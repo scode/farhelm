@@ -1,0 +1,322 @@
+[
+  {
+    "key": "g003/f3",
+    "latest_line": 7,
+    "recommendation": "covered",
+    "bucket": "highest",
+    "underlying_key": "failed-initial-environment-launch-discards-started-agent-after-lost-create-reply",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The source permits destruction of the fresh launch's own resource after an ambiguous first create. Both specifications explicitly accept that exact potentially destructive consequence. This is only a proposed exclusion; it requires the independent drop check.",
+    "checks": [
+      "At 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db, provisioning/tensorlake_add.rs:1019-1069 passes the captured host to first-session creation, destroys that host on Err, and only sends the result on Ok. Losing the outer result receiver alone does not take the cleanup branch.",
+      "At the reviewed tip, SPEC.md:1480-1486 explicitly includes a lost create reply and an already-started agent; :4831-4837 applies this initial-launch rule to containers and separately preserves failed/ambiguous Replace. SPEC_impl.md:6093-6105 preserves the same scope.",
+      "No execution or reproduction was performed. The source conclusion is conditional on a lost first-create reply, not an observed loss. No route to another resource or cleanup after confirmed creation is established."
+    ],
+    "coverage_checked": [
+      "Recording main 24bc058066fd57848e788b465719b0e6da2f98f7: SPEC.md Sandbox sessions and Container sessions, and SPEC_impl.md Environment ownership and refusal, expressly cover this trigger/consequence/scope.",
+      "TODO.md Planned is empty. Searches of plans/queue, BUGS.md, INDEX.md and active TRIAGE_OUTCOMES.md found no additional exact cover or same-root queued item. The environment plans listed in plans/REPORTS.md have landed, so their continued queue files are not unlanded-plan cover.",
+      "FILTER.md does not independently cover initial new-resource destruction; this is not merely a diagnostic or safe retry."
+    ],
+    "exact_cover_quotes": [
+      "SPEC.md:1480-1482: 'If an ordinary new launch fails before the helm has confirmed session creation, including a lost create reply, it attempts to delete that newly created sandbox and snapshots' and 'This may end an agent that started before its reply was lost.'",
+      "SPEC.md:4835: 'failed initial launch may discard its newly created container, including after a lost session-create reply.'",
+      "SPEC_impl.md:6100: 'failed normal initial launch may destroy only its new environment.'"
+    ],
+    "missing_premise": null,
+    "original_stronger_consequence": "An agent can already have written user work when the lost first-create reply causes cleanup to destroy its new environment. Preserve highest pending independent adjudication; Replace, unrelated resources and browser-only reply loss are excluded.",
+    "needs_independent_drop_check": true,
+    "proposed_basis": "Exact product-spec acceptance, confined to ordinary failed initial launch and its own newly created resource."
+  },
+  {
+    "key": "g003/f4",
+    "latest_line": 10,
+    "recommendation": "retain-verified",
+    "bucket": "other",
+    "underlying_key": "testing-overview-falsely-generalizes-built-farhelm-host-program",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The testing overview gives an unqualified executable account that conflicts with the newly introduced supervisor unit-test host executable. Correct separate-process behavior does not repair the documentation error.",
+    "checks": [
+      "At 70bc66a9f285cc2a9984924f389834d118b7cfdc, crates/farhelm-supervisor/src/hosts/test_program.rs:1-46 explains and selects current_exe(), then dispatches the host entry before libtest starts threads. This is a fresh executable invocation, not a host fork inside an executing test.",
+      "At 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db, SPEC_impl.md:2160-2174 explicitly distinguishes the e2e product binary and unit-test binary. Its complete Testing section at :8159-8203 covers workspace testing generally, while :8190 still says the supervisor's side uses the built farhelm without naming the unit-test exception.",
+      "The finding concerns the new real-host unit tests introduced by 70bc66a9, not the age of the pre-existing overview sentence. No runtime defect or test failure was observed."
+    ],
+    "coverage_checked": [
+      "Current SPEC_impl.md retains both conflicting statements. SPEC.md contains no acceptance of inaccurate testing architecture documentation.",
+      "TODO.md Planned is empty. Exact executable/unit-test/real-host searches across plans/queue, BUGS.md, INDEX.md and active TRIAGE_OUTCOMES.md found no item covering this explanation. The broad tmux docs cleanup plan is recorded landed in plans/REPORTS.md:32, and the statement remains.",
+      "FILTER.md does not cover a persistent authoritative architecture error merely because it is documentation. No rare runtime trigger is involved."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": null,
+    "original_stronger_consequence": "Misleading internal test-architecture map only; the separate-process/single-threaded host boundary remains correct. No security or loss-of-work consequence was alleged.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Retain the bounded documentation defect, identifying the glibc Linux unit-test exception without alleging production failure."
+  },
+  {
+    "key": "g003/f5",
+    "latest_line": 12,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "shared-environment-status-gate-and-stdio-constructor-suspicions",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The original narrow gate and shared-constructor suspicions are source-refuted. This says nothing about callers that bypass the constructor; the separately owned provisioning-probe issue survives.",
+    "checks": [
+      "At 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db, manager.rs:3585-3606 refuses successful Unknown/Changing/Missing. Only Err(StatusUnanswered) consults the provider fallback, so a successful unknown state does not receive DialAnyway.",
+      "At the same hash, access.rs:32-40 appends the selected stdin limit; :238-249 selects 120 for Tensorlake and PodmanExec and None for ordinary SSH.",
+      "Directly checked provisioning/backend.rs:1602-1645: probe_script emits internal stdio with an optional state directory and spawn_probe uses remote_command, bypassing stdio_argv. The narrow refutation must not be transcribed as a finding that every invocation satisfies the expiry contract.",
+      "SPEC_impl.md:5973-5981 distinguishes unknown state from unanswered status; :5999-6003 requires all environment routes to carry the option. No runtime observation was made."
+    ],
+    "coverage_checked": [
+      "Both specifications were searched for unknown status and helper expiry; the relevant current implementation contracts are SPEC_impl.md Environment rows and provider state / One route for transport and provisioning / Tensorlake transport watchdog.",
+      "TODO.md Planned is empty. Status/stdio/idle-limit searches of plans/queue, BUGS.md, INDEX.md and active TRIAGE_OUTCOMES.md found no exact same-root queue item. podman-environments is landed per plans/REPORTS.md:21, not unlanded cover.",
+      "No FILTER.md exclusion is needed or asserted."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": "The refuted constructor suspicion would require a missing option in stdio_argv itself. The known bypass is a different caller and remains with its original owner.",
+    "original_stronger_consequence": "Unknown provider state might be dialed as an unanswered lookup, or a command built through the shared environment constructor might lack expiry. Neither narrow route is established. No original security/user-work-loss consequence was established.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Concrete exhaustive gate and option construction, limited to the two named original suspicions; preserve the supplied g055/l5 bypass provenance."
+  },
+  {
+    "key": "g003/f6",
+    "latest_line": 13,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "ordinary-recipe-definition-write-or-referenced-place-mutation-loses-cleanup-ownership",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "Separate-column writes and final transactional refusal checks refute the named ordinary catalog-write and already-referenced-place paths. This does not settle power-loss durability or approval-time retargeting.",
+    "checks": [
+      "At 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db, tensorlake/recipes.rs:294-342 updates only spec_json/updated_at inside an immediate transaction; tensorlake/build.rs:318-367 reads current spec/state and writes only state_json inside an immediate transaction.",
+      "tensorlake/recipes.rs:393-427 rechecks referring hosts and needs_cleanup before deletion. store/podman.rs:213-250 refuses every place_host reference, including stopped/unresolved rows, and any recipe's needs_cleanup state; :256-278 guards prepared-coordinate publication by the exact entry and prior binding.",
+      "store.rs:798-815 decodes all three discriminator columns. :8034-8065 invokes referenced-place refusal in the removal transaction and requires host-specific destruction evidence for environment rows. Directly checked :7565-7567 invokes the same refusal inside the destination-update transaction before the ordinary SSH mutation.",
+      "Current SPEC_impl.md:5954-5970 explicitly requires reference refusal and cleanup evidence. No runtime or power-loss test was performed."
+    ],
+    "coverage_checked": [
+      "SPEC.md Container sessions and SPEC_impl.md Environment rows and provider state / Shared recipes and prepared artifacts were checked for the claimed ownership guarantees; they require preservation rather than accepting loss.",
+      "TODO.md Planned is empty. Recipe ownership/reference/retarget searches of plans/queue, BUGS.md, INDEX.md and active TRIAGE_OUTCOMES.md found no exact same-root cover. Existing snapshot-registration and detached-write queue entries concern different timing/generation boundaries, not these separate-column writers.",
+      "No FILTER.md basis is asserted. Supplied power-loss and approval-time retarget interfaces remain outside this narrow source refutation."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": "A loss route would need a different writer or a place mutation that bypasses the final reference guard. None is established by this named claim; crash durability is explicitly a different premise.",
+    "original_stronger_consequence": "Discarding the sole route to an existing environment could affect access to user processes/work. Preserve that possible highest consequence in the independent drop register even though the inspected ordinary routes are refuted.",
+    "needs_independent_drop_check": true,
+    "proposed_basis": "Separate transactional spec/state writes and refusal of already-recorded place references, not a blanket claim that all resource ownership is crash durable."
+  },
+  {
+    "key": "g004/f1",
+    "latest_line": 7,
+    "recommendation": "needs-parent",
+    "bucket": "highest",
+    "underlying_key": "update-survival-reassurance-restored-during-old-terminal-retirement",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The misleading general assurance and the intended one-time termination are established. The commit rationale explicitly accepts printing the assurance during that migration, but that is a separate decision source from specification acceptance of termination. Parent must adjudicate that proposed exclusion through the independent check; do not silently treat migration acceptance as wording acceptance.",
+    "checks": [
+      "The 78e9d68a95119db8452ee139efde13d38546f648 diff removes the migration caveat from SPEC_impl.md:7781 and restores the installer's 'Your sessions keep running.' at scripts/install.sh:1287.",
+      "The full commit rationale separately says the general statement returns 'without the caveat, accepting that the installer prints it during that one update too.' This is direct evidence of deliberate wording, independent of intended termination.",
+      "At reviewed tip, SPEC.md:2998-3011 and SPEC_impl.md:2780-2823 specify the old-server termination, conversion and accepted cleanup failures; SPEC_impl.md:7724 still gives the general assurance. The assurance can be misleading for the explicit exception. No user reliance or actual process termination was observed."
+    ],
+    "coverage_checked": [
+      "Current SPEC.md and SPEC_impl.md explicitly accept the migration, but do not separately say that a false update-survival assurance is acceptable. The reviewed commit's rationale supplies the separate wording decision; flag the distinction for the parent.",
+      "TODO.md Planned is empty. Old-terminal/update assurance searches of BUGS.md, INDEX.md and active TRIAGE_OUTCOMES.md found no exact cover. The old-terminal and install/docs cleanup plans are all landed per plans/REPORTS.md:29-32; they are not prospective cover. Their older instruction to remove the reassurance does not negate the later explicit restoration.",
+      "FILTER.md upgrade-plus-rare requires an additional rare condition. Updating a surviving old terminal is the migration's ordinary trigger, so it does not cover this assurance claim."
+    ],
+    "exact_cover_quotes": [
+      "Current SPEC.md:3000-3002: 'A supervisor that finds that tmux server when it starts ends it, and with it everything that still ran in an old terminal' — accepts termination, not the reassurance.",
+      "78e9d68a commit rationale: 'Every other update keeps sessions running, so the general statement comes back without the caveat, accepting that the installer prints it during that one update too.' — separate proposed decision basis requiring parent judgment."
+    ],
+    "missing_premise": "No actual reliance event was observed. Parent must decide whether the explicit commit-rationale wording decision is sufficient accepted cover under this recording flow; absent that decision, retain the contract mismatch.",
+    "original_stronger_consequence": "A user relying on the assurance could leave running work in an old terminal that this migration ends. Keep potentially highest until independently adjudicated; do not conflate this with omitted post-termination warnings or residual failed-cleanup behavior.",
+    "needs_independent_drop_check": true,
+    "proposed_basis": "Potential explicit wording acceptance in the reviewed commit rationale. Supplied g002/f1 and g071/f2 are same-root provenance, not independently read named records in this batch; reconcile them by underlying_key."
+  },
+  {
+    "key": "g004/f2",
+    "latest_line": 8,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "ordinary-late-wake-disconnect-retains-parked-launch-after-one-shot-timeout",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The one-shot timer is real and explicit, but ordinary loss of the observed woken connection changes its incarnation and invalidates the parked press before the waiting return. The claimed indefinite ordinary-disconnect route lacks its required unchanged-token producer.",
+    "checks": [
+      "At 533169cf19571d34af3a8497eaceb8d2d7b7c852, manager.rs:5190-5203 mints a new incarnation whenever the client changes, including disappearance.",
+      "At the same hash, list/create_form.rs:1143-1205 tolerates the pre-resume token or captured resumed authority; :7534-7556 validates that authority and discards a mismatch before awaiting_woken_connection can return. :7499-7522 checks its sleep once, not repeatedly.",
+      "SPEC_impl.md:207-214 explicitly scopes that single checkpoint. The broader product shorthand does not establish a supported unchanged-token late-connecting producer. No unbounded runtime wait was observed."
+    ],
+    "coverage_checked": [
+      "Current SPEC.md:1346-1356 and SPEC_impl.md:207-214 retain the broad wake wait and precise one-shot boundary. This source refutation does not rely on interpreting the narrower implementation contract as overriding product behavior.",
+      "TODO.md Planned is empty. Wake/late connection/60-second searches of plans/queue, BUGS.md, INDEX.md and active TRIAGE_OUTCOMES.md found no exact queued claim or unlanded fix. wake-launch-stuck and sandbox-suspend-overlap are landed per plans/REPORTS.md:23,27.",
+      "No filter is asserted; rarity alone would not settle an indefinitely blocked page."
+    ],
+    "exact_cover_quotes": [
+      "SPEC_impl.md:212-214: 'a press still waiting for a connection then is discarded' and 'a host that shows a connection pending again only after that point is not bounded by it.'"
+    ],
+    "missing_premise": "A shipped producer of a later connection-pending phase that preserves the captured resumed incarnation. Ordinary disconnection does not supply it.",
+    "original_stronger_consequence": "New and host changes might remain unavailable indefinitely after a resumed launch reenters connection wait past the one-shot check. Original suggested high if established; no security or work-loss route alleged.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Concrete incarnation invalidation refutes the ordinary disconnect route; retain the record's explicit limitation that no other unchanged-token producer was established."
+  },
+  {
+    "key": "g004/f3",
+    "latest_line": 6,
+    "recommendation": "covered",
+    "bucket": "high",
+    "underlying_key": "experimental-supervisor-outside-container-sessions-retired-delete-only",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The exact loss of normal terminal/lifecycle access to old experimental container sessions is expressly required by both specifications. It is not authority to destroy without the retained Delete confirmation or to reinterpret them as new environments.",
+    "checks": [
+      "At c8bc155cc36723c8c53870944d07ce8ec61ef9ed, SPEC_impl.md:8646-8656 requires decode-and-delete compatibility and refusal of all other lifecycle/terminal/exec paths.",
+      "At current recording main, SPEC.md:4892-4901 still names Delete as the sole action, explicitly lists the refused controls and retains confirmed legacy container removal. This establishes intended access restriction, not an observed execution or unconfirmed kill."
+    ],
+    "coverage_checked": [
+      "SPEC.md Retired containerized sessions and SPEC_impl.md retired-container compatibility text exactly cover trigger, consequence and scope.",
+      "TODO.md Planned is empty. Retired/delete-only/container searches of plans/queue, BUGS.md, INDEX.md and active TRIAGE_OUTCOMES.md found no separate same-root item. podman-environments is landed per plans/REPORTS.md:21.",
+      "No FILTER.md exclusion is needed."
+    ],
+    "exact_cover_quotes": [
+      "SPEC.md:4895-4897: 'Existing sessions support Delete only. Opening terminals or tabs, exec, Stop, Restart, Clone, Replace and Replace with are refused. Delete retains the legacy container-removal path and confirms absence.'"
+    ],
+    "missing_premise": null,
+    "original_stronger_consequence": "An existing running experimental container session can be inaccessible through ordinary terminal and Stop/Restart/Replace controls. Original high; no unauthorized destructive route established. Preserve the running-work context for the independent check.",
+    "needs_independent_drop_check": true,
+    "proposed_basis": "Exact intentional delete-only compatibility rule; its existing running-work context warrants conservative independent adjudication."
+  },
+  {
+    "key": "g004/f4",
+    "latest_line": 9,
+    "recommendation": "covered",
+    "bucket": "other",
+    "underlying_key": "unconditional-environment-stdin-option-versus-unsupported-older-helper",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The required supported older helper lacking the option is not established, and the implementation specification explicitly states the supported-release/prepared-helper premise. Local tag absence is supporting evidence only, not proof about every external or development binary.",
+    "checks": [
+      "At c8bc155cc36723c8c53870944d07ce8ec61ef9ed, SPEC_impl.md:7127-7130 expressly requires unconditional environment argv and says the option shipped with Tensorlake host support; Podman gets a prepared helper. Ordinary SSH remains outside that requirement.",
+      "The exact local command git tag --contains 88bf83e267b5066815448885c61ed4148b851930 --no-contains 8a7f66ede90651d47d1facc1e877ce81f842af1a returns no tags. This agrees with, but does not independently prove, the supported-release premise.",
+      "Current SPEC_impl.md:6763-6768 retains the same compatibility premise. No helper incompatibility was executed or observed."
+    ],
+    "coverage_checked": [
+      "Both specifications were searched for environment helper compatibility and idle limits; SPEC_impl.md explicitly settles the supported helper contract, and SPEC.md contains no broader promise that unpublished unsupported helper versions accept the new argv.",
+      "TODO.md Planned is empty. Helper-option/compatibility searches of plans/queue, BUGS.md, INDEX.md and active TRIAGE_OUTCOMES.md found no exact same-root item. podman-environments is landed, not pending cover.",
+      "No FILTER.md basis is asserted."
+    ],
+    "exact_cover_quotes": [
+      "SPEC_impl.md:6764-6767: '--stdin-idle-limit-secs 120' is passed 'unconditionally' and 'The option shipped in the same release as Tensorlake host support, and new Podman environments carry a prepared helper.'"
+    ],
+    "missing_premise": "A supported released Tensorlake helper without the option, or a prepared Podman helper lacking it. Unpublished development installations remain unverified and are not silently declared compatible.",
+    "original_stronger_consequence": "A helper might reject the command before ordinary version-skew recovery, leaving an environment unreachable. Original conditional high connectivity consequence; no security or work-loss route alleged.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Explicit supported-helper contract and absence of the named supported incompatible release in local history, with the external/development caveat preserved."
+  },
+  {
+    "key": "g004/f5",
+    "latest_line": 11,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "nothing-decided-delete-marker-misread-as-no-remote-mutation-guarantee",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The complete contract explicitly permits destruction after a lost reply and uses the marker for an unknown outcome. It does not establish the proposed no-mutation guarantee. The phrase can be clearer without constituting the stronger claimed contradiction.",
+    "checks": [
+      "Current SPEC.md:1518-1539 permits the finisher to destroy after a lost reply, describes the warned whole-resource fallback, and says Delete does not guess. SPEC_impl.md:6109-6113 reserves definite nothing-deleted Conflict for pre-decision refusal; :6137-6158 separately describes the unanswered marker and later seal handling.",
+      "At 222bf6253bcd168db04bcbb1df20180c88306998, sessions/sandbox.rs:113-124 explicitly states an unanswered request may have been acted on. :204-209 says nothing deleted only when there is no client; :224-240 says the outcome cannot be known after timeout or connection loss.",
+      "This resolves documentation semantics from surrounding contract text as well as caller wording. It does not rely merely on production code being correct. No runtime event was observed."
+    ],
+    "coverage_checked": [
+      "Both current specifications' complete Delete/seal subsections distinguish unknown outcome from definite pre-decision refusal; no additional automatic destructive consent is asserted.",
+      "TODO.md Planned is empty. Nothing-decided/lost-Delete-reply/seal searches of plans/queue, BUGS.md, INDEX.md and active TRIAGE_OUTCOMES.md found no exact same-root item. environment-agent-operations is landed per plans/REPORTS.md:28.",
+      "No diagnostic filter is asserted because the alleged guarantee concerns destructive outcomes."
+    ],
+    "exact_cover_quotes": [
+      "SPEC.md:1525-1527: 'the helm finishes destroying any sealed sandbox it sees, whether or not it sent the Delete: after a lost reply, a failed destruction or its own restart.'",
+      "SPEC.md:1532-1533: 'nothing is decided. Delete does not guess' — read as the helm's lack of a known outcome in the complete subsection."
+    ],
+    "missing_premise": "Text or a caller that promises no supervisor mutation for an answered-unknown request. The checked complete section and caller say the opposite.",
+    "original_stronger_consequence": "If interpreted as no mutation, the marker would misstate an unanswered deletion that had already deleted or sealed the environment. No loss beyond the user's already drawn destructive consent was established.",
+    "needs_independent_drop_check": true,
+    "proposed_basis": "Complete lost-reply/seal contract and the distinct definite-refusal wording; conservative independent check because the candidate concerns user-owned files/processes."
+  },
+  {
+    "key": "g005/f1",
+    "latest_line": 8,
+    "recommendation": "covered",
+    "bucket": "other",
+    "underlying_key": "old-terminal-retirement-commits-ended-after-unconfirmed-stop",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "Failed-retirement classification is source-established and exactly accepted. The stronger duplicate-agent/work-corruption route remains missing a survivor that escapes Restart's fresh refusal-grade sweep. Both the proposed drop and the earlier provisional consequence lowering need independent adjudication.",
+    "checks": [
+      "At dbfc69751215dbf15e1d31d5bed73c3754c4ebc4, old_terminals.rs:290-355 sweeps with ScopeKillFailure::Warn under a shared deadline. core.rs:7337-7382 proceeds to commit interrupted transitions and cleanup despite unconfirmed sweep completion.",
+      "At the same revision, core.rs:12985-13010 repeats an AgentOnly sweep with ScopeKillFailure::Refuse before relaunch. A continuing failure to kill a known scope therefore does not itself establish simultaneous agents.",
+      "Current SPEC.md:2998-3011 and SPEC_impl.md:2780-2823 explicitly accept startup continuing and sessions treated ended even after failed termination, including the possible later duplicate agent. No concurrent-agent execution or corruption was reproduced."
+    ],
+    "coverage_checked": [
+      "The current specifications' complete old-terminal migration sections cover precisely the named failed-stop/interrupted/restart residual. Their accepted limits do not cover unrelated cleanup defects.",
+      "TODO.md Planned is empty. Failed retirement/surviving old agent/restart searches of plans/queue, BUGS.md, INDEX.md and active TRIAGE_OUTCOMES.md found no exact queued item or active triage decision. tmux-end-old-terminals and user-tmux-jobs-outlive-cleanup are landed per plans/REPORTS.md:12,29; the latter is about user-run tmux, a different root.",
+      "The older-release-plus-rare filter may additionally fit the failed-stop subset, but no filter is needed: use exact specification acceptance and preserve independent review of the possible work-loss consequence."
+    ],
+    "exact_cover_quotes": [
+      "SPEC.md:3008-3010: 'A failure to end the server or to stop what ran there is logged and never stops the supervisor from starting; those sessions are treated as ended all the same, accepting that a Restart could then start a second agent beside one still running.'",
+      "SPEC_impl.md:2815-2821: 'the conversion commits regardless' and 'accepting that a Restart could then start a second agent beside one still running'."
+    ],
+    "missing_premise": "A shipped old-agent survivor that loses usable tree and marker attribution, survives retirement, passes the fresh Restart sweep, and runs beside the replacement in the same work. Ordinary persistent known-scope failure does not supply this.",
+    "original_stronger_consequence": "Concurrent old/new agents could modify or corrupt the user's work. Earlier other wording was provisional, not an accepted parent lowering. Keep this potentially highest route and the missing premise in the independent register; established classification alone is other under the route-established priority rule.",
+    "needs_independent_drop_check": true,
+    "proposed_basis": "Exact specification acceptance of failed retirement and the possible duplicate-agent residual. Supplied g007/f1 is provenance for cross-batch reconciliation, not a separately checked alias here."
+  },
+  {
+    "key": "g005/f2",
+    "latest_line": 7,
+    "recommendation": "retain-verified",
+    "bucket": "other",
+    "underlying_key": "environment-agent-launch-specs-disagree-receipt-relative-versus-post-allow-timeout",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The specifications describe different effective deadline models. This is a bounded contract wording discrepancy, not a minimum-response-time promise or an established lost reply/cancellation bug.",
+    "checks": [
+      "Read full b106c0e49646ecb9a17e1a06b17a70da0ece73e0 SPEC.md:4289-4341 and SPEC_impl.md:6658-6702. Product wording uses a receipt-relative approval-plus-launch span and says slow approval leaves less launch time. Implementation wording adds a relay span and a fresh thirty-minute post-Allow helm wait.",
+      "At 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db, agent_requests.rs:4506-4557 waits for approval, registers owned work, then times out result with ENVIRONMENT_LAUNCH_WAIT. This source confirms the post-Allow model as supplementary context; the finding was introduced by the earlier documentation-only change.",
+      "Current SPEC.md:4293-4305 and SPEC_impl.md:6185-6213 retain the discrepancy. Neither timeout cancels the launch. Earlier minute-30/38-versus-39 examples are model illustrations on a still-pending setup, not guaranteed minimum response times. No runtime failure was observed."
+    ],
+    "coverage_checked": [
+      "The current authoritative specifications retain both descriptions; accepted background continuation and relay expiry do not explain away the differing timeout origins or the 'slow answer leaves less time' statement.",
+      "TODO.md Planned is empty. Launch deadline/approval budget/thirty-minute/timeout-origin searches of plans/queue, BUGS.md, INDEX.md and active TRIAGE_OUTCOMES.md found no exact cover or same-root queued item. environment-agent-operations is landed, not future cover.",
+      "FILTER.md does not cover persistent conflicting design contracts. The claim does not depend on a rare runtime trigger or only an imprecise error message."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": null,
+    "original_stronger_consequence": "Initial lead suspected agent/helm wait mismatch leaving a launch running after the caller stopped waiting; subsequent source work refuted the missing-relay-budget implication. Retain only the established effective-deadline contract discrepancy. No security, cancellation or work-loss route was alleged.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Retain the two explicit conflicting deadline descriptions, keeping all corrections to the earlier stronger timeout interpretation."
+  },
+  {
+    "key": "g005/f3",
+    "latest_line": 9,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "removed-tmux-release-assets-break-version-pinned-provisioning",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "New provisioning requests only its farhelm archive, and older helms use their own immutable versioned release. Removing tmux assets from new releases does not establish the considered missing-payload failure.",
+    "checks": [
+      "At cb762a313abbe6da03ae0bf041f07486c4ed4df9, provisioning/release_payloads.rs:803-830 selects farhelm_archive_for and looks up its single name, not a complete inventory. plan.rs:841-870 installs/enables/restarts the supervisor and removes bundled tmux, with no tmux installation action.",
+      "At the same hash, payloads.rs:943-945 constructs /v{version}/; :1082-1100 supplies release_payloads::VERSION; :1172-1207 carries that expected version through default or custom release URLs. release_payloads.rs:899-907 refuses a signed checksum whose trusted comment names another version.",
+      "Current SPEC_impl.md:8038-8072 states own-version downloads and the immutable release layout, retaining older releases' tmux entries. This is a preservation premise, not network evidence that every historical object was fetched. Operator-staged directories remain explicitly trusted. No runtime or network reproduction was performed."
+    ],
+    "coverage_checked": [
+      "Both specifications were searched for release payloads/versioned provisioning. SPEC_impl.md's own-version and permanent-layout contracts support the refutation; no current specification requires new clients to fetch tmux.",
+      "TODO.md Planned is empty. Payload/tmux/versioned-download searches of plans/queue, BUGS.md, INDEX.md and active TRIAGE_OUTCOMES.md found no exact same-root queued concern. tmux-drop-from-install is already landed per plans/REPORTS.md:30.",
+      "No FILTER.md basis is asserted; a normally broken upgrade/provisioning route would not be dismissed merely because old versions are involved."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": "A supported current caller still requesting tmux, an old client fetching the new reduced manifest instead of its own version, or a violation of immutable older-release preservation. None is established; local source does not prove remote historical object availability.",
+    "original_stronger_consequence": "New setup might fail without tmux, or an old tmux-dependent client might fetch a new manifest missing its payload. Source refutes both request routes under the immutable-release contract; no security or work-loss consequence was established.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Actual single-archive caller, no tmux-install action, version-pinned URL and signed expected-version check, with immutable remote-object availability left as an explicit contract premise."
+  }
+]

@@ -1,0 +1,260 @@
+{
+  "group": {
+    "id": "g015",
+    "domain": "product-contracts",
+    "purpose": "product-contracts: SPEC_impl.md; phases @@ -2781,14 +2777,11 @@ least 12 terminals per GiB doing ordinary work and at least 5 per GiB if all of",
+    "interfaces": [
+      "g001",
+      "g003",
+      "g004",
+      "g005",
+      "g006",
+      "g007",
+      "g008",
+      "g009",
+      "g010",
+      "g011",
+      "g012",
+      "g014",
+      "g016",
+      "g149"
+    ],
+    "sources": [
+      {
+        "path": "[private-run]/prep/parts/01473-001.patch",
+        "ranges": [
+          [
+            1,
+            534
+          ]
+        ],
+        "original_path": "SPEC_impl.md",
+        "commit": "f96dd4363d97dc7e07dea5b8947c96be6bf912e8",
+        "notes": "@@ -2781,14 +2777,11 @@ least 12 terminals per GiB doing ordinary work and at least 5 per GiB if all of; patch character offsets [59960,117708)",
+        "lines": 534,
+        "bytes": 57814,
+        "start": 59960,
+        "end": 117708,
+        "original": "[private-run]/prep/originals/01473.patch"
+      }
+    ],
+    "lines": 534,
+    "bytes": 57814
+  },
+  "records": [
+    {
+      "key": "g015/f1",
+      "owner": "g015",
+      "id": "f1",
+      "domain": "product-contracts",
+      "purpose": "product-contracts: SPEC_impl.md; phases @@ -2781,14 +2777,11 @@ least 12 terminals per GiB doing ordinary work and at least 5 per GiB if all of",
+      "history": [
+        {
+          "line": 1,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "f1",
+            "state": "open",
+            "summary": "Removed desktop and provisioning paragraphs retain their contracts elsewhere",
+            "location": "SPEC_impl.md:2820",
+            "detail": "Reviewed commit: f96dd4363d97dc7e07dea5b8947c96be6bf912e8\nTLDR: The large deletion from the old-terminal section does not remove the requirements for restoring the app window, showing startup refusals, or removing the obsolete bundled tmux safely.\nDetails: Assigned patch lines 20–71 delete unrelated desktop/provisioning paragraphs from the old tmux section. Checked their replacement locations at the same revision: SPEC_impl.md:7268–7283 retains the window geometry and pre-window diagnostic rules; :7996–8021 retains tmux-free supervisor setup, the legacy environment variable rule, and removal of only the private bundled tmux after supervisor replacement. Exact retained text includes \"The geometry check requires the complete saved frame to fit one connected monitor and avoids arithmetic overflow\", \"Every pre-window desktop refusal prints one plain `farhelm-desktop: ...` stderr line and exits 1\", and \"it always names the private lib directory's `tmux`, never a file beside a registered binary that lives elsewhere\". The deleted general no-tmux paragraph is covered by the replacement provisioning text and SPEC.md:2896–2901 terminal-host environment rule. This is relocation, with no established behavior or safety-contract regression. Suggested bucket: other. Confidence: confirmed by pinned source comparison; no execution. proposed_drop: source refutation, the removed requirements remain in the same pinned document at the references above. possible_cover: none searched. Could-be-highest: false; no established security or loss-of-work route from this relocation. Caveat: this candidate assesses removal/replacement of these requirements, not independent correctness of desktop persistence or provisioning code."
+          }
+        },
+        {
+          "line": 2,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "f1",
+            "state": "open",
+            "summary": "Removed desktop and provisioning paragraphs retain their contracts elsewhere",
+            "location": "SPEC_impl.md:2820",
+            "detail": "# Removed desktop and provisioning paragraphs retain their contracts elsewhere\n\nReviewed commit: f96dd4363d97dc7e07dea5b8947c96be6bf912e8\n\n## TLDR\n\nThe large deletion from the old-terminal section does not remove the requirements for restoring the app window, showing startup refusals, or removing the obsolete bundled tmux safely.\n\n## Details\n\nAssigned patch lines 20–71 delete unrelated desktop/provisioning paragraphs from the old tmux section. Checked their replacement locations at the same revision: SPEC_impl.md:7268–7283 retains the window geometry and pre-window diagnostic rules; :7996–8021 retains tmux-free supervisor setup, the legacy environment variable rule, and removal of only the private bundled tmux after supervisor replacement. Exact retained text includes \"The geometry check requires the complete saved frame to fit one connected monitor and avoids arithmetic overflow\", \"Every pre-window desktop refusal prints one plain `farhelm-desktop: ...` stderr line and exits 1\", and \"it always names the private lib directory's `tmux`, never a file beside a registered binary that lives elsewhere\". The deleted general no-tmux paragraph is covered by the replacement provisioning text and SPEC.md's Terminal experience terminal-host environment rule. This is relocation, with no established behavior or safety-contract regression.\n\nSuggested bucket: other. Confidence: confirmed by pinned source comparison; no execution. proposed_drop: source refutation, the removed requirements remain in the same pinned document at the references above. possible_cover: none searched. Could-be-highest: false; no established security or loss-of-work route from this relocation. Caveat: this candidate assesses removal/replacement of these requirements, not independent correctness of desktop persistence or provisioning code. Revision reason: preserve the caller's Markdown finding template; no conclusion or impact changed."
+          }
+        }
+      ],
+      "latest": {
+        "line": 2,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "f1",
+          "state": "open",
+          "summary": "Removed desktop and provisioning paragraphs retain their contracts elsewhere",
+          "location": "SPEC_impl.md:2820",
+          "detail": "# Removed desktop and provisioning paragraphs retain their contracts elsewhere\n\nReviewed commit: f96dd4363d97dc7e07dea5b8947c96be6bf912e8\n\n## TLDR\n\nThe large deletion from the old-terminal section does not remove the requirements for restoring the app window, showing startup refusals, or removing the obsolete bundled tmux safely.\n\n## Details\n\nAssigned patch lines 20–71 delete unrelated desktop/provisioning paragraphs from the old tmux section. Checked their replacement locations at the same revision: SPEC_impl.md:7268–7283 retains the window geometry and pre-window diagnostic rules; :7996–8021 retains tmux-free supervisor setup, the legacy environment variable rule, and removal of only the private bundled tmux after supervisor replacement. Exact retained text includes \"The geometry check requires the complete saved frame to fit one connected monitor and avoids arithmetic overflow\", \"Every pre-window desktop refusal prints one plain `farhelm-desktop: ...` stderr line and exits 1\", and \"it always names the private lib directory's `tmux`, never a file beside a registered binary that lives elsewhere\". The deleted general no-tmux paragraph is covered by the replacement provisioning text and SPEC.md's Terminal experience terminal-host environment rule. This is relocation, with no established behavior or safety-contract regression.\n\nSuggested bucket: other. Confidence: confirmed by pinned source comparison; no execution. proposed_drop: source refutation, the removed requirements remain in the same pinned document at the references above. possible_cover: none searched. Could-be-highest: false; no established security or loss-of-work route from this relocation. Caveat: this candidate assesses removal/replacement of these requirements, not independent correctness of desktop persistence or provisioning code. Revision reason: preserve the caller's Markdown finding template; no conclusion or impact changed."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g015/findings.jsonl",
+        "id": "f1",
+        "line": 2,
+        "disposition": "under-investigation",
+        "group": "g015-f1",
+        "reason": "Record durably acknowledged; parent source/contract validation, cross-group synthesis, coverage/filter matching and any independent drop check remain pending. This preserves the claim and uncertainty without accepting, dropping or lowering it."
+      },
+      "accepted_parent_decision": null,
+      "returned_claim_checks": [
+        {
+          "batch": "claims-007",
+          "key": "g015/f1",
+          "latest_line": 2,
+          "recommendation": "refuted",
+          "bucket": "other",
+          "underlying_key": "spec-tmux-section-desktop-provisioning-relocation",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The named concern is deletion of existing desktop and provisioning requirements. Those requirements remain at their new locations in the same reviewed revision. This does not assess the independent correctness of their implementations.",
+          "checks": [
+            "f96dd4363d97dc7e07dea5b8947c96be6bf912e8^:SPEC_impl.md:2834-2846 and :2873-2874 contain the desktop frame and pre-window refusal paragraphs; f96dd4363d97dc7e07dea5b8947c96be6bf912e8:SPEC_impl.md:7268-7283 retains them, including monitor-fit, overflow, Wayland, fullscreen and best-effort durability qualifications.",
+            "Parent SPEC_impl.md:2830-2832,2848-2871 and reviewed SPEC_impl.md:7996-8020 retain the no-tmux unit/environment rules and bundled-file removal contract. Reviewed :8008-8012 still requires removal after supervisor replacement and restricts it to the private lib directory, protecting a user's tmux beside a separately registered binary.",
+            "Source/contract comparison only; no runtime behavior, startup restoration, or provisioning execution was observed."
+          ],
+          "coverage_checked": [
+            "Current SPEC_impl.md:7268-7283,7996-8020 and SPEC.md:181-185,2900-2904 retain the relevant requirements. These are refutation evidence for relocation, not acceptance of unsafe removal.",
+            "TODO.md:25-26 Planned is empty. plans/queue/INDEX.md has no unlanded entries; tmux-drop-from-docs/install/end-old-terminals are recorded as landed in plans/REPORTS.md:29-32.",
+            "BUGS.md contains only the SSH-helper transfer hang; no matching contract-removal entry. Searched INDEX.md and active TRIAGE_OUTCOMES.md for window restoration/geometry, pre-window refusal and bundled/private tmux removal; no matching queue item or active decision. FILTER.md does not cover a persistent specification omission."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": "No missing premise for the narrow relocation refutation. Independent desktop/provisioning correctness is outside this named claim.",
+          "original_stronger_consequence": "Suspected removal of the window-restoration, visible startup-refusal and safe private-tmux-removal requirements. Both recorded versions refute that concern; neither establishes a shipped behavior or safety regression.",
+          "needs_independent_drop_check": true,
+          "proposed_basis": "Source refutation, limited to the removed/replaced requirements. Independent checking is flagged conservatively because the considered removal included the safety rule that prevents deleting a user's own tmux."
+        }
+      ],
+      "parent_proposals": [
+        {
+          "artifact": "parent-flagged-judgments-007.json",
+          "key": "g015/f1",
+          "proposal": "claim-checks/claims-007/result.json",
+          "parent_proposal": "source-refuted-relocated-requirements",
+          "final_independent_gate": "required-before-drop",
+          "reason": "Parentreadfull007. Parent/reviewedSPEC_implcomparisonpreservesdesktopmonitorfit/overflow/Wayland/fullscreen/besteffortdurability andprewindowrefusal atnewpackaginglocation, no-tmuxunit/scrub/privatebundledfileafterreplacementonlyunderprivatelib atprovisioninglocation. Exactsourcecontractrelocationrefutesmissingrequirements, no broadimplementationcorrectnessclaim. Freshcheckconservativebecauseprivatefilepathlimitprotectsuserownedtmux; don'tacceptunsafeotherfiledeletion."
+        }
+      ],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": true,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "spec-tmux-section-desktop-provisioning-relocation",
+        "destination": null
+      }
+    },
+    {
+      "key": "g015/f2",
+      "owner": "g015",
+      "id": "f2",
+      "domain": "product-contracts",
+      "purpose": "product-contracts: SPEC_impl.md; phases @@ -2781,14 +2777,11 @@ least 12 terminals per GiB doing ordinary work and at least 5 per GiB if all of",
+      "history": [
+        {
+          "line": 3,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "f2",
+            "state": "open",
+            "summary": "Renamed old-terminal section retains its specification references",
+            "location": "SPEC_impl.md:2780",
+            "detail": "# Renamed old-terminal section retains its specification references\n\nReviewed commit: f96dd4363d97dc7e07dea5b8947c96be6bf912e8\n\n## TLDR\n\nThe section rename does not leave the reviewed specifications pointing readers to a missing old-terminal section.\n\n## Details\n\nSynthesis checked whether renaming `Terminal substrate: private tmux server` broke the surrounding contract references. A pinned `git grep` across SPEC.md, SPEC_impl.md and the changed old_terminals.rs comment found no old title or `terminal-substrate-private-tmux-server` anchor. SPEC_impl.md:2161 and :5687 use the exact new section title, `Ending the old private tmux server`, whose heading is at :2780. The module comment at crates/farhelm-supervisor/src/service/core/old_terminals.rs:6–8 names the same new section: \"SPEC_impl.md, `Ending the old private tmux server`\" (rendered there across two comment lines). This refutes the suspected broken reference within the checked interfaces.\n\nSuggested bucket: other. Confidence: confirmed by source search and reading the pinned module comment; no execution. proposed_drop: source refutation, callers name the existing new heading and no retired title/anchor remains in the checked specifications. possible_cover: none searched. Could-be-highest: false; the considered consequence was documentation navigation only, with no established security or loss-of-work route. Caveat: the check is confined to the reviewed specifications and their changed implementation comment, not every file in the repository."
+          }
+        }
+      ],
+      "latest": {
+        "line": 3,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "f2",
+          "state": "open",
+          "summary": "Renamed old-terminal section retains its specification references",
+          "location": "SPEC_impl.md:2780",
+          "detail": "# Renamed old-terminal section retains its specification references\n\nReviewed commit: f96dd4363d97dc7e07dea5b8947c96be6bf912e8\n\n## TLDR\n\nThe section rename does not leave the reviewed specifications pointing readers to a missing old-terminal section.\n\n## Details\n\nSynthesis checked whether renaming `Terminal substrate: private tmux server` broke the surrounding contract references. A pinned `git grep` across SPEC.md, SPEC_impl.md and the changed old_terminals.rs comment found no old title or `terminal-substrate-private-tmux-server` anchor. SPEC_impl.md:2161 and :5687 use the exact new section title, `Ending the old private tmux server`, whose heading is at :2780. The module comment at crates/farhelm-supervisor/src/service/core/old_terminals.rs:6–8 names the same new section: \"SPEC_impl.md, `Ending the old private tmux server`\" (rendered there across two comment lines). This refutes the suspected broken reference within the checked interfaces.\n\nSuggested bucket: other. Confidence: confirmed by source search and reading the pinned module comment; no execution. proposed_drop: source refutation, callers name the existing new heading and no retired title/anchor remains in the checked specifications. possible_cover: none searched. Could-be-highest: false; the considered consequence was documentation navigation only, with no established security or loss-of-work route. Caveat: the check is confined to the reviewed specifications and their changed implementation comment, not every file in the repository."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g015/findings.jsonl",
+        "id": "f2",
+        "line": 3,
+        "disposition": "excluded",
+        "group": "spec-old-tmux-section-reference-rename",
+        "reason": "Parent explicitly accepted named refuted proposal from claims-007 after inspecting it. The reviewed specifications and changed implementation comment point to the new existing heading. The named broken-navigation hypothesis is refuted within those interfaces. Source refutation of the specified caller references, without extending the verdict to the whole repository. Checked source/results: [\"At f96dd4363d97dc7e07dea5b8947c96be6bf912e8, git grep found no 'Terminal substrate: private tmux server' or 'terminal-substrate-private-tmux-server' in SPEC.md, SPEC_impl.md or crates/farhelm-supervisor/src/service/core/old_terminals.rs.\",\"Pinned SPEC_impl.md:2161,2780,5687 respectively reference, define and reference 'Ending the old private tmux server'. Pinned old_terminals.rs:6-8 names that same heading across two comment lines.\",\"This does not claim every link in the repository was checked. No runtime test is relevant to the narrow navigation claim.\"] Current coverage/results: [\"Searched current SPEC.md/SPEC_impl.md for old/new title and anchor; the current heading and specification references remain correct.\",\"TODO.md Planned and plans/queue/INDEX.md are empty. Matching tmux cleanup plans have landed (plans/REPORTS.md:29-32), so their retained source files are not unlanded coverage.\",\"BUGS.md, INDEX.md and active TRIAGE_OUTCOMES.md have no matching old-terminal-section navigation item or decision. A historical plan still mentioning the old title is frozen workflow context and outside the named checked interfaces. No FILTER.md boundary applies.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Suspected broken specification navigation after the section rename; no security or user-work consequence was claimed.\"; null."
+      },
+      "accepted_parent_decision": {
+        "key": "g015/f2",
+        "line": 3,
+        "disposition": "excluded",
+        "group": "spec-old-tmux-section-reference-rename",
+        "bucket": "other",
+        "recording": "refuted",
+        "queue_target_candidate": null,
+        "needs_independent_drop_check": false,
+        "reason": "Parent explicitly accepted named refuted proposal from claims-007 after inspecting it. The reviewed specifications and changed implementation comment point to the new existing heading. The named broken-navigation hypothesis is refuted within those interfaces. Source refutation of the specified caller references, without extending the verdict to the whole repository. Checked source/results: [\"At f96dd4363d97dc7e07dea5b8947c96be6bf912e8, git grep found no 'Terminal substrate: private tmux server' or 'terminal-substrate-private-tmux-server' in SPEC.md, SPEC_impl.md or crates/farhelm-supervisor/src/service/core/old_terminals.rs.\",\"Pinned SPEC_impl.md:2161,2780,5687 respectively reference, define and reference 'Ending the old private tmux server'. Pinned old_terminals.rs:6-8 names that same heading across two comment lines.\",\"This does not claim every link in the repository was checked. No runtime test is relevant to the narrow navigation claim.\"] Current coverage/results: [\"Searched current SPEC.md/SPEC_impl.md for old/new title and anchor; the current heading and specification references remain correct.\",\"TODO.md Planned and plans/queue/INDEX.md are empty. Matching tmux cleanup plans have landed (plans/REPORTS.md:29-32), so their retained source files are not unlanded coverage.\",\"BUGS.md, INDEX.md and active TRIAGE_OUTCOMES.md have no matching old-terminal-section navigation item or decision. A historical plan still mentioning the old title is frozen workflow context and outside the named checked interfaces. No FILTER.md boundary applies.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Suspected broken specification navigation after the section rename; no security or user-work consequence was claimed.\"; null."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-007",
+          "key": "g015/f2",
+          "latest_line": 3,
+          "recommendation": "refuted",
+          "bucket": "other",
+          "underlying_key": "spec-old-tmux-section-reference-rename",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The reviewed specifications and changed implementation comment point to the new existing heading. The named broken-navigation hypothesis is refuted within those interfaces.",
+          "checks": [
+            "At f96dd4363d97dc7e07dea5b8947c96be6bf912e8, git grep found no 'Terminal substrate: private tmux server' or 'terminal-substrate-private-tmux-server' in SPEC.md, SPEC_impl.md or crates/farhelm-supervisor/src/service/core/old_terminals.rs.",
+            "Pinned SPEC_impl.md:2161,2780,5687 respectively reference, define and reference 'Ending the old private tmux server'. Pinned old_terminals.rs:6-8 names that same heading across two comment lines.",
+            "This does not claim every link in the repository was checked. No runtime test is relevant to the narrow navigation claim."
+          ],
+          "coverage_checked": [
+            "Searched current SPEC.md/SPEC_impl.md for old/new title and anchor; the current heading and specification references remain correct.",
+            "TODO.md Planned and plans/queue/INDEX.md are empty. Matching tmux cleanup plans have landed (plans/REPORTS.md:29-32), so their retained source files are not unlanded coverage.",
+            "BUGS.md, INDEX.md and active TRIAGE_OUTCOMES.md have no matching old-terminal-section navigation item or decision. A historical plan still mentioning the old title is frozen workflow context and outside the named checked interfaces. No FILTER.md boundary applies."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": null,
+          "original_stronger_consequence": "Suspected broken specification navigation after the section rename; no security or user-work consequence was claimed.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Source refutation of the specified caller references, without extending the verdict to the whole repository."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "spec-old-tmux-section-reference-rename",
+        "destination": null
+      }
+    }
+  ],
+  "replies": [
+    {
+      "turn": 1,
+      "reply": "The initial review is incomplete. The supplied manifest requires lines 1–535, but the snapshot contains 534 lines, causing every evidence read to fail.\n\nI recorded the blocker in [progress.md]([private-run]/g015/progress.md). The findings log remains empty; no patch coverage is certified. A corrected manifest is needed to continue."
+    },
+    {
+      "turn": 2,
+      "reply": "Initial review complete. All 534 mandatory patch lines were delivered through the corrected evidence manifest.\n\nNo reportable findings or open leads. Candidate `f1` records a source-refuted concern: deleted requirements remain elsewhere in the specification. The findings log and progress file are updated. No runtime execution performed."
+    },
+    {
+      "turn": 3,
+      "reply": "Synthesis complete. Added candidate `f2`: source checks refute broken references from the section rename. Startup, cleanup, and reload checks established no new finding.\n\nNo existing conclusions revised. Unresolved lead IDs: none."
+    },
+    {
+      "turn": 4,
+      "reply": "Discovery pass complete. Checked startup clone-claim protection, terminal-root identity acquisition, and tab-helper environment/cwd ordering against pinned source.\n\nNew verified IDs: none. New unverified IDs: none. Open leads: none. Nothing new found. Progress updated."
+    }
+  ],
+  "progress": "Group: g015 product-contracts\nState: initial review blocked by supplied evidence manifest; assigned pass incomplete.\nTurn type/count: initial / 1. Discovery-pass count: 0.\nAssigned scope: SPEC_impl.md patch f96dd4363d97dc7e07dea5b8947c96be6bf912e8, 01473-001.patch declared lines 1–535.\nRead: full brief; complete inventory commits field only; machine instructions; priority buckets; feedback record format; evidence tooling; skill instructions. Pinned source context read: commit stat; SPEC/SPEC_impl headings; SPEC_impl lines 1035–1115 and complete Ending the old private tmux server section 2780–2824; SPEC Durability and resume lines 3436–3635 (section incomplete).\nEvidence blocker: supplied manifest.json requires [1,535], while wc reports 534 newline-terminated lines. evidence.ts manifest loader rejects any declared range beyond item.lines.length before producing packets. Both requested reads (1–140 and 1–80) failed with PERSISTENT_REVIEW_TOOL_FAILED: Invalid source range. No coverage is certified by this invocation. Supplied snapshot/manifest were not modified; no bulk patch read substituted.\nPending clarification: requested authorization to create a corrected private manifest for lines 1–534, or caller repair of supplied manifest. No answer received before this boundary. Per tooling.md, no new coverage credited from failed invocation.\nInterface assumptions: this group judges the assigned specification rewrite at its recorded revision; adjacent implementation is context only. Parent owns cross-group coverage. No source conclusions or substantive candidates established from the limited context reads.\nNext action: obtain repaired/corrected manifest, deliver every mandatory patch packet, then read complete governing contract sections and inspect relevant implementation contracts. Resume initial review rather than performing synthesis/discovery.\nUnread scope: all assigned patch lines; governing pinned contract sections beyond the context listed above; relevant callers and implementation.\nNew verified/unverified IDs this pass: none. findings.jsonl remains empty. Open leads: none. This is a tooling blocker, not a code finding.\nNo runtime execution, reproduction, checkout mutations, or helper agents.\n\nCoverage repair turn / 2: parent corrected mandatory endpoint to 534; source bytes/hash unchanged. Full corrected brief reread. Initial source review resumed; no synthesis/discovery pass started. Findings log verified present and empty. Next: mandatory packets 1–534 and source/contract analysis.\n\nCoverage repair / initial review completion (turn 2)\nState: assigned initial source-review pass complete. No synthesis or discovery pass performed.\nMandatory delivery: corrected manifest accepted. Six successful evidence read packets delivered source 01473-001.patch lines 1–100, 101–200, 201–300, 301–400, 401–470, 471–534. Same snapshot SHA-256 4ca963bd410805c2607a475a8a3d20bfd52f816c4af4242a9b8d60b9574f669b. No assigned patch text omitted or unread. Parent owns transcript audit/certification.\nPinned governing contracts read in full: SPEC_impl.md Ending the old private tmux server (2780–2824); Runtime state (4111–4993); Owned checkout admission and lifetime (3617–3944); Helm/supervisor transport and Grid streams (2825–3038); What the helm believes and Errors crossing levels of abstraction (3164–3512); supervisor emulator and snapshots (2669–2779); Native app packaging before side-by-side subsection (7193–7284); Provisioning (7735–8142). Answers bind to what was drawn paragraph read fully in prior turn (1069 onward). SPEC.md Status (2651–2854), Terminal experience (2855–3170), Durability and resume (3436–3753, combined across both turns), Lifecycle operations (1888–2130), Security (4464–4596).\nSource checks/results at f96dd4363d97dc7e07dea5b8947c96be6bf912e8: hosts/terminal.rs:790–903 and procs.rs:380–418,530–645 support the retained root/start anchor and pid-only already-exited adoption description; service/core.rs:15730–15845 supports publication-generation anchor lookup/retry; procs/positional.rs:1–83 supports emitter position and correction ancestors. host_launch.rs:1–185,428–500 plus launch.rs:1360–1485 support visible-child tmux removal before login and background guard preserving ambient tmux through login then removing it from Git. service/status.rs:580–715 supports negative-evidence settlement only with a dead terminal or boot proof. ticker.rs:1315–1425 and screen_reader.rs:309–347,710–749 support Codex-only title use and screen sampling. service/core.rs:7390–7525,14480–14565 plus host_launch.rs caller show OMP provenance recorded after spec publication and before host spawn. core.rs:11260–11585 supports retained unconfirmed failed launches and rollback sweep ordering. docs/agent-screen-fixtures.md read fully supports retaining historical tmux-captured screens after terminal environment changed. Removed desktop/provisioning text verified at relocated pinned paragraphs, recorded immediately as candidate f1.\nRecords appended/revised this pass: f1 candidate, then f1 format-only revision preserving the caller's Markdown template. New verified findings: none. New unverified findings: none. Open leads: none. Latest evidence findings check: active 0; candidates 1; leads 0.\nInterface assumptions: assignment is the specified partial SPEC_impl.md patch only. Other chunks and commits remain their owners' scope. Implementation reads are supporting context, not a review of unrelated latent implementation defects. Text still present in relocation is source-refuted as a regression; no coverage sources were consulted.\nValidation: source/contract analysis only; no tests, builds, reproductions, helper agents, live-install actions, or checkout changes. Skipped execution because none was requested or needed for these documentation conclusions.\nUnread assigned scope: none. No unresolved investigation premise.\nNext action: return this initial-pass delta; await the parent's synthesis/discovery prompt.\nTurn type/count: coverage repair completing initial / 2. Discovery-pass count: 0.\n\nTurn 3 started: later-turn synthesis. Initial delivery audited by parent. Existing findings log preserved (f1 candidate only); no open leads. Revisit cross-batch old-terminal startup, published report anchors, launch-evidence finality, and relocated safety contracts. No discovery pass started.\n\nTurn 3 synthesis complete\nCross-batch checks at reviewed revision f96dd4363d97dc7e07dea5b8947c96be6bf912e8:\n- Renamed-section references: pinned search across SPEC.md, SPEC_impl.md and the changed old_terminals.rs comment found no retired heading or anchor. Existing references at SPEC_impl.md:2161,5687 and old_terminals.rs:6–8 name the new heading at :2780. Recorded source-refuted navigation candidate f2 immediately after the check.\n- Old-server startup and reload boundaries: core.rs:6120–6190 places end_private_server after store/schema/identity handling and before reload, only with the state-directory claim. core.rs:6480–6635,6635–6785 preserves boot classification and independently adopts agent/tab hosts before judging old rows. The old kind is not looked up by its former terminal address; host rows keep their distinct attribution/unavailability treatment.\n- Conversion, cleanup and notices: core.rs:7035–7105 sweeps old targets before transition commit, removes launch artifacts/notifies only committed interrupted conversions, and resolves old warnings through record_ended. old_terminals.rs:1–180,265–535 confirms AgentOnly versus exact Tab targeting, remaining shared budget after server termination, existing-host tab exclusion, and nonfatal failure behavior. These checks support the interaction of the rewritten startup introduction with the unchanged detailed cleanup contract and runtime finality rules; no new defect was established.\n- Existing f1 relocation conclusion remains unchanged. The moved requirements are still present, and no source-checkable premise is left open.\nRecords this turn: appended f2 candidate only; no finding IDs, unverified findings, or revisions to f1. Open lead IDs: none.\nInterface assumptions unchanged: assigned SPEC_impl.md patch only; implementation reads support its contracts, not unrelated implementation review. Parent owns audited delivery and cross-group coverage. No excluded coverage sources read.\nUnread assigned scope: none; initial mandatory delivery remains fully audited by parent. No new mandatory range was assigned.\nExecution: source-only; no runtime tests, reproductions, checkout mutations, live-install actions or helper agents.\nTurn type/count: synthesis / 3. Discovery-pass count: 0. New verified/unverified finding IDs this pass: none.\nNext action: return synthesis delta; await parent direction.\n\nTurn 4 started: separate discovery pass 1 under original group charter. Required delivery and later-turn synthesis verified by parent. Existing f1/f2 candidates preserved; no open findings or leads. Read discovery-neighbours.json before new source search; no named pending questions. Search remains the assigned SPEC_impl.md patch at f96dd4363d97dc7e07dea5b8947c96be6bf912e8.\n\nTurn 4 discovery pass 1 complete\nInterface input: read discovery-neighbours.json fully in bounded chunks (1–65,66–130,131–190,191–247). Synthesized supplied exact latest interface records for novelty before the new search. No named pending questions were supplied. Existing interface findings were treated as known context, not copied into this group's log or counted as discoveries.\nNew checks beyond the prior passes, at f96dd4363d97dc7e07dea5b8947c96be6bf912e8:\n- Startup spare-claim evidence, assigned patch's owned-pane to agent-terminal rewrite: core.rs:7814–7895 reads the exact entry generation, terminal-host evidence and preparation origin/state, preserving uncertainty and NotStarted/CloneStarted claims. core.rs:8057–8065 orders that collection before the blocking repository-cache sweep. This supports the rewritten preparation/cache boundary; no additional contract defect established.\n- Root-identity acquisition, assigned attribution rewrite: hosts/terminal.rs:600–790,1685–1820,2010–2055 distinguishes a reaped child from an unpinned live child. Adoption refuses Child::Unpinned as ChildUnpinned rather than publishing a pid-only live anchor; a running pinned child stores Some(start), while a child already reaped stores None. Ended handles preserve prior child identity fields. This resolves the acquisition premise behind the assigned pid/start versus already-exited-pid wording without creating an additional concern.\n- Tab startup, assigned helper/environment wording: launch.rs:735–825 and1260–1330 show the terminal host starts the tab helper directly inside its scope; the helper enters the requested directory, sets matching PWD, removes the agent marker and TMUX/TMUX_PANE, then execs the interactive login shell. Its cwd/rc-file ordering matches the rewritten paragraph and differs intentionally from the agent's post-login shim restoration.\nNo substantive new finding, ruled-out bug candidate, or unresolved lead emerged. These were source/contract verification checks, not runtime observations. No new event was needed in findings.jsonl. Existing f1/f2 histories and proposed-drop bases remain unchanged.\nNew verified finding IDs: none. New unverified-after-investigation IDs: none. Open lead IDs: none. Explicit discovery result: empty; nothing new found.\nUnread assigned scope: none. Initial source delivery and later synthesis remain parent-verified. No prohibited coverage sources, runtime tests, reproductions, live-install actions, helper agents or checkout mutations.\nTurn type/count: discovery / 4. Discovery-pass count: 1.\nNext action: return this discovery delta and await parent direction.\n"
+}

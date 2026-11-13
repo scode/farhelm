@@ -1,0 +1,188 @@
+[
+  {
+    "key": "g171/f6",
+    "latest_line": 15,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "retired-tmux-format-mode-and-blank-row-test-removal",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The deleted oracles check tmux format positions and capture-block framing, whose production consumer is deleted in the same commit. Explicit application-keypad and exact blank-row assertions survive for the supported emulator. This does not establish a new missing supported oracle.",
+    "checks": [
+      "At 1ed482dde220452e424973faf38a5e1318986333^, crates/farhelm-supervisor/src/tmux/stream.rs:2313-2411 tests wrap_flag/keypad_flag expansion and capture-pane row count, including blank rows. The reviewed commit deletes all of stream.rs; git log for that path over the supplied range has only this deletion.",
+      "At 1ed482dde220452e424973faf38a5e1318986333, crates/farhelm-terminal-emulator/tests/modes.rs:35-66 explicitly asserts set/reset of application keypad; tests/screen.rs:16-110 compares exact six-row strings, including blank final rows and wraps.",
+      "At the same hash, crates/farhelm-supervisor/src/grid_output.rs:402-445 takes frame rows from screen.rows and represents omitted blank rows as blank cells, rather than stripping tmux capture terminators. Source checks only; no runtime or mutation test."
+    ],
+    "coverage_checked": [
+      "Current SPEC.md:2998-3031 and SPEC_impl.md:2669-2710,2780-2827 describe terminal hosts, emulator-owned state, and retired tmux; they do not excuse a supported missing oracle.",
+      "TODO.md Planned is empty. Searched plans/queue for tmux/keypad/blank-row/scroll-region/query/flow-control claims; the relevant tmux plans are already landed (plans/REPORTS.md:29-32), and other matches do not address this test deletion.",
+      "BUGS.md contains only the local-SSH-helper update hang. INDEX.md read in full and queue searched for the actual mode/row/tmux claims; no exact item. Active TRIAGE_OUTCOMES.md searched; no exact decision. Archive not read.",
+      "FILTER.md read in full; no filter used."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": "No supported row/mode obligation left untested by this deletion was identified. Equivalent replacement of every retired integration test is not asserted.",
+    "original_stronger_consequence": "Removing stream tests might remove regression checks for application-keypad modes and blank final screen rows. The histories expressly distinguish earlier in-range supported-test deletions owned by other groups; those are not dismissed here.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Source refutation limited to these retired format/framing tests, with separately inspected surviving positive test assertions; no filter and no inference from production correctness alone."
+  },
+  {
+    "key": "g172/c1",
+    "latest_line": 14,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "retired-tmux-control-client-teardown-test-removal",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The removed control-client teardown mechanism has no surviving caller at the reviewed revision. Viewer cancellation only ends the grid sender, while aborting a supervisor runtime leaves the terminal host alive. This refutes the specific shared-tmux-server crash route, not arbitrary shutdown or Delete safety concerns.",
+    "checks": [
+      "At 1ed482dde220452e424973faf38a5e1318986333^, tmux/stream.rs:2578-2635 documents the pane-id command trust boundary, pause-before-off workaround and no-output-before-reap ownership. At 1ed482dde220452e424973faf38a5e1318986333 the entire stream module is deleted.",
+      "At that reviewed hash, service/terminals.rs:1-9,220-265 resolves HostTerminal only; service/grid_stream.rs:925-964 cancels stream.run and reports Requested without sending Shutdown or owning a tmux process.",
+      "At that hash, service/core/host_handover.rs:323-370 checkpoints/skips hosts then aborts runtimes; hosts/terminal.rs:2374-2420 separates explicit Shutdown from abort, which cancels encoding and aborts the task while leaving the host running. terminal-host/SPEC.md:151-168 separately defines host-ending events. Source only."
+    ],
+    "coverage_checked": [
+      "Current SPEC.md:2998-3016 and SPEC_impl.md:2780-2827 explicitly retire old terminals. That acceptance is provenance, not acceptance of unintended shared-server crashes, wrong-target signals, missing warnings or unconfirmed Delete.",
+      "TODO.md Planned is empty. Relevant tmux plans matched in plans/queue are landed per plans/REPORTS.md:29-32; no unlanded plan repairing a surviving instance of this route found.",
+      "BUGS.md has no matching server-crash entry. INDEX.md read in full, queue searched for tmux/control-client/teardown/pane claims, and active TRIAGE_OUTCOMES.md searched; no exact coverage or alias. Archive not read.",
+      "FILTER.md read; no filter invoked."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": "A surviving shipped path that creates/closes these tmux output clients is absent. This is not a complete audit of all terminal-host lifecycle operations.",
+    "original_stronger_consequence": "Closing a tmux output client before no-output acknowledgement could abort the private tmux server and lose every old terminal and its running work. History line 10 corrects the initial could-be-highest=false; lines 12 and 14 preserve that highest historical class while proposing source refutation.",
+    "needs_independent_drop_check": true,
+    "proposed_basis": "Proposed dismissal of this retired-client route only, pending the parent's independent drop check. The broad intentional-retirement acceptance is not the basis for excusing unintended work loss."
+  },
+  {
+    "key": "g172/c2",
+    "latest_line": 15,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "retired-tmux-scroll-origin-query-catalog-test-removal",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The removed tests pin tmux replay extraction and its query-stripping catalog. The replacement has an independent query-answer table and golden snapshots that explicitly preserve region and origin state. No identical tmux-answer obligation remains.",
+    "checks": [
+      "At 1ed482dde220452e424973faf38a5e1318986333^, tmux/stream.rs:2400-2445 asserts positional tmux scroll-region/origin fields. The reviewed commit removes the stream and query-strip modules.",
+      "At 1ed482dde220452e424973faf38a5e1318986333, farhelm-terminal-emulator/tests/queries.rs:25-145 checks literal answers through the public API, including primary aliases, secondary identity, DSR, colors and unanswered clipboard reads.",
+      "At that hash, tests/snapshot_golden.rs:203-219 sets origin mode and scroll region together; :583-631 compares restored and live state to fixed fixture descriptions; common/describe.rs:27-31 includes modes and exact region. :728-737 adds clamped/empty-region assertions.",
+      "The missing explicit secondary alias CSI >0c oracle is a real limitation of the replacement-coverage claim. At the reviewed hash vendor/vte/src/ansi.rs:1616-1621,1637-1639 uses common absent/zero normalization and identity dispatch; :2175-2200 tests absent and zero primary identity forms. No distinct required alias-filter oracle remains after the old filter is deleted. No execution."
+    ],
+    "coverage_checked": [
+      "Reviewed SPEC_impl.md:2779-2803 and current SPEC_impl.md:2681-2708 define Farhelm's own query table and mode tests, not equivalence to live tmux; current SPEC.md terminal-experience/flow-control sections do not waive supported behavior.",
+      "TODO.md Planned empty; plans/queue searches for query catalog, origin/region and tmux find no unlanded fix of this claimed gap. Relevant tmux retirement plans are landed (plans/REPORTS.md:29-32).",
+      "BUGS.md, full INDEX.md plus matching queue searches, and active TRIAGE_OUTCOMES.md contain no exact test-removal claim or same-root alias. Archive not read. FILTER.md read; no filter used."
+    ],
+    "exact_cover_quotes": [
+      "SPEC_impl.md at 1ed482dde220452e424973faf38a5e1318986333:2801-2803: No test holds the emulator to a live tmux: the crate's own tests pin the answer table, the screen-text format and the modes as Farhelm's"
+    ],
+    "missing_premise": "No supported missing oracle established beyond absence of an explicit secondary-zero alias test. Identical alias-by-alias or integration-equivalent replacement coverage is not claimed.",
+    "original_stronger_consequence": "Loss of terminal mode or query behavior after deleting tmux tests; later history narrows the replacement coverage claim because CSI >0c has no explicit replacement test. Prompt readiness and final-screen checks in the history are additional boundary checks, not a claim of exhaustive emulator correctness.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Retired extraction/filter subject plus actual independent query and saved/restored-state oracles. The secondary-zero caveat must survive any dismissal."
+  },
+  {
+    "key": "g172/c3",
+    "latest_line": 13,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "retired-tmux-prefix-and-foreign-pane-isolation-test-removal",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "No shared tmux notification stream or prefix-based session resolution survives this deletion. Attach input and output retain the same terminal resolved within the named session. Independent terminal-isolation assertions remain.",
+    "checks": [
+      "At 1ed482dde220452e424973faf38a5e1318986333, service/terminals.rs:232-248 looks up a tab only in entry.session.host_tabs; :259-265 returns that entry's agent host.",
+      "At that hash, handlers.rs:1631-1664 holds the tab lifecycle claim; :1775-1799 revalidates the entry/generation/runtime; :1935-1945 gives HostAttach and GridStream the same resolved terminal clone.",
+      "At that hash, crates/farhelm/tests/e2e/terminal_tabs.rs:1339-1393 sends distinct markers on agent/tab channels and asserts each transcript lacks the other's marker. The wait-based absence boundary is source-read evidence only, not runtime certification.",
+      "terminal-host/SPEC.md:19-24 states one terminal/client, not a multiplexer. This does not audit every tag-discovery/adoption or lifecycle branch."
+    ],
+    "coverage_checked": [
+      "Current SPEC.md terminal-experience and SPEC_impl.md terminal-host/old-server sections describe the replacement; intentional retirement does not cover wrong-terminal disclosure or destructive targeting.",
+      "TODO.md Planned empty. Relevant tmux plans in plans/queue are landed (plans/REPORTS.md:29-32); other keyword hits do not fix this exact claimed test-removal route.",
+      "BUGS.md has no exact item. Full INDEX.md, matching queue source searches and active TRIAGE_OUTCOMES.md show no same-root item for this obsolete prefix/filter deletion. Archive not read. FILTER.md read and not applied."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": "A surviving prefix lookup or shared foreign-pane stream is absent; no wrong-terminal shipped route introduced by the deletion is shown. Complete host discovery is outside this consultation.",
+    "original_stronger_consequence": "Opening one terminal could display another terminal or consume a neighboring tab's output. Such wrong-target handling could involve confidential output or user-owned work, even though the reviewer initially marked could-be-highest=false and no actual shipped route was established.",
+    "needs_independent_drop_check": true,
+    "proposed_basis": "Specific obsolete-mechanism source refutation with surviving terminal-identity source and isolation assertions; requires independent check before dismissal because the considered consequence can cross security/work boundaries."
+  },
+  {
+    "key": "g172/c4",
+    "latest_line": 8,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "retired-tmux-pause-reply-debt-test-removal",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The obsolete pause/reply-debt implementation is gone. The host reads its pty independently of viewer writes, and retained grid tests assert pause withholding, exact history after resume/full queues, and stall expiry. This is a narrow test-removal conclusion, not a full history audit.",
+    "checks": [
+      "At 1ed482dde220452e424973faf38a5e1318986333, terminal-host/src/host.rs:269-328 polls pty reads while the pty remains open; :505-543 journals output; :628-654 bounds client filling; :658-693 returns on write backpressure without suspending pty reads.",
+      "At that hash, service/grid_stream/tests.rs:485-507 waits for processed output and pause parking, asserts no frame during pause, then exact history and zero resets. :520-550 establishes a full four-frame queue, then checks exact history and no reset. :778-801 requires Stalled within a bounded wait.",
+      "terminal-host/SPEC.md:233-234 requires the host not block on a slow client; current SPEC.md:3019-3031 preserves no-agent-slowing and history guarantees. Source checks only, no tests run."
+    ],
+    "coverage_checked": [
+      "Both specifications searched/read for slow-viewer and journal behavior; accepted journal-cap/resizing losses do not cover viewer-induced loss.",
+      "TODO.md Planned empty; no matching unlanded plan. Relevant tmux plans are landed (plans/REPORTS.md:29-32). BUGS.md does not cover this route.",
+      "Full INDEX.md and queue search found stopped-reader-output-witness.md, read in full: it concerns the browser flood fixture's unproved producer/reader overlap, not deletion of tmux pause/reply-debt tests or the inspected Rust oracles. host-flood-stall-window-claim.md's indexed eight-versus-sixty-second test-description concern is also distinct; neither is an exact alias or coverage.",
+      "Active TRIAGE_OUTCOMES.md searches found only unrelated old deflake exclusion references for shallow pause. FILTER.md read, no filter applied; archive not read."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": "No surviving caller of tmux pause/continue or positional filter replies; no required supported oracle removed here established. Rust oracle inspection does not certify all browser timing premises.",
+    "original_stronger_consequence": "Slow viewers might stop agents or corrupt replay after tmux pause/resume and outstanding-filter-reply tests disappear. Potential loss of retained output/work is preserved; journal-cap acceptance is a separate issue, and no actual runtime loss was demonstrated.",
+    "needs_independent_drop_check": true,
+    "proposed_basis": "Retired protocol plus separately inspected replacement flow-control assertions. Independent check should assess the possible work-loss consequence before dismissal, despite the reviewer's latest other classification."
+  },
+  {
+    "key": "g173/c1",
+    "latest_line": 5,
+    "recommendation": "covered",
+    "bucket": "other",
+    "underlying_key": "intentional-local-tmux-preflight-removal",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The exact removal of tmux requirements from local setup and the Mac app is explicit product behavior. Their sessions use terminal hosts, and the deleted probe API has no surviving caller.",
+    "checks": [
+      "At 17a3fe858c5511a24b7403af15dd41c93bf69fd7, tmux.rs:1-11 limits the remaining module to remote provisioning. A pinned git grep of crates and packaging found none of probe_tmux, TmuxSupport, classify_tmux_version, TMUX_PROGRAM_ENV, DEFAULT_TMUX_PROGRAM, resolve_tmux_program, program_display_path, find_on_path or candidates_on_path.",
+      "That commit's desktop.rs diff removes resolution, preflight imports/calls, SpawnInputs fields and FARHELM_TMUX assignment together; main.rs stops capturing PATH/FARHELM_TMUX for setup.",
+      "At that hash service/core/host_launch.rs:108-115,141-147 retains the literal FARHELM_TMUX in NOT_INHERITED and removes it after launch overrides. Thus removing the public constant does not remove this scrub. Source only."
+    ],
+    "coverage_checked": [
+      "Reviewed SPEC_impl.md:2866-2872 explicitly accepts no local requirement, as does reviewed SPEC.md:3012-3014. Current SPEC_impl.md:7996-8001 retains no-tmux local behavior and legacy-unit scrub; current SPEC.md:181-184 further removes remote provisioning's requirement.",
+      "TODO.md Planned empty; matching plans/queue/tmux-drop-from-install.md:40-48 explicitly removes desktop/setup probes but is already landed per plans/REPORTS.md:30. Not counted as unlanded-plan coverage.",
+      "BUGS.md, full INDEX.md and exact queue searches, and active TRIAGE_OUTCOMES.md have no additional same-root item. Archive not read. FILTER.md read; no filter used."
+    ],
+    "exact_cover_quotes": [
+      "SPEC_impl.md at 17a3fe858c5511a24b7403af15dd41c93bf69fd7:2866: The supervisor runs no tmux, and neither `farhelm supervisor run` nor `farhelm helm setup` takes a `--tmux`.",
+      "SPEC_impl.md at that hash:2871-2872: The Mac app bundles none and needs none, and hands its managed supervisor no tmux."
+    ],
+    "missing_premise": "No defect in removing the local dependency check established. This does not settle terminal-host lifecycle, remote provisioning, retirement warning, wrong-target-signal or unconfirmed-Delete findings.",
+    "original_stronger_consequence": "Mac/local Linux setup ceases checking for supported tmux. History consistently treats this local preflight removal as intentional; retirement screen loss and failed-termination duplicate agents are explicitly separate predecessor consequences, not discoveries or blanket acceptance here.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Exact specification acceptance for local preflight removal plus caller consistency and retained environment scrub."
+  },
+  {
+    "key": "g173/c2",
+    "latest_line": 4,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "retired-local-classifier-does-not-remove-remote-tmux-floor",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The deleted three-way local verdict is not remote provisioning's enforcement. Its surviving remote caller still parses the complete version and directly compares it with the floor, with independent policy assertions.",
+    "checks": [
+      "At 17a3fe858c5511a24b7403af15dd41c93bf69fd7, tmux.rs:76-80 retains 3.7c; :119-184 validates canonical whole-line versions; :203-209 asserts patch/numeric ordering, :225-279 malformed inputs, and :305-318 one release pin equal to the floor.",
+      "At that hash provisioning/backend.rs:3679-3681 directly compares parsed version >= TMUX_FLOOR; :3915-3928 also requires an absolute representable path before needs_tmux can be false.",
+      "At that hash provisioning.rs:6863-6875 asserts floor/above acceptance and old/unreadable rejection; :7909-7956 asserts absent/old/acceptable/relative-path reach outcomes. The assertions distinguish always-accept, always-reject and strict-floor/equality policy mistakes; no mutation experiment was run.",
+      "The remote test does not directly spell 3.7b/3.7d. The deleted classifier's test did not call remote policy either. Source analysis does not establish identical end-to-end coverage."
+    ],
+    "coverage_checked": [
+      "Reviewed SPEC_impl.md:2848-2864 requires exact stable parsing and a >= floor policy. Current SPEC.md:181-184 and SPEC_impl.md:8003-8019 intentionally remove the remote tmux dependency later; that later change is not used to deny a historical defect.",
+      "TODO.md Planned empty. The relevant install plan is landed (plans/REPORTS.md:30); no unlanded plan covering this alleged enforcement gap found. BUGS.md has no matching item.",
+      "Full INDEX.md, matching queue searches and active TRIAGE_OUTCOMES.md show no exact alias/coverage for the deleted-classifier allegation. Archive not read. FILTER.md read; no filter used."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": "No removed remote enforcement path identified. Direct adjacent patch-letter policy examples remain absent from the inspected remote-policy test, but their absence is not introduced by deleting a separate local classifier.",
+    "original_stronger_consequence": "Removing TmuxSupport/classify_tmux_version and its test might remove the last version-floor enforcement, silently accepting old or unreadable host tmux. No security or user-work-loss route was established; the supervisor already no longer runs tmux at this revision.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Direct surviving remote enforcement and independently read retained test assertions refute the specific deletion claim; preserve the adjacent patch-letter coverage caveat."
+  }
+]

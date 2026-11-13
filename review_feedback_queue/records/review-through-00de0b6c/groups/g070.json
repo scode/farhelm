@@ -1,0 +1,937 @@
+{
+  "group": {
+    "id": "g070",
+    "domain": "podman-environments",
+    "purpose": "podman-environments: crates/farhelm/tests/e2e/podman_environments.rs; phases complete small per-commit changes",
+    "interfaces": [
+      "g007",
+      "g009",
+      "g010",
+      "g011",
+      "g022",
+      "g023",
+      "g024",
+      "g025",
+      "g026",
+      "g027",
+      "g028",
+      "g029",
+      "g055",
+      "g056",
+      "g057",
+      "g058",
+      "g059",
+      "g060",
+      "g067",
+      "g069",
+      "g093"
+    ],
+    "sources": [
+      {
+        "path": "[private-run]/prep/parts/00325-000.patch",
+        "ranges": [
+          [
+            1,
+            1336
+          ]
+        ],
+        "original_path": "crates/farhelm/tests/e2e/podman_environments.rs",
+        "commit": "04d85f0c98a9b635709d00b056719a0baa7fd3fc",
+        "notes": "patch header; patch character offsets [0,53985)",
+        "lines": 1336,
+        "bytes": 53985,
+        "start": 0,
+        "end": 53985,
+        "original": "[private-run]/prep/originals/00325.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/00671-000.patch",
+        "ranges": [
+          [
+            1,
+            177
+          ]
+        ],
+        "original_path": "crates/farhelm/tests/e2e/podman_environments.rs",
+        "commit": "503af78794bf61361a10eed3295b563c87289228",
+        "notes": "patch header; patch character offsets [0,8347)",
+        "lines": 177,
+        "bytes": 8347,
+        "start": 0,
+        "end": 8347,
+        "original": "[private-run]/prep/originals/00671.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/01133-000.patch",
+        "ranges": [
+          [
+            1,
+            20
+          ]
+        ],
+        "original_path": "crates/farhelm/tests/e2e/podman_environments.rs",
+        "commit": "f560058da19e02716e6f943883a9508b447aff4e",
+        "notes": "patch header; patch character offsets [0,1072)",
+        "lines": 20,
+        "bytes": 1072,
+        "start": 0,
+        "end": 1072,
+        "original": "[private-run]/prep/originals/01133.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/01401-000.patch",
+        "ranges": [
+          [
+            1,
+            25
+          ]
+        ],
+        "original_path": "crates/farhelm/tests/e2e/podman_environments.rs",
+        "commit": "d751ff1633bb479c7bf53920f2e4ea4ba932a1c2",
+        "notes": "patch header; patch character offsets [0,1095)",
+        "lines": 25,
+        "bytes": 1095,
+        "start": 0,
+        "end": 1095,
+        "original": "[private-run]/prep/originals/01401.patch"
+      }
+    ],
+    "lines": 1558,
+    "bytes": 64499
+  },
+  "records": [
+    {
+      "key": "g070/l1",
+      "owner": "g070",
+      "id": "l1",
+      "domain": "podman-environments",
+      "purpose": "podman-environments: crates/farhelm/tests/e2e/podman_environments.rs; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 1,
+          "event": {
+            "version": 1,
+            "kind": "lead",
+            "id": "l1",
+            "state": "open",
+            "summary": "Check whether timeout cleanup can race a still-running provider mutation",
+            "location": "crates/farhelm/tests/e2e/podman_environments.rs:1198",
+            "detail": "Reviewed commit: 04d85f0c98a9b635709d00b056719a0baa7fd3fc. TLDR: a failed Podman acceptance run may leave owned images or containers behind if stopping the helm does not finish an already-sent provider command before fallback cleanup inventories resources. Source basis: cleanup stops/reaps the helm, then queries owned container and image labels (1198 onward); the scenario timeout drops exercise before cleanup. SPEC_impl.md, Disposable environments / Podman places, creation and images, places run/start in independent systemd scopes. Suggested bucket: other (test tooling cleanup); could-be-highest: no established route, only owned test resources implicated. Confidence: unresolved lead; proposed_drop: false; possible_cover: none. Next source checks: trace HelmProcess::stop_and_reap, provider shell command cancellation, and image commit/build timing. Exact missing premise: whether any in-flight command can create a resource after cleanup's last label query. No execution or reproduction performed."
+          }
+        },
+        {
+          "line": 5,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "l1",
+            "state": "open",
+            "summary": "Fallback cleanup does not settle provider commands before certifying absence",
+            "location": "crates/farhelm/tests/e2e/podman_environments.rs:1198",
+            "detail": "Reviewed commit: 04d85f0c98a9b635709d00b056719a0baa7fd3fc. TLDR: a failed real Podman acceptance run can report successful fallback cleanup while a container-creation command from that same run is still running and creates an owned container afterward. These are test-owned resources, but they can remain running and consume the shared machine until explicitly cleaned. Suggested bucket: other (maintainer test cleanup); confidence: confirmed by source lifetime analysis, not observed execution; proposed_drop: false; possible_cover: none; could-be-highest: no established security or user-work-loss route.\n\nThe timeout/panic wrapper drops exercise and calls cleanup (podman_environments.rs:1275-1300). cleanup first calls HelmProcess::stop_and_reap, then immediately inventories currently visible containers/images and declares success when those queries are empty (1198-1251). stop_and_reap only start_kill/waits the helm child (harness.rs:971-977); it neither joins nor ends provider subprocesses. Provider starts are separate systemd scopes (environment/podman.rs:295-320,417-456), and provider commands are spawned in an isolated process group (environment/podman_probe.rs:174-205). Killing the helm does not run its Rust kill-on-drop destructors or wait those children. An already-spawned command delayed before resource creation can therefore execute after the empty inventory. The cleanup loop even stops its image passes on the first empty result; no pending-send record or command completion boundary is consulted. A failure early in image preparation makes this route relevant; it does not require touching another test's resources.\n\nThe production recovery contract explicitly retains absent pending names because a disconnected command may still create them: environment/podman/build.rs:630-663 and SPEC_impl.md, Shared recipes and prepared artifacts / recipe deletion, require active work to finish its current command before ownership is forgotten. The fallback bypasses that boundary. Prefer canceling and awaiting owned build/launch work through the helm before forcibly stopping it, or retain and settle the run's exact pending commands/names before declaring fallback cleanup complete. Caveat: no frequency or exact scheduler delay was measured, and image-commit/container-removal serialization was not relied on; the established route is a pending create becoming visible only after the absence scan. No runtime tests or reproductions were run."
+          }
+        },
+        {
+          "line": 10,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "l1",
+            "state": "open",
+            "summary": "Unverified after investigation: fallback cleanup may race a surviving provider create",
+            "location": "crates/farhelm/tests/e2e/podman_environments.rs:1198",
+            "detail": "Reviewed commit: 04d85f0c98a9b635709d00b056719a0baa7fd3fc. TLDR: fallback cleanup has no completion boundary for already-sent provider commands, so a failed real Podman test may leave a resource that becomes visible after its final empty inventory. The original consequence remains owned test resources left running or consuming storage on the shared machine; there is no established security or user-work-loss route. Suggested bucket: other. Confidence revised from confirmed to unverified after investigation: the previous event established missing synchronization but overstated the specific late-publication outcome as proven. proposed_drop: false; possible_cover: none; could-be-highest: no.\n\nChecks and actual results: (1) podman_environments.rs:1276-1289 bounds and catches panics only in the test's exercise future. Leaving that block drops the HTTP client work; it does not cancel the server launch. sessions/sandbox.rs:61-80 starts admission through run_owned, whose lib.rs:2721-2727 tokio::spawn is detached from client cancellation, and provisioning/tensorlake_add.rs:464-487 stores a separately spawned launch task. Thus a test-side timeout can reach cleanup while a real launch/prepare command is active. (2) cleanup:1198-1201 calls HelmProcess::stop_and_reap; harness.rs:971-977 calls start_kill and waits only the direct helm PID. Its spawn:1014-1027 provides no child/process-group reaper. (3) SystemPlaceCommands::execute (podman_probe.rs:178-200) spawns the local shell or SSH client in its own process group with kill_on_drop; access.rs:67-94 and 173-185 supply no parent-death signal or descendant-wait facility. backend.rs:1979-2019 calls terminate_child on handled capture timeout/output failure; terminate_child:2268-2278 kills and reaps that group. Those paths require the helm to be alive; SIGKILL does not execute Rust drop or async termination. This supports a surviving already-spawned local/SSH command, rather than a not-yet-spawned Rust task continuing after helm death. (4) helper/build.rs:554-565 persists its pending name and timestamp before sending run; reconcile_helpers:630-675 retains recent absent names. Podman scopes deliberately move run/start out of the helm/login lifetime (podman.rs:295-320). (5) fallback cleanup only lists current recipe-labelled objects at 1217-1251; it neither reads pending names nor waits the command/scope. Ordinary provider cleanup's stronger behavior does not repair that test fallback.\n\nExact missing premise: an actual supported Podman/systemd/local-or-SSH execution path in which the already-spawned command remains live after helm death AND completes resource publication after fallback's final empty inventory, despite pipe closure and Podman's storage/creation locks. The app source proves neither that these locks serialize inventories behind creation nor that they permit them to overtake it. A hypothetical arbitrary scheduler pause before create is not sufficient evidence of the actual failure route. The in-repo failure model represents lost replies and pending ownership but does not validate real engine publication/lock timing. Image commit may also hold container locks that force fallback rm to wait, so no commit race is claimed as confirmed. Available app-source checks settle the cancellation/process ownership and pending-name premises but cannot settle the external engine's lock/publication/pipe behavior across the supported version range. Evidence needed: primary engine/systemd/SSH source establishing such an execution path for a supported version, or an explicitly authorized controlled failure test showing command PID/scope lifetime and inventory/publication order. No runtime tests or reproductions were performed."
+          }
+        },
+        {
+          "line": 14,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "l1",
+            "state": "open",
+            "summary": "Unverified after investigation: fallback cleanup lacks a provider-command completion boundary",
+            "location": "crates/farhelm/tests/e2e/podman_environments.rs:1198",
+            "detail": "Reviewed commit: 04d85f0c98a9b635709d00b056719a0baa7fd3fc. TLDR and original consequence retained: a failed real Podman test may leave a resource published after fallback's final empty inventory, consuming owned test storage/processes on the shared machine. Suggested bucket: other; could-be-highest: no established security or user-work-loss route. Confidence: unverified after investigation; proposed_drop: false; possible_cover: none. The app-source missing join is established; a real late-publication incident is not established.\n\nThis turn pursued accessible primary upstream source rather than treating external engine behavior as unavailable. Systemd v255 src/run/run.c, https://raw.githubusercontent.com/systemd/systemd/v255/src/run/run.c :1412-1490 sends StartTransientUnit and waits for its returned job; :1579 executes the requested program only afterward. With this provider's --quiet scope, that is a real pre-Podman asynchronous boundary, not evidence that a Rust task can continue after SIGKILL. Podman v4.9.3 libpod/runtime_ctr.go, https://raw.githubusercontent.com/containers/podman/v4.9.3/libpod/runtime_ctr.go :414-424 performs storage setup before :530-543 registers the container in libpod state; :1159-1185 inventories registered state. Its Bolt implementation, https://raw.githubusercontent.com/containers/podman/v4.9.3/libpod/boltdb_state.go :895-911, reads the current database in a transaction. Thus app-level inventory is not intrinsically a completion receipt for a not-yet-registered create. These checks supply useful concrete wait/publication boundaries but do not alone prove their ordering against this exact fixture's timeout and fallback.\n\nPrior useful app checks remain: exercise's 30-minute timeout drops test HTTP work, while sessions/sandbox.rs:61-80 and provisioning/tensorlake_add.rs:464-487 retain separate server tasks. Harness stop_and_reap kills/reaps only the helm PID (:971-977). Provider processes are separately grouped (podman_probe.rs:178-200); handled command deadlines invoke group kill/reap (backend.rs:1979-2019,2268-2278), but an abruptly killed helm cannot execute that path. Pending helper names are persisted before run (podman/build.rs:554-565); ordinary recovery retains ambiguous absent names (:630-675). Fallback does not read these records or wait scopes; it only scans visible labels (:1217-1251). This conclusion is not refuted by normal provider cleanup working correctly.\n\nExact remaining premise: a supported real local/localhost-SSH command surviving helm termination that publishes after ALL fallback container/image checks, under this fixture's actual 30-minute timeout or panic route. The upstream split permits concurrency, but no checked source sequence yet proves (a) a relevant pending create at that deadline, (b) image removal not preventing it or reporting in-use instead of cleanup success, and (c) no pipe/signal termination before publication. Storage setup can precede registration, but storage/image-reference locks and fallback image removal can alter the outcome; no arbitrary scheduler pause is counted as confirmation. Systemd and Podman checks above do not settle that full composition. Evidence needed is a primary-source trace through the selected engine storage backend plus the fixture's reachable failure boundary, or an explicitly authorized controlled failure observation of command/scope, inventories and publication. No installed process was inspected, no runtime tests/reproductions performed, no claim that a resource actually leaked. Original confirmed wording remains in history and is superseded only in confidence, with its consequence preserved."
+          }
+        },
+        {
+          "line": 17,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "l1",
+            "state": "open",
+            "summary": "SSH bootstrap failure can leave a storage-only builder outside fallback cleanup",
+            "location": "crates/farhelm/tests/e2e/podman_environments.rs:1198",
+            "detail": "Reviewed commit: 04d85f0c98a9b635709d00b056719a0baa7fd3fc. Original consequence retained and narrowed: fallback can report successful cleanup while an owned builder from the real SSH acceptance remains in Podman storage and can later become a running container. This consumes only this test's resources; no security or user-work-loss route is established. Suggested bucket: other. Confidence revised to likely, naming the external occurrence premise: a first-bootstrap remote Podman create stalls in a pre-libpod-registration filesystem operation past the 120-second command deadline and the fallback scans, while unrelated inventory reads remain usable. The conditional source route is now traced; no such storage stall or leaked process was observed. proposed_drop: false; possible_cover: none; could-be-highest: no.\n\nUseful storage checks refute the earlier broad implication that any missed derived-image create can pass fallback: Podman 4.9.3 pins containers/storage v1.51.0 and common v0.57.4 (go.mod:13,20). store.go:1744-1758 locks layers/images while CreateContainer resolves its source; :1871-1889 records the storage container and its ImageID before releasing those locks. DeleteImage uses writeToAllStores (:1349-1372), then :2551-2560 refuses an image referenced by ANY storage container, including one not yet registered in libpod. Thus a derived-image create either loses its source image before storage creation, or protects that image and makes the fallback's final image-empty check fail. Podman's container_commit.go:42-49 holds the container lock across Commit at :169; ordinary removeContainer takes that lock, so the claimed late-commit shortcut is not established. These narrower refutations preserve the original consequence but remove those proposed routes.\n\nThe remaining source-conditional route uses the first bootstrap builder, whose source is deliberately NOT swept: podman/build.rs:41-45 runs it from cached UBUNTU, before any test-owned image exists. Podman runtime_ctr.go:442-455 completes storage setup, then calls os.MkdirAll for the container secrets directory before libpod state.AddContainer at :566-578. This filesystem boundary is outside CreateContainer's image/layer locks. Podman storage.go:123-129 creates the storage container; common inventory ps.GetContainerLists uses runtime.GetContainers at pkg/ps/ps.go:64 and adds storage-only external containers only when options.External at :89. The fixture's owned_ids command does not pass --external. Therefore during a successful-but-stalled pre-registration mkdir, normal container ls cannot see the builder. The Ubuntu base is unlabelled/user-owned for this test and intentionally retained, so no test-owned image removal supplies the otherwise protective image-use check.\n\nFailure/child-lifetime sequence: this fixture's SSH route is ordinary non-PTY localhost SSH. SystemPlaceCommands spawns an isolated local SSH process group, and capture_child on deadline kills/reaps that group (backend.rs:1979-2019,2268-2278); it does not remotely signal the Podman PID. OpenSSH V_9_6_P1 session.c:2483-2523 explicitly handles a channel dying before its child: absent a PTY it closes/detaches channel state without killing that child. systemd v255 run.c:1535-1721 moves the command through the transient scope job then execs it; that scope is not the local SSH client's group. Podman detached run creates/starts first (ABI containers.go:1129-1165); cmd containers/run.go:214-225 prints its ID only after the engine returns. A closed output pipe is therefore not an implicit pre-create cancellation. This is an already-running external process blocked on named filesystem work, not a Rust future resuming after helm death or an arbitrary scheduler pause.\n\nAfter the remote command deadline the production prepare path attempts reconcile_helpers, whose normal libpod inspect cannot resolve this storage-only builder; its persisted recent pending name is retained (:630-675). There are no retired images yet (:41-45), so prepare_images returns the error (:267-289). environment_session_steps returns it (tensorlake_add.rs:521-539); finish_session_launch emits an error reply (:1028-1057), and the test's reply[error] assertion at podman_environments.rs:826-830 panics. Its catch boundary then stops/reaps the helm and runs fallback (:1276-1293). Fallback scans only visible recipe labels (:1217-1251), never the pending name/storage-only inventory. Its empty container/image checks can therefore succeed before the stalled remote operation completes; once it does, libpod registration/start can continue. This route uses an explicit handled command timeout followed by a reachable test assertion, not a conjectured 30-minute timeout during the early first run.\n\nExternal primary sources checked: https://raw.githubusercontent.com/containers/podman/v4.9.3/go.mod ; https://raw.githubusercontent.com/containers/storage/v1.51.0/store.go ; https://raw.githubusercontent.com/containers/common/v0.57.4/libimage/image.go ; https://raw.githubusercontent.com/containers/podman/v4.9.3/libpod/storage.go ; https://raw.githubusercontent.com/containers/podman/v4.9.3/libpod/runtime_ctr.go ; https://raw.githubusercontent.com/containers/podman/v4.9.3/libpod/container_commit.go ; https://raw.githubusercontent.com/containers/podman/v4.9.3/pkg/ps/ps.go ; https://raw.githubusercontent.com/containers/podman/v4.9.3/pkg/domain/infra/abi/containers.go ; https://raw.githubusercontent.com/containers/podman/v4.9.3/cmd/podman/containers/run.go ; https://raw.githubusercontent.com/systemd/systemd/v255/src/run/run.c ; https://raw.githubusercontent.com/openssh/openssh-portable/V_9_6_P1/session.c . Earlier web-rendered upstream line numbers stripped blank lines; the new citations here use raw numbered source.\n\nNo uninvestigated source branch remains for this stated conditional route. Unmeasured premises are occurrence/duration of the specified filesystem stall and actual installed engine/SSH versions, storage backend and configured wrappers; the test accepts a supported range and does not pin those host facts. Reading the same functions again cannot establish that an actual run experiences the stall. A version/config manifest or authorized observation could establish occurrence, but no reproduction or process/live-install operation is requested or performed. This is likely conditional source analysis, not a confirmed observed leak. The early confirmed wording and prior UAI details remain in append-only history; no original consequence or proposed-drop basis is erased."
+          }
+        },
+        {
+          "line": 18,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "l1",
+            "state": "open",
+            "summary": "SSH bootstrap failure can leave a storage-only builder outside fallback cleanup",
+            "location": "crates/farhelm/tests/e2e/podman_environments.rs:1198",
+            "detail": "Reviewed commit: 04d85f0c98a9b635709d00b056719a0baa7fd3fc. Original consequence retained and narrowed: fallback can report successful cleanup while an owned builder from the real SSH acceptance remains in Podman storage and can later become a running container. This consumes only this test's resources; no security or user-work-loss route is established. Suggested bucket: other. Confidence revised to likely, naming the external occurrence premise: a first-bootstrap remote Podman create stalls in a pre-libpod-registration filesystem operation past the 120-second command deadline and the fallback scans, while unrelated inventory reads remain usable. The conditional source route is now traced; no such storage stall or leaked process was observed. proposed_drop: false; possible_cover: none; could-be-highest: no.\n\nUseful storage checks refute the earlier broad implication that any missed derived-image create can pass fallback: Podman 4.9.3 pins containers/storage v1.51.0 and common v0.57.4 (go.mod:13,20). store.go:1744-1758 locks layers/images while CreateContainer resolves its source; :1871-1889 records the storage container and its ImageID before releasing those locks. DeleteImage uses writeToAllStores (:1349-1372), then :2551-2560 refuses an image referenced by ANY storage container, including one not yet registered in libpod. Thus a derived-image create either loses its source image before storage creation, or protects that image and makes the fallback's final image-empty check fail. Podman's container_commit.go:42-49 holds the container lock across Commit at :169; ordinary removeContainer takes that lock, so the claimed late-commit shortcut is not established. These narrower refutations preserve the original consequence but remove those proposed routes.\n\nThe remaining source-conditional route uses the first bootstrap builder, whose source is deliberately NOT swept: podman/build.rs:41-45 runs it from cached UBUNTU, before any test-owned image exists. Podman runtime_ctr.go:442-455 completes storage setup, then calls os.MkdirAll for the container secrets directory before libpod state.AddContainer at :566-578. This filesystem boundary is outside CreateContainer's image/layer locks. Podman storage.go:123-129 creates the storage container; common inventory ps.GetContainerLists uses runtime.GetContainers at pkg/ps/ps.go:64 and adds storage-only external containers only when options.External at :89. The fixture's owned_ids command does not pass --external. Therefore during a successful-but-stalled pre-registration mkdir, normal container ls cannot see the builder. The Ubuntu base is unlabelled/user-owned for this test and intentionally retained, so no test-owned image removal supplies the otherwise protective image-use check.\n\nFailure/child-lifetime sequence: this fixture's SSH route is ordinary non-PTY localhost SSH. SystemPlaceCommands spawns an isolated local SSH process group, and capture_child on deadline kills/reaps that group (backend.rs:1979-2019,2268-2278); it does not remotely signal the Podman PID. OpenSSH V_9_6_P1 session.c:2483-2523 explicitly handles a channel dying before its child: absent a PTY it closes/detaches channel state without killing that child. systemd v255 run.c:1535-1721 moves the command through the transient scope job then execs it; that scope is not the local SSH client's group. Podman detached run creates/starts first (ABI containers.go:1129-1165); cmd containers/run.go:214-225 prints its ID only after the engine returns. A closed output pipe is therefore not an implicit pre-create cancellation. This is an already-running external process blocked on named filesystem work, not a Rust future resuming after helm death or an arbitrary scheduler pause.\n\nAfter the remote command deadline the production prepare path attempts reconcile_helpers, whose normal libpod inspect cannot resolve this storage-only builder; its persisted recent pending name is retained (:630-675). There are no retired images yet (:41-45), so prepare_images returns the error (:267-289). environment_session_steps returns it (tensorlake_add.rs:521-539); finish_session_launch emits an error reply (:1028-1057), and the test's reply[error] assertion at podman_environments.rs:826-830 panics. Its catch boundary then stops/reaps the helm and runs fallback (:1276-1293). Fallback scans only visible recipe labels (:1217-1251), never the pending name/storage-only inventory. Its empty container/image checks can therefore succeed before the stalled remote operation completes; once it does, libpod registration/start can continue. This route uses an explicit handled command timeout followed by a reachable test assertion, not a conjectured 30-minute timeout during the early first run.\n\nExternal primary sources checked: https://raw.githubusercontent.com/containers/podman/v4.9.3/go.mod ; https://raw.githubusercontent.com/containers/storage/v1.51.0/store.go ; https://raw.githubusercontent.com/containers/common/v0.57.4/libimage/image.go ; https://raw.githubusercontent.com/containers/podman/v4.9.3/libpod/storage.go ; https://raw.githubusercontent.com/containers/podman/v4.9.3/libpod/runtime_ctr.go ; https://raw.githubusercontent.com/containers/podman/v4.9.3/libpod/container_commit.go ; https://raw.githubusercontent.com/containers/podman/v4.9.3/pkg/ps/ps.go ; https://raw.githubusercontent.com/containers/podman/v4.9.3/pkg/domain/infra/abi/containers.go ; https://raw.githubusercontent.com/containers/podman/v4.9.3/cmd/podman/containers/run.go ; https://raw.githubusercontent.com/systemd/systemd/v255/src/run/run.c ; https://raw.githubusercontent.com/openssh/openssh-portable/V_9_6_P1/session.c . Earlier web-rendered upstream line numbers stripped blank lines; the new citations here use raw numbered source.\n\nNo uninvestigated source branch remains for this stated conditional route. Unmeasured premises are occurrence/duration of the specified filesystem stall and actual installed engine/SSH versions, storage backend and configured wrappers; the test accepts a supported range and does not pin those host facts. Reading the same functions again cannot establish that an actual run experiences the stall. A version/config manifest or authorized observation could establish occurrence, but no reproduction or process/live-install operation is requested or performed. This is likely conditional source analysis, not a confirmed observed leak. The early confirmed wording and prior UAI details remain in append-only history; no original consequence or proposed-drop basis is erased.\n\nFinal lookup/cleanup composition checks this turn: v4.9.3 ABI containers.go:161-174 checks libpod LookupContainer for exists and consults storage-only containers only with options.External; :486-537 container inspect also uses LookupContainer. Thus the provider inspect gate at app podman.rs:226-229 really can return absent during the named storage-only interval. ps.go:28-106 confirms normal inventory excludes external storage unless explicitly requested. On initial preparation failure the session binding still has no session-container ID/pending-create marker; app podman.rs:1298-1301 therefore certifies that separate session resource never created, while the builder pending name remains in recipe state. finish_session_launch:1028-1057 can return its failure without settling this ambiguous builder. These checks close the stated application composition rather than relying on normal recipe cleanup. No new missing source premise, runtime observation or broader local-container/derived-image claim was added."
+          }
+        },
+        {
+          "line": 19,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "l1",
+            "state": "open",
+            "summary": "Source-verified conditional SSH bootstrap cleanup gap",
+            "location": "crates/farhelm/tests/e2e/podman_environments.rs:1198",
+            "detail": "Confidence reconciliation, turn 5: confirmed conditional source route for rootless Podman 4.9.3 with its pinned storage 1.51.0/common 0.57.4, systemd 255 and a non-PTY OpenSSH 9.6 connection to the explicitly selected localhost place. This is a supported implementation/configuration, not a claim those versions or a filesystem stall were observed on this host. The exact failure condition is that the remote first-builder command is still before libpod registration when the real 120-second capture deadline expires and remains there through the subsequent normal inventory reads. The checked pre-registration filesystem call gives an actual operation boundary where this condition can hold; the test/provider timeout and error-reply-to-assertion-panic path are executable source branches. Under that condition the storage-only builder is invisible to the exact non-external scans, its Ubuntu source is deliberately exempt from image cleanup, and non-PTY SSH channel teardown does not remotely kill it. The resulting false cleanup success/late publication follows from the checked branches. No further platform mechanism is asserted or needed for this conditional handling claim. Actual occurrence, delay duration, frequency and this machine's installed versions remain unobserved incidence/configuration facts, not an uninvestigated missing source premise. This does not claim that a generic syscall necessarily stalls, that every storage delay leaves inventories usable, or that the ordinary local/derived-image/commit branches share this route. Earlier likely/UAI/confirmed labels and broader routes remain preserved below as history, superseded in scope by this reconciliation. No reproduction or runtime operation; no parent drop or lowering accepted.\n\nReviewed commit: 04d85f0c98a9b635709d00b056719a0baa7fd3fc. Original consequence retained and narrowed: fallback can report successful cleanup while an owned builder from the real SSH acceptance remains in Podman storage and can later become a running container. This consumes only this test's resources; no security or user-work-loss route is established. Suggested bucket: other. Confidence revised to likely, naming the external occurrence premise: a first-bootstrap remote Podman create stalls in a pre-libpod-registration filesystem operation past the 120-second command deadline and the fallback scans, while unrelated inventory reads remain usable. The conditional source route is now traced; no such storage stall or leaked process was observed. proposed_drop: false; possible_cover: none; could-be-highest: no.\n\nUseful storage checks refute the earlier broad implication that any missed derived-image create can pass fallback: Podman 4.9.3 pins containers/storage v1.51.0 and common v0.57.4 (go.mod:13,20). store.go:1744-1758 locks layers/images while CreateContainer resolves its source; :1871-1889 records the storage container and its ImageID before releasing those locks. DeleteImage uses writeToAllStores (:1349-1372), then :2551-2560 refuses an image referenced by ANY storage container, including one not yet registered in libpod. Thus a derived-image create either loses its source image before storage creation, or protects that image and makes the fallback's final image-empty check fail. Podman's container_commit.go:42-49 holds the container lock across Commit at :169; ordinary removeContainer takes that lock, so the claimed late-commit shortcut is not established. These narrower refutations preserve the original consequence but remove those proposed routes.\n\nThe remaining source-conditional route uses the first bootstrap builder, whose source is deliberately NOT swept: podman/build.rs:41-45 runs it from cached UBUNTU, before any test-owned image exists. Podman runtime_ctr.go:442-455 completes storage setup, then calls os.MkdirAll for the container secrets directory before libpod state.AddContainer at :566-578. This filesystem boundary is outside CreateContainer's image/layer locks. Podman storage.go:123-129 creates the storage container; common inventory ps.GetContainerLists uses runtime.GetContainers at pkg/ps/ps.go:64 and adds storage-only external containers only when options.External at :89. The fixture's owned_ids command does not pass --external. Therefore during a successful-but-stalled pre-registration mkdir, normal container ls cannot see the builder. The Ubuntu base is unlabelled/user-owned for this test and intentionally retained, so no test-owned image removal supplies the otherwise protective image-use check.\n\nFailure/child-lifetime sequence: this fixture's SSH route is ordinary non-PTY localhost SSH. SystemPlaceCommands spawns an isolated local SSH process group, and capture_child on deadline kills/reaps that group (backend.rs:1979-2019,2268-2278); it does not remotely signal the Podman PID. OpenSSH V_9_6_P1 session.c:2483-2523 explicitly handles a channel dying before its child: absent a PTY it closes/detaches channel state without killing that child. systemd v255 run.c:1535-1721 moves the command through the transient scope job then execs it; that scope is not the local SSH client's group. Podman detached run creates/starts first (ABI containers.go:1129-1165); cmd containers/run.go:214-225 prints its ID only after the engine returns. A closed output pipe is therefore not an implicit pre-create cancellation. This is an already-running external process blocked on named filesystem work, not a Rust future resuming after helm death or an arbitrary scheduler pause.\n\nAfter the remote command deadline the production prepare path attempts reconcile_helpers, whose normal libpod inspect cannot resolve this storage-only builder; its persisted recent pending name is retained (:630-675). There are no retired images yet (:41-45), so prepare_images returns the error (:267-289). environment_session_steps returns it (tensorlake_add.rs:521-539); finish_session_launch emits an error reply (:1028-1057), and the test's reply[error] assertion at podman_environments.rs:826-830 panics. Its catch boundary then stops/reaps the helm and runs fallback (:1276-1293). Fallback scans only visible recipe labels (:1217-1251), never the pending name/storage-only inventory. Its empty container/image checks can therefore succeed before the stalled remote operation completes; once it does, libpod registration/start can continue. This route uses an explicit handled command timeout followed by a reachable test assertion, not a conjectured 30-minute timeout during the early first run.\n\nExternal primary sources checked: https://raw.githubusercontent.com/containers/podman/v4.9.3/go.mod ; https://raw.githubusercontent.com/containers/storage/v1.51.0/store.go ; https://raw.githubusercontent.com/containers/common/v0.57.4/libimage/image.go ; https://raw.githubusercontent.com/containers/podman/v4.9.3/libpod/storage.go ; https://raw.githubusercontent.com/containers/podman/v4.9.3/libpod/runtime_ctr.go ; https://raw.githubusercontent.com/containers/podman/v4.9.3/libpod/container_commit.go ; https://raw.githubusercontent.com/containers/podman/v4.9.3/pkg/ps/ps.go ; https://raw.githubusercontent.com/containers/podman/v4.9.3/pkg/domain/infra/abi/containers.go ; https://raw.githubusercontent.com/containers/podman/v4.9.3/cmd/podman/containers/run.go ; https://raw.githubusercontent.com/systemd/systemd/v255/src/run/run.c ; https://raw.githubusercontent.com/openssh/openssh-portable/V_9_6_P1/session.c . Earlier web-rendered upstream line numbers stripped blank lines; the new citations here use raw numbered source.\n\nNo uninvestigated source branch remains for this stated conditional route. Unmeasured premises are occurrence/duration of the specified filesystem stall and actual installed engine/SSH versions, storage backend and configured wrappers; the test accepts a supported range and does not pin those host facts. Reading the same functions again cannot establish that an actual run experiences the stall. A version/config manifest or authorized observation could establish occurrence, but no reproduction or process/live-install operation is requested or performed. This is likely conditional source analysis, not a confirmed observed leak. The early confirmed wording and prior UAI details remain in append-only history; no original consequence or proposed-drop basis is erased.\n\nFinal lookup/cleanup composition checks this turn: v4.9.3 ABI containers.go:161-174 checks libpod LookupContainer for exists and consults storage-only containers only with options.External; :486-537 container inspect also uses LookupContainer. Thus the provider inspect gate at app podman.rs:226-229 really can return absent during the named storage-only interval. ps.go:28-106 confirms normal inventory excludes external storage unless explicitly requested. On initial preparation failure the session binding still has no session-container ID/pending-create marker; app podman.rs:1298-1301 therefore certifies that separate session resource never created, while the builder pending name remains in recipe state. finish_session_launch:1028-1057 can return its failure without settling this ambiguous builder. These checks close the stated application composition rather than relying on normal recipe cleanup. No new missing source premise, runtime observation or broader local-container/derived-image claim was added."
+          }
+        }
+      ],
+      "latest": {
+        "line": 19,
+        "event": {
+          "version": 1,
+          "kind": "finding",
+          "id": "l1",
+          "state": "open",
+          "summary": "Source-verified conditional SSH bootstrap cleanup gap",
+          "location": "crates/farhelm/tests/e2e/podman_environments.rs:1198",
+          "detail": "Confidence reconciliation, turn 5: confirmed conditional source route for rootless Podman 4.9.3 with its pinned storage 1.51.0/common 0.57.4, systemd 255 and a non-PTY OpenSSH 9.6 connection to the explicitly selected localhost place. This is a supported implementation/configuration, not a claim those versions or a filesystem stall were observed on this host. The exact failure condition is that the remote first-builder command is still before libpod registration when the real 120-second capture deadline expires and remains there through the subsequent normal inventory reads. The checked pre-registration filesystem call gives an actual operation boundary where this condition can hold; the test/provider timeout and error-reply-to-assertion-panic path are executable source branches. Under that condition the storage-only builder is invisible to the exact non-external scans, its Ubuntu source is deliberately exempt from image cleanup, and non-PTY SSH channel teardown does not remotely kill it. The resulting false cleanup success/late publication follows from the checked branches. No further platform mechanism is asserted or needed for this conditional handling claim. Actual occurrence, delay duration, frequency and this machine's installed versions remain unobserved incidence/configuration facts, not an uninvestigated missing source premise. This does not claim that a generic syscall necessarily stalls, that every storage delay leaves inventories usable, or that the ordinary local/derived-image/commit branches share this route. Earlier likely/UAI/confirmed labels and broader routes remain preserved below as history, superseded in scope by this reconciliation. No reproduction or runtime operation; no parent drop or lowering accepted.\n\nReviewed commit: 04d85f0c98a9b635709d00b056719a0baa7fd3fc. Original consequence retained and narrowed: fallback can report successful cleanup while an owned builder from the real SSH acceptance remains in Podman storage and can later become a running container. This consumes only this test's resources; no security or user-work-loss route is established. Suggested bucket: other. Confidence revised to likely, naming the external occurrence premise: a first-bootstrap remote Podman create stalls in a pre-libpod-registration filesystem operation past the 120-second command deadline and the fallback scans, while unrelated inventory reads remain usable. The conditional source route is now traced; no such storage stall or leaked process was observed. proposed_drop: false; possible_cover: none; could-be-highest: no.\n\nUseful storage checks refute the earlier broad implication that any missed derived-image create can pass fallback: Podman 4.9.3 pins containers/storage v1.51.0 and common v0.57.4 (go.mod:13,20). store.go:1744-1758 locks layers/images while CreateContainer resolves its source; :1871-1889 records the storage container and its ImageID before releasing those locks. DeleteImage uses writeToAllStores (:1349-1372), then :2551-2560 refuses an image referenced by ANY storage container, including one not yet registered in libpod. Thus a derived-image create either loses its source image before storage creation, or protects that image and makes the fallback's final image-empty check fail. Podman's container_commit.go:42-49 holds the container lock across Commit at :169; ordinary removeContainer takes that lock, so the claimed late-commit shortcut is not established. These narrower refutations preserve the original consequence but remove those proposed routes.\n\nThe remaining source-conditional route uses the first bootstrap builder, whose source is deliberately NOT swept: podman/build.rs:41-45 runs it from cached UBUNTU, before any test-owned image exists. Podman runtime_ctr.go:442-455 completes storage setup, then calls os.MkdirAll for the container secrets directory before libpod state.AddContainer at :566-578. This filesystem boundary is outside CreateContainer's image/layer locks. Podman storage.go:123-129 creates the storage container; common inventory ps.GetContainerLists uses runtime.GetContainers at pkg/ps/ps.go:64 and adds storage-only external containers only when options.External at :89. The fixture's owned_ids command does not pass --external. Therefore during a successful-but-stalled pre-registration mkdir, normal container ls cannot see the builder. The Ubuntu base is unlabelled/user-owned for this test and intentionally retained, so no test-owned image removal supplies the otherwise protective image-use check.\n\nFailure/child-lifetime sequence: this fixture's SSH route is ordinary non-PTY localhost SSH. SystemPlaceCommands spawns an isolated local SSH process group, and capture_child on deadline kills/reaps that group (backend.rs:1979-2019,2268-2278); it does not remotely signal the Podman PID. OpenSSH V_9_6_P1 session.c:2483-2523 explicitly handles a channel dying before its child: absent a PTY it closes/detaches channel state without killing that child. systemd v255 run.c:1535-1721 moves the command through the transient scope job then execs it; that scope is not the local SSH client's group. Podman detached run creates/starts first (ABI containers.go:1129-1165); cmd containers/run.go:214-225 prints its ID only after the engine returns. A closed output pipe is therefore not an implicit pre-create cancellation. This is an already-running external process blocked on named filesystem work, not a Rust future resuming after helm death or an arbitrary scheduler pause.\n\nAfter the remote command deadline the production prepare path attempts reconcile_helpers, whose normal libpod inspect cannot resolve this storage-only builder; its persisted recent pending name is retained (:630-675). There are no retired images yet (:41-45), so prepare_images returns the error (:267-289). environment_session_steps returns it (tensorlake_add.rs:521-539); finish_session_launch emits an error reply (:1028-1057), and the test's reply[error] assertion at podman_environments.rs:826-830 panics. Its catch boundary then stops/reaps the helm and runs fallback (:1276-1293). Fallback scans only visible recipe labels (:1217-1251), never the pending name/storage-only inventory. Its empty container/image checks can therefore succeed before the stalled remote operation completes; once it does, libpod registration/start can continue. This route uses an explicit handled command timeout followed by a reachable test assertion, not a conjectured 30-minute timeout during the early first run.\n\nExternal primary sources checked: https://raw.githubusercontent.com/containers/podman/v4.9.3/go.mod ; https://raw.githubusercontent.com/containers/storage/v1.51.0/store.go ; https://raw.githubusercontent.com/containers/common/v0.57.4/libimage/image.go ; https://raw.githubusercontent.com/containers/podman/v4.9.3/libpod/storage.go ; https://raw.githubusercontent.com/containers/podman/v4.9.3/libpod/runtime_ctr.go ; https://raw.githubusercontent.com/containers/podman/v4.9.3/libpod/container_commit.go ; https://raw.githubusercontent.com/containers/podman/v4.9.3/pkg/ps/ps.go ; https://raw.githubusercontent.com/containers/podman/v4.9.3/pkg/domain/infra/abi/containers.go ; https://raw.githubusercontent.com/containers/podman/v4.9.3/cmd/podman/containers/run.go ; https://raw.githubusercontent.com/systemd/systemd/v255/src/run/run.c ; https://raw.githubusercontent.com/openssh/openssh-portable/V_9_6_P1/session.c . Earlier web-rendered upstream line numbers stripped blank lines; the new citations here use raw numbered source.\n\nNo uninvestigated source branch remains for this stated conditional route. Unmeasured premises are occurrence/duration of the specified filesystem stall and actual installed engine/SSH versions, storage backend and configured wrappers; the test accepts a supported range and does not pin those host facts. Reading the same functions again cannot establish that an actual run experiences the stall. A version/config manifest or authorized observation could establish occurrence, but no reproduction or process/live-install operation is requested or performed. This is likely conditional source analysis, not a confirmed observed leak. The early confirmed wording and prior UAI details remain in append-only history; no original consequence or proposed-drop basis is erased.\n\nFinal lookup/cleanup composition checks this turn: v4.9.3 ABI containers.go:161-174 checks libpod LookupContainer for exists and consults storage-only containers only with options.External; :486-537 container inspect also uses LookupContainer. Thus the provider inspect gate at app podman.rs:226-229 really can return absent during the named storage-only interval. ps.go:28-106 confirms normal inventory excludes external storage unless explicitly requested. On initial preparation failure the session binding still has no session-container ID/pending-create marker; app podman.rs:1298-1301 therefore certifies that separate session resource never created, while the builder pending name remains in recipe state. finish_session_launch:1028-1057 can return its failure without settling this ambiguous builder. These checks close the stated application composition rather than relying on normal recipe cleanup. No new missing source premise, runtime observation or broader local-container/derived-image claim was added."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g070/findings.jsonl",
+        "id": "l1",
+        "line": 19,
+        "disposition": "verified",
+        "group": "podman-acceptance-fallback-misses-inflight-ssh-bootstrap-storage",
+        "reason": "Parent explicitly accepted named retain-verified proposal from claims-044 after inspecting it. The narrowed SSH bootstrap route is source-established under its explicit pre-registration delay condition. Fallback scans only registered objects and can finish while an owned remote builder remains storage-only; its user-owned Ubuntu source is outside the image sweep. This is private test-resource leakage, not an observed incident or a production data-loss claim. Retain the latest source-verified conditional SSH-only handling gap and every external-condition caveat. All claimed retained resources are run-owned maintainer fixtures; no catastrophic tooling or user-owned-work consequence was established. Checked source/results: [\"04d85f0c98a9b635709d00b056719a0baa7fd3fc introduces crates/farhelm/tests/e2e/podman_environments.rs (1,330 added lines). owned_ids:1160-1194 uses ordinary container ls without --external; cleanup:1198-1251 stops only the helm and scans current labels. Assertion panic/timeout reaches cleanup at :1276-1293. Pinned tip retains this logic at :1491-1588.\",\"Same revision:environment/podman/build.rs:41-45 starts the first builder from user-owned UBUNTU; :554-565 persists its pending name before run; :267-289 attempts helper cleanup on failure; :630-675 retains recent absent names. This state is not consulted by fallback.\",\"Same revision:environment/podman.rs:295-320 uses an independent transient scope and a 120-second command deadline. podman_probe.rs:178-205 isolates the local SSH client; provisioning/backend.rs:1979-2019,2268-2278 kills/reaps that local group on timeout, without a remote Podman completion receipt.\",\"Same revision:provisioning/tensorlake_add.rs:521-539 propagates failed preparation; :1028-1057 reports failure after session-resource cleanup. environment/podman.rs:1298-1301 considers the separate session container never created when its handle has neither ID nor pending marker. Test :826-830 panics on that launch error; this is a reachable failure boundary before the scenario's long timeout.\",\"Podman v4.9.3 libpod/runtime_ctr.go:442-455 does setupStorage then secrets-directory MkdirAll before :566-578 adds libpod state. libpod/storage.go:123-129 creates storage; pkg/ps/ps.go:59-89 inventories libpod and adds storage-only containers only with External. These branches establish invisibility during the specified delay. URLs: https://raw.githubusercontent.com/containers/podman/v4.9.3/libpod/runtime_ctr.go ; https://raw.githubusercontent.com/containers/podman/v4.9.3/libpod/storage.go ; https://raw.githubusercontent.com/containers/podman/v4.9.3/pkg/ps/ps.go .\",\"OpenSSH V_9_6_P1 session.c:2483-2523 handles a channel closing before its child without a child kill for the non-PTY case. Podman ABI containers.go:1129-1165 completes create and detached Start before returning, so the output-pipe close is not itself a pre-create cancellation. URLs: https://raw.githubusercontent.com/openssh/openssh-portable/V_9_6_P1/session.c ; https://raw.githubusercontent.com/containers/podman/v4.9.3/pkg/domain/infra/abi/containers.go .\"] Current coverage/results: [\"SPEC.md Container sessions requires Podman >=4.9.3 and retains user-owned base images. SPEC_impl.md Shared recipes and prepared artifacts requires ordinary recipe deletion to wait for active commands, and Podman places describes independent scopes. These explain the intended product safeguards but do not accept the test fallback's missing completion boundary.\",\"Current TODO.md Planned empty. plans/queue searched for bootstrap/storage-only/fallback cleanup and provider tests. podman-environments is landed per plans/REPORTS.md:21; its normal product cleanup/verification criteria do not prescribe a pending-command-safe fallback. No unlanded repair found.\",\"BUGS.md concerns a different local SSH output-holder transfer hang. Active TRIAGE_OUTCOMES.md searched for Podman, bootstrap, storage-only and fallback cleanup; no matching decision. Archive not read.\",\"INDEX.md and matching queue coverage searched. podman-storage-selection-escapes-lifecycle-lookup concerns engine configuration selection; recipe-cleanup-navigation concerns browser navigation; route-retirement-failure-skips-owned-session-cleanup concerns browser teardown prerequisites. None is an exact alias or acceptance of the SSH bootstrap fallback route.\",\"FILTER.md full boundary does not match. The trigger is a remote provider operation before registration, not a hung user manager; successful cleanup with retained work is excluded from the rare safe-failure/diagnostic filter.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Line 5 broadly called late publication by a surviving provider create confirmed; lines 10/14 revised confidence to unverified after investigating missing external composition. Lines 17-19 preserve owned containers/storage left after apparent cleanup, but narrow proof to first SSH bootstrap. Earlier local/derived-image/commit routes are not re-established: the history reports storage image-reference locks and commit/container locks defeating their easy late-publication argument. Keep those refutations and the prior confidence reversals; do not summarize the latest as proving all old routes.\"; \"No missing source premise for the latest conditional route. Occurrence requires the remote first builder to remain pre-registration past 120 seconds and through otherwise usable fallback scans. Actual duration, incidence, installed versions and wrappers remain unobserved. No claim that every filesystem stall permits usable inventories.\"."
+      },
+      "accepted_parent_decision": {
+        "key": "g070/l1",
+        "line": 19,
+        "disposition": "verified",
+        "group": "podman-acceptance-fallback-misses-inflight-ssh-bootstrap-storage",
+        "bucket": "other",
+        "recording": "retain-verified",
+        "queue_target_candidate": null,
+        "needs_independent_drop_check": false,
+        "reason": "Parent explicitly accepted named retain-verified proposal from claims-044 after inspecting it. The narrowed SSH bootstrap route is source-established under its explicit pre-registration delay condition. Fallback scans only registered objects and can finish while an owned remote builder remains storage-only; its user-owned Ubuntu source is outside the image sweep. This is private test-resource leakage, not an observed incident or a production data-loss claim. Retain the latest source-verified conditional SSH-only handling gap and every external-condition caveat. All claimed retained resources are run-owned maintainer fixtures; no catastrophic tooling or user-owned-work consequence was established. Checked source/results: [\"04d85f0c98a9b635709d00b056719a0baa7fd3fc introduces crates/farhelm/tests/e2e/podman_environments.rs (1,330 added lines). owned_ids:1160-1194 uses ordinary container ls without --external; cleanup:1198-1251 stops only the helm and scans current labels. Assertion panic/timeout reaches cleanup at :1276-1293. Pinned tip retains this logic at :1491-1588.\",\"Same revision:environment/podman/build.rs:41-45 starts the first builder from user-owned UBUNTU; :554-565 persists its pending name before run; :267-289 attempts helper cleanup on failure; :630-675 retains recent absent names. This state is not consulted by fallback.\",\"Same revision:environment/podman.rs:295-320 uses an independent transient scope and a 120-second command deadline. podman_probe.rs:178-205 isolates the local SSH client; provisioning/backend.rs:1979-2019,2268-2278 kills/reaps that local group on timeout, without a remote Podman completion receipt.\",\"Same revision:provisioning/tensorlake_add.rs:521-539 propagates failed preparation; :1028-1057 reports failure after session-resource cleanup. environment/podman.rs:1298-1301 considers the separate session container never created when its handle has neither ID nor pending marker. Test :826-830 panics on that launch error; this is a reachable failure boundary before the scenario's long timeout.\",\"Podman v4.9.3 libpod/runtime_ctr.go:442-455 does setupStorage then secrets-directory MkdirAll before :566-578 adds libpod state. libpod/storage.go:123-129 creates storage; pkg/ps/ps.go:59-89 inventories libpod and adds storage-only containers only with External. These branches establish invisibility during the specified delay. URLs: https://raw.githubusercontent.com/containers/podman/v4.9.3/libpod/runtime_ctr.go ; https://raw.githubusercontent.com/containers/podman/v4.9.3/libpod/storage.go ; https://raw.githubusercontent.com/containers/podman/v4.9.3/pkg/ps/ps.go .\",\"OpenSSH V_9_6_P1 session.c:2483-2523 handles a channel closing before its child without a child kill for the non-PTY case. Podman ABI containers.go:1129-1165 completes create and detached Start before returning, so the output-pipe close is not itself a pre-create cancellation. URLs: https://raw.githubusercontent.com/openssh/openssh-portable/V_9_6_P1/session.c ; https://raw.githubusercontent.com/containers/podman/v4.9.3/pkg/domain/infra/abi/containers.go .\"] Current coverage/results: [\"SPEC.md Container sessions requires Podman >=4.9.3 and retains user-owned base images. SPEC_impl.md Shared recipes and prepared artifacts requires ordinary recipe deletion to wait for active commands, and Podman places describes independent scopes. These explain the intended product safeguards but do not accept the test fallback's missing completion boundary.\",\"Current TODO.md Planned empty. plans/queue searched for bootstrap/storage-only/fallback cleanup and provider tests. podman-environments is landed per plans/REPORTS.md:21; its normal product cleanup/verification criteria do not prescribe a pending-command-safe fallback. No unlanded repair found.\",\"BUGS.md concerns a different local SSH output-holder transfer hang. Active TRIAGE_OUTCOMES.md searched for Podman, bootstrap, storage-only and fallback cleanup; no matching decision. Archive not read.\",\"INDEX.md and matching queue coverage searched. podman-storage-selection-escapes-lifecycle-lookup concerns engine configuration selection; recipe-cleanup-navigation concerns browser navigation; route-retirement-failure-skips-owned-session-cleanup concerns browser teardown prerequisites. None is an exact alias or acceptance of the SSH bootstrap fallback route.\",\"FILTER.md full boundary does not match. The trigger is a remote provider operation before registration, not a hung user manager; successful cleanup with retained work is excluded from the rare safe-failure/diagnostic filter.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Line 5 broadly called late publication by a surviving provider create confirmed; lines 10/14 revised confidence to unverified after investigating missing external composition. Lines 17-19 preserve owned containers/storage left after apparent cleanup, but narrow proof to first SSH bootstrap. Earlier local/derived-image/commit routes are not re-established: the history reports storage image-reference locks and commit/container locks defeating their easy late-publication argument. Keep those refutations and the prior confidence reversals; do not summarize the latest as proving all old routes.\"; \"No missing source premise for the latest conditional route. Occurrence requires the remote first builder to remain pre-registration past 120 seconds and through otherwise usable fallback scans. Actual duration, incidence, installed versions and wrappers remain unobserved. No claim that every filesystem stall permits usable inventories.\"."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-044",
+          "key": "g070/l1",
+          "latest_line": 19,
+          "recommendation": "retain-verified",
+          "bucket": "other",
+          "underlying_key": "podman-acceptance-fallback-misses-inflight-ssh-bootstrap-storage",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The narrowed SSH bootstrap route is source-established under its explicit pre-registration delay condition. Fallback scans only registered objects and can finish while an owned remote builder remains storage-only; its user-owned Ubuntu source is outside the image sweep. This is private test-resource leakage, not an observed incident or a production data-loss claim.",
+          "checks": [
+            "04d85f0c98a9b635709d00b056719a0baa7fd3fc introduces crates/farhelm/tests/e2e/podman_environments.rs (1,330 added lines). owned_ids:1160-1194 uses ordinary container ls without --external; cleanup:1198-1251 stops only the helm and scans current labels. Assertion panic/timeout reaches cleanup at :1276-1293. Pinned tip retains this logic at :1491-1588.",
+            "Same revision:environment/podman/build.rs:41-45 starts the first builder from user-owned UBUNTU; :554-565 persists its pending name before run; :267-289 attempts helper cleanup on failure; :630-675 retains recent absent names. This state is not consulted by fallback.",
+            "Same revision:environment/podman.rs:295-320 uses an independent transient scope and a 120-second command deadline. podman_probe.rs:178-205 isolates the local SSH client; provisioning/backend.rs:1979-2019,2268-2278 kills/reaps that local group on timeout, without a remote Podman completion receipt.",
+            "Same revision:provisioning/tensorlake_add.rs:521-539 propagates failed preparation; :1028-1057 reports failure after session-resource cleanup. environment/podman.rs:1298-1301 considers the separate session container never created when its handle has neither ID nor pending marker. Test :826-830 panics on that launch error; this is a reachable failure boundary before the scenario's long timeout.",
+            "Podman v4.9.3 libpod/runtime_ctr.go:442-455 does setupStorage then secrets-directory MkdirAll before :566-578 adds libpod state. libpod/storage.go:123-129 creates storage; pkg/ps/ps.go:59-89 inventories libpod and adds storage-only containers only with External. These branches establish invisibility during the specified delay. URLs: https://raw.githubusercontent.com/containers/podman/v4.9.3/libpod/runtime_ctr.go ; https://raw.githubusercontent.com/containers/podman/v4.9.3/libpod/storage.go ; https://raw.githubusercontent.com/containers/podman/v4.9.3/pkg/ps/ps.go .",
+            "OpenSSH V_9_6_P1 session.c:2483-2523 handles a channel closing before its child without a child kill for the non-PTY case. Podman ABI containers.go:1129-1165 completes create and detached Start before returning, so the output-pipe close is not itself a pre-create cancellation. URLs: https://raw.githubusercontent.com/openssh/openssh-portable/V_9_6_P1/session.c ; https://raw.githubusercontent.com/containers/podman/v4.9.3/pkg/domain/infra/abi/containers.go ."
+          ],
+          "coverage_checked": [
+            "SPEC.md Container sessions requires Podman >=4.9.3 and retains user-owned base images. SPEC_impl.md Shared recipes and prepared artifacts requires ordinary recipe deletion to wait for active commands, and Podman places describes independent scopes. These explain the intended product safeguards but do not accept the test fallback's missing completion boundary.",
+            "Current TODO.md Planned empty. plans/queue searched for bootstrap/storage-only/fallback cleanup and provider tests. podman-environments is landed per plans/REPORTS.md:21; its normal product cleanup/verification criteria do not prescribe a pending-command-safe fallback. No unlanded repair found.",
+            "BUGS.md concerns a different local SSH output-holder transfer hang. Active TRIAGE_OUTCOMES.md searched for Podman, bootstrap, storage-only and fallback cleanup; no matching decision. Archive not read.",
+            "INDEX.md and matching queue coverage searched. podman-storage-selection-escapes-lifecycle-lookup concerns engine configuration selection; recipe-cleanup-navigation concerns browser navigation; route-retirement-failure-skips-owned-session-cleanup concerns browser teardown prerequisites. None is an exact alias or acceptance of the SSH bootstrap fallback route.",
+            "FILTER.md full boundary does not match. The trigger is a remote provider operation before registration, not a hung user manager; successful cleanup with retained work is excluded from the rare safe-failure/diagnostic filter."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": "No missing source premise for the latest conditional route. Occurrence requires the remote first builder to remain pre-registration past 120 seconds and through otherwise usable fallback scans. Actual duration, incidence, installed versions and wrappers remain unobserved. No claim that every filesystem stall permits usable inventories.",
+          "original_stronger_consequence": "Line 5 broadly called late publication by a surviving provider create confirmed; lines 10/14 revised confidence to unverified after investigating missing external composition. Lines 17-19 preserve owned containers/storage left after apparent cleanup, but narrow proof to first SSH bootstrap. Earlier local/derived-image/commit routes are not re-established: the history reports storage image-reference locks and commit/container locks defeating their easy late-publication argument. Keep those refutations and the prior confidence reversals; do not summarize the latest as proving all old routes.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Retain the latest source-verified conditional SSH-only handling gap and every external-condition caveat. All claimed retained resources are run-owned maintainer fixtures; no catastrophic tooling or user-owned-work consequence was established."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": true,
+        "clearly_refuted_candidate": false,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Source-confirmed by an existing parent decision; not runtime reproduced",
+        "deduplication_key": "podman-acceptance-fallback-misses-inflight-ssh-bootstrap-storage",
+        "destination": "trailing-podman-acceptance-fallback-misses-inflight-ssh-bootstrap-storage.md"
+      }
+    },
+    {
+      "key": "g070/c1",
+      "owner": "g070",
+      "id": "c1",
+      "domain": "podman-environments",
+      "purpose": "podman-environments: crates/farhelm/tests/e2e/podman_environments.rs; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 2,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c1",
+            "state": "open",
+            "summary": "Removed stream-kind assertions follow the grid-only protocol",
+            "location": "crates/farhelm/tests/e2e/podman_environments.rs:555",
+            "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e. TLDR: removing explicit grid-kind checks does not remove a supported distinction; every attachment is now a grid. Source: assigned patch removes only stream.stream_kind() and tab_stream.stream_kind() equality checks, retaining real attachment, readiness-output and typed-command assertions. Contract: SPEC_impl.md, Grid streams, lines 3011-3017: 'Protocol 77 removed the byte streams with the old terminals and xterm.js: every attachment’s data channel carries a grid stream, so Attach, Attached and the browser’s socket say nothing about it'. SPEC_impl.md, Terminal widget: the grid island, lines 1506-1508, likewise requires every terminal to run in a terminal host. Suggested bucket: other; confidence: confirmed by source and explicit contract; proposed_drop: the removed protocol distinction no longer exists; possible_cover: none. Could-be-highest: no, this is an assertion deletion with no security or loss-of-work route. No runtime execution performed."
+          }
+        }
+      ],
+      "latest": {
+        "line": 2,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c1",
+          "state": "open",
+          "summary": "Removed stream-kind assertions follow the grid-only protocol",
+          "location": "crates/farhelm/tests/e2e/podman_environments.rs:555",
+          "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e. TLDR: removing explicit grid-kind checks does not remove a supported distinction; every attachment is now a grid. Source: assigned patch removes only stream.stream_kind() and tab_stream.stream_kind() equality checks, retaining real attachment, readiness-output and typed-command assertions. Contract: SPEC_impl.md, Grid streams, lines 3011-3017: 'Protocol 77 removed the byte streams with the old terminals and xterm.js: every attachment’s data channel carries a grid stream, so Attach, Attached and the browser’s socket say nothing about it'. SPEC_impl.md, Terminal widget: the grid island, lines 1506-1508, likewise requires every terminal to run in a terminal host. Suggested bucket: other; confidence: confirmed by source and explicit contract; proposed_drop: the removed protocol distinction no longer exists; possible_cover: none. Could-be-highest: no, this is an assertion deletion with no security or loss-of-work route. No runtime execution performed."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g070/findings.jsonl",
+        "id": "c1",
+        "line": 2,
+        "disposition": "excluded",
+        "group": "removed-grid-kind-assertion-obsolete-protocol-distinction",
+        "reason": "Parent explicitly accepted named refuted proposal from claims-044 after inspecting it. The suspected loss of a meaningful stream-kind assertion is refuted narrowly: the reviewed protocol removes the distinction entirely. Real attachment, output and typed-command assertions remain. Do not record the assertion deletion itself as a defect; limit refutation to the removed stream-kind distinction. Checked source/results: [\"f560058da19e02716e6f943883a9508b447aff4e diff for crates/farhelm/tests/e2e/podman_environments.rs:552-555,606-609 removes only the two stream_kind equality assertions, leaving attachment and readiness/input checks.\",\"Historical SPEC_impl.md at that commit:3011-3021 and current SPEC_impl.md:2937-2952 explicitly describe protocol 77's grid-only data channel.\"] Current coverage/results: [\"Both specs searched for terminal/grid attachment contracts; SPEC_impl.md Grid streams directly resolves the removed distinction. SPEC.md Terminal experience supplies no surviving byte/grid selection requirement.\",\"TODO.md Planned empty; plans/queue terminal-kind/tmux plans searched. Relevant implemented removal is already reflected in the historical patch and current spec, not an unlanded workaround.\",\"BUGS.md, INDEX.md/matching terminal-oracle entries and active TRIAGE_OUTCOMES.md searched for stream kind/grid assertions; no separate exact queued defect or decision found. Archive not read.\",\"FILTER.md read; no filter is needed for this source/contract refutation.\"] Exact cited cover: [\"SPEC_impl.md, Grid streams: every attachment's data channel carries a grid stream\"] Original stronger consequence and missing premise remain preserved: \"Only the considered concern that deleting explicit grid-kind assertions weakens a meaningful distinction. No security, user-work loss or observed product defect was claimed.\"; null."
+      },
+      "accepted_parent_decision": {
+        "key": "g070/c1",
+        "line": 2,
+        "disposition": "excluded",
+        "group": "removed-grid-kind-assertion-obsolete-protocol-distinction",
+        "bucket": "other",
+        "recording": "refuted",
+        "queue_target_candidate": null,
+        "needs_independent_drop_check": false,
+        "reason": "Parent explicitly accepted named refuted proposal from claims-044 after inspecting it. The suspected loss of a meaningful stream-kind assertion is refuted narrowly: the reviewed protocol removes the distinction entirely. Real attachment, output and typed-command assertions remain. Do not record the assertion deletion itself as a defect; limit refutation to the removed stream-kind distinction. Checked source/results: [\"f560058da19e02716e6f943883a9508b447aff4e diff for crates/farhelm/tests/e2e/podman_environments.rs:552-555,606-609 removes only the two stream_kind equality assertions, leaving attachment and readiness/input checks.\",\"Historical SPEC_impl.md at that commit:3011-3021 and current SPEC_impl.md:2937-2952 explicitly describe protocol 77's grid-only data channel.\"] Current coverage/results: [\"Both specs searched for terminal/grid attachment contracts; SPEC_impl.md Grid streams directly resolves the removed distinction. SPEC.md Terminal experience supplies no surviving byte/grid selection requirement.\",\"TODO.md Planned empty; plans/queue terminal-kind/tmux plans searched. Relevant implemented removal is already reflected in the historical patch and current spec, not an unlanded workaround.\",\"BUGS.md, INDEX.md/matching terminal-oracle entries and active TRIAGE_OUTCOMES.md searched for stream kind/grid assertions; no separate exact queued defect or decision found. Archive not read.\",\"FILTER.md read; no filter is needed for this source/contract refutation.\"] Exact cited cover: [\"SPEC_impl.md, Grid streams: every attachment's data channel carries a grid stream\"] Original stronger consequence and missing premise remain preserved: \"Only the considered concern that deleting explicit grid-kind assertions weakens a meaningful distinction. No security, user-work loss or observed product defect was claimed.\"; null."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-044",
+          "key": "g070/c1",
+          "latest_line": 2,
+          "recommendation": "refuted",
+          "bucket": "other",
+          "underlying_key": "removed-grid-kind-assertion-obsolete-protocol-distinction",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The suspected loss of a meaningful stream-kind assertion is refuted narrowly: the reviewed protocol removes the distinction entirely. Real attachment, output and typed-command assertions remain.",
+          "checks": [
+            "f560058da19e02716e6f943883a9508b447aff4e diff for crates/farhelm/tests/e2e/podman_environments.rs:552-555,606-609 removes only the two stream_kind equality assertions, leaving attachment and readiness/input checks.",
+            "Historical SPEC_impl.md at that commit:3011-3021 and current SPEC_impl.md:2937-2952 explicitly describe protocol 77's grid-only data channel."
+          ],
+          "coverage_checked": [
+            "Both specs searched for terminal/grid attachment contracts; SPEC_impl.md Grid streams directly resolves the removed distinction. SPEC.md Terminal experience supplies no surviving byte/grid selection requirement.",
+            "TODO.md Planned empty; plans/queue terminal-kind/tmux plans searched. Relevant implemented removal is already reflected in the historical patch and current spec, not an unlanded workaround.",
+            "BUGS.md, INDEX.md/matching terminal-oracle entries and active TRIAGE_OUTCOMES.md searched for stream kind/grid assertions; no separate exact queued defect or decision found. Archive not read.",
+            "FILTER.md read; no filter is needed for this source/contract refutation."
+          ],
+          "exact_cover_quotes": [
+            "SPEC_impl.md, Grid streams: every attachment's data channel carries a grid stream"
+          ],
+          "missing_premise": null,
+          "original_stronger_consequence": "Only the considered concern that deleting explicit grid-kind assertions weakens a meaningful distinction. No security, user-work loss or observed product defect was claimed.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Do not record the assertion deletion itself as a defect; limit refutation to the removed stream-kind distinction."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "removed-grid-kind-assertion-obsolete-protocol-distinction",
+        "destination": null
+      }
+    },
+    {
+      "key": "g070/c2",
+      "owner": "g070",
+      "id": "c2",
+      "domain": "podman-environments",
+      "purpose": "podman-environments: crates/farhelm/tests/e2e/podman_environments.rs; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 3,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c2",
+            "state": "open",
+            "summary": "Held image user is not swept as a helper merely through inherited labels",
+            "location": "crates/farhelm/tests/e2e/podman_environments.rs:440",
+            "detail": "Reviewed commit: 04d85f0c98a9b635709d00b056719a0baa7fd3fc. TLDR: the test's deliberately held container can inherit the prepared image's labels without recipe deletion automatically removing it as a helper. Considered whether the in-use-image premise was invalid because the holder inherited Farhelm labels. Source refutation: environment/podman/build.rs:630-676 reconciles only builder_container_id and preparer_container_id from persisted recipe state, then checks ownership; it does not sweep arbitrary containers sharing image labels. The test creates an independent random hold name and verifies its image in podman_environments.rs:440-463. Suggested bucket: other; could-be-highest: no, only a run-owned hold fixture is involved. Confidence: confirmed by source for this narrow concern; proposed_drop: source refutation, not a defect; possible_cover: none. No execution performed."
+          }
+        }
+      ],
+      "latest": {
+        "line": 3,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c2",
+          "state": "open",
+          "summary": "Held image user is not swept as a helper merely through inherited labels",
+          "location": "crates/farhelm/tests/e2e/podman_environments.rs:440",
+          "detail": "Reviewed commit: 04d85f0c98a9b635709d00b056719a0baa7fd3fc. TLDR: the test's deliberately held container can inherit the prepared image's labels without recipe deletion automatically removing it as a helper. Considered whether the in-use-image premise was invalid because the holder inherited Farhelm labels. Source refutation: environment/podman/build.rs:630-676 reconciles only builder_container_id and preparer_container_id from persisted recipe state, then checks ownership; it does not sweep arbitrary containers sharing image labels. The test creates an independent random hold name and verifies its image in podman_environments.rs:440-463. Suggested bucket: other; could-be-highest: no, only a run-owned hold fixture is involved. Confidence: confirmed by source for this narrow concern; proposed_drop: source refutation, not a defect; possible_cover: none. No execution performed."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g070/findings.jsonl",
+        "id": "c2",
+        "line": 3,
+        "disposition": "excluded",
+        "group": "held-image-user-not-selected-by-helper-record-reconciliation",
+        "reason": "Parent explicitly accepted named refuted proposal from claims-044 after inspecting it. Inherited image labels do not by themselves select this held fixture for helper destruction. The production reconciliation checks persisted builder/preparer identities, not every similarly labelled container. Refute only the inherited-labels-to-helper-removal route. This does not refute unrelated fallback cleanup or provider command-lifetime findings. Checked source/results: [\"04d85f0c98a9b635709d00b056719a0baa7fd3fc:crates/farhelm/tests/e2e/podman_environments.rs:440-463 creates an independent random held container with an e2e-run label and verifies its actual source image.\",\"Same revision:environment/podman/build.rs:630-676 iterates only persisted builder_container_id and preparer_container_id, resolves canonical identity and checks ownership before clearing those helpers. There is no arbitrary label sweep in this reconciliation.\"] Current coverage/results: [\"SPEC.md Container sessions and SPEC_impl.md Shared recipes and prepared artifacts retain user base images and require nonforcing removal of in-use owned images. They support the held-user premise; they do not authorize removal of arbitrary holders.\",\"TODO.md Planned empty. plans/queue Podman recipe cleanup/test criteria searched; podman-environments already landed (plans/REPORTS.md:21). No unlanded exact repair or accepted defect found.\",\"BUGS.md, INDEX.md and matching Podman/image entries, active TRIAGE_OUTCOMES.md searched for held image/inherited labels/helper sweep; no exact cover or duplicate found. Archive not read.\",\"FILTER.md not needed; this is a narrow source refutation.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Considered invalidating the in-use-image test premise because the holder might inherit Farhelm labels and be swept as a helper. Only a run-owned hold fixture was implicated; no product user-container deletion claim was made.\"; null."
+      },
+      "accepted_parent_decision": {
+        "key": "g070/c2",
+        "line": 3,
+        "disposition": "excluded",
+        "group": "held-image-user-not-selected-by-helper-record-reconciliation",
+        "bucket": "other",
+        "recording": "refuted",
+        "queue_target_candidate": null,
+        "needs_independent_drop_check": false,
+        "reason": "Parent explicitly accepted named refuted proposal from claims-044 after inspecting it. Inherited image labels do not by themselves select this held fixture for helper destruction. The production reconciliation checks persisted builder/preparer identities, not every similarly labelled container. Refute only the inherited-labels-to-helper-removal route. This does not refute unrelated fallback cleanup or provider command-lifetime findings. Checked source/results: [\"04d85f0c98a9b635709d00b056719a0baa7fd3fc:crates/farhelm/tests/e2e/podman_environments.rs:440-463 creates an independent random held container with an e2e-run label and verifies its actual source image.\",\"Same revision:environment/podman/build.rs:630-676 iterates only persisted builder_container_id and preparer_container_id, resolves canonical identity and checks ownership before clearing those helpers. There is no arbitrary label sweep in this reconciliation.\"] Current coverage/results: [\"SPEC.md Container sessions and SPEC_impl.md Shared recipes and prepared artifacts retain user base images and require nonforcing removal of in-use owned images. They support the held-user premise; they do not authorize removal of arbitrary holders.\",\"TODO.md Planned empty. plans/queue Podman recipe cleanup/test criteria searched; podman-environments already landed (plans/REPORTS.md:21). No unlanded exact repair or accepted defect found.\",\"BUGS.md, INDEX.md and matching Podman/image entries, active TRIAGE_OUTCOMES.md searched for held image/inherited labels/helper sweep; no exact cover or duplicate found. Archive not read.\",\"FILTER.md not needed; this is a narrow source refutation.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Considered invalidating the in-use-image test premise because the holder might inherit Farhelm labels and be swept as a helper. Only a run-owned hold fixture was implicated; no product user-container deletion claim was made.\"; null."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-044",
+          "key": "g070/c2",
+          "latest_line": 3,
+          "recommendation": "refuted",
+          "bucket": "other",
+          "underlying_key": "held-image-user-not-selected-by-helper-record-reconciliation",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "Inherited image labels do not by themselves select this held fixture for helper destruction. The production reconciliation checks persisted builder/preparer identities, not every similarly labelled container.",
+          "checks": [
+            "04d85f0c98a9b635709d00b056719a0baa7fd3fc:crates/farhelm/tests/e2e/podman_environments.rs:440-463 creates an independent random held container with an e2e-run label and verifies its actual source image.",
+            "Same revision:environment/podman/build.rs:630-676 iterates only persisted builder_container_id and preparer_container_id, resolves canonical identity and checks ownership before clearing those helpers. There is no arbitrary label sweep in this reconciliation."
+          ],
+          "coverage_checked": [
+            "SPEC.md Container sessions and SPEC_impl.md Shared recipes and prepared artifacts retain user base images and require nonforcing removal of in-use owned images. They support the held-user premise; they do not authorize removal of arbitrary holders.",
+            "TODO.md Planned empty. plans/queue Podman recipe cleanup/test criteria searched; podman-environments already landed (plans/REPORTS.md:21). No unlanded exact repair or accepted defect found.",
+            "BUGS.md, INDEX.md and matching Podman/image entries, active TRIAGE_OUTCOMES.md searched for held image/inherited labels/helper sweep; no exact cover or duplicate found. Archive not read.",
+            "FILTER.md not needed; this is a narrow source refutation."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": null,
+          "original_stronger_consequence": "Considered invalidating the in-use-image test premise because the holder might inherit Farhelm labels and be swept as a helper. Only a run-owned hold fixture was implicated; no product user-container deletion claim was made.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Refute only the inherited-labels-to-helper-removal route. This does not refute unrelated fallback cleanup or provider command-lifetime findings."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "held-image-user-not-selected-by-helper-record-reconciliation",
+        "destination": null
+      }
+    },
+    {
+      "key": "g070/c3",
+      "owner": "g070",
+      "id": "c3",
+      "domain": "podman-environments",
+      "purpose": "podman-environments: crates/farhelm/tests/e2e/podman_environments.rs; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 4,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c3",
+            "state": "open",
+            "summary": "Archive-only prerequisites match the actual Linux payload producer",
+            "location": "crates/farhelm/tests/e2e/podman_environments.rs:190",
+            "detail": "Reviewed commit: d751ff1633bb479c7bf53920f2e4ea4ba932a1c2. TLDR: removing the static tmux payload prerequisite permits the acceptance test to use the payloads its producer actually stages. Checked whether this could hide a missing provisioning dependency. scripts/build-podman-test-payloads.sh:34-51 stages only a release-shaped farhelm archive, and its final checks require only that archive. provisioning/assets.rs:42-76 defines four release archives, with the farhelm Linux archive selected by farhelm_archive_for at lines 89-104; no tmux payload exists in that inventory. The test continues to require the absolute payload directory and architecture-specific farhelm archive. Suggested bucket: other; confidence: confirmed by source; proposed_drop: removed prerequisite is obsolete; possible_cover: none. Could-be-highest: no, this concerns test admission only. No execution performed."
+          }
+        },
+        {
+          "line": 12,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c3",
+            "state": "open",
+            "summary": "Archive-only prerequisite is the later repair, not evidence the intermediate consumer was correct",
+            "location": "crates/farhelm/tests/e2e/podman_environments.rs:190",
+            "detail": "Reviewed commit: d751ff1633bb479c7bf53920f2e4ea4ba932a1c2. TLDR: this assigned patch correctly removes an obsolete tmux prerequisite, repairing fresh-payload test admission. Suggested bucket: other; confidence: confirmed by pinned source; proposed_drop: no defect in this repair itself; possible_cover: none. Could-be-highest: no security or user-work-loss route.\n\nNarrowed after producer-group input: scripts/build-podman-test-payloads.sh began staging only the farhelm archive at 500548b9253b07a26fd03119679184b69544e31d, while that revision's consumer still required tmux-$target. That intermediate mismatch is confirmed and retained separately as l2 (counterpart g093/f1); it must not be dropped using this later repair. At d751ff consumer lines 190-197 require only farhelm-{target}.tar.gz, matching the producer. Tip 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db retains archive-only checking at 190-196. The previous event's producer/inventory observations apply to validating this repair, not retroactively to the unchanged earlier consumer. No runtime execution or reproduction."
+          }
+        }
+      ],
+      "latest": {
+        "line": 12,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c3",
+          "state": "open",
+          "summary": "Archive-only prerequisite is the later repair, not evidence the intermediate consumer was correct",
+          "location": "crates/farhelm/tests/e2e/podman_environments.rs:190",
+          "detail": "Reviewed commit: d751ff1633bb479c7bf53920f2e4ea4ba932a1c2. TLDR: this assigned patch correctly removes an obsolete tmux prerequisite, repairing fresh-payload test admission. Suggested bucket: other; confidence: confirmed by pinned source; proposed_drop: no defect in this repair itself; possible_cover: none. Could-be-highest: no security or user-work-loss route.\n\nNarrowed after producer-group input: scripts/build-podman-test-payloads.sh began staging only the farhelm archive at 500548b9253b07a26fd03119679184b69544e31d, while that revision's consumer still required tmux-$target. That intermediate mismatch is confirmed and retained separately as l2 (counterpart g093/f1); it must not be dropped using this later repair. At d751ff consumer lines 190-197 require only farhelm-{target}.tar.gz, matching the producer. Tip 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db retains archive-only checking at 190-196. The previous event's producer/inventory observations apply to validating this repair, not retroactively to the unchanged earlier consumer. No runtime execution or reproduction."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g070/findings.jsonl",
+        "id": "c3",
+        "line": 12,
+        "disposition": "excluded",
+        "group": "archive-only-podman-test-prerequisite-is-repair",
+        "reason": "Parent explicitly accepted named refuted proposal from claims-044 after inspecting it. The latest claim correctly treats archive-only admission as the later repair. Removing the obsolete tmux prerequisite matches the producer. This disposition applies to c3's proposed defect in the repair, and must not erase the separate intermediate mismatch. No defect in the later archive-only repair itself. Preserve the intermediate mismatch for its named owners; no judgment about dropping that separate record is proposed. Checked source/results: [\"d751ff1633bb479c7bf53920f2e4ea4ba932a1c2 diff:podman_environments.rs:190-197 replaces the archive-plus-tmux loop with a single farhelm archive assertion, retaining absolute-directory and base-image prerequisites.\",\"500548b9253b07a26fd03119679184b69544e31d:scripts/build-podman-test-payloads.sh:34-65 stages and verifies only the architecture-specific farhelm archive, while that revision's consumer still requires tmux at podman_environments.rs:190-197. This confirms the earlier mismatch independently of the repair.\",\"Pinned tip 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db retains archive-only admission at :190-196. Current SPEC_impl.md:8038-8055 describes farhelm as the only program provisioned to a Linux host.\"] Current coverage/results: [\"Both specifications searched for provisioning payloads/tmux prerequisites; current Provisioning contract matches archive-only consumption, not the intermediate archive-plus-tmux consumer.\",\"TODO.md Planned empty. tmux-drop-from-install and tmux-drop-from-tooling matching payload/consumer criteria read; both are already landed (plans/REPORTS.md:30-31), so neither is an unlanded cover for the historical intermediate mismatch.\",\"BUGS.md, INDEX.md and matching payload/test-admission entries, active TRIAGE_OUTCOMES.md searched for the build-podman producer and tmux prerequisite; no exact existing decision/queue coverage found. Archive not read.\",\"FILTER.md not needed for the repair's source refutation.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Initial c3 wording could be read as retroactively excusing the producer-only revision. Line 12 explicitly withdraws that inference: the earlier fresh-payload rejection remains separately retained as g070/l2 with counterpart g093/f1. Those are a separate underlying intermediate producer/consumer mismatch, not aliases to discard with c3.\"; null."
+      },
+      "accepted_parent_decision": {
+        "key": "g070/c3",
+        "line": 12,
+        "disposition": "excluded",
+        "group": "archive-only-podman-test-prerequisite-is-repair",
+        "bucket": "other",
+        "recording": "refuted",
+        "queue_target_candidate": null,
+        "needs_independent_drop_check": false,
+        "reason": "Parent explicitly accepted named refuted proposal from claims-044 after inspecting it. The latest claim correctly treats archive-only admission as the later repair. Removing the obsolete tmux prerequisite matches the producer. This disposition applies to c3's proposed defect in the repair, and must not erase the separate intermediate mismatch. No defect in the later archive-only repair itself. Preserve the intermediate mismatch for its named owners; no judgment about dropping that separate record is proposed. Checked source/results: [\"d751ff1633bb479c7bf53920f2e4ea4ba932a1c2 diff:podman_environments.rs:190-197 replaces the archive-plus-tmux loop with a single farhelm archive assertion, retaining absolute-directory and base-image prerequisites.\",\"500548b9253b07a26fd03119679184b69544e31d:scripts/build-podman-test-payloads.sh:34-65 stages and verifies only the architecture-specific farhelm archive, while that revision's consumer still requires tmux at podman_environments.rs:190-197. This confirms the earlier mismatch independently of the repair.\",\"Pinned tip 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db retains archive-only admission at :190-196. Current SPEC_impl.md:8038-8055 describes farhelm as the only program provisioned to a Linux host.\"] Current coverage/results: [\"Both specifications searched for provisioning payloads/tmux prerequisites; current Provisioning contract matches archive-only consumption, not the intermediate archive-plus-tmux consumer.\",\"TODO.md Planned empty. tmux-drop-from-install and tmux-drop-from-tooling matching payload/consumer criteria read; both are already landed (plans/REPORTS.md:30-31), so neither is an unlanded cover for the historical intermediate mismatch.\",\"BUGS.md, INDEX.md and matching payload/test-admission entries, active TRIAGE_OUTCOMES.md searched for the build-podman producer and tmux prerequisite; no exact existing decision/queue coverage found. Archive not read.\",\"FILTER.md not needed for the repair's source refutation.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Initial c3 wording could be read as retroactively excusing the producer-only revision. Line 12 explicitly withdraws that inference: the earlier fresh-payload rejection remains separately retained as g070/l2 with counterpart g093/f1. Those are a separate underlying intermediate producer/consumer mismatch, not aliases to discard with c3.\"; null."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-044",
+          "key": "g070/c3",
+          "latest_line": 12,
+          "recommendation": "refuted",
+          "bucket": "other",
+          "underlying_key": "archive-only-podman-test-prerequisite-is-repair",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The latest claim correctly treats archive-only admission as the later repair. Removing the obsolete tmux prerequisite matches the producer. This disposition applies to c3's proposed defect in the repair, and must not erase the separate intermediate mismatch.",
+          "checks": [
+            "d751ff1633bb479c7bf53920f2e4ea4ba932a1c2 diff:podman_environments.rs:190-197 replaces the archive-plus-tmux loop with a single farhelm archive assertion, retaining absolute-directory and base-image prerequisites.",
+            "500548b9253b07a26fd03119679184b69544e31d:scripts/build-podman-test-payloads.sh:34-65 stages and verifies only the architecture-specific farhelm archive, while that revision's consumer still requires tmux at podman_environments.rs:190-197. This confirms the earlier mismatch independently of the repair.",
+            "Pinned tip 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db retains archive-only admission at :190-196. Current SPEC_impl.md:8038-8055 describes farhelm as the only program provisioned to a Linux host."
+          ],
+          "coverage_checked": [
+            "Both specifications searched for provisioning payloads/tmux prerequisites; current Provisioning contract matches archive-only consumption, not the intermediate archive-plus-tmux consumer.",
+            "TODO.md Planned empty. tmux-drop-from-install and tmux-drop-from-tooling matching payload/consumer criteria read; both are already landed (plans/REPORTS.md:30-31), so neither is an unlanded cover for the historical intermediate mismatch.",
+            "BUGS.md, INDEX.md and matching payload/test-admission entries, active TRIAGE_OUTCOMES.md searched for the build-podman producer and tmux prerequisite; no exact existing decision/queue coverage found. Archive not read.",
+            "FILTER.md not needed for the repair's source refutation."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": null,
+          "original_stronger_consequence": "Initial c3 wording could be read as retroactively excusing the producer-only revision. Line 12 explicitly withdraws that inference: the earlier fresh-payload rejection remains separately retained as g070/l2 with counterpart g093/f1. Those are a separate underlying intermediate producer/consumer mismatch, not aliases to discard with c3.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "No defect in the later archive-only repair itself. Preserve the intermediate mismatch for its named owners; no judgment about dropping that separate record is proposed."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "archive-only-podman-test-prerequisite-is-repair",
+        "destination": null
+      }
+    },
+    {
+      "key": "g070/c4",
+      "owner": "g070",
+      "id": "c4",
+      "domain": "podman-environments",
+      "purpose": "podman-environments: crates/farhelm/tests/e2e/podman_environments.rs; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 6,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c4",
+            "state": "open",
+            "summary": "Real hosts-list assertion is partial, with exact scoping checked by the handler test",
+            "location": "crates/farhelm/tests/e2e/podman_environments.rs:801",
+            "detail": "Reviewed commit: 503af78794bf61361a10eed3295b563c87289228. TLDR: the real-container test checks its own host appears and this machine does not; it does not enumerate every other possible SSH host. Considered reporting this as insufficient evidence for its comment that only this container is listed. Source checks: agent_requests.rs:532-543 filters all returned views by the captured AgentScope; confined_agents_reach_only_their_own_environment at 14516-14526 requires exactly one returned host with the environment name and current marker, for both providers, in a fleet with local and remote ordinary hosts. The real test adds the actual CLI/relay route and verifies ordinary local-host exclusion. No currently incorrect hosts listing is established. Suggested bucket: other (test completeness); confidence: confirmed narrow test gap, refuted as a substantive current behavior bug; proposed_drop: exact-list cardinality is already asserted at the shared handler boundary; possible_cover: the named unit test, without any coverage-queue search. Could-be-highest: no established security or loss-of-work route; this candidate concerns regression evidence only. No execution performed."
+          }
+        },
+        {
+          "line": 11,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c4",
+            "state": "open",
+            "summary": "Real hosts-list assertion proves only own inclusion and local-host exclusion",
+            "location": "crates/farhelm/tests/e2e/podman_environments.rs:788",
+            "detail": "Reviewed commit: 503af78794bf61361a10eed3295b563c87289228. TLDR: the real-container test's comment says the hosts listing shows only this container, but its text checks do not prove exact membership. Original concern preserved: an extra SSH host row could pass those real-CLI assertions and leave false confidence in that oracle. Suggested bucket: other (test-oracle limitation); confidence: confirmed by source, not executed; could-be-highest: no established security or user-work-loss route. proposed_drop: proposed treatment as a limited real-route assertion supplemented by handler tests, for parent judgment; the partial real-route oracle itself is NOT refuted. possible_cover: agent_requests.rs:14518-14526 checks exact host cardinality/name/current at the handler boundary for both providers; it does not prove exact real CLI output membership.\n\nPrecise evidence: podman_environments.rs:696-702 describes only-this-container listing. Lines 788-797 require own_name as a substring and forbid the substring this machine. They neither parse rows nor reject every ordinary SSH host. The assigned SSH fixture supplies a second registered ordinary host, so the distinction is real. The unit test's hosts.len()==1 at agent_requests.rs:14524 is useful independent evidence for the handler's response but cannot strengthen this real test's actual assertion. My earlier reference to correct production filtering at 532-543 establishes current implementation behavior only; it does not prove a test oracle. This revision narrows that overclaim and does not retract the test limitation.\n\nInterface comparison: explicitly supplied g067/l1 latest event 3 concerns a different later Delete test at 2ef10815f12ed719ab6c51c6e3ac6fcd3f8bc1fa: two already-visible sessions do not distinguish supervisor-authoritative membership from helm-side counting. That record is not exact-membership coverage for this hosts-list assertion, and c4 supplies none for Delete. Neither handler-level coverage nor ordinary provider cleanup refutes l1's separate fallback-command lifetime concern. No runtime tests or reproductions."
+          }
+        },
+        {
+          "line": 13,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "c4",
+            "state": "open",
+            "summary": "Real-container hosts-list test overstates its exact-membership oracle",
+            "location": "crates/farhelm/tests/e2e/podman_environments.rs:788",
+            "detail": "Reviewed commit: 503af78794bf61361a10eed3295b563c87289228. TLDR: the real-container test says its hosts listing shows only that container, but its assertions can pass while extra ordinary SSH hosts appear. This creates false assurance about the real CLI/relay trust-boundary test, without establishing an actual production escape. Suggested bucket: other (test-oracle/documentation correctness); confidence: confirmed by source, not execution; proposed_drop: false. Could-be-highest: no established security or user-work-loss route. possible_cover: agent_requests.rs:14518-14526 separately checks exact handler response cardinality/name/current, but does not prove this real CLI output oracle; no prohibited coverage sources were searched.\n\nThe newly added helper's docstring at lines 696-702 claims the hosts listing shows only this container. Lines 788-797 merely require own_name as a substring and exclude the substring this machine; they do not parse returned host rows or forbid ordinary SSH host names. The SSH variant includes another ordinary registered host. The competing bad output containing the container plus that SSH host satisfies both assertions, so the limitation is concrete without a reproduction. Either parse and assert the single returned host identity, or narrow the comment/diagnostic to own inclusion and local-host exclusion. Correct production filtering and the separate handler test do not refute the distinct real-test/comment defect. This revises the earlier proposed drop under the same ID; the original false-assurance consequence is retained and the earlier proposed bases (correct filtering and complementary handler coverage) are explicitly not accepted as refutations. The later 2ef10815f12ed719ab6c51c6e3ac6fcd3f8bc1fa Delete-oracle issue supplied as g067/l1 is distinct. This helper is introduced within the pinned range at the reviewed commit, not attributed to earlier unrelated test code. No runtime tests or reproductions."
+          }
+        }
+      ],
+      "latest": {
+        "line": 13,
+        "event": {
+          "version": 1,
+          "kind": "finding",
+          "id": "c4",
+          "state": "open",
+          "summary": "Real-container hosts-list test overstates its exact-membership oracle",
+          "location": "crates/farhelm/tests/e2e/podman_environments.rs:788",
+          "detail": "Reviewed commit: 503af78794bf61361a10eed3295b563c87289228. TLDR: the real-container test says its hosts listing shows only that container, but its assertions can pass while extra ordinary SSH hosts appear. This creates false assurance about the real CLI/relay trust-boundary test, without establishing an actual production escape. Suggested bucket: other (test-oracle/documentation correctness); confidence: confirmed by source, not execution; proposed_drop: false. Could-be-highest: no established security or user-work-loss route. possible_cover: agent_requests.rs:14518-14526 separately checks exact handler response cardinality/name/current, but does not prove this real CLI output oracle; no prohibited coverage sources were searched.\n\nThe newly added helper's docstring at lines 696-702 claims the hosts listing shows only this container. Lines 788-797 merely require own_name as a substring and exclude the substring this machine; they do not parse returned host rows or forbid ordinary SSH host names. The SSH variant includes another ordinary registered host. The competing bad output containing the container plus that SSH host satisfies both assertions, so the limitation is concrete without a reproduction. Either parse and assert the single returned host identity, or narrow the comment/diagnostic to own inclusion and local-host exclusion. Correct production filtering and the separate handler test do not refute the distinct real-test/comment defect. This revises the earlier proposed drop under the same ID; the original false-assurance consequence is retained and the earlier proposed bases (correct filtering and complementary handler coverage) are explicitly not accepted as refutations. The later 2ef10815f12ed719ab6c51c6e3ac6fcd3f8bc1fa Delete-oracle issue supplied as g067/l1 is distinct. This helper is introduced within the pinned range at the reviewed commit, not attributed to earlier unrelated test code. No runtime tests or reproductions."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g070/findings.jsonl",
+        "id": "c4",
+        "line": 13,
+        "disposition": "under-investigation",
+        "group": "g070-c4",
+        "reason": "Record durably acknowledged; parent source/contract validation, cross-group synthesis, coverage/filter matching and any independent drop check remain pending. This preserves the claim and uncertainty without accepting, dropping or lowering it."
+      },
+      "accepted_parent_decision": null,
+      "returned_claim_checks": [
+        {
+          "batch": "claims-044",
+          "key": "g070/c4",
+          "latest_line": 13,
+          "recommendation": "retain-verified",
+          "bucket": "other",
+          "underlying_key": "real-container-agent-host-list-oracle-omits-extra-ssh-hosts",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The helper's stated exact-membership contract exceeds its real CLI assertion. Output containing both the container and an ordinary SSH host satisfies own-name inclusion and local-label exclusion. Correct product filtering and a separate exact handler test do not refute this test/comment defect.",
+          "checks": [
+            "503af78794bf61361a10eed3295b563c87289228:crates/farhelm/tests/e2e/podman_environments.rs:696-702 says the hosts listing shows only this container. :788-797 checks own_name as a substring and excludes this machine, without row parsing or excluding ordinary SSH names.",
+            "Same revision:agent_requests.rs:532-543 filters production host views through captured scope, while :14518-14526 asserts exactly one own/current host at the handler boundary. These are useful complementary safeguards, not proof of the real CLI oracle.",
+            "Pinned tip retains the comment at podman_environments.rs:702 and the no-other-host diagnostic at :825 with the same substring checks. The helper was introduced in the pinned range at 503af787; the issue is not merely inherited outside the review range."
+          ],
+          "coverage_checked": [
+            "SPEC.md Agents and environments:4254-4280 requires agents to list only their own environment. SPEC_impl.md Disposable environments delegates ordinary agent behavior to the shared supervisor/helm paths. Neither accepts an exact-membership claim proved only by partial text checks.",
+            "TODO.md Planned empty. plans/queue environment-agent-operations:82-110 requires own-environment listings, and its test acceptance criteria add real agent coverage, but it has already landed (plans/REPORTS.md:28). No unlanded oracle repair found.",
+            "BUGS.md and active TRIAGE_OUTCOMES.md searched for hosts-list, Podman and exact-membership test terms; no matching acceptance or decision found. Archive not read.",
+            "INDEX.md and matching queue entries checked. negated-isolation-probes-cannot-fail-test.md concerns old container network-denial shell assertions; hosts-panel-test-misses-filtered-row-premise concerns GUI list filtering. Neither is the real agent CLI membership oracle. No exact duplicate or coverage found.",
+            "FILTER.md does not cover a test/comment overclaim about a trust-boundary oracle. No actual production escape is alleged."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": "No missing source premise for the assertion/comment mismatch. An actual escaped production host listing is not established or required for this test defect; no runtime false pass was observed.",
+          "original_stronger_consequence": "Line 6 proposed dropping the real-route gap because production filtering and handler cardinality were correct. Lines 11 and 13 explicitly reverse that basis and retain false assurance in the real CLI/relay oracle. Preserve that reversal. The separate g067/l1 Delete-authority oracle and g070/l1 fallback lifetime concern are not refuted by this handler test.",
+          "needs_independent_drop_check": true,
+          "proposed_basis": "Retain as other for established test-oracle/documentation correctness. Because earlier proposed dismissal relied on complementary production security-boundary checks, send any parent decision to revive that dismissal or lower a stronger security interpretation through the independent drop check. No actual production security consequence has been demonstrated."
+        }
+      ],
+      "parent_proposals": [
+        {
+          "artifact": "parent-flagged-judgments-044.json",
+          "key": "g070/c4",
+          "proposal": "claim-checks/claims-044/result.json",
+          "parent_proposal": "retain-real-CLI-host-membership-oracle-overclaim",
+          "final_independent_gate": "required-for-any-revived-original-security-oracle-drop-or-lowering",
+          "reason": "Parent read full044. New503 real helper says only this container but checks own-name substring and absence of local label; own plus ordinary SSH host passes. Separate production scope filter and exact handler test are complementary and do not establish this real CLI/relay oracle. Retain source-confirmed test/comment defect at proposed other, no actual escaped production listing/security consequence or runtime false pass asserted. Original production-correctness dismissal was explicitly reversed and stays in register. Distinct067l1 Delete-authority oracle and070l1 cleanup lifetime remain unaffected; no exact cover/filter."
+        }
+      ],
+      "collection": {
+        "retain": true,
+        "clearly_refuted_candidate": false,
+        "needs_unfinished_gate": true,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "real-container-agent-host-list-oracle-omits-extra-ssh-hosts",
+        "destination": "trailing-real-container-agent-host-list-oracle-omits-extra-ssh-hosts.md"
+      }
+    },
+    {
+      "key": "g070/l2",
+      "owner": "g070",
+      "id": "l2",
+      "domain": "podman-environments",
+      "purpose": "podman-environments: crates/farhelm/tests/e2e/podman_environments.rs; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 7,
+          "event": {
+            "version": 1,
+            "kind": "lead",
+            "id": "l2",
+            "state": "open",
+            "summary": "Check intermediate payload producer/consumer mismatch",
+            "location": "crates/farhelm/tests/e2e/podman_environments.rs:190",
+            "detail": "Reviewed commit to check: 500548b9253b07a26fd03119679184b69544e31d. Interface input g093/f1 reports the payload producer stopped staging tmux-$target while this consumer still required it. TLDR: a fresh generated payload directory could make real Podman tests fail before creating resources, with an old staged tmux masking the defect. Suggested bucket: other; confidence: unresolved interface lead pending pinned producer/consumer reads; proposed_drop: false; possible_cover: g093/f1 is the reported producer-side counterpart, not a queue-coverage claim. Could-be-highest: no, test admission only. Next checks: inspect producer and prerequisites at this revision and the d751ff1633bb479c7bf53920f2e4ea4ba932a1c2 repair, including tip. No execution or reproduction."
+          }
+        },
+        {
+          "line": 8,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "l2",
+            "state": "open",
+            "summary": "Fresh Podman payloads fail the unchanged tmux prerequisite at an intermediate revision",
+            "location": "crates/farhelm/tests/e2e/podman_environments.rs:190",
+            "detail": "Reviewed commit: 500548b9253b07a26fd03119679184b69544e31d. TLDR: a freshly staged same-revision Podman payload directory fails real Podman test admission because the test requires a tmux binary that the payload producer no longer creates. An old directory containing that file can mask the defect. Suggested bucket: other (maintainer test admission); confidence: confirmed by pinned source, not observed execution; proposed_drop: false; possible_cover: g093/f1 reports the producer side of the same mismatch. Could-be-highest: no, no security or user-work-loss route.\n\nAt this revision podman_environments.rs:190-195 still requires both farhelm-{target}.tar.gz and tmux-{target}. scripts/build-podman-test-payloads.sh:40-49 creates only the farhelm archive and lines 59-60 validate only that archive, leaving no path which creates tmux in a fresh output directory. prerequisites runs before Fixture::new and any owned environment resources (run_managed_acceptance, 1271-1272 in the original revision). This is an exact producer/consumer contract mismatch, independent of the fallback cleanup finding l1. The assigned d751ff1633bb479c7bf53920f2e4ea4ba932a1c2 patch removes the obsolete tmux requirement; the historical failure must remain recorded despite that later repair. Next check will pin the repair and tip explicitly. No runtime tests or reproduction performed."
+          }
+        },
+        {
+          "line": 9,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "l2",
+            "state": "open",
+            "summary": "Intermediate Podman test admission still requires an unstaged tmux payload (repaired later)",
+            "location": "crates/farhelm/tests/e2e/podman_environments.rs:190",
+            "detail": "Reviewed commit: 500548b9253b07a26fd03119679184b69544e31d. TLDR: fresh same-revision Podman payloads fail the real test's prerequisites because the producer no longer stages tmux-$target but the consumer still requires it. An existing payload directory retaining an older tmux file masks the failure. Suggested bucket: other (test admission); confidence: confirmed by source, no execution; proposed_drop: false; possible_cover: producer-side counterpart g093/f1. Could-be-highest: no security or user-work-loss route.\n\nThe commit's producer diff removes build-pinned-tmux-ci.sh, both tmux install/move steps, and its final tmux existence check from scripts/build-podman-test-payloads.sh. At the same revision podman_environments.rs:190-195 still checks both the farhelm archive and tmux-$target before fixture creation. The new producer builds only the archive at script lines 40-49 and admits the directory at lines 59-64. This establishes the intermediate failure without a test run.\n\nRepair verified: assigned commit d751ff1633bb479c7bf53920f2e4ea4ba932a1c2 replaces that two-file loop with archive-only checking at consumer lines 190-197. Pinned tip 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db retains archive-only checking at lines 190-196. Thus this is a historical defect introduced at 500548b and repaired by d751ff, rather than a tip defect or grounds for dropping the historical record. Candidate c3 evaluates only the repair's validity. Distinct from l1's resource-lifetime concern. No runtime tests or reproduction."
+          }
+        }
+      ],
+      "latest": {
+        "line": 9,
+        "event": {
+          "version": 1,
+          "kind": "finding",
+          "id": "l2",
+          "state": "open",
+          "summary": "Intermediate Podman test admission still requires an unstaged tmux payload (repaired later)",
+          "location": "crates/farhelm/tests/e2e/podman_environments.rs:190",
+          "detail": "Reviewed commit: 500548b9253b07a26fd03119679184b69544e31d. TLDR: fresh same-revision Podman payloads fail the real test's prerequisites because the producer no longer stages tmux-$target but the consumer still requires it. An existing payload directory retaining an older tmux file masks the failure. Suggested bucket: other (test admission); confidence: confirmed by source, no execution; proposed_drop: false; possible_cover: producer-side counterpart g093/f1. Could-be-highest: no security or user-work-loss route.\n\nThe commit's producer diff removes build-pinned-tmux-ci.sh, both tmux install/move steps, and its final tmux existence check from scripts/build-podman-test-payloads.sh. At the same revision podman_environments.rs:190-195 still checks both the farhelm archive and tmux-$target before fixture creation. The new producer builds only the archive at script lines 40-49 and admits the directory at lines 59-64. This establishes the intermediate failure without a test run.\n\nRepair verified: assigned commit d751ff1633bb479c7bf53920f2e4ea4ba932a1c2 replaces that two-file loop with archive-only checking at consumer lines 190-197. Pinned tip 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db retains archive-only checking at lines 190-196. Thus this is a historical defect introduced at 500548b and repaired by d751ff, rather than a tip defect or grounds for dropping the historical record. Candidate c3 evaluates only the repair's validity. Distinct from l1's resource-lifetime concern. No runtime tests or reproduction."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g070/findings.jsonl",
+        "id": "l2",
+        "line": 9,
+        "disposition": "duplicate",
+        "group": "podman-test-payload-producer-consumer-tmux-mismatch",
+        "reason": "Parent read complete claims045; this is the same500548b9 intermediate producer/consumer mismatch as g067/l3: script stages no tmux, fresh consumer still requires it before fixture creation. Corrected prereq caller citation1600-1601 is preserved. d751ff16 repairs the consumer and00de retains it. Join canonical historical-repaired group, preserving original defect, stale-output masking and later repair, not claiming it never existed or persists at tip. No highest consequence; g093/f1 remains to reconcile separately."
+      },
+      "accepted_parent_decision": {
+        "key": "g070/l2",
+        "line": 9,
+        "disposition": "duplicate",
+        "group": "podman-test-payload-producer-consumer-tmux-mismatch",
+        "bucket": "other",
+        "recording": "repaired-in-range",
+        "needs_independent_drop_check": false,
+        "reason": "Parent read complete claims045; this is the same500548b9 intermediate producer/consumer mismatch as g067/l3: script stages no tmux, fresh consumer still requires it before fixture creation. Corrected prereq caller citation1600-1601 is preserved. d751ff16 repairs the consumer and00de retains it. Join canonical historical-repaired group, preserving original defect, stale-output masking and later repair, not claiming it never existed or persists at tip. No highest consequence; g093/f1 remains to reconcile separately."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-045",
+          "key": "g070/l2",
+          "latest_line": 9,
+          "recommendation": "retain-verified",
+          "bucket": "other",
+          "underlying_key": "podman-test-payload-producer-drops-tmux-before-consumer",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The intermediate producer/consumer mismatch is established by pinned source within the review range. It prevents maintainer test admission on a freshly staged directory. It was repaired later in the same range; preserve that qualification rather than presenting it as a tip defect. No security or user-work-loss route is claimed.",
+          "checks": [
+            "500548b9253b07a26fd03119679184b69544e31d:scripts/build-podman-test-payloads.sh:28-49 builds and stages only farhelm-$target.tar.gz; :59-64 validates that archive and exports its directory. Its commit diff removes the pinned-tmux build, static check, install/move and final presence check.",
+            "500548b9253b07a26fd03119679184b69544e31d:crates/farhelm/tests/e2e/podman_environments.rs:178-195 still asserts that both the archive and tmux-$target are files. A fresh producer directory therefore fails the assertion; an older residual tmux file can satisfy it.",
+            "At 500548b9253b07a26fd03119679184b69544e31d, run_managed_acceptance calls prerequisites before Fixture::new at podman_environments.rs:1600-1601. The historical record's earlier 1271-1272 reference is stale for this revision, but the stated ordering holds.",
+            "d751ff1633bb479c7bf53920f2e4ea4ba932a1c2 changes the consumer to archive-only admission at podman_environments.rs:190-197. Review tip 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db retains archive-only admission at :190-196.",
+            "git log for the explicit review range and these two paths includes both introduction 500548b9253b07a26fd03119679184b69544e31d and repair d751ff1633bb479c7bf53920f2e4ea4ba932a1c2. No execution or reproduction was performed.",
+            "The history names g093/f1 as the producer-side counterpart. That record is outside this supplied batch and was not read; parent reconciliation should compare it using the underlying key. No unverified alias is asserted here."
+          ],
+          "coverage_checked": [
+            "SPEC.md, Container sessions (:4806-4891), and SPEC_impl.md, Podman places, creation and images (:6058-6092): product and substrate rules, no acceptance of stale test payload admission.",
+            "TODO.md:25-26: Planned is empty. No covering Planned item.",
+            "plans/queue searched for payload, prerequisite, tmux staging and this script. tmux-drop-from-install.md, Acceptance criteria 2 and 6, describes removal of the tmux payload; tmux-drop-from-tooling.md, Acceptance criteria, describes test-tooling removal. plans/REPORTS.md:30-31 marks both plans landed, so neither is unlanded coverage. The actual later repair is recorded above.",
+            "BUGS.md read in full: its sole accepted bug concerns provisioning SSH output remaining open, not payload fixture admission.",
+            "review_feedback_queue/INDEX.md and queue files searched for build-podman-test-payloads, podman_environments.rs, staged tmux, payload prerequisite and Podman test/event history. No exact trigger/consequence/scope match. The matched centos-rustup-missing-pin, mac-process-lookup and switch-geometry references concern other causes.",
+            "Active TRIAGE_OUTCOMES.md searched for Podman, tmux, payload and admission; no decision on this mismatch. Archive not read.",
+            "FILTER.md read in full: deterministic failure on fresh staging is neither a rare self-correcting glitch nor another listed filter. Later repair is not a filter."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": null,
+          "original_stronger_consequence": "Fresh same-revision payloads fail real Podman test admission before fixture creation; an existing tmux file can mask the failure. All supplied revisions keep the impact confined to maintainer tests. No stronger security or user-work consequence was withdrawn or lowered.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Retain the source-confirmed historical defect with introduction and in-range repair together. Parent should reconcile the reported g093/f1 counterpart before choosing a feedback filename; this consultation does not decide that alias."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": true,
+        "clearly_refuted_candidate": false,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "podman-test-payload-producer-consumer-tmux-mismatch",
+        "destination": "trailing-podman-test-payload-producer-consumer-tmux-mismatch.md"
+      }
+    },
+    {
+      "key": "g070/l3",
+      "owner": "g070",
+      "id": "l3",
+      "domain": "podman-environments",
+      "purpose": "podman-environments: crates/farhelm/tests/e2e/podman_environments.rs; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 15,
+          "event": {
+            "version": 1,
+            "kind": "lead",
+            "id": "l3",
+            "state": "open",
+            "summary": "Check historical start-event default used by the real lifecycle oracle",
+            "location": "crates/farhelm/tests/e2e/podman_environments.rs:419",
+            "detail": "Reviewed commit: 04d85f0c98a9b635709d00b056719a0baa7fd3fc. TLDR: the lifecycle oracle counts podman events --stream=false without an explicit --since; verify that supported engines return prior start events rather than beginning only at invocation time. If not, the initial starts>=1 premise would fail valid runs. Suggested bucket: other (test oracle/admission); confidence: concrete API-default lead pending primary source check; proposed_drop: false; possible_cover: none in supplied interface context. Could-be-highest: no security or user-work-loss route. The exact missing premise is Podman v4.9.3 historical event default for nonstreaming reads. Next: inspect upstream events command and backend default options. No runtime tests or reproduction."
+          }
+        },
+        {
+          "line": 16,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "l3",
+            "state": "open",
+            "summary": "Nonstreaming event reads do include historical starts on the checked supported engine",
+            "location": "crates/farhelm/tests/e2e/podman_environments.rs:419",
+            "detail": "Reviewed commit: 04d85f0c98a9b635709d00b056719a0baa7fd3fc. TLDR: the feared empty start history from omitting --since is refuted for the checked supported Podman 4.9.3 event backends. Suggested bucket: other; confidence: confirmed source refutation of this API-default concern; proposed_drop: backend explicitly reads prior events when Stream is false; possible_cover: none. Could-be-highest: no security or user-work-loss route.\n\nActual checks: upstream cmd/podman/system/events.go:69-84 defaults Stream=true and sets FromStart only for since/until; ABI events.go:9-11 forwards the test's explicit Stream=false unchanged. That alone did not settle behavior. The journald backend libpod/events/journal_linux.go:122-141 seeks to the tail only when Stream is true with no time bounds, so this command reads history; GetNextEntry:239-243 ends at EOF when not streaming. The file backend libpod/events/logfile.go:74-80 explicitly seeks to the beginning when !Stream even if FromStart is false. Therefore both real backends answer the test's historical query. Primary sources: https://raw.githubusercontent.com/containers/podman/v4.9.3/cmd/podman/system/events.go ; https://raw.githubusercontent.com/containers/podman/v4.9.3/pkg/domain/infra/abi/events.go ; https://raw.githubusercontent.com/containers/podman/v4.9.3/libpod/events/journal_linux.go ; https://raw.githubusercontent.com/containers/podman/v4.9.3/libpod/events/logfile.go . This closes lead l3 as candidate. No claim about retained-event loss/rotation or engines configured with no events is made from this check. No execution or reproduction."
+          }
+        }
+      ],
+      "latest": {
+        "line": 16,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "l3",
+          "state": "open",
+          "summary": "Nonstreaming event reads do include historical starts on the checked supported engine",
+          "location": "crates/farhelm/tests/e2e/podman_environments.rs:419",
+          "detail": "Reviewed commit: 04d85f0c98a9b635709d00b056719a0baa7fd3fc. TLDR: the feared empty start history from omitting --since is refuted for the checked supported Podman 4.9.3 event backends. Suggested bucket: other; confidence: confirmed source refutation of this API-default concern; proposed_drop: backend explicitly reads prior events when Stream is false; possible_cover: none. Could-be-highest: no security or user-work-loss route.\n\nActual checks: upstream cmd/podman/system/events.go:69-84 defaults Stream=true and sets FromStart only for since/until; ABI events.go:9-11 forwards the test's explicit Stream=false unchanged. That alone did not settle behavior. The journald backend libpod/events/journal_linux.go:122-141 seeks to the tail only when Stream is true with no time bounds, so this command reads history; GetNextEntry:239-243 ends at EOF when not streaming. The file backend libpod/events/logfile.go:74-80 explicitly seeks to the beginning when !Stream even if FromStart is false. Therefore both real backends answer the test's historical query. Primary sources: https://raw.githubusercontent.com/containers/podman/v4.9.3/cmd/podman/system/events.go ; https://raw.githubusercontent.com/containers/podman/v4.9.3/pkg/domain/infra/abi/events.go ; https://raw.githubusercontent.com/containers/podman/v4.9.3/libpod/events/journal_linux.go ; https://raw.githubusercontent.com/containers/podman/v4.9.3/libpod/events/logfile.go . This closes lead l3 as candidate. No claim about retained-event loss/rotation or engines configured with no events is made from this check. No execution or reproduction."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g070/findings.jsonl",
+        "id": "l3",
+        "line": 16,
+        "disposition": "excluded",
+        "group": "podman-nonstream-events-without-since-history-default",
+        "reason": "Parent explicitly accepted named refuted proposal from claims-045 after inspecting it. The named concern was that omitting --since makes --stream=false start at invocation and miss the initial start. Podman 4.9.3's file and journald readers do not apply that streaming-tail behavior to a nonstreaming read. Agree with the recorded withdrawal for that precise API-default concern, without claiming universal event retention or runtime success. Source-refute only the stated --since/default-history concern on the checked Podman 4.9.3 backends. Preserve its withdrawal and explicit retention/configuration caveats in the parent's disposition record. Checked source/results: [\"04d85f0c98a9b635709d00b056719a0baa7fd3fc:crates/farhelm/tests/e2e/podman_environments.rs:417-435 issues events --stream=false with full container ID and event=start filters, without --since. :991-995 requires at least one initial start; :1005-1008 and :1038-1041 compare subsequent counts.\",\"The reviewed revision's SPEC.md:4744-4746 and SPEC_impl.md:6537-6542 require Podman 4.9.3 or later, making the checked 4.9.3 implementation relevant to the stated supported-engine premise.\",\"Primary source https://raw.githubusercontent.com/containers/podman/v4.9.3/cmd/podman/system/events.go, eventsFlags/eventsCmd (:70-85 in one-based file lines), binds --stream to Stream and sets FromStart for time bounds. https://raw.githubusercontent.com/containers/podman/v4.9.3/pkg/domain/infra/abi/events.go:10-12 forwards Stream unchanged. These facts alone would not refute the concern.\",\"Primary source https://raw.githubusercontent.com/containers/podman/v4.9.3/libpod/events/logfile.go:75-81 explicitly sets the seek origin to the beginning when !options.Stream, independently of FromStart.\",\"Primary source https://raw.githubusercontent.com/containers/podman/v4.9.3/libpod/events/journal_linux.go:100-150 opens the journal and seeks to its tail only when no time bounds AND options.Stream. :236-244 reads forward and returns at EOF when nonstreaming. Its vendored sdjournal.NewJournal (:414-429 of vendor/github.com/coreos/go-systemd/v22/sdjournal/journal.go) opens the local journal without a tail seek.\",\"All checks were source reads. No event capture, test execution or reproduction was performed. Event loss/rotation, an events=none engine, journal access restrictions and other versions are outside the narrowly refuted claim and were not promoted into new findings.\"] Current coverage/results: [\"Current SPEC.md, Container sessions (:4806-4891), and SPEC_impl.md, Podman places, creation and images (:6058-6092), read for the relevant Podman/lifecycle contract; neither accepts a broken event-count test oracle.\",\"TODO.md:25-26: Planned is empty.\",\"plans/queue searched for nonstreaming, --stream, event history, start-event/count and Podman test prerequisites. No unlanded plan matches this API-default concern. The Podman implementation plan is marked landed in plans/REPORTS.md:21.\",\"BUGS.md read in full: no event-history/test-oracle acceptance.\",\"review_feedback_queue/INDEX.md and queue files searched for Podman events, --stream=false, event history, podman_environments.rs and historical starts; no exact existing finding. Unrelated generic event-history wording is not coverage.\",\"Active TRIAGE_OUTCOMES.md searched for Podman, historical event/start queries and event defaults; no matching decision. Archive not read.\",\"FILTER.md read in full. No filter is needed or proposed; the narrow premise is source-refuted.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Line 15 proposed that missing --since might make valid lifecycle runs fail the starts>=1 premise by returning no historical starts. Line 16 withdrew that API-default concern after checking the two real 4.9.3 backends. Neither version claimed security harm or loss of user-owned work.\"; \"No missing premise for the narrow 4.9.3 nonstreaming-history default. The checks do not establish that every configured engine retains accessible start events throughout the test.\"."
+      },
+      "accepted_parent_decision": {
+        "key": "g070/l3",
+        "line": 16,
+        "disposition": "excluded",
+        "group": "podman-nonstream-events-without-since-history-default",
+        "bucket": "other",
+        "recording": "refuted",
+        "queue_target_candidate": null,
+        "needs_independent_drop_check": false,
+        "reason": "Parent explicitly accepted named refuted proposal from claims-045 after inspecting it. The named concern was that omitting --since makes --stream=false start at invocation and miss the initial start. Podman 4.9.3's file and journald readers do not apply that streaming-tail behavior to a nonstreaming read. Agree with the recorded withdrawal for that precise API-default concern, without claiming universal event retention or runtime success. Source-refute only the stated --since/default-history concern on the checked Podman 4.9.3 backends. Preserve its withdrawal and explicit retention/configuration caveats in the parent's disposition record. Checked source/results: [\"04d85f0c98a9b635709d00b056719a0baa7fd3fc:crates/farhelm/tests/e2e/podman_environments.rs:417-435 issues events --stream=false with full container ID and event=start filters, without --since. :991-995 requires at least one initial start; :1005-1008 and :1038-1041 compare subsequent counts.\",\"The reviewed revision's SPEC.md:4744-4746 and SPEC_impl.md:6537-6542 require Podman 4.9.3 or later, making the checked 4.9.3 implementation relevant to the stated supported-engine premise.\",\"Primary source https://raw.githubusercontent.com/containers/podman/v4.9.3/cmd/podman/system/events.go, eventsFlags/eventsCmd (:70-85 in one-based file lines), binds --stream to Stream and sets FromStart for time bounds. https://raw.githubusercontent.com/containers/podman/v4.9.3/pkg/domain/infra/abi/events.go:10-12 forwards Stream unchanged. These facts alone would not refute the concern.\",\"Primary source https://raw.githubusercontent.com/containers/podman/v4.9.3/libpod/events/logfile.go:75-81 explicitly sets the seek origin to the beginning when !options.Stream, independently of FromStart.\",\"Primary source https://raw.githubusercontent.com/containers/podman/v4.9.3/libpod/events/journal_linux.go:100-150 opens the journal and seeks to its tail only when no time bounds AND options.Stream. :236-244 reads forward and returns at EOF when nonstreaming. Its vendored sdjournal.NewJournal (:414-429 of vendor/github.com/coreos/go-systemd/v22/sdjournal/journal.go) opens the local journal without a tail seek.\",\"All checks were source reads. No event capture, test execution or reproduction was performed. Event loss/rotation, an events=none engine, journal access restrictions and other versions are outside the narrowly refuted claim and were not promoted into new findings.\"] Current coverage/results: [\"Current SPEC.md, Container sessions (:4806-4891), and SPEC_impl.md, Podman places, creation and images (:6058-6092), read for the relevant Podman/lifecycle contract; neither accepts a broken event-count test oracle.\",\"TODO.md:25-26: Planned is empty.\",\"plans/queue searched for nonstreaming, --stream, event history, start-event/count and Podman test prerequisites. No unlanded plan matches this API-default concern. The Podman implementation plan is marked landed in plans/REPORTS.md:21.\",\"BUGS.md read in full: no event-history/test-oracle acceptance.\",\"review_feedback_queue/INDEX.md and queue files searched for Podman events, --stream=false, event history, podman_environments.rs and historical starts; no exact existing finding. Unrelated generic event-history wording is not coverage.\",\"Active TRIAGE_OUTCOMES.md searched for Podman, historical event/start queries and event defaults; no matching decision. Archive not read.\",\"FILTER.md read in full. No filter is needed or proposed; the narrow premise is source-refuted.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Line 15 proposed that missing --since might make valid lifecycle runs fail the starts>=1 premise by returning no historical starts. Line 16 withdrew that API-default concern after checking the two real 4.9.3 backends. Neither version claimed security harm or loss of user-owned work.\"; \"No missing premise for the narrow 4.9.3 nonstreaming-history default. The checks do not establish that every configured engine retains accessible start events throughout the test.\"."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-045",
+          "key": "g070/l3",
+          "latest_line": 16,
+          "recommendation": "refuted",
+          "bucket": "other",
+          "underlying_key": "podman-nonstream-events-without-since-history-default",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The named concern was that omitting --since makes --stream=false start at invocation and miss the initial start. Podman 4.9.3's file and journald readers do not apply that streaming-tail behavior to a nonstreaming read. Agree with the recorded withdrawal for that precise API-default concern, without claiming universal event retention or runtime success.",
+          "checks": [
+            "04d85f0c98a9b635709d00b056719a0baa7fd3fc:crates/farhelm/tests/e2e/podman_environments.rs:417-435 issues events --stream=false with full container ID and event=start filters, without --since. :991-995 requires at least one initial start; :1005-1008 and :1038-1041 compare subsequent counts.",
+            "The reviewed revision's SPEC.md:4744-4746 and SPEC_impl.md:6537-6542 require Podman 4.9.3 or later, making the checked 4.9.3 implementation relevant to the stated supported-engine premise.",
+            "Primary source https://raw.githubusercontent.com/containers/podman/v4.9.3/cmd/podman/system/events.go, eventsFlags/eventsCmd (:70-85 in one-based file lines), binds --stream to Stream and sets FromStart for time bounds. https://raw.githubusercontent.com/containers/podman/v4.9.3/pkg/domain/infra/abi/events.go:10-12 forwards Stream unchanged. These facts alone would not refute the concern.",
+            "Primary source https://raw.githubusercontent.com/containers/podman/v4.9.3/libpod/events/logfile.go:75-81 explicitly sets the seek origin to the beginning when !options.Stream, independently of FromStart.",
+            "Primary source https://raw.githubusercontent.com/containers/podman/v4.9.3/libpod/events/journal_linux.go:100-150 opens the journal and seeks to its tail only when no time bounds AND options.Stream. :236-244 reads forward and returns at EOF when nonstreaming. Its vendored sdjournal.NewJournal (:414-429 of vendor/github.com/coreos/go-systemd/v22/sdjournal/journal.go) opens the local journal without a tail seek.",
+            "All checks were source reads. No event capture, test execution or reproduction was performed. Event loss/rotation, an events=none engine, journal access restrictions and other versions are outside the narrowly refuted claim and were not promoted into new findings."
+          ],
+          "coverage_checked": [
+            "Current SPEC.md, Container sessions (:4806-4891), and SPEC_impl.md, Podman places, creation and images (:6058-6092), read for the relevant Podman/lifecycle contract; neither accepts a broken event-count test oracle.",
+            "TODO.md:25-26: Planned is empty.",
+            "plans/queue searched for nonstreaming, --stream, event history, start-event/count and Podman test prerequisites. No unlanded plan matches this API-default concern. The Podman implementation plan is marked landed in plans/REPORTS.md:21.",
+            "BUGS.md read in full: no event-history/test-oracle acceptance.",
+            "review_feedback_queue/INDEX.md and queue files searched for Podman events, --stream=false, event history, podman_environments.rs and historical starts; no exact existing finding. Unrelated generic event-history wording is not coverage.",
+            "Active TRIAGE_OUTCOMES.md searched for Podman, historical event/start queries and event defaults; no matching decision. Archive not read.",
+            "FILTER.md read in full. No filter is needed or proposed; the narrow premise is source-refuted."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": "No missing premise for the narrow 4.9.3 nonstreaming-history default. The checks do not establish that every configured engine retains accessible start events throughout the test.",
+          "original_stronger_consequence": "Line 15 proposed that missing --since might make valid lifecycle runs fail the starts>=1 premise by returning no historical starts. Line 16 withdrew that API-default concern after checking the two real 4.9.3 backends. Neither version claimed security harm or loss of user-owned work.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Source-refute only the stated --since/default-history concern on the checked Podman 4.9.3 backends. Preserve its withdrawal and explicit retention/configuration caveats in the parent's disposition record."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "podman-nonstream-events-without-since-history-default",
+        "destination": null
+      }
+    }
+  ],
+  "replies": [
+    {
+      "turn": 1,
+      "reply": "Initial review complete; all assigned patch ranges read.\n\nRecorded `l1` (`other`): fallback cleanup can certify absence while an already-sent provider command later creates an owned resource. Supported by source analysis; not reproduced.\n\nFour candidates recorded with reasons for not reporting; no open leads. Findings and progress logs updated. No tests run or checkout files changed."
+    },
+    {
+      "turn": 2,
+      "reply": "- `l1` revised to **unverified after investigation**: cancellation and process ownership are traced; actual publication after the final inventory still depends on unresolved engine behavior.\n- `l2` confirmed: `500548b` stops staging tmux while the consumer requires it. Repaired by `d751ff`; repair retained at tip.\n- `c3` and `c4` narrowed to preserve the historical defect and distinguish handler coverage from the real test’s oracle.\n\nLog updated through event 12. No open lead IDs; `l1` retains explicit uncertainty. No runtime execution."
+    },
+    {
+      "turn": 3,
+      "reply": "Discovery pass 1 found no new independent issue.\n\n- Checked command capture, fixture identities, protocol/lifecycle assertions, agent scope checks, and later changes through tip.\n- `c4` promoted to a confirmed finding.\n- `l1` revised with upstream source evidence; remains unverified.\n- New lead `l3` resolved as a candidate: both checked Podman event backends include history for nonstreaming reads.\n\nNew unverified IDs: none. Open leads: none. Log updated through event 16. No runtime execution."
+    },
+    {
+      "turn": 4,
+      "reply": "Discovery pass 2 found nothing new beyond known issues.\n\nChecked storage/removal locks, SSH child lifetime, the fixture failure path, identity/protocol assertions, and cleanup oracles. Revised `l1` to a narrower conditional route with the filesystem-stall premise explicit.\n\nNew verified IDs: none. New unverified IDs: none. Open leads: none. Log updated through event 18. No runtime execution."
+    },
+    {
+      "turn": 5,
+      "reply": "Discovery pass 3 found nothing new.\n\nChecked credential/setup premises, lifecycle identity and event assertions, relay completion, panic/timeout cleanup ordering, and agent command oracles. Clarified `l1` as source-verified conditional; runtime incidence remains unobserved.\n\nNew verified IDs: none. New unverified IDs: none. Open leads: none. Log updated through event 19. No runtime execution."
+    }
+  ],
+  "progress": "# g070 progress\n\nInitial review complete, turn 1; discovery passes: 0 (initial assigned pass only).\n\nAll mandatory ranges were delivered with evidence read: 00325-000.patch 1-1336, 00671-000.patch 1-177, 01133-000.patch 1-20, 01401-000.patch 1-25. No unread assigned material. Complete inventory commits field read; excluded coverage metadata and prohibited queue/decision sources were not read.\n\nDurable record: l1 revised from lead to confirmed source finding, bucket other, about fallback cleanup racing already-sent provider commands. c1-c4 are candidates with source/contract grounds for not reporting. No open leads. No runtime tests, builds, or reproductions; no checkout modifications.\n\nSource checks: initial Container sessions and Disposable environments contracts; later Agents and environments contract; GUI Answers bind to what was drawn (no GUI handlers in assigned patches); grid-only protocol contract; payload producer/inventory; helm stop/reap and spawn; provider command lowering/process-group isolation; pending helper and image ownership; exact host-list and session-delete handler tests. Interface assumptions: provider code is context for these test changes, not independently reviewed production scope. Test-owned cleanup is other, with no established route to security or user-work loss. No child agent was spawned.\n\nNext: await the caller's later synthesis/discovery prompt. This turn did not perform later-turn protocol. New verified finding IDs: l1. New unverified findings: none. Candidates: c1, c2, c3, c4.\n\nTooling notes: evidence record first rejected c1's invalid state closed; corrected to open and appended successfully. First l1 revision was rejected for literal newlines inside JSON; encoded them and appended successfully. The diagnostics remain in the tool transcript. Mandatory evidence reads succeeded.\n\n## Later-turn synthesis, turn 2\n\nSynthesis complete; discovery passes remain 0 (no separate discovery pass performed). All 1,558 assigned lines remain read; parent reports complete delivery audit. No unread assigned scope.\n\nChanges this turn:\n- l1 revised under its original ID to unverified after investigation. Traced test timeout/panic block, HTTP cancellation, run_owned admission, stored provisioning launch task, direct helm kill/reap, local/SSH command lowering, child process-group capture/termination, scoped Podman starts and persisted pending helper names. The missing completion boundary is established. The exact late-publication outcome still needs external engine lock/publication and pipe-death premises; an arbitrary scheduling pause is not claimed as a proven route. Original owned-test-resource consequence and other bucket retained; no user-work-loss implication.\n- l2 added from g093/f1 interface input, then verified. Producer stopped staging tmux at 500548b9253b07a26fd03119679184b69544e31d while consumer still required it. The assigned d751ff1633bb479c7bf53920f2e4ea4ba932a1c2 consumer patch repairs this, and tip retains the repair. Historical finding remains; producer-side counterpart identified.\n- c3 revised to distinguish valid repair from defective intermediate consumer.\n- c4 revised with exact real-test lines 788-797. Real assertion proves own-name inclusion/local-label exclusion only; handler cardinality assertion does not prove the real CLI's exact membership. Compared only the explicitly supplied g067/l1 event 3; its later Delete oracle is a distinct limitation, not coverage for c4 or a refutation of l1.\n\nNo open lead records. Retained uncertainty: l1 is a finding explicitly marked unverified after investigation, with missing premise and useful source checks in its detail. c1/c2 unchanged. No candidate disposition accepted on the parent's behalf. No tests, builds or reproductions; no checkout changes. Next: caller-directed follow-up/discovery; the new verified historical l2 warrants a later pass under the charter. No evidence-tool failures this turn.\n\n## Discovery turn 3, pass 1\n\nRead discovery-neighbours.json completely in seven 16,000-byte-or-smaller packets after an initial clipped read; final byte reached. Used only supplied interface context, not prohibited coverage sources. Named input synthesis completed before the new search.\n\nNamed follow-ups: c4 promoted under its original ID to a confirmed other finding. The real hosts-list assertion/comment defect is not refuted by correct production filtering or a separate handler test. l1 revised with accessible primary systemd v255 and Podman v4.9.3 source checks: scope job wait precedes exec; storage setup precedes libpod registration; inventories read registered state. These are useful real asynchronous/publication boundaries. The full fixture deadline/pipe/image-removal composition remains unverified after investigation, with exact remaining premises recorded, rather than relying on an arbitrary scheduler pause. No new lead ID for that existing retained uncertainty.\n\nSeparate discovery beyond known issues: rechecked owned command capture/environment policy, file transfer/attachment/tab/TCP relay assertions, PID/start/progress evidence, pause/stop/restart/reconnect start/conversation assertions, fixture registration and random identity paths, agent-create/refuse/delete shell output assertions, and all later differences to pinned tip for attribution. New concrete lead l3 asked whether events --stream=false without --since could miss historical starts. Upstream command/ABI plus both journald and file backends explicitly establish history reading in nonstreaming mode, so l3 was immediately revised to candidate with source refutation.\n\nResult: no new independent verified or unverified issue found in discovery pass 1. c4 is a known candidate promoted per the named follow-up, not a new discovery. New verified IDs from named synthesis: c4. Newly added unverified-after-investigation IDs: none (l1 revised, still unverified). Open lead records: none. Retained unverified finding: l1. l2's historical producer/consumer defect/repair remains unchanged; neighbours g067/l3 and g093/f1 are counterpart reports for parent deduplication.\n\nNo runtime tests, reproductions, builds, live-install actions or checkout changes. All assigned source scope remains read. No remaining new readily checkable in-app lead. The initial clipped neighbour read is superseded by complete bounded byte packets. Next action: await caller direction; no later pass was folded into this turn.\n\n## Discovery turn 4, pass 2\n\nRead the updated discovery-neighbours.json completely, in twelve bounded byte packets through byte 178580. Named l1 follow-through completed before the separate new search. Neighbour input adds no distinct assigned-group issue beyond known records.\n\nl1 updated under the same ID (events 17-18). Read actual pinned upstream storage/image-removal, commit lock, non-PTY OpenSSH child close, systemd scope and Podman run/exists/inspect/list paths, plus the actual app failure-return/fixture panic chain. The broad derived-image/commit shortcut is narrowed: storage-layer image-use records make nonforcing image rm fail even before libpod registration; commit and remove share the container lock. A narrower first-bootstrap SSH path is source-conditional: a named filesystem operation after storage creation but before libpod registration can outlast the handled 120-second SSH command deadline, remain hidden from non-external inventories, and use the intentionally retained unlabelled Ubuntu base. The local group termination does not kill that non-PTY remote child; the error reply reaches the test assertion panic and fallback without settling the persisted builder name. Confidence is now likely with the occurrence premise named (prolonged filesystem stall and usable independent inventories), not an observed leak or a generic arbitrary scheduler pause. Unmeasured host versions/configuration and occurrence cannot be established by rereading the same source. No unexplored function-source branch remains for the stated conditional route. No UAI label retained on the latest l1 event; all earlier consequences/confidence/proposed bases remain in history.\n\nSeparate discovery pass 2 rechecked stand-in record/hook publication and atomic heartbeat/nonce identity, host/agent observation predicates, protocol argv/user/home/runtime wiring, child capture/transfer/tab/relay resource boundaries, create/refuse/delete shell status and marker oracles, canonical label-based cleanup and dependency ordering, and the two small later assigned consumer/assertion patches. Result: no new independent substantive issue found. No new candidate or lead was invented for activity.\n\nNew verified IDs: none. New unverified-after-investigation IDs: none. Revised known ID: l1. Open lead IDs: none. Discovery count: 2; result empty beyond known issues. No tests, builds, reproductions, live-install or process operations, or checkout mutations. All assigned source remains read; no unread scope. One source-read orchestration attempt had an invalid numeric argument type and returned no source; it was immediately repeated successfully. Next: await caller direction.\n\n## Discovery turn 5, pass 3\n\nRead refreshed discovery-neighbours.json completely in twelve bounded byte packets through byte 188461. Named confidence reconciliation completed before new discovery. The supplied new neighbour records do not establish a new assigned-group issue.\n\nl1 event 19 clarifies confidence under the original ID: source-verified conditional route for the explicitly named supported Podman/storage/common/systemd/OpenSSH implementation and non-PTY localhost place. The handling condition is a first-bootstrap command remaining pre-registration across the actual handled 120-second deadline and fallback inventories; source proves what cleanup does under that condition. Occurrence, frequency, duration and this host's installed versions are not claimed as observed. Prior likely/UAI wording and broader refuted derived-image/commit cases remain preserved in full. No parent drop/lowering accepted and no new ID created.\n\nSeparate discovery pass 3 checked fresh portions/sequences of credential fixture admission and target-relative checkout settings, initial/external Stop and both Restart identity/event/conversation witnesses, TCP relay owned-task completion, panic/timeout result and cleanup ordering, and the scoped agent create/refuse/delete marker/status/listing sequence. Reused the prior full assigned-patch reads, contract checks and later-patch attribution rather than expanding into neighbour-owned code. No new substantive finding or unresolved lead emerged. Empty result is the completed pass result, not inferred from existing production correctness.\n\nNew verified IDs: none. New unverified-after-investigation IDs: none. Revised known ID: l1 confidence clarification. Open lead IDs: none. Discovery count: 3; nothing new beyond known findings. No runtime tests, builds, reproductions, process/live-install actions or checkout mutations. All assigned source remains read; no unread scope. Next: await caller direction.\n"
+}

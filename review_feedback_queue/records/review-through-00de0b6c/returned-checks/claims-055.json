@@ -1,0 +1,312 @@
+[
+  {
+    "key": "g085/c1",
+    "latest_line": 13,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "ordinary-template-host-replay-clears-environment-placement",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "For an ordinary Create template that passes validation, replaying its Host field clears the whole environment target before choosing the host. This refutes only the ordinary-Create concern. It does not establish that a Host template repairs the incompatible Replace-with draft in g085/l2.",
+    "checks": [
+      "At 350a4b33b6d4476f4a78e43cea124bc2b828f462, crates/farhelm-ui/src/list/create_form/draft.rs:2559-2581 replays a supplied Host through apply_search_result; :2706-2722 calls select_recipe(None), then chooses the offered host and updates its authority. select_recipe delegates to select_target at :318-343, clearing target.",
+      "At the same revision, crates/farhelm-proto/src/launcher.rs:915-921,940-946 refuses Host or target assignments under host_fixed. create_form.rs:689-700 omits the held Host from an environment snapshot; :743-745 cannot remove an unequal or absent held Host. The later clarification correctly limits the refutation.",
+      "No runtime observation or reproduction. The reviewed change is inside the supplied range."
+    ],
+    "coverage_checked": [
+      "SPEC.md Creation: templates replay equivalent hand edits and omitted fields retain values; this supports the observed implementation, rather than accepting wrong placement.",
+      "SPEC_impl.md Launch templates, especially 8695-8713 and 8740-8746: validation precedes replay and held-field refusal is atomic.",
+      "TODO.md Planned is empty. plans/queue/INDEX.md has no unlanded plan entries. BUGS.md concerns a stalled SSH transfer, not template placement.",
+      "Searched review_feedback_queue/INDEX.md, matching queue text and active TRIAGE_OUTCOMES.md for template/placement/held-host concerns. No exact item covers this ordinary-Create allegation; g085/l2 is a distinct Replace-mode behavior. No FILTER.md boundary is needed for a source-refuted path."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": null,
+    "original_stronger_consequence": "Applying an ordinary-host template while environment placement is selected might silently retain that environment. No security or user-work-loss route was established. The final clarification excludes Replace with from the refutation.",
+    "needs_independent_drop_check": true,
+    "proposed_basis": "Proposed source refutation of wrong placement, narrowly limited to an accepted ordinary-Create Host template; independent checking remains required before dismissing a possible wrong-target concern."
+  },
+  {
+    "key": "g085/l1",
+    "latest_line": 11,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "ordinary-recent-host-clear-retains-installation-admission",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "Clearing chosen_host while leaving an environment is real. The alleged remembered-folder launch on another host is blocked by ordinary-history installation admission, live target matching, retained installation checks and the Replace source-host comparison. A refusal or conditional recovery is not proof of wrong-host execution.",
+    "checks": [
+      "At 350a4b33b6d4476f4a78e43cea124bc2b828f462, draft.rs:1994-2021 and :2672-2683,2825-2861 retain ordinary-install admission but clear chosen_host on the environment-to-ordinary transition.",
+      "create_form.rs:3657-3689 removes ordinary selection in environment Create. offered_recent_history at :1478-1490 requires ordinary history to match both current and live destination; admit_history_destination at :1697-1709 rejects an empty or unequal captured install and remembers successful admission.",
+      "create_form.rs:6179-6214 recomputes the effective live host, checks remembered_destination and target_matches_selection before dispatch; :7000-7010 repeats the remembered-install check after key minting. draft.rs:1707-1711 will not replace an explicit Recent folder with a default.",
+      "Replace differs: :2657-2667 does not automatically rebind a cleared Bound source, while :6356-6383 refuses a different effective host. This supports conditional recovery, not an automatic repair claim. No runtime execution."
+    ],
+    "coverage_checked": [
+      "SPEC.md Creation, Recent setups and Host: history is installation-scoped. SPEC_impl.md:5161-5180 requires captured installation authority and submit checks before and after key minting.",
+      "TODO.md Planned and plans/queue/INDEX.md contain no entries. BUGS.md has no matching history/placement consequence.",
+      "Read review_feedback_queue/history-reply-lacks-installation-provenance.md and its active TRIAGE_OUTCOMES.md heading at 1056 onward. That item concerns an A-to-B-to-A response being mislabeled as A, not clearing a host while applying correctly tagged history; its discard is not coverage here.",
+      "Searched index, queue text and active ledger for Recent host loss, held-host and environment-placement claims; no exact coverage. FILTER.md does not supply the source refutation."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": "No bypass of the captured-install, live-target and replacement-source checks was established. That would be needed for the original wrong-host execution consequence.",
+    "original_stronger_consequence": "An ordinary Recent could restore its remembered folder after dropping the selected host and launch that folder on a fallback host. Earlier uninvestigated wording became a proposed source refutation; that history is preserved, not silently treated as an approved drop.",
+    "needs_independent_drop_check": true,
+    "proposed_basis": "Proposed refutation of wrong-host launch through the named Recent transition. Preserve the real chosen_host mutation and conditional Replace recovery, and independently check the dismissal."
+  },
+  {
+    "key": "g085/c2",
+    "latest_line": 4,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "environment-recent-grouping-excludes-disposable-host",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "Recent grouping compares normalized selection, complete recipe/place target and destination intent. It does not compare the disposable host ID or a per-environment absolute home path.",
+    "checks": [
+      "At 350a4b33b6d4476f4a78e43cea124bc2b828f462, crates/farhelm-ui/src/launch_composer.rs:1459-1504 groups on normalized selection, entry.target and launch_destination, then ranks frequency and retained index.",
+      "crates/farhelm-helm/src/store/environment_history.rs:155-172 decodes target and repository intent with cwd '~' and canonical_cwd None. Thus a fresh disposable host does not by itself split an otherwise equal setup. Different recipe/place pairs still remain distinct. No runtime execution."
+    ],
+    "coverage_checked": [
+      "SPEC.md Container sessions:4873-4876 retains recipe/place and repository-or-home intent after Delete. SPEC_impl.md Shared recipes and prepared artifacts:6010-6024 explicitly separates reusable intent from disposable-host identity.",
+      "TODO.md Planned is empty; plans/queue/INDEX.md has no unlanded entries; BUGS.md has no matching behavior.",
+      "Index/queue/active-ledger searches for environment Recents, grouping, disposable host and recipe/place found no exact defect record. Read recent-setup-description-omits-wrapper-prefix.md: it concerns omitted distinguishing text, not incorrect grouping. No filter is needed."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": null,
+    "original_stronger_consequence": "Every fresh environment might create a separate Recent row instead of contributing to the same reusable setup's frequency. This was only a convenience/ranking concern.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Source refutes disposable-host-dependent grouping; do not equate distinct places being distinct with the alleged defect."
+  },
+  {
+    "key": "g085/l2",
+    "latest_line": 14,
+    "recommendation": "retain-verified",
+    "bucket": "high",
+    "underlying_key": "replace-with-accepts-incompatible-environment-recent",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "A shipped Recent can install new-environment placement into Replace with, after which submit refuses it and the direct placement picker is disabled. No race is required. Retain the workflow failure, with its actual recovery options and the source-protecting submit fences.",
+    "checks": [
+      "At 350a4b33b6d4476f4a78e43cea124bc2b828f462, create_form.rs:1478-1490,4344-4355 merges environment history without a Replace-mode filter; :8185-8250 offers direct Recent buttons in !restart_mode and Enter applies then submits. launch_composer.rs:1300-1315 exposes ranked Recent search independently of compact-strip draft filters.",
+      "draft.rs:1984-2057 only refuses restart, exempts entry.target Some from ordinary-install admission, then applies placement/selection/destination. The search Recent path at :2672-2683,2825-2861 does not consult host_fixed either.",
+      "create_form.rs:5991-5998 returns on target Some plus host_fixed before any environment creation. :6356-6383 separately refuses an ordinary replacement on another host. :7456 disables PlacementPicker when host_fixed. draft.rs:1507-1509 refuses ordinary/template editing during accepted in-flight work.",
+      "Recovery is broader than the initial reports: create_form.rs:5065-5087 still offers ordinary Host search; draft.rs:2706-2722 clears target, pins the selected host and resets remembered authority. Searching the original ordinary source host can repair the draft. Session-owned source hosts are omitted, so that is not universal. An ordinary Recent can also recover conditionally; templates cannot clear this target under host_fixed (proto/launcher.rs:915-921,940-946 and create_form.rs:689-700,743-745). Reopening remains general recovery.",
+      "At 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db, draft.rs:1978-2005,2818-2823 still assigns environment targets, and create_form.rs:5963-5969 still refuses their submission under host_fixed. No later repair was found. Source analysis only; no reproduced execution or timing claim."
+    ],
+    "coverage_checked": [
+      "SPEC.md Creation requires held-host template refusal without partial application; Lifecycle operations says Replace with changes harness/folder while Clone can change host. Sandbox sessions:1493-1498 and Container sessions:4831-4834 retain the existing environment for Replace. These rules do not accept the incompatible Recent mutation.",
+      "SPEC_impl.md Launch templates at 8708-8713 preserves held-field checks; Shared recipes at 6010-6024 explains reusable environment intent without accepting it as a replacement placement.",
+      "TODO.md Planned is empty. plans/queue/INDEX.md has no unlanded entries. Relevant podman-environments, sandbox-sessions and nonblocking-session-actions plans are listed as landed in plans/REPORTS.md, so they are not pending repair coverage. BUGS.md is unrelated.",
+      "Searched current index, queue content and active TRIAGE_OUTCOMES.md for environment Recent, Replace placement and held-host concerns. No exact queue/decision coverage found. Existing clone-read-overwrites-manual-recipe-choice.md concerns late Clone source reconciliation, not accepting incompatible Replace Recents.",
+      "FILTER.md does not match: ordinary shipped suggestions trigger this without a narrow timing window, and correcting the accepted draft requires a deliberate placement repair or reopening. Original reported aliases g086/l2 and g087/l1 are outside this batch and were not treated as independently checked exact aliases. Parent can reconcile using underlying_key."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": "The original destructive cross-environment replacement/source-deletion consequence needs a submit-fence bypass; none was established. This does not weaken the confirmed invalid-draft workflow failure.",
+    "original_stronger_consequence": "Initial lead: an environment Recent might switch Replace with to a fresh environment, potentially allowing cross-environment replacement or source deletion. Checked submit fences prevent that route. Early reports also understated recovery: Host search can repair an ordinary source, alongside a suitable ordinary Recent or reopening. No permanent wedge is claimed.",
+    "needs_independent_drop_check": true,
+    "proposed_basis": "Keep a verified high-priority workflow bug. Independently check the lowered destructive consequence before finalizing its limit; this consultation does not approve that lowering."
+  },
+  {
+    "key": "g085/c3",
+    "latest_line": 7,
+    "recommendation": "covered",
+    "bucket": "other",
+    "underlying_key": "retired-container-launch-control-removal",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "Removing the old creation control implements explicit retirement. The new provider PlacementPicker remains separate. This conclusion covers creation-control removal only, not retained-session Delete or other retirement paths.",
+    "checks": [
+      "At 04d85f0c98a9b635709d00b056719a0baa7fd3fc, the launch_controls.rs diff removes ContainerDraft/container_available/on_container props and the old ContainerControls render site at :650. The ordinary provider PlacementPicker exists in the caller independently (350a4b33b6d4476f4a78e43cea124bc2b828f462:create_form.rs:7447-7465). No runtime execution.",
+      "04d85f0c98a9b635709d00b056719a0baa7fd3fc is inside the supplied review range."
+    ],
+    "coverage_checked": [
+      "SPEC.md Retired containerized sessions:4892-4899 expressly removes the old switch and preserves Delete-only legacy sessions. SPEC_impl.md Rootless Podman sessions:8312-8326 explicitly removes creation helpers, fields and switches.",
+      "TODO.md Planned is empty, plans/queue/INDEX.md has no unlanded entries, and BUGS.md contains no relevant entry. podman-environments is already landed, not future coverage.",
+      "Index/queue/active-ledger searches found old-container concerns on other surfaces, not a requirement to retain this creation control. No filter is needed because the exact behavior is specified."
+    ],
+    "exact_cover_quotes": [
+      "SPEC.md, Retired containerized sessions: 'The old launcher switch and account-selection flow are gone.'",
+      "SPEC_impl.md, Rootless Podman sessions: 'Remove creation helpers, account selection, launch fields and switches, hooks-off branches, special tab/attach and file-confinement paths once nothing can create or open these sessions.'"
+    ],
+    "missing_premise": null,
+    "original_stronger_consequence": "Removing the old container switch might remove access to supported container launches. This claim does not cover existing-session deletion or other lifecycle behavior.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Exact specification acceptance of creation-control retirement; do not generalize it to other retired-session operations."
+  },
+  {
+    "key": "g085/c4",
+    "latest_line": 8,
+    "recommendation": "retain-unverified",
+    "bucket": "other",
+    "underlying_key": "environment-recent-search-omits-placement-label",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The omission is real, but the supplied basis for dismissal relies on absence of an explicit search requirement, rather than an explicit accepted limitation. No code refutation or exact coverage was found. Recommend retaining an investigated product-contract uncertainty: neither a confirmed search bug nor specification-covered behavior is established.",
+    "checks": [
+      "At 350a4b33b6d4476f4a78e43cea124bc2b828f462, launch_composer.rs:1300-1315 searches Recent destination label, harness and model only. Recipe/place labels, effort and permission are absent. The omission is source-established; it is not evidence that every displayed field must be searchable.",
+      "SPEC.md Creation's search paragraph promises recent setups among search groups but does not say which Recent fields match. SPEC_impl.md:5161-5180 specifies grouping and installation authority, not placement-name search. No runtime execution."
+    ],
+    "coverage_checked": [
+      "Both specifications searched for Recent search, placement/recipe labels and grouping. No explicit acceptance of omitting placement-name matching and no explicit requirement to include it was found.",
+      "TODO.md Planned is empty; plans/queue/INDEX.md has no unlanded entries; BUGS.md is unrelated.",
+      "Index/queue/active-ledger searches found no exact search-predicate item. recent-setup-description-omits-wrapper-prefix.md concerns indistinguishable descriptions and restored values, not filtering by a displayed placement label.",
+      "No FILTER.md boundary matches an ordinary static search omission; rarity was not established."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": "A product-contract or material-UX basis showing that a Recent must be discoverable by its recipe/container-host label. Conversely, no explicit accepted limitation presently supplies full coverage for the omission.",
+    "original_stronger_consequence": "Searching a recipe or container-host label does not find an environment Recent solely by that placement. No security, wrong-target or user-work-loss consequence was claimed.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Retain the investigated uncertainty rather than approve the enhancement-only dismissal from specification silence. Preserve the factual omission and the limited unresolved contract question for the parent."
+  },
+  {
+    "key": "g085/l3",
+    "latest_line": 16,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "clone-missing-environment-target-ordinary-create-backstop",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The named changed projection can return None in principle, but complete bound environment targets are projected in production and the ordinary-create backend refuses a session-owned host. The suspected successful ordinary launch into Clone's disposable source is not established. This does not prove every transient metadata mismatch is impossible or harmless.",
+    "checks": [
+      "At 350a4b33b6d4476f4a78e43cea124bc2b828f462, draft.rs:2925-2990 uses environment_target for a Clone source and preserves internal host behavior for Restart/Replace.",
+      "list/shared.rs:675-687 projects environment.target and a legacy Tensorlake recipe/place fallback. helm hosts.rs:4261-4287 constructs complete LaunchTarget values from both provider bindings; a missing catalog recipe is not itself target None.",
+      "helm sessions.rs:1491-1506 checks manager.status(host).is_session_owned before host_client and refuses ordinary creates there. UI create_form.rs:400-411 also holds an absent source row unresolved instead of silently selecting Local. A transient metadata omission therefore does not establish the suspected successful execution. No runtime observation."
+    ],
+    "coverage_checked": [
+      "SPEC.md Sandbox sessions:1493-1498 and Container sessions:4831-4834 require Clone to create a fresh recipe environment. SPEC.md:1570-1572 and SPEC_impl.md Shared recipes:6016-6018 / sandbox contract:6630-6634 prohibit unrelated ordinary creation on owned hosts.",
+      "TODO.md Planned and plans/queue/INDEX.md are empty; BUGS.md is unrelated. Relevant environment plans are landed (plans/REPORTS.md:7,21), not pending fix coverage.",
+      "Read clone-read-overwrites-manual-recipe-choice.md. That established late-read overwrite concerns a user-picked recipe, not missing-target fallback or a backend bypass. No exact coverage in queue/index/active ledger; no filter is needed for the source-based refutation."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": "A shipped sequence that both loses the complete live environment target and bypasses ordinary-create's session-owned-host refusal. No such route was established; a source read mismatch alone is insufficient.",
+    "original_stronger_consequence": "Clone could lose fresh-placement intent and start an ordinary session inside its disposable source, reusing its filesystem. The investigation narrowed this to no established successful production launch route; it did not establish destructive source cleanup or data loss.",
+    "needs_independent_drop_check": true,
+    "proposed_basis": "Proposed source refutation of successful source-environment reuse, with metadata/refusal limitations retained. Independently check this wrong-placement dismissal before dropping."
+  },
+  {
+    "key": "g085/c5",
+    "latest_line": 17,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "environment-target-guards-stale-folder-edits",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "A queued ordinary folder/browse callback cannot install a non-home path while a fresh environment target is selected: both primitive path edits and search actions enforce that invariant before applying the path.",
+    "checks": [
+      "At 350a4b33b6d4476f4a78e43cea124bc2b828f462, draft.rs:331-343 changes the complete target and resets ordinary destination/home authority. edit_folder at :397-407 and choose_existing_folder at :412-422 refuse nonempty/non-tilde paths when target Some.",
+      "draft.rs:2066-2098 validates browse authority and delegates to guarded choose_existing_folder. Search UsePath/Folder has the target guard at :2730-2738. Refused callbacks may clean advisory state, but the examined paths cannot replace target or restore the stale non-home path. No runtime reproduction."
+    ],
+    "coverage_checked": [
+      "SPEC.md Container sessions:4806-4811 and Sandbox sessions:1460-1463 fix fresh Folder destinations to the environment's home without Browse or recent folders. SPEC_impl.md Shared recipes:6020-6024 retains repository-or-home intent.",
+      "TODO.md Planned and plans/queue/INDEX.md are empty, BUGS.md is unrelated. No exact queue/index/active-ledger cover for this target-guard allegation.",
+      "Read history-reply-lacks-installation-provenance.md: its mis-tagged history response is a different cause and ordinary-folder scope. No FILTER.md boundary is needed."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": null,
+    "original_stronger_consequence": "After changing recipe/place, an already queued browse/folder choice might restore the old machine's path into a fresh container. The named target guards refute that mutation; no launch, trust or loss-of-work route was established.",
+    "needs_independent_drop_check": true,
+    "proposed_basis": "Source refutes the stale non-home path mutation across the named callback paths. Independent checking is conservative because the original allegation concerns carrying destination authority across machines."
+  },
+  {
+    "key": "g086/c1",
+    "latest_line": 1,
+    "recommendation": "covered",
+    "bucket": "other",
+    "underlying_key": "retired-container-template-field-refusal",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "Stored legacy container fields remain visible and removable, but cannot be newly offered or saved as an active container choice. This implements the explicit retirement contract. It does not settle unrelated template deletion/undo or lifecycle concerns.",
+    "checks": [
+      "At 04d85f0c98a9b635709d00b056719a0baa7fd3fc, templates.rs:717-732 makes Field::Container unoffered and returns RETIRED_CONTAINER_REASON. :1236-1239 displays an explanation to remove the field; :1477-1483 retains an explicit Remove action. No runtime execution.",
+      "The named revision is inside the review range. The source still decodes the stored field; the examined editor path does not silently recreate an old-style session."
+    ],
+    "coverage_checked": [
+      "SPEC.md Retired containerized sessions:4892-4899 keeps stored setups readable but drops/refuses the old choice with an explanation. SPEC_impl.md Rootless Podman sessions:8312-8326 states the same restriction and removal policy.",
+      "TODO.md Planned is empty, plans/queue/INDEX.md has no unlanded entries, and BUGS.md is unrelated. podman-environments is landed, rather than pending coverage.",
+      "Index/queue/active-ledger searches found no exact requirement to keep authoring a retired field. template-container-off-on-discards-editor-values.md is an older off/on editing concern, not this intentional refusal. No filter is needed."
+    ],
+    "exact_cover_quotes": [
+      "SPEC.md, Retired containerized sessions: 'Templates, recent setups and history with that choice still load. Using them drops or refuses the retired choice with an explanation and cannot create another old-style session.'",
+      "SPEC_impl.md, Rootless Podman sessions: 'Drop or refuse retired container selections when using a stored setup, with an explanation. No path creates another old-style session.'"
+    ],
+    "missing_premise": null,
+    "original_stronger_consequence": "Previously saved containerized-session template fields cannot be saved or added again, while the editor retains removal. This candidate concerns that authoring restriction only, not access to existing user files or retained-session Delete.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Exact retirement acceptance covers the named editor refusal/removal behavior."
+  },
+  {
+    "key": "g086/f1",
+    "latest_line": 14,
+    "recommendation": "retain-verified",
+    "bucket": "other",
+    "underlying_key": "environment-pending-launch-label-resolves-with-empty-places",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The request captures a numeric fallback label even when the selected container host has a name. If admission or usable stage publication takes at least two seconds, the generic pending pill displays that number. The request target remains correct and later stage text can replace the generic label.",
+    "checks": [
+      "At 350a4b33b6d4476f4a78e43cea124bc2b828f462, create_form.rs:6097-6105 constructs PendingLaunch with environment_ui::target_label(&target, &[]) before the environment-create await. environment_ui.rs:302-315 necessarily falls back to 'host {host}' for PodmanHost when places is empty.",
+      "launch_progress.rs:56-65 starts with stage None; :104-120 renders pending.host only without stage; :144-145 hides it for the first two seconds. api/sandbox_sessions.rs:67-104 awaits HTTP admission and validates host/run headers before invoking admitted, so pre-admission stage progress cannot replace this generic label.",
+      "At 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db, create_form.rs:6071-6075 still passes the empty places slice, and :7679-7684 mounts progress in the hidden presentation. The later-repair check leaves the defect intact. No runtime frequency, timing measurement or reproduction is claimed.",
+      "The full captured LaunchTarget still goes to create_environment_session. Numeric display does not establish wrong-target execution or data loss."
+    ],
+    "coverage_checked": [
+      "SPEC.md Creation:1357-1361 requires the captured host's name after two seconds. Container sessions separately names the recipe/container host. SPEC_impl.md GUI: Dioxus:199-201 requires captured host/name; neither accepts substituting internal host IDs when names are available.",
+      "TODO.md Planned is empty; plans/queue/INDEX.md has no unlanded entries. BUGS.md's stalled SSH transfer is not a progress-naming acceptance.",
+      "Searched current index and queue content for numeric host labels, target_label, environment progress and host naming. Read long-launch-status-crops-painted-edge.md, pending-replace-recreates-announcement.md and replace-source-removal-hides-progress-and-timeout.md: geometry, announcement continuity and source-removal visibility are different causes/consequences, not exact coverage or extensions of this naming defect.",
+      "Active TRIAGE_OUTCOMES.md has no matching naming decision. FILTER.md's rare self-correcting diagnostic filter lacks an established rare trigger: a two-second configuration/network/admission delay can expose this ordinary path. Do not omit merely because a later stage can correct the label."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": null,
+    "original_stronger_consequence": "Initially described as every container launch showing the internal number. Later records correctly restrict visible exposure to at least two seconds without usable stage progress; later stages replace the generic label. The original display mismatch is retained, with no wrong-target or loss-of-work inference.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Keep a verified other-priority naming defect, conditional on the documented display interval. Its unconditional bad capture is source-established; actual exposure frequency is unmeasured."
+  },
+  {
+    "key": "g086/c2",
+    "latest_line": 3,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "recent-merge-does-not-compare-independent-sequences",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "Neither the merge nor subsequent ranking compares unrelated creation_seq values. Each source retains its own order; timestamps choose only between heads and ranking uses frequency then merged index.",
+    "checks": [
+      "At 350a4b33b6d4476f4a78e43cea124bc2b828f462, create_form.rs:1454-1476 merges the two ordered inputs by current-head created_at without reading creation_seq. launch_composer.rs:1459-1504 groups complete selection/target/destination and sorts frequency plus candidate index, again without creation_seq.",
+      "No runtime execution. The concern is independent of g085/c2, which asks whether disposable host identity splits otherwise equal groups."
+    ],
+    "coverage_checked": [
+      "SPEC_impl.md Shared recipes:6020-6024 requires a shared environment admission order across independent supervisors. SPEC.md Creation's Recent contract and Container sessions' retained recipe/place intent do not require the alleged cross-sequence comparison.",
+      "TODO.md Planned and plans/queue/INDEX.md are empty; BUGS.md is unrelated. Index/queue/active-ledger searches for ranking, creation_seq and environment Recents found no exact defect record.",
+      "recent-setup-description-omits-wrapper-prefix.md concerns display of distinct grouped entries, not sequence comparison. No filter is needed for this source refutation."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": null,
+    "original_stronger_consequence": "Merged ordinary and environment history might rank unrelated supervisors' creation sequence numbers together. The suspected comparison does not occur; no execution-target or user-work-loss consequence was claimed.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Source refutes the exact cross-sequence comparison allegation. This does not make claims about every possible recency policy or timestamp choice."
+  },
+  {
+    "key": "g086/c3",
+    "latest_line": 4,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "replace-with-progress-guard-spans-request-lifetime",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The guard owns the published source progress across both create branches and clears it after the result, before settlement callbacks. Drop checks the exact published request. The named source does not show premature removal or missing cancellation cleanup.",
+    "checks": [
+      "At db72347066bc4de3fa1a5f05d64bca91e571bc11, create_form.rs:6991-6997 stores ReplaceProgressGuard before managed-checkout or ordinary create awaits. :7119 explicitly drops it after the result, before source_claim release and on_settled at :7137-7138, with no intervening await.",
+      "The correct guard path is crates/farhelm-ui/src/replace.rs, not list/replace.rs. :125-150 publishes the exact PendingLaunch and Drop removes only the equal entry. Its try_write can decline cleanup when the signal is unavailable; no held borrow across the examined awaits or surviving-page missed-cleanup route was established.",
+      "No cancellation execution or reproduction. The revision is inside the supplied range. This finding is about progress ownership, not cancellation of the backend operation."
+    ],
+    "coverage_checked": [
+      "SPEC.md Creation:1351-1361 keeps progress through actual reply settlement. SPEC_impl.md GUI: Dioxus:199-201 defines local pending status over the actual mutation lifetime, independently of preparation/page guard.",
+      "TODO.md Planned and plans/queue/INDEX.md contain no entries; BUGS.md is unrelated.",
+      "Read pending-replace-recreates-announcement.md and replace-source-removal-hides-progress-and-timeout.md. Their announcement/surface-disappearance concerns are distinct from this guard's insertion/removal lifetime. Index/queue/active-ledger searches found no exact coverage for the named suspicion. No filter is needed."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": "A live-page cleanup failure would require showing a real conflicting borrow or unavailable-signal lifetime that survives the page owner; none is established by the named path.",
+    "original_stronger_consequence": "Replacing explicit progress removal with a guard might clear Replacing too early or leave it stuck after cancellation. The reviewed lifetime and exact-entry Drop check refute the named concern, subject to the stated unexecuted cancellation and try_write caveats.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Proposed source refutation of progress-lifetime failure only. Preserve cancellation/try_write limits; do not infer backend cancellation guarantees."
+  }
+]

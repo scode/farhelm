@@ -1,0 +1,878 @@
+{
+  "group": {
+    "id": "g059",
+    "domain": "environment-recipes",
+    "purpose": "environment-recipes: crates/farhelm-proto/src/recipes.rs, crates/farhelm-proto/src/tensorlake/recipes_tests.rs, crates/farhelm-ui/src/tensorlake/recipe_editor.rs, crates/farhelm-ui/src/tensorlake/recipe_editor_tests.rs, crates/farhelm-ui/src/tensorlake/recipes.rs, crates/farhelm-helm/src/environment/recipes_tests.rs, crates/farhelm-helm/src/tensorlake/recipes.rs; phases complete small per-commit changes",
+    "interfaces": [
+      "g049",
+      "g050",
+      "g051",
+      "g058",
+      "g060",
+      "g064",
+      "g065",
+      "g066",
+      "g067",
+      "g068",
+      "g069",
+      "g070",
+      "g077",
+      "g078",
+      "g085",
+      "g086",
+      "g087"
+    ],
+    "sources": [
+      {
+        "path": "[private-run]/prep/parts/00139-000.patch",
+        "ranges": [
+          [
+            1,
+            864
+          ]
+        ],
+        "original_path": "crates/farhelm-proto/src/recipes.rs",
+        "commit": "56040bb964270bb40d191902173dbb84b3ba78fc",
+        "notes": "patch header; patch character offsets [0,35379)",
+        "lines": 864,
+        "bytes": 35385,
+        "start": 0,
+        "end": 35379,
+        "original": "[private-run]/prep/originals/00139.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/00141-000.patch",
+        "ranges": [
+          [
+            1,
+            210
+          ]
+        ],
+        "original_path": "crates/farhelm-proto/src/tensorlake/recipes_tests.rs",
+        "commit": "56040bb964270bb40d191902173dbb84b3ba78fc",
+        "notes": "patch header; patch character offsets [0,7827)",
+        "lines": 210,
+        "bytes": 7827,
+        "start": 0,
+        "end": 7827,
+        "original": "[private-run]/prep/originals/00141.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/00142-000.patch",
+        "ranges": [
+          [
+            1,
+            116
+          ]
+        ],
+        "original_path": "crates/farhelm-ui/src/tensorlake/recipe_editor.rs",
+        "commit": "56040bb964270bb40d191902173dbb84b3ba78fc",
+        "notes": "patch header; patch character offsets [0,6132)",
+        "lines": 116,
+        "bytes": 6132,
+        "start": 0,
+        "end": 6132,
+        "original": "[private-run]/prep/originals/00142.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/00143-000.patch",
+        "ranges": [
+          [
+            1,
+            77
+          ]
+        ],
+        "original_path": "crates/farhelm-ui/src/tensorlake/recipe_editor_tests.rs",
+        "commit": "56040bb964270bb40d191902173dbb84b3ba78fc",
+        "notes": "patch header; patch character offsets [0,2912)",
+        "lines": 77,
+        "bytes": 2912,
+        "start": 0,
+        "end": 2912,
+        "original": "[private-run]/prep/originals/00143.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/00144-000.patch",
+        "ranges": [
+          [
+            1,
+            193
+          ]
+        ],
+        "original_path": "crates/farhelm-ui/src/tensorlake/recipes.rs",
+        "commit": "56040bb964270bb40d191902173dbb84b3ba78fc",
+        "notes": "patch header; patch character offsets [0,8275)",
+        "lines": 193,
+        "bytes": 8285,
+        "start": 0,
+        "end": 8275,
+        "original": "[private-run]/prep/originals/00144.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/00184-000.patch",
+        "ranges": [
+          [
+            1,
+            21
+          ]
+        ],
+        "original_path": "crates/farhelm-helm/src/environment/recipes_tests.rs",
+        "commit": "56659839785691f76da3af5d8f51b511cff4ba8b",
+        "notes": "patch header; patch character offsets [0,1844)",
+        "lines": 21,
+        "bytes": 1844,
+        "start": 0,
+        "end": 1844,
+        "original": "[private-run]/prep/originals/00184.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/00214-000.patch",
+        "ranges": [
+          [
+            1,
+            57
+          ]
+        ],
+        "original_path": "crates/farhelm-helm/src/tensorlake/recipes.rs",
+        "commit": "56659839785691f76da3af5d8f51b511cff4ba8b",
+        "notes": "patch header; patch character offsets [0,2911)",
+        "lines": 57,
+        "bytes": 2911,
+        "start": 0,
+        "end": 2911,
+        "original": "[private-run]/prep/originals/00214.patch"
+      }
+    ],
+    "lines": 1538,
+    "bytes": 65296
+  },
+  "records": [
+    {
+      "key": "g059/l1",
+      "owner": "g059",
+      "id": "l1",
+      "domain": "environment-recipes",
+      "purpose": "environment-recipes: crates/farhelm-proto/src/recipes.rs, crates/farhelm-proto/src/tensorlake/recipes_tests.rs, crates/farhelm-ui/src/tensorlake/recipe_editor.rs, crates/farhelm-ui/src/tensorlake/recipe_editor_tests.rs, crates/farhelm-ui/src/tensorlake/recipes.rs, crates/farhelm-helm/src/environment/recipes_tests.rs, crates/farhelm-helm/src/tensorlake/recipes.rs; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 1,
+          "event": {
+            "version": 1,
+            "kind": "lead",
+            "id": "l1",
+            "state": "open",
+            "summary": "Check container image argument boundary",
+            "location": "crates/farhelm-proto/src/recipes.rs:786",
+            "detail": "Reviewed commit: 56040bb964270bb40d191902173dbb84b3ba78fc. TLDR: New container image inputs appear to allow leading option syntax; check whether the provider treats them as literal image references. Source basis: check_recipe ContainerImage validates presence and NUL only (documentation at lines 735 onward); existing Tensorlake image validator rejects leading '-'. Suspected consequence: a recipe could alter a Podman invocation if no option terminator or equivalent exists. Confidence: uninvestigated lead, not a confirmed bug. Suggested bucket: potentially highest/security if an actual option-injection route exists; otherwise other. Could-be-highest: yes, conditional on source route. proposed_drop: false. possible_cover: none; no coverage search performed. Next check: pinned Podman build argv construction and remote shell quoting. Missing premise: how reference reaches each Podman invocation. Source-only review; no execution."
+          }
+        },
+        {
+          "line": 2,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "l1",
+            "state": "open",
+            "summary": "Container image option injection is prevented by callers",
+            "location": "crates/farhelm-proto/src/recipes.rs:786",
+            "detail": "Reviewed commit: 56040bb964270bb40d191902173dbb84b3ba78fc; caller analysis at 56659839785691f76da3af5d8f51b511cff4ba8b, which introduces Podman execution. TLDR considered: a leading '-' in a saved container image reference could alter a Podman command and cross the security boundary. Could-be-highest: yes for the original suspected security consequence; that route is refuted by source. Confidence: confirmed source refutation; no execution. Suggested bucket: no finding. proposed_drop: caller argv handling prevents the suspected option injection. Evidence: environment/podman.rs:206-215 puts '--' before image-existence input; environment/podman/build.rs:808-839 puts '--' before reference in pull and inspect; environment/podman.rs:421-453 puts '--' before the image in run. The selected account is shell-quoted after 'getent passwd --' at environment/podman/build.rs:59-73. SystemPlaceCommands::process at environment/podman_probe.rs:142-158 keeps argv positional through the common route. The original commit has no Podman implementation (git ls-tree confirms only lifecycle/mod/recipes files). Contract: recipes.rs:737-741 explicitly leaves syntax/account resolution to Podman and image inspection. No specification-only acceptance was used. possible_cover: none; coverage sources not searched. Caveat: this closes only literal input/option injection; it does not certify arbitrary image contents or external Podman parsing."
+          }
+        },
+        {
+          "line": 8,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "l1",
+            "state": "open",
+            "summary": "Literal input boundary refutation persists through the review tip",
+            "location": "crates/farhelm-proto/src/recipes.rs:786",
+            "detail": "Reviewed commit: 56040bb964270bb40d191902173dbb84b3ba78fc, with runtime callers introduced by 56659839785691f76da3af5d8f51b511cff4ba8b and checked through 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db. Original TLDR/consequence preserved: accepting leading '-' or shell syntax in a saved image reference/account could permit option or command injection on the container host. Could-be-highest: yes for that original security consequence; independent judgment of the proposed refutation remains required. Confidence: confirmed source refutation of the literal input route, not execution. proposed_drop: '--' precedes image data in image-exists (environment/podman.rs:206-215), pull/inspect (environment/podman/build.rs:808-839), and run (environment/podman.rs:421-453); account lookup shell-quotes the requested account after 'getent passwd --' (build.rs:59-73). SystemPlaceCommands::process preserves positional argv through the common route (podman_probe.rs:142-158). New later-range check: git diff from the runtime-introducing commit to the review tip shows no changes in build.rs; podman.rs changes only the lifecycle provision-lock helper at :646; podman_probe.rs changes comments only. Tip source still has the quoted getent and pull_base boundaries. Hence absence of the executor in the earlier model-only commit is not the basis for rejecting the whole-range concern: the implemented runtime consumers provide the substantive refutation, and these boundaries persist. possible_cover: corroborates g060/c4; the parent may relay this caller evidence to g058/l1. Contract: the catalog intentionally requires nonempty NUL-free literal fields and delegates reference/account syntax to Podman/image inspection. No specification-only exception was used. Suggested bucket: no active finding proposed, with no drop treated as accepted. Caveats: does not certify arbitrary image contents or every unrelated provider command; no runtime test or reproduction run."
+          }
+        }
+      ],
+      "latest": {
+        "line": 8,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "l1",
+          "state": "open",
+          "summary": "Literal input boundary refutation persists through the review tip",
+          "location": "crates/farhelm-proto/src/recipes.rs:786",
+          "detail": "Reviewed commit: 56040bb964270bb40d191902173dbb84b3ba78fc, with runtime callers introduced by 56659839785691f76da3af5d8f51b511cff4ba8b and checked through 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db. Original TLDR/consequence preserved: accepting leading '-' or shell syntax in a saved image reference/account could permit option or command injection on the container host. Could-be-highest: yes for that original security consequence; independent judgment of the proposed refutation remains required. Confidence: confirmed source refutation of the literal input route, not execution. proposed_drop: '--' precedes image data in image-exists (environment/podman.rs:206-215), pull/inspect (environment/podman/build.rs:808-839), and run (environment/podman.rs:421-453); account lookup shell-quotes the requested account after 'getent passwd --' (build.rs:59-73). SystemPlaceCommands::process preserves positional argv through the common route (podman_probe.rs:142-158). New later-range check: git diff from the runtime-introducing commit to the review tip shows no changes in build.rs; podman.rs changes only the lifecycle provision-lock helper at :646; podman_probe.rs changes comments only. Tip source still has the quoted getent and pull_base boundaries. Hence absence of the executor in the earlier model-only commit is not the basis for rejecting the whole-range concern: the implemented runtime consumers provide the substantive refutation, and these boundaries persist. possible_cover: corroborates g060/c4; the parent may relay this caller evidence to g058/l1. Contract: the catalog intentionally requires nonempty NUL-free literal fields and delegates reference/account syntax to Podman/image inspection. No specification-only exception was used. Suggested bucket: no active finding proposed, with no drop treated as accepted. Caveats: does not certify arbitrary image contents or every unrelated provider command; no runtime test or reproduction run."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g059/findings.jsonl",
+        "id": "l1",
+        "line": 8,
+        "disposition": "under-investigation",
+        "group": "g059-l1",
+        "reason": "Record durably acknowledged; parent source/contract validation, cross-group synthesis, coverage/filter matching and any independent drop check remain pending. This preserves the claim and uncertainty without accepting, dropping or lowering it."
+      },
+      "accepted_parent_decision": null,
+      "returned_claim_checks": [
+        {
+          "batch": "claims-037",
+          "key": "g059/l1",
+          "latest_line": 8,
+          "recommendation": "duplicate",
+          "bucket": "other",
+          "underlying_key": "podman-literal-image-user-argument-injection",
+          "aliases": [
+            "g058/l1"
+          ],
+          "target_queue_file": null,
+          "why": "Exact same literal image/account injection hypothesis as g058/l1. Both the reference terminators and shell/account lowering were checked directly through the executable consumer revision and later tip. Consolidation does not accept a security drop.",
+          "checks": [
+            "56659839785691f76da3af5d8f51b511cff4ba8b podman.rs:206-215,430-452 and podman/build.rs:808-839 put -- before free image operands; build.rs:65-90 quotes account lookup after getent passwd -- and records observed identity.",
+            "Same revision podman_probe.rs:143-157, access.rs:73-80,207-230,343-374 and proto text.rs:82-99 retain argv and quote each SSH shell layer. Later diff through 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db leaves these behavioral boundaries intact.",
+            "The initial no-executor conclusion at 56040bb964270bb40d191902173dbb84b3ba78fc was superseded by direct checking of the later runtime; it is not used to dismiss the whole range. No execution."
+          ],
+          "coverage_checked": {
+            "specifications": "Current SPEC.md:450-488 and SPEC_impl.md:5985-6007,6010-6092 do not accept injection; they describe literal values and layered command lowering.",
+            "planned_and_plans": "TODO.md Planned and unlanded plans index are empty; no active exact repair.",
+            "bugs": "BUGS.md has no matching argument-injection entry.",
+            "queue": "INDEX.md searched for Podman/reference/user/injection and matching recipe terms; ambient image-inspection and engine-routing items have different causes. Exact in-batch alias is g058/l1; no queue file.",
+            "triage": "Active TRIAGE_OUTCOMES.md searched for matching terms; no same trigger, consequence and scope. Archive not read.",
+            "filter": "No filter used; security source refutation is the proposed basis."
+          },
+          "exact_cover_quotes": [],
+          "missing_premise": "No literal-input injection step remains in the traced consumers. This does not certify arbitrary image contents or unrelated engine behavior.",
+          "original_stronger_consequence": "Leading '-' or shell syntax in saved image/account inputs could alter commands on the container host. All initial and reopened potentially highest wording remains relevant to the independent check.",
+          "needs_independent_drop_check": true,
+          "proposed_basis": "Consolidate with g058/l1 and source-refute only that common route, subject to independent drop agreement."
+        }
+      ],
+      "parent_proposals": [
+        {
+          "artifact": "parent-flagged-judgments-037.json",
+          "key": "g059/l1",
+          "proposal": "claim-checks/claims-037/result.json",
+          "parent_proposal": "same-root-literal-input-source-refutation",
+          "final_independent_gate": "required-before-highest-security-drop",
+          "reason": "Full037 exactly duplicates058l1 image operand terminators, quoted account lookup and layered argv/SSH preservation at actual runtime566 through tip. Keep original foundation-only proposal and reopened later consumer checks, not a blanket absence-of-executor rationale. No arbitrary image content or engine behavior guarantee. Fresh gate must agree to both named histories and the narrow security refutation."
+        }
+      ],
+      "collection": {
+        "retain": true,
+        "clearly_refuted_candidate": false,
+        "needs_unfinished_gate": true,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "podman-literal-image-user-argument-injection",
+        "destination": "trailing-podman-literal-image-user-argument-injection.md"
+      }
+    },
+    {
+      "key": "g059/l2",
+      "owner": "g059",
+      "id": "l2",
+      "domain": "environment-recipes",
+      "purpose": "environment-recipes: crates/farhelm-proto/src/recipes.rs, crates/farhelm-proto/src/tensorlake/recipes_tests.rs, crates/farhelm-ui/src/tensorlake/recipe_editor.rs, crates/farhelm-ui/src/tensorlake/recipe_editor_tests.rs, crates/farhelm-ui/src/tensorlake/recipes.rs, crates/farhelm-helm/src/environment/recipes_tests.rs, crates/farhelm-helm/src/tensorlake/recipes.rs; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 3,
+          "event": {
+            "version": 1,
+            "kind": "lead",
+            "id": "l2",
+            "state": "open",
+            "summary": "Check deletion confirmation against cross-provider cleanup",
+            "location": "crates/farhelm-helm/src/tensorlake/recipes.rs:610",
+            "detail": "Reviewed commit: 56659839785691f76da3af5d8f51b511cff4ba8b. TLDR suspected: deleting a recipe may remove container images after a confirmation naming only Tensorlake snapshots. Source basis: assigned route now dispatches Providers::clean_recipe across both providers at tensorlake/recipes.rs:610; the previous pinned editor source at 56040bb964270bb40d191902173dbb84b3ba78fc tensorlake/recipe_editor.rs:579-584 describes only snapshots on Tensorlake. Confidence: uninvestigated cross-revision lead; need inspect the actual UI at 56659839785691f76da3af5d8f51b511cff4ba8b. Suggested bucket: potentially highest if destruction exceeds the user's stated consent and removes user-owned work; other/high if confined to regenerable artifacts. Could-be-highest: yes, conditional on artifact ownership/consequence and confirmation at route revision. proposed_drop: false. possible_cover: none. Contract: SPEC_impl.md 'Answers bind to what was drawn' and SPEC.md recipe deletion confirmation. Next checks: pinned current editor path/text, artifact cleanup scope and whether base/user images are protected. No execution."
+          }
+        },
+        {
+          "line": 4,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "l2",
+            "state": "open",
+            "summary": "Recipe deletion still confirms Tensorlake-only cleanup",
+            "location": "crates/farhelm-helm/src/tensorlake/recipes.rs:610",
+            "detail": "Reviewed commit: 56659839785691f76da3af5d8f51b511cff4ba8b. TLDR: Deleting a recipe can also delete its built and prepared container images on container hosts, although the confirmation tells the user only that Tensorlake snapshots will be deleted. Details: the assigned delete_recipe_owned change at tensorlake/recipes.rs:610 dispatches Providers::clean_recipe, and environment/mod.rs:426-446 calls every installed provider. Podman::clean_images at environment/podman/build.rs:764-799 retires both current image and prepared image per place, reconciles helpers, deletes retired images and then clears place state. The actual editor at this same revision still says, verbatim, 'Delete recipe {shown_name}? Any running build is cancelled and the snapshots Farhelm built for it on Tensorlake are deleted.' (tensorlake/recipe_editor.rs:585). Thus the destructive confirmation's stated resources lag behind the broadened route. SPEC.md:477-479 requires Delete confirmation, and SPEC_impl.md:1068 onward says answers act on what was drawn. Fix the confirmation with the cross-provider deletion scope before exposing the shared operation. Confidence: confirmed by source, no execution. Suggested bucket: other, established consequence is misleading destructive consent for regenerable build artifacts; no route to deleting user-owned base images or session data is established. Could-be-highest: the original lead considered harm beyond destructive consent; highest would require evidence that removed artifacts contain user-owned work rather than recipe build/preparation output. proposed_drop: false. possible_cover: none; the parent owns subsequent-commit/queue coverage. Material caveat: this is an intermediate-commit UI/route mismatch; later UI commits may correct it. The backend ownership protection and actual artifact contents still need the final checks recorded under this ID."
+          }
+        },
+        {
+          "line": 5,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "l2",
+            "state": "open",
+            "summary": "Recipe deletion still confirms Tensorlake-only cleanup",
+            "location": "crates/farhelm-helm/src/tensorlake/recipes.rs:610",
+            "detail": "Reviewed commit: 56659839785691f76da3af5d8f51b511cff4ba8b. TLDR: Deleting a recipe also deletes its built and prepared container images on container hosts, although the confirmation describes only Tensorlake snapshot deletion. Details: tensorlake/recipes.rs:610 dispatches Providers::clean_recipe; environment/mod.rs:426-446 invokes both installed providers. Podman::clean_images at environment/podman/build.rs:764-799 reconciles helpers, retires current software/prepared images, deletes retired images and clears place state. The same revision's editor still says exactly 'Delete recipe {shown_name}? Any running build is cancelled and the snapshots Farhelm built for it on Tensorlake are deleted.' at tensorlake/recipe_editor.rs:585. The confirmation omits container-host artifact deletion. SPEC.md:477-479 requires Delete confirmation; SPEC_impl.md:1068 onward binds answers to what was drawn. Update the confirmation for the broadened cleanup operation. Confidence: confirmed by source; no execution. Suggested bucket: other (misleading destructive consent for regenerable build artifacts). Could-be-highest: the original lead considered work removed beyond destructive consent, but the available source does not establish user-work loss: environment/podman/build.rs:679-750 removes only recorded retired images, checks matching helm/recipe ownership labels, skips images used by any container and issues non-forcing removal; pull_base:808-839 never records user-owned base images for cleanup. Reconciled helpers also require matching ownership/recipe at :630-668. Highest would require an additional route by which one of these owned build/preparation artifacts carries user-owned work; none is shown. proposed_drop: false; possible_cover: none, parent owns later-commit coverage. Material caveat: intermediate-revision UI mismatch, potentially corrected in later shared-editor work. This record preserves the original suspected destructive-consent consequence while limiting the established consequence to owned recipe artifacts."
+          }
+        },
+        {
+          "line": 7,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "l2",
+            "state": "open",
+            "summary": "Intermediate recipe-delete warning is repaired by the next UI commit",
+            "location": "crates/farhelm-helm/src/tensorlake/recipes.rs:610",
+            "detail": "Reviewed commit: 56659839785691f76da3af5d8f51b511cff4ba8b. Original TLDR/consequence preserved: deleting a recipe also deletes its built and prepared container images on container hosts, although the destructive confirmation at that revision names only Tensorlake snapshot deletion; the original concern was destruction beyond stated consent, potentially user-owned work if such a route exists. Original source: tensorlake/recipes.rs:610 dispatches all provider cleanup; the same revision's tensorlake/recipe_editor.rs:585 says 'Delete recipe {shown_name}? Any running build is cancelled and the snapshots Farhelm built for it on Tensorlake are deleted.' New exact repair evidence: 350a4b33b6d4476f4a78e43cea124bc2b828f462, crates/farhelm-ui/src/tensorlake/recipe_editor.rs:580-585 now says 'Delete recipe {shown_name}? Running builds are cancelled and Farhelm's images and snapshots for this recipe are deleted. Images in use must be released first.' The comment explicitly covers every place unconditionally, including a build finishing while the editor is open. Lines 544-554 capture the target from existing, take the rendered confirmation token, and submit that captured name; lines 873-883 capture the rendered token for Delete/Cancel. recipes.rs:448-460 keys the editor by captured recipe name. Thus the next UI revision fixes the omitted-container-artifact wording without a live-list retargeting gap. Confidence: confirmed by pinned source; no execution. proposed_drop: repair-based proposal only, subject to the parent's independent check, because commit 350a4b33b6d4476f4a78e43cea124bc2b828f462 names images as well as snapshots for this recipe and preserves token/target binding. possible_cover: exact later commit above, corroborating g060/c2. Suggested bucket previously other for the established regenerable-artifact warning mismatch; no lowering/drop is treated as accepted here. Could-be-highest: retain the original destructive-consent concern for independent judgment. Source ownership checks establish recipe-owned build/preparation artifacts, not user base/session files: environment/podman/build.rs:630-750 verifies ownership, skips images used by containers, and uses non-forcing removal; pull_base:808-839 never records a custom base for retirement. No user-work-loss route has been established. Remaining consequence: the historical mismatch remains real at 56659839785691f76da3af5d8f51b511cff4ba8b; no ongoing wording gap is shown at the repair revision. Contract: SPEC.md recipe Delete confirmation and SPEC_impl.md 'Answers bind to what was drawn'. Caveat: this event establishes the exact repair revision; persistence to the pinned review tip is the next readily checkable premise."
+          }
+        },
+        {
+          "line": 9,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "l2",
+            "state": "open",
+            "summary": "Recipe-delete warning mismatch has exact later repair coverage",
+            "location": "crates/farhelm-helm/src/tensorlake/recipes.rs:610",
+            "detail": "Reviewed commit: 56659839785691f76da3af5d8f51b511cff4ba8b. Original TLDR/consequence: recipe deletion cleans owned container images although its destructive confirmation names only Tensorlake snapshot deletion, exceeding the stated resource scope. Original potentially highest concern (user-owned work destroyed beyond consent) is preserved for independent judgment, not silently lowered or withdrawn. At this revision tensorlake/recipes.rs:610 dispatches both providers and tensorlake/recipe_editor.rs:585 says exactly 'Delete recipe {shown_name}? Any running build is cancelled and the snapshots Farhelm built for it on Tensorlake are deleted.' Repair: the next commit 350a4b33b6d4476f4a78e43cea124bc2b828f462 changes recipe_editor.rs:580-585 to say exactly 'Delete recipe {shown_name}? Running builds are cancelled and Farhelm's images and snapshots for this recipe are deleted. Images in use must be released first.' Its comment explicitly covers every place regardless of builds completing after editor opening. Same source :544-554 derives delete_name from captured existing, requires delete_prompt.take(rendered token), and submits that name; :873-883 captures the rendered token. RecipeList at recipes.rs:448-460 keys that captured editor by recipe name. New synthesis check: git diff from 350a4b33b6d4476f4a78e43cea124bc2b828f462 to review tip 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db is empty for both recipe_editor.rs and recipes.rs; tip grep confirms the same warning at :584. Thus no ongoing omitted-images wording consequence remains at the pinned tip. Historical intermediate behavior remains as originally reported. Confidence: confirmed source/contract analysis, no execution. proposed_drop: exact later source repair above, proposed only and requiring independent acceptance; no drop or bucket lowering has been accepted. possible_cover: repair commit 350a4b33b6d4476f4a78e43cea124bc2b828f462, corroborating g060/c2. Suggested bucket in the initial record was other for the established owned/regenerable-artifact consent mismatch; highest is not established because ownership checks protect custom bases, session files and images in container use. Could-be-highest: retain original concern; independent checker judges that consequence assessment separately from repair coverage. Source basis for the assessment: environment/podman/build.rs:630-750 checks helper/image helm/recipe ownership, skips images used by containers and removes without force; :808-839 never records a selected custom base for retirement. Contract: SPEC.md recipe deletion confirmation and SPEC_impl.md 'Answers bind to what was drawn'. Remaining unresolved premise: none readily checkable in this route; independent review of the proposed drop/lowering remains the parent's gate, not an unresolved source lead."
+          }
+        },
+        {
+          "line": 13,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "l2",
+            "state": "open",
+            "summary": "Reopen the user-base safety premise without withdrawing warning history",
+            "location": "crates/farhelm-helm/src/tensorlake/recipes.rs:610",
+            "detail": "Reviewed commit: 56659839785691f76da3af5d8f51b511cff4ba8b; exact later warning repair remains 350a4b33b6d4476f4a78e43cea124bc2b828f462. Original TLDR/consequence preserved: recipe Delete broadened to container artifacts while its confirmation named Tensorlake snapshots only; the potentially highest concern was destruction beyond consent. This reopened synthesis retracts treating explicit target ownership labels and nonforcing removal as a general proof that custom user bases are protected. Supplied g058/c2 complete history, latest event 16, identifies a distinct retained highest alias g061/l8: ordinary image rm -- ID can implicitly prune unnamed ancestors without the Farhelm label predicate when --no-prune is omitted. A selected local untagged user base may therefore lose its sole copy after owned descendant cleanup. This is existing interface evidence, not new discovery. proposed_drop: preserve the prior exact warning-repair proposal only for the historical omission of owned container images; it does not cover or authorize user-base pruning. Prior source-refutation arguments based on labels/nonforcing removal are preserved as history but their broad safety conclusion is retracted pending the named source verification. possible_cover: canonical pruning finding g061/l8, corroborated by g058/c2; no duplicate new ID. Could-be-highest: yes; preserve the original possible user-work loss consequence and the supplied pruning route for independent parent judgment. Confidence: supplied source-verified conditional engine evidence, not local execution; own app/contract verification and g061/claims-037 reads follow immediately. Suggested bucket: do not apply the earlier other recommendation to the user-base pruning consequence. Exact historical warning, repair text, token/target bindings and the fact that no parent drop/lowering is accepted remain in prior l2 revisions and will be retained in the closing revision. No runtime tests, builds or reproductions."
+          }
+        },
+        {
+          "line": 14,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "l2",
+            "state": "open",
+            "summary": "Warning repair does not cover implicit user-base deletion",
+            "location": "crates/farhelm-helm/src/tensorlake/recipes.rs:610",
+            "detail": "Reviewed commit: 56659839785691f76da3af5d8f51b511cff4ba8b. Original TLDR/consequence preserved: shared recipe Delete also removes owned container artifacts while the confirmation at this intermediate revision names only Tensorlake snapshots, exceeding the stated scope; original potentially highest concern was loss of user-owned work beyond consent. The same revision's recipe_editor.rs:585 says exactly 'Delete recipe {shown_name}? Any running build is cancelled and the snapshots Farhelm built for it on Tensorlake are deleted.' Exact later repair remains 350a4b33b6d4476f4a78e43cea124bc2b828f462 recipe_editor.rs:584: 'Delete recipe {shown_name}? Running builds are cancelled and Farhelm's images and snapshots for this recipe are deleted. Images in use must be released first.' That repair names owned images across places and retains captured-target/rendered-token binding (:544-554,:873-883; recipes.rs:448-460). Both UI files are unchanged through pinned tip 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db, as previously checked. proposed_drop: preserve the exact later-repair proposal ONLY for the historical omitted-owned-container-artifact warning. It neither authorizes deleting user bases nor covers the canonical highest pruning defect g061/l8 (alias g058/c2), and no parent drop/priority decision is assumed accepted.\nCorrection: retract every prior l2 statement that target ownership labels, nonforcing removal, omission of bases from retired_images, or container-use checks prove custom user bases are protected. Own app recheck at the reviewed revision: proto recipes.rs:788-798 admits a local image ID; pull_base build.rs:808-839 reuses an existing reference without tagging/protecting it. retire_images_unlocked :689-750 checks only the explicit owned target, then executes image rm -- ID, omitting --no-prune; clean_images :781-788 calls it during recipe deletion. Direct primary source verification this turn: Podman v4.9.3 cmd/podman/images/rm.go:55-70 defaults NoPrune false (https://raw.githubusercontent.com/containers/podman/v4.9.3/cmd/podman/images/rm.go). Vendored common/libimage/image.go:185-193 defines dangling by absence of names/children, and :470-518 obtains the parent, deletes the explicit image and recursively removes a now-dangling parent unless NoPrune; implicit parents never pass Farhelm's label predicate (https://raw.githubusercontent.com/containers/podman/v4.9.3/vendor/github.com/containers/common/libimage/image.go). This confirms the broad safety premise was wrong. The supplied complete g061/l8 history and g058/c2 history additionally establish ordinary committed ancestry through Podman/Buildah and libimage oci/layer_tree; claims-037 entries g058/c2 and g059/l2 independently preserve the same separation. A valid local untagged user-authored base selected by ID can lose its sole retained copy when its last unprotected owned descendants retire. Tagged/named bases, other image/container references and read-only state can protect it; no forced removal of an in-use base, universal impact or observed loss is claimed. A saved recipe reference is not an engine reference protecting that image.\nConfidence: source-confirmed conditional route, with direct own app/default-pruning checks and named owner/parent ancestry verification; no runtime observation. Suggested bucket: retain the canonical pruning route at highest for conditional user-work loss. The earlier other recommendation applies only to the historical omitted-owned-artifact wording and must not lower this distinct consequence. Could-be-highest: yes, original concern retained and supplied user-base route now established. possible_cover: exact repair for historical wording; canonical g061/l8 / alias g058/c2 for the separate retained pruning route, not new discovery or a new local ID. Contract: SPEC.md recipe Delete confirmation; SPEC_impl.md 'Answers bind to what was drawn' and the explicit user-base preservation rule. The admission/lifetime proof in c3 remains narrow: serializing/owning the operation does not constrain engine pruning semantics. Original proposed-drop bases remain in history, with only their invalid broad implication retracted. Remaining own-source checks: explicit preservation text and committed-child/Delete caller closure; no runtime tests, builds or reproductions."
+          }
+        },
+        {
+          "line": 15,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "l2",
+            "state": "open",
+            "summary": "Warning repair does not cover implicit user-base deletion",
+            "location": "crates/farhelm-helm/src/tensorlake/recipes.rs:610",
+            "detail": "Reviewed commit: 56659839785691f76da3af5d8f51b511cff4ba8b. Original TLDR/consequence preserved: shared recipe Delete also removes owned container artifacts while the confirmation at this intermediate revision names only Tensorlake snapshots, exceeding the stated scope; original potentially highest concern was loss of user-owned work beyond consent. The same revision's recipe_editor.rs:585 says exactly 'Delete recipe {shown_name}? Any running build is cancelled and the snapshots Farhelm built for it on Tensorlake are deleted.' Exact later repair remains 350a4b33b6d4476f4a78e43cea124bc2b828f462 recipe_editor.rs:584: 'Delete recipe {shown_name}? Running builds are cancelled and Farhelm's images and snapshots for this recipe are deleted. Images in use must be released first.' That repair names owned images across places and retains captured-target/rendered-token binding (:544-554,:873-883; recipes.rs:448-460). Both UI files are unchanged through pinned tip 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db, as previously checked. proposed_drop: preserve the exact later-repair proposal ONLY for the historical omitted-owned-container-artifact warning. It neither authorizes deleting user bases nor covers the canonical highest pruning defect g061/l8 (alias g058/c2), and no parent drop/priority decision is assumed accepted.\nCorrection: retract every prior l2 statement that target ownership labels, nonforcing removal, omission of bases from retired_images, or container-use checks prove custom user bases are protected. Own app recheck at the reviewed revision: proto recipes.rs:788-798 admits a local image ID; pull_base build.rs:808-839 reuses an existing reference without tagging/protecting it. retire_images_unlocked :689-750 checks only the explicit owned target, then executes image rm -- ID, omitting --no-prune; clean_images :781-788 calls it during recipe deletion. Direct primary source verification this turn: Podman v4.9.3 cmd/podman/images/rm.go:55-70 defaults NoPrune false (https://raw.githubusercontent.com/containers/podman/v4.9.3/cmd/podman/images/rm.go). Vendored common/libimage/image.go:185-193 defines dangling by absence of names/children, and :470-518 obtains the parent, deletes the explicit image and recursively removes a now-dangling parent unless NoPrune; implicit parents never pass Farhelm's label predicate (https://raw.githubusercontent.com/containers/podman/v4.9.3/vendor/github.com/containers/common/libimage/image.go). This confirms the broad safety premise was wrong. The supplied complete g061/l8 history and g058/c2 history additionally establish ordinary committed ancestry through Podman/Buildah and libimage oci/layer_tree; claims-037 entries g058/c2 and g059/l2 independently preserve the same separation. A valid local untagged user-authored base selected by ID can lose its sole retained copy when its last unprotected owned descendants retire. Tagged/named bases, other image/container references and read-only state can protect it; no forced removal of an in-use base, universal impact or observed loss is claimed. A saved recipe reference is not an engine reference protecting that image.\nConfidence: source-confirmed conditional route, with direct own app/default-pruning checks and named owner/parent ancestry verification; no runtime observation. Suggested bucket: retain the canonical pruning route at highest for conditional user-work loss. The earlier other recommendation applies only to the historical omitted-owned-artifact wording and must not lower this distinct consequence. Could-be-highest: yes, original concern retained and supplied user-base route now established. possible_cover: exact repair for historical wording; canonical g061/l8 / alias g058/c2 for the separate retained pruning route, not new discovery or a new local ID. Contract: SPEC.md recipe Delete confirmation; SPEC_impl.md 'Answers bind to what was drawn' and the explicit user-base preservation rule. The admission/lifetime proof in c3 remains narrow: serializing/owning the operation does not constrain engine pruning semantics. Original proposed-drop bases remain in history, with only their invalid broad implication retracted. Remaining own-source checks: explicit preservation text and committed-child/Delete caller closure; no runtime tests, builds or reproductions.\nClosing synthesis checks: directly re-read the complete SPEC_impl.md Shared recipes and Podman places sections at the reviewed commit, including :6527-6529 separating user bases from committed layers and :6566-6568 prohibiting user-base deletion. This contradicts pruning; it is no accepted specification exception. Directly re-read build.rs:137-151: the admitted literal existing base creates the build helper; :203-224 commits/publishes the owned image, retaining the base only as provenance. tensorlake/recipes.rs:593-615 calls provider cleanup before the final store check, so the guard cannot prevent or undo implicit parent loss. Also directly verified primary Podman v4.9.3 ABI images.go:558-568 passes NoPrune into libimage (https://raw.githubusercontent.com/containers/podman/v4.9.3/pkg/domain/infra/abi/images.go), and libimage oci.go:60-94 plus layer_tree.go:263-340 recognize ancestry through matching layers and one added history entry (https://raw.githubusercontent.com/containers/podman/v4.9.3/vendor/github.com/containers/common/libimage/oci.go ; https://raw.githubusercontent.com/containers/podman/v4.9.3/vendor/github.com/containers/common/libimage/layer_tree.go). The ordinary commit-history preservation is independently source-verified in the complete named g061/l8 and g058/c2 histories; no separate runtime evidence is claimed. All readily checkable named app/contract/default-prune premises for this correction are resolved; no open source lead. Final scope: historical owned-image warning omission retains exact later repair coverage; conditional user-base pruning remains canonical g061/l8 at highest with its stated naming/container/other-image/sole-copy caveats, proposed_drop false for that consequence. The independent check still judges every original drop/consequence assessment. No new defect ID, no discovery pass, and no runtime/test/build/live action this turn."
+          }
+        }
+      ],
+      "latest": {
+        "line": 15,
+        "event": {
+          "version": 1,
+          "kind": "finding",
+          "id": "l2",
+          "state": "open",
+          "summary": "Warning repair does not cover implicit user-base deletion",
+          "location": "crates/farhelm-helm/src/tensorlake/recipes.rs:610",
+          "detail": "Reviewed commit: 56659839785691f76da3af5d8f51b511cff4ba8b. Original TLDR/consequence preserved: shared recipe Delete also removes owned container artifacts while the confirmation at this intermediate revision names only Tensorlake snapshots, exceeding the stated scope; original potentially highest concern was loss of user-owned work beyond consent. The same revision's recipe_editor.rs:585 says exactly 'Delete recipe {shown_name}? Any running build is cancelled and the snapshots Farhelm built for it on Tensorlake are deleted.' Exact later repair remains 350a4b33b6d4476f4a78e43cea124bc2b828f462 recipe_editor.rs:584: 'Delete recipe {shown_name}? Running builds are cancelled and Farhelm's images and snapshots for this recipe are deleted. Images in use must be released first.' That repair names owned images across places and retains captured-target/rendered-token binding (:544-554,:873-883; recipes.rs:448-460). Both UI files are unchanged through pinned tip 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db, as previously checked. proposed_drop: preserve the exact later-repair proposal ONLY for the historical omitted-owned-container-artifact warning. It neither authorizes deleting user bases nor covers the canonical highest pruning defect g061/l8 (alias g058/c2), and no parent drop/priority decision is assumed accepted.\nCorrection: retract every prior l2 statement that target ownership labels, nonforcing removal, omission of bases from retired_images, or container-use checks prove custom user bases are protected. Own app recheck at the reviewed revision: proto recipes.rs:788-798 admits a local image ID; pull_base build.rs:808-839 reuses an existing reference without tagging/protecting it. retire_images_unlocked :689-750 checks only the explicit owned target, then executes image rm -- ID, omitting --no-prune; clean_images :781-788 calls it during recipe deletion. Direct primary source verification this turn: Podman v4.9.3 cmd/podman/images/rm.go:55-70 defaults NoPrune false (https://raw.githubusercontent.com/containers/podman/v4.9.3/cmd/podman/images/rm.go). Vendored common/libimage/image.go:185-193 defines dangling by absence of names/children, and :470-518 obtains the parent, deletes the explicit image and recursively removes a now-dangling parent unless NoPrune; implicit parents never pass Farhelm's label predicate (https://raw.githubusercontent.com/containers/podman/v4.9.3/vendor/github.com/containers/common/libimage/image.go). This confirms the broad safety premise was wrong. The supplied complete g061/l8 history and g058/c2 history additionally establish ordinary committed ancestry through Podman/Buildah and libimage oci/layer_tree; claims-037 entries g058/c2 and g059/l2 independently preserve the same separation. A valid local untagged user-authored base selected by ID can lose its sole retained copy when its last unprotected owned descendants retire. Tagged/named bases, other image/container references and read-only state can protect it; no forced removal of an in-use base, universal impact or observed loss is claimed. A saved recipe reference is not an engine reference protecting that image.\nConfidence: source-confirmed conditional route, with direct own app/default-pruning checks and named owner/parent ancestry verification; no runtime observation. Suggested bucket: retain the canonical pruning route at highest for conditional user-work loss. The earlier other recommendation applies only to the historical omitted-owned-artifact wording and must not lower this distinct consequence. Could-be-highest: yes, original concern retained and supplied user-base route now established. possible_cover: exact repair for historical wording; canonical g061/l8 / alias g058/c2 for the separate retained pruning route, not new discovery or a new local ID. Contract: SPEC.md recipe Delete confirmation; SPEC_impl.md 'Answers bind to what was drawn' and the explicit user-base preservation rule. The admission/lifetime proof in c3 remains narrow: serializing/owning the operation does not constrain engine pruning semantics. Original proposed-drop bases remain in history, with only their invalid broad implication retracted. Remaining own-source checks: explicit preservation text and committed-child/Delete caller closure; no runtime tests, builds or reproductions.\nClosing synthesis checks: directly re-read the complete SPEC_impl.md Shared recipes and Podman places sections at the reviewed commit, including :6527-6529 separating user bases from committed layers and :6566-6568 prohibiting user-base deletion. This contradicts pruning; it is no accepted specification exception. Directly re-read build.rs:137-151: the admitted literal existing base creates the build helper; :203-224 commits/publishes the owned image, retaining the base only as provenance. tensorlake/recipes.rs:593-615 calls provider cleanup before the final store check, so the guard cannot prevent or undo implicit parent loss. Also directly verified primary Podman v4.9.3 ABI images.go:558-568 passes NoPrune into libimage (https://raw.githubusercontent.com/containers/podman/v4.9.3/pkg/domain/infra/abi/images.go), and libimage oci.go:60-94 plus layer_tree.go:263-340 recognize ancestry through matching layers and one added history entry (https://raw.githubusercontent.com/containers/podman/v4.9.3/vendor/github.com/containers/common/libimage/oci.go ; https://raw.githubusercontent.com/containers/podman/v4.9.3/vendor/github.com/containers/common/libimage/layer_tree.go). The ordinary commit-history preservation is independently source-verified in the complete named g061/l8 and g058/c2 histories; no separate runtime evidence is claimed. All readily checkable named app/contract/default-prune premises for this correction are resolved; no open source lead. Final scope: historical owned-image warning omission retains exact later repair coverage; conditional user-base pruning remains canonical g061/l8 at highest with its stated naming/container/other-image/sole-copy caveats, proposed_drop false for that consequence. The independent check still judges every original drop/consequence assessment. No new defect ID, no discovery pass, and no runtime/test/build/live action this turn."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g059/findings.jsonl",
+        "id": "l2",
+        "line": 9,
+        "disposition": "under-investigation",
+        "group": "g059-l2",
+        "reason": "Record durably acknowledged; parent source/contract validation, cross-group synthesis, coverage/filter matching and any independent drop check remain pending. This preserves the claim and uncertainty without accepting, dropping or lowering it."
+      },
+      "accepted_parent_decision": null,
+      "returned_claim_checks": [
+        {
+          "batch": "claims-037",
+          "key": "g059/l2",
+          "latest_line": 9,
+          "recommendation": "covered",
+          "bucket": "other",
+          "underlying_key": "recipe-delete-warning-omits-container-artifacts",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The historical warning mismatch is real at the runtime-introducing commit. A later commit in this same review range explicitly adds images and every place to the warning, with unchanged text through review tip. This repairs omitted owned-container-artifact wording only. The record's broader claim that custom bases are protected is invalidated by the separate retained pruning route.",
+          "checks": [
+            "56659839785691f76da3af5d8f51b511cff4ba8b tensorlake/recipes.rs:610 and environment/mod.rs:426-445 dispatch both providers; podman/build.rs:764-799 removes owned images. The same revision's recipe_editor.rs:584-585 names only Tensorlake snapshots.",
+            "350a4b33b6d4476f4a78e43cea124bc2b828f462 recipe_editor.rs:580-585 warns unconditionally about Farhelm's images and snapshots, including builds finishing after opening. :544-554 and :873-883 bind the captured name and rendered confirmation token. recipes.rs:448-460 keys the editor by its captured target.",
+            "git diff from 350a4b33b6d4476f4a78e43cea124bc2b828f462 through 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db is empty for both UI files.",
+            "podman/build.rs:740 lacks --no-prune. Therefore labels, nonforcing removal and omission of user bases from retired_images cannot justify this record's general no-user-base-loss assertion. Keep g058/c2's separate highest route. No runtime observation."
+          ],
+          "coverage_checked": {
+            "specifications": "Current SPEC.md:488 requires recipe Delete confirmation; SPEC_impl.md:1069-1097 binds answers to displayed scope. Neither accepts omitted artifact scope. SPEC.md:4887 and SPEC_impl.md:6089 protect user bases rather than accepting pruning.",
+            "planned_and_plans": "TODO.md Planned and plans/queue/INDEX.md are empty. Exact coverage is the checked later source repair, not a planned task.",
+            "bugs": "BUGS.md contains no warning-scope exception.",
+            "queue": "INDEX.md searched for recipe deletion, confirmation, warning, images and snapshots; no exact queued warning mismatch. Nearby snapshot cleanup items have different causes.",
+            "triage": "Active TRIAGE_OUTCOMES.md searched for recipe-delete warning/consent/artifact terms; no exact outcome. Archive not read.",
+            "filter": "No filter used: a destructive scope mismatch is not dismissed as a rare diagnostic."
+          },
+          "exact_cover_quotes": [
+            "350a4b33b6d4476f4a78e43cea124bc2b828f462:crates/farhelm-ui/src/tensorlake/recipe_editor.rs:584: Delete recipe {shown_name}? Running builds are cancelled and Farhelm's images and snapshots for this recipe are deleted. Images in use must be released first."
+          ],
+          "missing_premise": "No ongoing omitted-owned-images wording gap remains at tip. The repaired text does not authorize deleting a user-owned base; the independent check must not treat the wording repair as coverage for pruning or rely on the latest record's disproved broad protection rationale.",
+          "original_stronger_consequence": "Deletion could destroy resources beyond the user's stated consent, potentially user-owned work. The intermediate confirmed consequence was omitted regenerable container artifacts; later wording repair was proposed, not accepted. Its narrowed consequence assessment and every earlier caveat require independent judgment.",
+          "needs_independent_drop_check": true,
+          "proposed_basis": "Propose repair coverage only for the omitted-container-artifact warning, retaining the historical finding and the separate highest pruning route. Reject any broader no-user-base-loss basis.",
+          "new_interface_evidence": "The already named g058/c2 route directly contradicts l2 line9's claim that nonforcing labelled removal protects custom bases: Podman default removal can prune unlabelled unnamed ancestors. This is existing named evidence, not a new defect search."
+        }
+      ],
+      "parent_proposals": [
+        {
+          "artifact": "parent-flagged-judgments-037.json",
+          "key": "g059/l2",
+          "proposal": "claim-checks/claims-037/result.json",
+          "parent_proposal": "later-source-repaired-owned-image-warning-only-with-pruning-correction-pending",
+          "final_independent_gate": "required-before-original-destructive-scope-drop-or-lowering",
+          "reason": "Full037 real566 warning names only Tensorlake snapshots while cleanup now includes owned container artifacts;350 explicitly warns about Farhelm images/snapshots across places and late-finishing builds, unchanged to tip. Propose historical repair only for that omitted owned-artifact wording. The line9 broad claim that labels/nonforcing removal protect custom bases is false under retained058c2/061l8 default pruning. Original059 explicitly reopened turn4 with named evidence to revise its own log; no warning-repair dismissal can erase user-base loss. Preserve original wider consent/work possibility and gate the narrowed historical consequence."
+        }
+      ],
+      "collection": {
+        "retain": true,
+        "clearly_refuted_candidate": false,
+        "needs_unfinished_gate": true,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "g059/l2",
+        "destination": "trailing-warning-repair-does-not-cover-implicit-user-base-deletion.md"
+      }
+    },
+    {
+      "key": "g059/c3",
+      "owner": "g059",
+      "id": "c3",
+      "domain": "environment-recipes",
+      "purpose": "environment-recipes: crates/farhelm-proto/src/recipes.rs, crates/farhelm-proto/src/tensorlake/recipes_tests.rs, crates/farhelm-ui/src/tensorlake/recipe_editor.rs, crates/farhelm-ui/src/tensorlake/recipe_editor_tests.rs, crates/farhelm-ui/src/tensorlake/recipes.rs, crates/farhelm-helm/src/environment/recipes_tests.rs, crates/farhelm-helm/src/tensorlake/recipes.rs; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 6,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c3",
+            "state": "open",
+            "summary": "Shared deletion admission retains resource ownership",
+            "location": "crates/farhelm-helm/src/tensorlake/recipes.rs:582-620",
+            "detail": "Reviewed commit: 56659839785691f76da3af5d8f51b511cff4ba8b. TLDR considered: broadening recipe deletion could forget container resources or drop its exclusion when the browser disconnects, permitting cleanup/build races. Confidence: confirmed source refutation for the paths reviewed; no execution. Suggested bucket: no finding. Could-be-highest: yes if a cleanup race actually destroyed user environments or lost their only ownership record; no such route was found. proposed_drop: source preserves ownership/admission rather than a specification-only exemption. tensorlake/recipes.rs:586 runs the full deletion body on run_owned; lib.rs:2721-2728 implements that as an owned tokio task. begin_delete at tensorlake/build.rs:1769-1782 records one deletion guard; lib.rs:2465-2472 passes the same registry into both production providers. Podman job admission checks deleting under the registry lock (:679-726), source use checks deletion after locking (:731-748), and cleanup requires the matching guard (:752-763). Tensorlake starts reject deleting (:930-933), snapshot use rejects it (:1957-1971). clean_tensorlake waits cancelled jobs and uses source exclusion before retiring snapshots (:1787-1876); clean_images waits jobs, takes place source exclusion, and only clears confirmed cleanup (:764-799). The store's final immediate transaction rechecks host use and aggregate needs_cleanup before deleting the row (tensorlake/recipes.rs:393-430). Contract: SPEC_impl.md 'Shared recipes and prepared artifacts' requires shared deletion admission and retaining failed ownership; 'Who owns an accepted action' requires disconnect-independent completion. possible_cover: none. Caveat: this candidate does not claim every provider command is correct, and does not retract l2's confirmation mismatch."
+          }
+        },
+        {
+          "line": 10,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c3",
+            "state": "open",
+            "summary": "Deletion ownership refutation remains separate from warning repair",
+            "location": "crates/farhelm-helm/src/tensorlake/recipes.rs:582-620",
+            "detail": "Reviewed commit: 56659839785691f76da3af5d8f51b511cff4ba8b, with later stability checked through 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db. Original TLDR/consequence considered: cross-provider deletion could forget resource ownership or lose its exclusion on browser disconnect, permitting destructive build/cleanup races. Could-be-highest: yes for the original possible destruction/ownership-loss consequence; no drop/lowering is accepted by this reviewer. Confidence: confirmed source refutation of the reviewed admission/lifetime paths; no execution. proposed_drop: source boundaries already recorded under c3 remain intact, rather than relying on l2's later wording repair. tensorlake/recipes.rs:586 owns the deletion body through run_owned, lib.rs:2721-2728 owns its tokio task, begin_delete (:1769-1782) holds shared admission and production construction shares its registry (lib.rs:2465-2472). Podman start/use/cleanup checks :679-763 exclude work under deletion; Tensorlake start and snapshot-use checks :930-933 and :1957-1971 do likewise. clean_tensorlake :1787-1876 and clean_images build.rs:764-799 wait active work and retain unsettled ownership; the final store transaction recipes.rs:393-430 rechecks hosts and aggregate needs_cleanup. New synthesis result: git diff from this revision to the pinned tip is empty for tensorlake/recipes.rs, tensorlake/build.rs and environment/recipes.rs; environment/mod.rs changes only a cfg(test) setter and leaves production cleanup dispatch unchanged. Podman build.rs is also unchanged through the tip (l1 synthesis check). Thus the warning repair neither fixes nor weakens the independently checked ownership contract. possible_cover: agrees narrowly with g060/c3's aggregate-state check, not a new queue-coverage assertion. Contract: SPEC_impl.md 'Shared recipes and prepared artifacts' and 'Who owns an accepted action'. Suggested bucket: no active finding proposed, with all original potentially highest consequences retained for the parent's independent check. Caveat: this is admission/lifetime/retention analysis, not certification of every underlying provider command."
+          }
+        },
+        {
+          "line": 16,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c3",
+            "state": "open",
+            "summary": "Deletion ownership refutation remains separate from warning repair",
+            "location": "crates/farhelm-helm/src/tensorlake/recipes.rs:582-620",
+            "detail": "Reviewed commit: 56659839785691f76da3af5d8f51b511cff4ba8b, with later stability checked through 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db. Original TLDR/consequence considered: cross-provider deletion could forget resource ownership or lose its exclusion on browser disconnect, permitting destructive build/cleanup races. Could-be-highest: yes for the original possible destruction/ownership-loss consequence; no drop/lowering is accepted by this reviewer. Confidence: confirmed source refutation of the reviewed admission/lifetime paths; no execution. proposed_drop: source boundaries already recorded under c3 remain intact, rather than relying on l2's later wording repair. tensorlake/recipes.rs:586 owns the deletion body through run_owned, lib.rs:2721-2728 owns its tokio task, begin_delete (:1769-1782) holds shared admission and production construction shares its registry (lib.rs:2465-2472). Podman start/use/cleanup checks :679-763 exclude work under deletion; Tensorlake start and snapshot-use checks :930-933 and :1957-1971 do likewise. clean_tensorlake :1787-1876 and clean_images build.rs:764-799 wait active work and retain unsettled ownership; the final store transaction recipes.rs:393-430 rechecks hosts and aggregate needs_cleanup. New synthesis result: git diff from this revision to the pinned tip is empty for tensorlake/recipes.rs, tensorlake/build.rs and environment/recipes.rs; environment/mod.rs changes only a cfg(test) setter and leaves production cleanup dispatch unchanged. Podman build.rs is also unchanged through the tip (l1 synthesis check). Thus the warning repair neither fixes nor weakens the independently checked ownership contract. possible_cover: agrees narrowly with g060/c3's aggregate-state check, not a new queue-coverage assertion. Contract: SPEC_impl.md 'Shared recipes and prepared artifacts' and 'Who owns an accepted action'. Suggested bucket: no active finding proposed, with all original potentially highest consequences retained for the parent's independent check. Caveat: this is admission/lifetime/retention analysis, not certification of every underlying provider command.\nLate-interface scope clarification: the verified default-pruning route canonicalized as g061/l8 (alias g058/c2) is not refuted by this admission/lifetime argument. c3 establishes that the handler owns its work, takes shared deletion admission and retains recorded ownership until explicit cleanup confirms; it does not establish that the external removal command affects only its explicit target. The final aggregate guard runs after provider cleanup and cannot prevent the implicit user-base deletion now corrected under l2. Preserve the original potential ownership-loss consequence and source-refutation proposal only for the disconnect/admission/bookkeeping mechanism stated here. No production-correctness certification or accepted drop is implied, and the separate historical warning-repair proposal cannot authorize base pruning. No new source lead or execution."
+          }
+        }
+      ],
+      "latest": {
+        "line": 16,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c3",
+          "state": "open",
+          "summary": "Deletion ownership refutation remains separate from warning repair",
+          "location": "crates/farhelm-helm/src/tensorlake/recipes.rs:582-620",
+          "detail": "Reviewed commit: 56659839785691f76da3af5d8f51b511cff4ba8b, with later stability checked through 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db. Original TLDR/consequence considered: cross-provider deletion could forget resource ownership or lose its exclusion on browser disconnect, permitting destructive build/cleanup races. Could-be-highest: yes for the original possible destruction/ownership-loss consequence; no drop/lowering is accepted by this reviewer. Confidence: confirmed source refutation of the reviewed admission/lifetime paths; no execution. proposed_drop: source boundaries already recorded under c3 remain intact, rather than relying on l2's later wording repair. tensorlake/recipes.rs:586 owns the deletion body through run_owned, lib.rs:2721-2728 owns its tokio task, begin_delete (:1769-1782) holds shared admission and production construction shares its registry (lib.rs:2465-2472). Podman start/use/cleanup checks :679-763 exclude work under deletion; Tensorlake start and snapshot-use checks :930-933 and :1957-1971 do likewise. clean_tensorlake :1787-1876 and clean_images build.rs:764-799 wait active work and retain unsettled ownership; the final store transaction recipes.rs:393-430 rechecks hosts and aggregate needs_cleanup. New synthesis result: git diff from this revision to the pinned tip is empty for tensorlake/recipes.rs, tensorlake/build.rs and environment/recipes.rs; environment/mod.rs changes only a cfg(test) setter and leaves production cleanup dispatch unchanged. Podman build.rs is also unchanged through the tip (l1 synthesis check). Thus the warning repair neither fixes nor weakens the independently checked ownership contract. possible_cover: agrees narrowly with g060/c3's aggregate-state check, not a new queue-coverage assertion. Contract: SPEC_impl.md 'Shared recipes and prepared artifacts' and 'Who owns an accepted action'. Suggested bucket: no active finding proposed, with all original potentially highest consequences retained for the parent's independent check. Caveat: this is admission/lifetime/retention analysis, not certification of every underlying provider command.\nLate-interface scope clarification: the verified default-pruning route canonicalized as g061/l8 (alias g058/c2) is not refuted by this admission/lifetime argument. c3 establishes that the handler owns its work, takes shared deletion admission and retains recorded ownership until explicit cleanup confirms; it does not establish that the external removal command affects only its explicit target. The final aggregate guard runs after provider cleanup and cannot prevent the implicit user-base deletion now corrected under l2. Preserve the original potential ownership-loss consequence and source-refutation proposal only for the disconnect/admission/bookkeeping mechanism stated here. No production-correctness certification or accepted drop is implied, and the separate historical warning-repair proposal cannot authorize base pruning. No new source lead or execution."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g059/findings.jsonl",
+        "id": "c3",
+        "line": 10,
+        "disposition": "under-investigation",
+        "group": "g059-c3",
+        "reason": "Record durably acknowledged; parent source/contract validation, cross-group synthesis, coverage/filter matching and any independent drop check remain pending. This preserves the claim and uncertainty without accepting, dropping or lowering it."
+      },
+      "accepted_parent_decision": null,
+      "returned_claim_checks": [
+        {
+          "batch": "claims-037",
+          "key": "g059/c3",
+          "latest_line": 10,
+          "recommendation": "refuted",
+          "bucket": "other",
+          "underlying_key": "recipe-delete-disconnect-loses-shared-admission",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The checked HTTP disconnect cannot drop deletion work or its shared admission: server-owned work retains the guard across both provider cleanups and final deletion. This narrow conclusion does not certify provider image semantics or erase existing same-name/detached-write races.",
+          "checks": [
+            "56659839785691f76da3af5d8f51b511cff4ba8b tensorlake/recipes.rs:584-615 owns deletion through run_owned and retains begin_delete guard through provider cleanup and store deletion; lib.rs:2721-2728 spawns the work independently of the waiter.",
+            "Same revision lib.rs:2465-2472 passes the same build registry to both providers; tensorlake/build.rs:1769-1779 records shared deletion admission; :679-763 rejects Podman job/use admission during deletion and requires the matching cleanup guard; :930-933 and :1958-1971 reject Tensorlake work/source admission.",
+            "Same revision clean_tensorlake :1784-1870 awaits cancelled jobs and preserves failed resource state; podman/build.rs:764-799 waits/cancels work and removes place state only after needs_cleanup is false. tensorlake/recipes.rs:393-430 checks host use and aggregate cleanup in its final immediate transaction.",
+            "Those route/build/state files remain unchanged through review tip; environment/mod.rs's later change adds only a test setter. No execution."
+          ],
+          "coverage_checked": {
+            "specifications": "Current SPEC_impl.md:22-58 owns accepted actions across disconnects; :6039-6050 requires shared admission, awaited cleanup and retained ownership. SPEC.md:462,550-580 states recipe use/cleanup constraints. No disconnect-lifetime exception.",
+            "planned_and_plans": "TODO.md Planned and plans/queue/INDEX.md are empty; no unlanded repair.",
+            "bugs": "BUGS.md has no recipe deletion/disconnect coverage.",
+            "queue": "Read old-recipe-admission-builds-same-name-replacement.md, detached-recipe-write-crosses-recreated-generation.md and snapshot-cleanup-races-new-host-registration.md after INDEX search. Those are distinct admitted-request/row-generation/registration races; the narrow disconnect-lifetime proposal does not refute or cover them.",
+            "triage": "Active TRIAGE_OUTCOMES.md searched for recipe deletion, disconnect and ownership; no exact outcome. Archive not read.",
+            "filter": "No filter used; potentially destructive admission hypothesis requires source/independent checking."
+          },
+          "exact_cover_quotes": [],
+          "missing_premise": "No checked path makes a browser disconnect release deletion admission early. Internal intentional cancellation, detached writes, row reincarnation and implicit image pruning are separate mechanisms and remain outside this refutation.",
+          "original_stronger_consequence": "Cross-provider deletion could forget resource ownership or lose exclusion when the browser disconnects, permitting destructive build/cleanup races or ownership loss. Neither the warning repair nor this narrow admission proof certifies all provider cleanup commands.",
+          "needs_independent_drop_check": true,
+          "proposed_basis": "Source-refute only loss of the checked server-owned deletion admission/lifetime on disconnect; send that destructive hypothesis to independent drop review."
+        }
+      ],
+      "parent_proposals": [
+        {
+          "artifact": "parent-flagged-judgments-037.json",
+          "key": "g059/c3",
+          "proposal": "claim-checks/claims-037/result.json",
+          "parent_proposal": "source-refuted-browser-disconnect-loses-recipe-deletion-admission",
+          "final_independent_gate": "required-before-original-ownership-loss-drop",
+          "reason": "Full037 run_owned keeps deletion task/shared guard across both provider cleanups and final immediate aggregate needs_cleanup transaction; both providers use the same registry and reject new job/use admission. Browser waiter loss does not release this owned work. Refute only that disconnect lifetime route, not detached writes, same-name reincarnation, registration races, intentional internal cancellation or implicit image pruning, all explicitly separate. Preserve destructive ownership/exclusion hypothesis for fresh check."
+        }
+      ],
+      "collection": {
+        "retain": true,
+        "clearly_refuted_candidate": false,
+        "needs_unfinished_gate": true,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "g059/c3",
+        "destination": "trailing-deletion-ownership-refutation-remains-separate-from-warning-repair.md"
+      }
+    },
+    {
+      "key": "g059/c4",
+      "owner": "g059",
+      "id": "c4",
+      "domain": "environment-recipes",
+      "purpose": "environment-recipes: crates/farhelm-proto/src/recipes.rs, crates/farhelm-proto/src/tensorlake/recipes_tests.rs, crates/farhelm-ui/src/tensorlake/recipe_editor.rs, crates/farhelm-ui/src/tensorlake/recipe_editor_tests.rs, crates/farhelm-ui/src/tensorlake/recipes.rs, crates/farhelm-helm/src/environment/recipes_tests.rs, crates/farhelm-helm/src/tensorlake/recipes.rs; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 11,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c4",
+            "state": "open",
+            "summary": "Changed login fixtures do not show an upgrade regression",
+            "location": "crates/farhelm-helm/src/environment/recipes_tests.rs:56",
+            "detail": "Reviewed commit: 56659839785691f76da3af5d8f51b511cff4ba8b. TLDR considered during discovery: adding required login identity to prepared-image fixtures could conceal inability to read already persisted Podman prepared records. Source check: at the immediate parent 52cc5d7250d262f93b730d91a07c240d33c2ea5f, environment/recipes.rs:86-92 defines PreparedImage without login, but git grep for 'PreparedImage {' across crates/farhelm-helm/src returns only that type declaration and no construction/writer. Its JSON prepared records are test fixtures from the model foundation, not evidence that an earlier runtime produced persistent images. The assigned recipes_tests.rs patch adds login to both prepared fixtures so they describe the runtime identity the newly introduced implementation actually requires. The earlier model declaration alone therefore does not establish a shipped upgrade path into an unreadable record. Confidence: confirmed source refutation of this specific predecessor-writer premise; no execution. Suggested bucket: no finding proposed. Could-be-highest: no established security, destructive cleanup or user-work-loss route; the considered consequence was upgrade-time prepared-state decoding failure. proposed_drop: source refutation based on the absence of a predecessor runtime constructor in the exact parent, not a generalized claim that staged types cannot be consumed. possible_cover: none. Contract: SPEC_impl.md 'Disposable environments' requires observed login coordinates for Podman execution; shared recipe artifact ownership must remain recorded. Caveat: this does not certify forward/backward downgrade compatibility or arbitrary externally fabricated state. No new verified or unverified finding resulted; the rejected candidate is retained for the caller."
+          }
+        },
+        {
+          "line": 12,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c4",
+            "state": "open",
+            "summary": "Required login fixtures have no predecessor runtime records to invalidate",
+            "location": "crates/farhelm-helm/src/environment/recipes_tests.rs:56",
+            "detail": "Reviewed commit: 56659839785691f76da3af5d8f51b511cff4ba8b. TLDR considered: adding login to prepared-image fixtures could mask an upgrade failure reading older persisted Podman preparations. Confidence: confirmed source refutation of that predecessor-production-state premise; no execution. Exact parent is 52cc5d7250d262f93b730d91a07c240d33c2ea5f (git rev-parse checked). It defines PreparedImage without login at environment/recipes.rs:86-92, but git grep for 'PreparedImage {' finds only the declaration, with no constructor. Additional checks: its environment directory has lifecycle, mod, podman_probe, recipes and recipes_tests only, with no Podman runtime/build implementation. All references to PodmanRecipeState, state.podman and podman insertion in helm source are definitions, aggregate cleanup checks and tests; the other hosts.rs hits concern the probe cache, not prepared records. Thus no predecessor production writer is shown that could have saved a missing-login prepared image. The assigned patch adds observed login data to both test fixtures to match the implementation introduced in the same commit; it does not erase a shown upgrade case. Contract: SPEC_impl.md 'Disposable environments' requires observed login coordinates for execution and retaining artifact ownership. Suggested bucket: no finding proposed. Could-be-highest: no established security, destructive cleanup or user-work-loss route; the considered consequence was decoding failure for a supposed earlier prepared record. proposed_drop: source refutation of the exact prior-writer premise, pending the caller's judgment, not a claim that all staged APIs lack consumers. possible_cover: none. Caveats: no downgrade-compatibility certification or claim about fabricated external state. All readily checkable predecessor-writer premises for this candidate are settled. No new verified/unverified finding resulted."
+          }
+        }
+      ],
+      "latest": {
+        "line": 12,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c4",
+          "state": "open",
+          "summary": "Required login fixtures have no predecessor runtime records to invalidate",
+          "location": "crates/farhelm-helm/src/environment/recipes_tests.rs:56",
+          "detail": "Reviewed commit: 56659839785691f76da3af5d8f51b511cff4ba8b. TLDR considered: adding login to prepared-image fixtures could mask an upgrade failure reading older persisted Podman preparations. Confidence: confirmed source refutation of that predecessor-production-state premise; no execution. Exact parent is 52cc5d7250d262f93b730d91a07c240d33c2ea5f (git rev-parse checked). It defines PreparedImage without login at environment/recipes.rs:86-92, but git grep for 'PreparedImage {' finds only the declaration, with no constructor. Additional checks: its environment directory has lifecycle, mod, podman_probe, recipes and recipes_tests only, with no Podman runtime/build implementation. All references to PodmanRecipeState, state.podman and podman insertion in helm source are definitions, aggregate cleanup checks and tests; the other hosts.rs hits concern the probe cache, not prepared records. Thus no predecessor production writer is shown that could have saved a missing-login prepared image. The assigned patch adds observed login data to both test fixtures to match the implementation introduced in the same commit; it does not erase a shown upgrade case. Contract: SPEC_impl.md 'Disposable environments' requires observed login coordinates for execution and retaining artifact ownership. Suggested bucket: no finding proposed. Could-be-highest: no established security, destructive cleanup or user-work-loss route; the considered consequence was decoding failure for a supposed earlier prepared record. proposed_drop: source refutation of the exact prior-writer premise, pending the caller's judgment, not a claim that all staged APIs lack consumers. possible_cover: none. Caveats: no downgrade-compatibility certification or claim about fabricated external state. All readily checkable predecessor-writer premises for this candidate are settled. No new verified/unverified finding resulted."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g059/findings.jsonl",
+        "id": "c4",
+        "line": 12,
+        "disposition": "under-investigation",
+        "group": "g059-c4",
+        "reason": "Record durably acknowledged; parent source/contract validation, cross-group synthesis, coverage/filter matching and any independent drop check remain pending. This preserves the claim and uncertainty without accepting, dropping or lowering it."
+      },
+      "accepted_parent_decision": null,
+      "returned_claim_checks": [
+        {
+          "batch": "claims-037",
+          "key": "g059/c4",
+          "latest_line": 12,
+          "recommendation": "refuted",
+          "bucket": "other",
+          "underlying_key": "prepared-image-login-no-predecessor-writer",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The exact predecessor defines the foundation shape but has no production PreparedImage constructor or Podman runtime/build implementation. Updating the fixtures therefore does not conceal a shown production upgrade case. This is a narrow predecessor-writer conclusion, not a general staged-API compatibility rule.",
+          "checks": [
+            "git rev-parse confirms 56659839785691f76da3af5d8f51b511cff4ba8b's parent is 52cc5d7250d262f93b730d91a07c240d33c2ea5f.",
+            "git grep 'PreparedImage {' in that exact parent's helm source returns only environment/recipes.rs:86. Its environment tree contains lifecycle/mod/podman_probe/recipes/recipes_tests, no Podman runtime/build module. Foundation 56040bb964270bb40d191902173dbb84b3ba78fc likewise has only the declaration.",
+            "Consumer environment/recipes.rs:94-100 adds required login, and podman/build.rs:368-375 creates actual prepared records with observed user login. No fabricated-state or downgrade assertion; no decoding experiment."
+          ],
+          "coverage_checked": {
+            "specifications": "Current SPEC.md:5360-5404 makes compatibility feature-specific and does not give blanket permission for destructive migrations. Recipe behavior at :450-488 and SPEC_impl.md:6010-6050,6058-6092 requires retained artifacts and observed login. No exact accepted login-record break is stated; the necessary predecessor writer is absent here.",
+            "planned_and_plans": "TODO.md Planned and unlanded plans index are empty; no active prepared-login migration task.",
+            "bugs": "BUGS.md has no prepared-state decode exception.",
+            "queue": "INDEX.md searched for prepared-image login, recipe decode/schema and upgrade compatibility. No exact item. g058/c3 shares this subcheck but its broader serde/type-move hypothesis is not treated as an exact same-root alias.",
+            "triage": "Active TRIAGE_OUTCOMES.md searched for prepared/login state, migration and recipe decoding; no exact outcome. Archive not read.",
+            "filter": "No upgrade filter applied: ordinary upgrade decode failure would not need an extra rare condition and could break existing state. Basis is absent predecessor writer."
+          },
+          "exact_cover_quotes": [],
+          "missing_premise": "No shipped predecessor writer creating a login-less prepared record is shown. Externally fabricated or downgrade-created state is not claimed supported by this check.",
+          "original_stronger_consequence": "A required-login fixture change could hide inability to read persisted older Podman preparations. Although the owner found no established highest route, unreadable ownership records could implicate cleanup and user work; the proposed dismissal is marked conservatively for independent checking.",
+          "needs_independent_drop_check": true,
+          "proposed_basis": "Source-refute the exact prior-production-record premise, with the stated compatibility limits preserved."
+        }
+      ],
+      "parent_proposals": [
+        {
+          "artifact": "parent-flagged-judgments-037.json",
+          "key": "g059/c4",
+          "proposal": "claim-checks/claims-037/result.json",
+          "parent_proposal": "source-refuted-login-less-prepared-record-prior-production-writer",
+          "final_independent_gate": "required-by-conservative-owned-artifact-schema-flag",
+          "reason": "Full037 exact566 parent52cc and foundation only declare PreparedImage; no production constructor or Podman build/runtime module. First real prepared write stores observed login. Fixture update therefore does not hide a shown shipped predecessor record, but this is not a general staged-API compatibility exemption. External fabricated/downgrade records excluded; preserve possible unreadable ownership/cleanup work consequence and independent gate."
+        }
+      ],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": true,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "prepared-image-login-no-predecessor-writer",
+        "destination": null
+      }
+    },
+    {
+      "key": "g059/l5",
+      "owner": "g059",
+      "id": "l5",
+      "domain": "environment-recipes",
+      "purpose": "environment-recipes: crates/farhelm-proto/src/recipes.rs, crates/farhelm-proto/src/tensorlake/recipes_tests.rs, crates/farhelm-ui/src/tensorlake/recipe_editor.rs, crates/farhelm-ui/src/tensorlake/recipe_editor_tests.rs, crates/farhelm-ui/src/tensorlake/recipes.rs, crates/farhelm-helm/src/environment/recipes_tests.rs, crates/farhelm-helm/src/tensorlake/recipes.rs; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 17,
+          "event": {
+            "version": 1,
+            "kind": "lead",
+            "id": "l5",
+            "state": "open",
+            "summary": "Check literal container-base text at recipe display boundaries",
+            "location": "crates/farhelm-ui/src/tensorlake/recipes.rs:74",
+            "detail": "Reviewed commit: 56040bb964270bb40d191902173dbb84b3ba78fc. Discovery pass 2. TLDR suspected: the new literal container reference/account fields can contain invisible or direction-changing characters and are interpolated into recipe summaries without a visible escape boundary, unlike previously ASCII-restricted base choices. Check whether this is an applicable external-text display contract and an actual shipped input/display route rather than treating all user-entered config as peer text. Source basis: proto recipes.rs ContainerImage validation requires only nonempty/NUL-free strings; UI recipe_summary formats reference and user into the new base description (recipes.rs:74-77); staged editor preserves exact values. Missing premises: governing text-display rule for recipe catalog values and whether callers escape the composed summary, plus accepted field-consumer semantics that make such a spelling reachable. Suggested bucket: other if established, misleading display only. Could-be-highest: no established wrong-target execution, security or user-work loss route; Dioxus text is not HTML execution. Confidence: uninvestigated source lead, not a finding. proposed_drop: false. possible_cover: supplied g086/l4 concerns host-alias footer text, a different source/path; do not claim novelty if the exact same recipe display issue is already known. Next: inspect summary callers, text contract and recipe authoring API. No runtime action."
+          }
+        },
+        {
+          "line": 18,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "l5",
+            "state": "open",
+            "summary": "Recipe summaries render literal container-base formatting characters",
+            "location": "crates/farhelm-ui/src/tensorlake/recipes.rs:74",
+            "detail": "Reviewed commit: 56040bb964270bb40d191902173dbb84b3ba78fc. Discovery pass 2. TLDR: a saved container reference or login account containing invisible/direction-changing characters is shown verbatim in its recipe summary, so its visible spelling and surrounding text can be misleading. Source: the assigned new ContainerImage branch at UI tensorlake/recipes.rs:74-76 interpolates reference/user into a single String; RecipeList at :464 renders recipe_summary directly in a span. The shared validator in proto recipes.rs:788-798 requires these fields to be nonempty and NUL-free, rather than the earlier ASCII-restricted image/snapshot grammar. The editor from_view/to_save at :149-153,:224-227 preserves literal bytes. This is a new display route; storage intentionally retains original strings. Contract/source explanation: peer.rs module docs :1-14 define the display boundary by authorship, covering every relayed value, not only a distant host; :49-55 explicitly includes directly decoded farhelm-proto types and plain-string snapshots at their rendering sites. display_peer at :159-180 visibly escapes unsafe presentation characters. Thus the fact these are recipe choices does not remove the display boundary, and Dioxus text escaping addresses markup rather than bidi/invisible spelling. Suggested fix: visibly escape each relayed base/account display value (with direction isolation where required) while retaining raw strings for save and provider arguments. Confidence: confirmed source rendering/validation mismatch; no runtime observation. Suggested bucket: other, misleading presentation only. Could-be-highest: no established wrong-provider/host execution, security or user-work-loss route; no HTML execution is claimed. proposed_drop: false. possible_cover: supplied g086/l4 has the same general escaping policy but a distinct host-alias launcher-footer route; this recipe-specific path is not in the supplied latest neighbour findings. Material caveats: these strings can be saved and displayed before any Podman reference/account resolution, so a successful image build is not required for the visible summary route; the server save/list path, exact product-contract section, whole-range introduction and tip persistence are next readily checkable premises. No tests, reproduction or live action."
+          }
+        },
+        {
+          "line": 19,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "l5",
+            "state": "open",
+            "summary": "Recipe summaries render literal container-base formatting characters",
+            "location": "crates/farhelm-ui/src/tensorlake/recipes.rs:74",
+            "detail": "Reviewed introducing commit: 56040bb964270bb40d191902173dbb84b3ba78fc, within exclusive 6e423e30068b62c6cfa276c6d720ee35bb70387a through inclusive 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db. Discovery pass 2. TLDR: a saved container image reference or login account containing invisible/direction-changing characters is displayed verbatim in its recipe summary. Its visible spelling and adjacent summary wording can therefore be misleading instead of making those characters visible. Source: UI tensorlake/recipes.rs:74-76 composes the new ContainerImage reference/user into one String, rendered directly by RecipeList at :464 (tip :484). No display_peer/PeerLine boundary wraps either field. Proto recipes.rs:788-798 deliberately accepts nonempty NUL-free literal strings, so U+200B or U+202E is not rejected. This finding does not ask to constrain provider argument syntax.\nShipped save/list route checked: helm environment/recipes.rs:143-163 calls check_recipe then stores save.base unchanged; :175-187 clones that base into the view. tensorlake/recipes.rs:251-280 serializes the validated spec; :486-520 returns its view in ordinary list reads; :529-545 accepts a normal authenticated CreateRecipe and returns the stored view without any build. UI api/tensorlake_recipes.rs:47-57 decodes RecipesView directly, and the summary renderer above uses its raw fields. Thus successful Podman resolution/build is not a missing premise: a syntactically accepted recipe is listed before provider execution. The staged editor also preserves exact values through from_view/to_save (:149-153,:224-227), and later enabled editing does not supply a display escape to the summary.\nContract: peer.rs module docs :1-14 define the UI text boundary by authorship rather than distance, including every relayed value rather than only remote-machine values; :49-55 explicitly require presentation helpers at access sites for directly decoded farhelm-proto types and plain-string snapshots. :57-66 says surfaces mixing UI words with relayed values use that module. display_peer at :159-180 escapes presentation-unsafe characters into visible spelling. SPEC.md Local authority and trust between hosts (:4863-4867) explicitly requires invisible/direction-changing characters in host-supplied display text to be visible; the local recipe-config route here relies on the broader stated renderer contract, not an invented remote-agent ability to edit the catalog. Dioxus text interpolation prevents HTML markup interpretation, but does not escape those Unicode characters visibly. Fix direction: visibly escape the base reference/account separately at display time, with direction isolation as appropriate, keeping original bytes for storage, save and provider arguments.\nWhole-range attribution checked: exclusive base recipes.rs has only ASCII-restricted image/snapshot inputs (:713-744) and no ContainerImage case. Full pinned-range -G history for the new base and summary finds 56040bb964270bb40d191902173dbb84b3ba78fc as the introducing relevant commit. The complete introducing-to-tip UI diff changes other shared-list features but leaves recipe_summary and its raw span unchanged; the corresponding proto diff only adds RecipePlaceView re-export, leaving validation unchanged. API decoder is unchanged. This is not a pre-range raw container-field route. Confidence: confirmed source/contract presentation defect, no execution or observed frequency. Suggested bucket: other. Could-be-highest: no established security, wrong-target/provider execution or user-work-loss route; requests retain the correct raw value and no HTML execution is claimed. proposed_drop: false. possible_cover: supplied g086/l4 applies the same escaping policy to a different host-alias footer path; no recipe-summary equivalent appears in the complete refreshed neighbour projection. Caveats: requires unsafe characters in a saved literal field; catalog save can succeed even if a later provider lookup rejects that spelling. No claim that all Unicode, all recipes, or only valid engine references are affected. The original suspected misleading-summary consequence is preserved and all readily checkable input, persistence, rendering, contract and introduction premises are settled. No open lead under this ID. No tests, builds, reproductions or live actions."
+          }
+        }
+      ],
+      "latest": {
+        "line": 19,
+        "event": {
+          "version": 1,
+          "kind": "finding",
+          "id": "l5",
+          "state": "open",
+          "summary": "Recipe summaries render literal container-base formatting characters",
+          "location": "crates/farhelm-ui/src/tensorlake/recipes.rs:74",
+          "detail": "Reviewed introducing commit: 56040bb964270bb40d191902173dbb84b3ba78fc, within exclusive 6e423e30068b62c6cfa276c6d720ee35bb70387a through inclusive 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db. Discovery pass 2. TLDR: a saved container image reference or login account containing invisible/direction-changing characters is displayed verbatim in its recipe summary. Its visible spelling and adjacent summary wording can therefore be misleading instead of making those characters visible. Source: UI tensorlake/recipes.rs:74-76 composes the new ContainerImage reference/user into one String, rendered directly by RecipeList at :464 (tip :484). No display_peer/PeerLine boundary wraps either field. Proto recipes.rs:788-798 deliberately accepts nonempty NUL-free literal strings, so U+200B or U+202E is not rejected. This finding does not ask to constrain provider argument syntax.\nShipped save/list route checked: helm environment/recipes.rs:143-163 calls check_recipe then stores save.base unchanged; :175-187 clones that base into the view. tensorlake/recipes.rs:251-280 serializes the validated spec; :486-520 returns its view in ordinary list reads; :529-545 accepts a normal authenticated CreateRecipe and returns the stored view without any build. UI api/tensorlake_recipes.rs:47-57 decodes RecipesView directly, and the summary renderer above uses its raw fields. Thus successful Podman resolution/build is not a missing premise: a syntactically accepted recipe is listed before provider execution. The staged editor also preserves exact values through from_view/to_save (:149-153,:224-227), and later enabled editing does not supply a display escape to the summary.\nContract: peer.rs module docs :1-14 define the UI text boundary by authorship rather than distance, including every relayed value rather than only remote-machine values; :49-55 explicitly require presentation helpers at access sites for directly decoded farhelm-proto types and plain-string snapshots. :57-66 says surfaces mixing UI words with relayed values use that module. display_peer at :159-180 escapes presentation-unsafe characters into visible spelling. SPEC.md Local authority and trust between hosts (:4863-4867) explicitly requires invisible/direction-changing characters in host-supplied display text to be visible; the local recipe-config route here relies on the broader stated renderer contract, not an invented remote-agent ability to edit the catalog. Dioxus text interpolation prevents HTML markup interpretation, but does not escape those Unicode characters visibly. Fix direction: visibly escape the base reference/account separately at display time, with direction isolation as appropriate, keeping original bytes for storage, save and provider arguments.\nWhole-range attribution checked: exclusive base recipes.rs has only ASCII-restricted image/snapshot inputs (:713-744) and no ContainerImage case. Full pinned-range -G history for the new base and summary finds 56040bb964270bb40d191902173dbb84b3ba78fc as the introducing relevant commit. The complete introducing-to-tip UI diff changes other shared-list features but leaves recipe_summary and its raw span unchanged; the corresponding proto diff only adds RecipePlaceView re-export, leaving validation unchanged. API decoder is unchanged. This is not a pre-range raw container-field route. Confidence: confirmed source/contract presentation defect, no execution or observed frequency. Suggested bucket: other. Could-be-highest: no established security, wrong-target/provider execution or user-work-loss route; requests retain the correct raw value and no HTML execution is claimed. proposed_drop: false. possible_cover: supplied g086/l4 applies the same escaping policy to a different host-alias footer path; no recipe-summary equivalent appears in the complete refreshed neighbour projection. Caveats: requires unsafe characters in a saved literal field; catalog save can succeed even if a later provider lookup rejects that spelling. No claim that all Unicode, all recipes, or only valid engine references are affected. The original suspected misleading-summary consequence is preserved and all readily checkable input, persistence, rendering, contract and introduction premises are settled. No open lead under this ID. No tests, builds, reproductions or live actions."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g059/findings.jsonl",
+        "id": "l5",
+        "line": 19,
+        "disposition": "verified",
+        "group": "shared-recipe-container-base-summary-raw-presentation",
+        "reason": "Parent read full primary17-19/audit/reply, directly checked introducingpeer.rs1-70 and raw summary/caller, then full fresh focused132 source/coverage result. New56040 ContainerImage reference/user can save/list as nonemptyNUL-free literal before any provider build; recipe_summary interpolates them into UI prose and rawspan without visible escaping or per-value isolation. Broad explicit renderer authorship contract includes local relayed values, so correct raw operational storage and Dioxus markup escaping do not satisfy visible Unicode spelling. Tip/currentmain persists; focused132 corrects introducing branch to72-74. BothSPECs/Planned/unlandedplans/BUGS/INDEX+matchingversion/normalizationitems/activeledger/FILTER checked with no exact cover/filter/alias. Retain other misleading presentation only, no HTML/security/wrong-target/work-loss/runtime-frequency claim. Physical bidi layout not measured; successful engine resolution not needed for save/list. Preserve raw bytes for provider arguments. New shared-contract evidence sent to original077 for its existing local-destination caveat; no new issue inferred there before source checks."
+      },
+      "accepted_parent_decision": {
+        "key": "g059/l5",
+        "line": 19,
+        "disposition": "verified",
+        "group": "shared-recipe-container-base-summary-raw-presentation",
+        "bucket": "other",
+        "recording": "new",
+        "needs_independent_drop_check": false,
+        "reason": "Parent read full primary17-19/audit/reply, directly checked introducingpeer.rs1-70 and raw summary/caller, then full fresh focused132 source/coverage result. New56040 ContainerImage reference/user can save/list as nonemptyNUL-free literal before any provider build; recipe_summary interpolates them into UI prose and rawspan without visible escaping or per-value isolation. Broad explicit renderer authorship contract includes local relayed values, so correct raw operational storage and Dioxus markup escaping do not satisfy visible Unicode spelling. Tip/currentmain persists; focused132 corrects introducing branch to72-74. BothSPECs/Planned/unlandedplans/BUGS/INDEX+matchingversion/normalizationitems/activeledger/FILTER checked with no exact cover/filter/alias. Retain other misleading presentation only, no HTML/security/wrong-target/work-loss/runtime-frequency claim. Physical bidi layout not measured; successful engine resolution not needed for save/list. Preserve raw bytes for provider arguments. New shared-contract evidence sent to original077 for its existing local-destination caveat; no new issue inferred there before source checks."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-132",
+          "key": "g059/l5",
+          "latest_line": 19,
+          "recommendation": "retain-verified",
+          "bucket": "other",
+          "underlying_key": "shared-recipe-container-base-summary-raw-presentation",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The shared recipe summary relays saved container image reference and login-user text without visibly escaping presentation-unsafe characters. This violates the renderer's explicit authorship boundary. Saving and listing a recipe precede provider resolution, so an image reference accepted by Podman is unnecessary for this display route. The established consequence is misleading spelling or surrounding summary text, not wrong-target execution, HTML execution, credential disclosure or loss of user-owned work.",
+          "checks": [
+            {
+              "source": "g059/findings.jsonl:17-19",
+              "result": "Read all three l5 events. Line 17 is an open lead; line 18 establishes the rendering/validation mismatch but leaves save/list, attribution and persistence to check; line 19 supplies those checks and closes the lead as a finding. All three keep the consequence at misleading presentation and suggest other. No withdrawal, proposed drop or stronger established consequence appears in this own-ID history."
+            },
+            {
+              "source": "56040bb964270bb40d191902173dbb84b3ba78fc:crates/farhelm-ui/src/tensorlake/recipes.rs:54-81,458-464",
+              "result": "recipe_summary interpolates reference and user directly into one UI-authored sentence; RecipeList places that String directly in recipe-row-summary. The introducing branch is actually at lines 72-74, rather than the latest record's approximate 74-76. No display_peer or separately isolated peer run intervenes. The source establishes the missing visible escaping; physical bidi layout and frequency were not measured."
+            },
+            {
+              "source": "56040bb964270bb40d191902173dbb84b3ba78fc:crates/farhelm-proto/src/recipes.rs:75-92,716-734,758-798; crates/farhelm-proto/src/tensorlake/recipes.rs:1-4; crates/farhelm-proto/src/text.rs:14-79",
+              "result": "ContainerImage holds ordinary String fields. Its validator rejects empty reference/user and NUL, while deliberately leaving reference syntax and account resolution to Podman/inspection. U+200B and U+202E therefore pass this branch and are both classified presentation-unsafe. The canonical validator is src/recipes.rs; the old tensorlake path only re-exports it. The earlier image/snapshot branches have restrictive ASCII grammars."
+            },
+            {
+              "source": "56040bb964270bb40d191902173dbb84b3ba78fc:crates/farhelm-helm/src/environment/recipes.rs:133-181; crates/farhelm-helm/src/tensorlake/recipes.rs:248-284,485-548; crates/farhelm-ui/src/api/tensorlake_recipes.rs:45-57",
+              "result": "Recipe::saved runs check_recipe and moves save.base unchanged into the stored definition; view clones it unchanged. Create serializes that definition into spec_json and returns its view without starting a build. GET maps stored rows to views locally, explicitly without calling Tensorlake. The UI decodes RecipesView directly. Credential-name and owned-snapshot checks do not require a container image or account to resolve. This is a shipped save/list route before provider execution, not a hypothetical successful engine input."
+            },
+            {
+              "source": "56040bb964270bb40d191902173dbb84b3ba78fc:crates/farhelm-ui/src/tensorlake/recipe_editor.rs:128-153,217-228",
+              "result": "The staged editor's from_view/to_save paths clone the raw container reference/user. Raw round trips are correct and are not the defect. The display repair should escape each visible value while retaining raw bytes for storage and provider arguments; this consultation does not request stricter provider syntax."
+            },
+            {
+              "source": "56040bb964270bb40d191902173dbb84b3ba78fc:crates/farhelm-ui/src/peer.rs:1-66,159-180; SPEC.md:4825-4867",
+              "result": "peer.rs explicitly draws the boundary by authorship, covers every relayed value including values generated locally, requires the same presentation/raw distinction for directly decoded proto types and plain-string snapshots, and includes any surface mixing UI words with someone else's. display_peer emits visible <U+XXXX> spellings. The module explicitly distinguishes Dioxus text-node markup safety from visual bidi/invisible-character effects. SPEC.md's narrower host-supplied-text rule supports visible escaping but does not establish that a remote agent can edit recipes; this local catalog finding rests on the broader renderer contract."
+            },
+            {
+              "source": "6e423e30068b62c6cfa276c6d720ee35bb70387a:crates/farhelm-proto/src/tensorlake/recipes.rs:713-744; full-range git log -G 'ContainerImage|base: container image' over UI/proto; 56040bb964270bb40d191902173dbb84b3ba78fc parent diff",
+              "result": "The exclusive base has only the ASCII-restricted image/snapshot choices and no ContainerImage case. The complete pinned-range matching history identifies 56040bb964270bb40d191902173dbb84b3ba78fc as the relevant introduction; its UI diff adds the raw container reference/user summary branch. The named defect is in range."
+            },
+            {
+              "source": "56040bb964270bb40d191902173dbb84b3ba78fc..00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db diffs for UI summary/API, proto validator and helm save/list files; 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db:crates/farhelm-ui/src/tensorlake/recipes.rs:55-82,478-485; those files and peer.rs through 24bc058066fd57848e788b465719b0e6da2f98f7",
+              "result": "The entire summary/API diff leaves the raw composition and span intact; the proto diff adds only RecipePlaceView export; helm changes affect build state/deletion rather than the checked save/list projection. Tip lines 73-74 and 484 still contain the route. The checked files have no later difference through recording-time main. No runtime, reproduction, tests, builds, process operations or checkout mutations were performed."
+            }
+          ],
+          "coverage_checked": [
+            {
+              "source": "SPEC.md at recording-time main, recipe catalog paragraphs:449-488 and Local authority and trust between hosts:4903-4948",
+              "result": "Searched recipe/container reference, summary/display, invisible and direction-changing terms; read the governing catalog and trust passages. Catalog scope requires displaying base/provider facts and accepts custom container reference/user choices. The trust passage requires visible escapes for host-supplied text and does not explicitly accept raw invisible formatting in local recipe summaries. No exact accepted-behavior cover."
+            },
+            {
+              "source": "SPEC_impl.md at recording-time main, Shared recipes and prepared artifacts:6011-6056, Tensorlake recipes:6396-6436, peer-presentation references:1277-1300 and diagnostic normalization:2869-2894",
+              "result": "Searched both recipe-summary/container-reference terms and peer/presentation/escaping terms; read matching governing passages. Shared raw storage and provider syntax are operational contracts, not authorization to render those values verbatim. Diagnostic normalization and host-name presentation are different scopes. No explicit exception accepting this summary behavior."
+            },
+            {
+              "source": "TODO.md:23-27, Planned bucket",
+              "result": "The current Planned bucket is empty. No planned item covers the trigger, consequence or summary sink. Read-only coverage check of the supplied recording-time main; no fetch/rebase or TODO mutation."
+            },
+            {
+              "source": "plans/queue/, all queued plan text searched; matching sections in podman-environments.md:250-276,370-418, approval-cards-fit.md:125-147,185-200 and host-progress-hover.md:112-126",
+              "result": "Searched all queued plans, which includes every unlanded plan, for recipe_summary, ContainerImage, reference/login user, recipe summary/display, Unicode/bidi/invisible/direction changes and display_peer/PeerLine. Podman's plan introduces the shared container-base catalog but does not promise a recipe-summary presentation repair. Escaping requirements in approval-card and host-progress plans apply to those separate surfaces. No queued plan states work removing this recipe-summary cause, regardless of the broader Podman plan's landing status."
+            },
+            {
+              "source": "BUGS.md, entire file",
+              "result": "Its sole known-bug entry concerns an SSH helper retaining provisioning output. No recipe or presentation coverage."
+            },
+            {
+              "source": "review_feedback_queue/INDEX.md, entire file in bounded chunks; matching queue-file searches; remote-version-display-retains-format-characters.md and peer-text-normalization-contract-overstates-retained-scope.md, entire files",
+              "result": "No item describes saved container base/reference/user summary text. The remote-version item is the closest display-policy relative, but its producer is remote --version stdout and its sink is recipe build-status text, not recipe_summary. The normalization item is a specification wording defect about retained raw operational text, not raw GUI display. Other indexed direction/escaping issues concern host hover/rail grouping, copied paths or diagnostics. No exact alias or existing item whose stated scope covers this trigger and consequence. A shared escaping fix might touch the same UI module as the version item; that is repair context, not duplicate coverage."
+            },
+            {
+              "source": "TRIAGE_OUTCOMES.md, active ledger only; matching sections removal-copy-hidden-unicode-warning-unresolved.md:1664-1677 and settings-save-races-final-replacement.md:1756-end",
+              "result": "Searched recipe, container image, Unicode, invisible/bidi/direction-changing, display_peer/PeerLine and peer-text terms. The hidden-Unicode decision concerns copying an uninstall path; the recipe decision concerns remote credential file-write races. Neither settles recipe-summary display. No archive read."
+            },
+            {
+              "source": "review_feedback_queue/FILTER.md, entire file",
+              "result": "No full match. This is repeated summary display from saved literal fields, not a brief display that corrects itself on refresh, a safe retry failure or an imprecise diagnostic. No timing, older-release, unsupported-harness, systemd-hang or other narrow filter trigger is needed. Unsafe characters alone being unusual is not a filter."
+            }
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": "None for the source-confirmed visible-escaping contract defect. Exact physical bidi rendering, observed frequency and any harmful downstream action were not tested. A stronger bucket would need an established route from this summary to security harm, acting on a wrong target, or loss of user-owned work; neither this own-ID history nor the checked source supplies one. Successful Podman resolution is not a missing premise for saving/listing.",
+          "original_stronger_consequence": "No stronger consequence was asserted in l5 events 17-19. The original suspicion was misleading visible spelling or adjacent text; all events explicitly disclaim an established security, wrong-target execution or user-work-loss route and HTML execution. Preserve those disclaimers and the progression from lead to verified source finding.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Retain a new verified other finding for the container-base recipe-summary display boundary. Keep raw save/storage/provider values intact. No dismissal, coverage claim, withdrawal or lowering from an earlier stronger consequence is proposed. This focused check is not an independent drop gate."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": true,
+        "clearly_refuted_candidate": false,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Source-confirmed by an existing parent decision; not runtime reproduced",
+        "deduplication_key": "shared-recipe-container-base-summary-raw-presentation",
+        "destination": "trailing-shared-recipe-container-base-summary-raw-presentation.md"
+      }
+    }
+  ],
+  "replies": [
+    {
+      "turn": 1,
+      "reply": "Initial pass complete; all seven assigned patches read.\n\nRecorded `l2`: recipe deletion removes container images while its confirmation names only Tensorlake snapshots. Bucket: `other`, source-confirmed.\n\nCandidates `l1` and `c3` were refuted and logged. No unresolved leads. No tests or reproductions run.\n\n[Findings log]([private-run]/g059/findings.jsonl) · [Progress]([private-run]/g059/progress.md)"
+    },
+    {
+      "turn": 2,
+      "reply": "- `l2`: verified exact repair in `350a4b33…`, unchanged through the review tip. Recorded a proposed repair-based drop; preserved the original destructive-consent concern for independent review.\n- `l1`: confirmed runtime argument protections persist through the tip.\n- `c3`: confirmed deletion ownership/lifetime protections remain unchanged, independently of the warning repair.\n\nNo new findings. Unresolved lead IDs: none."
+    },
+    {
+      "turn": 3,
+      "reply": "Discovery pass 1 complete. No additional defect found.\n\nChecked serialization compatibility, strict save decoding, editor value preservation, and changed state fixtures. Recorded candidate `c4`, source-refuted: the prior revision had no runtime writer producing missing-login prepared records.\n\n- New verified IDs: none.\n- New unverified-after-investigation IDs: none.\n- Open leads: none.\n\nProgress updated. No runtime execution."
+    },
+    {
+      "turn": 4,
+      "reply": "- Revised `l2`: retracted the broad custom-base protection claim. The warning repair covers only omitted owned-artifact wording; the separate highest pruning route remains canonical `g061/l8`.\n- Revised `c3`: confined its refutation to admission, lifetime and bookkeeping—not engine deletion scope.\n\nNamed source premises resolved. No new IDs. Unresolved lead IDs: none."
+    },
+    {
+      "turn": 5,
+      "reply": "Discovery pass 2 found one new source-confirmed issue: `l5`—recipe summaries display invisible/direction-changing characters in container references and accounts verbatim. Suggested bucket: `other`.\n\nChecked save/list/render callers, presentation contracts, test assertions, introduction and tip persistence.\n\n- New verified IDs: `l5`.\n- New unverified IDs: none.\n- Open leads: none.\n\nProgress updated. No runtime execution."
+    },
+    {
+      "turn": 6,
+      "reply": "Discovery pass 3 complete. Nothing new found.\n\nChecked staged-editor state preservation, exhaustive base/provider mappings, serialization tests, shared-state fixtures and Delete handler exits.\n\n- New verified IDs: none.\n- New unverified IDs: none.\n- Open leads: none.\n\nProgress updated. No runtime execution."
+    }
+  ],
+  "progress": "# g059 progress\n\nInitial review complete, turn 1. Group: environment-recipes. Discovery-pass count: 0 (the separate later-turn protocol has not begun).\n\nRead the full brief and the complete inventory commits field, without reading excluded metadata. All seven assigned patch ranges were delivered through evidence read in packets of at most 200 lines; no assigned material remains unread. Reviewed the patches at 56040bb964270bb40d191902173dbb84b3ba78fc and 56659839785691f76da3af5d8f51b511cff4ba8b, not the working tree. Compared the moved shared validator against its parent implementation to distinguish the new behavior from unchanged code. Read governing recipe, provider, artifact, confirmation and accepted-action specification contracts at those revisions; the specifications do not differ between the two assigned revisions.\n\nDurable records: l2 is a source-confirmed finding (other): deletion now cleans container artifacts while the confirmation names only Tensorlake snapshots. l1 is revised from a lead to a candidate: image/account option injection is refuted by option terminators and quoting. c3 is a candidate: source checks refute the considered deletion-admission/disconnect ownership gap. Original potentially highest consequences and their missing premises remain in the records for the parent's independent drop/bucket audit. New verified finding IDs this pass: l2. New unverified findings: none. Open unresolved leads: none.\n\nInterface assumptions checked: Podman consumes the shared catalog, both providers receive the same recipe registry, and cleanup removes only recorded owned artifacts. Non-forcing image cleanup protects images used by any container, and custom bases are not entered into the retirement list. The staged editor copies container reference/user literally through reopening and saving. Existing recipe tags retain their serialized names; strict write decoding includes the new container base. Changed test fixtures include the observed login identity and retain the cleanup obligations they assert.\n\nNo checkout files changed. No runtime tests, builds or reproductions run; conclusions are from source/contract analysis. No coverage-source searches made. Parent owns later-commit and queue coverage. Next action: await the caller's later synthesis/discovery turn; do not treat this initial review as the full persistent-review completion.\n\n## Later-turn synthesis, turn 2\n\nSynthesis complete. Discovery-pass count remains 0. No new findings or unverified IDs. Revised original IDs: l2 (exact repair coverage), l1 (runtime boundary evidence through the full review range), c3 (independent ownership/lifetime evidence remains stable). Open unresolved source leads: none. Unread assigned scope: none; the caller audited all 1,538 assigned lines with zero gaps.\n\nChecked g060/c2 against source: commit 350a4b33b6d4476f4a78e43cea124bc2b828f462 replaces the Tensorlake-only recipe-delete warning with images and snapshots for this recipe, plus the image-in-use caveat. The captured editor target and rendered confirmation token bind the answer to that warning. Both UI files are unchanged from the repair revision to pinned tip 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db. The UI client's delete_recipe in api/tensorlake_recipes.rs:107-121 submits the encoded captured name to /api/tensorlake/recipes/{name}; lib.rs:985-991 routes that DELETE to the same shared cleanup handler. Thus the repair warning covers the actual broadened backend operation. l2 retains its original destructive-consent concern and historical intermediate-revision behavior; the repair-based drop and any consequence lowering remain proposals for the parent's independent check.\n\nChecked l1 against later callers rather than relying on the model-stage executor's absence: image exists, pull, inspect and run all use an option terminator; getent shell-quotes the account after its terminator; common command lowering preserves argv. The relevant runtime code is unchanged to the review tip. g060/c4 independently agrees on immediate consumers; parent may relay this evidence to g058/l1.\n\nChecked c3 separately from l2: the deletion route, shared build registry, aggregate cleanup state and Podman build implementation remain unchanged to the tip. The only later environment/mod.rs change in the comparison is a test provider setter. c3 continues to preserve the original ownership-loss hypothesis and proposed source refutation for independent checking.\n\nNo tests, builds or reproductions run. No checkout files changed. Next action: await the caller's discovery or completion instruction; this synthesis does not substitute for a separately requested discovery turn.\n\n## Separate discovery, turn 3 / discovery pass 1\n\nDiscovery pass 1 complete. Before source searching, read discovery-neighbours.json in bounded chunks through its final closing brace: timestamp 2026-11-13T15:41:10.441Z, all 17 named neighbours. Used it only for novelty/interface context, not source credit. No known neighbour finding or alias was promoted as new discovery.\n\nNew useful source checks: the old tensorlake recipe module is exactly a re-export of the shared recipe module, avoiding a separate model/serializer; lib.rs exposes that same module and provider types. The explicit legacy base tags and strict save mirror agree for all four bases, with the strict conversion carrying container reference/user unchanged. Reviewed the new serialization tests and existing strict nested-save/read-tolerance tests against those declarations. Revisited the staged editor's reopen/save fixture and source behavior: container base values are copied into the draft and saved literally when another field changes. Inspected list rendering around the changed compatibility/status branch without widening into the neighbour's later per-place-resource issue. The changed environment-state fixtures still round-trip independent place records and make each resource category block removal. All conclusions are from source, not executed tests.\n\nOne additional rejected candidate recorded immediately as c4, then strengthened under the same ID: required login identity in prepared-image fixtures does not establish an upgrade regression. The exact parent revision has the earlier model declaration, but no PreparedImage constructor or Podman runtime/build implementation; state-map references are definitions, aggregate checks and tests. No production predecessor writer for a missing-login prepared record was found. The original candidate consequence and narrow refutation remain durable; it is not a verified or unverified-after-investigation finding.\n\nNew verified finding IDs: none. New unverified-after-investigation finding IDs: none. New candidate IDs: c4. Remaining lead IDs: none. Anything new found: no additional defect; only the source-refuted compatibility candidate above. No assigned material unread. Existing l2's repair proposal, c3's ownership/lifetime refutation and l1's literal-argument refutation remain separate and unchanged; no parent drop or priority decision is assumed accepted.\n\nNo runtime tests, builds, reproductions or live-install actions. No checkout changes. Next action: return this pass's delta to the caller for the persistent-review completion gate.\n\n## Reopened late-interface synthesis, turn 4\n\nSynthesis complete; discovery count remains 1. Read complete own findings history before revising. Read complete named g058/c2 and g061/l8 histories, and only claims-037/result.json entries g058/c2 and g059/l2. No prohibited coverage-source search was performed; the supplied claim entries contain commissioner coverage summaries that were not independently searched or adopted as review evidence.\n\nRevised l2 immediately on the supplied contradiction, then on source verification and caller closure. Retracted the broad prior claim that explicit labels/nonforcing deletion protect every custom user base. Direct own app checks: the shared validator admits local image IDs, existing bases are reused without a protecting name, ordinary software construction commits owned children, and shared recipe Delete performs image cleanup before its final state guard. The removal argv omits --no-prune. Direct primary Podman v4.9.3 checks: rm.go defaults NoPrune false; ABI forwards it; libimage/image.go recursively prunes unnamed childless parents; oci.go/layer_tree.go recognize the relevant ancestry. Complete named owner/parent histories supply the ordinary commit-history preservation verification. The explicit specification prohibition on deleting user bases was re-read in its full governing sections. Conclusions are conditional source analysis, not observed harm.\n\nKeep distinct: l2's historical omission of owned container artifacts remains exactly repaired by 350a4b33b6d4476f4a78e43cea124bc2b828f462; that repair does not authorize or cover user-base pruning. The retained highest pruning route is canonical g061/l8, alias g058/c2, with untagged local base, ancestry, absence of other protecting names/images/containers and sole-copy-loss conditions preserved. No duplicate defect ID was created. No parent drop/priority decision is assumed accepted. Revised c3 only to make explicit that owned request lifetime, shared admission and final bookkeeping checks are not a proof of external engine deletion scope. l1's literal-argument refutation and c4's predecessor-writer result remain unchanged.\n\nNew verified/unverified IDs: none. Revised IDs: l2, c3. Open unresolved lead IDs: none. All readily checkable named premises resolved. No discovery search this turn; the caller requires the separate post-audit discovery next. No runtime tests, builds, reproductions, installs, nested agents or live actions. No checkout changes.\n\n## Separate discovery, turn 5 / discovery pass 2\n\nDiscovery pass 2 complete. Read the complete refreshed discovery-neighbours.json first, in bounded chunks through line 465/final brace, timestamp 2026-11-13T21:29:01.861Z. It was used only for novelty/interface context, not source credit. No pending named synthesis questions were supplied. Retained full own history from the preceding turn; no prior candidate, consequence or proposed-drop basis was erased.\n\nNew verified finding l5, recorded immediately as a lead, then as a finding and final source-validated revision: the assigned container-base recipe summary displays reference/account strings without visible Unicode presentation escaping. Useful checks: shared strict conversion and draft reopening/save preserve these literal fields; the shared validator accepts nonempty/NUL-free spelling. The actual store/create/list/API decoder path retains it and lists it without needing an engine build or successful account lookup. recipe_summary interpolates these relayed values into a span without display_peer. The peer module defines its renderer boundary by authorship, explicitly including directly decoded proto values and plain-string snapshots; its helpers make unsafe characters visible. Read complete applicable SPEC.md Local authority/trust section and relevant SPEC_impl presentation rules, retaining the distinction between the product host-text rule and the broader renderer contract for relayed config. Full exclusive-base and pinned-range attribution checks show this container display path is introduced by 56040bb964270bb40d191902173dbb84b3ba78fc, where old bases were ASCII-restricted, and unchanged to tip. The supplied host-alias footer finding is a distinct value source/rendering path, not an alias claimed as novelty.\n\nFinished the assigned pass after recording l5: revisited all new proto golden-tag/compatibility and literal-input test assertions, the editor preservation test, the new container snapshot-action test, strict conversion fields, and changed shared-state fixtures. The pure tests have independent golden/expected values for the contracts they claim; no additional substantive oracle issue was identified. Rechecked final recipe store deletion against its immediate transaction and aggregate cleanup check, without using that bookkeeping proof to certify external image deletion semantics. No second new defect or new candidate emerged.\n\nNew verified IDs: l5 (other, presentation consequence only). New unverified-after-investigation IDs: none. Remaining open lead IDs: none. Anything new found: yes, l5. New rejected candidates: none. Assigned unread scope: none. Existing exact historical warning repair, ownership/lifetime proposal and literal-argument refutation remain separate; no parent drop/lowering is assumed accepted, and known pruning is not counted as new.\n\nNo runtime tests, builds, reproductions, nested agents, installs or live-install actions; no checkout changes. Source/contract conclusions only. Next action: return discovery delta; any required later synthesis belongs to its own caller-triggered turn.\n\n## Separate discovery, turn 6 / discovery pass 3\n\nDiscovery pass 3 complete. Read the complete refreshed discovery-neighbours.json in bounded chunks through its final brace at line 474, timestamp 2026-11-13T21:45:05.096Z, before new source searching. Reused complete own findings/candidate history from the preceding turns. No named pending synthesis questions were supplied; the new neighbour diagnostic-display record is a distinct source/sink and was not counted as recipe-summary novelty.\n\nUseful checks this pass: inspected the staged editor base enum, whole-draft equality, initialization and per-base control branches. The added reference/account fields participate in dirty-state equality and remain in the draft when another base is selected; only the selected base is submitted, while the existing authentication-mode/tunnel/package selections retain their own admission. Revisited all four exhaustive base/provider decisions and their explicit legacy serialization tags. Compared the new golden-tag/compatibility tests, literal-input preservation and empty/NUL rejection tables against the actual contracts they claim; reviewed the place round-trip cases separately from runtime host admission. Revisited the changed shared-state fixtures and their cross-place equality/resource-category assertions, checking serialization/resource-presence claims rather than treating them as an external cleanup oracle. Inspected the shared Delete handler's precheck, owned execution, guard lifetime and error exits as source control flow without extending those bookkeeping checks into a claim about engine target semantics.\n\nNo additional substantive defect or unsettled source lead emerged. No known issue was restated as new, no new finding/candidate event was needed, and no earlier consequence/proposed-drop basis was changed. New verified IDs: none. New unverified-after-investigation IDs: none. Remaining lead IDs: none. Anything new found: no. Assigned unread scope remains none.\n\nNo runtime tests, builds, reproductions, live-install actions, nested agents, installs, prohibited coverage-source searches or checkout changes. Source-only checks. Next action: return the empty discovery result to the caller.\n"
+}

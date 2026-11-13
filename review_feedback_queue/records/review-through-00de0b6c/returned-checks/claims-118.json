@@ -1,0 +1,325 @@
+[
+  {
+    "key": "g188/c1",
+    "latest_line": 1,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "deleted-xterm-assets-retained-loader-dependency",
+    "aliases": ["g189/c2"],
+    "target_queue_file": null,
+    "why": "The missing-bundle mount hypothesis is source-refuted. The page loads the grid assets and its readiness gate requires those assets, rather than deleted xterm globals. No runtime mount was observed.",
+    "checks": [
+      "At f560058da19e02716e6f943883a9508b447aff4e, crates/farhelm-ui/src/lib.rs:1479-1483,1914-1926 declares and injects all five grid scripts and the shared terminal helpers.",
+      "At that revision, assets/terminal.js:3203-3228 gates mounting on the grid/helpers/fonts; :3389-3393 builds and fits the grid, and :4313-4335 supplies the actual grid constructor callbacks.",
+      "Pinned git grep across crates, scripts, packaging, .github, Cargo.toml and Dioxus.toml found only two explanatory FitAddon comments for the searched retired paths/globals, with no executable consumer."
+    ],
+    "coverage_checked": {
+      "specifications": "Current SPEC_impl.md:1692-1726,1838-1886 describes the grid island and its mount contract; SPEC.md Terminal experience supplies the terminal contract. These support the replacement model, rather than accepting an unavailable terminal.",
+      "TODO_Planned": "TODO.md:25-26 is empty.",
+      "plans_queue": "Searched retired bundles/globals, mount, stylesheet, fit and width terms. The tmux-removal plans describe the already performed removal or wording cleanup; no unlanded stated work covers a missing grid loader.",
+      "BUGS": "Read in full; only the unrelated stuck provisioning-output bug is recorded.",
+      "queue": "Read INDEX.md in full and searched matching phrases. No same missing-bundle trigger/consequence item; g189/c2 is the assigned same-root alias.",
+      "active_triage": "Searched matching terms; the mount-attempt test decision concerns a test witness, not a retained dependency on deleted scripts.",
+      "FILTER": "Read in full. No filter used; the specific failure route is source-refuted."
+    },
+    "exact_cover_quotes": [],
+    "missing_premise": null,
+    "original_stronger_consequence": "Hypothetical terminal display waiting forever after bundle removal, suggested high/material UX; no security or work-loss route was claimed.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "The active declarations, script injection, readiness gate and grid construction agree. Refutation is limited to the deleted-loader dependency, not general replacement correctness."
+  },
+  {
+    "key": "g188/c2",
+    "latest_line": 7,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "deleted-fit-addon-missing-sizing-or-pre-socket-callback",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "Grid measurement survives independently, and the early resize callback returns before touching the absent socket or unassigned grid. Neither the original missing-fit concern nor its lifecycle follow-up is established.",
+    "checks": [
+      "At f560058da19e02716e6f943883a9508b447aff4e, assets/grid-terminal.js:222-246 computes cell size and bounded proposals; :473-497 measures pane space, subtracts padding and calls onResize.",
+      "assets/terminal.js:3275-3276 initializes grid and ws to null; :3389-3393 creates/fits the surface before opening its socket; :4319 supplies the hoisted sendResize callback; :4560-4565 checks ws/open before grid.size().",
+      "Pinned SPEC_impl.md:1847-1867 defines the fixed 80x24 reference and 14-pixel reserve as the current fit contract."
+    ],
+    "coverage_checked": {
+      "specifications": "Read current SPEC_impl.md The grid client in full and its island context, plus SPEC.md Terminal experience. The fixed fit reference is explicit, but neither specification accepts a missing fit or a mount exception.",
+      "TODO_Planned": "Empty at TODO.md:25-26.",
+      "plans_queue": "Searches found retained-fit wording in tmux-removal plans; none states a pending repair of this hypothesized callback or measurement loss.",
+      "BUGS": "Full file contains only unrelated provisioning hang.",
+      "queue": "Full INDEX and focused sizing/fit searches found no same trigger and consequence.",
+      "active_triage": "Focused fit/mount searches found unrelated test-witness material only.",
+      "FILTER": "No filter applied. Source refutes the assigned failure routes."
+    },
+    "exact_cover_quotes": [],
+    "missing_premise": null,
+    "original_stronger_consequence": "Hypothetical high/material UX from pane sizing or initial mounting failing; no established security or work-loss route.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Independent measurement plus the socket-before-grid-access guard refutes this removal hypothesis. Numerical and browser-specific sizing behavior remains unexecuted."
+  },
+  {
+    "key": "g188/c3",
+    "latest_line": 9,
+    "recommendation": "refuted",
+    "bucket": "highest",
+    "underlying_key": "deleted-clipboard-addon-confidentiality-or-system-write-loss",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The proposed confidentiality and wholesale system-write losses are source-refuted. The original possible highest consequence remains in the drop register and needs a fresh independent decision. Earlier history's primary-only guidance mismatch belongs to g188/c5 and is not erased by this result.",
+    "checks": [
+      "At f560058da19e02716e6f943883a9508b447aff4e, crates/farhelm-terminal-emulator/src/emulator.rs:99-125 sets Osc52::OnlyCopy and passes it to Term::new. vendor/alacritty_terminal/src/term/mod.rs:2209-2213 refuses clipboard loads unless OnlyPaste or CopyPaste is configured.",
+      "effects.rs:173-194 separately discards ClipboardLoad; :199-212 emits ClipboardStore notices only from live output, including both clipboard and selection targets at the emulator layer.",
+      "hosts/terminal.rs:3310-3321 broadcasts system-clipboard notices; service/handlers.rs:1907-1915 attaches that subscription; service/grid_stream.rs:844-849 retains clipboard writes. grid-terminal.js:1973-1983 applies frames and invokes onClipboard; terminal.js:4326-4334 sends clipboard and local-selection writes to :764-773's native-first writer.",
+      "This is source analysis, with no executed clipboard operation, permission-policy test, or distribution audit. It does not certify primary-selection notice delivery."
+    ],
+    "coverage_checked": {
+      "specifications": "Read current SPEC.md:3053-3073 and :4983-4989, plus SPEC_impl.md:1728-1769 and the emulator contract. They permit remote clipboard writing but explicitly forbid reads; they do not cover a disclosure bug. Primary-guidance delivery conflicts are separate under c5.",
+      "TODO_Planned": "Empty at TODO.md:25-26.",
+      "plans_queue": "Clipboard searches found the already performed desktop cap/removal work, and retained-attribution cleanup. No unlanded plan covers disclosure through this removed add-on.",
+      "BUGS": "Read in full; unrelated provisioning-output hang only.",
+      "queue": "Full INDEX, focused primary/clipboard searches and clipboard-notice-drain-lacks-per-turn-work-bound.md checked. The existing item concerns an unbounded notice drain, not reads or missing system-write wiring.",
+      "active_triage": "Clipboard matches concern copied removal text/harm premises and unrelated tooling. No same confidentiality or missing-handler decision.",
+      "FILTER": "No filter applied. Any confidentiality consequence would be excluded from the rare-diagnostic filter."
+    },
+    "exact_cover_quotes": [],
+    "missing_premise": "No missing readily checkable premise for this narrow refutation. Runtime behavior and unrelated clipboard edge cases were not assessed.",
+    "original_stronger_consequence": "Disclosure of clipboard secrets to terminal programs, highest/security; separately high/material UX if system-clipboard writing disappeared. Neither route is established. Earlier c3:5-6 also established primary-only false guidance, subsequently preserved as c5 rather than withdrawn.",
+    "needs_independent_drop_check": true,
+    "proposed_basis": "OnlyCopy is enforced before reads can raise a clipboard load, load events are discarded independently, and the active grid keeps the system-write callback chain. This proposes refutation only; it is not the independent drop approval."
+  },
+  {
+    "key": "g188/c4",
+    "latest_line": 4,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "deleted-unicode-addon-missing-grid-width-authority",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The active grid uses transmitted run positions and widths, rather than the removed Unicode provider. g189/c5 contains this same width subclaim plus a distinct stylesheet/decorations check; it is partial overlap, not an exact whole-record alias.",
+    "checks": [
+      "At f560058da19e02716e6f943883a9508b447aff4e, assets/grid-model.js:1174-1189 boxes non-ASCII cell content at the supplied width; grid-terminal.js:759-779 uses run.col, layoutRun(shown, run.width), cells*cellWidth boxes and run.col+run.width for the next column.",
+      "Pinned global/path search found no executable UnicodeGraphemesAddon consumer. SPEC_impl.md:1835-1867 makes the page a renderer, and :2673-2729 assigns interpretation and variation-selector policy to the supervisor."
+    ],
+    "coverage_checked": {
+      "specifications": "Read current island/grid and emulator sections, plus SPEC.md Terminal experience. Deliberate width/format policies are explicit; that is not blanket acceptance of arbitrary layout bugs.",
+      "TODO_Planned": "Empty.",
+      "plans_queue": "Searched Unicode/grapheme/provider/width terms; the tmux cleanup preserves Farhelm's retained behavior, rather than planning to restore a removed width authority.",
+      "BUGS": "No related known bug in the full file.",
+      "queue": "Full INDEX and focused phrases contain independent layout and recovery-width issues, not dependency on the deleted provider.",
+      "active_triage": "No same provider-removal trigger/consequence found.",
+      "FILTER": "No filter used."
+    },
+    "exact_cover_quotes": [],
+    "missing_premise": null,
+    "original_stronger_consequence": "Hypothetical high/material UX if emoji or combining text displaced later columns after losing the width authority; no security/work-loss route established.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "The concrete width-consuming renderer refutes loss of the active width provider. This does not assert exhaustive Unicode parity or executed rendering correctness."
+  },
+  {
+    "key": "g188/c5",
+    "latest_line": 8,
+    "recommendation": "out-of-range",
+    "bucket": "other",
+    "underlying_key": "primary-selection-notice-filter-causes-false-drag-guidance",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The primary-only false-guidance mechanism and its violated promise already exist at the exclusive base. This is a real source/contract mismatch, not a confidentiality defect or a route introduced by deleting vendor bundles. The reported cross-batch g186/c2 alias is preserved for parent reconciliation; its history was not assigned here.",
+    "checks": [
+      "At f560058da19e02716e6f943883a9508b447aff4e, hosts/terminal.rs:3310-3321 and service/grid_stream.rs:844-849 discard primary-selection notices; handlers.rs:1907-1915 uses that subscription. terminal.js:4326-4330 can count only delivered callbacks; :4417-4437 therefore admits guidance when a drag produces only a primary write.",
+      "At exclusive base 6e423e30068b62c6cfa276c6d720ee35bb70387a, hosts/terminal.rs:3210-3221 already filters to ClipboardTarget::Clipboard. terminal.js:6012-6016 and :6107-6124 already implement the same delivered-callback counter and grace condition.",
+      "Exclusive-base SPEC.md:3041-3061 explicitly requires primary writes to suppress guidance; SPEC_impl.md:1830-1845 describes the same either-target counter. This is not a requirement first added within the range.",
+      "Current SPEC_impl.md:2067-2070 also expressly says primary writes are not sent to subscribers. This delivery rationale conflicts with SPEC.md:3067-3068 and SPEC_impl.md:1747-1753's suppression promise; it is not exact acceptance of the misleading notice. No runtime was observed."
+    ],
+    "coverage_checked": {
+      "specifications": "Read full matching clipboard/guidance paragraphs and runtime-notice paragraph. They conflict as noted; recommend retention if the parent rejects the range-exclusion basis. Do not silently treat the delivery paragraph as full behavior coverage.",
+      "TODO_Planned": "Empty.",
+      "plans_queue": "Focused primary/clipboard/drag searches found no pending repair of primary-notice delivery. General tmux wording/removal work does not remove this cause.",
+      "BUGS": "No same root in the full file.",
+      "queue": "Full INDEX plus focused searches and three matching files checked: clipboard-notice-drain-lacks-per-turn-work-bound.md is a work-bound defect; drag-copy-guidance-gap-stays-stale-after-text-size-change.md is positioning; detached-grid-retains-program-drag-guidance.md is detach lifecycle. None matches primary-only suppression.",
+      "active_triage": "Primary-selection/guidance searches found no active same-trigger decision.",
+      "FILTER": "No full filter match established: a program's ordinary primary-selection response is not shown to be a rare trigger."
+    },
+    "exact_cover_quotes": [],
+    "missing_premise": "No missing source premise for the primary-only mechanism or pre-range provenance. A separate in-range documentation/test claim would need its own assigned source basis; this result does not refute one.",
+    "original_stronger_consequence": "Incorrect guidance after a program-owned drag that completed a primary-selection write; other priority. This was split from c3's earlier history without withdrawing or lowering c3's distinct hypothetical clipboard-secret disclosure.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Range exclusion only: both active-grid behavior and the violated primary-write requirement are already present at the exclusive base. If scope is widened to pre-existing bugs, retain the mismatch and contract conflict.",
+    "new_interface_evidence": "For the parent/original g186 primary-guidance reviewer: recording-time SPEC_impl.md:2067-2070 explicitly says primary writes are not sent because a viewer does nothing with them. This conflicts with that same document's :1747-1753 either-target guidance counter and SPEC.md:3067-3068. It reinforces the documented inconsistency, but does not establish a new in-range executable defect or excuse the false guidance."
+  },
+  {
+    "key": "g188/c6",
+    "latest_line": 10,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "deleted-bundle-notices-orphan-retained-ports",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "Removing whole-bundle notices does not remove the independent notice file or its asset declaration for retained ports. This is a source packaging check, not a legal conclusion or executed release audit.",
+    "checks": [
+      "At f560058da19e02716e6f943883a9508b447aff4e, THIRD_PARTY_NOTICES.md:19-45 lists retained ports and the independent grid-ported-code-LICENSES.txt asset.",
+      "That asset:1-145 contains the retained-code inventory and full xterm, fit, web-links and Visual Studio Code notices. crates/farhelm-ui/src/lib.rs:1484-1495 retains GRID_PORTED_CODE_LICENSES with #[used] and a nonhashed asset declaration."
+    ],
+    "coverage_checked": {
+      "specifications": "Current SPEC_impl.md:1692-1700 preserves attribution beside ported code and points to THIRD_PARTY_NOTICES.md. SPEC.md has no acceptance of missing attribution.",
+      "TODO_Planned": "Empty.",
+      "plans_queue": "tmux-drop-from-docs.md:33-48 explicitly preserves ported-code attribution and the notice file; it is a preservation constraint, not a repair covering an actual missing artifact.",
+      "BUGS": "No related known bug.",
+      "queue": "Full INDEX and ported-code/deleted-bundle phrase searches found no same-root attribution item.",
+      "active_triage": "No matching attribution or notice-removal decision.",
+      "FILTER": "No filter applied."
+    },
+    "exact_cover_quotes": [],
+    "missing_premise": null,
+    "original_stronger_consequence": "Hypothetical missing attribution artifact, other priority; no established security or user-work-loss consequence.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Both independent notice content and retained asset declaration survive the deletion. Distribution execution was outside this consultation."
+  },
+  {
+    "key": "g189/c1",
+    "latest_line": 11,
+    "recommendation": "covered",
+    "bucket": "other",
+    "underlying_key": "grid-ime-cursor-local-composition-preview-omission",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The exact display-only omission is explicitly accepted by SPEC_impl.md. The specification acceptance does not cover loss or duplication of committed text. The source contains a committed-input path; browser event-order correctness was not reproduced.",
+    "checks": [
+      "Pinned f560058da19e02716e6f943883a9508b447aff4e SPEC_impl.md:1886 and current SPEC_impl.md:1886 explicitly defer the composition-at-cursor preview.",
+      "At the pinned revision, grid-terminal.js:1472-1492 routes text to input messages; :1530-1547 handles typed insertText and compositionend data. terminal.js:4318 supplies sendGridInput; :4501-4508 encodes and sends on an open socket, deliberately dropping disconnected input.",
+      "grid-input.js:326-327 leaves composing/229 keydowns to the input method; :417-437 splits committed text within message bounds. supervisor grid_input.rs:175 emits Text as its UTF-8 bytes. This confirms source wiring, not real IME event sequencing."
+    ],
+    "coverage_checked": {
+      "specifications": "Read current The grid client and island context. SPEC_impl.md:1886 exactly covers missing composition display only; SPEC.md Terminal experience provides no broader committed-input exemption.",
+      "TODO_Planned": "Empty. TODO.md:547-552 keeps Input-method typing in grid terminals under Maybe later, not Planned; it corroborates the display omission but does not independently suppress findings as Planned coverage.",
+      "plans_queue": "tmux-drop-from-docs.md:78-86 explicitly leaves the input-method TODO alone. No pending plan broadens the accepted omission to committed-input loss.",
+      "BUGS": "No same root.",
+      "queue": "Full INDEX and focused IME/composition phrases found no same-root item.",
+      "active_triage": "No matching input-method preview decision.",
+      "FILTER": "Not needed: exact specification acceptance supplies the basis."
+    },
+    "exact_cover_quotes": [
+      {"source": "SPEC_impl.md:1886 (current and f560058da19e02716e6f943883a9508b447aff4e)", "quote": "Not built, a near-term entry in `TODO.md`: showing an input method's composition at the cursor (committed text is sent)."}
+    ],
+    "missing_premise": "No runtime IME or cross-engine event-order validation was performed; acceptance is confined to in-progress composition display.",
+    "original_stronger_consequence": "Visible uncommitted composition preview/candidate placement omission only, other priority. No committed-input loss or security/work-loss route was claimed.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Exact accepted specification omission. The Maybe later TODO is supporting context, not Planned coverage."
+  },
+  {
+    "key": "g189/c2",
+    "latest_line": 7,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "deleted-xterm-assets-retained-loader-dependency",
+    "aliases": ["g188/c1"],
+    "target_queue_file": null,
+    "why": "No retained executable reference requires the deleted scripts or stylesheet, and the grid's actual script/style loading is present. This is the same missing-dependency root as g188/c1, with additional web/native stylesheet evidence.",
+    "checks": [
+      "At f560058da19e02716e6f943883a9508b447aff4e, lib.rs:1479-1483,1914-1926 declares/injects replacement scripts, matching terminal.js:3203-3228's mount prerequisites and :4313's constructor.",
+      "lib.rs:1527-1530 statically injects app.css for the web build. desktop.rs:280-287 inlines that exact stylesheet into the native head.",
+      "Pinned searches for retired filename/global consumers across crates, scripts, packaging, .github and build configuration found only explanatory FitAddon comments. No build or executed mount/style observation was performed."
+    ],
+    "coverage_checked": {
+      "specifications": "Current SPEC_impl.md Terminal widget and The grid client sections describe the reachable replacement; SPEC.md Terminal experience does not accept missing scripts/styles.",
+      "TODO_Planned": "Empty.",
+      "plans_queue": "Retired asset/mount searches found the tmux-removal plan and wording cleanup, not an unlanded loader/style repair.",
+      "BUGS": "No relevant known bug.",
+      "queue": "Full INDEX and focused deleted-bundle/mount searches found no matching existing queue item; g188/c1 is the assigned alias.",
+      "active_triage": "Mount-related result is a test-witness decision, not the same production dependency hypothesis.",
+      "FILTER": "No filter applied."
+    },
+    "exact_cover_quotes": [],
+    "missing_premise": null,
+    "original_stronger_consequence": "Unavailable or unstyled terminals; reviewer suggested other and expressly established no security or user-work-loss route. A real wholesale terminal-unavailability defect would materially affect UX, but this one is source-refuted.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "The assets used by the replacement are both declared and loaded on web/native surfaces. Keep this as corroborating source for the shared c1 root, not a second queue item."
+  },
+  {
+    "key": "g189/c3",
+    "latest_line": 3,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "deleted-xterm-screen-reader-manager-enabled-regression",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The deleted screen-reader manager was option-gated and the old shipped terminal never enabled that option. This refutes loss of that previously active manager; it does not establish that the replacement is accessible.",
+    "checks": [
+      "At f560058da19e02716e6f943883a9508b447aff4e^, vendor/xterm.js sets screenReaderMode:!1 and constructs AccessibilityManager only when the option is true (bounded extracts around every screenReaderMode occurrence checked).",
+      "The complete parent assets/terminal.js:3900-3990 Terminal options contain no screenReaderMode. Pinned git grep across that terminal.js and UI Rust source finds no option assignment.",
+      "At f560058da19e02716e6f943883a9508b447aff4e, grid-terminal.js:341-369 marks output rows decorative and supplies a labelled terminal input; that limited source fact is not a positive assistive-technology assessment."
+    ],
+    "coverage_checked": {
+      "specifications": "Searched both specifications for screen-reader/accessibility and read the relevant grid contract. No specification statement accepting removal of an enabled old accessibility manager was needed for this refutation.",
+      "TODO_Planned": "Empty.",
+      "plans_queue": "Screen-reader/accessibility searches found no pending work removing this cause.",
+      "BUGS": "No matching bug.",
+      "queue": "Full INDEX and focused screenReaderMode/announcement search found attachment-failure-announcement-unresolved.md, which concerns a separate error announcement rather than an enabled vendor accessibility tree.",
+      "active_triage": "screen_reader.rs matches concern agent status recognition, not terminal assistive-technology output.",
+      "FILTER": "No filter used."
+    },
+    "exact_cover_quotes": [],
+    "missing_premise": null,
+    "original_stronger_consequence": "Hypothetical loss of an existing screen-reader terminal experience; other priority in the record, with no security or work-loss route.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "The exact deleted manager was unreachable under the old shipped options. Other accessibility deficiencies are outside this named claim."
+  },
+  {
+    "key": "g189/c4",
+    "latest_line": 8,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "deleted-web-links-addon-missing-detection-or-activation-policy",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The grid retains explicit URL detection, a reachable provider, scheme classification and target-disclosure admission. Wholesale loss of URL handling or its checked activation boundary is source-refuted. Because the discarded hypothesis includes a security-sensitive activation bypass, request an independent drop check despite the latest other bucket.",
+    "checks": [
+      "At f560058da19e02716e6f943883a9508b447aff4e, grid-buffer.js:59,378-419 detects printed URLs and maps their ranges while giving OSC links priority. terminal.js:1108-1115 exposes both via its provider; :4302-4335 passes it to the grid.",
+      "terminal-files.js:128-148 classifies OSC http(s) separately from file and inert targets. terminal.js:1030-1058 grants web activation only to classified web links; :998-1026 checks required disclosure before opening or tunneling.",
+      "terminal-links.js:108-120 validates printed URLs; :153-159 applies click/selection/program-mode gates and returns after tunneling; :69-75 uses native navigation or window.open with noopener. No runtime gesture, hover geometry or exhaustive parser validation was performed."
+    ],
+    "coverage_checked": {
+      "specifications": "Read current SPEC.md:3074-3122 and SPEC_impl.md Links in terminals in full. They require the checked http(s)/OSC target policy and do not accept a bypass.",
+      "TODO_Planned": "Empty.",
+      "plans_queue": "Web-link/retired-addon searches found removal/preserved-code context, not an unlanded same-root repair.",
+      "BUGS": "No same-root known bug.",
+      "queue": "Full INDEX and focused searches show detailed gesture, disclosure-coverage and parsing findings; none asserts absence of the replacement provider or a bypass caused by deleting this add-on.",
+      "active_triage": "No same deletion/detection/activation-policy decision found.",
+      "FILTER": "No filter applied; any security bypass would fall outside the rare diagnostic filter."
+    },
+    "exact_cover_quotes": [],
+    "missing_premise": "No readily checkable premise remains for this narrow replacement-policy refutation. Other link parser/hover/gesture edge cases remain outside the claim.",
+    "original_stronger_consequence": "Lost clickable URLs or safe activation. Latest record suggests other for the rejected removal hypothesis; it explicitly notes that bypassing OSC-target or scheme admission would be highest/security, although no such route is established.",
+    "needs_independent_drop_check": true,
+    "proposed_basis": "Concrete detector-to-provider wiring survives and the delegated activation code retains validation and disclosure. This proposes a narrow source refutation, not independent permission to drop a security concern."
+  },
+  {
+    "key": "g189/c5",
+    "latest_line": 12,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "deleted-xterm-css-missing-grid-rendering-surface",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The grid creates its own elements, receives supervisor widths, paints inline attributes and loads its own CSS. The width subclaim overlaps g188/c4; stylesheet/decorations coverage makes this a useful related check rather than an exact whole-record alias. The separate prior SGR-overline investigation remains a caveat, not a new finding or complete-parity certification.",
+    "checks": [
+      "At f560058da19e02716e6f943883a9508b447aff4e, grid-terminal.js:341-399 creates grid-specific elements and :759-779 draws supplied positions/widths. grid-model.js:1174-1189 boxes non-ASCII content at the supplied cell width.",
+      "app.css:8628-8682,8790-8825 supplies grid geometry, run boxes, hidden input and measurements; grid-style.js:145-209 supplies resolved colors and inline underline/strikethrough attributes. lib.rs:1527-1530 and desktop.rs:280-287 load this stylesheet.",
+      "Pinned parent searches for registerDecoration, registerMarker, overviewRuler and character-joiner registrations in terminal.js/UI Rust found no calls. The replacement's own grid-terminal.js:1407-1445 draws hover/link underlines independently.",
+      "Pinned SPEC_impl.md:1835-1867 and :2673-2729 define supervisor interpretation and the grid renderer, including deliberate width/format differences. No browser rendering or complete attribute-parity audit was executed."
+    ],
+    "coverage_checked": {
+      "specifications": "Read current grid/island and emulator sections plus SPEC.md Terminal experience. The defined renderer contract supports the source refutation, but is not blanket permission to lose arbitrary attributes.",
+      "TODO_Planned": "Empty.",
+      "plans_queue": "Retired CSS/Unicode/rendering searches found preservation and cleanup constraints in the tmux plans, not a pending repair of a missing rendering surface.",
+      "BUGS": "No same root in full file.",
+      "queue": "Full INDEX and focused searches show independent cursor/color/layout issues, not use of deleted xterm selectors or provider. No exact existing coverage or extension identified.",
+      "active_triage": "No same missing-style/width-provider decision found.",
+      "FILTER": "No filter applied."
+    },
+    "exact_cover_quotes": [],
+    "missing_premise": "No missing premise for the narrow deleted-dependency refutation. The record's unassigned l1 overline conclusion was preserved as a limitation and was not independently re-investigated.",
+    "original_stronger_consequence": "Unstyled terminal output or lost column-width decisions; other in the latest record, with no established security or user-work loss. Accepted IME preview omission remains separately under g189/c1.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "The replacement's concrete DOM, width, style and stylesheet-loading paths refute dependency on the deleted rendering surface. This does not establish complete visual or SGR parity."
+  }
+]

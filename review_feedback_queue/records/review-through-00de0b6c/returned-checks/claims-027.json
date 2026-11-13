@@ -1,0 +1,314 @@
+[
+  {
+    "key": "g043/c1",
+    "latest_line": 1,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "backend-typed-refusal-redaction-not-peer-text",
+    "aliases": ["g044/c2"],
+    "target_queue_file": null,
+    "why": "The changed warning boundary returns a fixed caller sentence for ordinary failures. The typed exception contains locally constructed diagnostic text, not credential-bearing stderr. This refutes the named new-call-site route only, not every transport constructor or every diagnostic sink.",
+    "checks": [
+      "56659839785691f76da3af5d8f51b511cff4ba8b provisioning/credential_delivery.rs:483-494 calls redacted_reason for home/settings read failures.",
+      "Same revision provisioning/backend.rs:287-325: new sets safe_refusal=None; redacted_reason returns context only for the typed exception and otherwise the caller fallback; stderr is never rendered there.",
+      "Same revision provisioning/backend.rs:939-948 and transport.rs:423-460: the exception comes from SSH-nested Podman exit 255 plus refusal classification, and its wording contains only the bounded route destination. The peer bytes select a fixed diagnosis rather than becoming its content. Source inspection only."
+    ],
+    "coverage_checked": [
+      "Current SPEC.md:4912-4930 retains remote-host and redaction boundaries; SPEC_impl.md:6331-6350 governs copied-state admission and credential merging. Neither accepts credential-bearing warnings.",
+      "TODO.md Planned is empty; plans/queue/INDEX.md lists no unlanded plans. BUGS.md contains only the escaped-local-SSH-helper transfer hang, with a different trigger and consequence.",
+      "Searched queue INDEX and active TRIAGE_OUTCOMES for redaction, credential disclosure, stderr and preparation. Read sandbox-status-diagnosis-bypasses-cleaning.md: successful API-status diagnosis propagation is a different source/sink, not coverage. No exact queue or active decision coverage found.",
+      "FILTER.md has no whole-boundary match for potential credential disclosure; no filter proposed."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": "No missing premise for refuting this changed warning route. No claim is made about unrelated failure constructors.",
+    "original_stronger_consequence": "Credential-bearing remote output could become a host warning; highest/security if established.",
+    "needs_independent_drop_check": true,
+    "proposed_basis": "Source refutation of raw stderr propagation at the changed redacted_reason call sites. g044/c2 shares the typed exception root but checks the sensitive-read boundary separately."
+  },
+  {
+    "key": "g043/c2",
+    "latest_line": 11,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "environment-update-and-prepared-clone-admission",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "Update cannot open the first-admission gate. The inspected clone path instead admits that create's saved preparation facts after preparation refuses copied state and verifies whole-state removal. A legitimate clone can already have minted its own database before admission; absence must be verified before capture, not by rejecting every running clone with a database. This conclusion does not audit every provider capture implementation or external image mutation.",
+    "checks": [
+      "04ffdbb35773cef36e73eb798c005ddbeb9a9de6 provisioning/service.rs:1321-1332 refuses either missing coordinate before probing; :966-993 requires guarded ExistingEnvironment admission. store/podman.rs:200-243 compares entry UUID, binding, old coordinates, recipe and pending marker.",
+      "56659839785691f76da3af5d8f51b511cff4ba8b provisioning/service.rs:1349-1360 retains that gate; manager.rs:4185-4199 refuses first dial before provider-status I/O when either coordinate is missing.",
+      "Same revision provisioning/snapshot_preparer.rs:97-99 refuses copied state; tensorlake_backend.rs:188-198 checks existing and dangling-link supervisor.db; :243-292 verifies stopped processes, removes the whole state tree and verifies absence before facts publication.",
+      "Same revision provisioning/tensorlake_add.rs:567-592 reads the created row's saved facts and admits those paths; environment/mod.rs:142-177 dispatches saved-fact reads/admission by provider. environment/podman.rs:1103-1125 saves selected facts/login before run; store/podman.rs:256-329 guards the saved create and admission. environment/podman/build.rs:345-374 runs preparation before committing its prepared image. Source inspection only."
+    ],
+    "coverage_checked": [
+      "Current SPEC.md:383-403,568-586 and SPEC_impl.md:6307-6342,6532-6584 require saved-create recovery, no copied state and durable first-dial admission. They forbid the suspected bypass rather than accept it.",
+      "TODO.md Planned empty; no unlanded plan is listed in plans/queue/INDEX.md; BUGS.md's SSH-helper hang does not match copied identity admission.",
+      "Searched queue INDEX and active TRIAGE_OUTCOMES for copied state/identity, admission, prepared snapshots and Update. Snapshot cleanup/retirement entries concern source deletion/selection, not accepting copied supervisor identity. No exact coverage found.",
+      "No FILTER.md boundary covers this security/identity consequence."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": "No missing premise remains for the narrow Update route or inspected saved-facts admission chain; uninspected external mutation and provider capture internals are excluded.",
+    "original_stronger_consequence": "Update or shared admission could accept another host's copied supervisor identity before initial checks; potentially highest/security or user-work ownership harm.",
+    "needs_independent_drop_check": true,
+    "proposed_basis": "Pre-probe/pre-dial coordinate gates plus pre-capture copied-state refusal, whole-state verification and create-specific saved-facts admission."
+  },
+  {
+    "key": "g043/c3",
+    "latest_line": 9,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "provider-destruction-proof-row-and-caller-ordering",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The generalized evidence keeps its host ID. Production deletion selects a provider from the held row's binding, obtains destruction evidence, then removes that row; rollback's never-created evidence precedes create-capable work. The store validates only row identity, not independent provider/resource facts, so the refutation depends on these production callers and immutable bindings. It does not claim arbitrary fabricated in-crate proofs are safe or independently audit all provider cleanup internals or external database edits.",
+    "checks": [
+      "ee39aeacdaccfeaa0cea25246540b20008c868f0 environment/mod.rs:197-211 wraps SandboxDeleted and forwards host(). provisioning/tensorlake_add.rs:537-565 mints never-created evidence only on registration handoff failure, before the create task at :608-613.",
+      "56659839785691f76da3af5d8f51b511cff4ba8b hosts.rs:1464-1508 retains the caller's provisioning guard, holds the actor, resolves the current binding/provider and calls destroy before delete_registered_host. environment/mod.rs:520-531 is exhaustive and :617-618 delegates test destruction to the actual provider.",
+      "Same revision store.rs:8034-8068 requires proof.host()==host for both environment providers. environment/podman.rs:1294-1335 rejects another provider's handle, issues never-created proof only without canonical ID/pending create, and attests created-resource deletion after remove_container; :400-414 checks absence after owned removal.",
+      "Same revision provisioning/tensorlake_add.rs:411-417 removes registration using never-created evidence before task preparation/create at :472-481. Source inspection only."
+    ],
+    "coverage_checked": [
+      "Current SPEC_impl.md:6294-6305 and :6685-6701 describe durable create ownership and deletion evidence; SPEC.md:399-403 keeps ambiguous-create ownership listed. These do not accept premature forgetting.",
+      "TODO.md Planned empty; unlanded plans index empty; BUGS.md has no destruction-proof exception.",
+      "Searched queue INDEX/active TRIAGE_OUTCOMES for deletion proofs, never-created evidence, provider deletion and ownership. Snapshot-cleanup and Podman storage-selection items have different causes/consequences; no exact coverage found.",
+      "Potential loss of ownership/user work does not match FILTER.md."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": "No supported cross-provider proof mismatch is shown in the checked callers. A claim about arbitrary proof fabrication or all cleanup internals would require a separate premise and is not refuted here.",
+    "original_stronger_consequence": "Forgetting a billed sandbox/resource before cleanup could strand user work; potentially highest.",
+    "needs_independent_drop_check": true,
+    "proposed_basis": "Opaque proof wrapping retains row identity; locked same-binding production dispatch and rollback-before-create ordering preserve the changed interface's boundary."
+  },
+  {
+    "key": "g043/l1",
+    "latest_line": 8,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "credential-delivery-post-registration-route-retarget",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "For an already registered environment, deleting a row cannot provide a replacement numeric ID, environment destinations cannot be retargeted, and its place cannot be ordinarily retargeted while referenced. This is narrower than event 5's unqualified 'no unverified shipped route remains'. It does not refute g020/l1's earlier approval/PLACE boundary: a retarget committed before environment registration can remain the route later used for delivery. External database editing and SSH configuration changes remain excluded.",
+    "checks": [
+      "56659839785691f76da3af5d8f51b511cff4ba8b store.rs:2714-2715 uses AUTOINCREMENT; :7563-7567 refuses environment retargets and checks referenced ordinary places. store/podman.rs:215-225 counts all referring rows, including unresolved/stopped environments.",
+      "190d844e58c96cf197aa838d0b0eea8062f48435 store/podman.rs:364-394 inserts place_host with a fresh entry_uuid and commits in one transaction. That commit starts the referring-row exclusion; it cannot bind a previously displayed approval's place snapshot.",
+      "56659839785691f76da3af5d8f51b511cff4ba8b provisioning/tensorlake_add.rs:391-398 registers before preparation/create at :521-555 and delivers through the fresh admitted environment row at :567-605. Source inspection only."
+    ],
+    "coverage_checked": [
+      "Current SPEC_impl.md:6307-6342 requires create-specific saved facts and admission before delivery; SPEC.md:383-403 defines clone/setup behavior. No accepted misdelivery exception found.",
+      "TODO.md Planned and unlanded plan index empty; BUGS.md's escaped-helper hang is unrelated.",
+      "Searched queue INDEX and active TRIAGE_OUTCOMES for retarget, credential route/target and misdelivery. update-preplanning-retarget-consent-ambiguity.md concerns a logical ordinary-host Update before server planning, not this registered-environment route. No exact queue/decision coverage found. g020/l1 is a separately supplied pre-registration claim, not coverage or an alias.",
+      "No FILTER.md match for credential misdelivery."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": "No missing supported mutation premise remains for this post-registration claim. The pre-registration approval authority question stays outside this refutation.",
+    "original_stronger_consequence": "A fresh numeric-ID lookup after entry_uuid-guarded delivery-state reading might deliver credentials to a replacement machine; highest/security if established.",
+    "needs_independent_drop_check": true,
+    "proposed_basis": "Refute only execution-target replacement after the environment row has registered, using non-reused IDs, immutable environment destinations and transactional place-reference refusal. Preserve the explicit narrowing from the earlier broad wording."
+  },
+  {
+    "key": "g043/c4",
+    "latest_line": 6,
+    "recommendation": "covered",
+    "bucket": "other",
+    "underlying_key": "tensorlake-recorded-create-recovery-after-recipe-base-change",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The compatibility refusal is for new work. Recovery retains the recorded resource and that create's saved facts despite later recipe edits; existing ordinary installs keep their ordinary recovery path. This does not authorize a fresh Tensorlake create from a Podman-only base.",
+    "checks": [
+      "56040bb964270bb40d191902173dbb84b3ba78fc provisioning/tensorlake_add.rs:384-414 distinguishes saved-prepared recovery, genuinely unstarted rows, recorded IDs and pending creates; :433-442 refuses incompatible new work unless recovering saved prepared facts.",
+      "Same revision :1088-1105 falls back to ordinary installation when the resource has no saved prepared facts. These checks establish the claimed distinction without executing it."
+    ],
+    "coverage_checked": [
+      "Current SPEC.md:383-403 and SPEC_impl.md:6307-6321 explicitly accept the exact recovery trigger/consequence/scope. Quoted below.",
+      "TODO.md Planned empty; unlanded plans index empty; BUGS.md unrelated. Searched queue INDEX/active TRIAGE_OUTCOMES for recovery, saved facts, recipe/base changes and provider compatibility; no narrower contrary decision or separate exact item found.",
+      "FILTER.md not used; this is explicit contract acceptance."
+    ],
+    "exact_cover_quotes": [
+      "SPEC.md:390-391: Rerunning an interrupted initial create first recovers that create's saved installation facts, rather than using the recipe's latest prepared snapshot.",
+      "SPEC_impl.md:6314-6316: An interrupted create recovers its own saved facts, not the recipe's latest prepared record. Later Rerun and Update retain ordinary installation"
+    ],
+    "missing_premise": null,
+    "original_stronger_consequence": "Setup recovery might incorrectly avoid the new provider-compatibility refusal after the recipe changes to a Podman-only base; other if contradictory. No security or user-work-loss route was asserted.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Exact specification acceptance of saved-create/ordinary-install recovery independently of the latest recipe preparation record."
+  },
+  {
+    "key": "g043/c5",
+    "latest_line": 10,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "preparer-route-one-shot-and-delivery-exclusion",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "Direct Tensorlake preparation retains one-shot SSH, the selected gateway access and an installer with no credential delivery/attachment authority. Do not generalize the one-shot claim to SSH-nested Podman exec: that route intentionally uses its place's supervisor master. Custom-base authentication is left intact and remains the author's responsibility. Existing SSH and provider cleanup internals are outside this route-composition check.",
+    "checks": [
+      "1038bb1f4549f6896fa6e064fecf540f4548b4da provisioning/service.rs:418-446 selects SystemBackend::one_shot for the preparer; snapshot_preparer.rs:75-82 checks selected Tensorlake access before forming the route and :110-128 skips attachment.",
+      "56659839785691f76da3af5d8f51b511cff4ba8b service.rs:432-474 supplies the same selected preparation backend to the Tensorlake adapter and common installer; tensorlake/prepared.rs:39-56 preserves access equality and passes the same route/home to it.",
+      "Same revision backend.rs:816-833 passes its one_shot policy into direct route lowering; access.rs:266-281 preserves it for SSH, whereas :318-323 deliberately chooses the place's Supervisor master for nested Podman exec.",
+      "Same revision snapshot_preparer.rs:1-6,103-121 has no delivery service and skips attachment; environment/podman/build.rs:345-374 enters this common installer before prepared-image commit. Source inspection only."
+    ],
+    "coverage_checked": [
+      "Current SPEC.md:568-586 separates preparation from credential delivery and preserves custom-base authentication. SPEC_impl.md:6566-6583 requires direct preparer one-shot transport and no delivery/gh/tunnels; the named source satisfies those requirements.",
+      "TODO.md Planned/unlanded plan index empty; BUGS.md unrelated. Queue INDEX and active TRIAGE_OUTCOMES searches for preparer access, one-shot reuse, managed-credential capture and transport routing found no exact coverage.",
+      "No FILTER.md match for the hypothetical security route."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": "No readily checkable production assembly premise remains. No claim is made that custom-base authentication is removed or every nested transport is one-shot.",
+    "original_stronger_consequence": "Route wrapping could reuse a prior preparer's SSH master or capture Farhelm-managed credentials in a reusable image; highest/security if established.",
+    "needs_independent_drop_check": true,
+    "proposed_basis": "Source refutation limited to direct Tensorlake one-shot/gateway composition and common-installer credential/attachment exclusion. g044/l1 shares equality-check evidence but its narrower removed-validation root is recorded separately."
+  },
+  {
+    "key": "g043/c6",
+    "latest_line": 14,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "ordinary-update-retained-registration-mutation-authority",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "Read-only Update planning can see separate row/route snapshots, but the retained plan freezes its original registration and checks it again before execution-side probing/mutation. This is ordinary Update's own plan, not an earlier environment approval, and promises neither atomic planning reads nor protection from external SSH configuration changes.",
+    "checks": [
+      "1038bb1f4549f6896fa6e064fecf540f4548b4da provisioning/service.rs:1286-1308 reads the row then resolves/probes; :1426-1428 freezes registration_for_row(&row), preserving the original row rather than the effective probe row.",
+      "Same reviewed revision :2242-2246 calls require_registration_unchanged before its execution-side probe. :2378-2398 compares the current registration and refuses a mismatch; :2985-2998 includes ordinary SSH destination and both installation coordinates. The earlier event's revision-attribution check is therefore resolved at the pinned commit itself. Source inspection only."
+    ],
+    "coverage_checked": [
+      "Current SPEC.md:122-134 governs Update authority; SPEC_impl.md:7782-7792 requires retained one-use plans, host/registry-fact revalidation before admission and recorded-coordinate use. No accepted unauthorized-mutation route was found or used as coverage.",
+      "TODO.md Planned empty; unlanded plans index empty; BUGS.md unrelated. Read update-preplanning-retarget-consent-ambiguity.md after the queue INDEX match: that item freezes a newer row before planning and questions stale GUI consent. It does not cover mixing the old plan's installation authority with a later destination. No exact active TRIAGE_OUTCOMES match found.",
+      "No FILTER.md match for wrong-machine mutation."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": "No missing attribution premise remains for this ordinary Update race. A pre-registration environment approval or external SSH-config route is outside this check.",
+    "original_stronger_consequence": "Separately refreshing Update's route could combine old installation paths with a retargeted destination and authorize mutation on another machine; potentially highest.",
+    "needs_independent_drop_check": true,
+    "proposed_basis": "Pinned-source original-registration retention and pre-mutation equality guard, rather than a later revision's guard or coverage from the distinct preplanning-consent item."
+  },
+  {
+    "key": "g043/c7",
+    "latest_line": 13,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "container-credential-selection-test-distinguishing-oracle",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The focused test has a distinguishing Podman selection assertion: restoring the legacy Tensorlake-only lookup makes it fail. Its name and 'hook' wording are broader than its calls, and its home round trip is not a stamp assertion. This test supplies no evidence of real connection-hook entry, leases, secret writes, delivery stamps or a Podman round trip; unchanged Tensorlake fixtures supply none of that Podman integration evidence either. Refute only the alleged absence of a distinguishing observable, not any separately asserted hook-coverage promise.",
+    "checks": [
+      "56659839785691f76da3af5d8f51b511cff4ba8b provisioning/credential_delivery_tests.rs:20-68 registers and decodes a Podman-only row, asserts its type at :55-58, directly checks read_bindings(...).uses(\"work\") at :59, and round-trips only remembered home at :60-66.",
+      "Same revision credential_delivery.rs:678-684 changes selection from the legacy Tensorlake binding to environment_binding. A Podman row without the former binding distinguishes that change without connecting. Test calls were inspected, not executed."
+    ],
+    "coverage_checked": [
+      "Current SPEC.md:391-394 and SPEC_impl.md Adding Tensorlake hosts / named credentials describe production delivery, but do not make this unit-seam test proof of the full hook. Production correctness was not used to dismiss a test-oracle defect.",
+      "TODO.md Planned/unlanded plan index empty; BUGS.md unrelated. Searched queue INDEX/active TRIAGE_OUTCOMES for credential-hook/container test, selection, stamps and record coverage; no exact queue or decision match found.",
+      "No FILTER.md match proposed for a test/documentation scope claim."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": "A separate claim that this seam test promises actual connected-hook or stamp coverage would need its precise asserted contract. The broad name/comment alone does not remove the observable for the changed selection regression.",
+    "original_stronger_consequence": "The new container credential test might falsely prove a real connected hook or a complete secret-delivery round trip. Other/test-evidence scope; no credential exposure consequence was asserted.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Source refutation of 'no distinguishing observable' only. Keep the narrower evidence limits and broader wording caveat with any final disposition."
+  },
+  {
+    "key": "g044/l1",
+    "latest_line": 10,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "tensorlake-preparer-moved-access-equality",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The removed common-installer access check moved intact to the Tensorlake adapter, with the selected one-shot backend shared by adapter and installer. This says nothing about inherited private binaries or the lifetime of an outer recipe lock. The supplied g045/l1 and g045/l2 concerns are separate and remain untouched.",
+    "checks": [
+      "56659839785691f76da3af5d8f51b511cff4ba8b tensorlake/prepared.rs:23-56 captures access for the selected state directory, compares equality at :45-48 before preparation, forms the Tensorlake route and passes that route plus observed home to the common installer.",
+      "Same revision provisioning/service.rs:432-474 selects a one-shot preparation backend and supplies that same backend through both paths.",
+      "Same revision tensorlake_add.rs:1352-1385 retains ordinary Add's outer source_guard across create_host_sandbox. :1599-1616 passes None as create_recorded's guard plus a readiness backend; tensorlake/hosts.rs:471-497 drops that None at Running then waits for SSH. This corroborates the supplied caller-lifetime distinction rather than refuting it. Source inspection only."
+    ],
+    "coverage_checked": [
+      "Current SPEC.md:568-586 and SPEC_impl.md:6560-6583 require selected preparer policy and distinguish installation/attachment from source exclusion. No specification accepts a removed access guard; the source preserves it.",
+      "TODO.md Planned/unlanded plan index empty; BUGS.md unrelated. Queue INDEX and active TRIAGE_OUTCOMES searches for preparation access validation, selected SSH policy and wrong credentials found no exact coverage.",
+      "No FILTER.md boundary covers the hypothetical wrong-host/credential consequence."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": "No missing equality-check or assembly premise remains. This conclusion supplies neither inherited-binary absence nor correct ordinary Add outer-lock release.",
+    "original_stronger_consequence": "Removing access validation could select the wrong host or credentials; potentially highest/security. Earlier other-only wording did not dispose of this potential consequence.",
+    "needs_independent_drop_check": true,
+    "proposed_basis": "Source refutation limited to the moved selected-access equality check.",
+    "new_interface_evidence": "g045/l1: at 5665983 tensorlake_add.rs:1352-1385 owns the real outer guard while :1599-1616 passes None to create_recorded; hosts.rs:484-497 drops only the passed guard before SSH readiness. The ordinary Add caller therefore retains its outer exclusion during readiness. No further search or runtime check performed."
+  },
+  {
+    "key": "g044/c2",
+    "latest_line": 11,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "backend-typed-refusal-redaction-not-peer-text",
+    "aliases": ["g043/c1"],
+    "target_queue_file": null,
+    "why": "Sensitive reads retain only a locally constructed typed diagnosis; ordinary failures become the fixed fallback and typed failures have stderr cleared. The exception's producer was checked, not merely trusted because it is typed. This refutes only these changed reads and their checked exception provenance.",
+    "checks": [
+      "56659839785691f76da3af5d8f51b511cff4ba8b provisioning/tensorlake_backend.rs:148-183 invokes redacted for all three changed run_shell error paths; nonzero command status, invalid size and size changes retain fixed failures.",
+      "Same revision provisioning/backend.rs:269-325 keeps safe_refusal private; new does not set it; redacted clears stderr only for that typed diagnosis and otherwise returns the fixed caller fallback.",
+      "Same revision backend.rs:939-948 constructs the exception from transport::nested_session_failure. transport.rs:423-460 requires SSH-nested Podman, exit 255 and refusal classification, then constructs fixed prose with only a 128-character route-destination excerpt. Credential-file bytes and peer diagnosis text are not interpolated. Source inspection only."
+    ],
+    "coverage_checked": [
+      "Current SPEC.md:4912-4930 requires remote-host/redaction boundaries; SPEC_impl.md:6331-6350 governs sensitive credential merging. No credential-byte disclosure exception found.",
+      "TODO.md Planned/unlanded plan index empty; BUGS.md unrelated. Searched queue INDEX/active TRIAGE_OUTCOMES for sensitive reads, redaction, diagnostic propagation and credential exposure. Read sandbox-status-diagnosis-bypasses-cleaning.md: its successful API-status path is a separate defect, not exact coverage here.",
+      "No FILTER.md boundary covers potential secret disclosure."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": "No missing exception-provenance premise remains for the checked changed reads. No general audit of all diagnostic sinks is claimed.",
+    "original_stronger_consequence": "Retained backend errors could expose credential-file bytes or peer stderr; highest/security if established.",
+    "needs_independent_drop_check": true,
+    "proposed_basis": "Source refutation through fixed fallback/redacted typed failure and checked local exception provenance. Shared redaction root with g043/c1, retaining this distinct sensitive-read sink."
+  },
+  {
+    "key": "g044/c3",
+    "latest_line": 9,
+    "recommendation": "covered",
+    "bucket": "other",
+    "underlying_key": "retired-supervisor-tmux-pin",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The supervisor no longer runs tmux, and its legacy-server shutdown uses socket/process operations without executing tmux. Removing its runtime pin follows the explicit replacement contract. This does not establish that an inherited private tmux cannot be selected by a user's or agent's command/startup script; that separate preparation-removal question remains g045/l2's scope.",
+    "checks": [
+      "17a3fe858c5511a24b7403af15dd41c93bf69fd7 provisioning/plan.rs:1227-1241 renders the unit with only Farhelm/state inputs; its explanation explicitly says the supervisor starts no tmux.",
+      "Same revision SPEC_impl.md:2787-2805,2866-2872 says the running supervisor runs no tmux, its driver is gone, startup cleanup works without any tmux program and the unit names no tmux. Linux provisioning's distinct payload policy remains at that intermediate revision.",
+      "500548b9253b07a26fd03119679184b69544e31d snapshot_preparer.rs:48-60 passes only target/unit/state to final cleanup before publishing facts; :109-119 skips bundled-tmux removal. The checked earlier cleanup implementation at 5665983 tensorlake_backend.rs:207-300 accepts unit/state/cgroup/machine-id and ends by checking state/database absence, not private-lib absence. Source inspection only."
+    ],
+    "coverage_checked": [
+      "Current SPEC_impl.md:2780-2825 and7996-8020 preserves no-tmux supervisor/unit behavior and separately describes bundled-binary cleanup; SPEC.md:183-213 likewise distinguishes typed session commands/removal from supervisor runtime use.",
+      "TODO.md Planned/unlanded plan index empty; BUGS.md unrelated. Searched queue INDEX/active TRIAGE_OUTCOMES for runtime pin, inherited/private tmux and preparation removal; no exact existing queue coverage for the pin concern. g045/l2 is not an alias or coverage for this runtime-only candidate.",
+      "No FILTER.md used. Explicit specification acceptance is confined to unused supervisor pin removal."
+    ],
+    "exact_cover_quotes": [
+      "SPEC_impl.md:7996-7997: The supervisor runs no tmux. The supervisor unit, whether provisioning or `farhelm helm setup` renders it, names no tmux and puts no tmux directory on `PATH`",
+      "SPEC_impl.md:2786-2788: works whether or not any tmux program exists."
+    ],
+    "missing_premise": "No runtime-selection premise remains. Inherited private-lib absence is unproven by the final publication guard and must not be inferred from this result.",
+    "original_stronger_consequence": "Removing an approved exact tmux pin might reintroduce selection of an unapproved or below-floor binary. Supervisor selection is refuted; explicit user/agent command shadowing is a separate preserved concern owned by g045/l2.",
+    "needs_independent_drop_check": true,
+    "proposed_basis": "Exact replacement contract accepts removing an unused supervisor tmux pin. Conservatively request independent checking because the original broader shadowing consequence touches user commands and must remain separated.",
+    "new_interface_evidence": "g045/l2: final cleanup receives no private-lib path and checks state/database absence, so that guard does not establish the inherited private binary's absence. The later preparation skip is explicit at 500548b snapshot_preparer.rs:109-119. This corroborates the supplied concern without deciding its supported trigger or consequence."
+  },
+  {
+    "key": "g044/l4",
+    "latest_line": 6,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "eager-tensorlake-preparer-state-path-validation",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The eager constructor does not validate SSH option spelling. It only computes an absolute Tensorlake directory and key paths, the same absolute conversion already required unconditionally during production Tensorlake assembly. The new expect changes presentation of an absolute-conversion failure; it does not show a newly unsupported usable state directory or a new startup-outage route. This does not claim that later SSH option validation accepts every path spelling.",
+    "checks": [
+      "56659839785691f76da3af5d8f51b511cff4ba8b provisioning/service.rs:450-460 eagerly expects TensorlakeSnapshotPreparer::new; tensorlake/prepared.rs:23-34 calls only TensorlakeSshAccess::for_state_dir.",
+      "Same revision tensorlake/ssh.rs:86-89 constructs paths through tensorlake_dir. Restrictions on UTF-8, percent, quotes, backslash and dollar-brace spelling live in options at :104-126, which new does not call.",
+      "Same revision tensorlake/mod.rs:364-365 uses std::path::absolute plus join. production_with_delivery already calls this at :169, retained also in 5665983^; lib.rs:2456-2461 invokes that production assembly unconditionally. No runtime execution performed."
+    ],
+    "coverage_checked": [
+      "Current SPEC_impl.md Tensorlake SSH/prepared-snapshot sections were searched for state paths and eager assembly; SPEC.md Add host/preparation sections do not accept a helm startup crash. Refutation comes from the actual constructor, not a specification exception.",
+      "TODO.md Planned/unlanded plan index empty; BUGS.md's SSH-helper transfer hang is unrelated. Queue INDEX and active TRIAGE_OUTCOMES searches for eager preparer, startup panic, state-path/SSH option validation found no exact coverage.",
+      "No FILTER.md proposed; an installation startup outage would not be a merely rare safe retry."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": "The originally missing usable-path/new-validation premise is refuted for the suspected special-character path. No open check remains for that stated mechanism.",
+    "original_stronger_consequence": "An otherwise usable helm state directory could crash helm startup even when Tensorlake is unused; high/startup outage if established. No user-work loss or security route was asserted.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Source refutation: special-character checks occur later in options(), while this constructor only repeats already mandatory absolute path construction."
+  }
+]

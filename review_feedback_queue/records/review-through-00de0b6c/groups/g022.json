@@ -1,0 +1,676 @@
+{
+  "group": {
+    "id": "g022",
+    "domain": "environment-host-lifecycle",
+    "purpose": "environment-host-lifecycle: crates/farhelm-helm/src/hosts.rs, crates/farhelm-helm/src/sessions.rs, crates/farhelm-helm/src/sessions_tests.rs, crates/farhelm-helm/src/environment/lifecycle.rs, crates/farhelm-helm/src/environment/mod.rs, crates/farhelm-helm/src/manager.rs, crates/farhelm-helm/src/tensorlake/hosts.rs, crates/farhelm-helm/src/tensorlake/lifecycle.rs; phases complete small per-commit changes",
+    "interfaces": [
+      "g001",
+      "g018",
+      "g019",
+      "g020",
+      "g021",
+      "g023",
+      "g024",
+      "g025",
+      "g026",
+      "g027",
+      "g031",
+      "g035",
+      "g036",
+      "g037",
+      "g038",
+      "g043",
+      "g044",
+      "g045",
+      "g046",
+      "g047",
+      "g048",
+      "g049",
+      "g050",
+      "g051",
+      "g055",
+      "g056",
+      "g057",
+      "g064",
+      "g065",
+      "g066",
+      "g067",
+      "g068",
+      "g069",
+      "g070",
+      "g085",
+      "g086",
+      "g087"
+    ],
+    "sources": [
+      {
+        "path": "[private-run]/prep/parts/00030-000.patch",
+        "ranges": [
+          [
+            1,
+            21
+          ]
+        ],
+        "original_path": "crates/farhelm-helm/src/hosts.rs",
+        "commit": "06d4b68f3a9e913f47cd426fedee5946a4eed77b",
+        "notes": "patch header; patch character offsets [0,924)",
+        "lines": 21,
+        "bytes": 924,
+        "start": 0,
+        "end": 924,
+        "original": "[private-run]/prep/originals/00030.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/00034-000.patch",
+        "ranges": [
+          [
+            1,
+            40
+          ]
+        ],
+        "original_path": "crates/farhelm-helm/src/sessions.rs",
+        "commit": "06d4b68f3a9e913f47cd426fedee5946a4eed77b",
+        "notes": "patch header; patch character offsets [0,1869)",
+        "lines": 40,
+        "bytes": 1869,
+        "start": 0,
+        "end": 1869,
+        "original": "[private-run]/prep/originals/00034.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/00035-000.patch",
+        "ranges": [
+          [
+            1,
+            31
+          ]
+        ],
+        "original_path": "crates/farhelm-helm/src/sessions_tests.rs",
+        "commit": "06d4b68f3a9e913f47cd426fedee5946a4eed77b",
+        "notes": "patch header; patch character offsets [0,1608)",
+        "lines": 31,
+        "bytes": 1608,
+        "start": 0,
+        "end": 1608,
+        "original": "[private-run]/prep/originals/00035.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/00085-000.patch",
+        "ranges": [
+          [
+            1,
+            35
+          ]
+        ],
+        "original_path": "crates/farhelm-helm/src/environment/lifecycle.rs",
+        "commit": "ee39aeacdaccfeaa0cea25246540b20008c868f0",
+        "notes": "patch header; patch character offsets [0,1550)",
+        "lines": 35,
+        "bytes": 1550,
+        "start": 0,
+        "end": 1550,
+        "original": "[private-run]/prep/originals/00085.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/00086-000.patch",
+        "ranges": [
+          [
+            1,
+            218
+          ]
+        ],
+        "original_path": "crates/farhelm-helm/src/environment/mod.rs",
+        "commit": "ee39aeacdaccfeaa0cea25246540b20008c868f0",
+        "notes": "patch header; patch character offsets [0,9513)",
+        "lines": 218,
+        "bytes": 9513,
+        "start": 0,
+        "end": 9513,
+        "original": "[private-run]/prep/originals/00086.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/00087-000.patch",
+        "ranges": [
+          [
+            1,
+            23
+          ]
+        ],
+        "original_path": "crates/farhelm-helm/src/hosts.rs",
+        "commit": "ee39aeacdaccfeaa0cea25246540b20008c868f0",
+        "notes": "patch header; patch character offsets [0,1034)",
+        "lines": 23,
+        "bytes": 1034,
+        "start": 0,
+        "end": 1034,
+        "original": "[private-run]/prep/originals/00087.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/00089-000.patch",
+        "ranges": [
+          [
+            1,
+            672
+          ]
+        ],
+        "original_path": "crates/farhelm-helm/src/manager.rs",
+        "commit": "ee39aeacdaccfeaa0cea25246540b20008c868f0",
+        "notes": "patch header; patch character offsets [0,30397)",
+        "lines": 672,
+        "bytes": 30397,
+        "start": 0,
+        "end": 30397,
+        "original": "[private-run]/prep/originals/00089.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/00097-000.patch",
+        "ranges": [
+          [
+            1,
+            277
+          ]
+        ],
+        "original_path": "crates/farhelm-helm/src/tensorlake/hosts.rs",
+        "commit": "ee39aeacdaccfeaa0cea25246540b20008c868f0",
+        "notes": "patch header; patch character offsets [0,12764)",
+        "lines": 277,
+        "bytes": 12764,
+        "start": 0,
+        "end": 12764,
+        "original": "[private-run]/prep/originals/00097.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/00099-000.patch",
+        "ranges": [
+          [
+            1,
+            42
+          ]
+        ],
+        "original_path": "crates/farhelm-helm/src/tensorlake/lifecycle.rs",
+        "commit": "ee39aeacdaccfeaa0cea25246540b20008c868f0",
+        "notes": "patch header; patch character offsets [0,2018)",
+        "lines": 42,
+        "bytes": 2018,
+        "start": 0,
+        "end": 2018,
+        "original": "[private-run]/prep/originals/00099.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/00104-000.patch",
+        "ranges": [
+          [
+            1,
+            15
+          ]
+        ],
+        "original_path": "crates/farhelm-helm/src/environment/mod.rs",
+        "commit": "1038bb1f4549f6896fa6e064fecf540f4548b4da",
+        "notes": "patch header; patch character offsets [0,919)",
+        "lines": 15,
+        "bytes": 919,
+        "start": 0,
+        "end": 919,
+        "original": "[private-run]/prep/originals/00104.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/00121-000.patch",
+        "ranges": [
+          [
+            1,
+            22
+          ]
+        ],
+        "original_path": "crates/farhelm-helm/src/environment/mod.rs",
+        "commit": "56040bb964270bb40d191902173dbb84b3ba78fc",
+        "notes": "patch header; patch character offsets [0,1159)",
+        "lines": 22,
+        "bytes": 1159,
+        "start": 0,
+        "end": 1159,
+        "original": "[private-run]/prep/originals/00121.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/00148-000.patch",
+        "ranges": [
+          [
+            1,
+            46
+          ]
+        ],
+        "original_path": "crates/farhelm-helm/src/environment/mod.rs",
+        "commit": "04ffdbb35773cef36e73eb798c005ddbeb9a9de6",
+        "notes": "patch header; patch character offsets [0,1692)",
+        "lines": 46,
+        "bytes": 1692,
+        "start": 0,
+        "end": 1692,
+        "original": "[private-run]/prep/originals/00148.patch"
+      }
+    ],
+    "lines": 1442,
+    "bytes": 65447
+  },
+  "records": [
+    {
+      "key": "g022/f1",
+      "owner": "g022",
+      "id": "f1",
+      "domain": "environment-host-lifecycle",
+      "purpose": "environment-host-lifecycle: crates/farhelm-helm/src/hosts.rs, crates/farhelm-helm/src/sessions.rs, crates/farhelm-helm/src/sessions_tests.rs, crates/farhelm-helm/src/environment/lifecycle.rs, crates/farhelm-helm/src/environment/mod.rs, crates/farhelm-helm/src/manager.rs, crates/farhelm-helm/src/tensorlake/hosts.rs, crates/farhelm-helm/src/tensorlake/lifecycle.rs; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 1,
+          "event": {
+            "version": 1,
+            "kind": "lead",
+            "id": "f1",
+            "state": "open",
+            "summary": "Check Tensorlake destructuring after Podman handle addition",
+            "location": "crates/farhelm-helm/src/environment/mod.rs:77",
+            "detail": "Reviewed commit: 04ffdbb35773cef36e73eb798c005ddbeb9a9de6\n\n## TLDR\nAdding the container handle may make the existing Tensorlake adapter fail to compile, preventing this intermediate revision from building.\n\n## Details\nThe assigned 00148 patch adds ProviderHandle::Podman. At reviewed commit ee39aeacdaccfeaa0cea25246540b20008c868f0 the Tensorlake adapter uses bare let ProviderHandle::Tensorlake(binding) = &binding.handle in status and destroy, which becomes refutable once Podman exists. Need inspect the full 04ffdbb35773cef36e73eb798c005ddbeb9a9de6 commit's adapter changes before concluding: the assignment may exclude a coordinated fix elsewhere. Suggested bucket: other (build break if established). Confidence: unresolved lead, not an established compile failure. Could-be-highest: no established security or loss-of-work route. proposed_drop: false. possible_cover: none. Source-only analysis; no build or reproduction performed."
+          }
+        },
+        {
+          "line": 2,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "f1",
+            "state": "open",
+            "summary": "Podman handle addition coordinates Tensorlake destructuring",
+            "location": "crates/farhelm-helm/src/tensorlake/hosts.rs:126",
+            "detail": "Reviewed commit: 04ffdbb35773cef36e73eb798c005ddbeb9a9de6\n\n## TLDR\nThe suspected intermediate build failure is refuted: the same commit adapts the Tensorlake methods to reject another provider's handle.\n\n## Details\nRevises lead f1. The original suspected consequence was inability to build the intermediate revision after ProviderHandle::Podman made the existing bare Tensorlake let patterns refutable. Source at this exact revision, crates/farhelm-helm/src/tensorlake/hosts.rs:126-132 and 153-155, uses let-else with a returning error in both status and destroy. Exact refuting text: `let ProviderHandle::Tensorlake(binding) = &binding.handle else { return Err(unanswered(\"the registry binding belongs to another provider\".into(), )); };` and `let ProviderHandle::Tensorlake(tensorlake) = &binding.handle else { anyhow::bail!(\"the registry binding belongs to another provider\"); };`. The commit stat confirms that file changes alongside environment/mod.rs. Suggested bucket: other; confidence: confirmed source refutation, no execution. Could-be-highest: no, this concern had only a possible build failure, no security or loss-of-work route. proposed_drop: source refutes the compile-failure premise via coordinated let-else changes. possible_cover: none. Caveat: those adapter changes are context outside this group's assigned mandatory patch snapshots; inspected only to settle this interface lead."
+          }
+        }
+      ],
+      "latest": {
+        "line": 2,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "f1",
+          "state": "open",
+          "summary": "Podman handle addition coordinates Tensorlake destructuring",
+          "location": "crates/farhelm-helm/src/tensorlake/hosts.rs:126",
+          "detail": "Reviewed commit: 04ffdbb35773cef36e73eb798c005ddbeb9a9de6\n\n## TLDR\nThe suspected intermediate build failure is refuted: the same commit adapts the Tensorlake methods to reject another provider's handle.\n\n## Details\nRevises lead f1. The original suspected consequence was inability to build the intermediate revision after ProviderHandle::Podman made the existing bare Tensorlake let patterns refutable. Source at this exact revision, crates/farhelm-helm/src/tensorlake/hosts.rs:126-132 and 153-155, uses let-else with a returning error in both status and destroy. Exact refuting text: `let ProviderHandle::Tensorlake(binding) = &binding.handle else { return Err(unanswered(\"the registry binding belongs to another provider\".into(), )); };` and `let ProviderHandle::Tensorlake(tensorlake) = &binding.handle else { anyhow::bail!(\"the registry binding belongs to another provider\"); };`. The commit stat confirms that file changes alongside environment/mod.rs. Suggested bucket: other; confidence: confirmed source refutation, no execution. Could-be-highest: no, this concern had only a possible build failure, no security or loss-of-work route. proposed_drop: source refutes the compile-failure premise via coordinated let-else changes. possible_cover: none. Caveat: those adapter changes are context outside this group's assigned mandatory patch snapshots; inspected only to settle this interface lead."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g022/findings.jsonl",
+        "id": "f1",
+        "line": 2,
+        "disposition": "excluded",
+        "group": "podman-handle-tensorlake-refutable-pattern-build-lead",
+        "reason": "Parent explicitly accepted named refuted proposal from claims-012 after inspecting it. The exact commit introducing the additional handle variant also changes both Tensorlake destructuring sites to returning let-else branches. The suspected intermediate compilation failure is source-refuted. Narrow source refutation of the two alleged incompatible patterns; not a claim that the entire revision was built or is otherwise defect-free. Checked source/results: [\"04ffdbb35773cef36e73eb798c005ddbeb9a9de6:crates/farhelm-helm/src/tensorlake/hosts.rs:126-130 and 150-154 reject a non-Tensorlake handle explicitly; neither pattern is an unguarded refutable let. The latest record's destroy line reference is slightly displaced: its let-else is at 151-153.\",\"Read both history events, including the initial unresolved build-failure suspicion. This is a source check, not a compilation result.\"] Current coverage/results: [\"Current SPEC.md and SPEC_impl.md searched for provider/handle/destructuring concerns; no acceptance of this suspected build break found.\",\"TODO.md Planned is empty. plans/queue/INDEX.md has no unlanded entries. BUGS.md describes an unrelated SSH transfer-helper hang.\",\"Current queue INDEX and active TRIAGE_OUTCOMES searched for this handle/build route; no matching record found. FILTER.md supplies no relevant whole-consequence match.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Adding Podman might make Tensorlake bare let patterns refutable and prevent the intermediate revision from building. No security or user-work-loss consequence was asserted.\"; null."
+      },
+      "accepted_parent_decision": {
+        "key": "g022/f1",
+        "line": 2,
+        "disposition": "excluded",
+        "group": "podman-handle-tensorlake-refutable-pattern-build-lead",
+        "bucket": "other",
+        "recording": "refuted",
+        "queue_target_candidate": null,
+        "needs_independent_drop_check": false,
+        "reason": "Parent explicitly accepted named refuted proposal from claims-012 after inspecting it. The exact commit introducing the additional handle variant also changes both Tensorlake destructuring sites to returning let-else branches. The suspected intermediate compilation failure is source-refuted. Narrow source refutation of the two alleged incompatible patterns; not a claim that the entire revision was built or is otherwise defect-free. Checked source/results: [\"04ffdbb35773cef36e73eb798c005ddbeb9a9de6:crates/farhelm-helm/src/tensorlake/hosts.rs:126-130 and 150-154 reject a non-Tensorlake handle explicitly; neither pattern is an unguarded refutable let. The latest record's destroy line reference is slightly displaced: its let-else is at 151-153.\",\"Read both history events, including the initial unresolved build-failure suspicion. This is a source check, not a compilation result.\"] Current coverage/results: [\"Current SPEC.md and SPEC_impl.md searched for provider/handle/destructuring concerns; no acceptance of this suspected build break found.\",\"TODO.md Planned is empty. plans/queue/INDEX.md has no unlanded entries. BUGS.md describes an unrelated SSH transfer-helper hang.\",\"Current queue INDEX and active TRIAGE_OUTCOMES searched for this handle/build route; no matching record found. FILTER.md supplies no relevant whole-consequence match.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Adding Podman might make Tensorlake bare let patterns refutable and prevent the intermediate revision from building. No security or user-work-loss consequence was asserted.\"; null."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-012",
+          "key": "g022/f1",
+          "latest_line": 2,
+          "recommendation": "refuted",
+          "bucket": "other",
+          "underlying_key": "podman-handle-tensorlake-refutable-pattern-build-lead",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The exact commit introducing the additional handle variant also changes both Tensorlake destructuring sites to returning let-else branches. The suspected intermediate compilation failure is source-refuted.",
+          "checks": [
+            "04ffdbb35773cef36e73eb798c005ddbeb9a9de6:crates/farhelm-helm/src/tensorlake/hosts.rs:126-130 and 150-154 reject a non-Tensorlake handle explicitly; neither pattern is an unguarded refutable let. The latest record's destroy line reference is slightly displaced: its let-else is at 151-153.",
+            "Read both history events, including the initial unresolved build-failure suspicion. This is a source check, not a compilation result."
+          ],
+          "coverage_checked": [
+            "Current SPEC.md and SPEC_impl.md searched for provider/handle/destructuring concerns; no acceptance of this suspected build break found.",
+            "TODO.md Planned is empty. plans/queue/INDEX.md has no unlanded entries. BUGS.md describes an unrelated SSH transfer-helper hang.",
+            "Current queue INDEX and active TRIAGE_OUTCOMES searched for this handle/build route; no matching record found. FILTER.md supplies no relevant whole-consequence match."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": null,
+          "original_stronger_consequence": "Adding Podman might make Tensorlake bare let patterns refutable and prevent the intermediate revision from building. No security or user-work-loss consequence was asserted.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Narrow source refutation of the two alleged incompatible patterns; not a claim that the entire revision was built or is otherwise defect-free."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "podman-handle-tensorlake-refutable-pattern-build-lead",
+        "destination": null
+      }
+    },
+    {
+      "key": "g022/f2",
+      "owner": "g022",
+      "id": "f2",
+      "domain": "environment-host-lifecycle",
+      "purpose": "environment-host-lifecycle: crates/farhelm-helm/src/hosts.rs, crates/farhelm-helm/src/sessions.rs, crates/farhelm-helm/src/sessions_tests.rs, crates/farhelm-helm/src/environment/lifecycle.rs, crates/farhelm-helm/src/environment/mod.rs, crates/farhelm-helm/src/manager.rs, crates/farhelm-helm/src/tensorlake/hosts.rs, crates/farhelm-helm/src/tensorlake/lifecycle.rs; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 3,
+          "event": {
+            "version": 1,
+            "kind": "lead",
+            "id": "f2",
+            "state": "open",
+            "summary": "Check archive epoch wake when deleted session is absent from cache",
+            "location": "crates/farhelm-helm/src/sessions.rs:3377",
+            "detail": "Reviewed commit: 06d4b68f3a9e913f47cd426fedee5946a4eed77b\n\n## TLDR\nA successful archive may update the Trash count too late in other windows if the new epoch receives no fleet wake when the deleted session is already absent from the helm's cache.\n\n## Details\nNew archive handling changes state.trash_requests before forget_deleted_session, relying on that existing tail to wake the fleet. The manager search shows forget_session has a conditional event bump. Need inspect its condition and route_session/cached-session guarantees before deciding whether a shipped delete can reach this path without a wake. SPEC_impl.md:4538-4542 requires the per-host Trash epoch to advance before the existing fleet wake and says only an epoch change invalidates an idle host reader. Suggested bucket if established: high/material UX or other depending actual propagation; no security/data-loss consequence established. Confidence: unresolved lead. Could-be-highest: no known route. proposed_drop: false. possible_cover: none. Source-only; no execution. Next check: exact pinned manager forget_session and session routing, rather than assuming cache removal always changes state."
+          }
+        },
+        {
+          "line": 4,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "f2",
+            "state": "open",
+            "summary": "Archive epoch can change without waking other clients",
+            "location": "crates/farhelm-helm/src/sessions.rs:3379",
+            "detail": "Reviewed commit: 06d4b68f3a9e913f47cd426fedee5946a4eed77b\n\n## TLDR\nAfter deleting a session that archives its checkout, other open windows can keep an empty or outdated Trash count until another fleet change or an explicit Trash open. A filtered window can miss the newly archived work entirely in its idle Trash display.\n\n## Details\nThe new archive branch in crates/farhelm-helm/src/sessions.rs:3376-3382 increments trash_requests but relies on forget_deleted_session to publish the fleet wake; finish_replacement:4195-4202 has the same reliance. That tail calls manager.forget_session. At manager.rs:2405-2434, forgetting only bumps FleetEvents when it actually removed a cached/live session. The supervisor can legitimately make that removal observable before the delete reply: service/teardown.rs:1062-1065 removes the session and hints SessionsChanged, then :1081 onward performs unbounded on-disk cleanup, including discard_quarantined at :1149-1150. The request handler only sends SessionDeleted after that teardown returns (service/handlers.rs:1369-1382). The manager can therefore consume the hint, commit a list without the session, and bump the fleet (manager.rs:4603-4615,4659-4662) while the Trash epoch is still old. Another client's completed hosts read can consume that wake. Later the reply increments the epoch, but forgetting the already-removed row returns false (store.rs:9227-9237), so no new event is emitted. This is a source-established ordering, especially visible when post-removal attachment cleanup is slow; it does not require a forged request or unshipped control.\n\nOther idle windows have no guaranteed repair timer: feed.rs:233-234 disables fallback polling with a healthy feed, list/view.rs:2314-2320 reads hosts on fleet notifications, and list/trash.rs:737-768 invalidates its reader only on the delivered epoch or other explicit causes. Stable periodic manager refreshes have no cache change or unanswered hint and need not emit another event (manager.rs:4659-4662). A window whose complete listing shows the removed managed row may independently refresh Trash; filtered/truncated windows are the explicit motivation of the new code and lack that fallback.\n\nContract: SPEC_impl.md:4538-4542 says `A per-host in-memory Trash epoch advances on accepted nonempty Delete or Retry, on a session Delete or Replace that archived a checkout, and on a recorded notice change, before the existing fleet wake. Hosts listings carry it; only its change invalidates an idle host’s Trash reader`. The archive fact is a separate observable change even when the session cache is already current. Publish an explicit fleet bump after advancing the epoch in both archive branches, rather than depending on a changed-only session-cache deletion.\n\nSuggested bucket: high/material UX (other windows can retain an incorrect Trash count indefinitely during an otherwise idle healthy connection). Confidence: confirmed by source and contract analysis; no execution, build or reproduction. Could-be-highest: no; files remain archived and retrievable, and no security or data-loss route is claimed. proposed_drop: false. possible_cover: none; coverage/queue sources were not read. Caveats: an unrelated later event, reconnect, app load or explicit dialog opening repairs the display; the issuing window may already perform its own refresh. This does not claim that archived files are lost."
+          }
+        },
+        {
+          "line": 5,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "f2",
+            "state": "open",
+            "summary": "Archive epoch can change without waking other clients",
+            "location": "crates/farhelm-helm/src/sessions.rs:3377",
+            "detail": "Reviewed commit: 06d4b68f3a9e913f47cd426fedee5946a4eed77b\n\n## TLDR\nAfter deleting a session that archives its checkout, other open windows can keep an empty or outdated Trash count until another fleet change or an explicit Trash open. A filtered window can miss the newly archived work entirely in its idle Trash display.\n\n## Details\nThe new archive branch in crates/farhelm-helm/src/sessions.rs:3376-3382 increments trash_requests but relies on forget_deleted_session to publish the fleet wake; finish_replacement:4195-4202 has the same reliance. That tail calls manager.forget_session. At manager.rs:2405-2434, forgetting only bumps FleetEvents when it actually removed a cached/live session. The supervisor can legitimately make that removal observable before the delete reply: service/teardown.rs:1062-1065 removes the session and hints SessionsChanged, then :1081 onward performs unbounded on-disk cleanup, including discard_quarantined at :1149-1150. The request handler only sends SessionDeleted after that teardown returns (service/handlers.rs:1369-1382). The manager can therefore consume the hint, commit a list without the session, and bump the fleet (manager.rs:4603-4615,4659-4662) while the Trash epoch is still old. Another client's completed hosts read can consume that wake. Later the reply increments the epoch, but forgetting the already-removed row returns false (store.rs:9227-9237), so no new event is emitted. This is a source-established ordering, especially visible when post-removal attachment cleanup is slow; it does not require a forged request or unshipped control.\n\nOther idle windows have no guaranteed repair timer: feed.rs:233-234 disables fallback polling with a healthy feed, list/view.rs:2314-2320 reads hosts on fleet notifications, and list/trash.rs:737-768 invalidates its reader only on the delivered epoch or other explicit causes. Stable periodic manager refreshes have no cache change or unanswered hint and need not emit another event (manager.rs:4659-4662). A window whose complete listing shows the removed managed row may independently refresh Trash; filtered/truncated windows are the explicit motivation of the new code and lack that fallback.\n\nContract: SPEC_impl.md:4538-4542 says `A per-host in-memory Trash epoch advances on accepted nonempty Delete or Retry, on a session Delete or Replace that archived a checkout, and on a recorded notice change, before the existing fleet wake. Hosts listings carry it; only its change invalidates an idle host’s Trash reader`. The archive fact is a separate observable change even when the session cache is already current. Publish an explicit fleet bump after advancing the epoch in both archive branches, rather than depending on a changed-only session-cache deletion.\n\nSuggested bucket: high/material UX (other windows can retain an incorrect Trash count indefinitely during an otherwise idle healthy connection). Confidence: confirmed by source and contract analysis; no execution, build or reproduction. Could-be-highest: no; files remain archived and retrievable, and no security or data-loss route is claimed. proposed_drop: false. possible_cover: none; coverage/queue sources were not read. Caveats: an unrelated later event, reconnect, app load or explicit dialog opening repairs the display; the issuing window may already perform its own refresh. This does not claim that archived files are lost.\n\nFinal initial-pass checks: teardown.rs:1155-1187 reaches SessionDeleteOutcome after file cleanup without another sessions-change hint. manager.rs:5055-5071 and 5168-5197 confirms stable Connected refreshes compare equal and emit no wake, so the background refresh is not a guaranteed repair. Exact new archive branches are sessions.rs:3376-3379 and 4195-4200. Original consequence and high bucket retained. No missing source premise remains for this interleaving; runtime incidence was not measured."
+          }
+        },
+        {
+          "line": 6,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "f2",
+            "state": "open",
+            "summary": "Archive epoch can change without waking other clients",
+            "location": "crates/farhelm-helm/src/sessions.rs:3377",
+            "detail": "Reviewed commit: 06d4b68f3a9e913f47cd426fedee5946a4eed77b\n\n## TLDR\nAfter deleting a session that archives its checkout, other open windows can keep an empty or outdated Trash count until another fleet change or an explicit Trash open. A filtered window can miss the newly archived work entirely in its idle Trash display.\n\n## Details\nThe new archive branch in crates/farhelm-helm/src/sessions.rs:3376-3382 increments trash_requests but relies on forget_deleted_session to publish the fleet wake; finish_replacement:4195-4202 has the same reliance. That tail calls manager.forget_session. At manager.rs:2405-2434, forgetting only bumps FleetEvents when it actually removed a cached/live session. The supervisor can legitimately make that removal observable before the delete reply: service/teardown.rs:1062-1065 removes the session and hints SessionsChanged, then :1081 onward performs unbounded on-disk cleanup, including discard_quarantined at :1149-1150. The request handler only sends SessionDeleted after that teardown returns (service/handlers.rs:1369-1382). The manager can therefore consume the hint, commit a list without the session, and bump the fleet (manager.rs:4603-4615,4659-4662) while the Trash epoch is still old. Another client's completed hosts read can consume that wake. Later the reply increments the epoch, but forgetting the already-removed row returns false (store.rs:9227-9237), so no new event is emitted. This is a source-established ordering, especially visible when post-removal attachment cleanup is slow; it does not require a forged request or unshipped control.\n\nOther idle windows have no guaranteed repair timer: feed.rs:233-234 disables fallback polling with a healthy feed, list/view.rs:2314-2320 reads hosts on fleet notifications, and list/trash.rs:737-768 invalidates its reader only on the delivered epoch or other explicit causes. Stable periodic manager refreshes have no cache change or unanswered hint and need not emit another event (manager.rs:4659-4662). A window whose complete listing shows the removed managed row may independently refresh Trash; filtered/truncated windows are the explicit motivation of the new code and lack that fallback.\n\nContract: SPEC_impl.md:4538-4542 says `A per-host in-memory Trash epoch advances on accepted nonempty Delete or Retry, on a session Delete or Replace that archived a checkout, and on a recorded notice change, before the existing fleet wake. Hosts listings carry it; only its change invalidates an idle host’s Trash reader`. The archive fact is a separate observable change even when the session cache is already current. Publish an explicit fleet bump after advancing the epoch in both archive branches, rather than depending on a changed-only session-cache deletion.\n\nSuggested bucket: high/material UX (other windows can retain an incorrect Trash count indefinitely during an otherwise idle healthy connection). Confidence: confirmed by source and contract analysis; no execution, build or reproduction. Could-be-highest: no; files remain archived and retrievable, and no security or data-loss route is claimed. proposed_drop: false. possible_cover: none; coverage/queue sources were not read. Caveats: an unrelated later event, reconnect, app load or explicit dialog opening repairs the display; the issuing window may already perform its own refresh. This does not claim that archived files are lost.\n\nFinal initial-pass checks: teardown.rs:1155-1187 reaches SessionDeleteOutcome after file cleanup without another sessions-change hint. manager.rs:5055-5071 and 5168-5197 confirms stable Connected refreshes compare equal and emit no wake, so the background refresh is not a guaranteed repair. Exact new archive branches are sessions.rs:3376-3379 and 4195-4200. Original consequence and high bucket retained. No missing source premise remains for this interleaving; runtime incidence was not measured.\n\nSynthesis turn 3, first checks: the end-of-range source at 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db retains the same missing explicit fleet bump in do_delete_session (:3731-3734) and finish_replacement (:4576-4581), while delete_checkout_trash (:633-635) explicitly bumps after changing the epoch. No later applied fix at the reviewed range endpoint. Supervisor hints.rs:148-161 sends on an owed Notify and then waits for a new mark; its throttle does not manufacture a second late notification. The post-row-removal teardown interval is sufficient for the sole delete hint and all previous pending marks to drain before the late archive reply. This strengthens the original ordering without changing the stale-display consequence or bucket. Parent crossinput g017/c1 is about a zero-valued wire golden fixture and is separate from this product wake defect; no queue or coverage artifacts were read."
+          }
+        },
+        {
+          "line": 7,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "f2",
+            "state": "open",
+            "summary": "Archive epoch can change without waking other clients",
+            "location": "crates/farhelm-helm/src/sessions.rs:3377",
+            "detail": "Reviewed commit: 06d4b68f3a9e913f47cd426fedee5946a4eed77b\n\n## TLDR\nAfter deleting a session that archives its checkout, other open windows can keep an empty or outdated Trash count until another fleet change or an explicit Trash open. A filtered window can miss the newly archived work entirely in its idle Trash display.\n\n## Details\nThe new archive branch in crates/farhelm-helm/src/sessions.rs:3376-3382 increments trash_requests but relies on forget_deleted_session to publish the fleet wake; finish_replacement:4195-4202 has the same reliance. That tail calls manager.forget_session. At manager.rs:2405-2434, forgetting only bumps FleetEvents when it actually removed a cached/live session. The supervisor can legitimately make that removal observable before the delete reply: service/teardown.rs:1062-1065 removes the session and hints SessionsChanged, then :1081 onward performs unbounded on-disk cleanup, including discard_quarantined at :1149-1150. The request handler only sends SessionDeleted after that teardown returns (service/handlers.rs:1369-1382). The manager can therefore consume the hint, commit a list without the session, and bump the fleet (manager.rs:4603-4615,4659-4662) while the Trash epoch is still old. Another client's completed hosts read can consume that wake. Later the reply increments the epoch, but forgetting the already-removed row returns false (store.rs:9227-9237), so no new event is emitted. This is a source-established ordering, especially visible when post-removal attachment cleanup is slow; it does not require a forged request or unshipped control.\n\nOther idle windows have no guaranteed repair timer: feed.rs:233-234 disables fallback polling with a healthy feed, list/view.rs:2314-2320 reads hosts on fleet notifications, and list/trash.rs:737-768 invalidates its reader only on the delivered epoch or other explicit causes. Stable periodic manager refreshes have no cache change or unanswered hint and need not emit another event (manager.rs:4659-4662). A window whose complete listing shows the removed managed row may independently refresh Trash; filtered/truncated windows are the explicit motivation of the new code and lack that fallback.\n\nContract: SPEC_impl.md:4538-4542 says `A per-host in-memory Trash epoch advances on accepted nonempty Delete or Retry, on a session Delete or Replace that archived a checkout, and on a recorded notice change, before the existing fleet wake. Hosts listings carry it; only its change invalidates an idle host’s Trash reader`. The archive fact is a separate observable change even when the session cache is already current. Publish an explicit fleet bump after advancing the epoch in both archive branches, rather than depending on a changed-only session-cache deletion.\n\nSuggested bucket: high/material UX (other windows can retain an incorrect Trash count indefinitely during an otherwise idle healthy connection). Confidence: confirmed by source and contract analysis; no execution, build or reproduction. Could-be-highest: no; files remain archived and retrievable, and no security or data-loss route is claimed. proposed_drop: false. possible_cover: none; coverage/queue sources were not read. Caveats: an unrelated later event, reconnect, app load or explicit dialog opening repairs the display; the issuing window may already perform its own refresh. This does not claim that archived files are lost.\n\nFinal initial-pass checks: teardown.rs:1155-1187 reaches SessionDeleteOutcome after file cleanup without another sessions-change hint. manager.rs:5055-5071 and 5168-5197 confirms stable Connected refreshes compare equal and emit no wake, so the background refresh is not a guaranteed repair. Exact new archive branches are sessions.rs:3376-3379 and 4195-4200. Original consequence and high bucket retained. No missing source premise remains for this interleaving; runtime incidence was not measured.\n\nSynthesis turn 3, first checks: the end-of-range source at 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db retains the same missing explicit fleet bump in do_delete_session (:3731-3734) and finish_replacement (:4576-4581), while delete_checkout_trash (:633-635) explicitly bumps after changing the epoch. No later applied fix at the reviewed range endpoint. Supervisor hints.rs:148-161 sends on an owed Notify and then waits for a new mark; its throttle does not manufacture a second late notification. The post-row-removal teardown interval is sufficient for the sole delete hint and all previous pending marks to drain before the late archive reply. This strengthens the original ordering without changing the stale-display consequence or bucket. Parent crossinput g017/c1 is about a zero-valued wire golden fixture and is separate from this product wake defect; no queue or coverage artifacts were read.\n\nSynthesis turn 3 completed (source-only, no reproductions). Additional readily checkable premises resolved:\n- List/delete concurrency is real, rather than an assumed schedule through a serialized RPC connection. client.rs:3057-3123 registers a per-request oneshot, releases the pending-map mutex, sends the frame and awaits only that reply. list_sessions (:3336-3351) and delete_session_fenced (:3923-3951) use that same multiplexed primitive. Supervisor handlers.rs:550-619 deliberately spawns ListSessions with its own list-admission permit rather than a management/delete permit; :2895-2897 dispatches to it. Thus a list can finish while the delete teardown performs post-removal disk cleanup. The manager seed epoch is incremented only in the later forget tail, so it cannot reject the already-completed early refresh in this ordering.\n- No generic mutation middleware supplies a missing late wake: middleware.rs:66-76 and lib.rs:2657-2664 only retain/await the request task. forget_deleted_session at sessions.rs:3388-3411 performs tunnel/bookkeeping cleanup then manager.forget_session; tunnels.rs:165-181 has no event when there are no tunnels (and no mandatory wake at all). An ordinary unpinned session without active tunnels suffices.\n- Replace-with can change the folder or obtain a fresh checkout (sessions.rs:4000-4086 and :4160), allowing its source deletion to archive the old last-reference checkout. Both accepted-create publication and optional pin-inheritance publication precede that source deletion; neither is a guaranteed wake after the late archive fact. finish_replacement (:4248-4254) and the REST success wrapper (:4273-4300) return without an extra wake. Plain same-folder Replace normally retains the checkout and does not take the archived branch.\n- Transport keepalive is not an accidental repair: events.rs:206-276 sends one handshake revision and thereafter revision text only on revisions.changed(); idle sends WebSocket Ping and a healthy Pong resets the liveness timer. assets/events.js:293-337 spends its handshake deadline after the first text frame and does not periodically resubscribe a healthy socket. feed.rs:361-369 updates feed state only on a revision/down report. No periodic revision or healthy-client reconnect is guaranteed.\n- The end-of-range manager.rs:2483-2537 still has changed-only forget. Endpoint ordinary Delete and Replace still lack an archive-specific bump. The later sessions change matching event publication (56659839785691f76da3af5d8f51b511cff4ba8b) moves successful-create history publication; it supplies no archive-tail wake. Feed/event/notices files have no endpoint difference from the reviewed commit. No later applied in-range fix was found.\n\nDisposition remains reported/confirmed, high/material UX, proposed_drop false, possible_cover none. Original wording and citations above are retained; no severity lowering or parent drop is accepted. The narrower consequence remains stale or missing Trash display until a repair trigger, not loss of archived files, and actual runtime incidence remains unmeasured. g017/c1 test-fixture sensitivity is separate and was not re-reviewed or counted here. Open lead IDs after synthesis: none."
+          }
+        }
+      ],
+      "latest": {
+        "line": 7,
+        "event": {
+          "version": 1,
+          "kind": "finding",
+          "id": "f2",
+          "state": "open",
+          "summary": "Archive epoch can change without waking other clients",
+          "location": "crates/farhelm-helm/src/sessions.rs:3377",
+          "detail": "Reviewed commit: 06d4b68f3a9e913f47cd426fedee5946a4eed77b\n\n## TLDR\nAfter deleting a session that archives its checkout, other open windows can keep an empty or outdated Trash count until another fleet change or an explicit Trash open. A filtered window can miss the newly archived work entirely in its idle Trash display.\n\n## Details\nThe new archive branch in crates/farhelm-helm/src/sessions.rs:3376-3382 increments trash_requests but relies on forget_deleted_session to publish the fleet wake; finish_replacement:4195-4202 has the same reliance. That tail calls manager.forget_session. At manager.rs:2405-2434, forgetting only bumps FleetEvents when it actually removed a cached/live session. The supervisor can legitimately make that removal observable before the delete reply: service/teardown.rs:1062-1065 removes the session and hints SessionsChanged, then :1081 onward performs unbounded on-disk cleanup, including discard_quarantined at :1149-1150. The request handler only sends SessionDeleted after that teardown returns (service/handlers.rs:1369-1382). The manager can therefore consume the hint, commit a list without the session, and bump the fleet (manager.rs:4603-4615,4659-4662) while the Trash epoch is still old. Another client's completed hosts read can consume that wake. Later the reply increments the epoch, but forgetting the already-removed row returns false (store.rs:9227-9237), so no new event is emitted. This is a source-established ordering, especially visible when post-removal attachment cleanup is slow; it does not require a forged request or unshipped control.\n\nOther idle windows have no guaranteed repair timer: feed.rs:233-234 disables fallback polling with a healthy feed, list/view.rs:2314-2320 reads hosts on fleet notifications, and list/trash.rs:737-768 invalidates its reader only on the delivered epoch or other explicit causes. Stable periodic manager refreshes have no cache change or unanswered hint and need not emit another event (manager.rs:4659-4662). A window whose complete listing shows the removed managed row may independently refresh Trash; filtered/truncated windows are the explicit motivation of the new code and lack that fallback.\n\nContract: SPEC_impl.md:4538-4542 says `A per-host in-memory Trash epoch advances on accepted nonempty Delete or Retry, on a session Delete or Replace that archived a checkout, and on a recorded notice change, before the existing fleet wake. Hosts listings carry it; only its change invalidates an idle host’s Trash reader`. The archive fact is a separate observable change even when the session cache is already current. Publish an explicit fleet bump after advancing the epoch in both archive branches, rather than depending on a changed-only session-cache deletion.\n\nSuggested bucket: high/material UX (other windows can retain an incorrect Trash count indefinitely during an otherwise idle healthy connection). Confidence: confirmed by source and contract analysis; no execution, build or reproduction. Could-be-highest: no; files remain archived and retrievable, and no security or data-loss route is claimed. proposed_drop: false. possible_cover: none; coverage/queue sources were not read. Caveats: an unrelated later event, reconnect, app load or explicit dialog opening repairs the display; the issuing window may already perform its own refresh. This does not claim that archived files are lost.\n\nFinal initial-pass checks: teardown.rs:1155-1187 reaches SessionDeleteOutcome after file cleanup without another sessions-change hint. manager.rs:5055-5071 and 5168-5197 confirms stable Connected refreshes compare equal and emit no wake, so the background refresh is not a guaranteed repair. Exact new archive branches are sessions.rs:3376-3379 and 4195-4200. Original consequence and high bucket retained. No missing source premise remains for this interleaving; runtime incidence was not measured.\n\nSynthesis turn 3, first checks: the end-of-range source at 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db retains the same missing explicit fleet bump in do_delete_session (:3731-3734) and finish_replacement (:4576-4581), while delete_checkout_trash (:633-635) explicitly bumps after changing the epoch. No later applied fix at the reviewed range endpoint. Supervisor hints.rs:148-161 sends on an owed Notify and then waits for a new mark; its throttle does not manufacture a second late notification. The post-row-removal teardown interval is sufficient for the sole delete hint and all previous pending marks to drain before the late archive reply. This strengthens the original ordering without changing the stale-display consequence or bucket. Parent crossinput g017/c1 is about a zero-valued wire golden fixture and is separate from this product wake defect; no queue or coverage artifacts were read.\n\nSynthesis turn 3 completed (source-only, no reproductions). Additional readily checkable premises resolved:\n- List/delete concurrency is real, rather than an assumed schedule through a serialized RPC connection. client.rs:3057-3123 registers a per-request oneshot, releases the pending-map mutex, sends the frame and awaits only that reply. list_sessions (:3336-3351) and delete_session_fenced (:3923-3951) use that same multiplexed primitive. Supervisor handlers.rs:550-619 deliberately spawns ListSessions with its own list-admission permit rather than a management/delete permit; :2895-2897 dispatches to it. Thus a list can finish while the delete teardown performs post-removal disk cleanup. The manager seed epoch is incremented only in the later forget tail, so it cannot reject the already-completed early refresh in this ordering.\n- No generic mutation middleware supplies a missing late wake: middleware.rs:66-76 and lib.rs:2657-2664 only retain/await the request task. forget_deleted_session at sessions.rs:3388-3411 performs tunnel/bookkeeping cleanup then manager.forget_session; tunnels.rs:165-181 has no event when there are no tunnels (and no mandatory wake at all). An ordinary unpinned session without active tunnels suffices.\n- Replace-with can change the folder or obtain a fresh checkout (sessions.rs:4000-4086 and :4160), allowing its source deletion to archive the old last-reference checkout. Both accepted-create publication and optional pin-inheritance publication precede that source deletion; neither is a guaranteed wake after the late archive fact. finish_replacement (:4248-4254) and the REST success wrapper (:4273-4300) return without an extra wake. Plain same-folder Replace normally retains the checkout and does not take the archived branch.\n- Transport keepalive is not an accidental repair: events.rs:206-276 sends one handshake revision and thereafter revision text only on revisions.changed(); idle sends WebSocket Ping and a healthy Pong resets the liveness timer. assets/events.js:293-337 spends its handshake deadline after the first text frame and does not periodically resubscribe a healthy socket. feed.rs:361-369 updates feed state only on a revision/down report. No periodic revision or healthy-client reconnect is guaranteed.\n- The end-of-range manager.rs:2483-2537 still has changed-only forget. Endpoint ordinary Delete and Replace still lack an archive-specific bump. The later sessions change matching event publication (56659839785691f76da3af5d8f51b511cff4ba8b) moves successful-create history publication; it supplies no archive-tail wake. Feed/event/notices files have no endpoint difference from the reviewed commit. No later applied in-range fix was found.\n\nDisposition remains reported/confirmed, high/material UX, proposed_drop false, possible_cover none. Original wording and citations above are retained; no severity lowering or parent drop is accepted. The narrower consequence remains stale or missing Trash display until a repair trigger, not loss of archived files, and actual runtime incidence remains unmeasured. g017/c1 test-fixture sensitivity is separate and was not re-reviewed or counted here. Open lead IDs after synthesis: none."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g022/findings.jsonl",
+        "id": "f2",
+        "line": 7,
+        "disposition": "verified",
+        "group": "archive-trash-epoch-lacks-unconditional-fleet-wake",
+        "reason": "Parent explicitly accepted named retain-verified proposal from claims-012 after inspecting it. A supervisor can publish session removal and let the helm consume that hint before its later archive reply. The reply changes the Trash epoch, but changed-only cache forgetting need not publish a second fleet event. An idle filtered window can retain its earlier count. This is a source-supported interleaving, not a runtime observation. Retain the conditional source finding and its high recommendation, with repair triggers and unmeasured incidence explicit. g017/c1's zero-valued wire fixture is a distinct test sensitivity concern, not an alias. Checked source/results: [\"06d4b68f3a9e913f47cd426fedee5946a4eed77b:crates/farhelm-supervisor/src/service/teardown.rs:1062-1065 removes the session and hints before unbounded cleanup at 1081-1187; service/handlers.rs:1371-1382 sends SessionDeleted only after mutation completion.\",\"At that revision client.rs:3057-3106 releases request-map ownership before awaiting its own reply, and supervisor service/handlers.rs:599-619 spawns list work with separate admission. A list may therefore complete during post-removal cleanup.\",\"00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db:crates/farhelm-helm/src/sessions.rs:3725-3735 and 4575-4581 advance the archive epoch without an explicit fleet bump. manager.rs:2507-2535 bumps only when cache forgetting changed rows. The ordinary Delete tail at sessions.rs:3743-3766 reaches that manager method.\",\"06d4b68f3a9e913f47cd426fedee5946a4eed77b:manager.rs:4602-4615,4662-4664 emits for changed cache or an unanswered hint, not every stable refresh. UI feed.rs:233-234 disables fallback while healthy; list/trash.rs:738-764 reacts to delivered epoch or explicit causes.\",\"Files remain archived and retrievable. An unrelated fleet event, reconnect, load or dialog open repairs the count; complete unfiltered listings and the issuing window may have independent refresh triggers. No loss of archived files is established.\"] Current coverage/results: [\"Current SPEC_impl.md:4039-4057 requires epoch advancement before the fleet wake and says ordinary events/fallback ticks do not themselves read Trash. Its other-helm reconnect exception is a different scope. SPEC.md Trash section supplies no acceptance of missed same-helm archive publication.\",\"TODO.md Planned and plans/queue/INDEX.md are empty. The retained bell-trash-reads.md plan text describes this feature, but the plan is already landed and cannot cover a remaining defect as unlanded work.\",\"BUGS.md has no archive/count item. INDEX and active TRIAGE_OUTCOMES searches found layout, migration, listing-test and read-admission issues, not the missing post-archive wake. Read trash-read-eligibility-can-remain-cached.md: it concerns an extra read during pending cleanup, not a missed epoch delivery.\",\"FILTER.md rare/self-correcting display filter is a possible ambiguity. No guaranteed repair event bounds how long this healthy idle window stays stale, so the whole 'briefly wrong' boundary is not established. Retain under the rule that unclear coverage/filtering does not authorize omission.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Other open windows can keep an empty/outdated Trash count until another fleet change or explicit Trash open; filtered windows can miss newly archived work in the idle display. The history consistently disclaims file loss and retains high/material-UX priority.\"; \"Runtime incidence and duration are unmeasured. Whether the maintainer regards an indefinitely idle stale count as 'briefly wrong' for FILTER.md remains a recording-policy ambiguity; it is not missing source support for the interleaving.\"."
+      },
+      "accepted_parent_decision": {
+        "key": "g022/f2",
+        "line": 7,
+        "disposition": "verified",
+        "group": "archive-trash-epoch-lacks-unconditional-fleet-wake",
+        "bucket": "high",
+        "recording": "retain-verified",
+        "queue_target_candidate": null,
+        "needs_independent_drop_check": false,
+        "reason": "Parent explicitly accepted named retain-verified proposal from claims-012 after inspecting it. A supervisor can publish session removal and let the helm consume that hint before its later archive reply. The reply changes the Trash epoch, but changed-only cache forgetting need not publish a second fleet event. An idle filtered window can retain its earlier count. This is a source-supported interleaving, not a runtime observation. Retain the conditional source finding and its high recommendation, with repair triggers and unmeasured incidence explicit. g017/c1's zero-valued wire fixture is a distinct test sensitivity concern, not an alias. Checked source/results: [\"06d4b68f3a9e913f47cd426fedee5946a4eed77b:crates/farhelm-supervisor/src/service/teardown.rs:1062-1065 removes the session and hints before unbounded cleanup at 1081-1187; service/handlers.rs:1371-1382 sends SessionDeleted only after mutation completion.\",\"At that revision client.rs:3057-3106 releases request-map ownership before awaiting its own reply, and supervisor service/handlers.rs:599-619 spawns list work with separate admission. A list may therefore complete during post-removal cleanup.\",\"00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db:crates/farhelm-helm/src/sessions.rs:3725-3735 and 4575-4581 advance the archive epoch without an explicit fleet bump. manager.rs:2507-2535 bumps only when cache forgetting changed rows. The ordinary Delete tail at sessions.rs:3743-3766 reaches that manager method.\",\"06d4b68f3a9e913f47cd426fedee5946a4eed77b:manager.rs:4602-4615,4662-4664 emits for changed cache or an unanswered hint, not every stable refresh. UI feed.rs:233-234 disables fallback while healthy; list/trash.rs:738-764 reacts to delivered epoch or explicit causes.\",\"Files remain archived and retrievable. An unrelated fleet event, reconnect, load or dialog open repairs the count; complete unfiltered listings and the issuing window may have independent refresh triggers. No loss of archived files is established.\"] Current coverage/results: [\"Current SPEC_impl.md:4039-4057 requires epoch advancement before the fleet wake and says ordinary events/fallback ticks do not themselves read Trash. Its other-helm reconnect exception is a different scope. SPEC.md Trash section supplies no acceptance of missed same-helm archive publication.\",\"TODO.md Planned and plans/queue/INDEX.md are empty. The retained bell-trash-reads.md plan text describes this feature, but the plan is already landed and cannot cover a remaining defect as unlanded work.\",\"BUGS.md has no archive/count item. INDEX and active TRIAGE_OUTCOMES searches found layout, migration, listing-test and read-admission issues, not the missing post-archive wake. Read trash-read-eligibility-can-remain-cached.md: it concerns an extra read during pending cleanup, not a missed epoch delivery.\",\"FILTER.md rare/self-correcting display filter is a possible ambiguity. No guaranteed repair event bounds how long this healthy idle window stays stale, so the whole 'briefly wrong' boundary is not established. Retain under the rule that unclear coverage/filtering does not authorize omission.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Other open windows can keep an empty/outdated Trash count until another fleet change or explicit Trash open; filtered windows can miss newly archived work in the idle display. The history consistently disclaims file loss and retains high/material-UX priority.\"; \"Runtime incidence and duration are unmeasured. Whether the maintainer regards an indefinitely idle stale count as 'briefly wrong' for FILTER.md remains a recording-policy ambiguity; it is not missing source support for the interleaving.\"."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-012",
+          "key": "g022/f2",
+          "latest_line": 7,
+          "recommendation": "retain-verified",
+          "bucket": "high",
+          "underlying_key": "archive-trash-epoch-lacks-unconditional-fleet-wake",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "A supervisor can publish session removal and let the helm consume that hint before its later archive reply. The reply changes the Trash epoch, but changed-only cache forgetting need not publish a second fleet event. An idle filtered window can retain its earlier count. This is a source-supported interleaving, not a runtime observation.",
+          "checks": [
+            "06d4b68f3a9e913f47cd426fedee5946a4eed77b:crates/farhelm-supervisor/src/service/teardown.rs:1062-1065 removes the session and hints before unbounded cleanup at 1081-1187; service/handlers.rs:1371-1382 sends SessionDeleted only after mutation completion.",
+            "At that revision client.rs:3057-3106 releases request-map ownership before awaiting its own reply, and supervisor service/handlers.rs:599-619 spawns list work with separate admission. A list may therefore complete during post-removal cleanup.",
+            "00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db:crates/farhelm-helm/src/sessions.rs:3725-3735 and 4575-4581 advance the archive epoch without an explicit fleet bump. manager.rs:2507-2535 bumps only when cache forgetting changed rows. The ordinary Delete tail at sessions.rs:3743-3766 reaches that manager method.",
+            "06d4b68f3a9e913f47cd426fedee5946a4eed77b:manager.rs:4602-4615,4662-4664 emits for changed cache or an unanswered hint, not every stable refresh. UI feed.rs:233-234 disables fallback while healthy; list/trash.rs:738-764 reacts to delivered epoch or explicit causes.",
+            "Files remain archived and retrievable. An unrelated fleet event, reconnect, load or dialog open repairs the count; complete unfiltered listings and the issuing window may have independent refresh triggers. No loss of archived files is established."
+          ],
+          "coverage_checked": [
+            "Current SPEC_impl.md:4039-4057 requires epoch advancement before the fleet wake and says ordinary events/fallback ticks do not themselves read Trash. Its other-helm reconnect exception is a different scope. SPEC.md Trash section supplies no acceptance of missed same-helm archive publication.",
+            "TODO.md Planned and plans/queue/INDEX.md are empty. The retained bell-trash-reads.md plan text describes this feature, but the plan is already landed and cannot cover a remaining defect as unlanded work.",
+            "BUGS.md has no archive/count item. INDEX and active TRIAGE_OUTCOMES searches found layout, migration, listing-test and read-admission issues, not the missing post-archive wake. Read trash-read-eligibility-can-remain-cached.md: it concerns an extra read during pending cleanup, not a missed epoch delivery.",
+            "FILTER.md rare/self-correcting display filter is a possible ambiguity. No guaranteed repair event bounds how long this healthy idle window stays stale, so the whole 'briefly wrong' boundary is not established. Retain under the rule that unclear coverage/filtering does not authorize omission."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": "Runtime incidence and duration are unmeasured. Whether the maintainer regards an indefinitely idle stale count as 'briefly wrong' for FILTER.md remains a recording-policy ambiguity; it is not missing source support for the interleaving.",
+          "original_stronger_consequence": "Other open windows can keep an empty/outdated Trash count until another fleet change or explicit Trash open; filtered windows can miss newly archived work in the idle display. The history consistently disclaims file loss and retains high/material-UX priority.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Retain the conditional source finding and its high recommendation, with repair triggers and unmeasured incidence explicit. g017/c1's zero-valued wire fixture is a distinct test sensitivity concern, not an alias."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": true,
+        "clearly_refuted_candidate": false,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "high",
+        "confidence": "Source-confirmed by an existing parent decision; not runtime reproduced",
+        "deduplication_key": "archive-trash-epoch-lacks-unconditional-fleet-wake",
+        "destination": "trailing-archive-trash-epoch-lacks-unconditional-fleet-wake.md"
+      }
+    },
+    {
+      "key": "g022/f3",
+      "owner": "g022",
+      "id": "f3",
+      "domain": "environment-host-lifecycle",
+      "purpose": "environment-host-lifecycle: crates/farhelm-helm/src/hosts.rs, crates/farhelm-helm/src/sessions.rs, crates/farhelm-helm/src/sessions_tests.rs, crates/farhelm-helm/src/environment/lifecycle.rs, crates/farhelm-helm/src/environment/mod.rs, crates/farhelm-helm/src/manager.rs, crates/farhelm-helm/src/tensorlake/hosts.rs, crates/farhelm-helm/src/tensorlake/lifecycle.rs; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 8,
+          "event": {
+            "version": 1,
+            "kind": "lead",
+            "id": "f3",
+            "state": "open",
+            "summary": "Check Stopped actor retention against manager Drop contract",
+            "location": "crates/farhelm-helm/src/manager.rs:3845",
+            "detail": "Reviewed commit: 56659839785691f76da3af5d8f51b511cff4ba8b\n\n## TLDR\nCaller-supplied interface evidence says stopped environment actors may retain their connection manager after its external owner drops it, delaying or conditionally preventing fallback shutdown of tasks/connections.\n\n## Details\nSynthesis input is exact g024/l5 event35, read fully at the caller's request. It identifies a named Option<Arc<ConnectionManager>> upgraded from Weak in the Stopped arm, moved only by a short-circuited automatic-start condition, then left in scope through idle select waits. Need independently read the exact arm, actor/map/Drop ownership and shutdown callers, and confirm the caller's concrete gate-false route before agreeing/refuting under this group's lifecycle contract. Suggested bucket if established: other, resource lifetime only. Confidence: unresolved local synthesis lead; do not claim independently verified yet. Could-be-highest:false; original conditional resource-only consequence preserved, no user-work loss or security consequence asserted. proposed_drop:false. possible_cover:g024/l5 event35 is the supplied same-mechanism record, not a coverage-source search. Normal graceful shutdown reportedly calls shutdown_and_wait; that narrower API/fixture fallback boundary must be preserved. No runtime execution, tests, builds or reproductions."
+          }
+        },
+        {
+          "line": 9,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "f3",
+            "state": "open",
+            "summary": "Stopped actor idle waits retain the manager needed to stop them",
+            "location": "crates/farhelm-helm/src/manager.rs:3845",
+            "detail": "# Stopped actors delay the manager's direct-drop cleanup\n\nReviewed commit: 56659839785691f76da3af5d8f51b511cff4ba8b\n\n## TLDR\nReleasing a connection manager without explicitly shutting it down can leave its tasks and unrelated supervisor connections alive while a stopped environment actor waits. Overlapping idle actors may retain each other indefinitely; normal graceful helm shutdown explicitly cancels them and is outside this finding.\n\n## Details\nRevises local synthesis lead f3; independently inspected the exact source named by g024/l5 event35. manager.rs:3845 initializes a named Option<Arc<ConnectionManager>> by upgrading the actor's Weak reference. :3846-3855 borrows it to check the place. Its only move at :3864 belongs to a left-to-right short-circuited condition requiring !stopped.attempted and gate. When either is false, the local remains owned throughout the same arm's idle select loop at :3873-3892. A named owned local is dropped at the end of that arm, not at its last borrow; the wait can retain the last strong manager reference. The idle reference is unnecessary after gate calculation.\n\nThis prevents the documented direct-drop cleanup from being entered immediately: the manager owns its actor map and ConnectionManager::drop at :3137-3145 calls shutdown. shutdown/withdraw_actors at :3093-3133 withdraws published clients and aborts all actors. The module explicitly says actors hold only Weak so the manager/actor map can be dropped (:1161). Its direct-drop test at :11929-11975 actually drops the manager without explicit shutdown, expects connection closure and no further dials, but its fixture creates an ordinary SSH host rather than a Stopped environment. Fixture at :7425-7430 has no cleanup override. Thus the contract is source-visible even though normal serving uses a stronger explicit shutdown.\n\nIndependent graceful-caller checks: lib.rs:2574-2585 always reaches state.manager.shutdown_and_wait after its serving select, and rest_harness.rs:1007-1010 explicitly calls manager.shutdown before drop. This record does not claim an ordinary desktop/standalone graceful shutdown hang, process/work loss, or an unbounded leak from one stopped actor alone. The original conditional indefinite-retention consequence from g024/l5 is retained for source confirmation of the supported repeated-Stopped route and endpoint/attribution next; the already confirmed narrower consequence is delayed fallback manager/resource cleanup.\n\nSuggested bucket: other, resource lifetime/API/fixture correctness. Confidence: confirmed source/language analysis for strong retention across the idle wait; not runtime observed. Could-be-highest:false, no security or user-work-loss route established. proposed_drop:false. possible_cover:g024/l5 event35 supplied by caller identifies the same mechanism; preserve both owners for parent consolidation. No tests, builds, runtime reproduction or live action. Fix direction: confine the place-gate upgrade to a short scope; separately upgrade/move only when an actual owned lifecycle start task needs it. Preserve that task's legitimate ownership and explicit shutdown."
+          }
+        },
+        {
+          "line": 10,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "f3",
+            "state": "open",
+            "summary": "Stopped actor idle waits retain the manager needed to stop them",
+            "location": "crates/farhelm-helm/src/manager.rs:3845",
+            "detail": "# Stopped actors delay the manager's direct-drop cleanup\n\nReviewed commit: 56659839785691f76da3af5d8f51b511cff4ba8b\n\n## TLDR\nReleasing a connection manager without explicitly shutting it down can leave its tasks and unrelated supervisor connections alive while a stopped environment actor waits. Overlapping idle actors may retain each other indefinitely; normal graceful helm shutdown explicitly cancels them and is outside this finding.\n\n## Details\nRevises local synthesis lead f3; independently inspected the exact source named by g024/l5 event35. manager.rs:3845 initializes a named Option<Arc<ConnectionManager>> by upgrading the actor's Weak reference. :3846-3855 borrows it to check the place. Its only move at :3864 belongs to a left-to-right short-circuited condition requiring !stopped.attempted and gate. When either is false, the local remains owned throughout the same arm's idle select loop at :3873-3892. A named owned local is dropped at the end of that arm, not at its last borrow; the wait can retain the last strong manager reference. The idle reference is unnecessary after gate calculation.\n\nThis prevents the documented direct-drop cleanup from being entered immediately: the manager owns its actor map and ConnectionManager::drop at :3137-3145 calls shutdown. shutdown/withdraw_actors at :3093-3133 withdraws published clients and aborts all actors. The module explicitly says actors hold only Weak so the manager/actor map can be dropped (:1161). Its direct-drop test at :11929-11975 actually drops the manager without explicit shutdown, expects connection closure and no further dials, but its fixture creates an ordinary SSH host rather than a Stopped environment. Fixture at :7425-7430 has no cleanup override. Thus the contract is source-visible even though normal serving uses a stronger explicit shutdown.\n\nIndependent graceful-caller checks: lib.rs:2574-2585 always reaches state.manager.shutdown_and_wait after its serving select, and rest_harness.rs:1007-1010 explicitly calls manager.shutdown before drop. This record does not claim an ordinary desktop/standalone graceful shutdown hang, process/work loss, or an unbounded leak from one stopped actor alone. The original conditional indefinite-retention consequence from g024/l5 is retained for source confirmation of the supported repeated-Stopped route and endpoint/attribution next; the already confirmed narrower consequence is delayed fallback manager/resource cleanup.\n\nSuggested bucket: other, resource lifetime/API/fixture correctness. Confidence: confirmed source/language analysis for strong retention across the idle wait; not runtime observed. Could-be-highest:false, no security or user-work-loss route established. proposed_drop:false. possible_cover:g024/l5 event35 supplied by caller identifies the same mechanism; preserve both owners for parent consolidation. No tests, builds, runtime reproduction or live action. Fix direction: confine the place-gate upgrade to a short scope; separately upgrade/move only when an actual owned lifecycle start task needs it. Preserve that task's legitimate ownership and explicit shutdown.\n\nReopened synthesis verification completed: the ordinary repeated-Stopped route is supported independently of an alive place supervisor. At this reviewed revision, environment/podman.rs:1237-1276 inspects the recorded canonical container and maps exited/stopped/created to Stopped. Its command path at :150-184 resolves a current base route, cached probe and direct place commands. environment/podman_probe.rs:338-378 returns an older successful probe for the current endpoint (or refreshes directly), and :409-415 executes bounded commands; neither depends on the connection manager reporting the place supervisor connected. Two environments at such a place can therefore repeatedly report Stopped while the gate is false, never spawning a start and leaving the named manager local owned during every idle wait. A second supported branch is attempted=true after a failed automatic start; it short-circuits before moving the local even when gate is true.\n\nThe actor map really retains all shutdown handles and published clients: manager.rs:1075-1135 owns status, supervising JoinHandle and AbortOnDrop for each host; HostActor.manager at :3153 is intended to be Weak. If two stopped actors have ordinary staggered wait boundaries and each finishes its bounded status observation before the other releases its reference, one strong local remains while the other drops then upgrades again. They can perpetuate manager retention through repeated 45-second reprobes without a new external owner. This conditional schedule needs no arbitrary suspended thread or surviving provider create; it is the idle actor/control-flow route itself. With only one idle retained local, destruction normally becomes possible when that arm ends; no unconditional indefinite single-actor leak is alleged. Explicit shutdown cancels all these actors even with strong locals, so the confirmed lib.rs and harness shutdown exclusions remain.\n\nAttribution: the exact parent-to-56659839785691f76da3af5d8f51b511cff4ba8b patch adds self_ref, actor.manager, StoppedEpisode and this entire upgraded-local/conditional-move/wait arm. This is not attributed to the earlier assigned ee39 provider-interface refactor itself. Inclusive endpoint 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db retains the same arm at manager.rs:4050-4101, including the local upgrade at4054. No later applied in-range repair. The user explicitly reopened this group for that late interface evidence; this is an independent agreement record, not a new broad review of g024 code.\n\nFinal agreement: f3 agrees with supplied g024/l5 event35 on the conditional direct-drop fallback/resource consequence, and excludes the claimed normal graceful shutdown hang as that caller already does. Suggested other bucket, confirmed conditional source/language/contract confidence, could-be-highest=false, proposed_drop=false and possible_cover=g024/l5 remain unchanged. No independent test-oracle/documentation defect is dismissed by production shutdown correctness, and no such additional defect is claimed here. No missing readily checkable premise or open local lead remains. Runtime occurrence/frequency was not measured. No tests, builds, reproduction, external actions or live-install changes."
+          }
+        }
+      ],
+      "latest": {
+        "line": 10,
+        "event": {
+          "version": 1,
+          "kind": "finding",
+          "id": "f3",
+          "state": "open",
+          "summary": "Stopped actor idle waits retain the manager needed to stop them",
+          "location": "crates/farhelm-helm/src/manager.rs:3845",
+          "detail": "# Stopped actors delay the manager's direct-drop cleanup\n\nReviewed commit: 56659839785691f76da3af5d8f51b511cff4ba8b\n\n## TLDR\nReleasing a connection manager without explicitly shutting it down can leave its tasks and unrelated supervisor connections alive while a stopped environment actor waits. Overlapping idle actors may retain each other indefinitely; normal graceful helm shutdown explicitly cancels them and is outside this finding.\n\n## Details\nRevises local synthesis lead f3; independently inspected the exact source named by g024/l5 event35. manager.rs:3845 initializes a named Option<Arc<ConnectionManager>> by upgrading the actor's Weak reference. :3846-3855 borrows it to check the place. Its only move at :3864 belongs to a left-to-right short-circuited condition requiring !stopped.attempted and gate. When either is false, the local remains owned throughout the same arm's idle select loop at :3873-3892. A named owned local is dropped at the end of that arm, not at its last borrow; the wait can retain the last strong manager reference. The idle reference is unnecessary after gate calculation.\n\nThis prevents the documented direct-drop cleanup from being entered immediately: the manager owns its actor map and ConnectionManager::drop at :3137-3145 calls shutdown. shutdown/withdraw_actors at :3093-3133 withdraws published clients and aborts all actors. The module explicitly says actors hold only Weak so the manager/actor map can be dropped (:1161). Its direct-drop test at :11929-11975 actually drops the manager without explicit shutdown, expects connection closure and no further dials, but its fixture creates an ordinary SSH host rather than a Stopped environment. Fixture at :7425-7430 has no cleanup override. Thus the contract is source-visible even though normal serving uses a stronger explicit shutdown.\n\nIndependent graceful-caller checks: lib.rs:2574-2585 always reaches state.manager.shutdown_and_wait after its serving select, and rest_harness.rs:1007-1010 explicitly calls manager.shutdown before drop. This record does not claim an ordinary desktop/standalone graceful shutdown hang, process/work loss, or an unbounded leak from one stopped actor alone. The original conditional indefinite-retention consequence from g024/l5 is retained for source confirmation of the supported repeated-Stopped route and endpoint/attribution next; the already confirmed narrower consequence is delayed fallback manager/resource cleanup.\n\nSuggested bucket: other, resource lifetime/API/fixture correctness. Confidence: confirmed source/language analysis for strong retention across the idle wait; not runtime observed. Could-be-highest:false, no security or user-work-loss route established. proposed_drop:false. possible_cover:g024/l5 event35 supplied by caller identifies the same mechanism; preserve both owners for parent consolidation. No tests, builds, runtime reproduction or live action. Fix direction: confine the place-gate upgrade to a short scope; separately upgrade/move only when an actual owned lifecycle start task needs it. Preserve that task's legitimate ownership and explicit shutdown.\n\nReopened synthesis verification completed: the ordinary repeated-Stopped route is supported independently of an alive place supervisor. At this reviewed revision, environment/podman.rs:1237-1276 inspects the recorded canonical container and maps exited/stopped/created to Stopped. Its command path at :150-184 resolves a current base route, cached probe and direct place commands. environment/podman_probe.rs:338-378 returns an older successful probe for the current endpoint (or refreshes directly), and :409-415 executes bounded commands; neither depends on the connection manager reporting the place supervisor connected. Two environments at such a place can therefore repeatedly report Stopped while the gate is false, never spawning a start and leaving the named manager local owned during every idle wait. A second supported branch is attempted=true after a failed automatic start; it short-circuits before moving the local even when gate is true.\n\nThe actor map really retains all shutdown handles and published clients: manager.rs:1075-1135 owns status, supervising JoinHandle and AbortOnDrop for each host; HostActor.manager at :3153 is intended to be Weak. If two stopped actors have ordinary staggered wait boundaries and each finishes its bounded status observation before the other releases its reference, one strong local remains while the other drops then upgrades again. They can perpetuate manager retention through repeated 45-second reprobes without a new external owner. This conditional schedule needs no arbitrary suspended thread or surviving provider create; it is the idle actor/control-flow route itself. With only one idle retained local, destruction normally becomes possible when that arm ends; no unconditional indefinite single-actor leak is alleged. Explicit shutdown cancels all these actors even with strong locals, so the confirmed lib.rs and harness shutdown exclusions remain.\n\nAttribution: the exact parent-to-56659839785691f76da3af5d8f51b511cff4ba8b patch adds self_ref, actor.manager, StoppedEpisode and this entire upgraded-local/conditional-move/wait arm. This is not attributed to the earlier assigned ee39 provider-interface refactor itself. Inclusive endpoint 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db retains the same arm at manager.rs:4050-4101, including the local upgrade at4054. No later applied in-range repair. The user explicitly reopened this group for that late interface evidence; this is an independent agreement record, not a new broad review of g024 code.\n\nFinal agreement: f3 agrees with supplied g024/l5 event35 on the conditional direct-drop fallback/resource consequence, and excludes the claimed normal graceful shutdown hang as that caller already does. Suggested other bucket, confirmed conditional source/language/contract confidence, could-be-highest=false, proposed_drop=false and possible_cover=g024/l5 remain unchanged. No independent test-oracle/documentation defect is dismissed by production shutdown correctness, and no such additional defect is claimed here. No missing readily checkable premise or open local lead remains. Runtime occurrence/frequency was not measured. No tests, builds, reproduction, external actions or live-install changes."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g022/findings.jsonl",
+        "id": "f3",
+        "line": 10,
+        "disposition": "duplicate",
+        "group": "stopped-idle-local-arc-blocks-direct-manager-drop",
+        "reason": "Parent read full primary corroboration and claims129. Exact same named idle Arc/conditional move/Drop ownership as024l5, same one-actor delay and conditional overlapping-actor retention, direct local provider status and explicit-shutdown exclusions. Preserve independent original-to-tip and admitted-row checks under canonical024l5; no residual or stronger consequence lost."
+      },
+      "accepted_parent_decision": {
+        "key": "g022/f3",
+        "line": 10,
+        "disposition": "duplicate",
+        "group": "stopped-idle-local-arc-blocks-direct-manager-drop",
+        "bucket": "other",
+        "recording": "supporting-provenance",
+        "needs_independent_drop_check": false,
+        "reason": "Parent read full primary corroboration and claims129. Exact same named idle Arc/conditional move/Drop ownership as024l5, same one-actor delay and conditional overlapping-actor retention, direct local provider status and explicit-shutdown exclusions. Preserve independent original-to-tip and admitted-row checks under canonical024l5; no residual or stronger consequence lost."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-129",
+          "key": "g022/f3",
+          "latest_line": 10,
+          "recommendation": "duplicate",
+          "bucket": "other",
+          "underlying_key": "helm-manager/stopped-idle-local-arc-blocks-direct-drop",
+          "aliases": [
+            "g024/l5",
+            "g026/f8",
+            "g027/l8",
+            "g067/l4"
+          ],
+          "alias_scope": "Exact same-root corroboration of canonical g024/l5, including the two-actor condition and explicit-shutdown exclusion. No independent residual defect.",
+          "target_queue_file": null,
+          "why": "This record independently agrees with the canonical idle-local ownership defect. Preserve its source checks as provenance for g024/l5 rather than create a second queue entry.",
+          "checks": [
+            {
+              "source": "g022/findings.jsonl:8-10",
+              "result": "Read every f3 event. Initial lead becomes a source-confirmed fallback-cleanup delay, then independently verifies repeated-Stopped/provider routing, two-actor overlap, introduction and endpoint persistence. It never claims observed incidence or an unconditional permanent single-actor leak."
+            },
+            {
+              "source": "56659839785691f76da3af5d8f51b511cff4ba8b:crates/farhelm-helm/src/manager.rs:1075-1162,3067-3145,3838-3893,4185-4219,7425-7430,11929-11976; tip manager.rs:4050-4102",
+              "result": "Own source reads confirm named Arc retention when !attempted or gate short-circuits, Drop-dependent cancellation/map ownership, admitted-row prerequisite and an actual ordinary-host direct-drop fixture. The tip retains the same faulty arm. The parent-to-566 diff introduces the ownership route; exclusive-base targeted search is empty."
+            },
+            {
+              "source": "566:environment/podman.rs:148-236,1237-1276; environment/podman_probe.rs:143-165,338-378,409-415; access.rs:64-94; tip lib.rs:2568-2592 and rest_harness.rs:1007-1016",
+              "result": "Direct local status works independently of a connected place supervisor, supporting repeated Stopped with gate false for admitted containers. Explicit serving shutdown and REST restart cancel actors before drop. Recording-time main leaves relevant code unchanged. These independently support the canonical narrow consequence and exclusions."
+            },
+            {
+              "source": "Rust Reference local-variable drop scopes and condition chains",
+              "result": "Read official primary rules. The named local remains owned until its containing block ends when the later let-move is skipped. No runtime test or reproduction was performed."
+            }
+          ],
+          "coverage_checked": [
+            {
+              "source": "SPEC.md Container sessions; SPEC_impl.md actor/cadence, Disposable environments/provider state, Tensorlake lifecycle and serving teardown",
+              "result": "Governing current and original contracts specify independent probes, one stopped-container start and explicit serving teardown; they do not accept direct-drop self-retention. Explicit-shutdown correctness narrows scope only."
+            },
+            {
+              "source": "TODO.md Planned; plans/queue; BUGS.md",
+              "result": "Planned is empty. Targeted claim searches and matching environment/overlap plan context provide no stated repair for idle strong ownership. The accepted SSH-transfer-helper hang is distinct."
+            },
+            {
+              "source": "review_feedback_queue/INDEX.md and matching retired-connection, successful-suspend and shutdown-wait test entries; TRIAGE_OUTCOMES.md",
+              "result": "No exact existing queue/decision cover. Matching entries and the shutdown-test decision have different triggers/consequences. Archive not read."
+            },
+            {
+              "source": "review_feedback_queue/FILTER.md",
+              "result": "No entire filter matches resource retention on direct drop. This is consolidated solely with named g024/l5, not filtered or dismissed as correct."
+            }
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": "None for the conditional source claim. Runtime incidence/frequency unmeasured; indefinite retention needs overlapping persistent stopped actors. Normal explicit shutdown, single-actor indefinite retention, security and user-work loss remain excluded.",
+          "original_stronger_consequence": "The original lead preserved conditional prevention of fallback cleanup; later records confirm it for overlapping actors while keeping one-actor cleanup delay separate. No highest consequence or withdrawal appears.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Exact named same-root alias; retain all substance under g024/l5. This proposes deduplication without rejecting or lowering the canonical defect."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": true,
+        "clearly_refuted_candidate": false,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "stopped-idle-local-arc-blocks-direct-manager-drop",
+        "destination": "trailing-stopped-idle-local-arc-blocks-direct-manager-drop.md"
+      }
+    }
+  ],
+  "replies": [
+    {
+      "turn": 1,
+      "reply": "Initial review blocked: all 12 manifest ranges exceed their snapshots by one line. The required evidence reader rejects the manifest.\n\nNo patches reviewed or findings recorded. Blocker and unread scope are saved in [progress.md]([private-run]/g022/progress.md).\n\nPlease repair the ranges or explicitly approve manual inspection, as required by the evidence tooling instructions."
+    },
+    {
+      "turn": 2,
+      "reply": "Initial pass complete: all 12 patches, 1,442 lines delivered and reviewed.\n\n- **f2 confirmed:** an archive update can miss its fleet wake, leaving other windows’ Trash counts stale.\n- **f1 ruled out:** coordinated adapter changes prevent the suspected build failure.\n- No open leads or unread assigned scope.\n\nFindings and progress are recorded. Conclusions are source-based; no tests or reproductions ran."
+    },
+    {
+      "turn": 3,
+      "reply": "Revised **f2** with confirmed RPC concurrency, both Delete/Replace paths, and absence of a guaranteed late wake or later in-range fix. Consequence remains stale Trash display; archived files remain intact.\n\nNo new findings. Unresolved lead IDs: none."
+    },
+    {
+      "turn": 4,
+      "reply": "Discovery pass complete. Checked provider dispatch, status classification, lifecycle guards, cleanup proofs, lease cancellation, documentation and changed test oracles.\n\nNothing new found. New verified IDs: none. New unverified IDs: none. Open leads: none.\n\nProgress updated; source-only review, no runtime execution."
+    },
+    {
+      "turn": 5,
+      "reply": "Added **f3**, agreeing with g024/l5: idle Stopped actors can delay direct-drop cleanup; overlapping actors can conditionally retain the manager indefinitely. Source confirms it persists at the range endpoint.\n\nConsequence remains resource retention, bucket **other**. Explicit graceful shutdown is unaffected.\n\nUnresolved lead IDs: none."
+    },
+    {
+      "turn": 6,
+      "reply": "Discovery pass 2 complete. Checked provider/binding consistency, lifecycle locking, cleanup proofs, lease cancellation, serialization and changed test oracles.\n\nNothing new found. New verified IDs: none. New unverified IDs: none. Open leads: none.\n\nProgress updated. No runtime execution."
+    }
+  ],
+  "progress": "Group g022: environment-host-lifecycle.\nInitial review turn 1; discovery passes 0. Blocked before mandatory source delivery. Findings log verified present and remains empty; no source findings, candidates, or leads have been considered.\nRead the full brief, inventory commits field only, skillette trigger table, machine rules, scode-voice, priority buckets, and feedback-file format. Root AGENTS.md End sentinel was supplied in context.\nEvidence command attempted: evidence read manifest.json prep/parts/00030-000.patch 1 22. Result: PERSISTENT_REVIEW_TOOL_FAILED: Invalid source range. No coverage certified. Read tooling.md and helper validation to establish the cause: the manifest declares 22 lines for that source, while the helper counts 21 physical lines. The snapshot ends in a newline; the manifest apparently counts a trailing empty split field as another line. Other entries have the same off-by-one mismatch (checked counts only, not patch contents). No snapshots or manifests changed. Tooling requires caller approval for manual inspection; no fallback used.\nInterface assumptions: none established yet. No source or contract conclusion and no runtime execution.\nUnread scope: all 12 assigned patches (1,454 declared lines), governing SPEC.md/SPEC_impl.md sections, and source/caller context. The complete assigned pass remains outstanding.\nNext action: caller repairs manifest ranges/group briefing to actual physical line counts, or explicitly approves manual inspection. Then resume the initial review with mandatory packets and governing contracts. New verified/unverified IDs this pass: none.\n\nCoverage repair turn 2 (initial review continuation), discovery passes 0. Corrected brief reread fully. Findings log preserved. Resuming all mandatory ranges; manifest endpoints now match physical line counts. Next: governing contract searches, then patch delivery and source analysis.\n\nInitial source pass completed, turn 2 (coverage repair continuation); discovery-pass count remains 0. Delivered every corrected mandatory range through separate evidence-read shell calls: 00030 1-21; 00034 1-40; 00035 1-31; 00085 1-35; 00086 1-150 and 151-218; 00087 1-23; 00089 1-180,181-360,361-540,541-672; 00097 1-150 and151-277; 00099 1-42; 00104 1-15; 00121 1-22; 00148 1-46. Total 1,442 physical patch lines, all 12 assigned snapshots. Parent owns delivery audit; no coverage claimed from the failed turn-1 read.\nRead governing SPEC sections at recorded revisions: SPEC_impl GUI Answers bind to what was drawn; full Disposable environments; Sandbox sessions; Tensorlake hosts (including lifecycle continuation); full Archived-checkout trash at 06d4; SPEC Managed checkouts and sandbox/lifecycle product contracts relevant to these changes. SPEC files are unchanged between ee39 and04ff, covering the later documentation/enum changes without a different contract. Read test-authoring checklist and examined changed tests against it. Read production provider wiring, current-binding conversion, removal proof/store gate, cancellable connected-hook lifetime, lifecycle key-before-hold/re-read ordering, archive notification producers and consumers, and wake/refresh/reply ordering at the correct pinned commits.\nNew records this pass: f1 lead resolved to candidate (04ff Tensorlake let-else changes refute suspected build failure); f2 lead resolved to confirmed source finding (06d4 archived-session epoch can change without a fleet wake after an earlier refresh removed the source cache row). f2 final revision adds source checks that stable refreshes and teardown return do not repair the missed wake. New verified IDs: f2. New unverified findings: none. Open leads: none. Candidate f1 has could-be-highest=false and exact source refutation. No drops rely on spec acceptance. No queue/coverage exclusions consulted.\nInterface assumptions established: the production manager and AppState share clones of the same Tensorlake service; deletion proof preserves row identity; lifecycle providers re-read under the existing provision lock; provider connected leases remain within the cancellable hook/serve scope. The Trash epoch is independent of session cache changes, exposing f2's missing explicit wake. No runtime behavior observed; no tests, builds or reproductions run, per the source-only brief. No checkout files changed.\nUnread assigned scope: none. Next: return to caller for its later synthesis turn; do not run a second initial/discovery pass inside this turn.\n\nSynthesis turn 3 started; discovery-pass count 0. Initial delivery audited by parent. Rechecking f2 notification/reply ordering, Delete and Replace cache tails, guaranteed late wakes, and later in-range changes. No open leads entering turn. Parent crossinput g017/c1 concerns golden fixture sensitivity, separate from f2 product behavior; do not treat it as coverage or refutation. Findings log retained; no changes to checkout or runtime execution planned.\n\nSynthesis turn 3 completed; discovery-pass count 0. Revised f2 twice under its original ID with end-of-range status and additional verified caller/transport premises. Confirmed that concurrent ListSessions can finish while Delete awaits post-row-removal cleanup: per-request client reply correlation, separate supervisor list admission, no mutation fence on listings. Hint sender only drains owed marks, so no mandatory late hint exists after cleanup. Generic request ownership, session cleanup, response wrapper, replacement create/pin publications and idle manager refresh do not supply a guaranteed post-epoch wake. Healthy feed transport sends Ping/Pong, not periodic revision text; client handshake deadline is spent after first message and no healthy idle resubscribe is scheduled. Both ordinary Delete and Replace-with-into-another-folder/fresh-checkout retain the route. Plain same-folder Replace normally does not archive. End revision 00de retains both unbumped archive branches and changed-only forget; later successful-create history publication in566598 does not repair them. Feed, events and notices source is unchanged at endpoint. No readily checkable missing premise remains for f2.\nOriginal impact and high bucket retained: stale Trash display until explicit/unrelated recovery, no archived-file loss. f1 remains source-refuted candidate unchanged. Parent crossinput g017/c1 stays separate; did not inspect its reviewer log, golden fixture or forbidden coverage data. New finding IDs this turn: none. Revised confirmed ID: f2. Unverified IDs: none. Open leads: none. No runtime tests, builds or reproductions. No proposed drops/lowerings added; f1's recorded source refutation and f2's full original wording/citations preserved.\nContext-read limitation: one broad endpoint manager diff was clipped; it was not used as complete source coverage. Relevant endpoint helper bodies and transport/event paths were then read in bounded targeted commands. All assigned mandatory initial coverage remains complete and parent-audited; no unread assigned scope.\nInterface assumptions after synthesis: deletion and listing RPCs are independently multiplexed; lifecycle/provider seam assumptions from initial pass still stand. Next: return delta to parent for its prescribed later turn. No second discovery pass performed inside this turn.\n\nDiscovery turn 4 started; discovery-pass count 1. Reusing complete initial/synthesis findings history and audited mandatory delivery. No open leads or named pending questions entering turn. Read discovery-neighbours in bounded chunks before fresh source search; do not use it as source-delivery credit. Search remains within assigned lifecycle/host/session patches, examining provider dispatch, cleanup proof, hook lifetime and changed tests beyond f2. No runtime or live-install actions.\n\nDiscovery turn 4 completed; discovery-pass count 1. Read discovery-neighbours.json fully in consecutive bounded 20,000-character chunks (0 through EOF at less than200,000), including empty interface records. It supplied novelty/context only, no mandatory-delivery credit. Named pending questions were empty. No interface concern required a local record revision; no parent drop/lowering was adopted.\nFresh source search beyond known f2: rechecked ee39 provider-neutral actor attempt admission, initial-install coordinate guard, exhaustive successful/unknown/unanswered status gate, Tensorlake vendor-status translation and API error classification. Rechecked explicit lifecycle provider selection and under-lock binding/key validation, repeated Resume connection preservation, failure hold release and retry revival. Rechecked row-bound destruction dispatch, proof retention and failure unwinding. Rechecked connected-hook cancellation, credential lease registration-before-await and Drop count, tunnel lease task/client retirement, and lexical scope across serving/parking. Examined access.rs at1038 and shared Recipe/Podman state at560 to validate the assigned module-map documentation against actual responsibilities, without reviewing unrelated provider implementation. Rechecked changed generic gate table against its full input vocabulary and the archive-epoch test's spliced single-local-host fixture against its asserted observable; no independent new test-oracle or documentation defect established. Kept supplied neighbouring diagnostic, approval, seal, recents and test findings outside this group's discovery result.\nUseful results: state translation preserves Unknown as refusal and unanswered Tensorlake as dial-anyway; provider key validation remains ahead of connection withdrawal; destruction still requires the exact host proof and preserves rows on failure; partial connected resource acquisition is cancelled before parking and returned leases span serving. Changed test table covers the actual shared gate contract, and the added epoch assertion has an isolated one-host harness. Source checks produced no substantive new lead and no additional issue beyond existing durable records. No runtime tests, builds, reproductions or live-install actions; no checkout edits or forbidden coverage searches.\nNew verified finding IDs this discovery: none. New unverified-after-investigation IDs: none. New/revised candidate IDs: none. Open lead IDs: none. Explicit result: nothing new found. Existing f1/f2 records unchanged in this turn. All assigned mandatory scope remains audited/complete; unread assigned scope none. Next: return discovery delta to parent; await any separately requested continuation rather than running another pass now.\n\nReopened synthesis turn 5 started; discovery-pass count remains1. Read complete own findings history and exact caller-named g024/l5 event35. Scope: check the later Stopped-arm manager ownership issue against this group's manager/lifecycle interfaces, including fallback Drop, explicit shutdown callers and conditional actor retention. No runtime tests/builds/reproductions; no nested agents or forbidden coverage searches. A separate discovery is reserved for a later prompt.\n\nReopened synthesis turn5 completed; discovery-pass count remains1. Read complete own findings history (all7 prior events) and exact g024/l5 event35; no other neighbour/coverage search. Added local f3 lead, then finding and verification revision under that same ID. Independently checked exact566 Stopped arm, named local ownership across short-circuited condition and idle wait, manager Weak intent/Drop shutdown, actor-map ownership of statuses/tasks/cancellation, direct-drop fixture contract, provider direct status route, explicit production/harness shutdown callers, introduction patch and inclusive endpoint. Confirmed source-supported gate=false via direct Podman observations even without manager-connected place; two staggered idle actors can overlap holds/reacquisition indefinitely, one idle actor delays fallback only until its arm ends absent another owner. Real lifecycle-task ownership remains legitimate and distinct. Endpoint4054 retains the local. Normal serving calls shutdown_and_wait; harness restart calls shutdown, so no graceful desktop/standalone shutdown hang claimed. The finding is other/resource-lifetime only, source/language/contract confidence, not observed execution. possible_cover exact supplied g024/l5; parent owns duplicate consolidation. No spec-accepted drop/lowering introduced.\nNew verified agreement record this synthesis: f3. New unverified-after-investigation IDs:none. Open leads:none. f1/f2 unchanged. No readily checkable premise remains for the conditional f3 route; runtime incidence remains unmeasured and was not requested. No tests/builds/reproductions/nested agents/live actions/checkout edits. All prior mandatory delivery remains audited; no unread assigned scope. This turn performed only the requested late-interface synthesis. Next: return delta and await the separately requested post-audit discovery; do not combine that pass into this turn.\n\nDiscovery turn6 started; discovery-pass count2. Reuse full retained own event history including f3 late-interface agreement. Named pending questions empty. Read refreshed discovery-neighbours in bounded chunks before source search, without treating it as source-delivery credit. Scope remains original assigned patches; f3 is known and will not be rediscovered or broadened. No runtime, tests, builds, reproductions or live actions.\n\nDiscovery turn6 completed; discovery-pass count2. Read refreshed discovery-neighbours.json fully (418,359 encoded bytes,995 lines) in consecutive20,000-character slices from0 throughEOF at420,000. Context included the expanded exact latest records, including g024/l4/l5, g067/l4 and other source/test/documentation findings. No mandatory source credit claimed for that context, no parent drop/lowering accepted, and no new local alias/duplicate was minted from it. Named pending questions remained empty.\nFresh search within original assigned group beyond known f2/f3: reviewed exact ee39 EnvironmentBinding/ProviderHandle authority and empty-provider behavior; confirmed absent mutation providers refuse while status uses the explicit per-kind policy. Rechecked lifecycle dispatch's captured binding against provider re-read under the existing provision lock and the key-before-hold contract; host checked/ordinary removal owns the same lock through cleanup. Rechecked the shared Destroyed wrapper and remove_host_row enforcement for exact host ID plus the existing full-sync row/grant deletion. Rechecked the later04ff binding projection's exhaustive kind-to-handle mapping and immutable resource/place coordinates. Examined connected-resource acquisition's select cancellation/lexical lease scope across serving and the new generic gate vocabulary documentation. Revisited the assigned session archive test's stated observable and fixed one-local-host fixture, without treating its epoch assertion as proof of notification delivery or adopting another group's distinct fixture gaps. Reviewed the newly added host-view epoch's serialization contract against process-local connection semantics. No additional substantive product, test-oracle or documentation lead was established in these checks; did not broaden into the supplied neighbouring later changes.\nUseful results: no mismatched provider/binding path is admitted by these projections; checked removal keeps consent validation and proof construction under its operation guard; missing providers do not fabricate mutation success; lease acquisition is cancellable and returned leases survive through serving; the changed archive test meaningfully distinguishes archive-fact propagation from bare deletion on its own isolated host. Findings history unchanged at10 events. New verified IDs:none. New unverified-after-investigation IDs:none. New candidates:none. Remaining open lead IDs:none. Explicit result:nothing new found. Existing f1/f2/f3 consequences and proposed-drop bases unchanged.\nNo runtime tests, builds, reproductions, nested agents, installs/live actions, checkout edits or prohibited coverage searches. All original assigned mandatory delivery remains complete and audited; unread assigned scope:none. Next:return discovery delta; await separately requested work rather than starting another pass.\n"
+}

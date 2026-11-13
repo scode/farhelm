@@ -1,0 +1,158 @@
+[
+  {
+    "key": "g126/l1",
+    "latest_line": 8,
+    "recommendation": "retain-verified",
+    "bucket": "other",
+    "underlying_key": "busy-host-list-limit-negative-oracle-never-reads-client-output",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The listing-limit test checks a reply cache that cannot change between sending request 3 and asserting its absence. The source establishes lost test sensitivity to premature replies, without establishing a production admission defect.",
+    "checks": [
+      "At 1ed482dde220452e424973faf38a5e1318986333, crates/farhelm-supervisor/src/service/handlers.rs:10488-10551 initializes the fixture and reads initial attachment replies before request 3 exists. send at 10595-10600 writes only. read_one at 10606-10641 is the only fixture operation that appends control replies; reply at 10646-10661 invokes it.",
+      "At that revision, handlers.rs:10669-10695 writes a channel-1 text frame and awaits TestHost::received_contains, without reading client output. handlers.rs:11287-11317 sends request 3, awaits that input marker, checks host.replies, releases held list permits, and only then reads the correlated listing reply. An already queued or transmitted early reply is invisible to the negative assertion.",
+      "connection.rs:455-581 routes input through the attached input side; the separate writer task starts at 921. Host input reception supplies no client-output drain. handlers.rs:585-615 still acquires list_admission inside the spawned listing task and drops it before sending; no current production semaphore bypass is alleged.",
+      "The parent revision's handlers.rs:11196-11213 reads client frames until the echo, preserving replies before that marker. That is a weaker ordered observation, not a guarantee that every concurrently spawned task settled. The diff from the reviewed revision to 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db leaves the input helper and this assertion unchanged apart from unrelated protocol-field removal. The introducing revision occurs within the named review range."
+    ],
+    "coverage_checked": [
+      "Current SPEC.md, Waiting between operations on one host: requires terminal/list progress while management waits; it does not accept an unobserved reply assertion. Current SPEC_impl.md terminal switch points and whole-list wire contract provide no acceptance of this test gap.",
+      "TODO.md:25-27 has an empty Planned bucket. Targeted searches of plans/queue, BUGS.md, INDEX.md and active TRIAGE_OUTCOMES.md for listing permits/limits, reply draining/cache, BusyHost, input markers and conformance found no exact trigger/consequence/scope coverage.",
+      "Read review_feedback_queue/conformance-test-never-admits-management-candidates.md in full and TRIAGE_OUTCOMES.md:1351-1361. They concern management representatives being busy-refused before admitted waits, not a dedicated listing test inspecting an unread cache. Its discard decision does not settle this different root cause.",
+      "FILTER.md read in full: none covers a persistent regression-test observation gap. No archive searched."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": "None for the negative-oracle defect. A concrete runtime semaphore-bypass failure or observed mutation-test pass was neither shown nor reproduced, and is not needed for this test-only claim.",
+    "original_stronger_consequence": "The initial lead suspected queued management requests could appear pending while typing continued. Investigation narrowed the established consequence to the listing-limit test missing premature completion or a skipped list semaphore. It still detects an inline list-permit wait blocking the reader. The former echo observation was never a universal scheduling barrier.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Record a new other-priority test-validity finding. Keep the distinction between source-established oracle weakness and unobserved product failure; do not merge it into the discarded generic admitted-management conformance finding."
+  },
+  {
+    "key": "g126/l2",
+    "latest_line": 9,
+    "recommendation": "retain-verified",
+    "bucket": "other",
+    "underlying_key": "request-conformance-target-testhost-owner-dropped-at-preparation-return",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The preparation future disposes of the channel-2 target's host owner before the terminal control and live-route observation. Retaining the client terminal handle or a temporarily live forwarder cannot preserve ownership of the stand-in host.",
+    "checks": [
+      "At 1ed482dde220452e424973faf38a5e1318986333, handlers.rs:10893-10902 creates the target terminal and local _target_host for Detach, Resize, PauseOutput and ResumeOutput. handlers.rs:10947-10973 attaches that terminal; 10982 returns only (message, listener). The local host owner is dropped before the preparation JoinHandle completes and before the later observation.",
+      "hosts/terminal/test_host.rs:78-108 gives TestHost exclusive ownership of the serve-task handle, child and temporary directory; Drop aborts the task and calls kill_child. Lines 126-132 take the child and call kill/wait, ignoring errors. adopt_test_host at 365-372 returns the client terminal and owner separately. hosts/terminal.rs:1232-1280 retains runtime channels and state, with no TestHost owner.",
+      "handlers.rs:11036-11058 checks a retained attachment and !forwarder.is_finished(), rather than host ownership, child liveness or serving-task readiness. grid_stream.rs:602-668 handles terminal/runtime state asynchronously. Task abortion is requested rather than synchronously joined; child kill/wait errors are ignored. These caveats leave exact later task state unobserved but do not preserve the fixture's healthy-live-host premise.",
+      "request_modes.rs:305-310 selects real channel-2 inline controls. handlers.rs:1981-2084 still exercises attachment lookup/ownership and detach/resize behavior where the attachment survives. The claim must not say every handler branch is bypassed. The independent channel-1 BusyHost host remains retained and can still witness typing.",
+      "The diff through reviewed tip 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db changes only protocol fields in the relevant handler regions and module wording in TestHost. The premature owner disposal remains. The introducing revision is within the supplied range."
+    ],
+    "coverage_checked": [
+      "Current SPEC.md, Waiting between operations on one host, requires responsive terminal controls; current SPEC_impl.md, Every terminal in a host, describes stand-in/unit-test hosts but does not accept premature fixture-owner disposal.",
+      "TODO.md's Planned bucket is empty. Targeted searches of plans/queue, BUGS.md, INDEX.md and active TRIAGE_OUTCOMES.md for conformance, target-host drop/ownership, terminal-control tests and live-route premises found no exact cover.",
+      "Read the existing conformance-test-never-admits-management-candidates.md and active outcome at TRIAGE_OUTCOMES.md:1351-1361. Their cause is generic management candidates being refused before admitted waits. They do not cover disposal of the host used by inline terminal controls. Shared fixture identity is insufficient for coverage or an exact-root alias.",
+      "FILTER.md has no boundary accepting a premature fixture teardown or lost test premise. No archive searched."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": "None for premature host-owner disposal. Whether an actual run fails the live-forwarder premise or passes while teardown has not propagated remains schedule-dependent and unobserved. No production defect or user-work loss is established.",
+    "original_stronger_consequence": "Earlier wording described shutdown before the action and either a live-premise failure or a dead-terminal cleanup path. Preserve both possibilities, while qualifying that abort requests are asynchronous and kill/wait errors are ignored. Some matched attachment/lock branches can still execute, so disposal does not prove universal handler bypass.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Record a separate other-priority test-lifetime finding. Retain the target TestHost owner through action, observation and cleanup. Do not treat the existing discard of the generic admitted-management gap as acceptance of this different lifetime defect."
+  },
+  {
+    "key": "g126/c1",
+    "latest_line": 5,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "removed-tmux-pane-query-fixture-has-no-current-query-path",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The deleted fixture injects a tmux socket-query error into a query path removed by the same change. The replacement list and rename paths read host-backed session state, while remaining checkout-projection errors still propagate.",
+    "checks": [
+      "At 1ed482dde220452e424973faf38a5e1318986333, service/listing.rs:104-168 snapshots live/held rows, calls entry_info, and propagates project_checkout_metadata with ?. handlers.rs:525-530 uses with_checkout_metadata(entry_info(entry)) for rename.",
+      "service/status.rs:344-429 constructs entry_info from run/session cells and terminal status. In particular 379-388 reads listed_host_tabs and the held terminal, with no external pane query. The reviewed patch deletes only_an_empty_listing_skips_failed_pane_queries, whose setup starts the old tmux server and substitutes its socket with an error-producing path.",
+      "The same change removes the supervisor's tmux driver. Current SPEC_impl.md:2134-2159 describes runtime-backed terminal switch points and 2160 onward states every new terminal is a host; those contracts agree with the replacement source. No failed-pane-query path remains for that exact fixture to exercise."
+    ],
+    "coverage_checked": [
+      "Searched both current specifications, TODO.md, plans/queue, BUGS.md, INDEX.md and active TRIAGE_OUTCOMES.md for failed pane queries, query failure, listing limits, oversized listings and conformance. No exact coverage item for this rejected candidate was found. TODO's Planned bucket is empty.",
+      "The existing generic conformance finding and its discard outcome concern management admission, not query-error propagation. The current whole-list frame-limit contract in SPEC_impl.md:3501-3511 also does not accept hiding query errors; source removal of the query, rather than a relaxed error contract, refutes this candidate.",
+      "FILTER.md was read but no filter is used. No archive searched."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": "A remaining external pane query whose failure this deleted tmux fixture should still exercise. The inspected list and rename paths have none.",
+    "original_stronger_consequence": "The set-aside concern was that deleting the failed-pane-query test might silently hide terminal tabs on listing failure. It was never a confirmed runtime finding; the record explicitly proposed not reporting it after tracing the replacement path.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Accept the source refutation only for this removed tmux-specific fixture and hypothetical hidden-tabs consequence. No security or user-owned-work route was claimed or established."
+  },
+  {
+    "key": "g126/c2",
+    "latest_line": 6,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "attach-stop-test-writer-slot-preserves-held-attachments-boundary",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The replacement readiness witness still identifies the attach's pre-lock boundary. The test holds the attachment lock, observes exactly one reserved reply slot, then sets the actual shutdown flag under the same lock before attach can install output.",
+    "checks": [
+      "At 1ed482dde220452e424973faf38a5e1318986333, handlers.rs:1728 reserves the writer reply slot and 1743 acquires attachments; no intervening await or state mutation weakens the boundary. The stopping check follows while holding that lock.",
+      "handlers.rs:7430-7517 keeps _test_host in the outer test scope, holds attachments, waits for queue capacity CONNECTION_WRITER_QUEUE - 1, requires !attach.is_finished(), sets attachments_closed, releases the lock, and asserts Conflict/SUPERVISOR_STOPPING with an empty attachment map.",
+      "terminals.rs:490-493 reads attachments_closed for is_stopping. teardown.rs:1237-1253 establishes that exact flag under attachments before draining. The test therefore models the production stop boundary. Its host lifetime differs from l2's preparation-local target owner."
+    ],
+    "coverage_checked": [
+      "Searched both specifications and current TODO Planned, unlanded plans/queue, BUGS.md, INDEX.md and active TRIAGE_OUTCOMES.md for attach-stop races, shutdown lock/boundary, conformance and fixture host ownership. No exact coverage item was found; the source ordering itself refutes the concern.",
+      "Read current SPEC.md, Waiting between operations on one host, and SPEC_impl.md terminal switch points/host lifecycle context. Neither accepts an invalid stop-race oracle, and neither is needed as a coverage dismissal. The generic management-conformance item is a different cause and scope.",
+      "No FILTER.md boundary is used. No archive searched."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": "A gap between reply reservation and the held-lock shutdown boundary that would let attach install without observing the flag; the inspected code preserves that ordering.",
+    "original_stronger_consequence": "The candidate questioned whether replacing sink-readiness polling invalidated the attach-versus-stop test. It was explicitly set aside on source evidence, not downgraded from a confirmed process-loss or security finding.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Accept the narrow source refutation of lost shutdown-boundary coverage. This is a test-oracle candidate only; it asserts no production stop/attachment defect."
+  },
+  {
+    "key": "g126/c3",
+    "latest_line": 7,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "oversized-list-fixed-host-preserves-serialization-fixture",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The oversized-list fixture still supplies a title that alone exceeds MAX_FRAME_LEN. Its synthetic running host needs no process, so replacing the terminal representation does not remove the test's size premise or its correlated-error check.",
+    "checks": [
+      "At 1ed482dde220452e424973faf38a5e1318986333, core.rs:20655-20657 returns HostTerminal::fixed_for_test(Liveness::Running { child: None }); its documented requirement is an existing Tokio runtime, supplied by this async test.",
+      "handlers.rs:10000-10150 directly inserts a session with title x repeated MAX_FRAME_LEN times, invokes the real ListSessions handler, awaits and checks request 1's Internal frame-limit error, then clears the oversized row only after receiving that error and checks request 2's normal empty SessionList.",
+      "service/listing.rs:104-168 and status.rs:344-429 read in-memory entry/terminal state and propagate projection errors; they do not adopt a host or send terminal input. The synthetic host cannot impose a missing real-host premise on this serialization check."
+    ],
+    "coverage_checked": [
+      "Current SPEC_impl.md:3501-3511 explicitly requires an oversized whole-list reply to fail at the writer backstop rather than silently shorten the list. The inspected test continues exercising that contract.",
+      "Searched both specifications, TODO.md Planned (empty), plans/queue, BUGS.md, INDEX.md and active TRIAGE_OUTCOMES.md for oversized listing/reply, frame-limit fixture and synthetic/target-host premises. No separate coverage item for a weakened version of this fixture was found.",
+      "FILTER.md was read and is not the basis for refutation. No archive searched."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": "A real-host operation or lost oversized serialized field caused by the replacement. Neither is present in the inspected path.",
+    "original_stronger_consequence": "The set-aside candidate asked whether the new synthetic host accidentally required a real host or weakened serialization coverage. No runtime failure or false pass was established, and the record already proposed not reporting it.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Accept the source refutation for this fixture: the fixed running terminal and oversized title preserve its independent serialization premise."
+  },
+  {
+    "key": "g126/c4",
+    "latest_line": 10,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "busy-host-direct-input-watch-still-traverses-real-connection-reader",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The direct host-input watch remains an adequate witness that the connection reader processed the following input frame. It loses client-output observation, recorded separately in l1, rather than bypassing the reader.",
+    "checks": [
+      "At 1ed482dde220452e424973faf38a5e1318986333, handlers.rs:10462-10472 runs a real handle_connection over an owned duplex stream. send at 10595-10600 writes control through that stream; type_and_see_received at 10669-10695 writes a following channel-1 Data frame through the same writer after ReplayComplete and rejects reused markers.",
+      "connection.rs:455-581 processes Data through the owning attachment's input side. test_host.rs:624-635 handles host-protocol Input; write_input at 760-776 appends received bytes and publishes their length. The watch observes protocol receipt, not direct fixture injection. An inline control stuck before the following frame prevents that marker from arriving.",
+      "The client fixture does not read output in type_and_see_received. Therefore this refutation does not withdraw l1: request 3's cached-reply absence assertion still lacks a client-output boundary. The named conformance contract is reader progress; the independent input and reply guarantees must remain distinct.",
+      "The diff through 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db retains the same input helper and relevant fixture ownership, apart from unrelated protocol-field removal. No runtime test or reproduction was run."
+    ],
+    "coverage_checked": [
+      "Current SPEC.md, Waiting between operations on one host, distinguishes terminal input/output and listing progress. Current SPEC_impl.md's host-backed terminal description does not require a cat echo for an input-reader observation.",
+      "Searched both specifications, TODO Planned (empty), plans/queue, BUGS.md, INDEX.md and active TRIAGE_OUTCOMES.md for reader progress, input marker/oracle, BusyHost, direct host observation and conformance. The existing generic management-conformance item and its discard decision concern admitted-wait coverage, not a reader bypass. There is no exact coverage item for this rejected concern.",
+      "FILTER.md was read; no filter is used. No archive searched."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": "An input route that updates TestHost's received-byte watch without processing the following frame through the real connection reader. The inspected source supplies no such route.",
+    "original_stronger_consequence": "The candidate separately suspected that replacing a real cat echo with the host's received-input record bypassed the connection reader. It explicitly retained l1's lost reply-observation finding and never claimed observed security or user-work harm.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Accept source refutation of the reader-bypass claim only. Preserve l1 as a separate verified negative-output-oracle defect and l2 as a separate target-host lifetime defect."
+  }
+]

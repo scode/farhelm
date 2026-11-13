@@ -1,0 +1,424 @@
+{
+  "group": {
+    "id": "g068",
+    "domain": "podman-environments",
+    "purpose": "podman-environments: crates/farhelm-helm/src/store/podman.rs; phases complete small per-commit changes",
+    "interfaces": [
+      "g022",
+      "g023",
+      "g024",
+      "g025",
+      "g026",
+      "g027",
+      "g028",
+      "g029",
+      "g055",
+      "g056",
+      "g057",
+      "g058",
+      "g059",
+      "g060",
+      "g064",
+      "g067",
+      "g069"
+    ],
+    "sources": [
+      {
+        "path": "[private-run]/prep/parts/00206-000.patch",
+        "ranges": [
+          [
+            1,
+            501
+          ]
+        ],
+        "original_path": "crates/farhelm-helm/src/store/podman.rs",
+        "commit": "56659839785691f76da3af5d8f51b511cff4ba8b",
+        "notes": "patch header; patch character offsets [0,22688)",
+        "lines": 501,
+        "bytes": 22688,
+        "start": 0,
+        "end": 22688,
+        "original": "[private-run]/prep/originals/00206.patch"
+      }
+    ],
+    "lines": 501,
+    "bytes": 22688
+  },
+  "records": [
+    {
+      "key": "g068/l1",
+      "owner": "g068",
+      "id": "l1",
+      "domain": "podman-environments",
+      "purpose": "podman-environments: crates/farhelm-helm/src/store/podman.rs; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 1,
+          "event": {
+            "version": 1,
+            "kind": "lead",
+            "id": "l1",
+            "state": "open",
+            "summary": "Check first recipe-build ownership against concurrent place retarget/removal",
+            "location": "crates/farhelm-helm/src/store/podman.rs:226",
+            "detail": "Reviewed commit: 56659839785691f76da3af5d8f51b511cff4ba8b. TLDR: A first recipe image build may race removal or retargeting of its container host before durable resource ownership becomes visible. Source basis: new refuse_referenced_place checks only existing row and RecipeState.needs_cleanup facts (store/podman.rs:215-249); rebuild admission probes its place before prepare_images, whose first edit only clears last_failure (environment/podman.rs:937; environment/podman/build.rs:246-263). Need inspect helper ownership publication and current route checks to determine whether a started command can still be aimed at an old endpoint or lose cleanup access. Contract: SPEC_impl.md Environment rows and provider state refuses removal/retarget while recipe state records artifacts, retaining access for confirmed cleanup. Suggested bucket: other or high if route loss is established; could-be-highest: not established, possible stranded helper processes require tracing. Confidence: uninvestigated lead; no execution. proposed_drop: false. possible_cover: none. Next checks: helper and edit transactions, place resolution and endpoint guards, plus retarget/removal callers."
+          }
+        },
+        {
+          "line": 2,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "l1",
+            "state": "open",
+            "summary": "First helper ownership is serialized with place removal and retarget",
+            "location": "crates/farhelm-helm/src/store/podman.rs:226",
+            "detail": "Reviewed commit: 56659839785691f76da3af5d8f51b511cff4ba8b. TLDR of considered consequence: A first recipe build could strand a helper at an old or forgotten container host if ownership publication raced host removal/retarget. Source checks refute that route. environment/podman/build.rs:538-565 calls edit_at with the HostRow paired with the observed route before run; edit_at at 488-500 calls update_recipe_place_state. tensorlake/build.rs:330-340 uses an immediate transaction to recheck kind, entry UUID and destination; it records ownership in the same transaction at 342-364. A winning removal/retarget makes that write fail; a winning ownership write makes the new refuse_referenced_place at store/podman.rs:226-249 reject removal/retarget through needs_cleanup (environment/recipes.rs:66-74). environment/podman.rs:150-184 resolves and checks the current route again per operation. A preceding base-image pull is user-base storage rather than a launched owned helper. Contract: SPEC_impl.md Environment rows and provider state says removal/retarget is refused while recipe state records artifacts, retaining the cleanup route. Suggested bucket if established: high for lost cleanup access; could-be-highest: the suspected stranded-process consequence was considered, but no shipped route survives the transaction guard. Confidence: confirmed source refutation; no execution. proposed_drop: source-refuted by the guarded ownership transaction and existing-refusal transaction. possible_cover: none. No unresolved premise remains for this lead."
+          }
+        },
+        {
+          "line": 3,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "l1",
+            "state": "open",
+            "summary": "Post-publication cleanup guard does not establish pre-publication consent",
+            "location": "crates/farhelm-helm/src/store/podman.rs:226",
+            "detail": "Reviewed commit: 56659839785691f76da3af5d8f51b511cff4ba8b. TLDR of original considered consequence: a first recipe build could strand a helper at an old or forgotten container host if ownership publication raced removal/retarget. The prior source-refuted proposed drop is preserved ONLY for that cleanup race after helper ownership is transactionally admitted. environment/podman/build.rs:538-565 writes helper intent through edit_at before run; tensorlake/build.rs:330-364 validates current kind, entry UUID and destination with state publication in one immediate transaction. store/podman.rs:215-249 then refuses endpoint loss. This starts at ownership publication; pending approval cards are not references checked here. It does not bind an earlier card to the physical endpoint it named. g020/l1 (reviewed 190d844e58c96cf197aa838d0b0eea8062f48435) now reports a separate pre-publication route: first container at an ordinary SSH place without retained rows/images/helpers, a requester on a different ordinary host, destination retarget plus fresh probe while its card waits, and later execution/credential delivery on the replacement endpoint. That reported highest consequence is NOT refuted by this candidate. Need independently check the exact admission boundary against that later caller; no new duplicate finding asserted yet. Original suggested bucket if stranded-helper consequence were established: high, with could-be-highest for lost processes considered but source-refuted in the original transactional route. Confidence: confirmed post-publication guard, pre-publication cross-group premise to verify. proposed_drop: retain source refutation of original cleanup race only; do not drop the distinct stale-consent route. possible_cover: g020/l1 owns the pre-publication approval finding. No runtime evidence."
+          }
+        },
+        {
+          "line": 7,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "l1",
+            "state": "open",
+            "summary": "Cleanup ownership fence starts after the earlier approval boundary",
+            "location": "crates/farhelm-helm/src/store/podman.rs:226",
+            "detail": "# Cleanup ownership fence starts after the earlier approval boundary\n\nReviewed commit: 56659839785691f76da3af5d8f51b511cff4ba8b; cross-group approval caller independently checked at 190d844e58c96cf197aa838d0b0eea8062f48435.\n\n## TLDR\n\nThe original suspected loss of cleanup access from retargeting after a helper is recorded is source-refuted. That guard does not protect the machine named by a pending approval before anything is registered. The distinct stale approval can deliver execution and recipe credentials to a retargeted machine; g020/l1 owns that finding.\n\n## Details\n\nOriginal consequence preserved: a first recipe build could strand a helper at an old or forgotten host if ownership publication raced removal/retarget. The initial proposed drop remains valid for that precise race. environment/podman/build.rs:538-565 publishes helper intent through edit_at before run; edit_at:488-500 calls update_recipe_place_state. tensorlake/build.rs:330-364 rechecks kind, entry UUID and destination in an immediate transaction with ownership publication. A winning endpoint mutation refuses stale helper publication; a winning publication sets needs_cleanup, making store/podman.rs:226-249 refuse retarget/removal in their own transaction. A preceding pull holds only a user-base image rather than an owned running helper. Original suggested bucket if established: high for lost cleanup access; could-be-highest for lost owned processes was considered but that route is refuted. No original consequence is withdrawn merely for rarity.\n\nThe exact fence begins when a hosts.place_host reference is inserted or recipe state starts needing cleanup. It is not admission for a pre-existing card. At the later approval revision, agent_requests.rs:4485-4515 captures place_name and numeric Place then waits for approval, with no resource registration or target destination/connection snapshot. approved:2865-2886 rechecks the requesting origin only. After Allow, agent_requests.rs:4541-4549 calls start_session_environment with that numeric place. provisioning/tensorlake_add.rs:379-398 checks CURRENT availability and registers ownership; store/podman.rs:364-394 reads CURRENT host kind and inserts the first row without an expected endpoint parameter. A cold place with no rows or resource state passes refuse_referenced_place:215-250 throughout the earlier card wait. A requester on another ordinary host is unaffected by a change to this separate container place. The later fresh probe is tied to the new current endpoint (podman_probe.rs:304-332,383-404), and Podman commands resolve that endpoint (podman.rs:150-184); those compare against a new probe, never the old card. Delivery resolves the environment's current route (credential_delivery.rs:434-440) and installs Codex auth.json (603-608) or a configured GitHub token (631-652). Thus the post-publication cleanup guard cannot refute g020/l1's earlier authority-substitution premise. The original source refutation never established that earlier consent boundary.\n\nExact separate approval contract at 190d844e58c96cf197aa838d0b0eea8062f48435, SPEC_impl.md:9548-9556: 'What a card shows is what an approval does.' and 'A launch is also refused if the target host’s connection changed while the card waited, since the approval was for the machine the card named.' (The source uses an ASCII apostrophe in host's.) This is independent from SPEC_impl.md Environment rows and provider state's requirement to retain cleanup access once resource ownership exists.\n\nSuggested bucket for the separate g020 route: highest because the shipped credential-copy route is established; its trigger requires a cold ordinary SSH place, concurrent operator retarget and a usable fresh probe, with requester on a different ordinary host. Confidence: confirmed source boundary and concrete credential delivery; no runtime observation. could-be-highest: yes for the separate consent finding, not refuted or lowered here. proposed_drop: retain original source-refuted no-report decision ONLY for the post-publication lost-cleanup race. No drop is proposed for the pre-publication approval issue. possible_cover: g020/l1 is the existing finding for that issue; this candidate records the independent store-boundary result without creating a duplicate queue item. No unresolved readily checkable premise remains in this assigned boundary analysis."
+          }
+        },
+        {
+          "line": 8,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "l1",
+            "state": "open",
+            "summary": "Cleanup ownership fence starts after the earlier approval boundary",
+            "location": "crates/farhelm-helm/src/store/podman.rs:226",
+            "detail": "# Cleanup ownership fence starts after the earlier approval boundary\n\nReviewed commit: 56659839785691f76da3af5d8f51b511cff4ba8b; cross-group approval caller independently checked at 190d844e58c96cf197aa838d0b0eea8062f48435.\n\n## TLDR\n\nThe original suspected loss of cleanup access from retargeting after a helper is recorded is source-refuted. That guard does not protect the machine named by a pending approval before anything is registered. The distinct stale approval can deliver execution and recipe credentials to a retargeted machine; g020/l1 owns that finding.\n\n## Details\n\nOriginal consequence preserved: a first recipe build could strand a helper at an old or forgotten host if ownership publication raced removal/retarget. The initial proposed drop remains valid for that precise race. environment/podman/build.rs:538-565 publishes helper intent through edit_at before run; edit_at:488-500 calls update_recipe_place_state. tensorlake/build.rs:330-364 rechecks kind, entry UUID and destination in an immediate transaction with ownership publication. A winning endpoint mutation refuses stale helper publication; a winning publication sets needs_cleanup, making store/podman.rs:226-249 refuse retarget/removal in their own transaction. A preceding pull holds only a user-base image rather than an owned running helper. Original suggested bucket if established: high for lost cleanup access; could-be-highest for lost owned processes was considered but that route is refuted. No original consequence is withdrawn merely for rarity.\n\nThe exact fence begins when a hosts.place_host reference is inserted or recipe state starts needing cleanup. It is not admission for a pre-existing card. At the later approval revision, agent_requests.rs:4485-4515 captures place_name and numeric Place then waits for approval, with no resource registration or target destination/connection snapshot. approved:2865-2886 rechecks the requesting origin only. After Allow, agent_requests.rs:4541-4549 calls start_session_environment with that numeric place. provisioning/tensorlake_add.rs:379-398 checks CURRENT availability and registers ownership; store/podman.rs:364-394 reads CURRENT host kind and inserts the first row without an expected endpoint parameter. A cold place with no rows or resource state passes refuse_referenced_place:215-250 throughout the earlier card wait. A requester on another ordinary host is unaffected by a change to this separate container place. The later fresh probe is tied to the new current endpoint (podman_probe.rs:304-332,383-404), and Podman commands resolve that endpoint (podman.rs:150-184); those compare against a new probe, never the old card. Delivery resolves the environment's current route (credential_delivery.rs:434-440) and installs Codex auth.json (603-608) or a configured GitHub token (631-652). Thus the post-publication cleanup guard cannot refute g020/l1's earlier authority-substitution premise. The original source refutation never established that earlier consent boundary.\n\nExact separate approval contract at 190d844e58c96cf197aa838d0b0eea8062f48435, SPEC_impl.md:9548-9556: 'What a card shows is what an approval does.' and 'A launch is also refused if the target host's connection changed while the card waited, since the approval was for the machine the card named.' This is independent from SPEC_impl.md Environment rows and provider state's requirement to retain cleanup access once resource ownership exists.\n\nSuggested bucket for the separate g020 route: highest because the shipped credential-copy route is established; its trigger requires a cold ordinary SSH place, concurrent operator retarget and a usable fresh probe, with requester on a different ordinary host. Confidence: confirmed source boundary and concrete credential delivery; no runtime observation. could-be-highest: yes for the separate consent finding, not refuted or lowered here. proposed_drop: retain original source-refuted no-report decision ONLY for the post-publication lost-cleanup race. No drop is proposed for the pre-publication approval issue. possible_cover: g020/l1 is the existing finding for that issue; this candidate records the independent store-boundary result without creating a duplicate queue item. No unresolved readily checkable premise remains in this assigned boundary analysis."
+          }
+        }
+      ],
+      "latest": {
+        "line": 8,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "l1",
+          "state": "open",
+          "summary": "Cleanup ownership fence starts after the earlier approval boundary",
+          "location": "crates/farhelm-helm/src/store/podman.rs:226",
+          "detail": "# Cleanup ownership fence starts after the earlier approval boundary\n\nReviewed commit: 56659839785691f76da3af5d8f51b511cff4ba8b; cross-group approval caller independently checked at 190d844e58c96cf197aa838d0b0eea8062f48435.\n\n## TLDR\n\nThe original suspected loss of cleanup access from retargeting after a helper is recorded is source-refuted. That guard does not protect the machine named by a pending approval before anything is registered. The distinct stale approval can deliver execution and recipe credentials to a retargeted machine; g020/l1 owns that finding.\n\n## Details\n\nOriginal consequence preserved: a first recipe build could strand a helper at an old or forgotten host if ownership publication raced removal/retarget. The initial proposed drop remains valid for that precise race. environment/podman/build.rs:538-565 publishes helper intent through edit_at before run; edit_at:488-500 calls update_recipe_place_state. tensorlake/build.rs:330-364 rechecks kind, entry UUID and destination in an immediate transaction with ownership publication. A winning endpoint mutation refuses stale helper publication; a winning publication sets needs_cleanup, making store/podman.rs:226-249 refuse retarget/removal in their own transaction. A preceding pull holds only a user-base image rather than an owned running helper. Original suggested bucket if established: high for lost cleanup access; could-be-highest for lost owned processes was considered but that route is refuted. No original consequence is withdrawn merely for rarity.\n\nThe exact fence begins when a hosts.place_host reference is inserted or recipe state starts needing cleanup. It is not admission for a pre-existing card. At the later approval revision, agent_requests.rs:4485-4515 captures place_name and numeric Place then waits for approval, with no resource registration or target destination/connection snapshot. approved:2865-2886 rechecks the requesting origin only. After Allow, agent_requests.rs:4541-4549 calls start_session_environment with that numeric place. provisioning/tensorlake_add.rs:379-398 checks CURRENT availability and registers ownership; store/podman.rs:364-394 reads CURRENT host kind and inserts the first row without an expected endpoint parameter. A cold place with no rows or resource state passes refuse_referenced_place:215-250 throughout the earlier card wait. A requester on another ordinary host is unaffected by a change to this separate container place. The later fresh probe is tied to the new current endpoint (podman_probe.rs:304-332,383-404), and Podman commands resolve that endpoint (podman.rs:150-184); those compare against a new probe, never the old card. Delivery resolves the environment's current route (credential_delivery.rs:434-440) and installs Codex auth.json (603-608) or a configured GitHub token (631-652). Thus the post-publication cleanup guard cannot refute g020/l1's earlier authority-substitution premise. The original source refutation never established that earlier consent boundary.\n\nExact separate approval contract at 190d844e58c96cf197aa838d0b0eea8062f48435, SPEC_impl.md:9548-9556: 'What a card shows is what an approval does.' and 'A launch is also refused if the target host's connection changed while the card waited, since the approval was for the machine the card named.' This is independent from SPEC_impl.md Environment rows and provider state's requirement to retain cleanup access once resource ownership exists.\n\nSuggested bucket for the separate g020 route: highest because the shipped credential-copy route is established; its trigger requires a cold ordinary SSH place, concurrent operator retarget and a usable fresh probe, with requester on a different ordinary host. Confidence: confirmed source boundary and concrete credential delivery; no runtime observation. could-be-highest: yes for the separate consent finding, not refuted or lowered here. proposed_drop: retain original source-refuted no-report decision ONLY for the post-publication lost-cleanup race. No drop is proposed for the pre-publication approval issue. possible_cover: g020/l1 is the existing finding for that issue; this candidate records the independent store-boundary result without creating a duplicate queue item. No unresolved readily checkable premise remains in this assigned boundary analysis."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g068/findings.jsonl",
+        "id": "l1",
+        "line": 8,
+        "disposition": "under-investigation",
+        "group": "g068-l1",
+        "reason": "Record durably acknowledged; parent source/contract validation, cross-group synthesis, coverage/filter matching and any independent drop check remain pending. This preserves the claim and uncertainty without accepting, dropping or lowering it."
+      },
+      "accepted_parent_decision": null,
+      "returned_claim_checks": [
+        {
+          "batch": "claims-043",
+          "key": "g068/l1",
+          "latest_line": 8,
+          "recommendation": "refuted",
+          "bucket": "high",
+          "underlying_key": "podman-helper-publication-versus-place-removal-transaction",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The original lost-cleanup race is source-refuted only at helper ownership admission and afterwards. The separately supplied stale-approval route precedes that admission and remains unaffected. Because the original concern included owned processes, any proposed dismissal requires the independent drop check.",
+          "checks": [
+            "56659839785691f76da3af5d8f51b511cff4ba8b:environment/podman/build.rs:488-500,538-565 publishes helper identity using the observed HostRow before run. tensorlake/build.rs:330-364 rechecks kind, entry UUID and destination under an immediate transaction and publishes state in that transaction.",
+            "Same revision:store/podman.rs:215-250 checks all referring rows and recipe needs_cleanup. environment/recipes.rs:66-74 includes builder/preparer identities. store.rs:7567 and 8046 invokes that refusal inside destination-update and removal transactions. A winning publication blocks endpoint loss; a winning mutation rejects stale publication.",
+            "At 190d844e58c96cf197aa838d0b0eea8062f48435:agent_requests.rs:4485-4515 captures place name and numeric place before approval, approved:2865-2886 rechecks only origin, and 4541-4549 dispatches the numeric place afterwards. store/podman.rs:364-394 registration has no expected endpoint parameter. This is a different, earlier boundary.",
+            "At that later revision:provisioning/credential_delivery.rs:434-440 resolves current access; 603-608 installs Codex auth bytes and 631-652 installs an enabled GitHub token. These support the supplied separate execution/credential-delivery consequence; no runtime disclosure was observed."
+          ],
+          "coverage_checked": [
+            "Current SPEC.md:4869-4872 and SPEC_impl.md:5964-5967 require keeping the cleanup route once rows/artifacts exist. They do not extend that guard to pending approval cards.",
+            "190d844e58c96cf197aa838d0b0eea8062f48435:SPEC_impl.md:9548-9556 binds approval to the machine shown. Current Permission prompts preserves the origin-binding contract; no acceptance of stale environment-place consent found.",
+            "TODO.md Planned is empty. Searches of unlanded plans, BUGS.md, INDEX and active TRIAGE_OUTCOMES.md found no exact post-publication helper-race cover or pending-container-place approval cover. podman-environments and environment-agent-operations are landed per plans/REPORTS.md:21,28. FILTER.md supplies no security cover."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": "No missing premise for the narrow transactional refutation. Parent must keep g020/l1's pre-publication approval record; its complete history is outside this batch.",
+          "original_stronger_consequence": "A first build could strand a helper at an old or forgotten host, losing cleanup access and possibly owned processes. The later record additionally preserves the distinct highest-severity execution/credential delivery to a retargeted machine before resource registration.",
+          "needs_independent_drop_check": true,
+          "proposed_basis": "Propose source refutation only for the original helper-publication/removal race. Do not drop or lower the separate stale-consent finding. Bucket high describes the original lost-cleanup hypothesis if it had been established; no user-visible defect is established for that exact race.",
+          "new_interface_evidence": "The checked ownership transaction starts at resource publication, not at card creation. The independently checked 190d844 approval caller and provisioning/credential_delivery.rs route support the supplied g020/l1 boundary distinction; a post-publication guard is not a rebuttal to that record."
+        }
+      ],
+      "parent_proposals": [
+        {
+          "artifact": "parent-flagged-judgments-043.json",
+          "key": "g068/l1",
+          "proposal": "claim-checks/claims-043/result.json",
+          "parent_proposal": "source-refuted-post-publication-helper-place-removal-race-only",
+          "final_independent_gate": "required-before-original-possible-work-loss-drop",
+          "reason": "Parent read full043. Helper publication rechecks observed kind/entryUUID/destination and writes ownership in one immediate transaction; place retarget/removal checks all referring rows and recipe helper/preparer cleanup state in its transaction. Either publication wins and blocks removal, or mutation wins and rejects stale publication. Refute only admission and later cleanup-route loss, not card creation before registration. Separate020l1 wrong-machine credentials/commands remains under its own logical-entry contract question; repeated supporting evidence already delivered earlier. Preserve original stranded owned-process/cleanup access consequence for fresh gate."
+        }
+      ],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": true,
+        "provisional_bucket": "high",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "podman-helper-publication-versus-place-removal-transaction",
+        "destination": null
+      }
+    },
+    {
+      "key": "g068/l2",
+      "owner": "g068",
+      "id": "l2",
+      "domain": "podman-environments",
+      "purpose": "podman-environments: crates/farhelm-helm/src/store/podman.rs; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 4,
+          "event": {
+            "version": 1,
+            "kind": "lead",
+            "id": "l2",
+            "state": "open",
+            "summary": "Check integrated container ownership persistence before external creation",
+            "location": "crates/farhelm-helm/src/store/podman.rs:268",
+            "detail": "Reviewed commit: 56659839785691f76da3af5d8f51b511cff4ba8b. TLDR: A host OS crash or power loss might erase ordinary WAL ownership commits while container creation on a remote place survives, leaving its cleanup record missing. Parent identifies g064/c3: the initial storage revision 04ffdbb35773cef36e73eb798c005ddbeb9a9de6 had no production caller, but this integrated revision does. Source basis already read: register_pending_session_container/register_container uses self.conn.call and set_podman_prepared_create uses self.conn.call, then environment/podman.rs:1103-1125 sends run after it returns. Need inspect connection synchronous policy, later FULL_SYNC operations, remote creation and failed-launch/leftover discovery paths. Missing premise: whether the end-to-end path supplies an fsync barrier before creation or before any user work, or accepts this failure class with retained discoverability. Suggested bucket: other on established evidence pending consequence; could-be-highest: yes if user-owned work/processes or credentials are lost/unaccounted after the erased binding. Confidence: uninvestigated source lead; no execution. proposed_drop: false. possible_cover: g064/c3 and g065 integrated provider review. Original possible lost-work consequence retained; not claiming that ordinary loss of a recreatable empty container alone is highest."
+          }
+        },
+        {
+          "line": 5,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "l2",
+            "state": "open",
+            "summary": "Integrated container ownership keeps the accepted WAL power-loss limit",
+            "location": "crates/farhelm-helm/src/store/podman.rs:268",
+            "detail": "# Integrated container ownership keeps the accepted WAL power-loss limit\n\nReviewed commit: 56659839785691f76da3af5d8f51b511cff4ba8b\n\n## TLDR\n\nAn OS crash or power loss on the helm machine can lose recently committed container ownership or create facts even though a remote container survives. This can require explicit leftover cleanup or manual recovery of running work. This is a real integrated creation route, not the foundation revision's missing-caller case, but the specification explicitly accepts ordinary WAL tail loss.\n\n## Details\n\nregister_container uses self.conn.call and commits registration at store/podman.rs:373-394. set_podman_prepared_create atomically writes login, selected install facts and pending send with self.conn.call at 268-278. environment/podman.rs:1103-1125 awaits that write before sending run. Canonical ID observation uses the same ordinary call at store/podman.rs:422-432; installation admission does too at 315-329. Db::call only locks and runs work (farhelm-supervisor/src/db.rs:230-245); it does not upgrade durability. configure_durability sets NORMAL when actual mode is WAL (db.rs:94-117). The separate FULL/EXTRA helper is invoked only explicitly (db.rs:247-266). The integrated provisioning caller registers before preparation (provisioning/tensorlake_add.rs:388-408), creates before reading saved facts/admitting paths (555-594), then delivers credentials (597-605), attaches, and creates the session in finish_session_launch (981-1013). No mandatory full-sync barrier is supplied by these ownership APIs before external create. A remote place can remain alive when only the helm machine loses power. This establishes potential loss of the registry/marker association, not database corruption or automatic destruction of the remote files.\n\nRecovery is conservative: decode_binding requires complete login for created/admitted rows (store/podman.rs:148-165); create adopts a name only with recorded canonical or pending identity (environment/podman.rs:1071-1093), otherwise it refuses the collision. destroy returns never-created when both ID and pending marker are absent (1298-1302), so loss of those records cannot by itself authorize deleting the surviving resource. Normal initial-launch failure explicitly cleans only its new environment (provisioning/tensorlake_add.rs:1028-1044); a power failure does not resume this task at startup. Label-based leftovers are listed at usable places and places referenced by rows or recipe artifacts (environment/podman.rs:771-835), with rowless explicit deletion ownership-checked at 725-765. Thus tail loss can strand work from its normal UI association and require manual recovery, but available source does not establish irreversible loss of the files/processes themselves. A helm process crash alone preserves committed ownership under the stated contract.\n\nExact specification acceptance, SPEC_impl.md Helm internals:5668-5672: 'Its ordinary store opens share the supervisor’s journal setup: owning opens attempt WAL before migrations, warning and continuing in the current mode if conversion fails or does not return `wal`. Non-owning opens never convert; every ordinary read-write connection selects `synchronous=NORMAL` only after reading an actual WAL mode and otherwise retains FULL. This accepts losing the last commits on an OS crash or power loss without weakening database consistency; process crashes preserve commits.' Same contract at 6683-6685 explicitly says: 'A legacy row or a power loss that lost both records cannot recover by name: remove that host entry, then handle the leftover explicitly.' Snapshot-build ownership at 6840-6841 says: 'Ordinary write durability is retained: a legacy row or power loss that loses both the ID and pending marker requires explicit cleanup.' The Podman integration continues ordinary store durability rather than introducing a listed trust-revocation exception.\n\nSuggested bucket: high for the source-established lost normal access/cleanup association if reported; could-be-highest: yes, the original potential loss of user work/processes is preserved for independent checking, but no shipped irreversible-loss or silent-destructive-recovery route was established. Confidence: confirmed source and contract analysis of the write policy/caller; no execution or reproduction and no claim that a particular crash was observed to lose a commit. proposed_drop: exact explicit specification acceptance of ordinary WAL power-loss tail loss and explicit cleanup above, NOT missing integrated caller. Retain as a finding with proposed_drop for the independent check because the original concern could be highest. possible_cover: g064/c3 examines the foundation/endpoint scope; this record supplies the integrated assigned-store caller and recovery analysis. No readily checkable missing premise remains for this conclusion."
+          }
+        },
+        {
+          "line": 6,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "l2",
+            "state": "open",
+            "summary": "Integrated container ownership keeps the accepted WAL power-loss limit",
+            "location": "crates/farhelm-helm/src/store/podman.rs:268",
+            "detail": "# Integrated container ownership keeps the accepted WAL power-loss limit\n\nReviewed commit: 56659839785691f76da3af5d8f51b511cff4ba8b\n\n## TLDR\n\nAn OS crash or power loss on the helm machine can lose recently committed container ownership or create facts even though a remote container survives. This can require explicit leftover cleanup or manual recovery of running work. This is a real integrated creation route, not the foundation revision's missing-caller case, but the specification explicitly accepts ordinary WAL tail loss.\n\n## Details\n\nregister_container uses self.conn.call and commits registration at store/podman.rs:373-394. set_podman_prepared_create atomically writes login, selected install facts and pending send with self.conn.call at 268-278. environment/podman.rs:1103-1125 awaits that write before sending run. Canonical ID observation uses the same ordinary call at store/podman.rs:422-432; installation admission does too at 315-329. Db::call only locks and runs work (farhelm-supervisor/src/db.rs:230-245); it does not upgrade durability. configure_durability sets NORMAL when actual mode is WAL (db.rs:94-117). The separate FULL/EXTRA helper is invoked only explicitly (db.rs:247-266). The integrated provisioning caller registers before preparation (provisioning/tensorlake_add.rs:388-408), creates before reading saved facts/admitting paths (555-594), then delivers credentials (597-605), attaches, and creates the session in finish_session_launch (981-1013). No mandatory full-sync barrier is supplied by these ownership APIs before external create. A remote place can remain alive when only the helm machine loses power. This establishes potential loss of the registry/marker association, not database corruption or automatic destruction of the remote files.\n\nRecovery is conservative: decode_binding requires complete login for created/admitted rows (store/podman.rs:148-165); create adopts a name only with recorded canonical or pending identity (environment/podman.rs:1071-1093), otherwise it refuses the collision. destroy returns never-created when both ID and pending marker are absent (1298-1302), so loss of those records cannot by itself authorize deleting the surviving resource. Normal initial-launch failure explicitly cleans only its new environment (provisioning/tensorlake_add.rs:1028-1044); a power failure does not resume this task at startup. Label-based leftovers are listed at usable places and places referenced by rows or recipe artifacts (environment/podman.rs:771-835), with rowless explicit deletion ownership-checked at 725-765. Thus tail loss can strand work from its normal UI association and require manual recovery, but available source does not establish irreversible loss of the files/processes themselves. A helm process crash alone preserves committed ownership under the stated contract.\n\nExact specification acceptance, SPEC_impl.md Helm internals:5668-5672: 'Its ordinary store opens share the supervisor's journal setup: owning opens attempt WAL before migrations, warning and continuing in the current mode if conversion fails or does not return `wal`. Non-owning opens never convert; every ordinary read-write connection selects `synchronous=NORMAL` only after reading an actual WAL mode and otherwise retains FULL. This accepts losing the last commits on an OS crash or power loss without weakening database consistency; process crashes preserve commits.' Same contract at 6683-6685 explicitly says: 'A legacy row or a power loss that lost both records cannot recover by name: remove that host entry, then handle the leftover explicitly.' Snapshot-build ownership at 6840-6841 says: 'Ordinary write durability is retained: a legacy row or power loss that loses both the ID and pending marker requires explicit cleanup.' The Podman integration continues ordinary store durability rather than introducing a listed trust-revocation exception.\n\nSuggested bucket: high for the source-established lost normal access/cleanup association if reported; could-be-highest: yes, the original potential loss of user work/processes is preserved for independent checking, but no shipped irreversible-loss or silent-destructive-recovery route was established. Confidence: confirmed source and contract analysis of the write policy/caller; no execution or reproduction and no claim that a particular crash was observed to lose a commit. proposed_drop: exact explicit specification acceptance of ordinary WAL power-loss tail loss and explicit cleanup above, NOT missing integrated caller. Retain as a finding with proposed_drop for the independent check because the original concern could be highest. possible_cover: g064/c3 examines the foundation/endpoint scope; this record supplies the integrated assigned-store caller and recovery analysis. No readily checkable missing premise remains for this conclusion."
+          }
+        }
+      ],
+      "latest": {
+        "line": 6,
+        "event": {
+          "version": 1,
+          "kind": "finding",
+          "id": "l2",
+          "state": "open",
+          "summary": "Integrated container ownership keeps the accepted WAL power-loss limit",
+          "location": "crates/farhelm-helm/src/store/podman.rs:268",
+          "detail": "# Integrated container ownership keeps the accepted WAL power-loss limit\n\nReviewed commit: 56659839785691f76da3af5d8f51b511cff4ba8b\n\n## TLDR\n\nAn OS crash or power loss on the helm machine can lose recently committed container ownership or create facts even though a remote container survives. This can require explicit leftover cleanup or manual recovery of running work. This is a real integrated creation route, not the foundation revision's missing-caller case, but the specification explicitly accepts ordinary WAL tail loss.\n\n## Details\n\nregister_container uses self.conn.call and commits registration at store/podman.rs:373-394. set_podman_prepared_create atomically writes login, selected install facts and pending send with self.conn.call at 268-278. environment/podman.rs:1103-1125 awaits that write before sending run. Canonical ID observation uses the same ordinary call at store/podman.rs:422-432; installation admission does too at 315-329. Db::call only locks and runs work (farhelm-supervisor/src/db.rs:230-245); it does not upgrade durability. configure_durability sets NORMAL when actual mode is WAL (db.rs:94-117). The separate FULL/EXTRA helper is invoked only explicitly (db.rs:247-266). The integrated provisioning caller registers before preparation (provisioning/tensorlake_add.rs:388-408), creates before reading saved facts/admitting paths (555-594), then delivers credentials (597-605), attaches, and creates the session in finish_session_launch (981-1013). No mandatory full-sync barrier is supplied by these ownership APIs before external create. A remote place can remain alive when only the helm machine loses power. This establishes potential loss of the registry/marker association, not database corruption or automatic destruction of the remote files.\n\nRecovery is conservative: decode_binding requires complete login for created/admitted rows (store/podman.rs:148-165); create adopts a name only with recorded canonical or pending identity (environment/podman.rs:1071-1093), otherwise it refuses the collision. destroy returns never-created when both ID and pending marker are absent (1298-1302), so loss of those records cannot by itself authorize deleting the surviving resource. Normal initial-launch failure explicitly cleans only its new environment (provisioning/tensorlake_add.rs:1028-1044); a power failure does not resume this task at startup. Label-based leftovers are listed at usable places and places referenced by rows or recipe artifacts (environment/podman.rs:771-835), with rowless explicit deletion ownership-checked at 725-765. Thus tail loss can strand work from its normal UI association and require manual recovery, but available source does not establish irreversible loss of the files/processes themselves. A helm process crash alone preserves committed ownership under the stated contract.\n\nExact specification acceptance, SPEC_impl.md Helm internals:5668-5672: 'Its ordinary store opens share the supervisor's journal setup: owning opens attempt WAL before migrations, warning and continuing in the current mode if conversion fails or does not return `wal`. Non-owning opens never convert; every ordinary read-write connection selects `synchronous=NORMAL` only after reading an actual WAL mode and otherwise retains FULL. This accepts losing the last commits on an OS crash or power loss without weakening database consistency; process crashes preserve commits.' Same contract at 6683-6685 explicitly says: 'A legacy row or a power loss that lost both records cannot recover by name: remove that host entry, then handle the leftover explicitly.' Snapshot-build ownership at 6840-6841 says: 'Ordinary write durability is retained: a legacy row or power loss that loses both the ID and pending marker requires explicit cleanup.' The Podman integration continues ordinary store durability rather than introducing a listed trust-revocation exception.\n\nSuggested bucket: high for the source-established lost normal access/cleanup association if reported; could-be-highest: yes, the original potential loss of user work/processes is preserved for independent checking, but no shipped irreversible-loss or silent-destructive-recovery route was established. Confidence: confirmed source and contract analysis of the write policy/caller; no execution or reproduction and no claim that a particular crash was observed to lose a commit. proposed_drop: exact explicit specification acceptance of ordinary WAL power-loss tail loss and explicit cleanup above, NOT missing integrated caller. Retain as a finding with proposed_drop for the independent check because the original concern could be highest. possible_cover: g064/c3 examines the foundation/endpoint scope; this record supplies the integrated assigned-store caller and recovery analysis. No readily checkable missing premise remains for this conclusion."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g068/findings.jsonl",
+        "id": "l2",
+        "line": 6,
+        "disposition": "under-investigation",
+        "group": "g068-l2",
+        "reason": "Record durably acknowledged; parent source/contract validation, cross-group synthesis, coverage/filter matching and any independent drop check remain pending. This preserves the claim and uncertainty without accepting, dropping or lowering it."
+      },
+      "accepted_parent_decision": null,
+      "returned_claim_checks": [
+        {
+          "batch": "claims-043",
+          "key": "g068/l2",
+          "latest_line": 6,
+          "recommendation": "covered",
+          "bucket": "high",
+          "underlying_key": "podman-ordinary-wal-tail-loss-of-create-ownership",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The integrated route uses ordinary durability, and ordinary helm WAL tail loss on OS crash or power loss is explicitly accepted. Source supports lost normal association and manual recovery, not automatic destruction of surviving work. This proposed coverage and consequence limit need independent checking.",
+          "checks": [
+            "56659839785691f76da3af5d8f51b511cff4ba8b:store/podman.rs:268-278,373-394,422-432 writes prepared/pending facts, registration and canonical identity through ordinary Db::call. farhelm-supervisor/src/db.rs:94-117 selects NORMAL in WAL; call:230-245 adds no durability barrier. Full sync is a separately selected operation at 247-266.",
+            "Same revision:environment/podman.rs:1103-1125 awaits recording before external run. provisioning/tensorlake_add.rs:388-398,555-605,981-1013 integrates registration, creation, credential delivery and session launch. Thus the missing-caller argument from an earlier foundation revision does not apply.",
+            "Same revision:environment/podman.rs:1071-1093 refuses adopting an unrecorded collision; destroy:1298-1302 returns never-created if both ownership markers are absent. leftovers:771-835 discovers labels at usable/referenced places, and delete_leftover:725-765 requires ownership and explicit deletion. A crash can require manual recovery; the checked source does not show irreversible destruction. No power-loss experiment was run."
+          ],
+          "coverage_checked": [
+            "Historical SPEC_impl.md:5668-5672 explicitly accepts ordinary OS-crash/power-loss commit loss. Current equivalent is SPEC_impl.md:5182-5198, including the enumerated trust-changing exceptions. Container create ownership is not among those exceptions.",
+            "Historical SPEC_impl.md:6683-6685 and 6840-6841 explicitly retain ordinary ownership durability and require explicit cleanup after lost ID/pending facts; current equivalents are 6302-6305 and 6458-6461. Current Disposable environments:6095-6104 shares the sandbox ownership contract, without a new durability exception. SPEC.md Container sessions requires discoverable explicit cleanup but does not promise power-loss fsync for these writes.",
+            "TODO.md Planned is empty. Searches of plans/queue, BUGS.md, INDEX and active TRIAGE_OUTCOMES.md found no different exact cover. Automatic-update opt-out durability concerns a trust setting and is not an alias. FILTER.md is not the proposed basis."
+          ],
+          "exact_cover_quotes": [
+            {
+              "source": "SPEC_impl.md:5188-5189 at recording main 24bc058066fd57848e788b465719b0e6da2f98f7",
+              "quote": "This accepts losing the last commits on an OS crash or power loss without weakening database consistency; process crashes preserve commits."
+            },
+            {
+              "source": "SPEC_impl.md:6304-6305 at recording main",
+              "quote": "A legacy row or a power loss that lost both records cannot recover by name: remove that host entry, then handle the leftover explicitly."
+            },
+            {
+              "source": "SPEC_impl.md:6460-6461 at recording main",
+              "quote": "Ordinary write durability is retained: a legacy row or power loss that loses both the ID and pending marker requires explicit cleanup."
+            }
+          ],
+          "missing_premise": "Irreversible work/process loss or a silent destructive recovery route was not established. The accepted loss of the normal UI/cleanup association is established conditionally on lost WAL tail commits.",
+          "original_stronger_consequence": "Power loss could erase ownership facts while remote work/processes survive, potentially leaving user work unaccounted for or inaccessible. Later wording narrows established consequence to lost normal association/manual recovery; it does not erase the original possible work-loss concern.",
+          "needs_independent_drop_check": true,
+          "proposed_basis": "Exact ordinary-durability specification acceptance, applied to the integrated caller. Do not use the earlier foundation revision's absent production caller as the drop basis. Independent check must also assess the proposed limit to association loss rather than irreversible loss."
+        }
+      ],
+      "parent_proposals": [
+        {
+          "artifact": "parent-flagged-judgments-043.json",
+          "key": "g068/l2",
+          "proposal": "claim-checks/claims-043/result.json",
+          "parent_proposal": "ordinary-WAL-power-loss-ownership-policy-cover-with-original-consequence-limit-gate",
+          "final_independent_gate": "required-before-original-possible-work-loss-drop-or-lowering",
+          "reason": "Full043 integrated caller actually awaits ordinary pending/identity writes before externalrun; globalWAL/NORMAL accepts OS/power tail loss, not processcrash loss, and no FULL trust exception covers container ownership. No-ID/no-pending refuses name adoption, leftovers require explicit ownership/deletion and may need manual recovery. Proposed same064c3/065l3 policy cover, not earlier foundation no-caller dismissal. Preserve loss of normal association and original possible irreversible work/process harm; exact accepted scope and proposed high consequence limit need fresh judgment."
+        }
+      ],
+      "collection": {
+        "retain": true,
+        "clearly_refuted_candidate": false,
+        "needs_unfinished_gate": true,
+        "provisional_bucket": "high",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "podman-ordinary-wal-tail-loss-of-create-ownership",
+        "destination": "trailing-podman-ordinary-wal-tail-loss-of-create-ownership.md"
+      }
+    },
+    {
+      "key": "g068/c3",
+      "owner": "g068",
+      "id": "c3",
+      "domain": "podman-environments",
+      "purpose": "podman-environments: crates/farhelm-helm/src/store/podman.rs; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 9,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c3",
+            "state": "open",
+            "summary": "Refused-create timestamp comparison has no out-of-order production caller",
+            "location": "crates/farhelm-helm/src/store/podman.rs:450",
+            "detail": "# Refused-create timestamp comparison has no out-of-order production caller\n\nReviewed commit: 56659839785691f76da3af5d8f51b511cff4ba8b\n\n## TLDR\n\nConsidered whether a delayed refusal could clear a newer container-create marker because send timestamps have only one-second resolution. Source checks establish that the production caller serializes the full create/refusal episode for this environment; no overlapping old result can settle a newer episode through this path. No user-visible defect is established.\n\n## Details\n\nclear_refused_podman_create uses entry UUID, binding coordinates, no canonical ID/admitted paths, and equality on sent at store/podman.rs:450-463. The timestamp is not a unique generation by itself. The only production caller is environment/podman.rs:1135-1145, inside create after awaiting run and a subsequent absent inspection; it clears only a typed CreateRefused. It does not spawn an independent settlement task. Source searches for the setter and clearer at this revision found only this production create implementation plus the changed store test. start_session_environment acquires the environment host's provisioning lock at provisioning/tensorlake_add.rs:452 before spawning the task, and moves the held guard through environment_session_steps into finish_session_launch at 472-484. create is awaited at 555 and completion/cleanup finishes under that same owned guard. Concurrent ordinary deletion is serialized by the same resource admission already checked in the prior synthesis. Thus equal second-level timestamps are not sufficient to create the hypothesized old/new overlapping result route. The new test's stale no-login guard is correctly rejected because the recorded login/marker no longer matches (store/podman.rs:526-531); it does not claim to exercise concurrent delayed command results.\n\nContract: SPEC_impl.md Disposable environments records observed login, prepared facts and pending-send together before creation; the store's per-create settlement comment at 435-438 describes the caller's serialized episode, not independent concurrent sends. Suggested bucket if stale ownership settlement were reachable: high for losing the automatic cleanup association; could-be-highest: yes in the original hypothetical if loss of that association led to lost user processes/work, but no such production out-of-order route is established. Confidence: confirmed source refutation, not runtime execution. proposed_drop: source-refuted by the sole production caller's awaited settlement and full-episode per-environment provisioning lock; no parent acceptance presumed. possible_cover: none. No unresolved source premise remains; this does not claim that timestamps alone are unique or that arbitrary unsynchronized private-store calls would have a stronger contract."
+          }
+        }
+      ],
+      "latest": {
+        "line": 9,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c3",
+          "state": "open",
+          "summary": "Refused-create timestamp comparison has no out-of-order production caller",
+          "location": "crates/farhelm-helm/src/store/podman.rs:450",
+          "detail": "# Refused-create timestamp comparison has no out-of-order production caller\n\nReviewed commit: 56659839785691f76da3af5d8f51b511cff4ba8b\n\n## TLDR\n\nConsidered whether a delayed refusal could clear a newer container-create marker because send timestamps have only one-second resolution. Source checks establish that the production caller serializes the full create/refusal episode for this environment; no overlapping old result can settle a newer episode through this path. No user-visible defect is established.\n\n## Details\n\nclear_refused_podman_create uses entry UUID, binding coordinates, no canonical ID/admitted paths, and equality on sent at store/podman.rs:450-463. The timestamp is not a unique generation by itself. The only production caller is environment/podman.rs:1135-1145, inside create after awaiting run and a subsequent absent inspection; it clears only a typed CreateRefused. It does not spawn an independent settlement task. Source searches for the setter and clearer at this revision found only this production create implementation plus the changed store test. start_session_environment acquires the environment host's provisioning lock at provisioning/tensorlake_add.rs:452 before spawning the task, and moves the held guard through environment_session_steps into finish_session_launch at 472-484. create is awaited at 555 and completion/cleanup finishes under that same owned guard. Concurrent ordinary deletion is serialized by the same resource admission already checked in the prior synthesis. Thus equal second-level timestamps are not sufficient to create the hypothesized old/new overlapping result route. The new test's stale no-login guard is correctly rejected because the recorded login/marker no longer matches (store/podman.rs:526-531); it does not claim to exercise concurrent delayed command results.\n\nContract: SPEC_impl.md Disposable environments records observed login, prepared facts and pending-send together before creation; the store's per-create settlement comment at 435-438 describes the caller's serialized episode, not independent concurrent sends. Suggested bucket if stale ownership settlement were reachable: high for losing the automatic cleanup association; could-be-highest: yes in the original hypothetical if loss of that association led to lost user processes/work, but no such production out-of-order route is established. Confidence: confirmed source refutation, not runtime execution. proposed_drop: source-refuted by the sole production caller's awaited settlement and full-episode per-environment provisioning lock; no parent acceptance presumed. possible_cover: none. No unresolved source premise remains; this does not claim that timestamps alone are unique or that arbitrary unsynchronized private-store calls would have a stronger contract."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g068/findings.jsonl",
+        "id": "c3",
+        "line": 9,
+        "disposition": "under-investigation",
+        "group": "g068-c3",
+        "reason": "Record durably acknowledged; parent source/contract validation, cross-group synthesis, coverage/filter matching and any independent drop check remain pending. This preserves the claim and uncertainty without accepting, dropping or lowering it."
+      },
+      "accepted_parent_decision": null,
+      "returned_claim_checks": [
+        {
+          "batch": "claims-043",
+          "key": "g068/c3",
+          "latest_line": 9,
+          "recommendation": "refuted",
+          "bucket": "high",
+          "underlying_key": "podman-refused-create-second-resolution-settlement-generation",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "Timestamp equality alone is not a unique generation, but the hypothesized old refusal settling a newer create has no overlapping production route through this caller. The full episode is awaited under the environment provisioning lock.",
+          "checks": [
+            "56659839785691f76da3af5d8f51b511cff4ba8b:store/podman.rs:439-463 guards identity, binding, pending timestamp and unadmitted state; the timestamp alone can repeat and is not credited with uniqueness.",
+            "git grep at that revision finds the sole production setter and clearer in environment/podman.rs:1107,1139. create:1116-1145 awaits run, then inspection, then clears only a typed CreateRefused with absence; it spawns no independent settlement task.",
+            "The sole production provider.create caller is provisioning/tensorlake_add.rs:555. start_session_environment acquires host_provision_lock at 452 and moves its guard through the spawned task at 472-484 into finish_session_launch:981-1044. Thus another ordinary create cannot settle during the previous create/refusal episode. No runtime overlap was tested."
+          ],
+          "coverage_checked": [
+            "SPEC_impl.md Disposable environments requires atomic selected facts/pending-send before create; it does not promise a unique wall-clock timestamp or accept stale settlement. Refutation is from the serialized caller, not specification acceptance.",
+            "TODO.md Planned is empty. Searches of plans/queue, BUGS.md, INDEX and active TRIAGE_OUTCOMES.md for refused create, pending marker, same-second settlement and Podman ownership found no exact match. sandbox-timestamp-wire-contract is a different timestamp display/wire question.",
+            "FILTER.md has no relevant full-boundary match and is not used."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": null,
+          "original_stronger_consequence": "A delayed refusal could allegedly clear a newer marker and lose cleanup association, possibly causing loss of user processes/work. That production ordering is source-refuted; arbitrary unsynchronized private store calls are outside the established caller contract.",
+          "needs_independent_drop_check": true,
+          "proposed_basis": "Narrow source refutation from the sole awaited production create and retained per-environment provisioning guard. Do not infer that second-resolution timestamps are unique. Independent check is required because the original hypothetical involved user-owned work."
+        }
+      ],
+      "parent_proposals": [
+        {
+          "artifact": "parent-flagged-judgments-043.json",
+          "key": "g068/c3",
+          "proposal": "claim-checks/claims-043/result.json",
+          "parent_proposal": "source-refuted-overlapping-refused-create-settlement-generation",
+          "final_independent_gate": "required-before-original-possible-work-loss-drop",
+          "reason": "Full043 second-resolution timestamp can repeat and is NOT a generation guarantee. Sole production create awaits run/inspection/typed-refusal settlement under per-environment provisioning guard moved through the owned task to finish; it spawns no detached clearer. Another ordinary create cannot overlap that episode to supply a newer marker. Refute exact production old-refusal-clears-new-marker ordering, not arbitrary unsynchronized store calls or timestamp uniqueness. Preserve cleanup association/process-work hypothesis for independent check."
+        }
+      ],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": true,
+        "provisional_bucket": "high",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "podman-refused-create-second-resolution-settlement-generation",
+        "destination": null
+      }
+    }
+  ],
+  "replies": [
+    {
+      "turn": 1,
+      "reply": "Initial review complete: all 501 assigned patch lines and governing contracts read.\n\nNo reportable findings. Lead `l1` was source-refuted and recorded as a candidate. No open leads or unread assigned scope. Findings and progress logs are updated. No tests or reproductions run."
+    },
+    {
+      "turn": 2,
+      "reply": "- Revised `l1`: cleanup guards begin at ownership publication and do not refute `g020/l1`’s earlier approval issue.\n- Added and resolved `l2`: integrated writes retain WAL power-loss limits; recorded a specification-based proposed drop for independent checking.\n- Unresolved lead IDs: none. Source analysis only; no reproductions."
+    },
+    {
+      "turn": 3,
+      "reply": "Discovery pass 1 complete. No new reportable issue found.\n\nChecked identity decoding, SQL guards, create/refusal ordering, execution gates, saved-fact admission, changed test assertions, and whole-range attribution.\n\nRecorded candidate `c3`: the delayed-refusal concern is source-refuted by the serialized production caller.\n\n- New verified findings: none.\n- New unverified findings: none.\n- Open leads: none.\n\nProgress updated. No runtime execution or reproductions."
+    }
+  ],
+  "progress": "# g068 initial review\n\nTurn 1 complete: initial source review. Discovery-pass count: 0 (no later discovery turn has been requested). Reviewed the full assigned 501-line patch, in three evidence packets, at 56659839785691f76da3af5d8f51b511cff4ba8b. Read the complete inventory commits field without excluded coverage metadata. No assigned material remains unread.\n\nGoverning contracts read at the pinned revision: SPEC_impl.md Disposable environments and all its subsections (6408-6592), SPEC.md shared recipe paragraphs (440-532), Container sessions (4737-4815), and Sandbox sessions (1433-1524). Also read the complete Answers bind to what was drawn paragraph (SPEC_impl.md 1068-1097). Contract snapshots and a supplemental evidence manifest remain here for those deliveries. Required queue priority and feedback format sections were read. Root AGENTS.md was injected with its End sentinel. The changed test was reviewed against the supplied verbatim checklist; no tests, builds, or reproductions were run.\n\nInterface checks: environment/podman.rs creation writes selected login/facts before run, recovers only recorded canonical or pending identities, and destruction retains ambiguous ownership. Provisioning's environment_session_steps loads saved per-create facts and admits under the per-host provisioning lock. Store binding decode rejects partial login identity and created/admitted rows without it. Place removal/retarget and first helper ownership writes serialize through store transactions. The helper state write rechecks kind, entry UUID and destination before publishing ownership; subsequent Podman operations resolve the current route. Recipe needs_cleanup covers current/prepared images, helper IDs, pending starts and retired images.\n\nDurable IDs this turn: l1 opened as a lead, then revised to a source-refuted candidate. No verified or unverified reportable findings. No open lead IDs. Its original stranded-helper consequence and source refutation are retained in findings.jsonl. One rejected recording attempt used unsupported state closed; the same candidate revision was immediately recorded with valid state open. Candidate kind represents the resolved no-report decision, not an unresolved lead.\n\nNext action: return to caller for a later synthesis or discovery turn. No second-pass protocol was performed during this initial turn. No checkout files or live processes were changed.\n\n## Turn 2: later-turn synthesis\n\nComplete. Discovery-pass count remains 0; this was the caller-requested synthesis, not a separate discovery pass. The parent's audit confirmed all 501 mandatory patch lines with no gaps. No assigned material is unread.\n\nRead g020/l1's original finding and the parent-named latest cross-group conclusions, and g064/c3's foundation rejection plus reopened integrated-caller lead. Independently checked the later agent approval caller at 190d844e58c96cf197aa838d0b0eea8062f48435, pending-container registration, the current-endpoint Podman probe, and credential install destinations. Revised l1 under its original ID: its source-refuted stranded-helper consequence and original proposed drop remain, limited to the post-publication cleanup race. The guard starts at host reference insertion or recipe ownership publication. It supplies no old endpoint comparison for a card answered before either exists. The cold-place pre-publication credential/execution consequence is corroborated and belongs to g020/l1; do not use this candidate to drop it.\n\nOpened and resolved l2 for the integrated WAL concern. Checked Db::call/configure_durability/full-sync dispatch, registration, prepared-create write, canonical observation/admission, provider create ordering, initial launch completion, conservative missing-marker recovery, and label-based leftovers. The integrated production caller exists and these store writes remain NORMAL in WAL. Recorded l2 as a finding with proposed_drop based on the exact explicit specification acceptance of OS-crash/power-loss tail loss (SPEC_impl.md Helm internals:5668-5683), with supporting ownership-recovery acceptance at 6677-6702 and 6828-6846, delivered as supplemental evidence packets. This replaces the missing-caller rationale only for the integrated route. The original potential lost-work/process consequence remains explicit; source establishes loss of normal association/manual recovery, not irreversible remote file/process destruction. Could-be-highest and the exact proposed-drop basis remain for independent review. No runtime evidence asserted.\n\nIDs appended/revised this turn: l1 revised; l2 added as lead and revised to finding with specification-based proposed_drop. Revisions corrected typographic apostrophes in exact contract quotes; previous events remain append-only. New reportable finding without a proposed drop: none. No unresolved lead IDs. No runtime tests or reproductions. No checkout or live-install changes.\n\nInterface assumptions resolved: cleanup publication guards are temporally later than pre-card consent; runtime route freshness is not a snapshot of the machine named by that card. Ordinary WAL durability is process-crash durability, not an OS-power-loss barrier; explicit trust-revocation barriers do not automatically apply to these ownership writes. Next action: return this synthesis delta to the caller; caller owns independent proposed-drop checks and any later discovery turn.\n\n## Turn 3: separate discovery pass 1\n\nComplete. Discovery-pass count: 1. Read all 274 lines of discovery-neighbours.json in bounded chunks before the new source search. Synthesized the named g064/c3:10 input: it matches l2's integrated NORMAL-write result and explicit power-loss acceptance; the initial missing-caller rationale remains superseded, and cleanup-visibility consequences and original potential highest consequence remain preserved. No parent drop or lowering was assumed. No further revision of l2 was needed.\n\nNew source search stayed within the assigned Podman store change and its direct contracts/callers. Rechecked pending-login decoding, partial identity refusal, canonical-ID validation, prepared-create compare predicates, installation admission and fact clearing, pending registration constraints, canonical-ID write gates, and refused-create settlement. Searched all production setters for login, canonical ID and prepared/clear operations. Checked the sole production clear caller's awaited run/absence/refusal sequence and the provisioning lock spanning the owned task. Also checked resolve_host_access requires canonical ID and login together before constructing exec, shared recipe resource predicates, and saved per-create facts before installation admission. Re-read the changed store test against the supplied checklist, distinguishing its directly asserted store contract from runtime command ordering; no new test-oracle/documentation defect was established.\n\nWhole-range attribution check: only 04ffdbb35773cef36e73eb798c005ddbeb9a9de6 and assigned 56659839785691f76da3af5d8f51b511cff4ba8b touch store/podman.rs in the exclusive-base/inclusive-tip range. The diff from the assigned revision to pinned tip for this path is empty. This pass did not treat merely predating 566 as proof of predating the range, and did not expand into the foundation group's independent scope.\n\nNew durable candidate c3 records the actual considered one-second marker-generation concern and its source refutation: the sole production caller serializes run, inspection and refusal settlement under the same per-environment provisioning guard; no delayed old result can overlap a new send there. The SQL timestamp is not claimed unique independently of that caller. Original hypothetical cleanup/process consequence and could-be-highest are retained for independent checking. No candidate was created merely from generic missing tests.\n\nNew verified reportable IDs: none. New unverified-after-investigation IDs: none. New source-refuted candidate: c3. Remaining open lead IDs: none. Anything new found: no new reportable issue; one concrete no-report candidate recorded. Existing l1/l2 consequences, IDs and proposed-drop bases are unchanged. No runtime test, reproduction, build, live-install action or checkout mutation. No assigned material remains unread.\n\nNext action: return discovery delta/results to caller. Independent proposed-drop handling remains the parent's responsibility; no second discovery pass was performed inside this turn.\n"
+}

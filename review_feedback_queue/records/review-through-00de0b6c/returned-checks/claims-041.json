@@ -1,0 +1,213 @@
+[
+  {
+    "key": "g064/c1",
+    "latest_line": 9,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "podman-create-guessed-login-admission",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The integrated production path permits missing login coordinates at registration and atomically admits observed login, prepared facts and the pending-send marker before external creation. The original foundation-only absence-of-callers argument is superseded by this integrated source check. This does not settle authority bound to an approval before registration.",
+    "checks": [
+      "56659839785691f76da3af5d8f51b511cff4ba8b: environment/mod.rs:132-135 calls register_pending_session_container; store/podman.rs:353-361 passes login None. Complete-coordinate registration at 332-350 is cfg(test).",
+      "Same revision, store/podman.rs:256-278 writes all three login columns, prepared facts and pending marker in one conditional UPDATE bound to row UUID, place, recipe, name, prior marker/login, absent container ID and absent admitted paths. decode_binding:148-164 rejects partial login and created/admitted rows without login.",
+      "Same revision, environment/podman.rs:1097-1125 compares any existing login to the selected image, awaits successful conditional admission, then sends run with that image. store/podman.rs:297-329 requires canonical ID/full login for installation admission. provisioning/tensorlake_add.rs:391-398,521-605 registers, prepares, creates and admits before credential delivery.",
+      "git diff 56659839785691f76da3af5d8f51b511cff4ba8b..00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db leaves store/podman.rs unchanged and changes only the provider lifecycle-lock helper in podman.rs. No runtime observation or reproduction."
+    ],
+    "coverage_checked": [
+      "SPEC.md Container sessions:4831-4872 and SPEC_impl.md Disposable environments:5945-5953 require ownership before creation and observed complete login before create; they do not accept guessed login. The historical contract is at 56659839 SPEC_impl.md:6425-6432.",
+      "TODO.md Planned:25-27 is empty. Searched plans/queue for Podman, registration, login, prepared admission and references: podman-environments.md describes the implemented provider mechanism, and environment-agent-operations.md concerns agent authority/session deletion; neither is an exact remaining fix for guessed login.",
+      "BUGS.md has only the SSH-helper transfer hang. INDEX.md and matching Podman queue files concern the retired container model's storage selection, keep-id inspection, token reads and remote routing; none covers this admission claim. Active TRIAGE_OUTCOMES.md has no matching Podman/login admission record. FILTER.md supplies no basis used here."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": "No missing premise for refuting guessed login in this integrated path. A separate pre-registration approval/retarget claim mentioned as g020/l1 in the history is outside this batch and remains untouched.",
+    "original_stronger_consequence": "A wrong login or place could break launch, disclose credentials or damage user work. No such route was established for this guessed-login concern; the separate earlier approval concern must not be folded into this refutation.",
+    "needs_independent_drop_check": true,
+    "proposed_basis": "Source refutation narrowly of guessed-login/nonatomic facts admission, using the integrated caller and conditional write, not foundation timing or coverage by another reviewer. Parent must independently check the proposed security/user-work-related dismissal."
+  },
+  {
+    "key": "g064/c2",
+    "latest_line": 4,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "podman-probe-raw-manager-error-disclosure",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The considered raw-output route is cut by error replacement before probe errors reach the public projection. Proxy values remain private data rather than ProbeView fields.",
+    "checks": [
+      "04ffdbb35773cef36e73eb798c005ddbeb9a9de6: provisioning/backend.rs:1930-1971 can construct a failure containing an output prefix at 1959-1962, but does not log that raw prefix in this path.",
+      "Same revision, environment/podman_probe.rs:98-110 replaces capture failure with a fixed message, run:272-287 replaces command errors with the static prerequisite reason, busctl:344-348 turns command/parser errors into None, and fallback parse:359-360 uses a fixed unreadable-environment message.",
+      "Same revision, ProbeView:52-60 contains timestamp/refreshing/readiness/reason/architecture/version and no proxy map. This is source evidence of the particular suspected public-probe leak being absent, not runtime evidence or a claim about every provider diagnostic."
+    ],
+    "coverage_checked": [
+      "Searched SPEC.md and SPEC_impl.md for Podman/proxy/environment contracts; the relevant current sections are SPEC.md:4806-4890 and SPEC_impl.md:6058-6092. Neither explicitly accepts credential disclosure; refutation rests on source.",
+      "TODO Planned is empty. plans/queue/podman-environments.md:808-810,853 addresses proxy passwords on command lines, a different transport route from raw public probe failures. Other proxy plans concern SSH routing or endpoint credentials, not this error projection.",
+      "BUGS.md, INDEX.md plus matching Podman files, and active TRIAGE_OUTCOMES.md contain no exact probe-error disclosure item. Exact source-name and proxy credential searches found no queue alias. FILTER.md is not applied to a security claim."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": "None for this narrow source refutation. It does not assert that all proxy-bearing command diagnostics or argv are safe.",
+    "original_stronger_consequence": "Proxy passwords could be exposed through public probe errors: highest/security if reachable.",
+    "needs_independent_drop_check": true,
+    "proposed_basis": "Source sanitization and public projection refute the named raw capture-error route. Requires an independent security drop check."
+  },
+  {
+    "key": "g064/c3",
+    "latest_line": 10,
+    "recommendation": "covered",
+    "bucket": "other",
+    "underlying_key": "podman-ordinary-wal-tail-loss-after-external-create",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The integrated route can lose recent ordinary registration/create commits after an OS crash or power loss while the external resource survives. This is the ordinary WAL/NORMAL durability limitation the implementation specification explicitly accepts. The initial no-caller rejection is withdrawn; coverage, rather than source refutation, is the proposed basis.",
+    "checks": [
+      "56659839785691f76da3af5d8f51b511cff4ba8b: store/podman.rs:268-278 and373-394 use ordinary Db::call for atomic create admission and registration. environment/podman.rs:1103-1125 awaits admission before run;1160-1165 saves canonical ID afterwards.",
+      "Same revision, supervisor/db.rs:110-115 selects NORMAL in WAL mode, call:230-245 does not strengthen sync mode, and call_full_sync_if begins at249 as a separate trust-change barrier.",
+      "Same revision, environment/podman.rs:1298-1301 treats a row with no ID or pending marker as never-created, without claiming a same-name resource. list_owned:1338-1380 uses helm labels and can still discover unregistered resources at reachable places. No actual destruction of user work follows from these source facts alone.",
+      "Endpoint diff leaves the store and create ordering unchanged. No power-loss reproduction or runtime test ran."
+    ],
+    "coverage_checked": [
+      "Current SPEC_impl.md Helm internals:5184-5201 explicitly accepts ordinary read-write WAL/NORMAL tail loss and names FULL exceptions for acknowledged trust revocations, not resource registration. Historical identical rule:56659839 SPEC_impl.md:5665-5683. SPEC.md Container sessions requires retained ownership/order, with no separate power-loss barrier overriding this rule.",
+      "Current SPEC.md:317-322 and SPEC_impl.md:6296-6305,6452-6463 explicitly discuss power-loss-lost ownership records for Tensorlake. Those provider-specific passages corroborate the ordinary policy but are not claimed as exact Podman coverage.",
+      "TODO Planned is empty. Searched unlanded plans for registration, pending create, power loss and durability; no stated fix for this ordinary Podman policy. BUGS.md is unrelated. INDEX.md and active TRIAGE_OUTCOMES.md durability matches concern installer files/update trust, not this root. No exact queue alias. FILTER.md not needed."
+    ],
+    "exact_cover_quotes": [
+      "SPEC_impl.md:5187-5189: every ordinary read-write connection selects `synchronous=NORMAL` only after reading an actual WAL mode and otherwise retains FULL. This accepts losing the last commits on an OS crash or power loss without weakening database consistency; process crashes preserve commits."
+    ],
+    "missing_premise": "An actual security or destruction-of-user-work route beyond lost registration/cleanup visibility is unestablished. This is not a claim that external resources cannot outlive their rows.",
+    "original_stronger_consequence": "Losing track of still-running user work could potentially cause security harm or actual loss of work. The history preserves this possibility but establishes neither harm route.",
+    "needs_independent_drop_check": true,
+    "proposed_basis": "Exact ordinary-store durability acceptance, limited to OS crash/power failure tail loss, not process crashes, missing pre-send admission, or arbitrary ownership loss. Parent must independently approve coverage and the absence of an established highest consequence."
+  },
+  {
+    "key": "g064/c4",
+    "latest_line": 12,
+    "recommendation": "retain-verified",
+    "bucket": "other",
+    "underlying_key": "podman-creation-reuses-cached-place-proxy-snapshot",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "A new container can inherit an earlier host-manager proxy snapshot and retain it after admission. This is source-established configuration propagation failure. The history attributes the same defect to g003/f1; that record is not among this batch's named claims, so exact cross-batch consolidation remains the parent's task rather than a dismissal here.",
+    "checks": [
+      "56659839785691f76da3af5d8f51b511cff4ba8b: environment/podman_probe.rs:324-332 accepts ready results up to FRESH_FOR; fresh:383-390 immediately returns that cache hit. runtime:338-362 accepts matching-route success without an age check. Proxy values are sampled only during probe:616-626,656-661.",
+      "Same revision, environment/podman.rs:150-164 resolves the runtime cache,1197-1207 passes ready.proxy into proxies, and1225-1228 deliberately leaves admitted snapshots unchanged. proxies:565-589 rereads the container manager only for XDG_CONFIG_HOME; it does not resample the place manager's proxies.",
+      "A completed place observation, then a host-manager proxy edit, then launch using an already prepared image within the freshness window suffices conditionally. Endpoint diff leaves these paths unchanged. No runtime reproduction or particular network-client outcome is claimed.",
+      "This is distinct from g065/l1: refreshing the input does not repair empty-value serialization, and repairing serialization does not refresh a stale input snapshot."
+    ],
+    "coverage_checked": [
+      "Current SPEC.md:4877-4879 requires creation-time manager variables and says later host changes affect new containers; SPEC_impl.md:6082-6085 specifies reading during probe and writing selected values at creation, without accepting old settings for a new environment. Historical clauses:56659839 SPEC.md:4802-4804, SPEC_impl.md:6561-6564.",
+      "TODO Planned is empty. Searched plans/queue proxy/cache/snapshot terms; podman-environments.md:242-245 describes probe sampling and deterministic environment.d writing, while its later proxy follow-up853 concerns argv disclosure. Neither schedules cache resampling to fix this cause. Environment-agent-operations and endpoint-credential-ownership concern different authority/credential paths.",
+      "BUGS.md, INDEX.md and matching Podman queue files, and active TRIAGE_OUTCOMES.md provide no exact coverage. Exact proxy cache/source-name searches found no existing item. FILTER.md does not cover the enduring wrong environment snapshot."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": "No premise missing for stale selected proxy values. A concrete connectivity disruption, credential disclosure or user-work-loss route is not established. Parent should compare its named g003/f1 record before deduplicating; its contents were not separately supplied here.",
+    "original_stronger_consequence": "New containers permanently inherit old proxy settings; the supplied history claims no highest consequence and no established credential disclosure or loss of work.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Retain the source-confirmed configuration defect under the stable underlying key. The local candidate's earlier consolidation proposal must not erase the finding if g003/f1 is not retained elsewhere."
+  },
+  {
+    "key": "g064/l5",
+    "latest_line": 14,
+    "recommendation": "retain-verified",
+    "bucket": "other",
+    "underlying_key": "podman-probe-dedup-test-asserts-before-spawned-task",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The regression's immediate counter check cannot observe a duplicate task just spawned by the second refresh. Its later wait witnesses one shared marker clearing, not completion of every scheduled probe. This is an independent test-oracle defect even though current production deduplication is correct.",
+    "checks": [
+      "04ffdbb35773cef36e73eb798c005ddbeb9a9de6: environment/podman_probe.rs:197-201 admits via a shared set and spawns; no await follows that spawn before refresh returns230. Test609-610 immediately checks the command count after its second refresh. The held uname567-570 has one release613;614-620 waits only for the shared refreshing flag, and621-637 never rechecks count or joins a duplicate.",
+      "Same revision, Refreshing::drop240-247 clears that shared host marker when either task finishes. With admission regressed to allow a duplicate while retaining marker insertion, a second probe can remain blocked after the first clears the marker.",
+      "Same revision, farhelm-testtrace-macros/src/lib.rs:55-64,247-259 selects CurrentThread by default; farhelm-testtrace/src/lib.rs:1007-1019 drops the runtime after body completion and accepts the body's outcome;1131-1142 builds the current-thread runtime.",
+      "Cargo.lock at that revision6278-6280 pins Tokio1.53.2. Installed primary source tokio-1.53.2/src/task/spawn.rs:22-29 guarantees spawn does not synchronously poll and outstanding tasks are dropped at shutdown. Thus the immediate assertion does not see the newly spawned duplicate, whose cancellation need not fail the test.",
+      "00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db: podman_probe.rs:851-933 retains the same test, with second refresh/counter904-905 and no final count/join. No mutation test, false pass or runtime reproduction was observed."
+    ],
+    "coverage_checked": [
+      "Searched both specifications for background probes/deduplication; SPEC.md Container sessions and SPEC_impl.md Podman places require background capability checks but do not accept an ineffective regression. The test's own552-554 contract promises per-host joining.",
+      "TODO Planned is empty. plans/queue searches for probe/deduplication/test names and schema/source names found no planned repair. BUGS.md is unrelated.",
+      "INDEX.md includes other ineffective or premature test oracles, but exact probe test/source-name searches of queue files found none for this root. Active TRIAGE_OUTCOMES.md has no matching disposition. FILTER.md's rare product-glitch filters do not cover this persistent test sensitivity defect."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": "None for the source-level oracle gap. Whether a particular mutation falsely passes in execution was not measured and is not needed to claim the missing distinguishing observation.",
+    "original_stronger_consequence": "The test can pass duplicate probes; no product security or user-work-loss route was alleged.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Record as other/test assurance with source-confirmed scheduling and teardown premises, and preserve that this is not an observed production deduplication failure."
+  },
+  {
+    "key": "g064/c6",
+    "latest_line": 15,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "podman-migration-test-foreign-key-enforcement-premise",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The tested upgrade connection explicitly enables foreign keys before schema application. Lack of an explicit pragma on the earlier fixture-writing connection does not disable the dependent sentinel at the destructive migration boundary.",
+    "checks": [
+      "04ffdbb35773cef36e73eb798c005ddbeb9a9de6: store/podman.rs:568-593 builds the ON DELETE CASCADE sentinel and old schema fixture.594 opens HelmStore for the actual migration;595-612 compares host rows, hosts rootpage and sentinel payload afterwards.",
+      "Same revision, store.rs:5326-5336 configures durability and calls conn.pragma_update(None, foreign_keys, true) before apply_schema. The named missing-cascade-oracle premise is therefore false. No runtime test or reproduction ran."
+    ],
+    "coverage_checked": [
+      "SPEC_impl.md Environment rows and provider state:5955-5968 requires additive columns without rebuilding hosts; the historical clause is56659839:6434-6445. It supplies the sentinel's contract, not acceptance of an ineffective test. SPEC.md has no separate test-oracle acceptance.",
+      "TODO Planned is empty. plans/queue/podman-environments.md describes additive host columns and records unrelated stripped-back old checkout-fixture repairs at746-750,837-839; no exact missing-foreign-key test coverage. BUGS.md is unrelated.",
+      "Exact schema_83/migration_sentinel/foreign-key/source-name searches found no matching INDEX/queue item or active TRIAGE_OUTCOMES.md decision. FILTER.md not applied."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": "None for refuting this specific missing-foreign-key premise; no broader claim about all migration test sensitivity is made.",
+    "original_stronger_consequence": "Potential false-pass in a migration-preservation test, other/test assurance. The history alleges no production loss-of-work route.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Source refutation at the actual migration connection, rather than assuming fixture creation enforces foreign keys."
+  },
+  {
+    "key": "g065/l1",
+    "latest_line": 15,
+    "recommendation": "retain-verified",
+    "bucket": "other",
+    "underlying_key": "podman-environment-d-drops-explicit-empty-proxy",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "An explicit empty proxy value is imported into the current container user manager but serialized as empty quotes that a concrete supported systemd parser discards. The assignment is then absent from generated persistent settings after restart. Dollar escaping is a separate, source-refuted mechanism whose original possible security consequence must remain in the parent's drop register.",
+    "checks": [
+      "56659839785691f76da3af5d8f51b511cff4ba8b: environment/podman_probe.rs:616-626 preserves Value(empty); podman.rs:1457-1469 writes NAME=empty double quotes;proxies588-617 installs this file and621-637 separately unsets/imports exact exported values into the live manager. Admitted retries1225-1228 leave the snapshot alone.",
+      "Same revision, environment/podman/build.rs:420-429 explicitly distinguishes empty from absent in shell exports. tests.rs:542-575 promises the distinction but checks encoder text, including HTTP_PROXY=empty quotes, rather than the actual generator.",
+      "Independently read official Ubuntu source archive https://archive.ubuntu.com/ubuntu/pool/main/s/systemd/systemd_255.4.orig.tar.gz : systemd-stable-255.4/src/basic/env-file.c:28-29 initializes value=NULL;97-130,202-214 allocate nothing for empty quotes;532-535 ignores NULL value;557-569 connects that callback to parsing. The generator src/environment-d-generator/environment-d-generator.c:44-79 calls merge_env_file at62 and prints only collected entries67-78. Thus empty quotes do not produce an empty assignment.",
+      "Independently streamed the complete patch files from official systemd_255.4-1ubuntu8.18.debian.tar.xz and searched diff headers for env-file.c,env-util.c,environment-d-generator.c,env-util.h. Only an env-util.h header patch matched; the parser/generator functions are not replaced there. Current SPEC.md custom-base requirement:480-482 expressly permits Ubuntu/Debian systemd images; no extra container-systemd floor excludes this route. The Ubuntu package web page timed out, so its package-page version claim was not independently confirmed; the actual versioned official source and patch paths were available.",
+      "Historical dollar mechanism: official upstream v233 env-util.c current raw text550-571 and v255:665-685 both collapse doubled dollars to a literal dollar. Browser-cached v233 text had different line offsets529-537; the raw download was also checked. This refutes the named doubled-dollar transformation mechanism, not all possible proxy/network security defects.",
+      "Endpoint provider diff leaves serializer/proxy installation unchanged. This remains source/contract evidence only: no container manager restart or network fallback was reproduced. g064/c4's stale-input snapshot has a different cause and survives an empty-value serializer fix."
+    ],
+    "coverage_checked": [
+      "Current SPEC.md:4877-4879 requires the same creation-time settings in environment.d and in sessions. SPEC_impl.md:6082-6085 requires deterministic manager inheritance; neither accepts empty-to-absent conversion. Historical exact proxy contracts:56659839 SPEC.md:4802-4804 and SPEC_impl.md:6561-6564.",
+      "TODO Planned is empty. Searched plans/queue for proxy empty/persistence/environment.d and actual source names. podman-environments.md's proxy rules require deterministic writing; its853 follow-up removes command-line disclosure, not empty serialization. Endpoint credential and SSH proxy plans are different inputs/mechanisms.",
+      "BUGS.md, INDEX.md/matching Podman files, and active TRIAGE_OUTCOMES.md contain no exact empty-proxy persistence coverage. Exact source/empty/cache proxy searches found no queue alias. FILTER.md does not cover an enduring wrong environment record that restart reveals rather than repairs."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": "No missing parser/encoder premise for the checked Ubuntu255.4 route. The package-page version assertion timed out, but actual official255.4 package source/patches were checked. Specific network-client fallback, material launch failure, unintended endpoint selection, credential disclosure or loss of work remain unestablished.",
+    "original_stronger_consequence": "Initial dollar-sign transformation hypothesis conditionally suggested high and possible highest if credential-bearing proxy text selected an unintended endpoint and exposed credentials. The reviewer first withdrew it based only on upstream-main documentation, reopened the supported-parser premise, then source-refuted the dollar mechanism using historical parsers while retaining a distinct empty-value defect. All of that history remains relevant to the independent drop/priority check.",
+    "needs_independent_drop_check": true,
+    "proposed_basis": "Retain empty-to-absent persistence as other for the established exact-environment consequence. Send the dollar-specific refutation and any lowering of the original security hypothesis to the independent drop check; this consultation does not approve that drop."
+  },
+  {
+    "key": "g065/l2",
+    "latest_line": 8,
+    "recommendation": "retain-verified",
+    "bucket": "other",
+    "underlying_key": "podman-leftover-discovery-all-or-nothing-and-row-loss",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "A failure at an enumerated place aborts the whole leftovers response, hiding healthy places' unregistered containers. A failed refresh also replaces earlier successful UI rows with an error. No shipped UI alternative discovers those unregistered session leftovers; this establishes cleanup obstruction, without establishing session disruption or loss of user work.",
+    "checks": [
+      "56659839785691f76da3af5d8f51b511cff4ba8b: environment/podman.rs:777-792 enumerates cached-usable ordinary hosts, every environment-row place_host and recipe places needing cleanup. A merely registered unusable/unprobed unreferenced host is excluded.795 propagates any list_owned error, losing results and skipping later places;843-860 returns only502.",
+      "Same revision, list_owned1338-1380 and require189-202 preserve command/inspection errors, while podman_probe runtime338-378 can return host/probe errors. Thus an unavailable referenced place can trigger this condition, without pretending every registered offline host necessarily does.",
+      "ba7cc0264028eebb39647deb1d25b055e6886935: containers_settings.rs:22-30 overwrites catalog even on error;98-125 renders an error instead of all former rows/Delete controls. api/environments.rs:63-71 has one global listing, while76-89 needs a discovered host row or independently known place/ID for deletion.",
+      "56659839: environment/podman/build.rs:630-675 reconciles only recorded builder/preparer helpers;764-803 cleans recorded recipe images/places.721-737 retains images used by any container. It neither discovers nor deletes unregistered role=session leftovers. Hosts requires a row; manual Podman and direct DELETE with independently known canonical coordinates are external workarounds.",
+      "Endpoint diff leaves affected provider listing unchanged. Source/caller checks only; no outage, UI refresh or deletion reproduction ran."
+    ],
+    "coverage_checked": [
+      "Current SPEC.md:4831-4838 requires interrupted-resource discovery, and4888-4890 requires the sandbox-leftovers pattern. That pattern528-539 explicitly retains earlier rows after a failed read. SPEC_impl.md:6087-6092 requires label discovery at cached-usable and referenced places. None explicitly accepts cross-place suppression or discarding prior rows.",
+      "TODO Planned is empty. Searched plans/queue for leftovers/failure/discovery/container settings; podman-environments.md:94-95,246-250 states the feature rather than scheduling repair of its all-or-nothing behavior. environment-agent-operations changes session deletion, not unregistered leftovers discovery. Other leftover plans concern Git cache locks or different session-action state.",
+      "BUGS.md is the SSH-transfer helper hang. INDEX.md and exact queue-file/source-name searches found no same-root item. Active TRIAGE_OUTCOMES.md has no container-leftovers decision. FILTER.md's rare/self-correcting boundary does not match the full claim: an ordinary unavailable place can continue suppressing healthy-place discovery and controls until that place recovers or its references change; repeated refresh alone need not repair it."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": "None for healthy-place UI cleanup obstruction and loss of displayed rows. A session disruption, security consequence or destruction of user work is not established. Hosts remains available for row-backed resources, which is a narrower fallback than unregistered discovery.",
+    "original_stronger_consequence": "The initial lead conditionally suggested high if healthy-place cleanup lacked an alternative; subsequent source checks establish that UI obstruction but recommend other because the proven consequence remains cleanup/discovery. No highest/security/user-work-loss route was alleged. The correction from any registered host to the exact enumerated set must be preserved.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Retain the complete discovery and cached-row contract defect as other. Preserve per-place failure diagnostics in any repair; silently skipping a failed place would falsely promise complete discovery."
+  }
+]

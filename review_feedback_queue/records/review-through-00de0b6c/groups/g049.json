@@ -1,0 +1,690 @@
+{
+  "group": {
+    "id": "g049",
+    "domain": "environment-durable-state",
+    "purpose": "environment-durable-state: crates/farhelm-helm/src/store.rs, crates/farhelm-helm/src/store/environment_history.rs; phases complete small per-commit changes",
+    "interfaces": [
+      "g009",
+      "g010",
+      "g011",
+      "g022",
+      "g023",
+      "g024",
+      "g025",
+      "g026",
+      "g027",
+      "g028",
+      "g029",
+      "g050",
+      "g055",
+      "g056",
+      "g057",
+      "g058",
+      "g059",
+      "g060"
+    ],
+    "sources": [
+      {
+        "path": "[private-run]/prep/parts/00096-000.patch",
+        "ranges": [
+          [
+            1,
+            64
+          ]
+        ],
+        "original_path": "crates/farhelm-helm/src/store.rs",
+        "commit": "ee39aeacdaccfeaa0cea25246540b20008c868f0",
+        "notes": "patch header; patch character offsets [0,2943)",
+        "lines": 64,
+        "bytes": 2943,
+        "start": 0,
+        "end": 2943,
+        "original": "[private-run]/prep/originals/00096.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/00156-000.patch",
+        "ranges": [
+          [
+            1,
+            799
+          ]
+        ],
+        "original_path": "crates/farhelm-helm/src/store.rs",
+        "commit": "04ffdbb35773cef36e73eb798c005ddbeb9a9de6",
+        "notes": "patch header; patch character offsets [0,42084)",
+        "lines": 799,
+        "bytes": 42088,
+        "start": 0,
+        "end": 42084,
+        "original": "[private-run]/prep/originals/00156.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/00170-000.patch",
+        "ranges": [
+          [
+            1,
+            200
+          ]
+        ],
+        "original_path": "crates/farhelm-helm/src/store/environment_history.rs",
+        "commit": "52cc5d7250d262f93b730d91a07c240d33c2ea5f",
+        "notes": "patch header; patch character offsets [0,8381)",
+        "lines": 200,
+        "bytes": 8381,
+        "start": 0,
+        "end": 8381,
+        "original": "[private-run]/prep/originals/00170.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/00205-000.patch",
+        "ranges": [
+          [
+            1,
+            31
+          ]
+        ],
+        "original_path": "crates/farhelm-helm/src/store.rs",
+        "commit": "56659839785691f76da3af5d8f51b511cff4ba8b",
+        "notes": "patch header; patch character offsets [0,1721)",
+        "lines": 31,
+        "bytes": 1721,
+        "start": 0,
+        "end": 1721,
+        "original": "[private-run]/prep/originals/00205.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/01038-000.patch",
+        "ranges": [
+          [
+            1,
+            13
+          ]
+        ],
+        "original_path": "crates/farhelm-helm/src/store.rs",
+        "commit": "f560058da19e02716e6f943883a9508b447aff4e",
+        "notes": "patch header; patch character offsets [0,440)",
+        "lines": 13,
+        "bytes": 440,
+        "start": 0,
+        "end": 440,
+        "original": "[private-run]/prep/originals/01038.patch"
+      }
+    ],
+    "lines": 1107,
+    "bytes": 55573
+  },
+  "records": [
+    {
+      "key": "g049/l1",
+      "owner": "g049",
+      "id": "l1",
+      "domain": "environment-durable-state",
+      "purpose": "environment-durable-state: crates/farhelm-helm/src/store.rs, crates/farhelm-helm/src/store/environment_history.rs; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 1,
+          "event": {
+            "version": 1,
+            "kind": "lead",
+            "id": "l1",
+            "state": "open",
+            "summary": "Check replay admission after independent history eviction and identity adoption",
+            "location": "crates/farhelm-helm/src/store/environment_history.rs:72",
+            "detail": "Reviewed commit: 52cc5d7250d262f93b730d91a07c240d33c2ea5f. TLDR: an old environment launch might become recent again and restore older launch defaults after its deduplication record is evicted and the origin installation identity changes away and back. Source basis: environment_history.rs:61-100 inserts by origin entry UUID/identity/session, ignores retained duplicates, and bounds the same table to MAX_LAUNCH_HISTORY. Its duplicate comment explicitly relies on that key surviving identity adoption. SPEC_impl.md:6499-6502 says replayed creates cannot change captured intent or increase frequency. Missing premise: whether ordinary create-history admission retains a non-evictable watermark across adoption, and whether shipped callers replay old captured environment targets. Next checks: inspect record_create_history_with_environment_if_current, adopt_identity, and reconciliation callers at this revision. Suggested bucket unresolved (high/material UX if defaults change); could-be-highest only if an established route changes launch authority without user confirmation, currently unestablished. Confidence: unverified, investigation in progress. proposed_drop: false. possible_cover: none. No runtime execution or reproduction."
+          }
+        },
+        {
+          "line": 2,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "l1",
+            "state": "open",
+            "summary": "Evicted history key does not establish a replay route",
+            "location": "crates/farhelm-helm/src/store/environment_history.rs:72",
+            "detail": "Reviewed commit: 52cc5d7250d262f93b730d91a07c240d33c2ea5f. TLDR considered: replaying an evicted environment create after A-to-B-to-A identity adoption could resurrect a recent setup and older permission defaults. Source checks: store.rs:8225-8300 confirms adoption purges ordinary admissions, cutoffs and partitions, while environment_history.rs:61-100 has bounded independent deduplication. However store.rs:8790-8847 explicitly separates a storage-only API from guarded captured-operation ingress: 'Ingress holding captured operation authority must use the guarded form so adoption followed by a return to the same identity cannot revive that operation after its bounded source key has been evicted.' The guarded API checks current() after taking the SQLite connection and keeps its guard through commit (store.rs:8864). git grep at the reviewed commit finds no production caller supplying an environment target: sessions.rs:1988-2020 uses record_create_history_with_destination and excludes session-owned rows. Thus the suspected stale captured-target ingress is not shipped at this revision; the bounded table alone cannot substantiate the reported consequence. Adjacent later ingress uses the guarded method (endpoint sessions.rs:2213), to be checked in its owning group. Suggested bucket: no finding; possible high/material UX was only conditional. Could-be-highest: considered older permission defaults, but no shipped route to changing authority without confirmation is established. Confidence: confirmed absence of required caller premise at reviewed revision. proposed_drop: source refutation, no production environment-target ingress in this storage-stage commit; preserve conditional consequence above. possible_cover: none. No runtime execution or reproduction."
+          }
+        },
+        {
+          "line": 6,
+          "event": {
+            "version": 1,
+            "kind": "lead",
+            "id": "l1",
+            "state": "open",
+            "summary": "Check guarded production ingress through commit, beyond foundation-stage absence",
+            "location": "crates/farhelm-helm/src/sessions.rs:2213",
+            "detail": "# Check guarded production ingress through commit\n\nReviewed commit: 52cc5d7250d262f93b730d91a07c240d33c2ea5f; integration through 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db.\n\n## TLDR\n\nAn obsolete launch completion could restore old recent setups or security-relevant defaults after identity adoption and bounded-key eviction if later callers do not retain current authority through the write.\n\n## Details\n\nThe original candidate establishes only that environment-target ingress was absent at the foundation revision. It does not refute the entire range. Parent-supplied g050/c1 now identifies the production guarded caller at endpoint sessions.rs:2213. Inspect the introducing commit and endpoint caller, guard implementation, adoption invalidation and lock lifetime; the storage current() check must survive through transaction commit. Suggested bucket: other pending route, potentially high for defaults; could-be-highest: yes if a stale security-default route is established. Confidence: integration investigation in progress. proposed_drop: false; prior candidate history preserved and no drop accepted. possible_cover: g050/c1 tracks the same integration premise. Source-only; no execution. Missing premise: the exact production lock/invalidation contract."
+          }
+        },
+        {
+          "line": 8,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "l1",
+            "state": "open",
+            "summary": "Production history guard spans the serialized transaction",
+            "location": "crates/farhelm-helm/src/store.rs:8864",
+            "detail": "# Production history guard spans the serialized transaction\n\nReviewed commit: 52cc5d7250d262f93b730d91a07c240d33c2ea5f; integration checked at introducing commit 56659839785691f76da3af5d8f51b511cff4ba8b and endpoint 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db.\n\n## TLDR\n\nThe suspected obsolete launch completion would restore old recent setups and security-relevant defaults after adoption and bounded-key eviction. The later shipped history caller supplies current connection authority at the actual database write boundary.\n\n## Details\n\nThis revision supersedes only the original whole-range inference from absent foundation-stage callers; it preserves that local observation and the original potential consequence. git log -S locates production guarded ingress in 566598..., sessions.rs:2046-2115. That caller takes host_write_lock, captures the SessionClaim, then passes a closure checking entry_uuid, incarnation, live client, connected identity and session-owned applicability. It returns the owned registry guard only on success (2091-2104). Endpoint sessions.rs:2174-2248 retains the same contract (2213-2244). The storage method (store.rs:8864 onward) invokes current() inside Db::call, binds its returned value to _guard and keeps it alive until after tx.commit; the ordinary SQL host_identity check independently rejects an adoption committed before status publication. Db::call actually holds the Arc<Mutex<Connection>> throughout work, not merely while queuing it (farhelm-supervisor/src/db.rs:230-245); adoption uses the same HelmStore connection. Therefore adoption cannot commit between current() and history commit. Endpoint manager.rs:2940-3004 commits adoption then replaces status with Connecting, removes the client and mints a fresh globally monotonic incarnation before reconnect. Before publication, durable identity rejects A-to-B; a return B-to-A cannot be initiated from a still-A mismatch/status without an intervening publication, and an eventual return has a different incarnation. The host write guard also serializes retarget/removal and remains captured by the queued blocking closure if its async waiter is cancelled (manager.rs:2539-2564; store.rs:8824-8843).\n\nThe independent table's bounded key is thus not the only production replay boundary. It still retains duplicate protection while present, while captured old ingress is refused after the underlying connection changes. No separate stale-default route is established by the assigned state/history extraction. Suggested bucket: no separate finding; could-be-highest: yes for the originally suspected stale security-default route, retained for independent checking, but the checked route is source-refuted. Confidence: confirmed by source/contract analysis, no execution. proposed_drop: the introducing and endpoint callers validate captured authority under the SQLite mutex and retain their write guard through commit; parent has accepted no drop. possible_cover: g050/c1 tracks the same premise. No runtime tests or reproduction. No unresolved readily checkable premise for this route."
+          }
+        },
+        {
+          "line": 11,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "l1",
+            "state": "open",
+            "summary": "Current-claim replay checks do not establish GUI-choice provenance",
+            "location": "crates/farhelm-helm/src/store/environment_history.rs:82",
+            "detail": "# Current-claim replay checks do not establish GUI-choice provenance\n\nReviewed commit: 52cc5d7250d262f93b730d91a07c240d33c2ea5f; integrating context 190d844e58c96cf197aa838d0b0eea8062f48435.\n\n## TLDR\n\nThe original stale-completion route and its security-default consequence remain preserved. Its current-claim refutation does not refute the distinct established agent-origin effects supplied in g050/l1: changing the user's default container place and evicting GUI recent setups.\n\n## Details\n\nDiscovery-neighbours.json supplies g050/l1's latest complete source-validated record. The supplied route uses a successful CURRENT agent environment launch, NULL explicit_selection and non-NULL environment_target; environment_history.rs:60-99 still inserts a shared marker, changes last_container_host and ages structured recents. This is distinct from replaying obsolete captured authority. No GUI-choice provenance bit is carried by the current() guard. The original l1 candidate proposed-drop basis covers only stale-operation admission and must not be applied to that provenance finding. Source-check the origin/target/selection boundary and exact GUI-default contract before the separate new search. Suggested bucket: other for supplied default/suggestion effects, as g050 records; could-be-highest: preserve original l1's conditional stale security-default concern for independent checking, while no highest route is established by these distinct place/history effects. Confidence: supplied source-confirmed provenance route; own focused synthesis underway. proposed_drop: false for g050/l1; original replay-only proposed drop remains scoped and unaccepted. possible_cover: g050/l1 already owns the agent-origin finding; no new finding credit or duplicate local ID. Source-only, no execution."
+          }
+        },
+        {
+          "line": 12,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "l1",
+            "state": "open",
+            "summary": "Origin-provenance input confirmed separately from replay authority",
+            "location": "crates/farhelm-helm/src/store/environment_history.rs:82",
+            "detail": "# Origin-provenance input confirmed separately from replay authority\n\nReviewed commit: 52cc5d7250d262f93b730d91a07c240d33c2ea5f, integrating context 190d844e58c96cf197aa838d0b0eea8062f48435.\n\n## TLDR\n\nThe supplied agent-origin default/recent-setup defect is consistent with the assigned storage path. It is distinct from this ID's original obsolete-completion suspicion.\n\n## Details\n\nFocused synthesis checked 190d... sessions.rs:2051-2060: explicit_selection is Some only for user-origin structured launches; agent creates get None. The independent environment_history::record at 40-100 checks only target presence and novelty, not GUI origin; a NULL selection is serialized as NULL but still inserts, updates the container place and evicts the shared bounded window. SPEC.md:5158-5163 says exactly: 'Only what the user explicitly selects in the GUI may affect the GUI’s future defaults and suggestions: the remembered permission mode and the recent setups the New dialog offers.' It further says 'anything an agent creates do not qualify, because none of them is a choice the user made in the GUI.' The supplied g050/l1 includes the full shipped target propagation and consumer path; direct checks here confirm the distinct missing provenance gate rather than disputing it on current-claim grounds. Original l1 stale security-default consequence and replay-only proposed-drop basis remain preserved for independent checking; no lowering or drop accepted. Suggested bucket: other for g050's established default/recent effects. Could-be-highest: original conditional security-default concern retained, but no highest route shown by the new origin/default effects. Confidence: confirmed source/contract synthesis, no execution. proposed_drop: false for g050/l1; replay-only candidate remains scoped. possible_cover: g050/l1 owns the confirmed provenance finding; no new local finding or issue credit. No unresolved premise in this supplied cross-group input. Next: separate discovery of the five assigned patches beyond recorded concerns."
+          }
+        }
+      ],
+      "latest": {
+        "line": 12,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "l1",
+          "state": "open",
+          "summary": "Origin-provenance input confirmed separately from replay authority",
+          "location": "crates/farhelm-helm/src/store/environment_history.rs:82",
+          "detail": "# Origin-provenance input confirmed separately from replay authority\n\nReviewed commit: 52cc5d7250d262f93b730d91a07c240d33c2ea5f, integrating context 190d844e58c96cf197aa838d0b0eea8062f48435.\n\n## TLDR\n\nThe supplied agent-origin default/recent-setup defect is consistent with the assigned storage path. It is distinct from this ID's original obsolete-completion suspicion.\n\n## Details\n\nFocused synthesis checked 190d... sessions.rs:2051-2060: explicit_selection is Some only for user-origin structured launches; agent creates get None. The independent environment_history::record at 40-100 checks only target presence and novelty, not GUI origin; a NULL selection is serialized as NULL but still inserts, updates the container place and evicts the shared bounded window. SPEC.md:5158-5163 says exactly: 'Only what the user explicitly selects in the GUI may affect the GUI’s future defaults and suggestions: the remembered permission mode and the recent setups the New dialog offers.' It further says 'anything an agent creates do not qualify, because none of them is a choice the user made in the GUI.' The supplied g050/l1 includes the full shipped target propagation and consumer path; direct checks here confirm the distinct missing provenance gate rather than disputing it on current-claim grounds. Original l1 stale security-default consequence and replay-only proposed-drop basis remain preserved for independent checking; no lowering or drop accepted. Suggested bucket: other for g050's established default/recent effects. Could-be-highest: original conditional security-default concern retained, but no highest route shown by the new origin/default effects. Confidence: confirmed source/contract synthesis, no execution. proposed_drop: false for g050/l1; replay-only candidate remains scoped. possible_cover: g050/l1 owns the confirmed provenance finding; no new local finding or issue credit. No unresolved premise in this supplied cross-group input. Next: separate discovery of the five assigned patches beyond recorded concerns."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g049/findings.jsonl",
+        "id": "l1",
+        "line": 12,
+        "disposition": "under-investigation",
+        "group": "g049-l1",
+        "reason": "Record durably acknowledged; parent source/contract validation, cross-group synthesis, coverage/filter matching and any independent drop check remain pending. This preserves the claim and uncertainty without accepting, dropping or lowering it."
+      },
+      "accepted_parent_decision": null,
+      "returned_claim_checks": [
+        {
+          "batch": "claims-031",
+          "key": "g049/l1",
+          "latest_line": 12,
+          "recommendation": "needs-parent",
+          "bucket": "other",
+          "underlying_key": "environment-history-obsolete-claim-after-adoption",
+          "aliases": [
+            "g050/c1"
+          ],
+          "target_queue_file": null,
+          "why": "This record contains two distinct roots. Its original obsolete-completion suspicion is source-refuted on the checked production path. Its latest provenance synthesis corroborates g050/l1, which should be retained once. Do not turn either conclusion into a whole-record dismissal.",
+          "checks": [
+            "52cc5d7250d262f93b730d91a07c240d33c2ea5f:store/environment_history.rs:60-99 has bounded independent source keys; store.rs:8282-8299 purges ordinary partitions on adoption but preserves this projection. These facts alone do not establish production replay admission.",
+            "52cc5d7250d262f93b730d91a07c240d33c2ea5f:store.rs:8789-8830 separates storage-only ingress from captured-operation ingress; :8863-8885 invokes current() under the database connection and checks durable identity; :9121 commits before the closure and _guard leave scope.",
+            "56659839785691f76da3af5d8f51b511cff4ba8b:sessions.rs:2065-2108 and 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db:sessions.rs:2202-2244 acquire the host writer and return it only when entry UUID, incarnation, connected identity and live client match. Endpoint db.rs:230-244 owns the SQLite mutex throughout work; manager.rs:2940-3004 commits adoption then withdraws the client and changes incarnation. This closes the stated obsolete A-to-B-to-A route, including a cancelled async waiter after blocking submission.",
+            "190d844e58c96cf197aa838d0b0eea8062f48435:sessions.rs:2051-2060 withholds explicit_selection for agents, but :2204-2233 independently supplies environment_target. The current-claim guard supplies no GUI-origin bit. The resulting distinct default/history effects are checked under g050/l1. All conclusions are source-only."
+          ],
+          "coverage_checked": [
+            "Current SPEC.md:5122-5127 excludes agent creates from GUI defaults and recents; SPEC_impl.md:5133-5140 requires GUI selection provenance and :6020-6023 forbids replay changing intent/frequency. Neither accepts the agent-origin effect.",
+            "TODO.md Planned is empty (:25-26). Searches of unlanded plans, BUGS.md, INDEX.md and active TRIAGE_OUTCOMES.md found no exact obsolete-completion or agent-origin convenience-bookkeeping cover. Podman/environment-agent plans are recorded landed in plans/REPORTS.md:21,28.",
+            "Read canonical-folder-history-contract-conflict.md and history-reply-lacks-installation-provenance.md: they concern host canonical reply spelling and response relabeling, not this guarded write or agent-origin admission. No exact alias or useful extension established.",
+            "FILTER.md supplies no full match: the established agent-origin effect is durable and does not require a human subsecond race. Replay refutation rests on source, not rarity."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": "No missing source premise remains for the narrow obsolete-claim refutation or g050/l1 corroboration. A stronger security-default consequence would require an actual production ingress bypassing the checked claim/identity boundary; none is established here.",
+          "original_stronger_consequence": "Obsolete create completion after identity A-to-B-to-A and bounded-key eviction could restore older permission/wrapper defaults or launch authority without current confirmation. Preserve this conditional security concern and the initial absence-of-caller withdrawal; the later provenance finding does not replace it.",
+          "needs_independent_drop_check": true,
+          "proposed_basis": "Split at recording: put the obsolete-claim source refutation together with g050/c1 into the independent drop register; retain g050/l1 once and cite this record as corroboration. This consultation authorizes neither dismissal nor consequence lowering."
+        }
+      ],
+      "parent_proposals": [
+        {
+          "artifact": "parent-flagged-judgments-031.json",
+          "key": "g049/l1",
+          "proposal": "claim-checks/claims-031/result.json",
+          "parent_proposal": "split-obsolete-completion-source-refutation-and-retained-agent-origin-history",
+          "final_independent_gate": "required-before-original-security-default-drop",
+          "reason": "Parent read full031: foundationboundedkeys/adoptionpreservationnotproductionbypass; actual566/endpointcallerhostwriter/currententry-incarnation-clientidentitycheckunderSQLite andreturnsownedguardthroughcommit, durableIDclosesadoptioncommit-beforepublication, tokennonreuseclosesA-B-A. Narrowobsoletecompletionrefutationneedsfreshgateoriginalpermission/wrapperdefaultsecurityclaim. LatercurrentagentoriginNULLselectionseparatetargetwritesdefault/agesrecentscorroboratesretained020l5/050l1; no whole-recorddrop mayeraseprovenance. Storage-onlywrappernobasisfortholeintegrationrefutation."
+        }
+      ],
+      "collection": {
+        "retain": true,
+        "clearly_refuted_candidate": false,
+        "needs_unfinished_gate": true,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "environment-history-obsolete-claim-after-adoption",
+        "destination": "trailing-environment-history-obsolete-claim-after-adoption.md"
+      }
+    },
+    {
+      "key": "g049/c2",
+      "owner": "g049",
+      "id": "c2",
+      "domain": "environment-durable-state",
+      "purpose": "environment-durable-state: crates/farhelm-helm/src/store.rs, crates/farhelm-helm/src/store/environment_history.rs; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 3,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c2",
+            "state": "open",
+            "summary": "Recipe-place retention is absent only before Podman artifact production exists",
+            "location": "crates/farhelm-helm/src/store.rs:7539",
+            "detail": "Reviewed commit: 04ffdbb35773cef36e73eb798c005ddbeb9a9de6. TLDR considered: removing or retargeting a container host that retains recipe images could lose the cleanup route. SPEC_impl.md:6443-6446 requires refusal while rows or recipe artifacts reference a place. store.rs:7539 and 8020 call podman::refuse_referenced_place transactionally; at this revision store/podman.rs:183-195 checks referring rows but not recipe state. Source checks establish that this is a staged storage change: register_session_container has no production caller (all matches in access.rs, provisioning.rs and store/podman.rs are cfg(test)); environment/recipes.rs only defines Podman artifact records; repository-wide search for podman.insert/entry and BuiltImage/PreparedImage construction finds no artifact producer outside the pure recipe-state test at environment/recipes_tests.rs:104. The later provider-stage revision 56659839785691f76da3af5d8f51b511cff4ba8b adds the recipe-state needs_cleanup guard in store/podman.rs:225-246. No shipped state-producing route to the consequence exists in the reviewed patch. Suggested bucket: no finding. Could-be-highest: considered loss of cleanup access to retained resource state; no established loss of user work or security route, and no producer premise. Confidence: confirmed source refutation at recorded revision. proposed_drop: absent production artifact creation at this intermediate revision; not dropped merely because later work fixes it. possible_cover: none. No runtime execution or reproduction."
+          }
+        }
+      ],
+      "latest": {
+        "line": 3,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c2",
+          "state": "open",
+          "summary": "Recipe-place retention is absent only before Podman artifact production exists",
+          "location": "crates/farhelm-helm/src/store.rs:7539",
+          "detail": "Reviewed commit: 04ffdbb35773cef36e73eb798c005ddbeb9a9de6. TLDR considered: removing or retargeting a container host that retains recipe images could lose the cleanup route. SPEC_impl.md:6443-6446 requires refusal while rows or recipe artifacts reference a place. store.rs:7539 and 8020 call podman::refuse_referenced_place transactionally; at this revision store/podman.rs:183-195 checks referring rows but not recipe state. Source checks establish that this is a staged storage change: register_session_container has no production caller (all matches in access.rs, provisioning.rs and store/podman.rs are cfg(test)); environment/recipes.rs only defines Podman artifact records; repository-wide search for podman.insert/entry and BuiltImage/PreparedImage construction finds no artifact producer outside the pure recipe-state test at environment/recipes_tests.rs:104. The later provider-stage revision 56659839785691f76da3af5d8f51b511cff4ba8b adds the recipe-state needs_cleanup guard in store/podman.rs:225-246. No shipped state-producing route to the consequence exists in the reviewed patch. Suggested bucket: no finding. Could-be-highest: considered loss of cleanup access to retained resource state; no established loss of user work or security route, and no producer premise. Confidence: confirmed source refutation at recorded revision. proposed_drop: absent production artifact creation at this intermediate revision; not dropped merely because later work fixes it. possible_cover: none. No runtime execution or reproduction."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g049/findings.jsonl",
+        "id": "c2",
+        "line": 3,
+        "disposition": "under-investigation",
+        "group": "g049-c2",
+        "reason": "Record durably acknowledged; parent source/contract validation, cross-group synthesis, coverage/filter matching and any independent drop check remain pending. This preserves the claim and uncertainty without accepting, dropping or lowering it."
+      },
+      "accepted_parent_decision": null,
+      "returned_claim_checks": [
+        {
+          "batch": "claims-031",
+          "key": "g049/c2",
+          "latest_line": 3,
+          "recommendation": "refuted",
+          "bucket": "other",
+          "underlying_key": "podman-place-removal-before-artifact-fence",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The intermediate storage patch omits the recipe-artifact fence, but has no shipped artifact producer. The provider-stage implementation adds the fence before the checked production capability. This is narrower than claiming every later cleanup path is safe.",
+          "checks": [
+            "04ffdbb35773cef36e73eb798c005ddbeb9a9de6:store/podman.rs:183-195 checks environment rows only. git grep for register_session_container, BuiltImage/PreparedImage construction and podman.insert/entry finds declarations and test fixtures, not production artifact creation; the sole podman.insert is environment/recipes_tests.rs:104.",
+            "56659839785691f76da3af5d8f51b511cff4ba8b:store/podman.rs:215-250 additionally reads every recipe state, refuses unreadable ownership state and checks PodmanRecipeState::needs_cleanup for the place. This is an actual recipe-resource fence, not a later cosmetic repair. No runtime test was run."
+          ],
+          "coverage_checked": [
+            "Current SPEC.md Container sessions:4866-4871 and SPEC_impl.md Environment rows and provider state:5964-5970 require retaining cleanup access while rows or recipe artifacts refer to the place; they do not accept losing it.",
+            "TODO Planned is empty. Searches of plans/queue, BUGS.md, INDEX.md and active TRIAGE_OUTCOMES.md found no exact same trigger/consequence item. The matching podman-environments plan is already landed (plans/REPORTS.md:21), so it is not unlanded-plan cover.",
+            "Read confirmation-rollback-omits-container-cleanup.md: its supervisor borrowed-checkout rollback and missing failure producer are a different root. FILTER supplies no cleanup-access-loss acceptance."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": "The claimed intermediate-revision consequence requires a shipped producer of retained Podman recipe resources; the focused symbol searches find none.",
+          "original_stronger_consequence": "Removing or retargeting a place could lose cleanup access to retained recipe resources. The primary record did not establish loss of user-owned work or a security route; resource-ownership implications are preserved conservatively.",
+          "needs_independent_drop_check": true,
+          "proposed_basis": "Absent production artifact creation at 04ffdbb35773cef36e73eb798c005ddbeb9a9de6, followed by a transactional needs_cleanup fence at the provider integration. Independent checking should agree only to this staged omission, not a general cleanup guarantee."
+        }
+      ],
+      "parent_proposals": [
+        {
+          "artifact": "parent-flagged-judgments-031.json",
+          "key": "g049/c2",
+          "proposal": "claim-checks/claims-031/result.json",
+          "parent_proposal": "source-refuted-staged-place-artifact-fence-before-production-producer",
+          "final_independent_gate": "required-by-conservative-resource-ownership-flag",
+          "reason": "Full031 04fffenceonlyenvrowsbutnoactualproductionpreparedartifactproducer(symbolchecksdecls/tests),566realproviderintegrationtransactionallyreadsallrecipestates/refusesunreadable/needs_cleanupbeforeplace removal. Narrowintermediateomissionwithoutshippedconsequence, notblanketfuturecleanupguarantee. Preservelosscleanupaccessresourceownershiphypothesisfreshgate; notlandedplanasfuturecover."
+        }
+      ],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": true,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "podman-place-removal-before-artifact-fence",
+        "destination": null
+      }
+    },
+    {
+      "key": "g049/c3",
+      "owner": "g049",
+      "id": "c3",
+      "domain": "environment-durable-state",
+      "purpose": "environment-durable-state: crates/farhelm-helm/src/store.rs, crates/farhelm-helm/src/store/environment_history.rs; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 4,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c3",
+            "state": "open",
+            "summary": "Deleted place IDs cannot be reused for a different host",
+            "location": "crates/farhelm-helm/src/store/environment_history.rs:107",
+            "detail": "Reviewed commit: 52cc5d7250d262f93b730d91a07c240d33c2ea5f. TLDR considered: a recent setup surviving container-host removal might silently target a newly registered host if its numeric ID were reused. History intentionally has no disposable-host foreign key and retains the place ID in target_json (environment_history.rs:22-35,107-175; farhelm-proto/src/environment.rs:22-27). SPEC.md:4798-4800 requires a missing recipe/container host to stay unavailable until the user changes the choice. Source refutation: hosts.id is INTEGER PRIMARY KEY AUTOINCREMENT (store.rs:2714-2715, likewise the historical fixture at 15812-15813), so ordinary row deletion and host addition cannot reuse the old place ID. Suggested bucket: no finding. Could-be-highest: explicitly considered launching on the wrong host and consequent credential delivery; the required ID-reuse premise is refuted, so no security route established. Confidence: confirmed from DDL and closed Place representation. proposed_drop: AUTOINCREMENT prevents the posited place-ID aliasing. possible_cover: none. No runtime execution or reproduction."
+          }
+        },
+        {
+          "line": 7,
+          "event": {
+            "version": 1,
+            "kind": "lead",
+            "id": "c3",
+            "state": "open",
+            "summary": "Separate reusable place identity from authority for a changed endpoint",
+            "location": "crates/farhelm-helm/src/store/environment_history.rs:107",
+            "detail": "# Separate reusable place identity from authority for a changed endpoint\n\nReviewed commit: 52cc5d7250d262f93b730d91a07c240d33c2ea5f; parent-supplied integration finding g020/l1 at 190d844e58c96cf197aa838d0b0eea8062f48435.\n\n## TLDR\n\nThe same retained container-host ID can name a changed physical machine even though deletion never recycles IDs. A pending approval can consequently deliver recipe credentials and execute on a machine its card did not name.\n\n## Details\n\nThe original AUTOINCREMENT argument refutes deletion/reuse only. It does not refute g020/l1's established changed-endpoint route through a permitted cold-place retarget, refreshed Podman probe and old pending card. Preserve that highest/security consequence for independent checking. Next inspect history/default consumers to determine whether reusable storage is responsible for freezing endpoint authority or the newly answered launch must capture and validate it. Suggested bucket: highest for g020/l1's established route, no separate storage finding established yet. Could-be-highest: yes, actual credential delivery/execution on another machine reported in the supplied source-validated interface record. Confidence: confirmed distinction; own consumer analysis in progress. proposed_drop: false for changed-endpoint authority; original deletion/reuse candidate remains preserved. possible_cover: g020/l1; g050/c2 makes this same distinction. Source-only; no execution."
+          }
+        },
+        {
+          "line": 10,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c3",
+            "state": "open",
+            "summary": "Reusable place storage does not bind pending endpoint consent",
+            "location": "crates/farhelm-helm/src/store/environment_history.rs:107",
+            "detail": "# Reusable place storage does not bind pending endpoint consent\n\nReviewed commit: 52cc5d7250d262f93b730d91a07c240d33c2ea5f; integration through 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db; changed-endpoint approval source checked at 190d844e58c96cf197aa838d0b0eea8062f48435.\n\n## TLDR\n\nA remembered numeric host ID survives as reusable placement. It cannot prove that a pending approval still acts on the physical machine its card named. The established credential-copy/execution consequence in g020/l1 remains highest and is not dropped.\n\n## Details\n\nOriginal narrow source refutation preserved: AUTOINCREMENT prevents a deleted place ID being allocated to another newly added host; it says nothing about destination edits of a surviving ordinary SSH row. SPEC.md:4798-4800 explicitly requires: 'Recent setups retain the recipe, container host when applicable, explicit agent selection and repository-or-home intent after Delete removes the environment. Applying one creates a fresh environment. A missing recipe or container host stays unavailable until the user changes that choice.' The storage projection meets that reusable-intent contract by retaining LaunchTarget rather than an installed environment's authority. Actual consumers keep that separation: endpoint create_form/draft.rs:1948-2043 accept_recent restores entry.target and selection into an editable draft, selects repository/home intent and never dispatches a launch itself; create_form.rs:4806-4825 leaves Enter submission to the ordinary submit path. environment_ui.rs:716-735 uses last_container_host only to choose a default among current places, not to authorize a command. An absent remembered default may fall back among current places, while explicit recent target remains captured; neither is evidence for answering an already-displayed approval.\n\nDirect source check of g020/l1's boundary confirms agent_requests.rs:4485-4515 captures place_name and numeric place for the card, then 4519-4550 revalidates clone origin only and passes the same place to start_session_environment after Allow, without a place-route snapshot argument. SPEC_impl.md:9548-9556 states: 'What a card shows is what an approval does' and 'A launch is also refused if the target host’s connection changed while the card waited, since the approval was for the machine the card named.' Its distinction is the approval answer, not durable history identity. The store's retarget fence covers existing rows/artifacts, not pending approvals at a cold place. Thus do not apply this candidate's ID-reuse refutation to that actual changed-endpoint route. Source attribution for the complete credential path and cold-place admission is the parent-supplied, validated g020/l1 latest record; no independent execution here.\n\nSuggested bucket: highest for the established changed-endpoint route, already carried in g020/l1; no additional storage-specific finding established. Could-be-highest: yes, configured recipe credentials and command execution on a different machine are explicitly preserved. Confidence: confirmed contract/consumer distinction from source, no runtime observation. proposed_drop: only the original deletion/reuse scenario is source-refuted by AUTOINCREMENT and missing-place retention is explicitly specified; false for changed-endpoint approval authority, and no parent drop accepted. possible_cover: g020/l1 is the existing finding for the changed-endpoint consequence; g050/c2 tracks the same storage/approval distinction. No remaining readily checkable premise for this assigned storage boundary; this candidate does not close or lower g020/l1."
+          }
+        }
+      ],
+      "latest": {
+        "line": 10,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c3",
+          "state": "open",
+          "summary": "Reusable place storage does not bind pending endpoint consent",
+          "location": "crates/farhelm-helm/src/store/environment_history.rs:107",
+          "detail": "# Reusable place storage does not bind pending endpoint consent\n\nReviewed commit: 52cc5d7250d262f93b730d91a07c240d33c2ea5f; integration through 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db; changed-endpoint approval source checked at 190d844e58c96cf197aa838d0b0eea8062f48435.\n\n## TLDR\n\nA remembered numeric host ID survives as reusable placement. It cannot prove that a pending approval still acts on the physical machine its card named. The established credential-copy/execution consequence in g020/l1 remains highest and is not dropped.\n\n## Details\n\nOriginal narrow source refutation preserved: AUTOINCREMENT prevents a deleted place ID being allocated to another newly added host; it says nothing about destination edits of a surviving ordinary SSH row. SPEC.md:4798-4800 explicitly requires: 'Recent setups retain the recipe, container host when applicable, explicit agent selection and repository-or-home intent after Delete removes the environment. Applying one creates a fresh environment. A missing recipe or container host stays unavailable until the user changes that choice.' The storage projection meets that reusable-intent contract by retaining LaunchTarget rather than an installed environment's authority. Actual consumers keep that separation: endpoint create_form/draft.rs:1948-2043 accept_recent restores entry.target and selection into an editable draft, selects repository/home intent and never dispatches a launch itself; create_form.rs:4806-4825 leaves Enter submission to the ordinary submit path. environment_ui.rs:716-735 uses last_container_host only to choose a default among current places, not to authorize a command. An absent remembered default may fall back among current places, while explicit recent target remains captured; neither is evidence for answering an already-displayed approval.\n\nDirect source check of g020/l1's boundary confirms agent_requests.rs:4485-4515 captures place_name and numeric place for the card, then 4519-4550 revalidates clone origin only and passes the same place to start_session_environment after Allow, without a place-route snapshot argument. SPEC_impl.md:9548-9556 states: 'What a card shows is what an approval does' and 'A launch is also refused if the target host’s connection changed while the card waited, since the approval was for the machine the card named.' Its distinction is the approval answer, not durable history identity. The store's retarget fence covers existing rows/artifacts, not pending approvals at a cold place. Thus do not apply this candidate's ID-reuse refutation to that actual changed-endpoint route. Source attribution for the complete credential path and cold-place admission is the parent-supplied, validated g020/l1 latest record; no independent execution here.\n\nSuggested bucket: highest for the established changed-endpoint route, already carried in g020/l1; no additional storage-specific finding established. Could-be-highest: yes, configured recipe credentials and command execution on a different machine are explicitly preserved. Confidence: confirmed contract/consumer distinction from source, no runtime observation. proposed_drop: only the original deletion/reuse scenario is source-refuted by AUTOINCREMENT and missing-place retention is explicitly specified; false for changed-endpoint approval authority, and no parent drop accepted. possible_cover: g020/l1 is the existing finding for the changed-endpoint consequence; g050/c2 tracks the same storage/approval distinction. No remaining readily checkable premise for this assigned storage boundary; this candidate does not close or lower g020/l1."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g049/findings.jsonl",
+        "id": "c3",
+        "line": 10,
+        "disposition": "under-investigation",
+        "group": "g049-c3",
+        "reason": "Record durably acknowledged; parent source/contract validation, cross-group synthesis, coverage/filter matching and any independent drop check remain pending. This preserves the claim and uncertainty without accepting, dropping or lowering it."
+      },
+      "accepted_parent_decision": null,
+      "returned_claim_checks": [
+        {
+          "batch": "claims-031",
+          "key": "g049/c3",
+          "latest_line": 10,
+          "recommendation": "refuted",
+          "bucket": "other",
+          "underlying_key": "environment-history-deleted-place-id-reuse",
+          "aliases": [
+            "g050/c2"
+          ],
+          "target_queue_file": null,
+          "why": "Ordinary deletion/addition does not recycle the numeric place ID. Retaining reusable place intent is specified. This conclusion says nothing about changing the endpoint of a surviving row or answering an old approval.",
+          "checks": [
+            "52cc5d7250d262f93b730d91a07c240d33c2ea5f:store.rs:2714-2715 declares hosts.id INTEGER PRIMARY KEY AUTOINCREMENT. environment_history.rs:23-34 retains a serialized target without a host foreign key. A deleted host's ordinary replacement therefore cannot acquire that saved ID.",
+            "00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db:create_form/draft.rs:1948-2043 restores recent intent into an editable draft, including target at :2005; environment_ui.rs:716-732 uses remembered place only as a picker default. Neither is the approval endpoint-binding mechanism.",
+            "190d844e58c96cf197aa838d0b0eea8062f48435:agent_requests.rs:4485-4515 captures place name plus numeric place before approval; :4519-4548 rechecks clone source then passes place to start_session_environment without a route snapshot. This supports the supplied distinction; the complete cold-place retarget/credential consequence remains attributed to the parent-supplied g020/l1, not independently re-proved here. No runtime observation."
+          ],
+          "coverage_checked": [
+            "Current SPEC.md:4873-4875 expressly requires missing recent targets to remain unavailable. SPEC_impl.md:6015-6023 separates reusable recipe/place intent from installed identity.",
+            "Current SPEC_impl.md:9090-9098 separately requires the confirmed machine to stay the same while approval waits. This is no acceptance of a changed-endpoint approval.",
+            "TODO Planned is empty. Searches of unlanded plans, BUGS.md, INDEX.md and active TRIAGE_OUTCOMES.md found no exact deleted-ID reuse or pending-environment approval cover. Matching historical environment plans are landed. Read history-reply-lacks-installation-provenance.md: it concerns relabeling an already-read history response, not ID reuse or pending place approval. No filter fully covers wrong-target credential/execution harm."
+          ],
+          "exact_cover_quotes": [
+            "SPEC.md:4873-4875: Recent setups retain the recipe, container host when applicable, explicit agent selection and repository-or-home intent after Delete removes the environment. Applying one creates a fresh environment. A missing recipe or container host stays unavailable until the user changes that choice."
+          ],
+          "missing_premise": "Deleted-ID reuse is refuted for ordinary row operations. The separately supplied changed-endpoint finding needs its own complete retarget/dispatch evidence and independent handling; reusable-history storage is not that authority boundary.",
+          "original_stronger_consequence": "Original suspicion: a deleted place ID could select another host and deliver credentials there. Later supplied g020/l1 asserts credential copying and execution on a retargeted surviving SSH row after an old approval; that highest consequence is explicitly preserved and is not dismissed by this recommendation.",
+          "needs_independent_drop_check": true,
+          "proposed_basis": "Refute deleted-row ID aliasing only; cover deliberate missing-place retention by the exact specification. Keep the separately owned changed-endpoint approval finding intact."
+        }
+      ],
+      "parent_proposals": [
+        {
+          "artifact": "parent-flagged-judgments-031.json",
+          "key": "g049/c3",
+          "proposal": "claim-checks/claims-031/result.json",
+          "parent_proposal": "source-refuted-deleted-place-numeric-alias-with-separate-live-endpoint-approval-preserved",
+          "final_independent_gate": "required-before-original-possible-credential-drop",
+          "reason": "Full031 AUTOINCREMENTblocksordinarydeletedplaceIDreuse; reusabletargetintentkept/restorededitable/pickerdefaultperSPEC. This doesnotprovephysicalendpointstabilityofsurvivingroworapprovalmachinebinding. Separate020l1/041l2pre-registrationretargetcredentialroutekeptpendingownjudgment, nocoverfromretainedID. Same050c2missingintentcoverandIDaliasrefutation, preservetwohistories; noexemptionwrongmachinefilter."
+        }
+      ],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": true,
+        "provisional_bucket": "highest",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "environment-history-deleted-place-id-reuse",
+        "destination": null
+      }
+    },
+    {
+      "key": "g049/c4",
+      "owner": "g049",
+      "id": "c4",
+      "domain": "environment-durable-state",
+      "purpose": "environment-durable-state: crates/farhelm-helm/src/store.rs, crates/farhelm-helm/src/store/environment_history.rs; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 5,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c4",
+            "state": "open",
+            "summary": "Shared destruction proof preserves row-specific removal admission",
+            "location": "crates/farhelm-helm/src/store.rs:7883",
+            "detail": "Reviewed commit: ee39aeacdaccfeaa0cea25246540b20008c868f0. TLDR considered: generalizing sandbox deletion evidence might allow forgetting a resource before its cleanup is confirmed. Source checks: store.rs:7883-7922 computes proven only when proof.host() equals the row being removed and continues refusing Tensorlake removal without it. environment/mod.rs:Destroy​ed wraps the opaque SandboxDeleted and delegates host() without adding a public constructor. tensorlake/hosts.rs:48-71 retains the existing private attest constructor and the explicitly contracted never_created rollback constructor. HostRow::environment_binding clones the existing binding, including saved sandbox ID and pending-create marker (store.rs:978-991; tensorlake_binding at 4859-4881), rather than reconstructing deletion authority from a live name lookup. The patch changes the proof type without weakening the cleanup/row binding. Suggested bucket: no finding. Could-be-highest: yes, resource ownership could be lost if this admission weakened; source refutes the hypothesized weakening. Confidence: confirmed by source and SPEC_impl.md:6448-6449, 'Destruction returns provider-confirmed cleanup evidence before the store forgets a resource row.' proposed_drop: unchanged row-specific guard and opaque provider proof. possible_cover: none. No runtime execution or reproduction."
+          }
+        },
+        {
+          "line": 9,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c4",
+            "state": "open",
+            "summary": "Destruction proof stays within locked cleanup and row deletion",
+            "location": "crates/farhelm-helm/src/hosts.rs:1420",
+            "detail": "# Destruction proof stays within locked cleanup and row deletion\n\nReviewed commit: ee39aeacdaccfeaa0cea25246540b20008c868f0.\n\n## TLDR\n\nThe extraction does not establish the feared loss of resource ownership through a stale or mismatched deletion proof. Its production callers keep the proof within one locked cleanup/removal operation.\n\n## Details\n\nOriginal potential consequence preserved: forgetting a still-owned environment could lose the cleanup record, and destruction-authority errors could affect user work; could-be-highest remains yes for independent checking. Checked the actual callers, not only the opaque type. hosts.rs:1374-1384 acquires the provisioning lock before forget_host_locked; 1420-1490 holds it while reading the row, parking the connection, releasing shared routes, calling provider.destroy on the captured binding, consuming its returned proof in delete_registered_host, stopping the actor and closing tunnels. There is no retained or reusable proof cache. provisioning/service.rs:2051-2092 takes host_write_lock before the row deletion and retains it through actor removal. That operation requires the provisioning lock already held. Provider destroy dispatch delegates to Tensorlake's delete_binding; tensorlake/hosts.rs:220-306 uses the captured saved ID or pending-create evidence, saves a recovered ID before termination, confirms termination and deletes associated snapshots before the private attest constructor. Failure returns without proof. The never-created fast path requires no saved ID and no pending create (243); the separate registration-rollback constructor at provisioning/tensorlake_add.rs:530-568 executes only after registration/reconciliation failure, before any run is spawned/provider I/O begins, under add_confirmations. It immediately removes that just-registered row. hosts.rs retarget/removal and provisioning share the provisioning lock; Tensorlake environment destinations are immutable in the store. Host IDs are AUTOINCREMENT, and the store requires proof.host()==host.\n\nThis does not claim that an opaque proof alone protects arbitrary callers forever; the actual callers provide the required lifetime and exclusion here. SPEC_impl.md:6448-6449: 'Destruction returns provider-confirmed cleanup evidence before the store forgets a resource row.' Suggested bucket: no separate finding. Confidence: confirmed source/contract analysis. proposed_drop: actual provider proof construction and immediate locked consumption preserve the pre-extraction deletion contract; parent has accepted no drop. possible_cover: parent-supplied g023/f3 addresses never-created rollback timing, consistent with this direct source check. No execution/reproduction; no unresolved caller/lifetime premise for the assigned extraction."
+          }
+        }
+      ],
+      "latest": {
+        "line": 9,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c4",
+          "state": "open",
+          "summary": "Destruction proof stays within locked cleanup and row deletion",
+          "location": "crates/farhelm-helm/src/hosts.rs:1420",
+          "detail": "# Destruction proof stays within locked cleanup and row deletion\n\nReviewed commit: ee39aeacdaccfeaa0cea25246540b20008c868f0.\n\n## TLDR\n\nThe extraction does not establish the feared loss of resource ownership through a stale or mismatched deletion proof. Its production callers keep the proof within one locked cleanup/removal operation.\n\n## Details\n\nOriginal potential consequence preserved: forgetting a still-owned environment could lose the cleanup record, and destruction-authority errors could affect user work; could-be-highest remains yes for independent checking. Checked the actual callers, not only the opaque type. hosts.rs:1374-1384 acquires the provisioning lock before forget_host_locked; 1420-1490 holds it while reading the row, parking the connection, releasing shared routes, calling provider.destroy on the captured binding, consuming its returned proof in delete_registered_host, stopping the actor and closing tunnels. There is no retained or reusable proof cache. provisioning/service.rs:2051-2092 takes host_write_lock before the row deletion and retains it through actor removal. That operation requires the provisioning lock already held. Provider destroy dispatch delegates to Tensorlake's delete_binding; tensorlake/hosts.rs:220-306 uses the captured saved ID or pending-create evidence, saves a recovered ID before termination, confirms termination and deletes associated snapshots before the private attest constructor. Failure returns without proof. The never-created fast path requires no saved ID and no pending create (243); the separate registration-rollback constructor at provisioning/tensorlake_add.rs:530-568 executes only after registration/reconciliation failure, before any run is spawned/provider I/O begins, under add_confirmations. It immediately removes that just-registered row. hosts.rs retarget/removal and provisioning share the provisioning lock; Tensorlake environment destinations are immutable in the store. Host IDs are AUTOINCREMENT, and the store requires proof.host()==host.\n\nThis does not claim that an opaque proof alone protects arbitrary callers forever; the actual callers provide the required lifetime and exclusion here. SPEC_impl.md:6448-6449: 'Destruction returns provider-confirmed cleanup evidence before the store forgets a resource row.' Suggested bucket: no separate finding. Confidence: confirmed source/contract analysis. proposed_drop: actual provider proof construction and immediate locked consumption preserve the pre-extraction deletion contract; parent has accepted no drop. possible_cover: parent-supplied g023/f3 addresses never-created rollback timing, consistent with this direct source check. No execution/reproduction; no unresolved caller/lifetime premise for the assigned extraction."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g049/findings.jsonl",
+        "id": "c4",
+        "line": 9,
+        "disposition": "under-investigation",
+        "group": "g049-c4",
+        "reason": "Record durably acknowledged; parent source/contract validation, cross-group synthesis, coverage/filter matching and any independent drop check remain pending. This preserves the claim and uncertainty without accepting, dropping or lowering it."
+      },
+      "accepted_parent_decision": null,
+      "returned_claim_checks": [
+        {
+          "batch": "claims-031",
+          "key": "g049/c4",
+          "latest_line": 9,
+          "recommendation": "refuted",
+          "bucket": "other",
+          "underlying_key": "environment-destruction-proof-extraction-lifetime",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The provider-proof extraction preserves the row-specific removal gate, and the inspected callers construct and consume evidence within one serialized cleanup/removal operation. No stale reusable proof route is established.",
+          "checks": [
+            "ee39aeacdaccfeaa0cea25246540b20008c868f0:store.rs:7883-7913 requires matching proof.host() for Tensorlake removal; environment/mod.rs:197-210 wraps the opaque provider proof and delegates host identity.",
+            "Same revision hosts.rs:1377-1385,1420-1478 holds the provisioning guard across captured-binding destruction, immediate delete_registered_host and actor/tunnel retirement. provisioning/service.rs:2055-2091 documents that prerequisite and retains the host writer across store removal and actor removal.",
+            "Same revision tensorlake/hosts.rs:48-71 keeps successful attestation private; :240-308 uses saved ID or pending-create evidence, saves recovered IDs, confirms termination and removes snapshots before attestation. Errors return without proof. The no-saved-ID/no-pending-create path at :242-243 is the explicit never-created exception.",
+            "Same revision provisioning/tensorlake_add.rs:530-568 serializes registration with add_confirmations and constructs never_created only after registration/reconciliation failure before starting run setup. It immediately removes that new row. No proof cache or arbitrary delayed consumption was found in these named callers; no runtime reproduction."
+          ],
+          "coverage_checked": [
+            "SPEC_impl.md:5969-5970 requires provider-confirmed cleanup before forgetting a row; :6273-6275 documents pre-create registration rollback. SPEC.md Container sessions requires confirmed absence before forgetting resources. No acceptance of arbitrary stale proof or forgotten live resources was found.",
+            "TODO Planned is empty. Searches of unlanded plans, BUGS.md, INDEX.md and active TRIAGE_OUTCOMES.md found no exact provider-proof extraction/lifetime item. confirmation-rollback-omits-container-cleanup.md concerns a different supervisor row-removal mechanism. No filter supplies the source-refutation basis."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": "No supported caller retaining or reusing a proof across resource replacement is established by the named extraction. This conclusion is limited to the checked construction and consumption paths.",
+          "original_stronger_consequence": "A weakened destruction gate could forget a still-owned resource, lose its cleanup record or affect user work. Preserve this could-be-highest suspicion even though the checked extraction does not weaken the gate.",
+          "needs_independent_drop_check": true,
+          "proposed_basis": "Unchanged host-bound gate plus actual locked provider construction and immediate consumption, including the separately contracted pre-create rollback. Obtain an independent narrow source-refutation agreement before dropping."
+        }
+      ],
+      "parent_proposals": [
+        {
+          "artifact": "parent-flagged-judgments-031.json",
+          "key": "g049/c4",
+          "proposal": "claim-checks/claims-031/result.json",
+          "parent_proposal": "source-refuted-extracted-provider-proof-lifetime-weakening",
+          "final_independent_gate": "required-before-possible-highest-forgotten-resource-drop",
+          "reason": "Full031 unchangedhostboundstoregate/opaqueproofwrap; actuallockedbindingdestroy→immediateforget+actorretirement/hostwriter, successfulattestationprivateaftertermination+snapshotcleanup, errorsnoproof; precreateregistrationrollbacknevercreatedbeforetasksetup. No cache/reuseacrossreplacementincheckedcallers. Refutesnamedextractionweakeningonly, notarbitraryincratefabrication/providerinternals/externalmutation. Originaluserresourcecleanuprecord/workriskpreservedfreshgate."
+        }
+      ],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": true,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "environment-destruction-proof-extraction-lifetime",
+        "destination": null
+      }
+    },
+    {
+      "key": "g049/c5",
+      "owner": "g049",
+      "id": "c5",
+      "domain": "environment-durable-state",
+      "purpose": "environment-durable-state: crates/farhelm-helm/src/store.rs, crates/farhelm-helm/src/store/environment_history.rs; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 13,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c5",
+            "state": "open",
+            "summary": "Bounded pruning retains the newest environment admission key",
+            "location": "crates/farhelm-helm/src/store/environment_history.rs:94",
+            "detail": "# Bounded pruning retains the newest environment admission key\n\nReviewed commit: 52cc5d7250d262f93b730d91a07c240d33c2ea5f.\n\n## TLDR\n\nConsidered whether the shared recent-setup order could reuse an old admission number after pruning and therefore misorder a later launch. The production pruning path retains the greatest key, so this route is refuted.\n\n## Details\n\nDiscovery source check: environment_launch_history uses admission_order INTEGER PRIMARY KEY without AUTOINCREMENT (environment_history.rs:23-24). However record inserts one row then deletes only rows ordered admission_order DESC beyond MAX_LAUNCH_HISTORY (94-99); the cap is 100 at store.rs:101, not zero. The greatest key survives every ordinary pruning operation, and the next implicit ROWID is above that surviving maximum. The table intentionally has no host-deletion cascade (23-35), so deleting the origin host does not erase the newest key; identity adoption likewise does not delete this projection, as checked under l1. The reader orders by this same key (111-115), with u64 conversion in decode_entry at 173. No production reset/clear or deletion of the current maximum was found in the assigned file or its full-range change; its only DELETE is the bounded pruning statement. This check concerns shared order only and does not refute the independently supplied agent-origin eviction finding in g050/l1. Suggested bucket: no finding (conditional suggestion ordering, other). Could-be-highest: no; no security or work-loss route established by reused recency numbers. Confidence: confirmed source refutation, no execution. proposed_drop: pruning preserves the maximum rowid and no ordinary path empties/resets this independent table; parent has accepted no drop. possible_cover: none; no coverage sources searched. No unresolved premise for this considered route."
+          }
+        }
+      ],
+      "latest": {
+        "line": 13,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c5",
+          "state": "open",
+          "summary": "Bounded pruning retains the newest environment admission key",
+          "location": "crates/farhelm-helm/src/store/environment_history.rs:94",
+          "detail": "# Bounded pruning retains the newest environment admission key\n\nReviewed commit: 52cc5d7250d262f93b730d91a07c240d33c2ea5f.\n\n## TLDR\n\nConsidered whether the shared recent-setup order could reuse an old admission number after pruning and therefore misorder a later launch. The production pruning path retains the greatest key, so this route is refuted.\n\n## Details\n\nDiscovery source check: environment_launch_history uses admission_order INTEGER PRIMARY KEY without AUTOINCREMENT (environment_history.rs:23-24). However record inserts one row then deletes only rows ordered admission_order DESC beyond MAX_LAUNCH_HISTORY (94-99); the cap is 100 at store.rs:101, not zero. The greatest key survives every ordinary pruning operation, and the next implicit ROWID is above that surviving maximum. The table intentionally has no host-deletion cascade (23-35), so deleting the origin host does not erase the newest key; identity adoption likewise does not delete this projection, as checked under l1. The reader orders by this same key (111-115), with u64 conversion in decode_entry at 173. No production reset/clear or deletion of the current maximum was found in the assigned file or its full-range change; its only DELETE is the bounded pruning statement. This check concerns shared order only and does not refute the independently supplied agent-origin eviction finding in g050/l1. Suggested bucket: no finding (conditional suggestion ordering, other). Could-be-highest: no; no security or work-loss route established by reused recency numbers. Confidence: confirmed source refutation, no execution. proposed_drop: pruning preserves the maximum rowid and no ordinary path empties/resets this independent table; parent has accepted no drop. possible_cover: none; no coverage sources searched. No unresolved premise for this considered route."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g049/findings.jsonl",
+        "id": "c5",
+        "line": 13,
+        "disposition": "excluded",
+        "group": "environment-history-pruning-rowid-reuse",
+        "reason": "Parent explicitly accepted named refuted proposal from claims-031 after inspecting it. Ordinary pruning retains the greatest admission key, so omission of AUTOINCREMENT does not cause the proposed key reuse and recency inversion. The nonzero newest-first pruning cap preserves the maximum, which is the premise the suspected ordinary ROWID reuse lacks. Checked source/results: [\"52cc5d7250d262f93b730d91a07c240d33c2ea5f:environment_history.rs:23-34 uses INTEGER PRIMARY KEY; :93-99 deletes only keys below the newest MAX_LAUNCH_HISTORY entries. store.rs:101 fixes that cap at 100. The maximum therefore survives each ordinary prune.\",\"The same projection has no host-deletion foreign key; store.rs:8282-8299 adoption deletion names only ordinary history tables. git grep finds this projection's sole DELETE at environment_history.rs:94, and git diff from the foundation to 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db shows no change to that file. No ordinary maximum-removal/reset route is present. No execution.\"] Current coverage/results: [\"SPEC_impl.md:6020-6023 requires shared admission ordering and stable replay frequency; SPEC.md:4873-4875 requires retained reusable intent. Neither accepts misordering, but source does not establish it.\",\"TODO Planned is empty. Searches of plans/queue, BUGS.md, INDEX.md and active TRIAGE_OUTCOMES.md for pruning, admission, replay and environment recents found no exact same issue. Existing terminal replay/history items have different data and consequences. No filter is needed.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Wrong ordering of convenience suggestions only; no stronger security or user-work-loss consequence was claimed. This does not refute agent-origin window eviction in g050/l1.\"; \"The posited implicit-key reuse requires removing the current maximum or emptying/resetting the table; no ordinary path does that in the checked range.\"."
+      },
+      "accepted_parent_decision": {
+        "key": "g049/c5",
+        "line": 13,
+        "disposition": "excluded",
+        "group": "environment-history-pruning-rowid-reuse",
+        "bucket": "other",
+        "recording": "refuted",
+        "queue_target_candidate": null,
+        "needs_independent_drop_check": false,
+        "reason": "Parent explicitly accepted named refuted proposal from claims-031 after inspecting it. Ordinary pruning retains the greatest admission key, so omission of AUTOINCREMENT does not cause the proposed key reuse and recency inversion. The nonzero newest-first pruning cap preserves the maximum, which is the premise the suspected ordinary ROWID reuse lacks. Checked source/results: [\"52cc5d7250d262f93b730d91a07c240d33c2ea5f:environment_history.rs:23-34 uses INTEGER PRIMARY KEY; :93-99 deletes only keys below the newest MAX_LAUNCH_HISTORY entries. store.rs:101 fixes that cap at 100. The maximum therefore survives each ordinary prune.\",\"The same projection has no host-deletion foreign key; store.rs:8282-8299 adoption deletion names only ordinary history tables. git grep finds this projection's sole DELETE at environment_history.rs:94, and git diff from the foundation to 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db shows no change to that file. No ordinary maximum-removal/reset route is present. No execution.\"] Current coverage/results: [\"SPEC_impl.md:6020-6023 requires shared admission ordering and stable replay frequency; SPEC.md:4873-4875 requires retained reusable intent. Neither accepts misordering, but source does not establish it.\",\"TODO Planned is empty. Searches of plans/queue, BUGS.md, INDEX.md and active TRIAGE_OUTCOMES.md for pruning, admission, replay and environment recents found no exact same issue. Existing terminal replay/history items have different data and consequences. No filter is needed.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Wrong ordering of convenience suggestions only; no stronger security or user-work-loss consequence was claimed. This does not refute agent-origin window eviction in g050/l1.\"; \"The posited implicit-key reuse requires removing the current maximum or emptying/resetting the table; no ordinary path does that in the checked range.\"."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-031",
+          "key": "g049/c5",
+          "latest_line": 13,
+          "recommendation": "refuted",
+          "bucket": "other",
+          "underlying_key": "environment-history-pruning-rowid-reuse",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "Ordinary pruning retains the greatest admission key, so omission of AUTOINCREMENT does not cause the proposed key reuse and recency inversion.",
+          "checks": [
+            "52cc5d7250d262f93b730d91a07c240d33c2ea5f:environment_history.rs:23-34 uses INTEGER PRIMARY KEY; :93-99 deletes only keys below the newest MAX_LAUNCH_HISTORY entries. store.rs:101 fixes that cap at 100. The maximum therefore survives each ordinary prune.",
+            "The same projection has no host-deletion foreign key; store.rs:8282-8299 adoption deletion names only ordinary history tables. git grep finds this projection's sole DELETE at environment_history.rs:94, and git diff from the foundation to 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db shows no change to that file. No ordinary maximum-removal/reset route is present. No execution."
+          ],
+          "coverage_checked": [
+            "SPEC_impl.md:6020-6023 requires shared admission ordering and stable replay frequency; SPEC.md:4873-4875 requires retained reusable intent. Neither accepts misordering, but source does not establish it.",
+            "TODO Planned is empty. Searches of plans/queue, BUGS.md, INDEX.md and active TRIAGE_OUTCOMES.md for pruning, admission, replay and environment recents found no exact same issue. Existing terminal replay/history items have different data and consequences. No filter is needed."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": "The posited implicit-key reuse requires removing the current maximum or emptying/resetting the table; no ordinary path does that in the checked range.",
+          "original_stronger_consequence": "Wrong ordering of convenience suggestions only; no stronger security or user-work-loss consequence was claimed. This does not refute agent-origin window eviction in g050/l1.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "The nonzero newest-first pruning cap preserves the maximum, which is the premise the suspected ordinary ROWID reuse lacks."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "environment-history-pruning-rowid-reuse",
+        "destination": null
+      }
+    }
+  ],
+  "replies": [
+    {
+      "turn": 1,
+      "reply": "Initial review complete: all five assigned commits and 1,107 patch lines reviewed. No reportable findings or unresolved leads.\n\nFour considered concerns, their source refutations, and coverage status are recorded in `findings.jsonl` and `progress.md`. No tests or reproductions run. Ready for the separate synthesis turn."
+    },
+    {
+      "turn": 2,
+      "reply": "Revised `l1`, `c3`, and `c4` with caller, transaction, and proof-lifetime evidence. No new findings.\n\n`c3` now explicitly preserves g020/l1’s highest-severity retargeting consequence; AUTOINCREMENT refutes deletion/reuse only. No drops accepted.\n\nUnresolved lead IDs: none. No execution or reproductions."
+    },
+    {
+      "turn": 3,
+      "reply": "Discovery pass 1 complete. Checked provider decoding, install admission, migrations, history ordering/decoding, removal transactions, and changed test fixtures.\n\nNothing new found. Recorded candidate `c5` with its source refutation; revised `l1` to preserve g050’s distinct provenance finding.\n\nNew verified IDs: none. New unverified IDs: none. Open leads: none. No execution or reproductions."
+    }
+  ],
+  "progress": "# g049 environment-durable-state\n\nInitial review turn 1 complete. Discovery-pass count: 0; no later synthesis/discovery protocol performed.\n\nRead the complete brief and inventory commits field only. All 1,107 assigned patch lines delivered through evidence reads: 00096 1-64; 00156 1-200, 201-400, 401-600, 601-799; 00170 1-200; 00205 1-31; 01038 1-13. No unread assigned scope.\n\nRead required priority and recording sections, test-authoring checklist, pinned disposable-environment contracts in SPEC_impl.md 6408-6594, confirmation contract 1068 onward, and relevant SPEC.md creation/recent-setup, sandbox and container sections. SPEC.md/SPEC_impl.md do not change between the storage-stage and history-stage assigned revisions. Source context checked at each assigned revision; endpoint used only to locate the later ingress interface, never to excuse an intermediate regression. The initial combined context request clipped; its environment-module material and relevant store production history were reread in bounded separate commands. Assigned evidence packets were not clipped.\n\nResults: no verified findings. Durable records l1 (lead revised to source-refuted candidate), c2, c3, c4; no unresolved lead IDs. Candidate c4 concerns a could-be-highest consequence and requires the parent's independent drop check. All consequences, source refutations, missing shipped premises and bucket caveats are retained in findings.jsonl. The evidence recorder rejected l1's first candidate revision because state=closed is invalid; corrected state=open and successfully appended the same candidate detail. The latest candidate kind resolves the former lead.\n\nInterface assumptions checked: ordinary SSH and local hosts alone can be places; row retention and retarget safeguards execute in the same transaction; immutable provider/name/place coordinates are decoded separately from install paths; provider cleanup evidence remains row-specific. At the history-stage revision production acceptance does not yet pass environment targets. Later acceptance uses the guarded API and belongs to adjacent ingress groups; the source-only bounded-key concern alone establishes no shipped replay route. At the Podman storage-stage revision there is no production container/artifact producer; later provider-stage recipe-place retention exists. Host IDs use AUTOINCREMENT, so independent recent setups cannot alias a later host through ordinary row deletion/addition.\n\nValidation: source/contract analysis only. No runtime tests, builds, bug reproductions, repository mutations, coverage metadata or queue records read. Only private group artifacts written.\n\nNext action: return to parent for the separately requested synthesis turn. New verified IDs this pass: none. New unverified IDs retained: none.\n\n## Synthesis turn 2\n\nCompleted later-turn synthesis; discovery-pass count remains 0. No new finding ID. Revised l1, c3 and c4 under their original IDs, preserving every initial event and potential highest consequence. Temporarily reopened l1/c3 as leads before investigation and returned each to candidate after resolving readily checkable premises. No unresolved lead IDs. No drop accepted; candidates still require independent checks.\n\nRead the parent-supplied g050 records and g020/l1 latest. For l1, located the production caller introduction with git log -S at 56659839785691f76da3af5d8f51b511cff4ba8b and inspected its complete record_created_history method plus endpoint sessions.rs 2174-2248, store.rs 8850-8899, manager's host-write lock/adoption invalidation, and the actual shared Db::call implementation. Result: current authority is checked while owning SQLite; returned owned host-write guard survives through commit and waiter cancellation; SQL identity and fresh incarnation protect adoption before/after publication. Foundation-stage absence of callers is no longer used as a whole-range refutation.\n\nFor c3, checked actual recent-setup application and remembered-place consumers: they restore editable draft/default intent, rather than dispatching from storage. Directly inspected the supplied changed-endpoint approval source and contract. AUTOINCREMENT addresses deletion/reuse only. Highest credential-copy/execution consequence through a retargeted cold place remains in g020/l1; candidate c3 does not close/lower it and does not propose dropping that route. No separate storage-specific defect established.\n\nFor c4, checked production proof creators and callers at extraction revision ee39aeacdaccfeaa0cea25246540b20008c868f0: hosts.rs 1374-1490, provisioning/service.rs 2051-2092, tensorlake_add.rs 530-568, tensorlake/hosts.rs 220-306. Provider proof is created after confirmation (or established never-sent rollback), immediately consumed under the provisioning lock, with host write lock for durable row deletion; no proof cache or cross-operation retention. Original could-be-highest consequence remains recorded for independent check.\n\nc2's foundation-stage artifact-producer premise and later retention guard were already directly checked; no new premise or conclusion arose in synthesis. Assigned 1,107-line coverage unchanged and no unread assigned scope. Relevant pinned contracts retained from initial turn; additional endpoint and approval contract/source checked as noted above. No tests/builds/reproductions or checkout mutations. Only private artifacts updated.\n\nNext action: parent independent synthesis/drop checks. This turn new verified finding IDs: none. New unresolved/unverified IDs retained: none. Candidate revisions: l1, c3, c4. No further turn protocol performed.\n\n## Discovery turn 3 — pass 1\n\nCompleted the separate discovery pass; discovery-pass count: 1. Read discovery-neighbours.json completely in bounded ranges 1-120, 121-160, 161-200, 201-242. This is supplied interface context, not mandatory source credit. All earlier findings/candidate/lead events remain intact.\n\nBefore new search, synthesized the named g050/l1 provenance input. Appended two l1 candidate revisions making explicit that current-connection authority does not establish GUI-choice provenance. Direct checks at 190d844e58c96cf197aa838d0b0eea8062f48435 covered sessions.rs 2044-2070, SPEC.md 5145-5177 and environment_history.rs 40-104. They support g050's independently recorded agent-origin place/default and recent-window consequence; no duplicate new finding ID or issue credit. Original replay/security consequence and scoped proposed-drop basis preserved; no drop/lowering accepted.\n\nSeparate assigned-scope search examined ordinary discovered-install convergence and its transactional kind/provider admission (04ff store.rs 7180-7334), retarget validation and uniqueness handling (7490-7625), all discriminator tuples (775-823), pending/complete/partial login decoding at provider integration (566 store/podman.rs 119-191), additive migration/fresh-version coupling and historical fixture rewinding (04ff store.rs 2952-3018, 15260-15310 and podman migration 73-103), alias full-discriminator checks and removal transaction (7880-8059), entire environment_history.rs including decode/failure handling and corruption test, deletion/replay persistence test fixture (52cc store.rs 10240-10344), extraction diff at ee39, 566's admitted-path OR condition/re-export change, and the f560 fixture removal against actual removed protocol fields. The full-range environment_history diff was checked for attribution/late changes. No production correctness argument was used to dismiss a distinct test-oracle or documentation defect. No such separate defect was substantiated by these checks.\n\nNew candidate c5 records the considered admission-order ROWID reuse concern and source refutation: bounded pruning retains the maximum, no host cascade/adoption clears it, and the assigned projection has no ordinary reset path. Candidate is not a verified/unverified issue and not an accepted drop. No substantive source lead remained unchecked.\n\nResult: nothing new found beyond supplied/previous findings. New verified finding IDs: none. New unverified-after-investigation IDs: none. New candidate IDs: c5. Revised known ID: l1 (cross-group provenance boundary only). Remaining open lead IDs: none. Unread assigned scope: none. Initial audited 1,107-line delivery remains unchanged. No runtime tests, builds, reproductions, prohibited coverage-source searches or live-install actions. Only private group artifacts written.\n\nNext action: parent independent audit/synthesis. A new substantive discovery did not occur in this pass.\n"
+}

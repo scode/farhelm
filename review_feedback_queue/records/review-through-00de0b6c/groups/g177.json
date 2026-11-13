@@ -1,0 +1,431 @@
+{
+  "group": {
+    "id": "g177",
+    "domain": "browser-terminal-regressions",
+    "purpose": "browser-terminal-regressions: e2e/tests/terminal-replay-rename.spec.ts, e2e/tests/terminal-scroll-freeze.spec.ts; phases complete small per-commit changes",
+    "interfaces": [
+      "g005",
+      "g006",
+      "g079",
+      "g080",
+      "g081",
+      "g082",
+      "g083",
+      "g084",
+      "g091",
+      "g092",
+      "g176",
+      "g178",
+      "g181"
+    ],
+    "sources": [
+      {
+        "path": "[private-run]/prep/parts/00836-000.patch",
+        "ranges": [
+          [
+            1,
+            591
+          ]
+        ],
+        "original_path": "e2e/tests/terminal-replay-rename.spec.ts",
+        "commit": "647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513",
+        "notes": "patch header; patch character offsets [0,26960)",
+        "lines": 591,
+        "bytes": 27008,
+        "start": 0,
+        "end": 26960,
+        "original": "[private-run]/prep/originals/00836.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/00837-000.patch",
+        "ranges": [
+          [
+            1,
+            759
+          ]
+        ],
+        "original_path": "e2e/tests/terminal-scroll-freeze.spec.ts",
+        "commit": "647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513",
+        "notes": "patch header; patch character offsets [0,38274)",
+        "lines": 759,
+        "bytes": 38360,
+        "start": 0,
+        "end": 38274,
+        "original": "[private-run]/prep/originals/00837.patch"
+      }
+    ],
+    "lines": 1350,
+    "bytes": 65368
+  },
+  "records": [
+    {
+      "key": "g177/l1",
+      "owner": "g177",
+      "id": "l1",
+      "domain": "browser-terminal-regressions",
+      "purpose": "browser-terminal-regressions: e2e/tests/terminal-replay-rename.spec.ts, e2e/tests/terminal-scroll-freeze.spec.ts; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 1,
+          "event": {
+            "version": 1,
+            "kind": "lead",
+            "id": "l1",
+            "state": "open",
+            "summary": "Check removed replay degradation coverage against the terminal retirement",
+            "location": "e2e/tests/terminal-replay-rename.spec.ts (deleted replay-degrades tests)",
+            "detail": "Reviewed commit: 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513. TLDR: deleting replay size, chunk, idle and interrupted-catch-up tests could remove protection for a terminal still supported, but the commit may retire that implementation entirely. Source basis: complete assigned patch 00836-000.patch removes OLD_TERMINAL_TAG tests and their frame injectors; pinned SPEC_impl.md:1507-1520 still describes xterm for old terminals and grid for new terminals. Contract: replay must land at the current tail and preserve retained output, including interrupted catch-up. Suggested bucket: other (test coverage only). Could-be-highest: no established shipped security or loss-of-work route; this is a deletion/replacement contract check. Confidence: unresolved pending checking the commit's actual supported terminal paths and grid replacement tests. Proposed_drop: false. Possible_cover: none; coverage sources not searched. Next checks: commit scope and production terminal surface at this revision, then retained replacement attach tests. No execution or reproduction."
+          }
+        },
+        {
+          "line": 2,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "l1",
+            "state": "open",
+            "summary": "Removed xterm replay tests leave an acknowledged coverage gap, not a demonstrated regression",
+            "location": "e2e/tests/terminal-replay-rename.spec.ts (deleted replay-degrades tests)",
+            "detail": "Reviewed commit: 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513. TLDR: the old-terminal replay size, chunk, idle and interrupted-catch-up checks disappear. Existing old terminals remain supported, so this does reduce their regression coverage; source does not establish a new user-visible failure from the removal. Original suspected consequence preserved: protection for replay visibility and retained output on an old terminal is lost. Source checks: all 591 lines of assigned patch read; terminal.js:5390-5470 retains endCatchUp, byte joining, degradation and grid reveal; SPEC_impl.md:2294-2313 establishes every newly created terminal is a host and the browser suite attaches only hosts; grid-attach.spec.ts:721-783 retains explicit grid catch-up detach/close contracts. The commit description states exactly: 'Until the next changes delete them, the tmux tabs of an adopted old session and the page’s old-terminal renderer have no test against a running stack.' (ASCII apostrophe in git source.) Deleting tests solely of the no-longer-creatable substrate while converting the running stack to hosts does not by itself demonstrate a production regression; retained grid paths are exercised by their own tests. Suggested bucket if retained: other, confined to test protection. Could-be-highest: no; no established security or loss-of-work route. Confidence: confirmed source-only conclusion. Proposed_drop: the identified consequence is the expressly acknowledged intermediate old-renderer coverage gap, without evidence of a changed production behavior in this assigned patch; not dropped based on specification acceptance of a highest consequence. Possible_cover: none; coverage sources not searched. No execution or reproduction."
+          }
+        },
+        {
+          "line": 4,
+          "event": {
+            "version": 1,
+            "kind": "lead",
+            "id": "l1",
+            "state": "open",
+            "summary": "Reassess removed replay assertions as an independent test regression",
+            "location": "e2e/tests/terminal-replay-rename.spec.ts (deleted replay-degrades tests)",
+            "detail": "Reviewed commit: 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513. Original wording retained in prior events: 'Removed xterm replay tests leave an acknowledged coverage gap, not a demonstrated regression.' Correction: absence of a new production bug and the commit author's acknowledgment do not refute an independently useful lost regression assertion. TLDR: protection for size/chunk/idle bounds and interrupted replay on still-supported old terminals was removed at this intermediate revision. The remaining question is which assertions still protect shared grid behavior at the pinned tip, and which lose their subject when xterm is removed. Source already checked: terminal.js:5390-5470,5725-5764; SPEC_impl.md:1507-1520,2294-2313; grid-attach.spec.ts:721-783. Source history identifies later f560058da19e02716e6f943883a9508b447aff4e removal of xterm and terminal kinds, and 1ed482dde220452e424973faf38a5e1318986333 removal of the supervisor tmux driver; their actual diffs and retained observables are not yet checked in this turn. Suggested bucket: other, test-only consequence. Could-be-highest: no established shipped security/loss-of-work route. Confidence: confirmed intermediate loss of protection, unresolved surviving scope. Proposed_drop: false; prior dismissal rationale is insufficient. Possible_cover: none. Next checks: retirement diffs at recorded revisions and pinned-tip shared idle/ending behavior against actual retained test observables. No execution or reproduction."
+          }
+        },
+        {
+          "line": 6,
+          "event": {
+            "version": 1,
+            "kind": "lead",
+            "id": "l1",
+            "state": "open",
+            "summary": "Removed progress-versus-idle assertions may leave the grid watchdog insensitive to regression",
+            "location": "e2e/tests/terminal-replay-rename.spec.ts:650-743,1395-1450 (parent of deletion)",
+            "detail": "Reviewed commit: 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513; synthesis against pinned tip 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db. Original consequence: old-terminal size/chunk/idle/ending regression protection was deleted while old terminals were still supported. Newly narrowed surviving concern: the distinction between progressing replay and silence, including empty-frame traffic, is still required by the grid-only catch-up watchdog. Source checked this turn: pinned terminal.js still has armIdleTimer, endCatchUp idle, an empty-frame gate at 4154 and receiveGrid rearming at 4475; f560058da19e02716e6f943883a9508b447aff4e removes xterm and byte-size/chunk bounds but retains idle controls. Pinned grid-attach.spec.ts test inventory includes normal marker, malformed-frame, takeover and close endings, but no test named for progressing or empty-frame replay; actual bodies and other tests still need inspection before concluding absence of equivalent assertions. Suggested bucket: other (test sensitivity); could-be-highest: no established shipped security/loss-of-work route. Confidence: unresolved surviving coverage premise, not an observed production bug. Proposed_drop: false. Possible_cover: none. Next: inspect watchdog and replay tests and search test source for equivalent progress/empty-frame observables. No runtime execution or reproduction."
+          }
+        },
+        {
+          "line": 7,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "l1",
+            "state": "open",
+            "summary": "Deleting replay degradation tests also removes surviving grid idle-bound assertions",
+            "location": "e2e/tests/terminal-replay-rename.spec.ts:715-781,1392-1457 (parent of 647f0227)",
+            "detail": "Reviewed commit: 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513. TLDR: the browser tests stop checking that an actively progressing replay stays hidden until it finishes, and that an already-connected replay reveals after genuine silence even while empty frames keep arriving. Those protections still matter for the current terminal; an incorrect timer can reveal a deep replay early or leave the pane hidden indefinitely without these tests noticing. This is a test-sensitivity defect, not an observed production failure. Original wording/consequence preserved: 'Removed xterm replay tests leave an acknowledged coverage gap, not a demonstrated regression'; the removal also leaves old supported terminals without size/chunk/idle/ending protection at the intermediate revision. Correction: a production defect need not be introduced for a lost useful regression assertion to be reportable. Later f560058da19e02716e6f943883a9508b447aff4e deletes xterm and the byte-size/chunk buffer bounds, so those particular subjects do disappear before pinned tip 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db. It does not retire the idle policy. Source basis: the deleted parent test at 715-781 injects four real payloads over a total longer than the idle window, asserts no reveal while progress continues, then asserts an idle reveal and retained content. The deleted parent test at 1392-1457 requires reveal while bounded empty-frame traffic is still active and observes another empty frame after reveal. At pinned tip terminal.js:3633-3729 clears and rearms the catch-up timer; 4152-4166 ignores zero-length frames; 4465-4476 rearms on accepted grid frames. Its module contract at 93-124 explicitly requires reveal on idle and calls the idle bound a trust boundary against a peer holding the terminal hidden. The same progress/empty-frame decisions existed in terminal.js at the deletion revision:5725-5764 and its receiveGrid path. Actual replacement observables checked: grid-attach.spec.ts pins marker, malformed stream, detach and close endings, including DOM visibility and retained first row, not progressing-versus-silent idle behavior. Pinned terminal-replay-rename.spec.ts:927-1080 checks CONNECTING expiry and delayed-main-thread expiry ending on a marker; it supplies neither a continuously progressing valid stream longer than the window nor repeated empty frames. terminal-reconnect.spec.ts:1359-1431 tests completely muted replacement sockets staying on the retry ladder, while 2075-2155 tests late evidence on CLOSING sockets; neither distinguishes total elapsed time from progress silence or empty traffic. Targeted git grep across pinned e2e and UI js-tests found no equivalent positive idle-reveal/progress/empty-frame assertion. Suggested fix: migrate the two policy assertions to the static grid attachment harness, feeding valid grid frames and empty binary frames, retaining explicit DOM visibility, reveal reason, ongoing-traffic and content witnesses. Do not restore byte/chunk buffering or require xterm's one-write invariant for a grid. Suggested bucket: other, regression protection in tests; could-be-highest: no established shipped security/loss-of-work route, and the source still implements the correct guard. Confidence: confirmed by source and assertion comparison, no execution or reproduction. Proposed_drop: false. Possible_cover: none; queue/coverage sources not searched. The commit description's acknowledgment is context only and is not treated as specification acceptance."
+          }
+        }
+      ],
+      "latest": {
+        "line": 7,
+        "event": {
+          "version": 1,
+          "kind": "finding",
+          "id": "l1",
+          "state": "open",
+          "summary": "Deleting replay degradation tests also removes surviving grid idle-bound assertions",
+          "location": "e2e/tests/terminal-replay-rename.spec.ts:715-781,1392-1457 (parent of 647f0227)",
+          "detail": "Reviewed commit: 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513. TLDR: the browser tests stop checking that an actively progressing replay stays hidden until it finishes, and that an already-connected replay reveals after genuine silence even while empty frames keep arriving. Those protections still matter for the current terminal; an incorrect timer can reveal a deep replay early or leave the pane hidden indefinitely without these tests noticing. This is a test-sensitivity defect, not an observed production failure. Original wording/consequence preserved: 'Removed xterm replay tests leave an acknowledged coverage gap, not a demonstrated regression'; the removal also leaves old supported terminals without size/chunk/idle/ending protection at the intermediate revision. Correction: a production defect need not be introduced for a lost useful regression assertion to be reportable. Later f560058da19e02716e6f943883a9508b447aff4e deletes xterm and the byte-size/chunk buffer bounds, so those particular subjects do disappear before pinned tip 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db. It does not retire the idle policy. Source basis: the deleted parent test at 715-781 injects four real payloads over a total longer than the idle window, asserts no reveal while progress continues, then asserts an idle reveal and retained content. The deleted parent test at 1392-1457 requires reveal while bounded empty-frame traffic is still active and observes another empty frame after reveal. At pinned tip terminal.js:3633-3729 clears and rearms the catch-up timer; 4152-4166 ignores zero-length frames; 4465-4476 rearms on accepted grid frames. Its module contract at 93-124 explicitly requires reveal on idle and calls the idle bound a trust boundary against a peer holding the terminal hidden. The same progress/empty-frame decisions existed in terminal.js at the deletion revision:5725-5764 and its receiveGrid path. Actual replacement observables checked: grid-attach.spec.ts pins marker, malformed stream, detach and close endings, including DOM visibility and retained first row, not progressing-versus-silent idle behavior. Pinned terminal-replay-rename.spec.ts:927-1080 checks CONNECTING expiry and delayed-main-thread expiry ending on a marker; it supplies neither a continuously progressing valid stream longer than the window nor repeated empty frames. terminal-reconnect.spec.ts:1359-1431 tests completely muted replacement sockets staying on the retry ladder, while 2075-2155 tests late evidence on CLOSING sockets; neither distinguishes total elapsed time from progress silence or empty traffic. Targeted git grep across pinned e2e and UI js-tests found no equivalent positive idle-reveal/progress/empty-frame assertion. Suggested fix: migrate the two policy assertions to the static grid attachment harness, feeding valid grid frames and empty binary frames, retaining explicit DOM visibility, reveal reason, ongoing-traffic and content witnesses. Do not restore byte/chunk buffering or require xterm's one-write invariant for a grid. Suggested bucket: other, regression protection in tests; could-be-highest: no established shipped security/loss-of-work route, and the source still implements the correct guard. Confidence: confirmed by source and assertion comparison, no execution or reproduction. Proposed_drop: false. Possible_cover: none; queue/coverage sources not searched. The commit description's acknowledgment is context only and is not treated as specification acceptance."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g177/findings.jsonl",
+        "id": "l1",
+        "line": 7,
+        "disposition": "under-investigation",
+        "group": "g177-l1",
+        "reason": "Record durably acknowledged; parent source/contract validation, cross-group synthesis, coverage/filter matching and any independent drop check remain pending. This preserves the claim and uncertainty without accepting, dropping or lowering it."
+      },
+      "accepted_parent_decision": null,
+      "returned_claim_checks": [
+        {
+          "batch": "claims-110",
+          "key": "g177/l1",
+          "latest_line": 7,
+          "recommendation": "retain-verified",
+          "bucket": "other",
+          "underlying_key": "grid-catchup-progress-and-empty-frame-idle-tests-removed",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "Two removed assertions protect idle semantics that survive in the grid-only terminal: valid progress must keep catch-up hidden beyond the total idle duration, and empty traffic must not postpone reveal. Retained tests cover other endings and do not distinguish those competing timer regressions.",
+          "checks": [
+            "647f0227^:terminal-replay-rename.spec.ts:715-778 injects four real frames 700 ms apart against a 1500 ms idle bound, checks still hidden after the total exceeds the bound, then requires idle reveal and first/last payload retention. 1392-1449 requires idle reveal during bounded ongoing empty-frame traffic and witnesses another empty frame after reveal. 647f0227 deletes both.",
+            "00de0b6c:assets/terminal.js:3635-3729 still measures silence with a rearmed timer and ends catch-up as idle; 4152-4165 ignores empty binary frames, while 4465-4475 rearms only after accepted grid.receive. The module contract at 90-124 expressly retains idle reveal and the hostile-peer bound.",
+            "Pinned e2e/UI-JS searches for idleMs, progressing and empty-frame replay identify no equivalent continuing-valid-progress or ongoing-empty-traffic witness. terminal-replay-rename.spec.ts:927-1017 tests CONNECTING expiry; 1040-1080 tests main-thread starvation followed by marker reveal. Neither provides a longer-than-window progressing stream or ongoing empties.",
+            "00de0b6c:terminal-reconnect.spec.ts:1360-1426 mutes all replacement messages and checks the retry ladder; it does not establish a proved open attachment revealing after silence. Grid-attach inventory separately retains marker, takeover and socket-close endings, which do not distinguish idle rearming.",
+            "The byte-size/chunk buffering and xterm write-count subjects disappear with f560058d. Do not restore those obsolete invariants as part of the surviving grid idle tests. No runtime reproduction was performed."
+          ],
+          "coverage_checked": [
+            "Current SPEC.md Terminal experience requires replay/reconnect visibility and usability; SPEC_impl.md:1838-1846 retains catch-up/reveal around grid mounts and 773-778 forbids dead-socket callbacks retiring recovery. Source's explicit idle contract further narrows the test obligation. Neither specification accepts losing these shared idle assertions.",
+            "TODO.md Planned empty. No unlanded plan text supplies replacement progress/empty-frame idle witnesses. tmux-end-old-terminals.md:130-133 says surviving test subjects run on terminal hosts; that plan is landed (REPORTS.md:29), and the policy does not cover deletion of surviving idle assertions.",
+            "BUGS.md has no exact bug acceptance. Full INDEX.md and active TRIAGE_OUTCOMES.md searches found no exact lost-idle-test item. Replay-work-model and reconnect-replay items concern checkpoint work and supervisor event-count fences, respectively, not browser catch-up idle test sensitivity.",
+            "FILTER.md has no entire-boundary match. Test deletion is not a rare self-correcting diagnostic, and a trust-boundary description cannot by itself justify filtering."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": "No current timer implementation failure or shipped security/work-loss route is established. Highest would require such a concrete consequence; the confirmed impact is maintainer regression-test sensitivity.",
+          "original_stronger_consequence": "Old terminals lost size/chunk/idle/ending replay protection at the intermediate deletion revision. An early event proposed dismissal because no production regression was shown and the author acknowledged the gap; later events expressly correct that rationale. The surviving concern is early reveal during continued progress or indefinite hiding under empty traffic if those correct guards later regress. Retired byte/chunk/xterm-write subjects remain historical, not current repair requirements.",
+          "needs_independent_drop_check": true,
+          "proposed_basis": "Retain the two surviving grid idle-policy witnesses as other. The historical proposed dismissal concerned a guard source calls a trust boundary, so parent should include it in independent-drop reconciliation even though this recommendation retains the finding and asserts no current security failure."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": true,
+        "clearly_refuted_candidate": false,
+        "needs_unfinished_gate": true,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "grid-catchup-progress-and-empty-frame-idle-tests-removed",
+        "destination": "trailing-grid-catchup-progress-and-empty-frame-idle-tests-removed.md"
+      }
+    },
+    {
+      "key": "g177/c2",
+      "owner": "g177",
+      "id": "c2",
+      "domain": "browser-terminal-regressions",
+      "purpose": "browser-terminal-regressions: e2e/tests/terminal-replay-rename.spec.ts, e2e/tests/terminal-scroll-freeze.spec.ts; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 3,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c2",
+            "state": "open",
+            "summary": "Deleted viewport-freeze suite targets the retired creation path and xterm workaround",
+            "location": "e2e/tests/terminal-scroll-freeze.spec.ts:1-753 (deleted)",
+            "detail": "Reviewed commit: 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513. TLDR: the suite no longer checks the old renderer for stale scrollback painting under continuous output or sibling-band resizes. Existing old terminals still use that renderer; the removal alone establishes reduced coverage, not a newly introduced stale display. Source: all 759 patch lines read. Deleted file header:1-48 and viewportSnapshot:170-199 explicitly target xterm buffer-versus-DOM disagreement and refreshIfScrolledBack; five test bodies cover pre-cap/full-cap output, DECSTBM, synchronized output and resize. SPEC_impl.md:2294-2313 and the commit description establish browser stacks now create and attach only host terminals, while terminal.js still serves existing old terminals. Grid replacement has different mechanisms: SPEC_impl.md:1948-2014 describes supervisor-owned emulation and DOM grid rendering; grid-terminal.spec.ts:715-760,1187-1224,1298-1329 cover live-output scroll anchoring and cap eviction, and grid-flood.spec.ts:151-231 checks contiguous retained history through a slow viewer. A deleted xterm-specific workaround test cannot run unchanged on that replacement and is not evidence of its failure. Suggested bucket if retained: other (test-only coverage). Could-be-highest: no established security or loss-of-work consequence. Confidence: confirmed source-only scope analysis; no claim that the retained tests replace all five shapes end to end. Proposed_drop: no concrete production defect or invalid retained test identified; intermediate old-renderer coverage gap is acknowledged in the commit description, rather than hidden by this change. Exact context quote: 'Some test coverage ends because it only ever ran on tmux.' Possible_cover: none; excluded coverage sources not read. No runtime execution or reproduction."
+          }
+        },
+        {
+          "line": 5,
+          "event": {
+            "version": 1,
+            "kind": "lead",
+            "id": "c2",
+            "state": "open",
+            "summary": "Reassess useful viewport assertions after old-renderer retirement",
+            "location": "e2e/tests/terminal-scroll-freeze.spec.ts:1-753 (deleted)",
+            "detail": "Reviewed commit: 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513. Original wording retained in prior event: 'Deleted viewport-freeze suite targets the retired creation path and xterm workaround.' Correction: a useful test assertion can be lost even when the removal changes no production behavior, and a commit description is not specification acceptance. TLDR: checks of sustained rendered-DOM agreement under output and resize are removed while old terminals remain supported. The question is whether later removal of xterm before 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db removes the assertion's subject or leaves an uncovered shared/grid behavior. Source basis: complete 759-line deletion patch; SPEC_impl.md:1507-1540; prior inspected grid-terminal.spec.ts scroll/cap assertions and grid-flood.spec.ts snapshot assertions. The static grid checks actually inspect DOM rows for individual frame updates; the real-stack flood check inspects model snapshots, not sustained rendered viewport agreement. Suggested bucket: other, test-only consequence. Could-be-highest: no established security or loss-of-work route. Confidence: confirmed intermediate missing protection; surviving shared/grid relevance unresolved. Proposed_drop: false; no drop accepted. Possible_cover: none. Next checks: actual later renderer removal and retained grid tests' paint, eviction and resize observables, without conflating snapshot content with rendered rows. No execution or reproduction."
+          }
+        },
+        {
+          "line": 8,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c2",
+            "state": "open",
+            "summary": "Viewport suite loses useful intermediate protection; its xterm-specific subject is removed before tip",
+            "location": "e2e/tests/terminal-scroll-freeze.spec.ts:1-753 (deleted)",
+            "detail": "Reviewed commit: 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513, with retirement checked through pinned tip 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db. TLDR: at this intermediate revision, supported old terminals lose useful checks that a scrolled-back display remains consistent throughout continuing output and repeated pane resizes. That is a real test-only consequence even without a newly introduced production bug. Original wording preserved: 'Deleted viewport-freeze suite targets the retired creation path and xterm workaround.' The earlier rationale based on acknowledgment/no production defect was insufficient. Narrowed conclusion: unlike the shared idle policy in l1, this suite's actual old-renderer mechanism and observer disappear before tip. Every sample uses island.term.buffer.active and .xterm-rows; each test also requires scrolledRefreshCount to advance, proving the xterm-specific refresh workaround ran. SPEC_impl.md at the deletion revision:1528-1540 describes the particular vendored xterm stale-paint defect, dirty-row mapping and unconditional refresh workaround. Source retirement: dbfc69751215dbf15e1d31d5bed73c3754c4ebc4 changes startup from adopt_running_server to OldTerminals::end_private_server and no_server_after_startup, before reload. f560058da19e02716e6f943883a9508b447aff4e removes buildXtermSurface, writeBytes and its refreshIfScrolledBack call, the workaround functions and scrolledRefreshCount; every mount instead creates a grid surface. Pinned SPEC_impl.md:2780-2795 states exactly: 'a starting supervisor ends that server' and 'before sessions are reloaded'. Pinned grid-terminal.js:13-69,505-623,875-951,1870-1985 is an independent model/damage/animation-frame renderer; no BufferService.scroll, ydisp, DECSTBM repaint mapping, xterm ResizeObserver fit callback or compensating refresh remains. Actual replacement assertions inspected rather than treating names as equivalents: grid-terminal.spec.ts:714-760 compares visible DOM rows after a history/frame update while scrolled back; 1186-1223 checks the old line still rendered after cap eviction; 1297-1329 checks oldest-line rendering after trimming. These helpers explicitly flush(), so they do NOT replace sustained naturally scheduled painting under flood or sibling-band resizing. grid-flood.spec.ts checks model snapshot history and screen, NOT rendered viewport rows. Thus there remains a broader opportunity for grid natural-paint stress coverage, but no source route establishes that this xterm-only deleted suite exercised the grid, or that its retired workaround/observer is a surviving shared path. This is different from g153's supplied stale-owner authorization concern: c2's entire asserted refresh mechanism is removed, not a backend-independent ownership decision. Proposed_drop: propose excluding c2 as a surviving tip defect because its concrete regression subject is removed by the cited code, while retaining the confirmed intermediate missing protection in this record for the caller's judgment. This is a proposal, not an accepted drop, and is NOT based on specification acceptance or the commit author's acknowledgment. Suggested bucket if retained: other, useful regression protection lost during intermediate old-terminal support. Could-be-highest: no established shipped security/loss-of-work route. Confidence: confirmed source-only intermediate gap and retirement; no claim that grid replacements are complete or that natural-paint failures cannot exist. Possible_cover: none; queue/coverage sources not searched. No runtime tests or reproduction. No unresolved source premise for the retirement conclusion; whether the caller retains a historical test gap after its subject's removal is a review disposition, not missing execution evidence."
+          }
+        },
+        {
+          "line": 9,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "c2",
+            "state": "open",
+            "summary": "Intermediate loss of sustained viewport regression checks before old-renderer retirement",
+            "location": "e2e/tests/terminal-scroll-freeze.spec.ts:1-753 (deleted)",
+            "detail": "Reviewed commit: 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513. TLDR: while existing old terminals remain supported, their tests lose the check that scrolled-back rendered rows stay consistent throughout continuing output and repeated pane resizes. This is a confirmed historical test-coverage defect, independently of whether a new production failure was introduced. Normalize prior c2 candidate to finding as requested by parent/c2-record-kind; no new discovery is claimed by this record-kind correction. Preserve original wording: 'Deleted viewport-freeze suite targets the retired creation path and xterm workaround.' Preserve all original consequences: pre-cap/full-cap continuous output, DECSTBM and synchronized-output viewport correctness, and sibling-band resize coverage disappear; the intermediate old renderer still needs them. Original no-production-defect/commit-acknowledgment dismissal is superseded, not accepted. Source basis remains complete 759-line deletion patch; every viewport sample uses island.term.buffer.active and .xterm-rows; tests additionally require scrolledRefreshCount to advance. SPEC_impl.md at reviewed revision:1528-1540 records the vendored stale-paint failure and compensating refresh. Actual retirement before pinned tip 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db: dbfc69751215dbf15e1d31d5bed73c3754c4ebc4 replaces adoption with OldTerminals::end_private_server before reload; f560058da19e02716e6f943883a9508b447aff4e removes buildXtermSurface, writeBytes/refreshIfScrolledBack, workaround state and scrolledRefreshCount, and always mounts grids. Pinned SPEC_impl.md:2780-2795 states 'a starting supervisor ends that server' and 'before sessions are reloaded'. Replacement observables checked in synthesis: grid-terminal.spec.ts:714-760 compares DOM rows across a history/frame update, :1186-1223 checks rendered line retention after cap eviction, :1297-1329 checks oldest-line paint after trimming. They explicitly flush, so they are not equivalent to naturally scheduled sustained flood/resize painting. grid-flood.spec.ts observes model snapshots, not viewport DOM. No surviving grid natural-paint failure is asserted; the concrete xterm workaround subject no longer exists at tip. Suggested bucket: other, useful maintainer regression coverage lost at an in-range intermediate revision. Could-be-highest: no established shipped security/loss-of-work route. Confidence: confirmed source/contract/patch analysis only; no runtime tests or reproductions. proposed_drop: preserve the prior proposal based solely on later source retirement of the exact subject, for independent parent disposition; this does not erase the historical defect or suggest restoring xterm at tip. No parent drop or lowering accepted. possible_cover: none; no prohibited coverage sources searched. Shared idle-policy loss remains separately recorded as l1. No unresolved source premise for c2's intermediate gap or retirement."
+          }
+        }
+      ],
+      "latest": {
+        "line": 9,
+        "event": {
+          "version": 1,
+          "kind": "finding",
+          "id": "c2",
+          "state": "open",
+          "summary": "Intermediate loss of sustained viewport regression checks before old-renderer retirement",
+          "location": "e2e/tests/terminal-scroll-freeze.spec.ts:1-753 (deleted)",
+          "detail": "Reviewed commit: 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513. TLDR: while existing old terminals remain supported, their tests lose the check that scrolled-back rendered rows stay consistent throughout continuing output and repeated pane resizes. This is a confirmed historical test-coverage defect, independently of whether a new production failure was introduced. Normalize prior c2 candidate to finding as requested by parent/c2-record-kind; no new discovery is claimed by this record-kind correction. Preserve original wording: 'Deleted viewport-freeze suite targets the retired creation path and xterm workaround.' Preserve all original consequences: pre-cap/full-cap continuous output, DECSTBM and synchronized-output viewport correctness, and sibling-band resize coverage disappear; the intermediate old renderer still needs them. Original no-production-defect/commit-acknowledgment dismissal is superseded, not accepted. Source basis remains complete 759-line deletion patch; every viewport sample uses island.term.buffer.active and .xterm-rows; tests additionally require scrolledRefreshCount to advance. SPEC_impl.md at reviewed revision:1528-1540 records the vendored stale-paint failure and compensating refresh. Actual retirement before pinned tip 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db: dbfc69751215dbf15e1d31d5bed73c3754c4ebc4 replaces adoption with OldTerminals::end_private_server before reload; f560058da19e02716e6f943883a9508b447aff4e removes buildXtermSurface, writeBytes/refreshIfScrolledBack, workaround state and scrolledRefreshCount, and always mounts grids. Pinned SPEC_impl.md:2780-2795 states 'a starting supervisor ends that server' and 'before sessions are reloaded'. Replacement observables checked in synthesis: grid-terminal.spec.ts:714-760 compares DOM rows across a history/frame update, :1186-1223 checks rendered line retention after cap eviction, :1297-1329 checks oldest-line paint after trimming. They explicitly flush, so they are not equivalent to naturally scheduled sustained flood/resize painting. grid-flood.spec.ts observes model snapshots, not viewport DOM. No surviving grid natural-paint failure is asserted; the concrete xterm workaround subject no longer exists at tip. Suggested bucket: other, useful maintainer regression coverage lost at an in-range intermediate revision. Could-be-highest: no established shipped security/loss-of-work route. Confidence: confirmed source/contract/patch analysis only; no runtime tests or reproductions. proposed_drop: preserve the prior proposal based solely on later source retirement of the exact subject, for independent parent disposition; this does not erase the historical defect or suggest restoring xterm at tip. No parent drop or lowering accepted. possible_cover: none; no prohibited coverage sources searched. Shared idle-policy loss remains separately recorded as l1. No unresolved source premise for c2's intermediate gap or retirement."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g177/findings.jsonl",
+        "id": "c2",
+        "line": 9,
+        "disposition": "rejected",
+        "group": "old-xterm-sustained-viewport-tests-removed-before-retirement",
+        "reason": "Full111:647 removes753line sustainedrenderedviewport oracle forpre/fullhistorycap eviction,DECSTBM,synchronizedoutput,siblingbandresize whileoldrenderer andstale-paintworkaroundstillserved. Usefulregressionprotectionlost, no-productbug/commitintentisnotrefutation. f560retiresconcretextermrendererbytip; don'trestoreobsoleteviewportworkaroundfixtures. Preservehistoricalgap, distinct178query/selection/unicodetests, no actualstaleviewport/gridbug."
+      },
+      "accepted_parent_decision": {
+        "key": "g177/c2",
+        "line": 9,
+        "disposition": "rejected",
+        "group": "old-xterm-sustained-viewport-tests-removed-before-retirement",
+        "bucket": "other",
+        "recording": "retired-in-range",
+        "needs_independent_drop_check": false,
+        "reason": "Full111:647 removes753line sustainedrenderedviewport oracle forpre/fullhistorycap eviction,DECSTBM,synchronizedoutput,siblingbandresize whileoldrenderer andstale-paintworkaroundstillserved. Usefulregressionprotectionlost, no-productbug/commitintentisnotrefutation. f560retiresconcretextermrendererbytip; don'trestoreobsoleteviewportworkaroundfixtures. Preservehistoricalgap, distinct178query/selection/unicodetests, no actualstaleviewport/gridbug."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-111",
+          "key": "g177/c2",
+          "latest_line": 9,
+          "recommendation": "retain-verified",
+          "bucket": "other",
+          "underlying_key": "old-xterm-sustained-viewport-tests-removed-before-retirement",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The intermediate loss of useful rendered-viewport regression protection is established. Later removal of the tested renderer makes restoration at tip inappropriate, but does not refute the in-range historical gap. Preserve it for the parent's disposition rather than silently treating retirement as historical coverage.",
+          "checks": [
+            "647f0227^:e2e/tests/terminal-scroll-freeze.spec.ts:1-48,170-191 describes sustained output, cap eviction, DECSTBM, synchronized output and resize, and compares rendered .xterm-rows against term.buffer.active. The 647f0227 deletion removes all 753 lines.",
+            "647f0227:SPEC.md:3013-3038 still supports existing old terminals; SPEC_impl.md:1529-1540 records their stale-paint defect and retained refresh workaround.",
+            "f560058d:terminal.js:4294-4355 builds the grid surface. At 00de0b6c, terminal.js has no new Terminal, swallowDecrqm, registerDcsHandler, refreshIfScrolledBack or scrolledRefreshCount; f560058d is an ancestor of that tip. Exact xterm subject is retired.",
+            "The earlier no-production-defect and commit-acknowledgment dismissal is not a source refutation of deleted test protection. No runtime observation or reproduction was made."
+          ],
+          "coverage_checked": [
+            "Current SPEC.md Terminal experience and SPEC_impl.md Terminal widget/The grid client/Ending the old private tmux server accept present grid-only operation, not premature removal of supported-renderer regression tests.",
+            "TODO.md Planned is empty (25-27). BUGS.md concerns an SSH transfer hang. Active TRIAGE_OUTCOMES.md and INDEX.md searches found no exact viewport-test deletion decision/item.",
+            "plans/queue/tmux-end-old-terminals.md:130-133,308-319 describes the staged test deletion and later ending; plans/REPORTS.md:29 records that plan landed. It is historical intent, not an unlanded fix or specification acceptance of the historical test gap. The docs sweep also landed (REPORTS:32). No unlanded matching plan found.",
+            "FILTER.md: no complete boundary matches a durable missing regression check. No queue alias found; g178/g178-l1 loses different assertions at the same intermediate stage."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": null,
+          "original_stronger_consequence": "Preserve the lost pre-cap/full-cap continuous-output, DECSTBM, synchronized-output and sibling-band resize protection while old terminals remained supported. No grid natural-paint defect or newly introduced product failure was established. The earlier proposed retirement-based drop remains a proposal, not an accepted decision.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Record the historical test defect as other, explicitly stating that its concrete renderer no longer exists at tip. Parent decides whether historical obsolescence warrants a separate disposition."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": true,
+        "clearly_refuted_candidate": false,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "old-xterm-sustained-viewport-tests-removed-before-retirement",
+        "destination": "trailing-old-xterm-sustained-viewport-tests-removed-before-retirement.md"
+      }
+    },
+    {
+      "key": "g177/c3",
+      "owner": "g177",
+      "id": "c3",
+      "domain": "browser-terminal-regressions",
+      "purpose": "browser-terminal-regressions: e2e/tests/terminal-replay-rename.spec.ts, e2e/tests/terminal-scroll-freeze.spec.ts; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 10,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c3",
+            "state": "open",
+            "summary": "Removal leaves no dangling replay helpers or deleted-suite registration",
+            "location": "e2e/tests/terminal-replay-rename.spec.ts:16-44; e2e/tests/terminal-scroll-freeze.spec.ts (deleted)",
+            "detail": "Reviewed commit: 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513. Discovery check beyond l1/c2: considered whether deleting local replay frame injectors, imports and an entire suite also breaks retained calls or explicit runner registration. TLDR: source checks refute that concern; no additional test-load or setup failure is established. Details: the assigned replay diff adds only the narrowed evidence import and explanatory comments, deletes local helpers setReplayLimits/injectReplayFrames/injectEmptyFrames plus OLD_TERMINAL_TAG/newObservedContext imports, and removes their consuming tests. A separate pinned git grep for all those identifiers and __farhelmEmptyFrameInjection in the retained file returns no matches. A separate pinned search for terminal-scroll-freeze.spec.ts across e2e and the validation/run-all inventory files also returns no matches. playwright.config.ts:37-50 recursively discovers existing .spec.ts files, and :109-114 makes projects from that dynamic list; no explicit deleted-file entry is left. Retained terminal-replay-rename.spec.ts:44 still installs terminal suite hooks with tabSweep:true; terminal-suite.ts:203-222 still provides beforeAll reset, route-drain afterEach and directory-sweep afterAll, so removal does not also remove retained tests' cleanup registration. The changed idleMs comment is consistent with retained CONNECTING tests at :936-1031 passing their own shorter interval. git diff --check for both assigned paths is clean. Suggested bucket if it had existed: other, maintainer test loading/setup. Could-be-highest: no security or loss-of-work route. Confidence: confirmed source refutation, not runtime execution. proposed_drop: exact source references above show no dangling dependency or registration; this candidate records a negative discovery check, not an additional defect or an accepted disposition of l1/c2. possible_cover:none. No unresolved premise and no reproduction or runtime test."
+          }
+        }
+      ],
+      "latest": {
+        "line": 10,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c3",
+          "state": "open",
+          "summary": "Removal leaves no dangling replay helpers or deleted-suite registration",
+          "location": "e2e/tests/terminal-replay-rename.spec.ts:16-44; e2e/tests/terminal-scroll-freeze.spec.ts (deleted)",
+          "detail": "Reviewed commit: 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513. Discovery check beyond l1/c2: considered whether deleting local replay frame injectors, imports and an entire suite also breaks retained calls or explicit runner registration. TLDR: source checks refute that concern; no additional test-load or setup failure is established. Details: the assigned replay diff adds only the narrowed evidence import and explanatory comments, deletes local helpers setReplayLimits/injectReplayFrames/injectEmptyFrames plus OLD_TERMINAL_TAG/newObservedContext imports, and removes their consuming tests. A separate pinned git grep for all those identifiers and __farhelmEmptyFrameInjection in the retained file returns no matches. A separate pinned search for terminal-scroll-freeze.spec.ts across e2e and the validation/run-all inventory files also returns no matches. playwright.config.ts:37-50 recursively discovers existing .spec.ts files, and :109-114 makes projects from that dynamic list; no explicit deleted-file entry is left. Retained terminal-replay-rename.spec.ts:44 still installs terminal suite hooks with tabSweep:true; terminal-suite.ts:203-222 still provides beforeAll reset, route-drain afterEach and directory-sweep afterAll, so removal does not also remove retained tests' cleanup registration. The changed idleMs comment is consistent with retained CONNECTING tests at :936-1031 passing their own shorter interval. git diff --check for both assigned paths is clean. Suggested bucket if it had existed: other, maintainer test loading/setup. Could-be-highest: no security or loss-of-work route. Confidence: confirmed source refutation, not runtime execution. proposed_drop: exact source references above show no dangling dependency or registration; this candidate records a negative discovery check, not an additional defect or an accepted disposition of l1/c2. possible_cover:none. No unresolved premise and no reproduction or runtime test."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g177/findings.jsonl",
+        "id": "c3",
+        "line": 10,
+        "disposition": "excluded",
+        "group": "removed-replay-helper-dangling-reference-concern",
+        "reason": "Parent explicitly accepted named refuted proposal from claims-111 after inspecting it. The retained file has no calls/imports of the removed helpers, and recursive discovery does not retain a deleted suite entry. This is a considered negative check, not a separate defect. Exclude only the dangling-reference/registration candidate on the pinned source evidence. Checked source/results: [\"git grep at 647f0227 for setReplayLimits, injectReplayFrames, injectEmptyFrames, OLD_TERMINAL_TAG, newObservedContext and __farhelmEmptyFrameInjection in terminal-replay-rename.spec.ts returned no matches.\",\"git grep at 647f0227 for terminal-scroll-freeze.spec.ts across e2e and the validation/run-all inventories returned no matches.\",\"647f0227:e2e/playwright.config.ts:37-50 recursively discovers existing spec files;109-114 builds projects from that list. terminal-replay-rename.spec.ts:43 still installs tabSweep hooks; helpers/terminal-suite.ts:203-222 retains reset, route drain and final directory sweep. These are source checks only.\"] Current coverage/results: [\"Both specifications searched for replay/test lifecycle and old renderer retirement; neither supplies an additional requirement violated by these removed local names.\",\"TODO Planned empty; BUGS, active TRIAGE_OUTCOMES, INDEX and plans/queue searches for the file/helper names and dangling replay registration found no matching item. The tmux removal plan is landed and is context only.\",\"FILTER not used: exact source absence and dynamic discovery refute the claimed dangling reference.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Potential retained-test loading/setup failure after helper and suite deletion. No production, security or user-work loss consequence was claimed. This does not settle g177/c2 or its historical test coverage.\"; null."
+      },
+      "accepted_parent_decision": {
+        "key": "g177/c3",
+        "line": 10,
+        "disposition": "excluded",
+        "group": "removed-replay-helper-dangling-reference-concern",
+        "bucket": "other",
+        "recording": "refuted",
+        "queue_target_candidate": null,
+        "needs_independent_drop_check": false,
+        "reason": "Parent explicitly accepted named refuted proposal from claims-111 after inspecting it. The retained file has no calls/imports of the removed helpers, and recursive discovery does not retain a deleted suite entry. This is a considered negative check, not a separate defect. Exclude only the dangling-reference/registration candidate on the pinned source evidence. Checked source/results: [\"git grep at 647f0227 for setReplayLimits, injectReplayFrames, injectEmptyFrames, OLD_TERMINAL_TAG, newObservedContext and __farhelmEmptyFrameInjection in terminal-replay-rename.spec.ts returned no matches.\",\"git grep at 647f0227 for terminal-scroll-freeze.spec.ts across e2e and the validation/run-all inventories returned no matches.\",\"647f0227:e2e/playwright.config.ts:37-50 recursively discovers existing spec files;109-114 builds projects from that list. terminal-replay-rename.spec.ts:43 still installs tabSweep hooks; helpers/terminal-suite.ts:203-222 retains reset, route drain and final directory sweep. These are source checks only.\"] Current coverage/results: [\"Both specifications searched for replay/test lifecycle and old renderer retirement; neither supplies an additional requirement violated by these removed local names.\",\"TODO Planned empty; BUGS, active TRIAGE_OUTCOMES, INDEX and plans/queue searches for the file/helper names and dangling replay registration found no matching item. The tmux removal plan is landed and is context only.\",\"FILTER not used: exact source absence and dynamic discovery refute the claimed dangling reference.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Potential retained-test loading/setup failure after helper and suite deletion. No production, security or user-work loss consequence was claimed. This does not settle g177/c2 or its historical test coverage.\"; null."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-111",
+          "key": "g177/c3",
+          "latest_line": 10,
+          "recommendation": "refuted",
+          "bucket": "other",
+          "underlying_key": "removed-replay-helper-dangling-reference-concern",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The retained file has no calls/imports of the removed helpers, and recursive discovery does not retain a deleted suite entry. This is a considered negative check, not a separate defect.",
+          "checks": [
+            "git grep at 647f0227 for setReplayLimits, injectReplayFrames, injectEmptyFrames, OLD_TERMINAL_TAG, newObservedContext and __farhelmEmptyFrameInjection in terminal-replay-rename.spec.ts returned no matches.",
+            "git grep at 647f0227 for terminal-scroll-freeze.spec.ts across e2e and the validation/run-all inventories returned no matches.",
+            "647f0227:e2e/playwright.config.ts:37-50 recursively discovers existing spec files;109-114 builds projects from that list. terminal-replay-rename.spec.ts:43 still installs tabSweep hooks; helpers/terminal-suite.ts:203-222 retains reset, route drain and final directory sweep. These are source checks only."
+          ],
+          "coverage_checked": [
+            "Both specifications searched for replay/test lifecycle and old renderer retirement; neither supplies an additional requirement violated by these removed local names.",
+            "TODO Planned empty; BUGS, active TRIAGE_OUTCOMES, INDEX and plans/queue searches for the file/helper names and dangling replay registration found no matching item. The tmux removal plan is landed and is context only.",
+            "FILTER not used: exact source absence and dynamic discovery refute the claimed dangling reference."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": null,
+          "original_stronger_consequence": "Potential retained-test loading/setup failure after helper and suite deletion. No production, security or user-work loss consequence was claimed. This does not settle g177/c2 or its historical test coverage.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Exclude only the dangling-reference/registration candidate on the pinned source evidence."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "removed-replay-helper-dangling-reference-concern",
+        "destination": null
+      }
+    }
+  ],
+  "replies": [
+    {
+      "turn": 1,
+      "reply": "Initial pass complete: all 1,350 assigned patch lines reviewed.\n\nNo substantive findings. Recorded candidates `l1` and `c2` with source checks and proposed-drop rationale; no unresolved leads. Findings log and progress updated. No tests or reproductions run."
+    },
+    {
+      "turn": 2,
+      "reply": "- `l1` promoted to a source-confirmed test finding: deleted progress/idle and empty-frame assertions remain relevant to grid replay.\n- `c2` revised: useful intermediate coverage was lost; later removal retires its concrete xterm subject. Proposed-drop rationale recorded, not accepted.\n- Unresolved lead IDs: none."
+    },
+    {
+      "turn": 3,
+      "reply": "Discovery pass complete; nothing new found.\n\n- Checked helper references, suite discovery, retained setup/cleanup hooks, and diff formatting.\n- Normalized `c2` to finding; recorded refuted candidate `c3`.\n- New verified IDs: none.\n- New unverified IDs: none.\n- Open leads: none.\n\nProgress updated. No runtime tests or reproductions."
+    }
+  ],
+  "progress": "# g177 progress\n\nInitial review complete. Turn type: initial. Turn count: 1. Discovery-pass count: 0 (no later discovery turn requested).\n\nAssigned scope: browser-terminal-regressions, commit 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513. Read the complete inventory commits field without excluded coverage metadata. All mandatory patch material delivered with evidence read: 00836-000.patch lines 1-591 and 00837-000.patch lines 1-759 (1,350 lines total). No unread assigned scope.\n\nContracts checked at the pinned revision: SPEC.md session rename, terminal replay/retention and attach behavior; SPEC_impl.md Answers bind to what was drawn, complete Terminal widget / grid client sections, new-terminal creation policy and Testing section. Inspected the retained agent/tab replay assertions and their readiness/factory helpers, terminal.js catch-up completion and byte/grid dispatch, static grid interrupted-catch-up checks, grid viewport anchoring/cap checks and real-stack grid-flood retention assertions.\n\nInterface assumptions resolved: newly created browser-stack terminals are hosts; existing old terminals remain served. The removed byte-size/chunk/idle batching tests and refresh-workaround suite describe xterm mechanisms the grid does not use. Grid catch-up detach/close tests retain visible partial output; retained replay tests hold the intended mount and reveal before input. No evidence that these assigned deletions change runtime behavior. Existing old-renderer coverage is reduced, explicitly acknowledged by the commit, and is not claimed to be replaced one-for-one by grid checks.\n\nDurable events: l1 was recorded as a lead and revised to a candidate after checking production paths and replacement tests; c2 records the viewport-suite deletion candidate. Both have complete proposed-drop rationale. Reported findings: none. New verified findings: none. New unverified findings: none. Open leads: none.\n\nOne recording invocation rejected state closed; the diagnostic was retained in the tool transcript. The event was corrected to state open and successfully appended through evidence record. No mandatory read failed. Findings log was never truncated.\n\nNo runtime tests, builds or reproductions were run; source/contract review only, as requested. No checkout files changed. No excluded coverage sources read. Next action: return to caller for the later synthesis turn; do not perform that protocol within this initial turn.\n\n## Synthesis turn 2\n\nTurn type: later synthesis. Turn count: 2. Discovery-pass count: 0. No additional mandatory patch packets assigned; prior 1,350-line coverage remains complete. No unread assigned scope.\n\nReopened l1 and c2 immediately: the initial dismissal conflated no production defect with no test defect, and treated a commit description as stronger than it is. Both intermediate losses of useful regression protection are now explicit. Revisions preserve the original titles/consequences.\n\nl1 is now a finding (other, confirmed source comparison). The later removal of xterm retires byte-size/chunk buffering, but does not retire catch-up progress/idle and empty-frame policy. Inspected the pinned timer, dispatch and receiveGrid paths and actual reconnect/replay assertions, not only test names. The removed progressing-versus-silent replay and active-empty-traffic assertions have no equivalent in inspected retained test source. A silent reconnect attempt and CONNECTING/stalled-main-thread expiry are different observables. No production failure asserted or reproduced.\n\nc2 is revised to a candidate with a new, evidence-based proposed-drop rationale, still subject to caller disposition. The intermediate useful coverage loss is retained. Startup ends old terminals in dbfc6975; f560058d removes the xterm surface, write completion refresh, workaround and observer. Static grid tests actually check DOM rows for anchoring and eviction, but use explicit flush; real-stack grid flood checks snapshots. They are not claimed to replace sustained natural-paint/flood/resize checks. The concrete xterm workaround asserted by the removed suite is nevertheless absent at tip. This differs from the supplied g153 shared-authorization case. No drop accepted by this reviewer on the caller's behalf.\n\nChecks: source-only git show/log/grep at assigned and pinned revisions, including actual replacement bodies and renderer scheduling/damage contracts. A broad contextual retirement diff search clipped unrelated later lines; the relevant startup replacement was delivered in full at its beginning, and page deletion/endpoint contracts independently establish retirement. No tests, builds or reproductions run; no checkout changes; no queue or excluded coverage-source reads.\n\nNew verified IDs this turn: l1 (test-sensitivity finding). New unverified findings: none. Revised candidate: c2. Open lead IDs: none. Next: return delta to caller. Because l1 is a substantive new conclusion, a later requested discovery pass is still needed; no additional pass was performed inside this synthesis turn.\n\n## Discovery turn 3\n\nTurn type: separate discovery. Turn count: 3. Discovery-pass count: 1. Result: no new substantive defect found. New verified finding IDs: none. New unverified-after-investigation IDs: none. Open lead IDs: none. No unread assigned source scope.\n\nBefore discovery, read discovery-neighbours.json completely. The initial 1-160 read clipped; re-read bounded ranges 1-50,51-106,107-140,141-175 without clipping. Used supplied neighbour records for novelty, not as source evidence or queue coverage. Synthesis input parent/c2-record-kind resolved first: c2 is now kind finding, retaining the confirmed intermediate useful viewport-assertion loss and exact later-removal proposed-drop basis. This is a correction to the existing record, not a new discovery. No parent drop/lowering accepted. The supplied g181 held-marker/applied-history documentation issue and the neighbouring retired-callback/overlay coverage findings remain distinct and were not re-reported.\n\nNew search within assigned group: enumerated all added lines and hunk boundaries of the replay patch, checked retained code adjacent to removed blocks and shorter-idle callers, checked removed helper/import/global identifiers for remaining uses, searched deleted-suite references in e2e and the validation inventories, inspected actual dynamic spec discovery/project construction and retained suite reset/route-drain/tabSweep hooks. git diff --check on the two assigned paths passed. A first chained no-match grep did not execute its second grep; re-ran that second search independently and verified no matches. c3 durably records this refuted dangling-dependency/registration concern, with source basis; it is a candidate, not a defect. No missing source premise remains.\n\nNo runtime tests, builds, reproductions or live-install actions. No repository edits. Findings/events and progress are the only authored private artifacts. No prohibited coverage/queue searches. Existing l1/c2 content was reused rather than re-catalogued. Next: return discovery delta to caller; additional discovery is not self-started within this turn.\n"
+}

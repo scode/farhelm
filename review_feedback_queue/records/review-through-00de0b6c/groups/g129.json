@@ -1,0 +1,1113 @@
+{
+  "group": {
+    "id": "g129",
+    "domain": "supervisor-status-reporting",
+    "purpose": "supervisor-status-reporting: crates/farhelm-supervisor/src/service/ticker.rs, crates/farhelm-supervisor/src/service/notifications.rs, crates/farhelm-supervisor/src/service/listing.rs, crates/farhelm-supervisor/src/service/status.rs, crates/farhelm-supervisor/src/service/report_files.rs, crates/farhelm-supervisor/src/service/report_watch.rs; phases complete small per-commit changes",
+    "interfaces": [
+      "g001",
+      "g003",
+      "g005",
+      "g006",
+      "g007",
+      "g008",
+      "g009",
+      "g010",
+      "g011",
+      "g102",
+      "g103",
+      "g104",
+      "g105",
+      "g106",
+      "g107",
+      "g108",
+      "g109",
+      "g110",
+      "g111",
+      "g112",
+      "g113",
+      "g114",
+      "g115",
+      "g116",
+      "g130",
+      "g131",
+      "g132",
+      "g133",
+      "g134",
+      "g159",
+      "g160",
+      "g161",
+      "g162",
+      "g163",
+      "g164",
+      "g165",
+      "g166",
+      "g167",
+      "g168",
+      "g169",
+      "g170",
+      "g171",
+      "g172",
+      "g173"
+    ],
+    "sources": [
+      {
+        "path": "[private-run]/prep/parts/00303-000.patch",
+        "ranges": [
+          [
+            1,
+            206
+          ]
+        ],
+        "original_path": "crates/farhelm-supervisor/src/service/ticker.rs",
+        "commit": "04d85f0c98a9b635709d00b056719a0baa7fd3fc",
+        "notes": "patch header; patch character offsets [0,10245)",
+        "lines": 206,
+        "bytes": 10245,
+        "start": 0,
+        "end": 10245,
+        "original": "[private-run]/prep/originals/00303.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/00746-000.patch",
+        "ranges": [
+          [
+            1,
+            15
+          ]
+        ],
+        "original_path": "crates/farhelm-supervisor/src/service/notifications.rs",
+        "commit": "70bc66a9f285cc2a9984924f389834d118b7cfdc",
+        "notes": "patch header; patch character offsets [0,985)",
+        "lines": 15,
+        "bytes": 985,
+        "start": 0,
+        "end": 985,
+        "original": "[private-run]/prep/originals/00746.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/00770-000.patch",
+        "ranges": [
+          [
+            1,
+            17
+          ]
+        ],
+        "original_path": "crates/farhelm-supervisor/src/service/listing.rs",
+        "commit": "647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513",
+        "notes": "patch header; patch character offsets [0,902)",
+        "lines": 17,
+        "bytes": 902,
+        "start": 0,
+        "end": 902,
+        "original": "[private-run]/prep/originals/00770.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/00772-000.patch",
+        "ranges": [
+          [
+            1,
+            38
+          ]
+        ],
+        "original_path": "crates/farhelm-supervisor/src/service/notifications.rs",
+        "commit": "647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513",
+        "notes": "patch header; patch character offsets [0,2068)",
+        "lines": 38,
+        "bytes": 2068,
+        "start": 0,
+        "end": 2068,
+        "original": "[private-run]/prep/originals/00772.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/00773-000.patch",
+        "ranges": [
+          [
+            1,
+            51
+          ]
+        ],
+        "original_path": "crates/farhelm-supervisor/src/service/status.rs",
+        "commit": "647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513",
+        "notes": "patch header; patch character offsets [0,2765)",
+        "lines": 51,
+        "bytes": 2765,
+        "start": 0,
+        "end": 2765,
+        "original": "[private-run]/prep/originals/00773.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/00775-000.patch",
+        "ranges": [
+          [
+            1,
+            86
+          ]
+        ],
+        "original_path": "crates/farhelm-supervisor/src/service/ticker.rs",
+        "commit": "647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513",
+        "notes": "patch header; patch character offsets [0,4024)",
+        "lines": 86,
+        "bytes": 4024,
+        "start": 0,
+        "end": 4024,
+        "original": "[private-run]/prep/originals/00775.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/00870-000.patch",
+        "ranges": [
+          [
+            1,
+            89
+          ]
+        ],
+        "original_path": "crates/farhelm-supervisor/src/service/notifications.rs",
+        "commit": "dbfc69751215dbf15e1d31d5bed73c3754c4ebc4",
+        "notes": "patch header; patch character offsets [0,4331)",
+        "lines": 89,
+        "bytes": 4331,
+        "start": 0,
+        "end": 4331,
+        "original": "[private-run]/prep/originals/00870.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/00872-000.patch",
+        "ranges": [
+          [
+            1,
+            103
+          ]
+        ],
+        "original_path": "crates/farhelm-supervisor/src/service/ticker.rs",
+        "commit": "dbfc69751215dbf15e1d31d5bed73c3754c4ebc4",
+        "notes": "patch header; patch character offsets [0,4912)",
+        "lines": 103,
+        "bytes": 4912,
+        "start": 0,
+        "end": 4912,
+        "original": "[private-run]/prep/originals/00872.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/00935-000.patch",
+        "ranges": [
+          [
+            1,
+            129
+          ]
+        ],
+        "original_path": "crates/farhelm-supervisor/src/service/listing.rs",
+        "commit": "1ed482dde220452e424973faf38a5e1318986333",
+        "notes": "patch header; patch character offsets [0,6707)",
+        "lines": 129,
+        "bytes": 6723,
+        "start": 0,
+        "end": 6707,
+        "original": "[private-run]/prep/originals/00935.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/00937-000.patch",
+        "ranges": [
+          [
+            1,
+            250
+          ]
+        ],
+        "original_path": "crates/farhelm-supervisor/src/service/notifications.rs",
+        "commit": "1ed482dde220452e424973faf38a5e1318986333",
+        "notes": "patch header; patch character offsets [0,12797)",
+        "lines": 250,
+        "bytes": 12797,
+        "start": 0,
+        "end": 12797,
+        "original": "[private-run]/prep/originals/00937.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/00938-000.patch",
+        "ranges": [
+          [
+            1,
+            60
+          ]
+        ],
+        "original_path": "crates/farhelm-supervisor/src/service/report_files.rs",
+        "commit": "1ed482dde220452e424973faf38a5e1318986333",
+        "notes": "patch header; patch character offsets [0,3793)",
+        "lines": 60,
+        "bytes": 3805,
+        "start": 0,
+        "end": 3793,
+        "original": "[private-run]/prep/originals/00938.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/00939-000.patch",
+        "ranges": [
+          [
+            1,
+            22
+          ]
+        ],
+        "original_path": "crates/farhelm-supervisor/src/service/report_watch.rs",
+        "commit": "1ed482dde220452e424973faf38a5e1318986333",
+        "notes": "patch header; patch character offsets [0,1120)",
+        "lines": 22,
+        "bytes": 1120,
+        "start": 0,
+        "end": 1120,
+        "original": "[private-run]/prep/originals/00939.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/01052-000.patch",
+        "ranges": [
+          [
+            1,
+            36
+          ]
+        ],
+        "original_path": "crates/farhelm-supervisor/src/service/listing.rs",
+        "commit": "f560058da19e02716e6f943883a9508b447aff4e",
+        "notes": "patch header; patch character offsets [0,1496)",
+        "lines": 36,
+        "bytes": 1496,
+        "start": 0,
+        "end": 1496,
+        "original": "[private-run]/prep/originals/01052.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/01054-000.patch",
+        "ranges": [
+          [
+            1,
+            38
+          ]
+        ],
+        "original_path": "crates/farhelm-supervisor/src/service/status.rs",
+        "commit": "f560058da19e02716e6f943883a9508b447aff4e",
+        "notes": "patch header; patch character offsets [0,2059)",
+        "lines": 38,
+        "bytes": 2061,
+        "start": 0,
+        "end": 2059,
+        "original": "[private-run]/prep/originals/01054.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/01549-000.patch",
+        "ranges": [
+          [
+            1,
+            40
+          ]
+        ],
+        "original_path": "crates/farhelm-supervisor/src/service/ticker.rs",
+        "commit": "08399d092d20815ced6619c26df2391944ae2b4a",
+        "notes": "patch header; patch character offsets [0,2592)",
+        "lines": 40,
+        "bytes": 2598,
+        "start": 0,
+        "end": 2592,
+        "original": "[private-run]/prep/originals/01549.patch"
+      }
+    ],
+    "lines": 1180,
+    "bytes": 60832
+  },
+  "records": [
+    {
+      "key": "g129/c1",
+      "owner": "g129",
+      "id": "c1",
+      "domain": "supervisor-status-reporting",
+      "purpose": "supervisor-status-reporting: crates/farhelm-supervisor/src/service/ticker.rs, crates/farhelm-supervisor/src/service/notifications.rs, crates/farhelm-supervisor/src/service/listing.rs, crates/farhelm-supervisor/src/service/status.rs, crates/farhelm-supervisor/src/service/report_files.rs, crates/farhelm-supervisor/src/service/report_watch.rs; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 1,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c1",
+            "state": "open",
+            "summary": "Retired-session dead tabs deliberately remain for Delete",
+            "location": "crates/farhelm-supervisor/src/service/ticker.rs:2095",
+            "detail": "Reviewed commit: 04d85f0c98a9b635709d00b056719a0baa7fd3fc.\nTLDR: Dead shell tabs in retired containerized sessions remain until the user deletes the session.\nDetails: The two automatic reapers now skip a session whose stored launch is retired before spending admission budget (ticker.rs:2095 and :2167). Considered whether that leaves cleanup indefinitely pending. SPEC.md, Retired containerized sessions, lines 4818-4821 explicitly states: ‘Existing sessions support Delete only. Opening terminals or tabs, exec, Stop, Restart, Clone, Replace and Replace with are refused. Delete retains the legacy container-removal path and confirms absence.’ Leaving these tabs for whole-session Delete is consistent with that restriction and avoids repeatedly admitting refused closes. The added test asserts no lifecycle claims on retired sessions and full admission budget for ordinary sessions. Suggested bucket: other; could-be-highest: no established security or loss-of-work route from retaining already-dead tabs. Confidence: confirmed from source and contract, not execution. proposed_drop: exact specification acceptance quoted above. possible_cover: none; no coverage sources searched. Caveat: whole-session Delete implementation is an interface owned outside this patch group; no independent audit of that implementation is claimed."
+          }
+        }
+      ],
+      "latest": {
+        "line": 1,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c1",
+          "state": "open",
+          "summary": "Retired-session dead tabs deliberately remain for Delete",
+          "location": "crates/farhelm-supervisor/src/service/ticker.rs:2095",
+          "detail": "Reviewed commit: 04d85f0c98a9b635709d00b056719a0baa7fd3fc.\nTLDR: Dead shell tabs in retired containerized sessions remain until the user deletes the session.\nDetails: The two automatic reapers now skip a session whose stored launch is retired before spending admission budget (ticker.rs:2095 and :2167). Considered whether that leaves cleanup indefinitely pending. SPEC.md, Retired containerized sessions, lines 4818-4821 explicitly states: ‘Existing sessions support Delete only. Opening terminals or tabs, exec, Stop, Restart, Clone, Replace and Replace with are refused. Delete retains the legacy container-removal path and confirms absence.’ Leaving these tabs for whole-session Delete is consistent with that restriction and avoids repeatedly admitting refused closes. The added test asserts no lifecycle claims on retired sessions and full admission budget for ordinary sessions. Suggested bucket: other; could-be-highest: no established security or loss-of-work route from retaining already-dead tabs. Confidence: confirmed from source and contract, not execution. proposed_drop: exact specification acceptance quoted above. possible_cover: none; no coverage sources searched. Caveat: whole-session Delete implementation is an interface owned outside this patch group; no independent audit of that implementation is claimed."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g129/findings.jsonl",
+        "id": "c1",
+        "line": 1,
+        "disposition": "excluded",
+        "group": "retired-container-session-dead-tabs-delete-only",
+        "reason": "Parent explicitly accepted named covered proposal from claims-082 after inspecting it. Skipping automatic tab closes on retired containerized sessions follows their explicit Delete-only contract. The consequence is retaining already-dead tabs until whole-session Delete, not newly ending user work. Exact specification acceptance for this retained-dead-tab scope; no FILTER.md rule needed. Do not generalize this to Delete correctness or live-terminal loss. Checked source/results: [\"04d85f0c98a9b635709d00b056719a0baa7fd3fc:crates/farhelm-supervisor/src/service/ticker.rs:2093-2099 and 2165-2169 exclude retired launches before close admission/budget use.\",\"Same revision ticker.rs:3233-3282 checks that retired sessions receive no claims and ordinary sessions receive the full close budget; retained retired host cells are explicitly asserted.\"] Current coverage/results: [\"SPEC.md:4892-4899, Retired containerized sessions, explicitly allows Delete only and retains legacy container removal; exact cover.\",\"SPEC_impl.md:8317-8320 repeats Delete-only retirement. TODO.md:25-26 Planned is empty; plans/queue/INDEX.md has no unlanded plans. BUGS.md contains only an unrelated SSH transfer hang. INDEX.md and active TRIAGE_OUTCOMES.md searches for retired container/tab/reap/close claims found no matching item or decision.\"] Exact cited cover: [\"SPEC.md:4895-4896: Existing sessions support Delete only. Opening terminals or tabs, exec, Stop, Restart, Clone, Replace and Replace with are refused. Delete retains the legacy container-removal path and confirms absence.\"] Original stronger consequence and missing premise remain preserved: \"Retired dead tabs could remain indefinitely pending automatic cleanup. Whole-session Delete implementation was outside this candidate's audit.\"; null."
+      },
+      "accepted_parent_decision": {
+        "key": "g129/c1",
+        "line": 1,
+        "disposition": "excluded",
+        "group": "retired-container-session-dead-tabs-delete-only",
+        "bucket": "other",
+        "recording": "covered",
+        "queue_target_candidate": null,
+        "needs_independent_drop_check": false,
+        "reason": "Parent explicitly accepted named covered proposal from claims-082 after inspecting it. Skipping automatic tab closes on retired containerized sessions follows their explicit Delete-only contract. The consequence is retaining already-dead tabs until whole-session Delete, not newly ending user work. Exact specification acceptance for this retained-dead-tab scope; no FILTER.md rule needed. Do not generalize this to Delete correctness or live-terminal loss. Checked source/results: [\"04d85f0c98a9b635709d00b056719a0baa7fd3fc:crates/farhelm-supervisor/src/service/ticker.rs:2093-2099 and 2165-2169 exclude retired launches before close admission/budget use.\",\"Same revision ticker.rs:3233-3282 checks that retired sessions receive no claims and ordinary sessions receive the full close budget; retained retired host cells are explicitly asserted.\"] Current coverage/results: [\"SPEC.md:4892-4899, Retired containerized sessions, explicitly allows Delete only and retains legacy container removal; exact cover.\",\"SPEC_impl.md:8317-8320 repeats Delete-only retirement. TODO.md:25-26 Planned is empty; plans/queue/INDEX.md has no unlanded plans. BUGS.md contains only an unrelated SSH transfer hang. INDEX.md and active TRIAGE_OUTCOMES.md searches for retired container/tab/reap/close claims found no matching item or decision.\"] Exact cited cover: [\"SPEC.md:4895-4896: Existing sessions support Delete only. Opening terminals or tabs, exec, Stop, Restart, Clone, Replace and Replace with are refused. Delete retains the legacy container-removal path and confirms absence.\"] Original stronger consequence and missing premise remain preserved: \"Retired dead tabs could remain indefinitely pending automatic cleanup. Whole-session Delete implementation was outside this candidate's audit.\"; null."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-082",
+          "key": "g129/c1",
+          "latest_line": 1,
+          "recommendation": "covered",
+          "bucket": "other",
+          "underlying_key": "retired-container-session-dead-tabs-delete-only",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "Skipping automatic tab closes on retired containerized sessions follows their explicit Delete-only contract. The consequence is retaining already-dead tabs until whole-session Delete, not newly ending user work.",
+          "checks": [
+            "04d85f0c98a9b635709d00b056719a0baa7fd3fc:crates/farhelm-supervisor/src/service/ticker.rs:2093-2099 and 2165-2169 exclude retired launches before close admission/budget use.",
+            "Same revision ticker.rs:3233-3282 checks that retired sessions receive no claims and ordinary sessions receive the full close budget; retained retired host cells are explicitly asserted."
+          ],
+          "coverage_checked": [
+            "SPEC.md:4892-4899, Retired containerized sessions, explicitly allows Delete only and retains legacy container removal; exact cover.",
+            "SPEC_impl.md:8317-8320 repeats Delete-only retirement. TODO.md:25-26 Planned is empty; plans/queue/INDEX.md has no unlanded plans. BUGS.md contains only an unrelated SSH transfer hang. INDEX.md and active TRIAGE_OUTCOMES.md searches for retired container/tab/reap/close claims found no matching item or decision."
+          ],
+          "exact_cover_quotes": [
+            "SPEC.md:4895-4896: Existing sessions support Delete only. Opening terminals or tabs, exec, Stop, Restart, Clone, Replace and Replace with are refused. Delete retains the legacy container-removal path and confirms absence."
+          ],
+          "missing_premise": null,
+          "original_stronger_consequence": "Retired dead tabs could remain indefinitely pending automatic cleanup. Whole-session Delete implementation was outside this candidate's audit.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Exact specification acceptance for this retained-dead-tab scope; no FILTER.md rule needed. Do not generalize this to Delete correctness or live-terminal loss."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": false,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "retired-container-session-dead-tabs-delete-only",
+        "destination": null
+      }
+    },
+    {
+      "key": "g129/l1",
+      "owner": "g129",
+      "id": "l1",
+      "domain": "supervisor-status-reporting",
+      "purpose": "supervisor-status-reporting: crates/farhelm-supervisor/src/service/ticker.rs, crates/farhelm-supervisor/src/service/notifications.rs, crates/farhelm-supervisor/src/service/listing.rs, crates/farhelm-supervisor/src/service/status.rs, crates/farhelm-supervisor/src/service/report_files.rs, crates/farhelm-supervisor/src/service/report_watch.rs; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 2,
+          "event": {
+            "version": 1,
+            "kind": "lead",
+            "id": "l1",
+            "state": "open",
+            "summary": "Host-tab test may inspect cleanup before close tasks complete",
+            "location": "crates/farhelm-supervisor/src/service/ticker.rs:3264",
+            "detail": "Reviewed commit: 04d85f0c98a9b635709d00b056719a0baa7fd3fc.\nTLDR: The new regression test may fail depending on whether asynchronous tab cleanup has finished.\nDetails: The test releases four held close tasks, then calls wait_for_reaped_panes with an empty slice for its host-tab branch before asserting all ordinary host-tab cells are empty. Need to inspect that helper and the close-task completion boundary to determine whether this establishes readiness or merely yields incidentally. The helper was located at ticker.rs:2692 but has not yet been read. Suggested bucket: other (test reliability); could-be-highest: no. Confidence: uninvestigated lead; no execution performed. proposed_drop: false pending source checks. possible_cover: none; no coverage sources searched. Missing premise: whether wait_for_reaped_panes with zero panes waits for lifecycle claims or host-tab cell removal. Next check: helper and owned tab-close source at the same revision."
+          }
+        },
+        {
+          "line": 3,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "l1",
+            "state": "open",
+            "summary": "Host-tab test waits for all lifecycle claims before asserting cleanup",
+            "location": "crates/farhelm-supervisor/src/service/ticker.rs:2692",
+            "detail": "Reviewed commit: 04d85f0c98a9b635709d00b056719a0baa7fd3fc.\nTLDR: The suspected race in the new cleanup test is ruled out by its completion helper.\nDetails: Original suspected consequence was a test failure from inspecting host-tab cleanup before its four close tasks completed. Source check: wait_for_reaped_panes at ticker.rs:2692-2720 requires both no named panes AND no lifecycle claim for any session in the fixture, even with an empty pane slice. The helper's declared contract says the close holds that claim through teardown. The added test also checks every ordinary session is claimed before releasing the gate (:3242-3264), so the wait cannot mistake unstarted tasks for completed ones. No execution performed. Suggested bucket: other (test reliability); could-be-highest: no. Confidence: confirmed source refutation. proposed_drop: source refutation, the helper waits for owned close completion rather than just pane absence. possible_cover: none; no coverage sources searched. Caveat: this conclusion depends on the lifecycle claim spanning close teardown as documented; the owned-close caller will also be inspected to validate that contract."
+          }
+        },
+        {
+          "line": 8,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "l1",
+            "state": "open",
+            "summary": "Host-tab test waits for all lifecycle claims before asserting cleanup",
+            "location": "crates/farhelm-supervisor/src/service/ticker.rs:2692",
+            "detail": "Reviewed commit: 04d85f0c98a9b635709d00b056719a0baa7fd3fc.\nTLDR: The suspected race in the new cleanup test is ruled out by its completion helper and the owned-close implementation.\nDetails: Original suspected consequence was a test failure from inspecting host-tab cleanup before its four close tasks completed. wait_for_reaped_panes at ticker.rs:2692-2720 requires both no named panes AND no lifecycle claim for any session in the fixture, even with an empty pane slice. The test checks every ordinary session is claimed before releasing the gate (:3248-3264). Follow-up caller validation: core.rs:16077-16141 takes the lifecycle claim synchronously before spawning, then moves it into the owned close task and borrows it through close_tab_under_claim. core/host_tabs.rs:1020-1064 performs process cleanup, removes the launch record, and forgets the host tab before returning. Thus claim release cannot precede cell removal on successful close. No execution performed. Suggested bucket: other (test reliability); could-be-highest: no. Confidence: confirmed source refutation. proposed_drop: source refutation, the helper waits for owned close completion rather than just pane absence. possible_cover: none; no coverage sources searched. No unresolved premise remains for this candidate."
+          }
+        }
+      ],
+      "latest": {
+        "line": 8,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "l1",
+          "state": "open",
+          "summary": "Host-tab test waits for all lifecycle claims before asserting cleanup",
+          "location": "crates/farhelm-supervisor/src/service/ticker.rs:2692",
+          "detail": "Reviewed commit: 04d85f0c98a9b635709d00b056719a0baa7fd3fc.\nTLDR: The suspected race in the new cleanup test is ruled out by its completion helper and the owned-close implementation.\nDetails: Original suspected consequence was a test failure from inspecting host-tab cleanup before its four close tasks completed. wait_for_reaped_panes at ticker.rs:2692-2720 requires both no named panes AND no lifecycle claim for any session in the fixture, even with an empty pane slice. The test checks every ordinary session is claimed before releasing the gate (:3248-3264). Follow-up caller validation: core.rs:16077-16141 takes the lifecycle claim synchronously before spawning, then moves it into the owned close task and borrows it through close_tab_under_claim. core/host_tabs.rs:1020-1064 performs process cleanup, removes the launch record, and forgets the host tab before returning. Thus claim release cannot precede cell removal on successful close. No execution performed. Suggested bucket: other (test reliability); could-be-highest: no. Confidence: confirmed source refutation. proposed_drop: source refutation, the helper waits for owned close completion rather than just pane absence. possible_cover: none; no coverage sources searched. No unresolved premise remains for this candidate."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g129/findings.jsonl",
+        "id": "l1",
+        "line": 8,
+        "disposition": "excluded",
+        "group": "retired-tab-test-close-completion-oracle",
+        "reason": "Parent explicitly accepted named refuted proposal from claims-082 after inspecting it. The zero-pane branch still waits for all lifecycle claims to end, and those claims span successful host-tab cell removal. Source refutation of the named test race, without claiming runtime execution or auditing all close failures. No applicable filter. Checked source/results: [\"04d85f0c98a9b635709d00b056719a0baa7fd3fc:ticker.rs:2692-2727 returns only when both named panes and fixture lifecycle claims are absent; an empty pane slice does not bypass the claim test.\",\"Same revision ticker.rs:3248-3267 establishes every ordinary close is claimed and has reached the held teardown before release.\",\"Same revision service/core.rs:16077-16141 takes the claim before spawn and moves it into the owned task, borrowed by close_tab_under_claim. core/host_tabs.rs:1020-1064 forgets the tab before successful return.\"] Current coverage/results: [\"Both specs were searched for tab-close/reap and lifecycle completion; neither accepts an unreliable test oracle. SPEC_impl.md:2248-2266 describes processed-exit reaping rather than this test wait.\",\"TODO Planned empty; plans queue index empty; BUGS unrelated. Queue INDEX and active ledger searches found no exact match. review_feedback_queue/tab-reap-deadline-excludes-listing-request.md was read: it concerns an integration helper's unbounded listing await, not this claim-spanning completion predicate.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"A false test failure from asserting host-tab cells empty before the four asynchronous close tasks finish. The earlier refutation was conditional on claim lifetime; the later source check settles that premise.\"; null."
+      },
+      "accepted_parent_decision": {
+        "key": "g129/l1",
+        "line": 8,
+        "disposition": "excluded",
+        "group": "retired-tab-test-close-completion-oracle",
+        "bucket": "other",
+        "recording": "refuted",
+        "queue_target_candidate": null,
+        "needs_independent_drop_check": false,
+        "reason": "Parent explicitly accepted named refuted proposal from claims-082 after inspecting it. The zero-pane branch still waits for all lifecycle claims to end, and those claims span successful host-tab cell removal. Source refutation of the named test race, without claiming runtime execution or auditing all close failures. No applicable filter. Checked source/results: [\"04d85f0c98a9b635709d00b056719a0baa7fd3fc:ticker.rs:2692-2727 returns only when both named panes and fixture lifecycle claims are absent; an empty pane slice does not bypass the claim test.\",\"Same revision ticker.rs:3248-3267 establishes every ordinary close is claimed and has reached the held teardown before release.\",\"Same revision service/core.rs:16077-16141 takes the claim before spawn and moves it into the owned task, borrowed by close_tab_under_claim. core/host_tabs.rs:1020-1064 forgets the tab before successful return.\"] Current coverage/results: [\"Both specs were searched for tab-close/reap and lifecycle completion; neither accepts an unreliable test oracle. SPEC_impl.md:2248-2266 describes processed-exit reaping rather than this test wait.\",\"TODO Planned empty; plans queue index empty; BUGS unrelated. Queue INDEX and active ledger searches found no exact match. review_feedback_queue/tab-reap-deadline-excludes-listing-request.md was read: it concerns an integration helper's unbounded listing await, not this claim-spanning completion predicate.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"A false test failure from asserting host-tab cells empty before the four asynchronous close tasks finish. The earlier refutation was conditional on claim lifetime; the later source check settles that premise.\"; null."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-082",
+          "key": "g129/l1",
+          "latest_line": 8,
+          "recommendation": "refuted",
+          "bucket": "other",
+          "underlying_key": "retired-tab-test-close-completion-oracle",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The zero-pane branch still waits for all lifecycle claims to end, and those claims span successful host-tab cell removal.",
+          "checks": [
+            "04d85f0c98a9b635709d00b056719a0baa7fd3fc:ticker.rs:2692-2727 returns only when both named panes and fixture lifecycle claims are absent; an empty pane slice does not bypass the claim test.",
+            "Same revision ticker.rs:3248-3267 establishes every ordinary close is claimed and has reached the held teardown before release.",
+            "Same revision service/core.rs:16077-16141 takes the claim before spawn and moves it into the owned task, borrowed by close_tab_under_claim. core/host_tabs.rs:1020-1064 forgets the tab before successful return."
+          ],
+          "coverage_checked": [
+            "Both specs were searched for tab-close/reap and lifecycle completion; neither accepts an unreliable test oracle. SPEC_impl.md:2248-2266 describes processed-exit reaping rather than this test wait.",
+            "TODO Planned empty; plans queue index empty; BUGS unrelated. Queue INDEX and active ledger searches found no exact match. review_feedback_queue/tab-reap-deadline-excludes-listing-request.md was read: it concerns an integration helper's unbounded listing await, not this claim-spanning completion predicate."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": null,
+          "original_stronger_consequence": "A false test failure from asserting host-tab cells empty before the four asynchronous close tasks finish. The earlier refutation was conditional on claim lifetime; the later source check settles that premise.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Source refutation of the named test race, without claiming runtime execution or auditing all close failures. No applicable filter."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "retired-tab-test-close-completion-oracle",
+        "destination": null
+      }
+    },
+    {
+      "key": "g129/c2",
+      "owner": "g129",
+      "id": "c2",
+      "domain": "supervisor-status-reporting",
+      "purpose": "supervisor-status-reporting: crates/farhelm-supervisor/src/service/ticker.rs, crates/farhelm-supervisor/src/service/notifications.rs, crates/farhelm-supervisor/src/service/listing.rs, crates/farhelm-supervisor/src/service/status.rs, crates/farhelm-supervisor/src/service/report_files.rs, crates/farhelm-supervisor/src/service/report_watch.rs; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 4,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c2",
+            "state": "open",
+            "summary": "Terminal-kind report removal is fenced by a protocol bump",
+            "location": "crates/farhelm-supervisor/src/service/status.rs:425",
+            "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e.\nTLDR: Removing the old/new-terminal details does not silently connect incompatible old and new peers.\nDetails: Considered whether deleting report_new_terminals and entry_info's agent_terminal projection could leave an older client believing these sessions still need migration, or choose an unsupported stream. Source check: the same commit's crates/farhelm-proto/src/lib.rs changes PROTOCOL_VERSION from 76 to 77 and removes both SessionInfo fields, along with the raw stream variants. The listing and single-session boundary no longer need to add a field absent from the new wire contract. Suggested bucket: other; could-be-highest: no established security or loss-of-work route. Confidence: confirmed from source, not execution. proposed_drop: source refutation, explicit incompatible-protocol fence accompanies the report removal. possible_cover: none; no coverage sources searched. Caveat: this is a review of these status projections and their protocol interface, not an independent review of all grid-stream removal changes."
+          }
+        }
+      ],
+      "latest": {
+        "line": 4,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c2",
+          "state": "open",
+          "summary": "Terminal-kind report removal is fenced by a protocol bump",
+          "location": "crates/farhelm-supervisor/src/service/status.rs:425",
+          "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e.\nTLDR: Removing the old/new-terminal details does not silently connect incompatible old and new peers.\nDetails: Considered whether deleting report_new_terminals and entry_info's agent_terminal projection could leave an older client believing these sessions still need migration, or choose an unsupported stream. Source check: the same commit's crates/farhelm-proto/src/lib.rs changes PROTOCOL_VERSION from 76 to 77 and removes both SessionInfo fields, along with the raw stream variants. The listing and single-session boundary no longer need to add a field absent from the new wire contract. Suggested bucket: other; could-be-highest: no established security or loss-of-work route. Confidence: confirmed from source, not execution. proposed_drop: source refutation, explicit incompatible-protocol fence accompanies the report removal. possible_cover: none; no coverage sources searched. Caveat: this is a review of these status projections and their protocol interface, not an independent review of all grid-stream removal changes."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g129/findings.jsonl",
+        "id": "c2",
+        "line": 4,
+        "disposition": "excluded",
+        "group": "terminal-kind-report-removal-protocol-fence",
+        "reason": "Parent read full claims082 and narrows its protocol-fence basis: protocol77 and exact hello equality refute incompatible live helm/supervisor peers, coordinated statusprojection removal matches sameversion schema. That handshake does NOT fence an alreadyloadedoldbrowserpage. The accepted old-page misdrawing/attachment refusal requires reload per exact Gridstreams2949-2955, already checked with other owners. Separate rawJSONpaste reinterpretation/highest condition remains retained under017l1/196l1 and is neither refuted nor accepted by this candidate decision. No stronger consequence or whole-removal clearance inferred. No applicablefilter needed for the narrow native-peer source refutation."
+      },
+      "accepted_parent_decision": {
+        "key": "g129/c2",
+        "line": 4,
+        "disposition": "excluded",
+        "group": "terminal-kind-report-removal-protocol-fence",
+        "bucket": "other",
+        "recording": "bounded-live-peer-refutation-old-page-qualified",
+        "needs_independent_drop_check": false,
+        "reason": "Parent read full claims082 and narrows its protocol-fence basis: protocol77 and exact hello equality refute incompatible live helm/supervisor peers, coordinated statusprojection removal matches sameversion schema. That handshake does NOT fence an alreadyloadedoldbrowserpage. The accepted old-page misdrawing/attachment refusal requires reload per exact Gridstreams2949-2955, already checked with other owners. Separate rawJSONpaste reinterpretation/highest condition remains retained under017l1/196l1 and is neither refuted nor accepted by this candidate decision. No stronger consequence or whole-removal clearance inferred. No applicablefilter needed for the narrow native-peer source refutation."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-082",
+          "key": "g129/c2",
+          "latest_line": 4,
+          "recommendation": "refuted",
+          "bucket": "other",
+          "underlying_key": "terminal-kind-report-removal-protocol-fence",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The projection fields are removed from the wire contract in the same commit that increments its incompatible-protocol version.",
+          "checks": [
+            "f560058da19e02716e6f943883a9508b447aff4e:crates/farhelm-proto/src/lib.rs changes PROTOCOL_VERSION from 76 to 77 and removes SessionInfo.agent_terminal and supervisor_creates_host_terminals; the status.rs projection/helper removals correspond to those deleted fields.",
+            "Current SPEC.md:4348-4352 and SPEC_impl.md transport section require refusal of protocol-version incompatibility."
+          ],
+          "coverage_checked": [
+            "SPEC.md protocol-skew rule and SPEC_impl.md Helm-supervisor transport were checked; they provide the interface contract, not an acceptance of silent incompatible streams.",
+            "TODO Planned and unlanded plans empty; BUGS unrelated. Queue INDEX and active ledger searches for terminal-kind reports/protocol version/old stream migration found no exact matching claim."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": null,
+          "original_stronger_consequence": "An older client might mistakenly request an unsupported stream or believe a session still needs migration after the fields disappear. The claim did not establish security or user-work loss and did not audit all stream-removal behavior.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Source refutation confined to the status projections and protocol fence; no filter or whole-change correctness assertion."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "terminal-kind-report-removal-protocol-fence",
+        "destination": null
+      }
+    },
+    {
+      "key": "g129/c3",
+      "owner": "g129",
+      "id": "c3",
+      "domain": "supervisor-status-reporting",
+      "purpose": "supervisor-status-reporting: crates/farhelm-supervisor/src/service/ticker.rs, crates/farhelm-supervisor/src/service/notifications.rs, crates/farhelm-supervisor/src/service/listing.rs, crates/farhelm-supervisor/src/service/status.rs, crates/farhelm-supervisor/src/service/report_files.rs, crates/farhelm-supervisor/src/service/report_watch.rs; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 5,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c3",
+            "state": "open",
+            "summary": "Old-terminal-ended notices are not erased by warning resolution",
+            "location": "crates/farhelm-supervisor/src/service/notifications.rs:111",
+            "detail": "Reviewed commit: dbfc69751215dbf15e1d31d5bed73c3754c4ebc4; removal follow-up 1ed482dde220452e424973faf38a5e1318986333.\nTLDR: The new notice explaining why an old agent stopped survives later startup and conversation recovery.\nDetails: Checked whether adding OldTerminalEnded to NotificationKind::ALL could cause the generic resume resolver or startup's old-warning resolver to erase it. Both resolves_on_resume and requires_no_identity match it explicitly as false (notifications.rs:143 and :162), and its stored key is distinct old_terminal_ended (:179). core/old_terminals.rs:525-550 writes the notice at the converted generation, then resolves only old_terminal. It writes before publication and reload loads the history. The follow-up deletes the obsolete ticker warning producer, not this startup writer. SPEC.md, Status, at 1ed482d lines 2810-2817 says the new notice stays unresolved across later starts. Suggested bucket: other; could-be-highest: no established security or loss-of-work consequence from the suspected notice-resolution defect. Confidence: confirmed source refutation; no execution performed. proposed_drop: source refutation, both resolution paths distinguish the new kind. possible_cover: none; no coverage sources searched. Caveats: best-effort persistence can omit a notice after a write failure, but this is the documented diagnostic contract, not introduced by the new enum routing."
+          }
+        }
+      ],
+      "latest": {
+        "line": 5,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c3",
+          "state": "open",
+          "summary": "Old-terminal-ended notices are not erased by warning resolution",
+          "location": "crates/farhelm-supervisor/src/service/notifications.rs:111",
+          "detail": "Reviewed commit: dbfc69751215dbf15e1d31d5bed73c3754c4ebc4; removal follow-up 1ed482dde220452e424973faf38a5e1318986333.\nTLDR: The new notice explaining why an old agent stopped survives later startup and conversation recovery.\nDetails: Checked whether adding OldTerminalEnded to NotificationKind::ALL could cause the generic resume resolver or startup's old-warning resolver to erase it. Both resolves_on_resume and requires_no_identity match it explicitly as false (notifications.rs:143 and :162), and its stored key is distinct old_terminal_ended (:179). core/old_terminals.rs:525-550 writes the notice at the converted generation, then resolves only old_terminal. It writes before publication and reload loads the history. The follow-up deletes the obsolete ticker warning producer, not this startup writer. SPEC.md, Status, at 1ed482d lines 2810-2817 says the new notice stays unresolved across later starts. Suggested bucket: other; could-be-highest: no established security or loss-of-work consequence from the suspected notice-resolution defect. Confidence: confirmed source refutation; no execution performed. proposed_drop: source refutation, both resolution paths distinguish the new kind. possible_cover: none; no coverage sources searched. Caveats: best-effort persistence can omit a notice after a write failure, but this is the documented diagnostic contract, not introduced by the new enum routing."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g129/findings.jsonl",
+        "id": "c3",
+        "line": 5,
+        "disposition": "excluded",
+        "group": "old-terminal-ended-notice-resolution-routing",
+        "reason": "Parent explicitly accepted named refuted proposal from claims-082 after inspecting it. The new notice has a distinct persisted kind and neither resume resolution nor startup old-warning resolution selects it. Source refutation of enum/resolution routing, not a claim that all notice persistence succeeds. No filter needed. Checked source/results: [\"dbfc69751215dbf15e1d31d5bed73c3754c4ebc4:service/notifications.rs:111-179 includes OldTerminalEnded in ALL, returns false for resolves_on_resume and requires_no_identity, and persists old_terminal_ended separately from old_terminal.\",\"Same revision service/core/old_terminals.rs:525-550 records the ended notice at the converted generation, then resolves only NotificationKind::OldTerminal. 1ed482d's follow-up removes the obsolete ticker producer, not this startup writer.\"] Current coverage/results: [\"SPEC.md:2804-2813 explicitly says nothing resolves the notice and it remains across later starts. SPEC_impl.md:5685-5689 gives the matching distinct-kind startup contract.\",\"TODO Planned and unlanded plans empty; BUGS unrelated. Queue INDEX and active ledger searches for old-terminal-ended notice/resolution found no exact item; notification-read-failure-leaves-stale-cell is a different publication-read failure.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Adding the notice to generic notification routing might erase the explanation after later startup or conversation recovery. Best-effort persistence can still fail to write a notice; that separate caveat is preserved.\"; null."
+      },
+      "accepted_parent_decision": {
+        "key": "g129/c3",
+        "line": 5,
+        "disposition": "excluded",
+        "group": "old-terminal-ended-notice-resolution-routing",
+        "bucket": "other",
+        "recording": "refuted",
+        "queue_target_candidate": null,
+        "needs_independent_drop_check": false,
+        "reason": "Parent explicitly accepted named refuted proposal from claims-082 after inspecting it. The new notice has a distinct persisted kind and neither resume resolution nor startup old-warning resolution selects it. Source refutation of enum/resolution routing, not a claim that all notice persistence succeeds. No filter needed. Checked source/results: [\"dbfc69751215dbf15e1d31d5bed73c3754c4ebc4:service/notifications.rs:111-179 includes OldTerminalEnded in ALL, returns false for resolves_on_resume and requires_no_identity, and persists old_terminal_ended separately from old_terminal.\",\"Same revision service/core/old_terminals.rs:525-550 records the ended notice at the converted generation, then resolves only NotificationKind::OldTerminal. 1ed482d's follow-up removes the obsolete ticker producer, not this startup writer.\"] Current coverage/results: [\"SPEC.md:2804-2813 explicitly says nothing resolves the notice and it remains across later starts. SPEC_impl.md:5685-5689 gives the matching distinct-kind startup contract.\",\"TODO Planned and unlanded plans empty; BUGS unrelated. Queue INDEX and active ledger searches for old-terminal-ended notice/resolution found no exact item; notification-read-failure-leaves-stale-cell is a different publication-read failure.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Adding the notice to generic notification routing might erase the explanation after later startup or conversation recovery. Best-effort persistence can still fail to write a notice; that separate caveat is preserved.\"; null."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-082",
+          "key": "g129/c3",
+          "latest_line": 5,
+          "recommendation": "refuted",
+          "bucket": "other",
+          "underlying_key": "old-terminal-ended-notice-resolution-routing",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The new notice has a distinct persisted kind and neither resume resolution nor startup old-warning resolution selects it.",
+          "checks": [
+            "dbfc69751215dbf15e1d31d5bed73c3754c4ebc4:service/notifications.rs:111-179 includes OldTerminalEnded in ALL, returns false for resolves_on_resume and requires_no_identity, and persists old_terminal_ended separately from old_terminal.",
+            "Same revision service/core/old_terminals.rs:525-550 records the ended notice at the converted generation, then resolves only NotificationKind::OldTerminal. 1ed482d's follow-up removes the obsolete ticker producer, not this startup writer."
+          ],
+          "coverage_checked": [
+            "SPEC.md:2804-2813 explicitly says nothing resolves the notice and it remains across later starts. SPEC_impl.md:5685-5689 gives the matching distinct-kind startup contract.",
+            "TODO Planned and unlanded plans empty; BUGS unrelated. Queue INDEX and active ledger searches for old-terminal-ended notice/resolution found no exact item; notification-read-failure-leaves-stale-cell is a different publication-read failure."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": null,
+          "original_stronger_consequence": "Adding the notice to generic notification routing might erase the explanation after later startup or conversation recovery. Best-effort persistence can still fail to write a notice; that separate caveat is preserved.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Source refutation of enum/resolution routing, not a claim that all notice persistence succeeds. No filter needed."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "old-terminal-ended-notice-resolution-routing",
+        "destination": null
+      }
+    },
+    {
+      "key": "g129/l2",
+      "owner": "g129",
+      "id": "l2",
+      "domain": "supervisor-status-reporting",
+      "purpose": "supervisor-status-reporting: crates/farhelm-supervisor/src/service/ticker.rs, crates/farhelm-supervisor/src/service/notifications.rs, crates/farhelm-supervisor/src/service/listing.rs, crates/farhelm-supervisor/src/service/status.rs, crates/farhelm-supervisor/src/service/report_files.rs, crates/farhelm-supervisor/src/service/report_watch.rs; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 6,
+          "event": {
+            "version": 1,
+            "kind": "lead",
+            "id": "l2",
+            "state": "open",
+            "summary": "Report-file documentation calls a gone host definitive but anchor may retry",
+            "location": "crates/farhelm-supervisor/src/service/report_files.rs:43",
+            "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333.\nTLDR: A waiting conversation report might be retried indefinitely after its terminal host is gone, contrary to the changed documentation.\nDetails: The patch newly says a gone terminal host is definitive and the report is discarded. Source check: core.rs:15826-15853 host_agent_anchor returns Internal when there is no published same-generation host or host.anchor() is None. It does not visibly distinguish gone from temporarily unreadable here. Need inspect HostTerminal::anchor and report disposition, plus parent revision, to determine whether a definitive path exists and whether any behavioral defect belongs to this patch rather than the pre-existing host path. Suggested bucket: other absent a stronger consequence; could-be-highest: no established loss-of-work or security route. Confidence: uninvestigated lead, not execution. proposed_drop: false pending checks. possible_cover: none; no coverage sources searched. Missing premise: anchor result for a gone host and treatment of Internal refusals. Next checks: hosts implementation, report_files drain, and original parent implementation."
+          }
+        },
+        {
+          "line": 7,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "l2",
+            "state": "open",
+            "summary": "Gone-host report documentation contradicts the anchor contract",
+            "location": "crates/farhelm-supervisor/src/service/report_files.rs:43",
+            "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333.\nTLDR: The new source documentation incorrectly promises that a waiting conversation report is discarded when its terminal host is gone. The implementation can keep retrying it, or still accept it from retained process evidence.\nDetails: report_files.rs:43-55 newly replaces the tmux-specific explanation with claims that a gone terminal host is definitive and a report whose terminal is gone is discarded. Actual source: core.rs:15826-15853 host_agent_anchor returns Internal if the same-generation published entry has no terminal, or host.anchor() returns None. report_files.rs:252-261 treats Internal as Retry. hosts/terminal.rs:872-883 explicitly permits Liveness::Gone to yield a TerminalAnchor when child_pid > 1, so even a gone handle need not reject a report: retained child evidence can still anchor it. Thus neither the definitive discard claim nor the implied requirement that the host still hold the terminal is accurate. Suggested fix: document retained child anchors and retry behavior accurately; if definitive rejection is intended, specify and implement that separately rather than teaching a contract the code does not enforce. Suggested bucket: other (documentation/contract correctness). could-be-highest: no established security or loss-of-work route; retained anchors carry start identity and the per-generation fence remains. Confidence: confirmed through source and caller analysis; no execution or reproductions performed. proposed_drop: false. possible_cover: none; no coverage sources searched. Material caveat: the underlying host retry/retained-anchor behavior already exists in the parent revision (core.rs:17044-17066); this finding concerns the inaccurate replacement documentation introduced by this patch, not a newly introduced runtime regression. The original suspected consequence of retrying indefinitely after permanent host loss is supported by the None-terminal/Internal/Retry path, but is pre-existing and is not independently charged to this change."
+          }
+        },
+        {
+          "line": 10,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "l2",
+            "state": "open",
+            "summary": "Gone-host report documentation contradicts the anchor contract",
+            "location": "crates/farhelm-supervisor/src/service/report_files.rs:43",
+            "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333; coverage-repair synthesis checks through 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db.\nTLDR: The new source documentation incorrectly promises that a waiting conversation report is discarded when its terminal host is gone. Existing code can retry it or still anchor it from retained process evidence.\nDetails: report_files.rs:43-56 newly replaces the tmux-specific explanation with definitive-discard claims. At the reviewed revision, core.rs:15826-15853 returns Internal for a same-generation published entry without a terminal or child anchor; report_files.rs:252-261 retries Internal. hosts/terminal.rs:872-883 allows Gone to retain an anchor with child_pid > 1. The per-generation and process-chain attribution fences remain; host liveness alone is not the report-rejection rule. The parent revision already has the retry behavior (core.rs:17044-17066), so this is an introduced documentation defect, not a newly introduced runtime regression. Original suspected consequence: queued reports may retry indefinitely after permanent host loss; that behavior is pre-existing and no automatic credential or user-work harm has been established.\nCoverage-repair check: git diff of report_files.rs from 1ed482d to pinned tip is empty, and the pinned tip still has the inaccurate prose verbatim at lines 43-56. No repair in this file through tip. Cross-group provenance supplied by parent: g016/l2 at f96dd4363d97dc7e07dea5b8947c96be6bf912e8 covers the equivalent changed implementation-spec claim that a report whose terminal no longer exists is discarded. Retain both IDs/provenance for the caller to consolidate one defect; this is not a new discovery. Further synthesis will verify exact SPEC_impl attribution and current anchor paths.\nSuggested bucket: other (documentation/contract correctness). could-be-highest: no established security or loss-of-work route. Confidence: confirmed source contradiction; no execution performed. proposed_drop: false; no parent drop accepted. possible_cover: g016/l2, as explicitly supplied by parent, with no coverage-source search. Suggested fix: describe retained child anchors and transient absence accurately in both source comments and implementation spec; any intended runtime change needs a separate decision."
+          }
+        },
+        {
+          "line": 11,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "l2",
+            "state": "open",
+            "summary": "Gone-host report documentation contradicts the anchor contract",
+            "location": "crates/farhelm-supervisor/src/service/report_files.rs:43",
+            "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. Correlated spec change: f96dd4363d97dc7e07dea5b8947c96be6bf912e8. Synthesis verified through pinned tip 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db.\nTLDR: The changed documentation incorrectly promises that a waiting conversation report is discarded when its terminal host is gone. Existing code can retry it or still admit a valid final report using retained child-process evidence.\nDetails: At 1ed482d, report_files.rs:43-56 changes the earlier tmux-specific explanation into claims that a gone terminal host is definitive and a report whose terminal is gone is discarded. core.rs:15826-15853 instead returns Internal for a same-generation published entry without a terminal or usable child anchor, and report_files.rs:252-261 retries Internal. hosts/terminal.rs:872-881 permits Gone to retain a TerminalAnchor when child_pid > 1. The anchor carries its saved start identity when one was recorded; a child already exited on adoption can have pid-only evidence. The parent revision already has this host behavior (core.rs:17044-17066). This is introduced inaccurate prose, not a new runtime regression. Original suspected consequence was indefinite retries after permanent host loss; that behavior is pre-existing, and no automatic credential or user-owned-work harm follows from the demonstrated route.\nCross-group reconciliation: preserve g129/l2 for the source-comment change at 1ed482d and g016/l2 for the implementation-spec change at f96dd4363d97dc7e07dea5b8947c96be6bf912e8. The latter changes ‘whose pane no longer exists’ to ‘whose terminal no longer exists’ in SPEC_impl.md, Report files, lines 4644-4645. It repeats the same inaccurate generalization, so these are one documentation defect with two changed-source locations, not a new discovery. The g016 ID/provenance was supplied by the parent; no queue or coverage source was searched.\nLater repair check: git diff of report_files.rs from 1ed482d through pinned tip is empty; lines 43-56 remain verbatim. The f96dd4-to-tip SPEC_impl diff changes only unrelated setup prose; lines 4644-4645 remain. At tip, core.rs:15775-15792 still returns Internal for missing terminal/anchor; report_files.rs:253-261 still retries it. hosts/terminal.rs:872-881 still anchors Gone, and :2549 exposes that anchor. report_files.rs:322-324 passes the anchor to procs.rs:547-582, which checks recorded pid/start and chain shape without requiring live host evidence. Thus there is no repair through the pinned tip.\nSuggested bucket: other (documentation/contract correctness). could-be-highest: no established security or loss-of-work route; retained reports alone establish no such harm. Confidence: confirmed by source, parent comparison, callers and pinned-tip checks; no runtime execution or reproduction performed. proposed_drop: false; no parent drop accepted. possible_cover: g016/l2, supplied by parent, for consolidation while retaining both provenance records. Suggested fix: describe retained child anchors and retryable absence accurately in both source comments and implementation spec; an intentional runtime rejection change would be separate work. No missing premise or open investigation remains for this finding."
+          }
+        }
+      ],
+      "latest": {
+        "line": 11,
+        "event": {
+          "version": 1,
+          "kind": "finding",
+          "id": "l2",
+          "state": "open",
+          "summary": "Gone-host report documentation contradicts the anchor contract",
+          "location": "crates/farhelm-supervisor/src/service/report_files.rs:43",
+          "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. Correlated spec change: f96dd4363d97dc7e07dea5b8947c96be6bf912e8. Synthesis verified through pinned tip 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db.\nTLDR: The changed documentation incorrectly promises that a waiting conversation report is discarded when its terminal host is gone. Existing code can retry it or still admit a valid final report using retained child-process evidence.\nDetails: At 1ed482d, report_files.rs:43-56 changes the earlier tmux-specific explanation into claims that a gone terminal host is definitive and a report whose terminal is gone is discarded. core.rs:15826-15853 instead returns Internal for a same-generation published entry without a terminal or usable child anchor, and report_files.rs:252-261 retries Internal. hosts/terminal.rs:872-881 permits Gone to retain a TerminalAnchor when child_pid > 1. The anchor carries its saved start identity when one was recorded; a child already exited on adoption can have pid-only evidence. The parent revision already has this host behavior (core.rs:17044-17066). This is introduced inaccurate prose, not a new runtime regression. Original suspected consequence was indefinite retries after permanent host loss; that behavior is pre-existing, and no automatic credential or user-owned-work harm follows from the demonstrated route.\nCross-group reconciliation: preserve g129/l2 for the source-comment change at 1ed482d and g016/l2 for the implementation-spec change at f96dd4363d97dc7e07dea5b8947c96be6bf912e8. The latter changes ‘whose pane no longer exists’ to ‘whose terminal no longer exists’ in SPEC_impl.md, Report files, lines 4644-4645. It repeats the same inaccurate generalization, so these are one documentation defect with two changed-source locations, not a new discovery. The g016 ID/provenance was supplied by the parent; no queue or coverage source was searched.\nLater repair check: git diff of report_files.rs from 1ed482d through pinned tip is empty; lines 43-56 remain verbatim. The f96dd4-to-tip SPEC_impl diff changes only unrelated setup prose; lines 4644-4645 remain. At tip, core.rs:15775-15792 still returns Internal for missing terminal/anchor; report_files.rs:253-261 still retries it. hosts/terminal.rs:872-881 still anchors Gone, and :2549 exposes that anchor. report_files.rs:322-324 passes the anchor to procs.rs:547-582, which checks recorded pid/start and chain shape without requiring live host evidence. Thus there is no repair through the pinned tip.\nSuggested bucket: other (documentation/contract correctness). could-be-highest: no established security or loss-of-work route; retained reports alone establish no such harm. Confidence: confirmed by source, parent comparison, callers and pinned-tip checks; no runtime execution or reproduction performed. proposed_drop: false; no parent drop accepted. possible_cover: g016/l2, supplied by parent, for consolidation while retaining both provenance records. Suggested fix: describe retained child anchors and retryable absence accurately in both source comments and implementation spec; an intentional runtime rejection change would be separate work. No missing premise or open investigation remains for this finding."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g129/findings.jsonl",
+        "id": "l2",
+        "line": 11,
+        "disposition": "duplicate",
+        "group": "spec-report-discard-on-terminal-disappearance",
+        "reason": "Parent read complete claims082 and prior canonical g016/l2/claims007. Same new terminal-gone definitive-discard promise at1ed482 report_files43-56 andf96dd436SPEC_impl4644-4645 contradicts missing-anchor Internal→Retry and Gone retained-child historical admission. Join retained source/spec documentation root, with distinct introductioncommits and both counterexamples retained. Runtime retry/retainedanchor behavior predatesrange; no new runtime lostconversation or wrongResume claim. No exact currentcover/filter found; persistent false source/spec contract retainedother."
+      },
+      "accepted_parent_decision": {
+        "key": "g129/l2",
+        "line": 11,
+        "disposition": "duplicate",
+        "group": "spec-report-discard-on-terminal-disappearance",
+        "bucket": "other",
+        "recording": "retain-verified",
+        "needs_independent_drop_check": false,
+        "reason": "Parent read complete claims082 and prior canonical g016/l2/claims007. Same new terminal-gone definitive-discard promise at1ed482 report_files43-56 andf96dd436SPEC_impl4644-4645 contradicts missing-anchor Internal→Retry and Gone retained-child historical admission. Join retained source/spec documentation root, with distinct introductioncommits and both counterexamples retained. Runtime retry/retainedanchor behavior predatesrange; no new runtime lostconversation or wrongResume claim. No exact currentcover/filter found; persistent false source/spec contract retainedother."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-082",
+          "key": "g129/l2",
+          "latest_line": 11,
+          "recommendation": "retain-verified",
+          "bucket": "other",
+          "underlying_key": "gone-host-report-definitive-discard-documentation",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The introduced source explanation promises definitive discard after host loss, but missing anchors produce retryable Internal and Gone handles can retain child anchors. This is a documentation defect; no new runtime regression is established.",
+          "checks": [
+            "1ed482dde220452e424973faf38a5e1318986333:service/report_files.rs:43-56 introduces definitive-gone/discard wording. :252-261 retries Internal. service/core.rs:15826-15853 returns Internal for absent same-generation entry, terminal, or anchor.",
+            "Same revision hosts/terminal.rs:864-883 retains anchors after exit and permits Liveness::Gone with child_pid > 1; recorded start identity is kept when available, but a child already exited on adoption can have pid-only evidence.",
+            "Exclusive base 6e423e30068b62c6cfa276c6d720ee35bb70387a:service/core.rs:18919-18939 already has missing-terminal/Internal behavior. Thus the earlier indefinite-retry concern is not newly introduced by the reviewed replacement prose.",
+            "1ed482d-to-00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db diff leaves report_files.rs unchanged. f96dd4363d97dc7e07dea5b8947c96be6bf912e8 changes SPEC_impl Report files from pane-no-longer-exists to terminal-no-longer-exists, repeating the same inaccurate generalization."
+          ],
+          "coverage_checked": [
+            "SPEC.md conversation reporting and SPEC_impl.md:4618-4665 Report files were searched/read. SPEC_impl.md:4644-4645 repeats the challenged statement; this does not cover a documentation contradiction by accepting its false factual premise.",
+            "TODO Planned empty; unlanded plan index empty. The tmux documentation plan file is landed, so its former general audit is not future coverage. BUGS unrelated. Queue INDEX and active ledger searches for gone host/report discard/anchor/retry found no exact item. Existing late-reporter-preparation-capture-conflict concerns named-Restart capture restoration, not gone-host rejection wording."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": null,
+          "original_stronger_consequence": "The first lead suspected indefinite retries after permanent host loss. That path is supported conditionally by missing terminal/Internal/Retry but already exists before this range's prose change. No automatic credential or user-owned-work harm is established. The record preserves parent-supplied g016/l2 provenance for the equivalent SPEC_impl change; that other record was not supplied here, so exact alias consolidation remains the parent's check.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Retain introduced source/spec documentation contradiction, with the pre-existing runtime caveat and retained-anchor qualification. FILTER.md does not cover persistent inaccurate lifecycle documentation; a rare diagnostic trigger alone is insufficient."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": true,
+        "clearly_refuted_candidate": false,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "spec-report-discard-on-terminal-disappearance",
+        "destination": "trailing-spec-report-discard-on-terminal-disappearance.md"
+      }
+    },
+    {
+      "key": "g129/c4",
+      "owner": "g129",
+      "id": "c4",
+      "domain": "supervisor-status-reporting",
+      "purpose": "supervisor-status-reporting: crates/farhelm-supervisor/src/service/ticker.rs, crates/farhelm-supervisor/src/service/notifications.rs, crates/farhelm-supervisor/src/service/listing.rs, crates/farhelm-supervisor/src/service/status.rs, crates/farhelm-supervisor/src/service/report_files.rs, crates/farhelm-supervisor/src/service/report_watch.rs; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 9,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c4",
+            "state": "open",
+            "summary": "The migrated serve test still requires ticker screen sampling",
+            "location": "crates/farhelm-supervisor/src/service/ticker.rs:6885",
+            "detail": "Reviewed commit: dbfc69751215dbf15e1d31d5bed73c3754c4ebc4.\nTLDR: The test still distinguishes a running status ticker from startup alone after its fixture moves to a terminal host.\nDetails: Considered whether creating a host session before serve, or serve's startup capture pass, could satisfy samples > 0 without the ticker. core.rs:18832-18844 host_supervisor only constructs the supervisor. core.rs:8364-8365 runs capture_now at serve startup, but capture.rs:102-118 applies reports, refreshes conversation captures and handles notifications; it does not sample screens or advance ActivitySample.samples. core.rs:8455 starts the ticker after initialization. The changed test at ticker.rs:6885-6936 uses the served session's screen-sample counter and asserts serve remains alive, so its observable is still tied to ticker operation. Suggested bucket: other (test quality); could-be-highest: no. Confidence: confirmed source refutation; no execution performed. proposed_drop: source refutation, the alternative startup path does not change the asserted counter. possible_cover: none; no coverage sources searched. Caveat: this conclusion is limited to the fixture rewrite and its readiness oracle, not an independent audit of the entire ticker test module."
+          }
+        }
+      ],
+      "latest": {
+        "line": 9,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c4",
+          "state": "open",
+          "summary": "The migrated serve test still requires ticker screen sampling",
+          "location": "crates/farhelm-supervisor/src/service/ticker.rs:6885",
+          "detail": "Reviewed commit: dbfc69751215dbf15e1d31d5bed73c3754c4ebc4.\nTLDR: The test still distinguishes a running status ticker from startup alone after its fixture moves to a terminal host.\nDetails: Considered whether creating a host session before serve, or serve's startup capture pass, could satisfy samples > 0 without the ticker. core.rs:18832-18844 host_supervisor only constructs the supervisor. core.rs:8364-8365 runs capture_now at serve startup, but capture.rs:102-118 applies reports, refreshes conversation captures and handles notifications; it does not sample screens or advance ActivitySample.samples. core.rs:8455 starts the ticker after initialization. The changed test at ticker.rs:6885-6936 uses the served session's screen-sample counter and asserts serve remains alive, so its observable is still tied to ticker operation. Suggested bucket: other (test quality); could-be-highest: no. Confidence: confirmed source refutation; no execution performed. proposed_drop: source refutation, the alternative startup path does not change the asserted counter. possible_cover: none; no coverage sources searched. Caveat: this conclusion is limited to the fixture rewrite and its readiness oracle, not an independent audit of the entire ticker test module."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g129/findings.jsonl",
+        "id": "c4",
+        "line": 9,
+        "disposition": "excluded",
+        "group": "serve-ticker-test-screen-sample-witness",
+        "reason": "Parent explicitly accepted named refuted proposal from claims-082 after inspecting it. The test's sample counter is advanced by screen sampling, while startup's capture pass applies report/capture/notification work without screen sampling. Source refutation of the named alternative producer; no runtime execution and no audit of all ticker tests. No filter needed. Checked source/results: [\"dbfc69751215dbf15e1d31d5bed73c3754c4ebc4:ticker.rs:6885-6936 waits for ActivitySample.samples > 0 and asserts serve remains running.\",\"Same revision service/core.rs:18832-18844 host_supervisor constructs the supervisor; :8364-8365 runs capture_now and :8455 starts the ticker. service/capture.rs:102-118 applies reports, refreshes conversation captures and notifications; it does not advance screen samples.\"] Current coverage/results: [\"Both specifications were searched for ticker/sampling/startup capture; their periodic status sampling contract does not accept a false-positive test. No exact coverage was found.\",\"TODO Planned empty; plans queue index empty; BUGS unrelated. Queue INDEX and active ledger searches for serve_starts/sample counter/ticker readiness found no exact matching item.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"The migrated test might pass with ticker startup removed because pre-serve fixture construction or startup capture had already sampled its screen. This candidate concerns that readiness oracle only.\"; null."
+      },
+      "accepted_parent_decision": {
+        "key": "g129/c4",
+        "line": 9,
+        "disposition": "excluded",
+        "group": "serve-ticker-test-screen-sample-witness",
+        "bucket": "other",
+        "recording": "refuted",
+        "queue_target_candidate": null,
+        "needs_independent_drop_check": false,
+        "reason": "Parent explicitly accepted named refuted proposal from claims-082 after inspecting it. The test's sample counter is advanced by screen sampling, while startup's capture pass applies report/capture/notification work without screen sampling. Source refutation of the named alternative producer; no runtime execution and no audit of all ticker tests. No filter needed. Checked source/results: [\"dbfc69751215dbf15e1d31d5bed73c3754c4ebc4:ticker.rs:6885-6936 waits for ActivitySample.samples > 0 and asserts serve remains running.\",\"Same revision service/core.rs:18832-18844 host_supervisor constructs the supervisor; :8364-8365 runs capture_now and :8455 starts the ticker. service/capture.rs:102-118 applies reports, refreshes conversation captures and notifications; it does not advance screen samples.\"] Current coverage/results: [\"Both specifications were searched for ticker/sampling/startup capture; their periodic status sampling contract does not accept a false-positive test. No exact coverage was found.\",\"TODO Planned empty; plans queue index empty; BUGS unrelated. Queue INDEX and active ledger searches for serve_starts/sample counter/ticker readiness found no exact matching item.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"The migrated test might pass with ticker startup removed because pre-serve fixture construction or startup capture had already sampled its screen. This candidate concerns that readiness oracle only.\"; null."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-082",
+          "key": "g129/c4",
+          "latest_line": 9,
+          "recommendation": "refuted",
+          "bucket": "other",
+          "underlying_key": "serve-ticker-test-screen-sample-witness",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The test's sample counter is advanced by screen sampling, while startup's capture pass applies report/capture/notification work without screen sampling.",
+          "checks": [
+            "dbfc69751215dbf15e1d31d5bed73c3754c4ebc4:ticker.rs:6885-6936 waits for ActivitySample.samples > 0 and asserts serve remains running.",
+            "Same revision service/core.rs:18832-18844 host_supervisor constructs the supervisor; :8364-8365 runs capture_now and :8455 starts the ticker. service/capture.rs:102-118 applies reports, refreshes conversation captures and notifications; it does not advance screen samples."
+          ],
+          "coverage_checked": [
+            "Both specifications were searched for ticker/sampling/startup capture; their periodic status sampling contract does not accept a false-positive test. No exact coverage was found.",
+            "TODO Planned empty; plans queue index empty; BUGS unrelated. Queue INDEX and active ledger searches for serve_starts/sample counter/ticker readiness found no exact matching item."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": null,
+          "original_stronger_consequence": "The migrated test might pass with ticker startup removed because pre-serve fixture construction or startup capture had already sampled its screen. This candidate concerns that readiness oracle only.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Source refutation of the named alternative producer; no runtime execution and no audit of all ticker tests. No filter needed."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "serve-ticker-test-screen-sample-witness",
+        "destination": null
+      }
+    },
+    {
+      "key": "g129/c5",
+      "owner": "g129",
+      "id": "c5",
+      "domain": "supervisor-status-reporting",
+      "purpose": "supervisor-status-reporting: crates/farhelm-supervisor/src/service/ticker.rs, crates/farhelm-supervisor/src/service/notifications.rs, crates/farhelm-supervisor/src/service/listing.rs, crates/farhelm-supervisor/src/service/status.rs, crates/farhelm-supervisor/src/service/report_files.rs, crates/farhelm-supervisor/src/service/report_watch.rs; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 12,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c5",
+            "state": "open",
+            "summary": "Removing the terminal-creation switch preserves unknown-probe warning behavior",
+            "location": "crates/farhelm-supervisor/src/service/ticker.rs:1688",
+            "detail": "Reviewed commit: 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513.\nTLDR: The intermediate change still leaves old-terminal warnings alone when the supervisor cannot ask the old server.\nDetails: In discovery pass 1, checked whether removing the new-terminal switch could make an absent or failed probe resolve a live session's warning from an invented empty snapshot. The unchanged production caller at ticker.rs:1685-1690 invokes reconciliation only for Some(states); the probe-error branch leaves None, while a definite no-server result is an intentional empty map. The changed no_old_terminal_notification_without_an_answer test (:7496-7559) injects a PaneStates failure before initial recording and again after ending the agent and verifies neither a blind insert nor a blind resolution. The switch-off-only assertions were removed because this commit eliminates that creation mode; failed-probe protection remains a distinct retained oracle. Suggested bucket: other if broken; could-be-highest: no established security or user-work-loss route from this notification concern. Confidence: confirmed source refutation, no runtime execution. proposed_drop: source refutation, failed probes still skip reconciliation and both directions retain their regression assertions. possible_cover: none; supplied neighbour records were read for novelty, prohibited coverage sources were not searched. Caveat: this does not assess the separately recorded startup retirement policy or hidden-old-tab Delete authority route. No unresolved premise remains."
+          }
+        }
+      ],
+      "latest": {
+        "line": 12,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c5",
+          "state": "open",
+          "summary": "Removing the terminal-creation switch preserves unknown-probe warning behavior",
+          "location": "crates/farhelm-supervisor/src/service/ticker.rs:1688",
+          "detail": "Reviewed commit: 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513.\nTLDR: The intermediate change still leaves old-terminal warnings alone when the supervisor cannot ask the old server.\nDetails: In discovery pass 1, checked whether removing the new-terminal switch could make an absent or failed probe resolve a live session's warning from an invented empty snapshot. The unchanged production caller at ticker.rs:1685-1690 invokes reconciliation only for Some(states); the probe-error branch leaves None, while a definite no-server result is an intentional empty map. The changed no_old_terminal_notification_without_an_answer test (:7496-7559) injects a PaneStates failure before initial recording and again after ending the agent and verifies neither a blind insert nor a blind resolution. The switch-off-only assertions were removed because this commit eliminates that creation mode; failed-probe protection remains a distinct retained oracle. Suggested bucket: other if broken; could-be-highest: no established security or user-work-loss route from this notification concern. Confidence: confirmed source refutation, no runtime execution. proposed_drop: source refutation, failed probes still skip reconciliation and both directions retain their regression assertions. possible_cover: none; supplied neighbour records were read for novelty, prohibited coverage sources were not searched. Caveat: this does not assess the separately recorded startup retirement policy or hidden-old-tab Delete authority route. No unresolved premise remains."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g129/findings.jsonl",
+        "id": "c5",
+        "line": 12,
+        "disposition": "excluded",
+        "group": "failed-old-pane-probe-notification-reconciliation",
+        "reason": "Parent explicitly accepted named refuted proposal from claims-082 after inspecting it. Removing the creation-mode switch leaves failed probes as None and reconciliation guarded by Some(states), so failure cannot invent an empty snapshot for warning insertion or resolution. Source refutation at the reviewed intermediate revision, preserving both test directions. No filter needed. Checked source/results: [\"647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513:ticker.rs:1613-1651 maps probe errors to None; :1685-1690 reconciles old-terminal notifications only on Some(states).\",\"Same revision ticker.rs:7496-7559 injects probe failure both before recording and after ending the agent; assertions prohibit blind insert and blind resolution.\"] Current coverage/results: [\"SPEC.md Status/old-terminal notification and SPEC_impl.md notification routing were checked; later retirement resolves the warning at startup, but is not the basis for dismissing this earlier failed-probe concern.\",\"TODO Planned and unlanded plan index empty; BUGS unrelated. Queue INDEX and active ledger searches for old-terminal warning/probe failure found no exact matching item. Startup retirement and hidden-old-tab Delete authority are separate scopes.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"A failed or absent old-server probe might insert or resolve a warning from an invented empty snapshot. No security or user-work-loss route was established by that notification concern.\"; null."
+      },
+      "accepted_parent_decision": {
+        "key": "g129/c5",
+        "line": 12,
+        "disposition": "excluded",
+        "group": "failed-old-pane-probe-notification-reconciliation",
+        "bucket": "other",
+        "recording": "refuted",
+        "queue_target_candidate": null,
+        "needs_independent_drop_check": false,
+        "reason": "Parent explicitly accepted named refuted proposal from claims-082 after inspecting it. Removing the creation-mode switch leaves failed probes as None and reconciliation guarded by Some(states), so failure cannot invent an empty snapshot for warning insertion or resolution. Source refutation at the reviewed intermediate revision, preserving both test directions. No filter needed. Checked source/results: [\"647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513:ticker.rs:1613-1651 maps probe errors to None; :1685-1690 reconciles old-terminal notifications only on Some(states).\",\"Same revision ticker.rs:7496-7559 injects probe failure both before recording and after ending the agent; assertions prohibit blind insert and blind resolution.\"] Current coverage/results: [\"SPEC.md Status/old-terminal notification and SPEC_impl.md notification routing were checked; later retirement resolves the warning at startup, but is not the basis for dismissing this earlier failed-probe concern.\",\"TODO Planned and unlanded plan index empty; BUGS unrelated. Queue INDEX and active ledger searches for old-terminal warning/probe failure found no exact matching item. Startup retirement and hidden-old-tab Delete authority are separate scopes.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"A failed or absent old-server probe might insert or resolve a warning from an invented empty snapshot. No security or user-work-loss route was established by that notification concern.\"; null."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-082",
+          "key": "g129/c5",
+          "latest_line": 12,
+          "recommendation": "refuted",
+          "bucket": "other",
+          "underlying_key": "failed-old-pane-probe-notification-reconciliation",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "Removing the creation-mode switch leaves failed probes as None and reconciliation guarded by Some(states), so failure cannot invent an empty snapshot for warning insertion or resolution.",
+          "checks": [
+            "647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513:ticker.rs:1613-1651 maps probe errors to None; :1685-1690 reconciles old-terminal notifications only on Some(states).",
+            "Same revision ticker.rs:7496-7559 injects probe failure both before recording and after ending the agent; assertions prohibit blind insert and blind resolution."
+          ],
+          "coverage_checked": [
+            "SPEC.md Status/old-terminal notification and SPEC_impl.md notification routing were checked; later retirement resolves the warning at startup, but is not the basis for dismissing this earlier failed-probe concern.",
+            "TODO Planned and unlanded plan index empty; BUGS unrelated. Queue INDEX and active ledger searches for old-terminal warning/probe failure found no exact matching item. Startup retirement and hidden-old-tab Delete authority are separate scopes."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": null,
+          "original_stronger_consequence": "A failed or absent old-server probe might insert or resolve a warning from an invented empty snapshot. No security or user-work-loss route was established by that notification concern.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Source refutation at the reviewed intermediate revision, preserving both test directions. No filter needed."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "failed-old-pane-probe-notification-reconciliation",
+        "destination": null
+      }
+    },
+    {
+      "key": "g129/c6",
+      "owner": "g129",
+      "id": "c6",
+      "domain": "supervisor-status-reporting",
+      "purpose": "supervisor-status-reporting: crates/farhelm-supervisor/src/service/ticker.rs, crates/farhelm-supervisor/src/service/notifications.rs, crates/farhelm-supervisor/src/service/listing.rs, crates/farhelm-supervisor/src/service/status.rs, crates/farhelm-supervisor/src/service/report_files.rs, crates/farhelm-supervisor/src/service/report_watch.rs; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 13,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c6",
+            "state": "open",
+            "summary": "Held Restart rows retain coherent listing and terminal-report boundaries",
+            "location": "crates/farhelm-supervisor/src/service/listing.rs:111",
+            "detail": "Reviewed commits: 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513 and f560058da19e02716e6f943883a9508b447aff4e.\nTLDR: The report/listing cleanup does not cause a restarting session to disappear or expose an entry-local false terminal report.\nDetails: Discovery pass 1 traced the held-row fallback because it can originate from entry.info, whose supervisor_creates_host_terminals field starts false. At 647f0227 listing.rs applies report_new_terminals to every projected row, held ones included, after joining the map and held snapshots. The fallback is therefore overwritten to true at the actual reply boundary. core.rs:13286-13317 swaps the held row/tab cell and removes the entry while holding sessions; :13762-13803 republishes and removes held state under that same lock. listing.rs reads both under sessions and filters duplicate IDs. Later f560058d removes the report only when its wire field itself is removed; the held/live join and lock remain intact at listing.rs:111-145. A retained pre-Restart status is intentional rather than a fresh exit observation during replacement. Suggested bucket: other if broken; could-be-highest: no established security or user-work-loss route. Confidence: confirmed source refutation, no runtime execution. proposed_drop: source refutation, shared reply boundary overwrites held defaults before the field is retired, and coordinated locking preserves one row. possible_cover: none; no prohibited coverage search. Caveat: this checks the assigned listing changes and immediate publication interface, not the correctness of all Restart mutation paths. No unresolved premise remains."
+          }
+        }
+      ],
+      "latest": {
+        "line": 13,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c6",
+          "state": "open",
+          "summary": "Held Restart rows retain coherent listing and terminal-report boundaries",
+          "location": "crates/farhelm-supervisor/src/service/listing.rs:111",
+          "detail": "Reviewed commits: 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513 and f560058da19e02716e6f943883a9508b447aff4e.\nTLDR: The report/listing cleanup does not cause a restarting session to disappear or expose an entry-local false terminal report.\nDetails: Discovery pass 1 traced the held-row fallback because it can originate from entry.info, whose supervisor_creates_host_terminals field starts false. At 647f0227 listing.rs applies report_new_terminals to every projected row, held ones included, after joining the map and held snapshots. The fallback is therefore overwritten to true at the actual reply boundary. core.rs:13286-13317 swaps the held row/tab cell and removes the entry while holding sessions; :13762-13803 republishes and removes held state under that same lock. listing.rs reads both under sessions and filters duplicate IDs. Later f560058d removes the report only when its wire field itself is removed; the held/live join and lock remain intact at listing.rs:111-145. A retained pre-Restart status is intentional rather than a fresh exit observation during replacement. Suggested bucket: other if broken; could-be-highest: no established security or user-work-loss route. Confidence: confirmed source refutation, no runtime execution. proposed_drop: source refutation, shared reply boundary overwrites held defaults before the field is retired, and coordinated locking preserves one row. possible_cover: none; no prohibited coverage search. Caveat: this checks the assigned listing changes and immediate publication interface, not the correctness of all Restart mutation paths. No unresolved premise remains."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g129/findings.jsonl",
+        "id": "c6",
+        "line": 13,
+        "disposition": "excluded",
+        "group": "held-restart-listing-terminal-report-boundary",
+        "reason": "Parent explicitly accepted named refuted proposal from claims-082 after inspecting it. The reply boundary overwrites held-row default terminal reports before sending them, and one shared lock keeps map/held-row transitions coherent until those fields leave the protocol. Source refutation of the listing changes and immediate publication interface, not blanket Restart correctness. No filter needed. Checked source/results: [\"647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513:listing.rs:111-145 snapshots held rows under sessions and filters duplicate IDs; :198-208 projects and applies report_new_terminals to every live or held row.\",\"Same revision service/core.rs:13286-13317 holds sessions while inserting held metadata/tab state and removing the entry; :13762-13803 inserts the replacement and removes held state under that lock.\",\"f560058da19e02716e6f943883a9508b447aff4e removes the report helper with its wire field and protocol bump, rather than exposing a false fallback value.\"] Current coverage/results: [\"Both specifications were searched for Restart-held/listing/terminal report behavior. The source contract explicitly retains pre-Restart status while replacing the entry, rather than observing a fresh exit in that window.\",\"TODO Planned and unlanded plans empty; BUGS unrelated. Queue INDEX and active ledger searches for held rows/restarting_rows/false terminal report found no exact item. Existing held-lifecycle display findings concern host setup/Suspend state, not session listing publication.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Restarting sessions might disappear from listings or leak entry.info's false supervisor_creates_host_terminals default. This does not decide correctness of every Restart mutation path.\"; null."
+      },
+      "accepted_parent_decision": {
+        "key": "g129/c6",
+        "line": 13,
+        "disposition": "excluded",
+        "group": "held-restart-listing-terminal-report-boundary",
+        "bucket": "other",
+        "recording": "refuted",
+        "queue_target_candidate": null,
+        "needs_independent_drop_check": false,
+        "reason": "Parent explicitly accepted named refuted proposal from claims-082 after inspecting it. The reply boundary overwrites held-row default terminal reports before sending them, and one shared lock keeps map/held-row transitions coherent until those fields leave the protocol. Source refutation of the listing changes and immediate publication interface, not blanket Restart correctness. No filter needed. Checked source/results: [\"647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513:listing.rs:111-145 snapshots held rows under sessions and filters duplicate IDs; :198-208 projects and applies report_new_terminals to every live or held row.\",\"Same revision service/core.rs:13286-13317 holds sessions while inserting held metadata/tab state and removing the entry; :13762-13803 inserts the replacement and removes held state under that lock.\",\"f560058da19e02716e6f943883a9508b447aff4e removes the report helper with its wire field and protocol bump, rather than exposing a false fallback value.\"] Current coverage/results: [\"Both specifications were searched for Restart-held/listing/terminal report behavior. The source contract explicitly retains pre-Restart status while replacing the entry, rather than observing a fresh exit in that window.\",\"TODO Planned and unlanded plans empty; BUGS unrelated. Queue INDEX and active ledger searches for held rows/restarting_rows/false terminal report found no exact item. Existing held-lifecycle display findings concern host setup/Suspend state, not session listing publication.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Restarting sessions might disappear from listings or leak entry.info's false supervisor_creates_host_terminals default. This does not decide correctness of every Restart mutation path.\"; null."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-082",
+          "key": "g129/c6",
+          "latest_line": 13,
+          "recommendation": "refuted",
+          "bucket": "other",
+          "underlying_key": "held-restart-listing-terminal-report-boundary",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The reply boundary overwrites held-row default terminal reports before sending them, and one shared lock keeps map/held-row transitions coherent until those fields leave the protocol.",
+          "checks": [
+            "647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513:listing.rs:111-145 snapshots held rows under sessions and filters duplicate IDs; :198-208 projects and applies report_new_terminals to every live or held row.",
+            "Same revision service/core.rs:13286-13317 holds sessions while inserting held metadata/tab state and removing the entry; :13762-13803 inserts the replacement and removes held state under that lock.",
+            "f560058da19e02716e6f943883a9508b447aff4e removes the report helper with its wire field and protocol bump, rather than exposing a false fallback value."
+          ],
+          "coverage_checked": [
+            "Both specifications were searched for Restart-held/listing/terminal report behavior. The source contract explicitly retains pre-Restart status while replacing the entry, rather than observing a fresh exit in that window.",
+            "TODO Planned and unlanded plans empty; BUGS unrelated. Queue INDEX and active ledger searches for held rows/restarting_rows/false terminal report found no exact item. Existing held-lifecycle display findings concern host setup/Suspend state, not session listing publication."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": null,
+          "original_stronger_consequence": "Restarting sessions might disappear from listings or leak entry.info's false supervisor_creates_host_terminals default. This does not decide correctness of every Restart mutation path.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Source refutation of the listing changes and immediate publication interface, not blanket Restart correctness. No filter needed."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "held-restart-listing-terminal-report-boundary",
+        "destination": null
+      }
+    }
+  ],
+  "replies": [
+    {
+      "turn": 1,
+      "reply": "Initial review complete: all 15 patches read; no unread assigned scope.\n\nRecorded one confirmed `other` finding, `l2`: changed report-file documentation incorrectly promises definitive discard after host loss. The runtime behavior predates this patch.\n\nFive candidates recorded; no open leads. Findings and progress are saved in the assigned private logs. No tests or reproductions run."
+    },
+    {
+      "turn": 2,
+      "reply": "Coverage repaired: all 15 sources / 1,180 lines delivered through the corrected manifest in 17 packets. No unread scope remains.\n\nRevised `l2`: reconciled `g129/l2` with `g016/l2`, retained both provenance records, and confirmed no repair through the pinned tip. It remains an `other` documentation finding; runtime behavior is pre-existing.\n\nNo new findings or open leads. Logs updated; no reproductions run."
+    },
+    {
+      "turn": 3,
+      "reply": "Discovery pass 1 complete. Nothing new found.\n\nChecked warning probe failures, reaper admission, ticker-start readiness, and held Restart listing/report boundaries. Recorded source-refuted candidates `c5` and `c6`.\n\nNew verified findings: none. New unverified findings: none. Open leads: none. Progress updated; no runtime execution."
+    }
+  ],
+  "progress": "Group: g129 supervisor-status-reporting.\nTurn: initial review, count 1. Discovery-pass count: 0 (later synthesis/discovery turn not performed).\nState: assigned initial pass complete; ready for caller's later synthesis turn.\nCoverage: full brief and complete inventory commits field read; no excluded inventory metadata read. All 15 assigned patches, all 1,180 lines / 60,832 encoded bytes, read through the evidence command in 17 bounded packets. No unread or omitted assigned patch material.\nContracts: reviewed pinned Status and retired-container rules, Session view tab lifecycle, relevant implementation contracts for host/tmux transition, report files and notification storage, and GUI answer-binding rule. Source context checked at recorded revisions and parent revision where needed.\nInterfaces checked: reaper admission and owned close/lifecycle completion; host-only launch and single-session metadata boundary; startup old-terminal notice writer/resolver and publication order; listing's host status and tabs; protocol 76-to-77 field removal; report file admission, host anchors and retry disposition; serve's startup capture versus screen sampler.\nNew verified IDs this pass: l2 (finding, other: inaccurate changed gone-host report documentation). New unverified findings: none.\nCandidates recorded: c1 (Delete-only retired tabs), l1 (test cleanup race refuted), c2 (protocol removal fenced), c3 (ended notice resolution refuted), c4 (serve-test counter premise checked). Open leads: none; l1 and l2 revised to candidate and finding respectively.\nInterface assumptions: current terminal hosts can retain child process anchors after liveness becomes Gone; absent host handles yield Internal retries. This predates the reviewed report-files comment rewrite. No new runtime regression is claimed by l2. Old tmux driver removal intentionally stops discovering old tabs; whole-session deletion and startup cleanup internals are owned outside this assignment.\nEvidence limits: source and contract analysis only. No runtime tests, builds or reproductions run; no execution observations claimed. Checkout unchanged; writes confined to this group's private artifacts. No helper agents spawned, coverage queue consulted, or live install touched.\nNext action: return initial-pass delta; await caller-directed later synthesis/discovery. Do not restart or repeat completed patch reads absent compaction.\n\nCoverage repair turn 2: corrected brief reread fully. Parent audit credits zero prior packet coverage because delivery was wrapped. Re-delivering all 1,180 mandatory lines with direct stdout through the corrected manifest. Prior findings preserved. After delivery, reconcile g129/l2 with supplied g016/l2 provenance and inspect any repair through pinned tip; parent explicitly requests synthesis in this turn. Discovery-pass count remains 0; no new discovery yet.\n\nCoverage repair turn 2 complete, including the parent's explicit same-turn synthesis override. Corrected brief read fully; every mandatory range re-delivered through the exact evidence read command with raw stdout (17 separate packets covering 15 sources, 1,180 lines / 60,832 source bytes). No unread assigned range remains. Prior wrapped deliveries are not relied on for supported coverage. No source snapshot changes were found and no new finding arose from the re-delivery.\nDelta: l2 revised twice, first recording pinned-tip persistence and supplied cross-group provenance, then completing reconciliation. g129/l2 concerns the report_files.rs comment change at 1ed482dde220452e424973faf38a5e1318986333; g016/l2 concerns the matching SPEC_impl.md change at f96dd4363d97dc7e07dea5b8947c96be6bf912e8. Both IDs/provenance are retained as one documentation defect. The source-comment file is unchanged through pinned tip 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db; the later spec change remains at lines 4644-4645, and the f96dd4-to-tip spec diff does not repair it. Current anchor, Internal retry and chain-check callers confirm the same contradiction. Runtime behavior predates the changed prose; no automatic credential or user-work harm established. Bucket remains other, proposed_drop false; no parent drop accepted.\nState at boundary: initial source-review coverage repair and requested synthesis complete. Turn count 2; discovery-pass count 0. New IDs this turn: none. Revised verified ID: l2. New unverified IDs: none. Open leads: none. Existing candidates unchanged. No runtime tests, builds or reproductions run; all conclusions are source-supported. No checkout files changed and no coverage sources searched.\nInterface assumptions: retained Gone child evidence can still anchor a valid final report; absent runtime/anchor yields retryable Internal. A source-documentation fix should describe both rather than silently change the runtime contract.\nNext action: return delta and coverage status; await caller direction. There is no unfinished assigned range or substantive unresolved lead.\n\nTurn 3: separate discovery pass 1 starting. Reusing full prior review and candidate history. Required delivery and later synthesis are parent-verified. No pending named cross-group questions. First read supplied discovery-neighbours.json, then search only assigned changes for distinct concerns. No runtime actions authorized or planned.\n\nTurn 3 boundary: separate discovery pass 1 complete. Read discovery-neighbours.json fully in bounded chunks, lines 1-654, before the source search. Supplied interface findings were used for novelty and boundaries only; none required a change to existing dispositions. No named pending question existed. Prior findings and candidate histories preserved.\nUseful checks/results: read intermediate old-terminal notification tests and production sample-pass caller at 647f0227; injected probe failures still skip both inserts and resolutions, and the switch-specific deletion does not remove that oracle. Rechecked retired/ordinary reaper fixture admission using the stored container predicate and same-harness setup; no separate changed behavior outside the intentional exclusion emerged. Checked the host-backed serve test's polling readiness against the supplied single-pass-catch-up concern: it polls the served session's samples rather than asserting one unready pass. Traced held Restart row creation/republication under the session-map lock and listing's post-projection report boundary at 647f0227 and f560058d; entry-local false defaults are overwritten while the wire field exists, and the field's later removal leaves the held/live join unchanged. No new runtime or test-oracle defect established in the assigned changes.\nRecords appended this pass: c5 (failed-probe warning concern source-refuted), c6 (held Restart row/report concern source-refuted). Both retain full candidate details and proposed-drop bases. New verified finding IDs: none. New unverified-after-investigation finding IDs: none. Existing finding l2 unchanged. Open lead IDs: none.\nResult: nothing new found beyond known findings. Discovery-pass count 1, turn count 3. Required source delivery remains complete and parent-verified; no unread assigned scope. No runtime tests, builds, reproductions, live-install actions or prohibited coverage searches performed. Only own private artifacts written.\nNext action: return the discovery delta and await caller direction; no unresolved source premise needs a follow-up within this pass.\n"
+}

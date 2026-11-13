@@ -1,0 +1,551 @@
+{
+  "group": {
+    "id": "g170",
+    "domain": "retired-supervisor-tmux",
+    "purpose": "retired-supervisor-tmux: crates/farhelm-supervisor/src/tmux/stream.rs; phases complete small per-commit changes",
+    "interfaces": [
+      "g001",
+      "g007",
+      "g008",
+      "g009",
+      "g071",
+      "g072",
+      "g073",
+      "g097",
+      "g098",
+      "g099",
+      "g100",
+      "g101",
+      "g102",
+      "g103",
+      "g104",
+      "g105",
+      "g106",
+      "g107",
+      "g108",
+      "g109",
+      "g110",
+      "g111",
+      "g112",
+      "g113",
+      "g114",
+      "g115",
+      "g116",
+      "g117",
+      "g118",
+      "g119",
+      "g120",
+      "g121",
+      "g127",
+      "g128",
+      "g129",
+      "g130",
+      "g131",
+      "g132",
+      "g133",
+      "g134",
+      "g144",
+      "g145",
+      "g146",
+      "g149",
+      "g150",
+      "g151",
+      "g152",
+      "g153",
+      "g154",
+      "g155",
+      "g156",
+      "g157",
+      "g158",
+      "g169",
+      "g171",
+      "g172"
+    ],
+    "sources": [
+      {
+        "path": "[private-run]/prep/parts/00957-000.patch",
+        "ranges": [
+          [
+            1,
+            1211
+          ]
+        ],
+        "original_path": "crates/farhelm-supervisor/src/tmux/stream.rs",
+        "commit": "1ed482dde220452e424973faf38a5e1318986333",
+        "notes": "patch header; patch character offsets [0,57930)",
+        "lines": 1211,
+        "bytes": 58081,
+        "start": 0,
+        "end": 57930,
+        "original": "[private-run]/prep/originals/00957.patch"
+      }
+    ],
+    "lines": 1211,
+    "bytes": 58081
+  },
+  "records": [
+    {
+      "key": "g170/f1",
+      "owner": "g170",
+      "id": "f1",
+      "domain": "retired-supervisor-tmux",
+      "purpose": "retired-supervisor-tmux: crates/farhelm-supervisor/src/tmux/stream.rs; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 1,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "f1",
+            "state": "open",
+            "summary": "Old terminals and their running work end on upgrade (specification-accepted; proposed drop)",
+            "location": "crates/farhelm-supervisor/src/tmux/stream.rs:1 (deleted)",
+            "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. TLDR: Updating a supervisor ends programs still running in old terminals and discards their terminal screen and scrollback. Details: The assigned deletion removes the old control-client replay/output path (parent stream.rs lines 1–1205 in the assigned packet). SPEC.md at the reviewed commit, Terminal experience, lines 3003–3016 expressly changes the product contract: 'This release ends them: the first time a host’s supervisor of this release starts, it ends that tmux server, and with it everything that still ran in an old terminal, without needing a tmux program.' The original uses a straight apostrophe in host's. The same paragraph explicitly says an ended agent's 'terminal’s last screen, which lived in the server, is gone; old tabs are closed' (straight apostrophe in original), and 'A session whose agent or tabs already run in terminal hosts keeps them.' Suggested bucket: highest (loss of running user-owned processes/work); could-be-highest: yes, the specified upgrade path directly ends running programs. Confidence: confirmed specification acceptance, source-only; startup implementation still to be checked for the claimed boundaries. proposed_drop: specification acceptance only, requiring independent check; exact ASCII source text is: 'This release ends them: the first time a host's supervisor of this release starts, it ends that tmux server, and with it everything that still ran in an old terminal, without needing a tmux program.' possible_cover: none; no coverage sources searched. Caveats: this record does not allege an unauthorized implementation deviation; the charter requires potentially highest issues accepted solely by specification to remain findings proposed for drop. The implementation must still preserve terminal-host sessions, and that check continues."
+          }
+        },
+        {
+          "line": 3,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "f1",
+            "state": "open",
+            "summary": "Old terminals and their running work end on upgrade (specification-accepted; proposed drop)",
+            "location": "crates/farhelm-supervisor/src/tmux/stream.rs:1 (deleted)",
+            "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. TLDR: Updating a supervisor ends programs still running in old terminals and discards their terminal screen and scrollback. Details: The assigned deletion removes the tmux control-client replay/output path (parent stream.rs lines 1–1205 in the assigned packet). SPEC.md, Terminal experience, lines 3003–3016 explicitly accepts this consequence. Exact quoted text (line breaks preserved): 'This release ends them: the first time a host's supervisor of this release starts, it ends that\n  tmux server, and with it everything that still ran in an old terminal, without needing a tmux program.' The paragraph also states: 'A session whose agent or tabs already run in terminal hosts keeps them.' Source validation: service/core.rs:6112–6184 opens/checks the store and gates server termination on state-directory ownership before reload; :6675–6704 gives old rows no terminal while adopting host rows independently; :6805–6822 converts live old rows, and :7042–7090 sweeps before committing, then records notices. service/core/old_terminals.rs:176–279 identifies and terminates the old socket peer; :290–408 uses agent-only/tab-specific sweeps, with terminal-host tab records excluded from scope discovery. The parent revision already calls OldTerminals::end_private_server (core.rs:6434) and maps TerminalKind::Tmux to None (:6969), so deleting stream.rs removes an already-retired runtime rather than introducing this startup consequence. Suggested bucket: highest for the original loss of running user-owned processes/work; could-be-highest: yes. Confidence: confirmed source/specification analysis, no execution. proposed_drop: explicit specification acceptance and source refutation of introduction by the assigned deletion; independent check required because the original consequence can be highest. possible_cover: none; no coverage sources searched. Caveats: the charter requires potentially highest consequences accepted solely by specification to remain findings proposed for drop. This record is not a claim of an implementation deviation; the retained host path is distinct. Revision reason: source investigation settled startup boundaries and confirmed the retirement already exists in the parent; original loss-of-work consequence preserved."
+          }
+        }
+      ],
+      "latest": {
+        "line": 3,
+        "event": {
+          "version": 1,
+          "kind": "finding",
+          "id": "f1",
+          "state": "open",
+          "summary": "Old terminals and their running work end on upgrade (specification-accepted; proposed drop)",
+          "location": "crates/farhelm-supervisor/src/tmux/stream.rs:1 (deleted)",
+          "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. TLDR: Updating a supervisor ends programs still running in old terminals and discards their terminal screen and scrollback. Details: The assigned deletion removes the tmux control-client replay/output path (parent stream.rs lines 1–1205 in the assigned packet). SPEC.md, Terminal experience, lines 3003–3016 explicitly accepts this consequence. Exact quoted text (line breaks preserved): 'This release ends them: the first time a host's supervisor of this release starts, it ends that\n  tmux server, and with it everything that still ran in an old terminal, without needing a tmux program.' The paragraph also states: 'A session whose agent or tabs already run in terminal hosts keeps them.' Source validation: service/core.rs:6112–6184 opens/checks the store and gates server termination on state-directory ownership before reload; :6675–6704 gives old rows no terminal while adopting host rows independently; :6805–6822 converts live old rows, and :7042–7090 sweeps before committing, then records notices. service/core/old_terminals.rs:176–279 identifies and terminates the old socket peer; :290–408 uses agent-only/tab-specific sweeps, with terminal-host tab records excluded from scope discovery. The parent revision already calls OldTerminals::end_private_server (core.rs:6434) and maps TerminalKind::Tmux to None (:6969), so deleting stream.rs removes an already-retired runtime rather than introducing this startup consequence. Suggested bucket: highest for the original loss of running user-owned processes/work; could-be-highest: yes. Confidence: confirmed source/specification analysis, no execution. proposed_drop: explicit specification acceptance and source refutation of introduction by the assigned deletion; independent check required because the original consequence can be highest. possible_cover: none; no coverage sources searched. Caveats: the charter requires potentially highest consequences accepted solely by specification to remain findings proposed for drop. This record is not a claim of an implementation deviation; the retained host path is distinct. Revision reason: source investigation settled startup boundaries and confirmed the retirement already exists in the parent; original loss-of-work consequence preserved."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g170/findings.jsonl",
+        "id": "f1",
+        "line": 3,
+        "disposition": "under-investigation",
+        "group": "g170-f1",
+        "reason": "Record durably acknowledged; parent source/contract validation, cross-group synthesis, coverage/filter matching and any independent drop check remain pending. This preserves the claim and uncertainty without accepting, dropping or lowering it."
+      },
+      "accepted_parent_decision": null,
+      "returned_claim_checks": [
+        {
+          "batch": "claims-107",
+          "key": "g170/f1",
+          "latest_line": 3,
+          "recommendation": "covered",
+          "bucket": "highest",
+          "underlying_key": "accepted-startup-retirement-of-old-private-tmux-terminals",
+          "aliases": [
+            "g171/f1"
+          ],
+          "target_queue_file": null,
+          "why": "Ending old terminals, their running programs and their terminal contents on upgrade is explicitly accepted. This acceptance is limited to those old terminals; it does not cover unrelated processes or surviving terminal hosts.",
+          "checks": [
+            "1ed482d:SPEC.md:3003-3016 expressly ends old terminals and their programs, loses their last screen, closes old tabs, and preserves terminal-host agents/tabs. Current SPEC.md:2998-3011 preserves the same boundary.",
+            "1ed482d:service/core.rs:6141-6185 ends the private server only with state-directory ownership before reload; :6675-6704 ignores tmux addresses and adopts Host rows separately. old_terminals.rs:176-279 identifies the peer and validates the server before signalling; :300-408 uses AgentOnly/tab sweeps and excludes host-tab launch records from scope discovery.",
+            "The immediate parent already calls end_private_server at core.rs:6434 and maps Tmux to None at :6969. This is not whole-range preexistence: git log identifies dbfc6975 (feat!: end old terminals at startup) within the reviewed range, while 1ed482d deletes the unused driver afterward.",
+            "Source-only checks support the stated retirement separation, not a universal audit of startup attribution or sweep safety. No behavior was reproduced."
+          ],
+          "coverage_checked": {
+            "SPEC.md": "Exact trigger/consequence/scope acceptance in Terminal experience:2998-3011.",
+            "SPEC_impl.md": "Ending the old private tmux server:2780-2821 explicitly describes startup ending, selective sweeps and accepted residuals.",
+            "TODO.md Planned": "Empty. Mid term phase-3 removal at :225-232 is not Planned coverage and is unnecessary to this disposition.",
+            "plans/queue": "No unlanded plan in INDEX. The retirement plan is already landed (REPORTS.md:29).",
+            "BUGS.md": "No related bug acceptance.",
+            "queue INDEX and matching files": "No additional exact queued item needed; named g171/f1 is the same retirement consequence. Other host lifecycle/test items do not broaden the acceptance.",
+            "TRIAGE_OUTCOMES.md": "No active exact retirement decision found by claim-term search; archive unread.",
+            "FILTER.md": "No filter needed; this ordinary upgrade consequence is accepted by specification, not by an extra rare-condition filter."
+          },
+          "exact_cover_quotes": [
+            {
+              "source": "SPEC.md:3000-3002 (recording-time main)",
+              "quote": "A supervisor that finds that\n  tmux server when it starts ends it, and with it everything that still ran in an old terminal, without needing a tmux\n  program."
+            },
+            {
+              "source": "SPEC.md:3003-3008 (recording-time main)",
+              "quote": "one whose agent had already ended keeps its outcome, but its terminal's\n  last screen, which lived in the server, is gone; old tabs are closed."
+            },
+            {
+              "source": "SPEC.md:3007-3008 (recording-time main)",
+              "quote": "A session whose agent or tabs already run in\n  terminal hosts keeps them."
+            }
+          ],
+          "missing_premise": null,
+          "original_stronger_consequence": "An upgrade ends running user-owned programs in old terminals and discards their screen and scrollback. Highest remains the consequence bucket even though the specification accepts it.",
+          "needs_independent_drop_check": true,
+          "proposed_basis": "Explicit specification acceptance for old-terminal retirement only, plus no additional loss attributable to deleting the already-unused stream. Do not call the retirement out-of-range merely because the assigned deletion's parent already implements it."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": true,
+        "clearly_refuted_candidate": false,
+        "needs_unfinished_gate": true,
+        "provisional_bucket": "highest",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "accepted-startup-retirement-of-old-private-tmux-terminals",
+        "destination": "trailing-accepted-startup-retirement-of-old-private-tmux-terminals.md"
+      }
+    },
+    {
+      "key": "g170/c2",
+      "owner": "g170",
+      "id": "c2",
+      "domain": "retired-supervisor-tmux",
+      "purpose": "retired-supervisor-tmux: crates/farhelm-supervisor/src/tmux/stream.rs; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 2,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c2",
+            "state": "open",
+            "summary": "Deleting the replay stream does not remove replay or pane isolation for surviving host terminals",
+            "location": "crates/farhelm-supervisor/src/tmux/stream.rs:253 (deleted)",
+            "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. TLDR: Considered whether removing tmux replay, pane filtering, query stripping and guarded output-client ownership would corrupt a surviving terminal or stop its work. Details: Source search at the reviewed commit finds no remaining uses of open_replay_stream, ReplayStreamCandidate, request_pause or resume_paused_with_replay in supervisor source; the sole OutputStream hit is an obsolete comment at service/connection.rs:986. service/core.rs:6675–6704 separates old rows (no terminal lookup) from adopted HostTerminal runtimes. service/handlers.rs:1688–1716 resolves a HostTerminal, refuses bytes-only clients before takeover, and :1928–1966 installs GridSender with that terminal's own input pump, notice subscription and shutdown/pause channels. hosts/terminal.rs module contracts :1–83 describe the independent per-host connection/emulator, journal replay and terminal-query handling; the commit's full patch to hosts/terminal.rs does not remove its journal feeding or query handling. SPEC_impl.md, Terminal host, :1963–1980, :2108–2168 and :2624–2671 establish the replacement journal/emulator/grid contracts. Assigned stream.rs mechanisms are specific to old tmux control clients, which no surviving terminal uses. Suggested bucket: other for the ruled-out implementation concern; could-be-highest: yes if deletion had made a viewer block another terminal's work or contaminate input/output, but no such shipped route is established and the independent host path refutes dependence on the deleted mechanism. Confidence: confirmed source refutation of this deletion concern, not a complete review of the independent host implementation. proposed_drop: source refutation (no dependent runtime caller and separate host/grid implementation). possible_cover: none; no coverage sources searched. Caveats: intentional destruction of old terminals remains separately recorded as f1; source-only analysis, no observed execution."
+          }
+        },
+        {
+          "line": 4,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c2",
+            "state": "open",
+            "summary": "Deleting the replay stream does not remove replay or pane isolation for surviving host terminals",
+            "location": "crates/farhelm-supervisor/src/tmux/stream.rs:253 (deleted)",
+            "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. TLDR (original consequence retained verbatim): Considered whether removing tmux replay, pane filtering, query stripping and guarded output-client ownership would corrupt a surviving terminal or stop its work. Details: No remaining runtime uses of open_replay_stream, ReplayStreamCandidate, request_pause or resume_paused_with_replay exist in supervisor source; OutputStream survives only in a stale connection.rs:986 comment. core.rs:6675–6704 separates old rows from adopted hosts; handlers.rs:1688–1716 refuses unusable/bytes-only attaches before takeover, and :1928–1966 installs the independent per-host GridSender/input pump. hosts/terminal.rs:1–83 explains the journal/emulator/query path, which this commit's patch leaves intact. grid_stream.rs:414–497 actually reads that emulator for screen/history replay and starts a live cycle after catch-up. Synthesis checks: core.rs:11915–12010 holds the target lifecycle claim, takes only entry.terminal, probes it, waits for caught_up and checks the emulator's bracketed-paste mode. deliver_prompt_to_host (:2192–2232) uses one host input sequence and submits only after Written fate for the whole paste. launch_artifacts.rs:42–76 quotes only entry.terminal's emulator after HostEvidence reports its final exit, so removal of tmux snapshot/stream state cannot redirect the excerpt. terminals.rs:227–247 resolves a tab only from this session's host-tab cell, with no fallback to the agent; host_tabs.rs:915–929 requires the same runtime and refuses the agent runtime; :1474–1478 cross-checks session plus tab role/id on recovery. These retained paths do not borrow tmux pane identities or the deleted stream. Governing SPEC_impl.md Terminal host (:1963–2700) explicitly defines these independent journal, prompt, excerpt, tab and grid contracts. Suggested bucket: other for the source-refuted implementation concern; could-be-highest: yes if the original consequence were established, including corruption of input/output or stopping another terminal's work. No such source route was found. Confidence: source-confirmed refutation of dependence on the deleted path, not a comprehensive certification of host implementation. proposed_drop: source refutation, still pending independent check; not specification acceptance of the alleged contamination/stall. possible_cover: none. Caveats: f1 separately preserves intentional old-terminal work loss. These source checks do not by themselves establish test sensitivity; deleted-test responsibilities are being checked separately. No runtime observation or reproduction. Revision reason: settled retained host-only prompt, excerpt and tab identity premises while preserving the original potential security/loss-of-work wording."
+          }
+        },
+        {
+          "line": 6,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c2",
+            "state": "open",
+            "summary": "Deleting the replay stream does not remove replay or pane isolation for surviving host terminals",
+            "location": "crates/farhelm-supervisor/src/tmux/stream.rs:253 (deleted)",
+            "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. TLDR (original consequence retained verbatim): Considered whether removing tmux replay, pane filtering, query stripping and guarded output-client ownership would corrupt a surviving terminal or stop its work. Details: No remaining runtime uses of open_replay_stream, ReplayStreamCandidate, request_pause or resume_paused_with_replay exist in supervisor source; OutputStream survives only in a stale connection.rs:986 comment. core.rs:6675–6704 separates old rows from adopted hosts; handlers.rs:1688–1716 refuses unusable/bytes-only attaches before takeover, and :1928–1966 installs the independent per-host GridSender/input pump. hosts/terminal.rs:1–83 explains the journal/emulator/query path, which this commit's patch leaves intact. grid_stream.rs:414–497 actually reads that emulator for screen/history replay and starts a live cycle after catch-up. Prompt/excerpt/tab synthesis: core.rs:11915–12010 holds the target lifecycle claim, takes only entry.terminal, probes it, requires caught_up and checks the emulator's bracketed-paste mode; deliver_prompt_to_host (:2192–2232) uses one host input sequence and submits only after Written fate for the whole paste. launch_artifacts.rs:42–76 quotes only entry.terminal's emulator after HostEvidence reports its final exit. terminals.rs:227–247 resolves a tab only from this session's host-tab cell, without fallback to the agent; host_tabs.rs:915–929 requires the same runtime and refuses the agent runtime; :1474–1478 cross-checks session plus tab role/id on recovery. Lifecycle synthesis: host_launch.rs:434–640 constructs the generation-tagged host, holds the host_scan fence and writes the socket/starter record before finish starts the child, then adopts the fresh runtime; no per-viewer replay client is acquired there. host_restart.rs:216–388 starts through the same host path with the optional history seed, records the new socket for the generation, publishes it before ending the replaced host, and preserves the host tabs in publication. host_handover.rs:291–420 fences publication while gathering/checkpointing runtimes; :433–471 closes runtimes and publishes placeholders after the fence; :522–555 includes tab runtimes (including sessions temporarily off-map for Restart) and aborts runtimes without sending host Shutdown. On Delete, teardown.rs:542–561 awaits SessionHosts::end and propagates failure before row removal; session_hosts.rs:686–791 treats each unconfirmed/unfinished ending as Err; host_launch.rs:682–719 attempts runtime Shutdown, then aborts the runtime and uses its adopted process identity or the tagged socket fallback. Deleting tmux output-candidate/reap machinery therefore does not remove these host ownership/persistence/failure paths. Governing SPEC_impl.md Terminal host (:1963–2700) defines the independent journal, prompt, excerpt, tab, restart, shutdown and grid contracts; SPEC.md Terminal experience requires surviving host terminals to remain. Suggested bucket: other for the source-refuted implementation concern; could-be-highest: yes if the original consequence were established, including corruption of input/output or stopping another terminal's work. No distinct source route from this assigned deletion was found. Confidence: source-confirmed refutation of dependence on the deleted path, not comprehensive certification of the host implementation. proposed_drop: source refutation, still pending independent check; not specification acceptance of the alleged contamination/stall. possible_cover: none. Caveats: f1 separately preserves intentional old-terminal work loss. Correct production alone does not establish test sensitivity; c3 separately records inspected test assertions and their limits. No runtime observation or reproduction. Revision reason: completed cross-batch caller/lifecycle synthesis and settled the readily checkable retained prompt/excerpt/tab/ownership premises while preserving the original potential security/loss-of-work wording."
+          }
+        },
+        {
+          "line": 7,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c2",
+            "state": "open",
+            "summary": "Deleting the replay stream does not remove replay or pane isolation for surviving host terminals",
+            "location": "crates/farhelm-supervisor/src/tmux/stream.rs:253 (deleted)",
+            "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. TLDR (original consequence retained verbatim): Considered whether removing tmux replay, pane filtering, query stripping and guarded output-client ownership would corrupt a surviving terminal or stop its work. Source checks and exact references in preceding c2 revisions remain part of this append-only record: no runtime caller of the deleted replay API remains; handlers.rs:1928–1966 uses an existing independent HostTerminal/GridSender, and host journal, prompt/input sequence, tab runtime identity, checkpoint/publication and Delete host-ending paths do not use the deleted control client. Suggested bucket: other for this source-refuted dependency concern; could-be-highest: yes if the original corruption/stopping-work consequence is established. Confidence: source-confirmed absence of dependence on this deleted runtime, not certification of all host behavior. proposed_drop: source refutation of that specific dependency only, pending independent check; no drop or lowering accepted. possible_cover: interface snapshot g100/c1 now explicitly reports a distinct inherited-history/resize excerpt-contamination route; g097/l4 reports startup pane-PID-to-owner misattribution; g007/c4 and g128/l1 report guarded Delete of hidden old survivors. These are received source-review findings for context, not independently verified by this group and not new discoveries here. Caveat/correction: final-exit evidence and a one-child host do not establish provenance of inherited history that a later resize can promote to the visible screen. Nor do host-only prompt/tab resolution or fail-closed host ending establish safe startup attribution or guarded Delete of old tmux survivors. Earlier c2 wording must not be used to drop those distinct known issues. The original possible security/loss-of-work consequence remains preserved above; this revision narrows only the source-refutation basis to the assigned stream deletion's actual consumers. Complete lifecycle checks and production/test distinction remain recorded in earlier revisions; c3 separately covers the inspected test assertions. Attribution caveat: a mechanism already retired in the immediate parent can still have been retired within the full reviewed range; parent equivalence alone is not whole-range preexistence. No claim that earlier in-range retirement predates the range is made. No runtime execution or reproduction. Revision reason: discovery-neighbour synthesis exposes limits of the prior host-path refutation; preserve independent excerpt, PID attribution and destructive-consent routes for the parent's checks, without broadening the assigned stream review or claiming a new finding."
+          }
+        }
+      ],
+      "latest": {
+        "line": 7,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c2",
+          "state": "open",
+          "summary": "Deleting the replay stream does not remove replay or pane isolation for surviving host terminals",
+          "location": "crates/farhelm-supervisor/src/tmux/stream.rs:253 (deleted)",
+          "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. TLDR (original consequence retained verbatim): Considered whether removing tmux replay, pane filtering, query stripping and guarded output-client ownership would corrupt a surviving terminal or stop its work. Source checks and exact references in preceding c2 revisions remain part of this append-only record: no runtime caller of the deleted replay API remains; handlers.rs:1928–1966 uses an existing independent HostTerminal/GridSender, and host journal, prompt/input sequence, tab runtime identity, checkpoint/publication and Delete host-ending paths do not use the deleted control client. Suggested bucket: other for this source-refuted dependency concern; could-be-highest: yes if the original corruption/stopping-work consequence is established. Confidence: source-confirmed absence of dependence on this deleted runtime, not certification of all host behavior. proposed_drop: source refutation of that specific dependency only, pending independent check; no drop or lowering accepted. possible_cover: interface snapshot g100/c1 now explicitly reports a distinct inherited-history/resize excerpt-contamination route; g097/l4 reports startup pane-PID-to-owner misattribution; g007/c4 and g128/l1 report guarded Delete of hidden old survivors. These are received source-review findings for context, not independently verified by this group and not new discoveries here. Caveat/correction: final-exit evidence and a one-child host do not establish provenance of inherited history that a later resize can promote to the visible screen. Nor do host-only prompt/tab resolution or fail-closed host ending establish safe startup attribution or guarded Delete of old tmux survivors. Earlier c2 wording must not be used to drop those distinct known issues. The original possible security/loss-of-work consequence remains preserved above; this revision narrows only the source-refutation basis to the assigned stream deletion's actual consumers. Complete lifecycle checks and production/test distinction remain recorded in earlier revisions; c3 separately covers the inspected test assertions. Attribution caveat: a mechanism already retired in the immediate parent can still have been retired within the full reviewed range; parent equivalence alone is not whole-range preexistence. No claim that earlier in-range retirement predates the range is made. No runtime execution or reproduction. Revision reason: discovery-neighbour synthesis exposes limits of the prior host-path refutation; preserve independent excerpt, PID attribution and destructive-consent routes for the parent's checks, without broadening the assigned stream review or claiming a new finding."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g170/findings.jsonl",
+        "id": "c2",
+        "line": 7,
+        "disposition": "under-investigation",
+        "group": "g170-c2",
+        "reason": "Record durably acknowledged; parent source/contract validation, cross-group synthesis, coverage/filter matching and any independent drop check remain pending. This preserves the claim and uncertainty without accepting, dropping or lowering it."
+      },
+      "accepted_parent_decision": null,
+      "returned_claim_checks": [
+        {
+          "batch": "claims-107",
+          "key": "g170/c2",
+          "latest_line": 7,
+          "recommendation": "refuted",
+          "bucket": "other",
+          "underlying_key": "retired-tmux-stream-runtime-dependency",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The remaining attachment route resolves a HostTerminal and creates its grid sender; it has no dependent tmux replay/control-client runtime. The broad original corruption/stopping-work consequence remains conditional, not an accepted behavior.",
+          "checks": [
+            "Tip 00de0b6 supervisor-source git grep finds only connection.rs:986 for OutputStream/open_replay_stream/ReplayStreamCandidate/resume_paused_with_replay. The sole hit is the stale comment separately retained as g170/l4 and g171/f5.",
+            "1ed482d:service/handlers.rs:1688-1716 resolves a host and refuses non-grid/unreadable attachments before takeover; :1928-1966 constructs only a host GridStream and HostAttach. service/terminals.rs:232-247 resolves tabs from the session's own host-tab cell.",
+            "1ed482d:hosts/terminal.rs:3343-3503 consumes host journal output and feeds its emulator independently of viewers. service/grid_stream.rs:423-497 reads that emulator for catch-up. core.rs:11915-12010 and host_tabs.rs:915-948 retain explicit prompt/tab host selection.",
+            "No runtime tests or reproductions. These checks do not disprove the supplied independent inherited-history excerpt, startup pane-PID attribution, Gone-tab end-confirmation or hidden-legacy-survivor consent routes. Correct production is not by itself proof of test sensitivity."
+          ],
+          "coverage_checked": {
+            "SPEC.md": "Terminal experience:2998-3031 accepts only old-terminal retirement and requires host/history preservation; no corruption or arbitrary work-stopping acceptance.",
+            "SPEC_impl.md": "Terminal host/Grid streams:2551-2588 and old-server retirement:2780-2821 describe independent mechanisms. Not coverage of a generic corruption/stall defect.",
+            "TODO.md Planned": "Empty.",
+            "plans/queue": "No unlanded plans in INDEX; tmux retirement/docs plans are landed, not pending cover.",
+            "BUGS.md": "Unrelated provisioning SSH-holder hang only.",
+            "queue INDEX and matching files": "No exact deleted-runtime-dependency item. Retired-runtime-retains-restart-seed-reply.md concerns a live bounded-channel lifetime mechanism, not the deleted tmux stream. Existing test-oracle items remain distinct.",
+            "TRIAGE_OUTCOMES.md": "No matching active stream-dependency/retirement decision found; archive unread.",
+            "FILTER.md": "No generic filter can excuse corruption, wrong targets or lost processes. Source refutation is the basis."
+          },
+          "exact_cover_quotes": [],
+          "missing_premise": "A surviving path dependent on the deleted tmux replay, pane filtering, query stripping or output-client lifetime mechanism. This check does not certify every host replacement implementation.",
+          "original_stronger_consequence": "Removing replay, pane filtering, query stripping and guarded output-client ownership could corrupt a surviving terminal's input/output or stop its or another terminal's user-owned work.",
+          "needs_independent_drop_check": true,
+          "proposed_basis": "Refute dependency on the deleted stream only. g171/f2, f3 and f4 independently name submechanisms, but are not exact whole-claim aliases of this omnibus candidate. Keep the history's limits and neighboring claims explicit."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": true,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "retired-tmux-stream-runtime-dependency",
+        "destination": null
+      }
+    },
+    {
+      "key": "g170/c3",
+      "owner": "g170",
+      "id": "c3",
+      "domain": "retired-supervisor-tmux",
+      "purpose": "retired-supervisor-tmux: crates/farhelm-supervisor/src/tmux/stream.rs; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 5,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c3",
+            "state": "open",
+            "summary": "No distinct test-sensitivity defect established from retiring tmux stream tests",
+            "location": "crates/farhelm-supervisor/src/tmux/stream.rs:2632 (parent revision; deleted)",
+            "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. TLDR: Considered whether retiring the stream's tests removes checks for output/history loss or unsafe teardown that surviving host terminals still need. Details: The assigned patch packet (old stream.rs lines 1–1205) contains production code, not the test module; additional context search locates the old test module at parent :1709 onwards. Inspected parent :2632–2710: the abandoned-candidate test gates tmux no-output acknowledgement, verifies the exact control client remains before acknowledgement, then is reaped, and confirms the private tmux server survives. Those are assertions about the deleted per-attachment tmux control client, not a host lifecycle guard that production retained. Host attachments create no such client (handlers.rs:1928–1966), and GridStream catches up from the independent existing emulator (:414–497). Separately inspected the surviving tests' actual assertions, not just production: grid_stream/tests.rs:313–333 checks message ordering and exact numbered history; :338–379 establishes catch-up remains unfinished before injecting more output, then checks exact uninterrupted history after quieting; :485–506 waits for processed flood plus an observed parked sender before asserting no paused output, and exact history/no reset after resume; :520–546 establishes a full writer queue before draining and asserting exact history/no reset. These source-level assertions distinguish the relevant replay/pause/queue loss mechanisms. They are not claimed as an equivalent test for tmux's retired server-abort protocol, nor proof of complete host test coverage. Suggested bucket: other (considered test-sensitivity gap, not an established production defect). could-be-highest: no established catastrophic tooling consequence; potential user work/history corruption from deleting production mechanisms remains explicitly preserved in c2, with its original wording. Confidence: source-confirmed refutation of needing the old no-output/candidate test for the retained implementation; no distinct surviving responsibility was found lost in this assigned deletion. proposed_drop: source/test-assertion analysis, pending independent check. possible_cover: none; coverage/queue sources not searched. Caveats: no test execution or mutation experiment, no claim that correct production alone proves test sensitivity, and no comprehensive review of neighbouring groups' test deletions. This is a considered candidate, not a new implementation finding."
+          }
+        }
+      ],
+      "latest": {
+        "line": 5,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c3",
+          "state": "open",
+          "summary": "No distinct test-sensitivity defect established from retiring tmux stream tests",
+          "location": "crates/farhelm-supervisor/src/tmux/stream.rs:2632 (parent revision; deleted)",
+          "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. TLDR: Considered whether retiring the stream's tests removes checks for output/history loss or unsafe teardown that surviving host terminals still need. Details: The assigned patch packet (old stream.rs lines 1–1205) contains production code, not the test module; additional context search locates the old test module at parent :1709 onwards. Inspected parent :2632–2710: the abandoned-candidate test gates tmux no-output acknowledgement, verifies the exact control client remains before acknowledgement, then is reaped, and confirms the private tmux server survives. Those are assertions about the deleted per-attachment tmux control client, not a host lifecycle guard that production retained. Host attachments create no such client (handlers.rs:1928–1966), and GridStream catches up from the independent existing emulator (:414–497). Separately inspected the surviving tests' actual assertions, not just production: grid_stream/tests.rs:313–333 checks message ordering and exact numbered history; :338–379 establishes catch-up remains unfinished before injecting more output, then checks exact uninterrupted history after quieting; :485–506 waits for processed flood plus an observed parked sender before asserting no paused output, and exact history/no reset after resume; :520–546 establishes a full writer queue before draining and asserting exact history/no reset. These source-level assertions distinguish the relevant replay/pause/queue loss mechanisms. They are not claimed as an equivalent test for tmux's retired server-abort protocol, nor proof of complete host test coverage. Suggested bucket: other (considered test-sensitivity gap, not an established production defect). could-be-highest: no established catastrophic tooling consequence; potential user work/history corruption from deleting production mechanisms remains explicitly preserved in c2, with its original wording. Confidence: source-confirmed refutation of needing the old no-output/candidate test for the retained implementation; no distinct surviving responsibility was found lost in this assigned deletion. proposed_drop: source/test-assertion analysis, pending independent check. possible_cover: none; coverage/queue sources not searched. Caveats: no test execution or mutation experiment, no claim that correct production alone proves test sensitivity, and no comprehensive review of neighbouring groups' test deletions. This is a considered candidate, not a new implementation finding."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g170/findings.jsonl",
+        "id": "c3",
+        "line": 5,
+        "disposition": "excluded",
+        "group": "retired-tmux-abandoned-candidate-test-responsibility",
+        "reason": "Parent explicitly accepted named refuted proposal from claims-107 after inspecting it. The removed abandoned-candidate test asserts a tmux control-client shutdown ordering that host attachments no longer perform. Actual retained grid assertions independently exercise catch-up, pause and full writer queue history, without proving comprehensive replacement coverage. Narrow source/test-assertion refutation. Treat g170/c2's potentially highest production consequence separately; do not use this test-only disposition to drop it. Checked source/results: [\"1ed482d^:tmux/stream.rs:2625-2710 gates external no-output acknowledgement, checks that the specific client remains until acknowledgement and is then reaped, and checks private server survival. 1ed482d:handlers.rs:1928-1966 creates no equivalent process-backed viewer client.\",\"1ed482d:service/grid_stream/tests.rs:313-333 asserts ordering and exact numbered history; :338-379 asserts incomplete catch-up before injecting additional output and then exact history after quieting; :485-506 observes the paused sender and asserts no delivery/exact history/no reset; :520-546 witnesses a full queue then checks complete exact history/no reset.\",\"These are source-level sensitivity checks, not test execution or mutation results. They refute the narrow claim that the old candidate acknowledgement test protects a retained responsibility. They do not establish that all retired tests have equivalent coverage.\"] Current coverage/results: {\"SPEC.md\":\"Terminal experience retains history/flow-control requirements; it does not accept ineffective tests.\",\"SPEC_impl.md\":\"Grid streams:2551-2588 specifies the replacement history behavior, rather than tmux candidate-client lifetime.\",\"TODO.md Planned\":\"Empty.\",\"plans/queue\":\"No unlanded plans in INDEX.\",\"BUGS.md\":\"No related accepted test defect.\",\"queue INDEX and matching files\":\"stopped-reader-output-witness.md concerns browser flood overlap; host-flood-stall-window-claim.md concerns an e2e timeout-description/premise gap. Both read in full and neither covers these grid unit-test assertions or establishes lost candidate-client responsibility. foreign-host-refusal-test-cannot-observe-shutdown.md is another distinct oracle.\",\"TRIAGE_OUTCOMES.md\":\"The matching replay term belongs to removal of obsolete deflake exclusions, not these test responsibilities; relevant section read. No exact active decision.\",\"FILTER.md\":\"No filter needed or applied; deterministic test-sensitivity defects would not become acceptable merely because production is correct.\"} Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Retiring tests might leave surviving output/history preservation or safe teardown unprotected. The record places potential production loss/corruption separately in g170/c2 and alleges no established catastrophic maintainer-tooling effect here.\"; \"No retained tmux candidate-client acknowledgement responsibility was identified. This does not eliminate unrelated replacement test defects.\"."
+      },
+      "accepted_parent_decision": {
+        "key": "g170/c3",
+        "line": 5,
+        "disposition": "excluded",
+        "group": "retired-tmux-abandoned-candidate-test-responsibility",
+        "bucket": "other",
+        "recording": "refuted",
+        "queue_target_candidate": null,
+        "needs_independent_drop_check": false,
+        "reason": "Parent explicitly accepted named refuted proposal from claims-107 after inspecting it. The removed abandoned-candidate test asserts a tmux control-client shutdown ordering that host attachments no longer perform. Actual retained grid assertions independently exercise catch-up, pause and full writer queue history, without proving comprehensive replacement coverage. Narrow source/test-assertion refutation. Treat g170/c2's potentially highest production consequence separately; do not use this test-only disposition to drop it. Checked source/results: [\"1ed482d^:tmux/stream.rs:2625-2710 gates external no-output acknowledgement, checks that the specific client remains until acknowledgement and is then reaped, and checks private server survival. 1ed482d:handlers.rs:1928-1966 creates no equivalent process-backed viewer client.\",\"1ed482d:service/grid_stream/tests.rs:313-333 asserts ordering and exact numbered history; :338-379 asserts incomplete catch-up before injecting additional output and then exact history after quieting; :485-506 observes the paused sender and asserts no delivery/exact history/no reset; :520-546 witnesses a full queue then checks complete exact history/no reset.\",\"These are source-level sensitivity checks, not test execution or mutation results. They refute the narrow claim that the old candidate acknowledgement test protects a retained responsibility. They do not establish that all retired tests have equivalent coverage.\"] Current coverage/results: {\"SPEC.md\":\"Terminal experience retains history/flow-control requirements; it does not accept ineffective tests.\",\"SPEC_impl.md\":\"Grid streams:2551-2588 specifies the replacement history behavior, rather than tmux candidate-client lifetime.\",\"TODO.md Planned\":\"Empty.\",\"plans/queue\":\"No unlanded plans in INDEX.\",\"BUGS.md\":\"No related accepted test defect.\",\"queue INDEX and matching files\":\"stopped-reader-output-witness.md concerns browser flood overlap; host-flood-stall-window-claim.md concerns an e2e timeout-description/premise gap. Both read in full and neither covers these grid unit-test assertions or establishes lost candidate-client responsibility. foreign-host-refusal-test-cannot-observe-shutdown.md is another distinct oracle.\",\"TRIAGE_OUTCOMES.md\":\"The matching replay term belongs to removal of obsolete deflake exclusions, not these test responsibilities; relevant section read. No exact active decision.\",\"FILTER.md\":\"No filter needed or applied; deterministic test-sensitivity defects would not become acceptable merely because production is correct.\"} Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Retiring tests might leave surviving output/history preservation or safe teardown unprotected. The record places potential production loss/corruption separately in g170/c2 and alleges no established catastrophic maintainer-tooling effect here.\"; \"No retained tmux candidate-client acknowledgement responsibility was identified. This does not eliminate unrelated replacement test defects.\"."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-107",
+          "key": "g170/c3",
+          "latest_line": 5,
+          "recommendation": "refuted",
+          "bucket": "other",
+          "underlying_key": "retired-tmux-abandoned-candidate-test-responsibility",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The removed abandoned-candidate test asserts a tmux control-client shutdown ordering that host attachments no longer perform. Actual retained grid assertions independently exercise catch-up, pause and full writer queue history, without proving comprehensive replacement coverage.",
+          "checks": [
+            "1ed482d^:tmux/stream.rs:2625-2710 gates external no-output acknowledgement, checks that the specific client remains until acknowledgement and is then reaped, and checks private server survival. 1ed482d:handlers.rs:1928-1966 creates no equivalent process-backed viewer client.",
+            "1ed482d:service/grid_stream/tests.rs:313-333 asserts ordering and exact numbered history; :338-379 asserts incomplete catch-up before injecting additional output and then exact history after quieting; :485-506 observes the paused sender and asserts no delivery/exact history/no reset; :520-546 witnesses a full queue then checks complete exact history/no reset.",
+            "These are source-level sensitivity checks, not test execution or mutation results. They refute the narrow claim that the old candidate acknowledgement test protects a retained responsibility. They do not establish that all retired tests have equivalent coverage."
+          ],
+          "coverage_checked": {
+            "SPEC.md": "Terminal experience retains history/flow-control requirements; it does not accept ineffective tests.",
+            "SPEC_impl.md": "Grid streams:2551-2588 specifies the replacement history behavior, rather than tmux candidate-client lifetime.",
+            "TODO.md Planned": "Empty.",
+            "plans/queue": "No unlanded plans in INDEX.",
+            "BUGS.md": "No related accepted test defect.",
+            "queue INDEX and matching files": "stopped-reader-output-witness.md concerns browser flood overlap; host-flood-stall-window-claim.md concerns an e2e timeout-description/premise gap. Both read in full and neither covers these grid unit-test assertions or establishes lost candidate-client responsibility. foreign-host-refusal-test-cannot-observe-shutdown.md is another distinct oracle.",
+            "TRIAGE_OUTCOMES.md": "The matching replay term belongs to removal of obsolete deflake exclusions, not these test responsibilities; relevant section read. No exact active decision.",
+            "FILTER.md": "No filter needed or applied; deterministic test-sensitivity defects would not become acceptable merely because production is correct."
+          },
+          "exact_cover_quotes": [],
+          "missing_premise": "No retained tmux candidate-client acknowledgement responsibility was identified. This does not eliminate unrelated replacement test defects.",
+          "original_stronger_consequence": "Retiring tests might leave surviving output/history preservation or safe teardown unprotected. The record places potential production loss/corruption separately in g170/c2 and alleges no established catastrophic maintainer-tooling effect here.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Narrow source/test-assertion refutation. Treat g170/c2's potentially highest production consequence separately; do not use this test-only disposition to drop it."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "retired-tmux-abandoned-candidate-test-responsibility",
+        "destination": null
+      }
+    },
+    {
+      "key": "g170/l4",
+      "owner": "g170",
+      "id": "l4",
+      "domain": "retired-supervisor-tmux",
+      "purpose": "retired-supervisor-tmux: crates/farhelm-supervisor/src/tmux/stream.rs; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 8,
+          "event": {
+            "version": 1,
+            "kind": "lead",
+            "id": "l4",
+            "state": "open",
+            "summary": "Connection writer diagnostics still point to the deleted stream checkpoint",
+            "location": "crates/farhelm-supervisor/src/service/connection.rs:985–987",
+            "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. TLDR: A maintainer tracing terminal-output loss is told to consult a first diagnostic checkpoint in a stream implementation this commit deletes. Details: connection.rs:985–987 says 'Output-path checkpoint; see the first one in `OutputStream::next_output`. Data frames only: control replies are not what that path loses.' Assigned stream.rs deletion includes the OutputStream type and its control-client ownership; the same complete file deletion removes next_output in the adjacent assigned batch. At this revision an allowed-source git grep for the deleted type/method/cutover names finds this single residual reference and no executable caller. This is a concrete stale present-tense diagnostic map, distinct from the source-refuted runtime dependency in c2 (which already noted this residual but did not validate it as a documentation defect). Suggested bucket: other/documentation correctness if attribution is confirmed. could-be-highest: no, no security or loss-of-work consequence established for the pointer. Confidence: source-confirmed missing target; historical validity and later repair still to check. proposed_drop: false pending those checks; not a finding of bad runtime logging or loss of data. possible_cover: none in the fully read interface snapshot. Missing readily checkable premise: confirm the referenced first checkpoint exists before deletion and whether a later in-range patch repairs this instruction. No runtime tests or reproduction. Scope caveat: caller reference is examined only as an implication of assigned stream deletion, not a separate review of the connection writer."
+          }
+        },
+        {
+          "line": 9,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "l4",
+            "state": "open",
+            "summary": "Connection writer diagnostics still point to the deleted stream checkpoint",
+            "location": "crates/farhelm-supervisor/src/service/connection.rs:985–987",
+            "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. TLDR: A maintainer tracing terminal-output loss is told to consult a first diagnostic checkpoint in a stream implementation this commit deletes. Details: connection.rs:985–987 says 'Output-path checkpoint; see the first one in `OutputStream::next_output`. Data frames only: control replies are not what that path loses.' The assigned deletion removes the OutputStream type/ownership and the whole stream.rs file, including next_output in the adjacent batch. At the immediate parent, stream.rs:1206 defines next_output and :1320–1342 contains the expressly named first debug checkpoint, explains its downstream writer-checkpoint map and logs pane-output decode lengths. Thus the comment used to point to a real diagnostic map. The excluded range base 6e423e30068b62c6cfa276c6d720ee35bb70387a also has the same stream map at :1320–1342 and the referring writer comment at connection.rs:1035–1037. Whole-path git log over the pinned range shows only this deletion changes stream.rs, establishing introduction of the missing target within the reviewed range, rather than assuming parent equivalence establishes pre-range behavior. At the reviewed commit an allowed-source git grep over crates, docs and SPEC files finds this as the only remaining reference to the deleted stream/cutover API set; there is no replacement alias or executable target. Later-range diff of connection.rs through 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db changes other comments/types but not this pointer; direct tip read confirms the same comment still at :985–987. No later repair. Correct grid production behavior does not refute a stale diagnostic instruction. Governing contract: root documentation instructions require comments to give accurate surrounding context and lifecycle constraints; SPEC_impl.md Terminal host/Grid streams describes the actual retained output path, and Terminal substrate: private tmux server explicitly says the driver is gone. Suggested fix: remove the retired cross-reference or replace it with an accurate map to the host/grid diagnostics; do not restore retired stream code. Suggested bucket: other/documentation correctness. could-be-highest: no established security or loss-of-work route from this pointer. Confidence: confirmed source/history analysis, not execution or a generated-doc check. proposed_drop: false. possible_cover: none in the completely read discovery-neighbours.json; no forbidden coverage sources searched. Caveats: runtime data-frame logging still executes, and no malfunction or missing mandatory diagnostic event is alleged. The residual reference was noted incidentally in c2, but this pass separately validated its historical target, introduced documentation defect and lack of later repair; c2's runtime-dependency refutation remains distinct. Scope: caller context checked solely for the implications of assigned OutputStream/file deletion. Lead l4 closed as a finding; no missing premise remains."
+          }
+        }
+      ],
+      "latest": {
+        "line": 9,
+        "event": {
+          "version": 1,
+          "kind": "finding",
+          "id": "l4",
+          "state": "open",
+          "summary": "Connection writer diagnostics still point to the deleted stream checkpoint",
+          "location": "crates/farhelm-supervisor/src/service/connection.rs:985–987",
+          "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. TLDR: A maintainer tracing terminal-output loss is told to consult a first diagnostic checkpoint in a stream implementation this commit deletes. Details: connection.rs:985–987 says 'Output-path checkpoint; see the first one in `OutputStream::next_output`. Data frames only: control replies are not what that path loses.' The assigned deletion removes the OutputStream type/ownership and the whole stream.rs file, including next_output in the adjacent batch. At the immediate parent, stream.rs:1206 defines next_output and :1320–1342 contains the expressly named first debug checkpoint, explains its downstream writer-checkpoint map and logs pane-output decode lengths. Thus the comment used to point to a real diagnostic map. The excluded range base 6e423e30068b62c6cfa276c6d720ee35bb70387a also has the same stream map at :1320–1342 and the referring writer comment at connection.rs:1035–1037. Whole-path git log over the pinned range shows only this deletion changes stream.rs, establishing introduction of the missing target within the reviewed range, rather than assuming parent equivalence establishes pre-range behavior. At the reviewed commit an allowed-source git grep over crates, docs and SPEC files finds this as the only remaining reference to the deleted stream/cutover API set; there is no replacement alias or executable target. Later-range diff of connection.rs through 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db changes other comments/types but not this pointer; direct tip read confirms the same comment still at :985–987. No later repair. Correct grid production behavior does not refute a stale diagnostic instruction. Governing contract: root documentation instructions require comments to give accurate surrounding context and lifecycle constraints; SPEC_impl.md Terminal host/Grid streams describes the actual retained output path, and Terminal substrate: private tmux server explicitly says the driver is gone. Suggested fix: remove the retired cross-reference or replace it with an accurate map to the host/grid diagnostics; do not restore retired stream code. Suggested bucket: other/documentation correctness. could-be-highest: no established security or loss-of-work route from this pointer. Confidence: confirmed source/history analysis, not execution or a generated-doc check. proposed_drop: false. possible_cover: none in the completely read discovery-neighbours.json; no forbidden coverage sources searched. Caveats: runtime data-frame logging still executes, and no malfunction or missing mandatory diagnostic event is alleged. The residual reference was noted incidentally in c2, but this pass separately validated its historical target, introduced documentation defect and lack of later repair; c2's runtime-dependency refutation remains distinct. Scope: caller context checked solely for the implications of assigned OutputStream/file deletion. Lead l4 closed as a finding; no missing premise remains."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g170/findings.jsonl",
+        "id": "l4",
+        "line": 9,
+        "disposition": "verified",
+        "group": "connection-writer-comment-points-to-deleted-outputstream-checkpoint",
+        "reason": "Parent explicitly accepted named retain-verified proposal from claims-107 after inspecting it. The retained writer comment directs maintainers to a deleted first checkpoint. Historical source establishes that the reference was valid at the range base and lost its target in-range. The pointer still exists at the reviewed tip and recording-time main. Record one other-priority source-comment finding with both g170/l4 and g171/f5 provenance. Preserve historical validity, in-range deletion and endpoint persistence. Checked source/results: [\"6e423e3:service/connection.rs:1035-1037 points to OutputStream::next_output; tmux/stream.rs:1320-1342 contains the first checkpoint, diagnostic hop map and no-payload rationale. Thus the reference was valid at the exclusive base.\",\"1ed482d deletes tmux/stream.rs. The scoped range history has only this stream-file change and only this matching reference/target change; 1ed482d..00de0b6 connection.rs diff leaves the pointer untouched.\",\"00de0b6:service/connection.rs:985-993 still contains the reference and working data-frame length debug event; source grep finds no executable OutputStream target. Current connection.rs:986 retains it too.\",\"No runtime logging failure, disclosure, transport failure or generated-document failure is alleged or reproduced. Source comments are within scope even though ordinary workflow/docs files are excluded as independent targets.\"] Current coverage/results: {\"SPEC.md\":\"Searched terminal/output/diagnostic terms; no accepted stale diagnostic-map behavior.\",\"SPEC_impl.md\":\"Terminal host, emulator and Grid streams describe the retained path; the old-server section says only startup retirement remains. None covers a false source-navigation pointer.\",\"TODO.md Planned\":\"Empty.\",\"plans/queue\":\"INDEX has no unlanded plans. tmux-drop-from-docs criterion 3/5 broadly required comment cleanup, but REPORTS.md:32 says it already landed. The still-present pointer is not covered by that completed plan.\",\"BUGS.md\":\"No related accepted issue.\",\"queue INDEX and matching files\":\"Full INDEX read and searches for OutputStream, stream.rs, deleted checkpoint and output-trace terminology found no exact existing item. g171/f5 is the exact named alias; unrelated stale-comment items concern other targets.\",\"TRIAGE_OUTCOMES.md\":\"No exact active diagnostic-pointer decision; archive unread.\",\"FILTER.md\":\"Rare-imprecise-diagnostic filter does not fully match: this persistent false documentation pointer exists whenever followed, with no required rare runtime trigger. Retain.\"} Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Maintainers tracing terminal-output loss are sent to a deleted checkpoint and explanation. Earlier records expressly disclaimed a runtime loss, leak or logging malfunction.\"; null."
+      },
+      "accepted_parent_decision": {
+        "key": "g170/l4",
+        "line": 9,
+        "disposition": "verified",
+        "group": "connection-writer-comment-points-to-deleted-outputstream-checkpoint",
+        "bucket": "other",
+        "recording": "retain-verified",
+        "queue_target_candidate": "review_feedback_queue/output-trace-deleted-checkpoint.md",
+        "needs_independent_drop_check": false,
+        "reason": "Parent explicitly accepted named retain-verified proposal from claims-107 after inspecting it. The retained writer comment directs maintainers to a deleted first checkpoint. Historical source establishes that the reference was valid at the range base and lost its target in-range. The pointer still exists at the reviewed tip and recording-time main. Record one other-priority source-comment finding with both g170/l4 and g171/f5 provenance. Preserve historical validity, in-range deletion and endpoint persistence. Checked source/results: [\"6e423e3:service/connection.rs:1035-1037 points to OutputStream::next_output; tmux/stream.rs:1320-1342 contains the first checkpoint, diagnostic hop map and no-payload rationale. Thus the reference was valid at the exclusive base.\",\"1ed482d deletes tmux/stream.rs. The scoped range history has only this stream-file change and only this matching reference/target change; 1ed482d..00de0b6 connection.rs diff leaves the pointer untouched.\",\"00de0b6:service/connection.rs:985-993 still contains the reference and working data-frame length debug event; source grep finds no executable OutputStream target. Current connection.rs:986 retains it too.\",\"No runtime logging failure, disclosure, transport failure or generated-document failure is alleged or reproduced. Source comments are within scope even though ordinary workflow/docs files are excluded as independent targets.\"] Current coverage/results: {\"SPEC.md\":\"Searched terminal/output/diagnostic terms; no accepted stale diagnostic-map behavior.\",\"SPEC_impl.md\":\"Terminal host, emulator and Grid streams describe the retained path; the old-server section says only startup retirement remains. None covers a false source-navigation pointer.\",\"TODO.md Planned\":\"Empty.\",\"plans/queue\":\"INDEX has no unlanded plans. tmux-drop-from-docs criterion 3/5 broadly required comment cleanup, but REPORTS.md:32 says it already landed. The still-present pointer is not covered by that completed plan.\",\"BUGS.md\":\"No related accepted issue.\",\"queue INDEX and matching files\":\"Full INDEX read and searches for OutputStream, stream.rs, deleted checkpoint and output-trace terminology found no exact existing item. g171/f5 is the exact named alias; unrelated stale-comment items concern other targets.\",\"TRIAGE_OUTCOMES.md\":\"No exact active diagnostic-pointer decision; archive unread.\",\"FILTER.md\":\"Rare-imprecise-diagnostic filter does not fully match: this persistent false documentation pointer exists whenever followed, with no required rare runtime trigger. Retain.\"} Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Maintainers tracing terminal-output loss are sent to a deleted checkpoint and explanation. Earlier records expressly disclaimed a runtime loss, leak or logging malfunction.\"; null."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-107",
+          "key": "g170/l4",
+          "latest_line": 9,
+          "recommendation": "retain-verified",
+          "bucket": "other",
+          "underlying_key": "connection-writer-comment-points-to-deleted-outputstream-checkpoint",
+          "aliases": [
+            "g171/f5"
+          ],
+          "target_queue_file": "review_feedback_queue/output-trace-deleted-checkpoint.md",
+          "why": "The retained writer comment directs maintainers to a deleted first checkpoint. Historical source establishes that the reference was valid at the range base and lost its target in-range. The pointer still exists at the reviewed tip and recording-time main.",
+          "checks": [
+            "6e423e3:service/connection.rs:1035-1037 points to OutputStream::next_output; tmux/stream.rs:1320-1342 contains the first checkpoint, diagnostic hop map and no-payload rationale. Thus the reference was valid at the exclusive base.",
+            "1ed482d deletes tmux/stream.rs. The scoped range history has only this stream-file change and only this matching reference/target change; 1ed482d..00de0b6 connection.rs diff leaves the pointer untouched.",
+            "00de0b6:service/connection.rs:985-993 still contains the reference and working data-frame length debug event; source grep finds no executable OutputStream target. Current connection.rs:986 retains it too.",
+            "No runtime logging failure, disclosure, transport failure or generated-document failure is alleged or reproduced. Source comments are within scope even though ordinary workflow/docs files are excluded as independent targets."
+          ],
+          "coverage_checked": {
+            "SPEC.md": "Searched terminal/output/diagnostic terms; no accepted stale diagnostic-map behavior.",
+            "SPEC_impl.md": "Terminal host, emulator and Grid streams describe the retained path; the old-server section says only startup retirement remains. None covers a false source-navigation pointer.",
+            "TODO.md Planned": "Empty.",
+            "plans/queue": "INDEX has no unlanded plans. tmux-drop-from-docs criterion 3/5 broadly required comment cleanup, but REPORTS.md:32 says it already landed. The still-present pointer is not covered by that completed plan.",
+            "BUGS.md": "No related accepted issue.",
+            "queue INDEX and matching files": "Full INDEX read and searches for OutputStream, stream.rs, deleted checkpoint and output-trace terminology found no exact existing item. g171/f5 is the exact named alias; unrelated stale-comment items concern other targets.",
+            "TRIAGE_OUTCOMES.md": "No exact active diagnostic-pointer decision; archive unread.",
+            "FILTER.md": "Rare-imprecise-diagnostic filter does not fully match: this persistent false documentation pointer exists whenever followed, with no required rare runtime trigger. Retain."
+          },
+          "exact_cover_quotes": [],
+          "missing_premise": null,
+          "original_stronger_consequence": "Maintainers tracing terminal-output loss are sent to a deleted checkpoint and explanation. Earlier records expressly disclaimed a runtime loss, leak or logging malfunction.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Record one other-priority source-comment finding with both g170/l4 and g171/f5 provenance. Preserve historical validity, in-range deletion and endpoint persistence."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": true,
+        "clearly_refuted_candidate": false,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Source-confirmed by an existing parent decision; not runtime reproduced",
+        "deduplication_key": "connection-writer-comment-points-to-deleted-outputstream-checkpoint",
+        "destination": "trailing-connection-writer-comment-points-to-deleted-outputstream-checkpoint.md"
+      }
+    }
+  ],
+  "replies": [
+    {
+      "turn": 1,
+      "reply": "Initial pass complete; all 1,211 assigned lines reviewed.\n\n- **f1:** Recorded old-terminal work loss, proposed drop based on explicit specification acceptance and retirement already present in the parent.\n- **c2:** Recorded source-refuted concern about replay and isolation for surviving terminals.\n\nNo implementation defect established; no open leads. Findings and progress logs updated. No tests or reproductions run."
+    },
+    {
+      "turn": 2,
+      "reply": "- Revised `c2` with source checks across prompt/excerpt/tab identity and the surviving host lifecycle, including Delete’s handling of unconfirmed endings.\n- Added `c3`: inspected deleted and surviving test assertions; no distinct test-sensitivity defect established.\n- No new implementation findings. Proposed drops remain pending independent check.\n\nUnresolved lead IDs: none."
+    },
+    {
+      "turn": 3,
+      "reply": "Discovery pass 1 complete.\n\n- Checked interface records, deleted-symbol callers, teardown dependencies, and history through the pinned tip.\n- **New verified: `l4`** — writer diagnostics reference a deleted stream checkpoint; no later repair found.\n- Revised `c2` to clarify its limited refutation.\n- New unverified IDs: none. Open leads: none.\n\n**Something new found: yes**, the documentation defect above. No runtime execution performed."
+    }
+  ],
+  "progress": "Group: g170 retired-supervisor-tmux\nState: initial review complete; awaiting caller's later synthesis/discovery prompt.\nTurn type/count: initial / 1. Discovery-pass count: 0.\nAssigned scope: all 1211/1211 lines of prep/parts/00957-000.patch read through seven evidence packets (1–180, 181–360, 361–540, 541–720, 721–900, 901–1080, 1081–1211). No unread assigned material.\nCommit: 1ed482dde220452e424973faf38a5e1318986333. Complete inventory commits field read; no excluded coverage metadata read.\nContracts: pinned SPEC.md Terminal experience (2855–3187); SPEC_impl.md Terminal host main section (1963–2700), Terminal substrate: private tmux server (2880–2991), GUI Answers bind to what was drawn (1071–1119). Supplemental snapshots/manifest are private context artifacts; other ranges of these entire specifications were not in assigned scope.\nInterfaces/source checks: pinned core startup and row conversion, complete old_terminals.rs, host runtime patch and module contracts, attach resolution/grid setup, grid catch-up implementation. Searches found no remaining runtime callers of deleted stream APIs; one stale OutputStream comment remains. Parent core already ends the old server and treats old-kind rows as terminal-less. No independent review of unrelated retired defects.\nRecords this pass: f1 created and revised (source-confirmed loss-of-work consequence, proposed drop: exact specification acceptance and parent already retires old terminals); c2 created (source-refuted removal concern: surviving hosts use independent journal/emulator/grid path). No new implementation defect established. No unverified findings. Open lead IDs: none.\nAssumptions/limits: startup cleanup remains existing behavior; host/grid runtime provides replacement contracts; source conclusions are not runtime observations. No runtime tests, builds, reproductions, fixes, checkout mutations, helper agents or live-install operations.\nNext action: caller's later synthesis pass; independently check f1's proposed drop before final disposition. No separate final report written.\nTool note: an evidence --help invocation failed with a usage diagnostic; subsequent evidence reads/records succeeded. An overbroad optional tmux.rs context read was clipped; no conclusion depends on its unread middle. All assigned patch packets and cited mandatory contract packets were delivered in full.\n\nTurn 2 entered: later-turn synthesis in progress. Rechecking complete replacement lifecycle/callers, prompt/excerpt/tab identity and deletion-test responsibilities. No open leads at entry; f1 and c2 remain proposals only. No discovery pass counted for synthesis.\n\nTurn 2 boundary: later-turn synthesis complete (total turns 2; discovery passes 0).\nDelta: c2 revised twice with retained host-only prompt/excerpt/tab identity checks and create/adopt/replay/attach/restart/checkpoint/Delete integration checks. New c3 records the considered deleted-test-sensitivity concern and the actual old/replacement assertions inspected; source-refuted proposal, not runtime proof or blanket coverage. f1 unchanged; all proposals remain pending independent check, and all original possible work-loss/security wording remains durable.\nUseful checks: target lifecycle claim plus host-only input sequence and Written receipt; final-exit gating of launch excerpt; session/tag/runtime tab identity; record-before-host-start and generation-bound restart publication; shutdown gathers/fences host runtimes and off-map tabs; Delete propagates unconfirmed host endings before row removal. Inspected replay/pause/full-queue test premises and exact history assertions, rather than relying on production correctness. No distinct wrong-target, missing-warning, survival-guidance or unconfirmed-Delete route arose from assigned stream deletion.\nNew verified implementation findings: none. New unverified findings: none. Open lead IDs: none. Unread assigned scope: none. Context limits: neighbouring test deletions not comprehensively reviewed; no runtime execution or reproduction. Next: caller-directed discovery or independent drop check.\n\nTurn 3 entered: separate discovery pass 1. Existing records reused; pending cross-group questions list is empty. First reading discovery-neighbours.json in bounded chunks, then searching only assigned deletion for new source-supported routes. No runtime actions.\n\nTurn 3 boundary: discovery pass 1 complete (total turns 3; discovery passes 1).\nInterface input: read all 797 lines of discovery-neighbours.json in 16 bounded chunks. No named pending question. Reconciled c2 limits immediately: host final-exit evidence is not excerpt provenance; host-only consumers do not refute distinct startup-PID attribution or hidden-survivor Delete issues received from neighbours. Those known records are not new discoveries here.\nDiscovery checks: allowed-path searches for the assigned stream's API/type/cutover/filter/candidate/barrier names at deletion revision and pinned tip; no executable consumers remain. Examined removed candidate-completion caller and retained HostAttach/GridSender attachment ownership. Whole pinned-range path history shows stream.rs changes only in assigned deletion. Checked residual writer diagnostic pointer against immediate parent, exclusive base and pinned tip, and read complete deletion-to-tip connection.rs diff: target diagnostic map existed before removal; referring instruction survives unrepaired.\nDelta events: c2 revised to narrow its source-refutation basis and retain known independent routes; l4 appended as lead then resolved to source-confirmed finding (stale writer diagnostic pointer to deleted stream checkpoint). Original IDs/consequences/proposed-drop bases remain append-only. No parent drop/lowering assumed accepted.\nNew verified IDs: l4 (documentation correctness, other; no runtime consequence claimed).\nNew unverified-after-investigation IDs: none.\nRemaining open lead IDs: none.\nAnything new found: yes, l4 was validated as an introduced, unrepaired diagnostic-documentation defect; no new security/loss-of-work or runtime finding established. No other distinct concern found in the assigned stream deletion.\nUnread assigned material: none. No runtime tests, builds, reproductions, live-install actions, checkout edits, helper agents or prohibited coverage searches. Source-derived conclusions only.\nNext: caller-directed follow-up after this substantive new finding; do not claim this discovery pass is an empty stabilization pass.\n"
+}

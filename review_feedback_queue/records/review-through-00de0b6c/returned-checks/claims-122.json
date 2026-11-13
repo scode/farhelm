@@ -1,0 +1,162 @@
+[
+  {
+    "key": "g196/c2",
+    "latest_line": 6,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "removed-xterm-notice-retained-ported-code-attribution",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The proposed source-level attribution omission is refuted: the retained ported-code notice is declared as an asset and included in the generated asset inventory. This is a proposed disposition only.",
+    "checks": [
+      "At f560058da19e02716e6f943883a9508b447aff4e, crates/farhelm-ui/src/lib.rs:1337-1358 generates all_assets from every declare_assets entry; :1485-1496 retains the unhashed GRID_PORTED_CODE_LICENSES asset with #[used].",
+      "At that revision, assets/grid-ported-code-LICENSES.txt:1-33 identifies the ported keyboard/platform, wheel and other code; :120-146 supplies the VS Code/Microsoft MIT notice and disclaimer. Source retention is established; release bundles were not built or inspected.",
+      "Both ancestor checks place f560058da19e02716e6f943883a9508b447aff4e inside the assigned review range. All two historical events were read, including the original proposed-drop basis and the later asset-inventory qualification."
+    ],
+    "coverage_checked": [
+      "SPEC.md and SPEC_impl.md searched for xterm, ported code, attribution and license notices. Current SPEC_impl.md:1693-1700 requires retained attribution beside ported code and in THIRD_PARTY_NOTICES.md; this supports the retained-source check rather than accepting an omission.",
+      "TODO.md:25-26 Planned is empty. BUGS.md contains only the unrelated provisioning SSH-helper hang. No matching active TRIAGE_OUTCOMES.md entry or INDEX.md/queue item was found by the exact notice/ported-code searches.",
+      "plans/queue/tmux-end-old-terminals.md:125-129 explicitly keeps ported-code notices; plans/REPORTS.md:29 records it landed. tmux-drop-from-docs:69-74 preserves attribution; REPORTS.md:32 records it landed. These are context, not unlanded coverage. No unlanded matching fix found.",
+      "FILTER.md has no complete boundary for an omitted source attribution notice; no filter applied."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": "None for the narrow source omission. Built-distribution notice retention was not checked, and no legal conclusion is offered.",
+    "original_stronger_consequence": "Deleting the bundled VS Code utilities' vendor notice could leave copied scrolling/platform behavior without attribution. Both histories instead propose source refutation; no security or loss-of-work consequence and no accepted withdrawal were recorded.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Source refutation confined to retained notice text and its declared inventory inclusion, without certifying generated release artifacts."
+  },
+  {
+    "key": "g196/c3",
+    "latest_line": 11,
+    "recommendation": "covered",
+    "bucket": "high",
+    "underlying_key": "grid-only-old-page-display-and-malformed-input-detachment",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The exact display failure and ordinary malformed-input detachment are explicitly accepted. The successful JSON reinterpretation in g196/l1 is a separate, stronger consequence and must remain retained; this proposal cannot dispose of it.",
+    "checks": [
+      "At f560058da19e02716e6f943883a9508b447aff4e^, UI lib.rs:514-521 defaults absent agent_terminal to None; session_view.rs:1771-1786,1806-1810,3839-3849 carries that into the mount; assets/terminal.js:4651-4666 chooses xterm for an unknown kind.",
+      "At that parent, terminal.js:5719-5724 and :5891-5930 treats an absent stream notice as bytes for xterm; a known host/grid mount instead refuses that byte-stream interpretation. Thus not every old-page reconnect misdraws.",
+      "At f560058da19e02716e6f943883a9508b447aff4e, supervisor service/grid_stream.rs:1064-1076 decodes GridInput before encoding; malformed raw keystrokes fail that decode. This does not establish stopping the program, and valid JSON is expressly outside this narrow claim.",
+      "All four histories were read. The final event explicitly supersedes the earlier overall no-loss-route statement because l1 establishes the valid-JSON route. No drop or lowering has been accepted."
+    ],
+    "coverage_checked": [
+      "Reviewed SPEC_impl.md:3008-3040 Grid streams and current SPEC_impl.md:2938-2968 retain the same exact old-page misdrawing/malformed-input/reload acceptance.",
+      "SPEC.md Upgrade compatibility and client scale does not grant blanket permission for destructive migrations or ordinary runtime loss. SPEC_impl.md:8256-8261 withdraws unattended behavior under skew while preserving explicit actions. Those clauses do not extend this narrow acceptance to l1.",
+      "TODO Planned is empty; BUGS contains only the unrelated SSH-helper hang. Exact old-page, stream-notice, malformed-input and JSON searches found no matching queue/index or active triage outcome. The four tmux removal plans are recorded landed at plans/REPORTS.md:29-32; none is an unlanded fix for this consequence.",
+      "No filter needed or applied. An upgrade alone is not enough to invoke the upgrade-plus-rare-condition filter."
+    ],
+    "exact_cover_quotes": [
+      "SPEC_impl.md, Grid streams, current :2950-2955 and reviewed f560058da19e02716e6f943883a9508b447aff4e:3022-3029: A page loaded from the previous helm and left open across the update must be reloaded; nothing keeps it working. Its terminals stop reconnecting on their own once the page sees the helm's new build (the build-mismatch latch, which can take a few seconds), and any reconnect from it, automatic in that window or manual, misdraws the terminal: that page builds its old terminal component for a terminal whose kind the listing no longer names and takes the missing stream notice for an older helm's byte stream, so it draws grid messages as terminal output, and what is typed into it ends the attachment as malformed input. Keeping the stream notice for such pages was considered and not done: a reload is the whole remedy."
+    ],
+    "missing_premise": "No missing premise for the narrow accepted consequence. Timing/incidence was not measured. Successful interpretation of valid pasted JSON is not established as accepted by this paragraph.",
+    "original_stronger_consequence": "Original c3: old open page reconnects, misdraws grid output and ordinary typing ends the attachment until reload. Final event preserves that consequence but withdraws its earlier overall assurance that no security/loss route exists, citing g196/l1's highest-priority paste route.",
+    "needs_independent_drop_check": true,
+    "proposed_basis": "Exact specification coverage only for misdrawing and malformed-input attachment failure. Keep the independently recorded successful-command reinterpretation consequence outside this proposed coverage decision."
+  },
+  {
+    "key": "g196/l1",
+    "latest_line": 15,
+    "recommendation": "retain-verified",
+    "bucket": "highest",
+    "underlying_key": "grid-only-old-page-raw-paste-decoded-as-gridinput",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "Source establishes the conditional shipped route from an old page's complete raw paste to newly decoded unbracketed Text input. A JSON document containing escaped carriage returns can therefore become command input rather than literal JSON. Runtime incidence remains unmeasured. Generic reload acceptance does not explicitly cover this consequence.",
+    "checks": [
+      "At f560058da19e02716e6f943883a9508b447aff4e^, lib.rs:514-521 defaults missing kind to None; session_view.rs:1771-1786,1806-1810,3839-3849 carries it to an actual mount; terminal.js:4651-4666 builds fresh xterm for that unknown kind and :5719-5724,:5891-5930 assumes byte output without a stream notice.",
+      "At that parent, terminal.js:2649-2675 routes plain clipboard text through insert; :2232-2235 sanitizes it and :4628-4634 calls term.paste. term-bytes.js:55-56 removes actual ESC bytes, leaving literal JSON escapes intact. Targeted complete minified snippets at vendor/xterm.js:1 show paste preparing the whole string, conditionally framing only when bracketedPasteMode is true, and calling triggerDataEvent once; default decPrivateModes has bracketedPasteMode:false.",
+      "Parent terminal.js:4157-4158 and :4191-4196 encodes each onData string into one binary WebSocket message. At f560058da19e02716e6f943883a9508b447aff4e helm terminal.rs:762-773 forwards binary messages through send_grid_input without a browser-build guard. SPEC_impl.md Grid streams states one browser message becomes one data frame.",
+      "At the reviewed revision proto grid.rs:1565-1566 uses internally tagged JSON with t and snake_case names; :1610-1612 Text holds data; :1650-1655 deserializes and validates; :1686-1693 bounds text length without refusing carriage returns. Supervisor service/grid_stream.rs:1064-1085 decodes and encodes before classifying Text separately from Paste; grid_input.rs:175 returns Text data bytes without paste framing. A small one-line literal {\"t\":\"text\",\"data\":\"echo sample\\r\"} can thus deliver a real CR after JSON decoding.",
+      "Caller admission is source-supported: parent api.rs:2522-2549 notes skew but returns successful responses; lib.rs:2042-2098 retains the authenticated UI under skew; skew.rs:30-35 explicitly refuses blocking/render veto; session_view.rs:3793-3814 keeps an ordinary nonstale running session's surface; terminal.js:3276-3320 permits attended opening mounts despite manual-only capability. A newly opened SessionView after a successful refreshed unknown-kind listing avoids depending on a kind-only remount of an existing island.",
+      "Both ancestor checks place the reviewed change inside the assigned range. All five histories were read, including the initial missing wire/paste/admission premises, subsequent source checks resolving them, the former possible spec-drop wording and latest explicit refusal to propose dropping the stronger consequence. No reproduction, runtime tests or build performed."
+    ],
+    "coverage_checked": [
+      "Current SPEC_impl.md:2938-2968 accepts old-page misdrawing and malformed-input detachment, but never names successful reinterpretation of valid pasted JSON. Its Grid client :1859-1865 requires structured JSON input rather than raw bytes; :8256-8261 preserves explicit actions under mismatch. These do not explicitly authorize replacing a pasted document with its decoded command-bearing field.",
+      "SPEC.md:4983-4987 calls a user paste intentional delivery of the pasted content; Upgrade compatibility and client scale :5372-5378 denies blanket permission for ordinary runtime loss. Terminal experience :2920-2942 accepts mode damage after an output-recovery gap, a different trigger from this no-gap browser protocol confusion.",
+      "TODO.md Planned is empty. BUGS.md has only the unrelated provisioning SSH-helper hang. Searches of INDEX.md, queue text and active TRIAGE_OUTCOMES.md for old/stale pages, raw/grid input, valid/pasted JSON, paste commands and reinterpretation found no exact matching item or decision. No archive read.",
+      "The tmux removal plans are all recorded landed in plans/REPORTS.md:29-32. The docs plan only promises text/comment/behavior-preserving cleanup, not a fix for old-page input provenance. No unlanded plan was found that removes this cause.",
+      "FILTER.md upgrade-plus-rare-condition explicitly excludes security/trust-boundary consequences. Successful program input beyond literal user paste is a security/loss-of-work concern, so that filter does not fully match. Rare self-correcting diagnostic/display filters also do not cover already-executed command input."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": "No remaining source admission premise identified for the conditional route. Conditions remain: an old loaded page, deliberate fresh unknown-kind mount after a successful refreshed listing, working authentication and attachment, no prior invalid input ending it, a small complete valid GridInput Text JSON paste, and a fresh xterm whose bracketed-paste mode has not been enabled by accidentally interpreted output. No actual browser execution or incidence is claimed.",
+    "original_stronger_consequence": "Initial line 8 suspected unintended program input from valid JSON and left highest unresolved. Lines 9-15 establish the stronger conditional consequence: escaped carriage returns in otherwise literal pasted JSON become real Enter bytes outside bracketed paste and can execute embedded commands. Earlier possible specification-drop wording is preserved as a rejected proposal, not an accepted withdrawal or lowering. Latest suggested bucket remains highest and confidence likely for the full conditional runtime outcome.",
+    "needs_independent_drop_check": true,
+    "proposed_basis": "Retain highest on the established conditional source route. Any attempt to dismiss, filter or lower it using generic reload acceptance must receive a separate independent drop consultation. Histories mention g082/c2 and g088/l2 as corroboration; those records were not supplied in this named batch and are not independently certified aliases here. Parent can reconcile with underlying_key."
+  },
+  {
+    "key": "g197/c1",
+    "latest_line": 4,
+    "recommendation": "refuted",
+    "bucket": "high",
+    "underlying_key": "removed-xterm-smooth-scroll-caller-dependency",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The replacement owns its viewport, keyboard scrolling and scrollbar without the deleted helpers. Source refutes the specific stranded-dependency hypothesis; it does not establish universal scrolling correctness or complete animation parity.",
+    "checks": [
+      "At f560058da19e02716e6f943883a9508b447aff4e, grid-terminal.js:530-595 computes/clamps history and screen positions and implements scrollLines/scrollToBottom; :950-1028 handles slider drag through scrollToIndex; :1514-1528 handles local page scrolling. grid-input.js:295-350 classifies Shift+PageUp/Down locally and cancels them.",
+      "An exact git grep across crates/farhelm-ui at that hash found no setScrollPositionSmooth, hasPendingScrollAnimation, SmoothScrolling, new Terminal(, window.Terminal or removed assets/vendor/xterm path (status 1).",
+      "All three histories were read. Original inaccessible-history and later animation consequences are preserved; no runtime observation, full API-parity claim or audit of unrelated pre-existing grid behavior was made."
+    ],
+    "coverage_checked": [
+      "SPEC.md Reaching everything by keyboard :3311-3320 explicitly requires Shift+PageUp/PageDown. SPEC_impl.md Grid client :1836-1868 assigns local viewport ownership to the grid. These requirements support the caller check rather than accept inaccessible history.",
+      "TODO Planned empty; BUGS unrelated; no exact removal-dependency or smooth-scroll coverage in active TRIAGE_OUTCOMES or queue/index. Existing oldest-row clipping and selection/history items concern different causes, not a stranded deleted helper. The tmux removal plans are landed per REPORTS.md:29-32; no unlanded remedy found.",
+      "No FILTER.md boundary applied: inaccessible history is not established as a rare transient display glitch, and no filtering is needed for the source refutation."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": "None for deleted-helper dependency. Runtime viewport correctness and full old-animation parity were not measured.",
+    "original_stronger_consequence": "Deleting smooth-scrolling helpers might make retained terminal history inaccessible; changed animation was also considered. Preserve high for the former hypothetical, other for animation only. Latest explicitly raises the hypothetical inaccessible-history bucket to high and accepts no drop or lowering.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Narrow source refutation of dependency on deleted smooth-scroll implementation. This is not acceptance of unrelated grid history defects."
+  },
+  {
+    "key": "g197/c2",
+    "latest_line": 6,
+    "recommendation": "refuted",
+    "bucket": "high",
+    "underlying_key": "removed-xterm-export-new-page-startup-dependency",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "New-page startup directly constructs the grid and waits for its assets. It has no remaining Terminal-export dependency. The latest record correctly retracts an overly broad cleanup assurance; this narrow disposition does not refute constructor-failure cleanup or changed-test-oracle concerns.",
+    "checks": [
+      "At f560058da19e02716e6f943883a9508b447aff4e, UI lib.rs:1913-1926 emits all grid scripts before terminal.js; terminal.js:3190-3230 waits for grid globals; :3387-3393 creates/fits the grid before opening its socket; :4294-4342 constructs it through farhelmGridTerminal.create.",
+      "Exact git grep of that revision's UI found no new Terminal(, window.Terminal, deleted asset-path or smooth-helper dependency (status 1). This refutes the specific missing-export dependency, not arbitrary startup failures.",
+      "All three histories were read. The latest explicitly limits prior normal disposal/outer rollback claims: cleanup attempts do not prove nested failures preserve the original exception or release allocations from a constructor that never returned. g083/l1,g135/l2,g136/l1 were named only as distinct supplied context, not checked here."
+    ],
+    "coverage_checked": [
+      "SPEC_impl.md Grid client :1836-1847 assigns terminal.js the unconditional grid mount before the socket. No specification accepts terminals failing to mount because a deleted export is required.",
+      "TODO Planned empty; BUGS unrelated; no exact missing-export startup item or active outcome found in targeted queue/index/ledger searches. All tmux removal plans are landed per REPORTS.md:29-32; none is unlanded coverage. FILTER.md not applied.",
+      "g196/l1 is a distinct old loaded-page compatibility route. Absence of new-page Terminal callers cannot refute it. Likewise production dependency correctness cannot dispose of an independent changed-test or documentation defect."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": "None for the missing-runtime-export dependency. Compilation, browser startup and nested construction-failure cleanup were not exercised or certified.",
+    "original_stronger_consequence": "Removing the exported Terminal class and utilities could prevent terminals mounting. Intermediate normal teardown checks were subsequently narrowed because they do not certify constructor-failure safety. Original failed-startup consequence remains high if demonstrated; no accepted drop or severity lowering.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Source refutation only of the deleted-export dependency in the new page. Preserve the latest limits on broad lifecycle language and keep separate old-page and test-oracle records independent."
+  },
+  {
+    "key": "g197/c3",
+    "latest_line": 7,
+    "recommendation": "refuted",
+    "bucket": "high",
+    "underlying_key": "removed-xterm-parser-duplicate-browser-query-responder",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The new page consumes structured grid frames rather than terminal escape sequences, so removing the old parser suppressors does not leave that browser query responder active. This only refutes duplicate browser-generated query replies from the removed responder.",
+    "checks": [
+      "At f560058da19e02716e6f943883a9508b447aff4e^, terminal.js:4100-4147 registers DECRQM/DECRQSS suppressors and explains that late replies can parse as keystrokes. At f560058da19e02716e6f943883a9508b447aff4e, terminal.js:4152-4165 passes binary data to receiveGrid.",
+      "At the reviewed revision, grid-terminal.js:1972-1993 decodes a grid frame and applies the model, with explicit focus-report/clipboard/fit effects. It does not parse ANSI queries. Exact reviewed-UI grep found no registerCsiHandler/registerDcsHandler or Terminal constructor/global dependency (status 1).",
+      "The sole history was read in full. It preserves potential stray input and notes that extending it to destructive input requires an actual reply path. No runtime query behavior was observed."
+    ],
+    "coverage_checked": [
+      "Current SPEC_impl.md Grid client :1836-1868 says the browser is not a terminal emulator and receives styled grid rows. This is architecture supporting source refutation, not blanket permission for unintended input. SPEC.md output-recovery-gap input-mode acceptance :2920-2942 has a different trigger.",
+      "TODO Planned empty; BUGS unrelated; no exact duplicate browser query-responder finding or active triage outcome found. Existing grid-input X10/selection items have different triggers and consequences. All tmux removal plans are recorded landed per REPORTS.md:29-32; no unlanded fix covers this exact hypothesis. FILTER.md not applied.",
+      "The g196/l1 old-page valid-JSON paste route is distinct and remains retained. Correct new-page source behavior does not refute any independent changed-test or documentation claim."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": "No remaining premise for the deleted responder dependency. An actual new-page outgoing query reply route would be needed to establish unintended keystrokes; none was found in these targeted checks. No claim about every supervisor query path is made.",
+    "original_stronger_consequence": "Deleting parser accessors/suppression might let late terminal-query replies become unintended keystrokes. Hypothetical destructive input could affect user-owned work but requires an outgoing responder path; retain that original concern in the independent-drop register even though latest reports high/no established impact.",
+    "needs_independent_drop_check": true,
+    "proposed_basis": "Narrow source refutation: the removed browser ANSI responder has no counterpart in the replacement structured-grid receive path. Separate independent acceptance is required before dropping the possible harmful-input consequence."
+  }
+]

@@ -1,0 +1,304 @@
+[
+  {
+    "key": "g044/c5",
+    "latest_line": 7,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "mac-update-survival-metadata-assertion-removal",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The removed terminal-kind metadata does not supply the survival oracle. This Mac test still checks original process identities, shell state and fresh executed input after recovery.",
+    "checks": [
+      "f560058da19e02716e6f943883a9508b447aff4e:crates/farhelm-helm/src/provisioning/tests/macos_real_tests.rs:341-409 waits for this attachment's ReplayComplete, sends a lowercase random token and requires its uppercase form in decoded GridOutput. Echo alone cannot meet that predicate.",
+      "Same revision, macos_real_tests.rs:495-575 requires the same session and tab, live status, all four original process identities and fresh nonce-checking commands in both terminals.",
+      "Same revision, crates/farhelm-helm/src/client.rs:3967-3980,4040-4077 has one grid attachment path, without a terminal-kind selection. No execution performed."
+    ],
+    "coverage_checked": [
+      "Recording-main SPEC_impl.md:2937-2955 explicitly removes stream-kind and terminal-kind metadata in protocol 77; SPEC.md terminal-survival promises do not require obsolete metadata assertions.",
+      "TODO.md Planned and plans/queue/INDEX.md have no entries. BUGS.md has only the unrelated escaped-SSH-helper transfer hang.",
+      "INDEX.md read in full; matching queue item tab-survival-missing-live-exchange.md read in full. It concerns another test that lacks fresh successor input, unlike this test. Targeted active TRIAGE_OUTCOMES.md searches found no exact item. FILTER.md supplies no needed basis."
+    ],
+    "exact_cover_quotes": ["SPEC_impl.md:2944-2945: every attachment's data channel carries a grid stream"],
+    "missing_premise": null,
+    "original_stronger_consequence": "Removing kind assertions might let the Mac update-survival test pass with recreated or wrong-substrate terminals. This was a test-oracle hypothesis, not a shipped process-loss claim.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Source refutes the specific missing-survival-oracle premise. Agreement is narrow: this does not establish exhaustive terminal-survival test coverage."
+  },
+  {
+    "key": "g044/l6",
+    "latest_line": 15,
+    "recommendation": "filtered",
+    "bucket": "other",
+    "underlying_key": "stopped-provider-state-zero-refusal-ticket",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The unreachable stopped-environment explanation is established. The exact claim is a lost diagnostic and ordinary bounded attachment wait after an external stop within setup/Update's reconnect window, which fits the rare-diagnostic filter.",
+    "checks": [
+      "56659839785691f76da3af5d8f51b511cff4ba8b:crates/farhelm-helm/src/provisioning/service.rs:297-299 maps Stopped to a Resume explanation, but :2916-2919 requires refusal_attempt > ticket. manager.rs:3841-3889 publishes Stopped via set_state; :5056-5087 sends refusal_attempt=0; :5224 stores it. nudge_now at :2891-2926 returns an unsigned attempt-counter ticket. Zero cannot pass the gate.",
+      "Same revision, service.rs:2091-2110 holds the provisioning lock across execution; plan.rs:910-915 puts AttachSupervisor after RestartSupervisor; environment/podman.rs:643-651 makes automatic start refuse the busy provisioning lock. An external stop after restart and before attachment is source-permitted.",
+      "00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db:service.rs:2913-2915 retains the gate. No runtime incidence or reproduction is claimed. The defect does not cause the external stop or erase files."
+    ],
+    "coverage_checked": [
+      "SPEC.md:4857-4865 and SPEC_impl.md:5973-5981 require distinct Stopped state and automatic-start failure/Resume reporting. Those describe the host state, which can remain correct; neither expressly accepts the attach diagnostic bug.",
+      "TODO.md Planned and plans/queue/INDEX.md are empty. BUGS.md's transfer hang has a different trigger, duration and mechanism.",
+      "INDEX.md read in full; searches for refusal_attempt, attach_refusal and stopped-environment diagnosis in queue records and active TRIAGE_OUTCOMES.md found no exact cover. Existing stopped-host-update-floor-unresolved concerns version eligibility, not attachment diagnosis.",
+      "FILTER.md, Rare, self-correcting glitches and imprecise diagnostics: external stop must fall inside the attachment window, and the entire established consequence is lost detail plus the existing 30-second attach wait. No security, wrong-target action, durable wrong record or user-work loss is attributed to this bug."
+    ],
+    "exact_cover_quotes": [
+      "FILTER.md: The trigger is rare: a narrow timing window, a crash or interruption at a specific point, or an input the shipped clients never send.",
+      "FILTER.md: an error message, log line or other diagnostic that is imprecise, misleading, missing detail, or lost."
+    ],
+    "missing_premise": "No premise remains for the bounded diagnostic defect. Frequency was not measured; the filter basis is the specifically narrow stop-during-attachment ordering, not an assertion that all container stops are rare.",
+    "original_stronger_consequence": "Setup/Update waits for ordinary attachment timeout and reports a generic timeout instead of the new Stopped/Resume remedy. The host's separate Stopped state and controls may remain correct. No earlier security or work-loss consequence was alleged.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Propose the complete rare-diagnostic filter match, while preserving that the source bug is real. If the parent broadens the consequence beyond this diagnostic/wait scope, retain and reassess the filter."
+  },
+  {
+    "key": "g044/c7",
+    "latest_line": 13,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "replacement-launch-fixture-old-manager-repopulation",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The fixture shuts the old manager's registry before constructing its replacement. Its old reconciliation cannot repopulate actors after that terminal gate.",
+    "checks": [
+      "56659839785691f76da3af5d8f51b511cff4ba8b:crates/farhelm-helm/src/provisioning/session_launch_failure_tests.rs:40-149 calls harness.manager.shutdown before adding the place host and constructing the replacement; it awaits the replacement place actor's connected state.",
+      "Same revision, manager.rs:3093-3133 sets map.shut_down under the actor-map mutex, drains actor handles, clears published clients, aborts actors and retires clients. Reconciliation checks that gate under the insertion lock at :1725-1732, and revive does likewise at :2963-2969. Shutdown does not promise to join every cancelled future; the stated repopulation mechanism is nevertheless fenced. No runtime test performed."
+    ],
+    "coverage_checked": [
+      "Both specifications searched for shutdown, provisioning and actor lifetime. SPEC_impl.md:5357-5359 explicitly requires terminal shutdown and no reconciliation repopulation. No accepted defective fixture behavior is needed for the source refutation.",
+      "TODO.md Planned and plans/queue/INDEX.md are empty; BUGS.md is unrelated. INDEX.md read in full and targeted active ledger/queue searches found no exact old-manager-repopulation item. FILTER.md is not the basis."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": null,
+    "original_stronger_consequence": "The previous fixture manager might keep reconnecting or repopulating actors against the same store, making tests unreliable. This concerned fixture isolation only.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Source refutes continuing/repopulating actors after terminal withdrawal; it does not establish synchronous joining or correctness of every fixture assertion."
+  },
+  {
+    "key": "g044/l8",
+    "latest_line": 19,
+    "recommendation": "retain-verified",
+    "bucket": "other",
+    "underlying_key": "sealed-setup-test-overlay-hides-hold-and-run-leak",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The test's public-state equality cannot detect the hold it claims to exclude, and it never checks that run/busy bookkeeping was removed. This is a test-oracle defect even though the implementation currently does both correctly.",
+    "checks": [
+      "222bf6253bcd168db04bcbb1df20180c88306998:crates/farhelm-helm/src/provisioning/tensorlake_add_tests.rs:2033-2068 compares manager.state and checks only refusal wording/backend events. Its docstring promises refusal before a hold and no retained run.",
+      "Same revision, manager.rs:2214-2238 overlays the public state with sealed_state; :2669-2679 derives Deleting from the separate seal map. hold_connection at :1655-1695 mutates raw state, client, incarnation and hold without changing that map. Moving the refusal after that hold would preserve both public-state values.",
+      "tensorlake_add.rs:866-874 inserts busy/runs; :894-900 removes them for the sealed refusal. The test never observes either map or service.view. backend_events at test lines 339-345 only decodes the event file and supplies no hidden actor/memory oracle.",
+      "git diff 222bf6253bcd168db04bcbb1df20180c88306998..00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db for this test file is empty. The complete test is in-range. No mutation test or reproduction performed."
+    ],
+    "coverage_checked": [
+      "SPEC.md:1511-1533 establishes the seal and deletion/Retry behavior. SPEC_impl.md seal/setup/hold searches found no exception accepting an oracle that cannot observe its claimed boundary.",
+      "TODO.md Planned and plans/queue/INDEX.md are empty. BUGS.md has no related test or seal issue.",
+      "INDEX.md read in full; targeted queue and active TRIAGE_OUTCOMES.md searches for sealed setup, hold and this test found no exact coverage. Other lifecycle/runtime seal defects are distinct from the assigned test's missing observations. No FILTER.md boundary covers ordinary missing regression sensitivity."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": null,
+    "original_stronger_consequence": "The regression may pass if refused setup takes a connection hold or leaves an admitted run/busy entry. This remains maintainer regression assurance, not a claimed product deletion or user-work-loss defect.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Retain a source-verified test finding. Add a direct hold/incarnation oracle and a no-run/no-busy assertion; preserve the existing checks for their separate guarantees."
+  },
+  {
+    "key": "g044/c9",
+    "latest_line": 18,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "spliced-launch-peer-composite-transport-lifetime",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The one-reply peer task is only part of the mock supervisor. Ending it does not by itself close the manager-facing connection.",
+    "checks": [
+      "56659839785691f76da3af5d8f51b511cff4ba8b:crates/farhelm-helm/src/provisioning/session_launch_failure_tests.rs:325-368 explicitly assigns exactly the initial CreateSession reply to this task; finish at :280-300 waits on the owned launch result.",
+      "Same revision, rest_harness.rs:588-604 lets the peer-to-helm relay end while retaining the manager connection. The downstream owns a to_helm sender and handles forwarding setup and lists (:606-644); the writer is aborted at the downstream/kill boundary (:652-657). Peer-task completion is not that boundary. No execution performed."
+    ],
+    "coverage_checked": [
+      "Both specifications searched for mock transport/peer lifetime; no accepted defective behavior is needed. The explicit fixture ownership contract and implementation settle the premise.",
+      "TODO.md Planned and plans/queue/INDEX.md are empty, BUGS.md unrelated; full INDEX and targeted queue/active ledger searches found no exact premature-peer-death item. FILTER.md is not the basis."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": null,
+    "original_stronger_consequence": "The launch-result wait might depend on a dead supervisor peer and falsely manufacture connection loss after the initial reply task exits. This was a fixture concern only.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Refute only the claim that ending the one-reply task itself ends this composite mocked connection. No general lifetime guarantee for arbitrary further forwarded traffic is implied."
+  },
+  {
+    "key": "g044/l10",
+    "latest_line": 21,
+    "recommendation": "out-of-range",
+    "bucket": "other",
+    "underlying_key": "agent-file-size-only-read-consistency-docstring",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The inaccurate universal consistency wording and size-only checks are already present at the exclusive base. The range does not introduce or invalidate this explanation.",
+    "checks": [
+      "6e423e30068b62c6cfa276c6d720ee35bb70387a:crates/farhelm-helm/src/provisioning/tensorlake_backend.rs:128-182 already says a changed file is refused while comparing only sizes and accumulated length across chunked reads.",
+      "Complete git diff of that path from exclusive base to 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db changes preparation composition, read-error redaction and test route spelling; it does not change the explanation or consistency predicates. Path history confirms in-range modifications without attributing this limitation to them.",
+      "The same-size edit limitation is real as a conditional source observation. No affected file, mixed read or downstream settings loss was reproduced."
+    ],
+    "coverage_checked": [
+      "SPEC_impl.md Adding Tensorlake hosts describes bounded reads, merge and final replacement comparison; neither specification explicitly promises universal snapshot reads in this helper. These do not refute the comment defect.",
+      "settings-save-races-final-replacement.md read in full: it concerns a save after the final digest check, not this pre-existing read-consistency explanation. agent-settings-write-exceeds-next-read-limit.md also read in full: its output/input size mismatch is distinct. Active ledger's credential-save references concern the write window, not exact coverage here.",
+      "TODO.md Planned and plans/queue/INDEX.md empty; BUGS.md unrelated. Full INDEX and targeted queue/active ledger searches found no exact documentation item. No filter used."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": "No in-range introduction or newly changed consistency contract was found. A review of the old comment in isolation would be a different scope.",
+    "original_stronger_consequence": "The read helper's changed-file refusal claim can mislead maintainers because same-size edits need not be detected. No credential disclosure or user-work loss was originally established.",
+    "needs_independent_drop_check": true,
+    "proposed_basis": "Exclude this independent pre-range documentation/consistency limitation only. Preserve it for the parent's drop register because it discusses reads used for credential settings; do not treat this consultation as independent authorization to drop any stronger settings-loss claim."
+  },
+  {
+    "key": "g045/c1",
+    "latest_line": 1,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "environment-create-after-host-row-deletion-durable-gate",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "Both providers require a durable create record on a still-present matching host before creating the external resource. Row publication before lock acquisition does not establish the suspected unowned create.",
+    "checks": [
+      "56659839785691f76da3af5d8f51b511cff4ba8b:crates/farhelm-helm/src/tensorlake/hosts.rs:377-391 rereads the host and binding; :428-447 requires set_tensorlake_prepared_create or pending-create storage to return true before API create.",
+      "Same revision, environment/podman.rs:1048-1063 rereads the row/binding and :1103-1125 requires the guarded prepared-create write before run. A deleted row fails these gates. Once the launch owns the provisioning lock, deletion uses that same lock. No runtime interleaving observed."
+    ],
+    "coverage_checked": [
+      "SPEC_impl.md:6267-6305 requires recorded ownership before billed work and durable pending creates. SPEC.md:1472-1486 and :4824-4837 describes owned resource/cleanup behavior; neither supplies an unowned-create exception needed here.",
+      "TODO.md Planned/plans queue index empty; BUGS.md unrelated. Full INDEX and targeted active ledger/queue searches found no exact row-deletion/create-gate issue. Snapshot cleanup races new host registration is a different recipe-snapshot cleanup mechanism. No filter used."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": null,
+    "original_stronger_consequence": "A concurrent deletion between host publication and acquiring its provisioning lock might leave an unowned billed environment. No shipped path bypassing durable pre-create ownership was shown.",
+    "needs_independent_drop_check": true,
+    "proposed_basis": "Source refutes the stated unowned-create route. Keep this proposed dismissal in the parent's independent register because the original hypothesis concerns lost ownership of an external resource; unrelated cancellation/storage failures are outside the narrow refutation."
+  },
+  {
+    "key": "g045/f1",
+    "latest_line": 2,
+    "recommendation": "covered",
+    "bucket": "highest",
+    "underlying_key": "fresh-environment-launch-ambiguous-create-cleanup",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The source can destroy the new environment after a session started but its create reply was lost. Both current product and implementation specifications explicitly accept this exact initial-launch cleanup consequence, including containers.",
+    "checks": [
+      "56659839785691f76da3af5d8f51b511cff4ba8b:crates/farhelm-helm/src/provisioning/tensorlake_add.rs:1028-1041 calls forget_host_locked on the fresh environment for an error from session creation. Its comment expressly includes an agent started before a lost reply.",
+      "This shared finish path never targets a Replace source. Source consequence is confirmed conditionally, not reproduced; it can end the newly started agent and work, so retain highest for the proposed-drop assessment."
+    ],
+    "coverage_checked": [
+      "Recording-main SPEC.md:1480-1486 explicitly allows failed initial sandbox launch cleanup after a lost create reply, even ending an agent. :4831-4837 expressly applies that rule to containers. SPEC_impl.md:6598-6606 expressly permits destruction before confirmed create; :6098-6101 shares the new-environment-only cleanup contract.",
+      "TODO.md Planned/plans queue index empty. BUGS.md unrelated. Full INDEX and targeted queue/active ledger searches found no additional exact item. GUI-helm ambiguous-launch entries address a different transport and authority boundary. No filter used."
+    ],
+    "exact_cover_quotes": [
+      "SPEC.md:1480-1482: If an ordinary new launch fails before the helm has confirmed session creation, including a lost create reply, it attempts to delete that newly created sandbox and snapshots and shows **Not launched.** with the reason. This may end an agent that started before its reply was lost.",
+      "SPEC_impl.md:6602-6605: Before a confirmed create reply, a failed normal launch attempts whole-sandbox cleanup through the existing bounded Tensorlake deletion calls and resource proof. The row is retained if cleanup cannot complete. Lost create replies need no special reconciliation: the newly created resource may be destroyed.",
+      "SPEC.md:4834-4835: An ordinary failed initial launch may discard its newly created container, including after a lost session-create reply."
+    ],
+    "missing_premise": null,
+    "original_stronger_consequence": "A fresh environment, a remotely started session and its work may be destroyed when session creation succeeded but its reply was lost. This consequence remains established and is not severity-lowered.",
+    "needs_independent_drop_check": true,
+    "proposed_basis": "Exact explicit specification acceptance, limited to this launch's new resource before confirmed creation. This is a proposed covered disposition only; an independent fresh-context drop check must agree before omission."
+  },
+  {
+    "key": "g045/c2",
+    "latest_line": 3,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "tensorlake-create-confirmed-versus-stored-size",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "Setup recovery puts the recorded resource size into the confirmation's recipe copy. Shared creation reads that same recorded size, preserving the confirmed billing choice after recipe edits.",
+    "checks": [
+      "56659839785691f76da3af5d8f51b511cff4ba8b:crates/farhelm-helm/src/provisioning/tensorlake_add.rs:670-700 extracts binding.resources; :730-732 assigns it to recipe.size; :788-794 returns that size in the confirmation.",
+      "Same revision, tensorlake/hosts.rs:412-423 constructs CreateSandbox.resources from current.resources. New registration records the confirmed size. No source size mismatch was found; vendor accounting was not tested."
+    ],
+    "coverage_checked": [
+      "SPEC_impl.md:6267-6305 freezes size in the outer plan and recovers durable existing-create facts. Both specifications' size/resource searches found no contrary requirement to use a newly edited recipe during recovery.",
+      "TODO.md Planned/plans queue index empty; live-resize entries outside Planned concern future explicit resizing, not this trigger. BUGS.md unrelated. Full INDEX and targeted active ledger/queue searches found no exact confirmed/stored mismatch. No filter used."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": null,
+    "original_stronger_consequence": "Moving creation from plan.recipe.size to stored resources might change billed resources after a recipe edit. The values are equal for the shipped initial and recovery paths checked.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Source refutes the confirmed-versus-created-size mismatch. This makes no claim about external vendor accounting."
+  },
+  {
+    "key": "g045/l1",
+    "latest_line": 14,
+    "recommendation": "retain-verified",
+    "bucket": "other",
+    "underlying_key": "ordinary-tensorlake-add-outer-source-lock-across-ssh-readiness",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The ordinary prepared Add path retains the real recipe source guard across the provider's SSH readiness wait after Running. Concurrent same-recipe creates and snapshot publication wait unnecessarily; the provider only drops its own absent guard.",
+    "checks": [
+      "56659839785691f76da3af5d8f51b511cff4ba8b:crates/farhelm-helm/src/provisioning/tensorlake_add.rs:1352-1385 selects under lock_snapshot_use, stores source_guard, awaits create_host_sandbox and only then drops it.",
+      "Same revision, :1590-1617 calls create_recorded with guard=None and backend=Some. tensorlake/hosts.rs:471-497 waits for Running, drops that None, then awaits wait_tensorlake_ssh before returning. The caller's guard remains owned across the wait.",
+      "tensorlake/hosts.rs:227 takes the same lock for another prepared session create; tensorlake/build.rs:1245 and :2443-2445 takes its snapshot_mutex for built/prepared publication. These independently awaited operations can queue behind the outer guard.",
+      "tensorlake_backend.rs:58-89 uses a 60-second retry budget and 15-second attempts with retry pacing. This is nominally about a minute plus final command/cleanup/scheduling overhead, not a proven strict 60/75-second wall-clock cap or permanent deadlock.",
+      "Complete tensorlake_add.rs diff from 56659839785691f76da3af5d8f51b511cff4ba8b to 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db adds only the unrelated seal refusal. No runtime latency or billed cost measured."
+    ],
+    "coverage_checked": [
+      "SPEC_impl.md:6560-6564 defines the first observed Running state as the exclusion boundary and explicitly puts installation/attachment outside it. Adding Tensorlake hosts separately acknowledges Running can precede gateway readiness (:6314-6319); it does not extend source exclusion across that wait.",
+      "TODO.md Planned and plans/queue/INDEX.md empty; BUGS.md's escaped SSH transfer hang differs from this normally bounded gateway wait.",
+      "Full INDEX plus targeted queue/active ledger searches found no exact outer-guard readiness item. snapshot-cleanup-races-new-host-registration.md and snapshot-state-races-build-admission.md read in full: they concern source admission/retirement gaps, not unnecessary guard retention after Running, and are not exact cover or same-root aliases.",
+      "No FILTER.md match: the established consequence includes delaying independent same-recipe launches/publications and extending a builder's billed lifetime, rather than only a local diagnostic or safely retried operation."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": "Actual latency, concurrency frequency and additional cost are unmeasured. They are not needed for the bounded extra-serialization finding; no security, work-loss or permanent-cycle route is established.",
+    "original_stronger_consequence": "Same-recipe launches and build/preparation publication are delayed while a Running host's SSH gateway is unavailable. Earlier numeric bounds were refined to a retry budget plus cleanup overhead; no proven permanent deadlock was withdrawn.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Retain the precise source/contract defect at other priority. Transfer the actual outer guard to the shared helper, or restore readiness waiting after dropping it. Do not claim a strict wall-clock cap."
+  },
+  {
+    "key": "g045/c3",
+    "latest_line": 7,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "linux-update-survival-metadata-assertion-removal",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The surviving test still asks the live retained terminal to execute fresh input and decodes the resulting grid output. Terminal echo and removed kind metadata do not establish a false pass.",
+    "checks": [
+      "f560058da19e02716e6f943883a9508b447aff4e:crates/farhelm-helm/src/provisioning.rs:13122-13228 requires live status, creates its own viewer, waits for ReplayComplete, sends a lowercase random marker through printf/tr and requires its uppercase form in GridOutput rows/history.",
+      "The expected uppercase marker is absent from typed input. The command must execute for that response to appear. client.rs:3967-4075 now exposes only a grid attachment path. No test was executed."
+    ],
+    "coverage_checked": [
+      "SPEC_impl.md:2937-2955 explicitly makes every protocol-77 attachment a grid stream and removes kind metadata. Both specifications' terminal survival/stream sections found no requirement to retain the obsolete selection assertion.",
+      "TODO.md Planned/plans queue index empty; BUGS.md unrelated. INDEX read in full and tab-survival-missing-live-exchange.md read: that different test lacks the fresh command this helper retains. Targeted active ledger/queue searches found no exact issue. No filter used."
+    ],
+    "exact_cover_quotes": ["SPEC_impl.md:2944-2945: every attachment's data channel carries a grid stream"],
+    "missing_premise": null,
+    "original_stronger_consequence": "Removing kind/stream assertions might make the update-survival helper pass on the wrong substrate or echoed input alone. This was a test-coverage concern, not an established product process-loss route.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Source and the explicit grid-only contract refute this narrow regression claim. g044/c5 concerns a separate Mac survival oracle; similar metadata removal is not an exact same-test alias."
+  },
+  {
+    "key": "g045/l2",
+    "latest_line": 15,
+    "recommendation": "covered",
+    "bucket": "other",
+    "underlying_key": "prepared-image-inherits-private-tmux-cleanup-exception",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The conditional inherited-binary route remains possible. The specific preparation contract nevertheless explicitly requires skipping bundled-tmux removal, qualifying the ordinary Linux setup/Update rule.",
+    "checks": [
+      "500548b9253b07a26fd03119679184b69544e31d:crates/farhelm-helm/src/provisioning/snapshot_preparer.rs:75-119 refuses setup-managed installations and copied state, then explicitly skips RemoveBundledTmux. plan.rs:244-263 explains ordinary cleanup and the preparation exception.",
+      "Same revision, tensorlake_backend.rs:188-198 checks only state/supervisor.db, including dangling links. These predicates do not prove lib/tmux absent. A supported custom base retaining that executable but no managed unit/database is not source-disproved.",
+      "Same revision SPEC_impl.md:2784-2876 read, including the exact preparation exception at :2868-2871. Ordinary plans' first-on-PATH rationale explains the conditional explicit-user-command consequence. Farhelm itself no longer invokes tmux. No affected deployed image or runtime behavior observed."
+    ],
+    "coverage_checked": [
+      "Current SPEC_impl.md:8002-8020 retains the same explicit preparation skip. SPEC.md:481-482 permits qualifying custom bases, :571-586 covers prepared clones/inherited authentication, and Adding Tensorlake hosts distinguishes clone admission from ordinary installation. The skip does not rely on proving arbitrary base programs absent.",
+      "TODO.md Planned/plans queue index empty; remaining plan files are not unlanded index entries. BUGS.md unrelated. Full INDEX and targeted queue/active ledger searches found no exact inherited-private-tmux item.",
+      "No upgrade filter asserted: the input is a custom base with residual files, not necessarily a user's live installation upgraded from an older release. Coverage is the explicit preparation exception."
+    ],
+    "exact_cover_quotes": [
+      "SPEC_impl.md:8018-8020: Snapshot preparation skips the step, as it skips attachment and lingering: the sandbox image it installs into has no Farhelm installation (preparation refuses setup-managed installs and copied state), so it is not expected to carry an earlier tmux."
+    ],
+    "missing_premise": "An actually deployed affected base is unverified. The specification's expectation is weaker than proven executable absence; absence is not the proposed-drop basis.",
+    "original_stronger_consequence": "A custom base retaining the earlier private lib/tmux without the database/setup-managed unit can propagate it into prepared clones, where an explicit user/agent tmux command may select it before the host's tmux. The earlier likely code-defect finding was revised to proposed specification coverage; the conditional source behavior was not withdrawn.",
+    "needs_independent_drop_check": true,
+    "proposed_basis": "Propose exact specification coverage of the omission, preserving the admitted custom-input route and earlier withdrawal history. Conservative independent check requested for dismissal of an inherited executable-selection concern; no actual vulnerability or user-work-loss route is established. No cross-batch alias was independently checked."
+  }
+]

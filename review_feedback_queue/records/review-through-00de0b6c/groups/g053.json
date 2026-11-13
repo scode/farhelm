@@ -1,0 +1,1052 @@
+{
+  "group": {
+    "id": "g053",
+    "domain": "wire-protocol",
+    "purpose": "wire-protocol: crates/farhelm-proto/src/lib.rs, crates/farhelm-proto/src/grid.rs; phases complete small per-commit changes",
+    "interfaces": [
+      "g005",
+      "g006",
+      "g007",
+      "g009",
+      "g010",
+      "g011",
+      "g018",
+      "g019",
+      "g020",
+      "g021",
+      "g052",
+      "g054",
+      "g074",
+      "g075",
+      "g076",
+      "g079",
+      "g080",
+      "g081",
+      "g082",
+      "g083",
+      "g084",
+      "g085",
+      "g086",
+      "g087",
+      "g122",
+      "g123",
+      "g124",
+      "g125",
+      "g126",
+      "g196"
+    ],
+    "sources": [
+      {
+        "path": "[private-run]/prep/parts/00762-000.patch",
+        "ranges": [
+          [
+            1,
+            64
+          ]
+        ],
+        "original_path": "crates/farhelm-proto/src/lib.rs",
+        "commit": "647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513",
+        "notes": "patch header; patch character offsets [0,3644)",
+        "lines": 64,
+        "bytes": 3650,
+        "start": 0,
+        "end": 3644,
+        "original": "[private-run]/prep/originals/00762.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/00862-000.patch",
+        "ranges": [
+          [
+            1,
+            16
+          ]
+        ],
+        "original_path": "crates/farhelm-proto/src/lib.rs",
+        "commit": "dbfc69751215dbf15e1d31d5bed73c3754c4ebc4",
+        "notes": "patch header; patch character offsets [0,1050)",
+        "lines": 16,
+        "bytes": 1056,
+        "start": 0,
+        "end": 1050,
+        "original": "[private-run]/prep/originals/00862.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/01040-000.patch",
+        "ranges": [
+          [
+            1,
+            142
+          ]
+        ],
+        "original_path": "crates/farhelm-proto/src/grid.rs",
+        "commit": "f560058da19e02716e6f943883a9508b447aff4e",
+        "notes": "patch header; patch character offsets [0,8386)",
+        "lines": 142,
+        "bytes": 8386,
+        "start": 0,
+        "end": 8386,
+        "original": "[private-run]/prep/originals/01040.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/01041-000.patch",
+        "ranges": [
+          [
+            1,
+            788
+          ]
+        ],
+        "original_path": "crates/farhelm-proto/src/lib.rs",
+        "commit": "f560058da19e02716e6f943883a9508b447aff4e",
+        "notes": "patch header; patch character offsets [0,38706)",
+        "lines": 788,
+        "bytes": 38742,
+        "start": 0,
+        "end": 38706,
+        "original": "[private-run]/prep/originals/01041.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/01527-000.patch",
+        "ranges": [
+          [
+            1,
+            109
+          ]
+        ],
+        "original_path": "crates/farhelm-proto/src/grid.rs",
+        "commit": "08399d092d20815ced6619c26df2391944ae2b4a",
+        "notes": "patch header; patch character offsets [0,6509)",
+        "lines": 109,
+        "bytes": 6509,
+        "start": 0,
+        "end": 6509,
+        "original": "[private-run]/prep/originals/01527.patch"
+      }
+    ],
+    "lines": 1119,
+    "bytes": 58343
+  },
+  "records": [
+    {
+      "key": "g053/c1",
+      "owner": "g053",
+      "id": "c1",
+      "domain": "wire-protocol",
+      "purpose": "wire-protocol: crates/farhelm-proto/src/lib.rs, crates/farhelm-proto/src/grid.rs; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 1,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c1",
+            "state": "open",
+            "summary": "Old pages misdraw grid output after protocol 77 upgrade",
+            "location": "crates/farhelm-proto/src/lib.rs:3844",
+            "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e. TLDR: a page left open across the helm upgrade can draw grid messages as raw terminal output and lose its attachment on typing until reloaded. Source: removal of Attached::stream and Attach::grid in crates/farhelm-proto/src/lib.rs, and StreamKind removal; SPEC_impl.md:3009-3027 explicitly describes this route. Suggested bucket: high/material UX. Confidence: confirmed by source/contract, not executed. proposed_drop: explicit acceptance in SPEC_impl.md, Grid streams: ‘A page loaded from the previous helm and left open across the update must be reloaded; nothing keeps it working.’ and ‘Keeping the stream notice for such pages was considered and not done: a reload is the whole remedy.’ possible_cover: this exact specification acceptance only; no coverage sources searched. Could-be-highest: no established security or user-owned-work loss route; malformed input closes the attachment, and momentary typed input is not user-owned work under Priority buckets. Caveat: source consequences are specified, not observed in execution."
+          }
+        },
+        {
+          "line": 15,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c1",
+            "state": "open",
+            "summary": "Old pages misdraw grid output after protocol 77 upgrade",
+            "location": "crates/farhelm-proto/src/lib.rs:3844",
+            "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e. Original TLDR and consequence preserved: a page left open across the helm upgrade can draw grid messages as raw terminal output and lose its attachment on typing until reloaded. Suggested bucket: high/material UX. Source: removal of Attached::stream, Attach::grid and StreamKind. Synthesis revision: verified the previous page source at f560^: terminal.js:5622-5640 and 5717-5730 treats binary data/replay_complete without a stream notice as bytes; noteStreamKind at 5876-5932 accepts that on its xterm surface, while a directly mounted retained host/grid surface instead raises a stream error. session_view.rs:3817-3853 chooses xterm-first when refreshed listings no longer supply a terminal kind. At f560 the helm forwards binary browser input unchanged through send_grid_input (terminal.rs:760-777), while supervisor grid_stream.rs:1064-1095 requires GridInput JSON. Thus the original wrong-renderer/malformed-input route remains established; retained host kind has the narrower explicit-error variant, not a universal misdraw claim. Confidence: confirmed source and contract, not executed. proposed_drop: exact explicit acceptance in SPEC_impl.md, Grid streams: ‘A page loaded from the previous helm and left open across the update must be reloaded; nothing keeps it working.’ and ‘Keeping the stream notice for such pages was considered and not done: a reload is the whole remedy.’ Still proposed; no independent drop accepted. possible_cover: that exact specification acceptance only; no excluded coverage sources searched. Could-be-highest: no established security or user-owned-work-loss route; malformed raw input closes its attachment, and momentary typed input is not user-owned work under Priority buckets. Caveat: this accepted browser reload applies only to the page-helm boundary; it cannot justify incompatible changes to long-lived terminal-host wire behavior, which c2 checks separately."
+          }
+        },
+        {
+          "line": 18,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "c1",
+            "state": "open",
+            "summary": "Old-page stream fallback can reinterpret a literal paste as grid input",
+            "location": "crates/farhelm-proto/src/grid.rs:1650",
+            "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e. Original consequence preserved: a page left open across the helm upgrade can draw grid messages as raw terminal output and lose its attachment on typing until reloaded. Revision from supplied g196/l1 and direct protocol source checks: some raw text is valid GridInput JSON, so malformed-input detachment is not the only input outcome. A literal small one-line JSON document shaped as Text can be decoded and its data string written to the program; JSON escapes become real control bytes, including Enter, without paste bracketing. This can turn a literal-document paste into command input and could lose user work. Suggested bucket: highest/security or loss of work for this wider input-authority consequence; the earlier no-established-highest assessment was limited to misdrawing and ordinary malformed input and must not suppress this route. Could-be-highest: yes. Source: parent terminal.js:2220-2235 sanitizes literal ESC only; :2650-2675 dispatches text pastes through insert; :4628-4634 calls term.paste; :4651-4666 chooses xterm for unknown kind. Parent term-bytes.js:55-56 does not unescape backslash sequences. The parent vendored xterm.js paste helper prepares text, brackets it only when decPrivateModes.bracketedPasteMode is true, and calls triggerDataEvent once; its default mode object sets bracketedPasteMode false. Parent terminal.js:4157-4159 encodes each sendData call into one binary WebSocket message, with :4191-4196 forwarding onData. New helm terminal.rs:762-773 forwards each binary message unchanged. At the reviewed revision GridInput is serde(tag=t) (grid.rs:1565-1566); Text carries a String (:1610-1612), decode uses serde_json::from_slice (:1650-1655), check_object merely checks the initial object delimiter (:558-565), and Text validation only bounds byte length (:1686-1693), with no ban on decoded control characters. HostAttach::send_input decodes before InputEncoder (grid_stream.rs:1064-1076); InputEncoder::encode Text is data.as_bytes(), distinct from the Paste branch and independent of the real program's bracketed-paste mode (grid_input.rs:175-176). Thus JSON escape interpretation and bypass of paste wrapping are confirmed source properties, not speculation that all old raw input must fail decode. Confidence: confirmed wire/encoder transformation conditional on the shipped legacy surface sending that complete paste; full end-to-end stale-page interlocks remain the interface owner g196's concern, whose latest supplied record establishes deliberate reconnect availability and no terminal build fence. No runtime behavior observed and no payload generated. Exact proposed_drop basis preserved for independent judgment: SPEC_impl.md, Grid streams, says ‘A page loaded from the previous helm and left open across the update must be reloaded; nothing keeps it working.’ and ‘Keeping the stream notice for such pages was considered and not done: a reload is the whole remedy.’ It describes grid misdrawing and malformed-input detachment, not specifically successful reinterpretation of a literal document. Do not accept or reject its scope here; no drop or lowering accepted. possible_cover: supplied g196/l1 is the originating same input-reinterpretation concern, with g082/c2 and g083/c5 corroboration; retain for consolidation, not a new independent discovery. Caveats: requires old page plus fresh unknown-kind xterm surface and valid small JSON paste; ordinary keystrokes generally detach. If that surface has already enabled bracketed paste from received bytes, the added wrapper prevents this exact complete-JSON route. A retained host/grid surface instead raises a stream error as recorded earlier. This acceptance cannot justify incompatible terminal-host wire behavior, which c2 separately refutes. This revises the original c1 rather than erasing its display/detach consequences or its proposed-drop basis."
+          }
+        }
+      ],
+      "latest": {
+        "line": 18,
+        "event": {
+          "version": 1,
+          "kind": "finding",
+          "id": "c1",
+          "state": "open",
+          "summary": "Old-page stream fallback can reinterpret a literal paste as grid input",
+          "location": "crates/farhelm-proto/src/grid.rs:1650",
+          "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e. Original consequence preserved: a page left open across the helm upgrade can draw grid messages as raw terminal output and lose its attachment on typing until reloaded. Revision from supplied g196/l1 and direct protocol source checks: some raw text is valid GridInput JSON, so malformed-input detachment is not the only input outcome. A literal small one-line JSON document shaped as Text can be decoded and its data string written to the program; JSON escapes become real control bytes, including Enter, without paste bracketing. This can turn a literal-document paste into command input and could lose user work. Suggested bucket: highest/security or loss of work for this wider input-authority consequence; the earlier no-established-highest assessment was limited to misdrawing and ordinary malformed input and must not suppress this route. Could-be-highest: yes. Source: parent terminal.js:2220-2235 sanitizes literal ESC only; :2650-2675 dispatches text pastes through insert; :4628-4634 calls term.paste; :4651-4666 chooses xterm for unknown kind. Parent term-bytes.js:55-56 does not unescape backslash sequences. The parent vendored xterm.js paste helper prepares text, brackets it only when decPrivateModes.bracketedPasteMode is true, and calls triggerDataEvent once; its default mode object sets bracketedPasteMode false. Parent terminal.js:4157-4159 encodes each sendData call into one binary WebSocket message, with :4191-4196 forwarding onData. New helm terminal.rs:762-773 forwards each binary message unchanged. At the reviewed revision GridInput is serde(tag=t) (grid.rs:1565-1566); Text carries a String (:1610-1612), decode uses serde_json::from_slice (:1650-1655), check_object merely checks the initial object delimiter (:558-565), and Text validation only bounds byte length (:1686-1693), with no ban on decoded control characters. HostAttach::send_input decodes before InputEncoder (grid_stream.rs:1064-1076); InputEncoder::encode Text is data.as_bytes(), distinct from the Paste branch and independent of the real program's bracketed-paste mode (grid_input.rs:175-176). Thus JSON escape interpretation and bypass of paste wrapping are confirmed source properties, not speculation that all old raw input must fail decode. Confidence: confirmed wire/encoder transformation conditional on the shipped legacy surface sending that complete paste; full end-to-end stale-page interlocks remain the interface owner g196's concern, whose latest supplied record establishes deliberate reconnect availability and no terminal build fence. No runtime behavior observed and no payload generated. Exact proposed_drop basis preserved for independent judgment: SPEC_impl.md, Grid streams, says ‘A page loaded from the previous helm and left open across the update must be reloaded; nothing keeps it working.’ and ‘Keeping the stream notice for such pages was considered and not done: a reload is the whole remedy.’ It describes grid misdrawing and malformed-input detachment, not specifically successful reinterpretation of a literal document. Do not accept or reject its scope here; no drop or lowering accepted. possible_cover: supplied g196/l1 is the originating same input-reinterpretation concern, with g082/c2 and g083/c5 corroboration; retain for consolidation, not a new independent discovery. Caveats: requires old page plus fresh unknown-kind xterm surface and valid small JSON paste; ordinary keystrokes generally detach. If that surface has already enabled bracketed paste from received bytes, the added wrapper prevents this exact complete-JSON route. A retained host/grid surface instead raises a stream error as recorded earlier. This acceptance cannot justify incompatible terminal-host wire behavior, which c2 separately refutes. This revises the original c1 rather than erasing its display/detach consequences or its proposed-drop basis."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g053/findings.jsonl",
+        "id": "c1",
+        "line": 18,
+        "disposition": "under-investigation",
+        "group": "g053-c1",
+        "reason": "Record durably acknowledged; parent source/contract validation, cross-group synthesis, coverage/filter matching and any independent drop check remain pending. This preserves the claim and uncertainty without accepting, dropping or lowering it."
+      },
+      "accepted_parent_decision": null,
+      "returned_claim_checks": [
+        {
+          "batch": "claims-033",
+          "key": "g053/c1",
+          "latest_line": 18,
+          "recommendation": "retain-verified",
+          "bucket": "highest",
+          "underlying_key": "legacy-byte-browser-paste-reinterpreted-as-grid-input",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The source establishes a successful input transformation beyond the originally considered misdraw/detach: a complete small JSON-shaped literal paste can decode as Text and turn escaped controls into program input without paste wrapping. The spec explicitly accepts stale-page misdrawing and malformed-input detachment, but does not clearly accept this successful reinterpretation. Ambiguous coverage means retain.",
+          "checks": [
+            "f560058da19e02716e6f943883a9508b447aff4e^:crates/farhelm-ui/src/session_view.rs:3817-3853 and assets/terminal.js:4651-4666: a listing lacking terminal kind can build a fresh xterm surface. terminal.js:5622-5640,5717-5730,5876-5932 treats no stream notice as bytes; a retained host/grid surface instead fails explicitly.",
+            "Parent terminal.js:2220-2235,2650-2675,4628-4634 routes text paste through sanitizer to term.paste; term-bytes.js:55-56 removes literal ESC, not JSON escapes. Parent vendor/xterm.js paste helper normalizes line ends, conditionally brackets, and emits once; its default bracketedPasteMode is false.",
+            "Parent terminal.js:4157-4159,4191-4196 sends each text callback as one binary message. f560:crates/farhelm-helm/src/terminal.rs:760-777 forwards that message unchanged.",
+            "f560:crates/farhelm-proto/src/grid.rs:1565-1566,1610-1612,1650-1655,1686-1693 decodes JSON Text and bounds length, without excluding decoded control bytes. service/grid_stream.rs:1064-1095 decodes before encoding; grid_input.rs:175-176 writes Text data bytes directly, unlike Paste.",
+            "Parent reconnect.rs:150-165 offers manual reconnect after build mismatch; skew.rs:116-130 gates unattended behavior. Source-only conditional route; no payload or runtime reproduction."
+          ],
+          "coverage_checked": {
+            "SPEC.md": "Searched terminal upgrade, input/paste authority, old page and compatibility. No explicit acceptance of reinterpreting a literal document into control input found.",
+            "SPEC_impl.md": "Grid streams, 2937-2955, explicitly accepts reload-only stale-page behavior, describing misdrawing and attachment termination on malformed input. Successful decoding/control reinterpretation is not named; coverage scope is ambiguous.",
+            "TODO.md Planned": "Empty.",
+            "plans/queue": "No unlanded plans. tmux-end-old-terminals and tmux-drop-from-docs are landed; broad removal plans are not a pending fix.",
+            "BUGS.md": "No matching known bug.",
+            "INDEX.md and queue": "Searched raw/grid input, literal JSON paste, stale/legacy page and reinterpretation. No exact existing item. legacy-page-server-rebinding-source-gap.md was read: it concerns the unrelated local maintainer static server.",
+            "TRIAGE_OUTCOMES.md": "No exact active decision. The legacy-page-server discard at 1558-1569 concerns that unrelated static server, not the product terminal page.",
+            "FILTER.md": "Upgrade plus another rare condition cannot filter a security/trust-boundary effect; ordinary rare-glitch filters also exclude transformed command input and work loss. No filter applied."
+          },
+          "exact_cover_quotes": [
+            "SPEC_impl.md:2950: 'A page loaded from the previous helm and left open across the update must be reloaded; nothing keeps it working.'",
+            "SPEC_impl.md:2953-2955 describes grid messages drawn as terminal output and says 'what is typed into it ends the attachment as malformed input.' 'Keeping the stream notice for such pages was considered and not done: a reload is the whole remedy.' These quotes do not unambiguously cover successful literal-document reinterpretation."
+          ],
+          "missing_premise": "Requires a stale page, fresh unknown-kind xterm surface, a complete valid small JSON paste and no active xterm paste wrapper. The JSON/control transformation is directly established. Caller-supplied g196/l1 owns the complete stale-page interface synthesis; no browser observation is claimed. If xterm already has bracketed paste enabled, its wrapper defeats this exact complete-JSON route.",
+          "original_stronger_consequence": "Original high consequence: stale page misdraws grid output and detaches on ordinary malformed input until reload. Latest revision strengthens to possible command/control input and user-work loss after literal JSON reinterpretation. The earlier no-established-highest assessment is expressly superseded, not evidence to drop the stronger consequence.",
+          "needs_independent_drop_check": true,
+          "proposed_basis": "Retain highest with source-only trigger conditions. Parent should consolidate with caller-supplied g196/l1 (and its g082/c2/g083/c5 corroboration), not create an extra independent report. Any proposal to cover or lower the input-authority consequence needs a fresh independent check of the exact acceptance scope."
+        }
+      ],
+      "parent_proposals": [
+        {
+          "artifact": "parent-flagged-judgments-033.json",
+          "key": "g053/c1",
+          "proposal": "claim-checks/claims-033/result.json",
+          "parent_proposal": "retain-highest-raw-legacy-paste-grid-input-reinterpretation",
+          "final_independent_gate": "required-for-any-original-dropping-or-lowering",
+          "reason": "Parent read full033 bounded. Fresh unknown-kind xterm after old-page reconnect, no notice selects bytes, literal paste sanitizer removes literalESC but not JSON escapes, unbracketed paste emits once as binary whole message, helm forwards unchanged, new GridInput Text decoding writes decoded controls as ordinary input. Successful data-to-control transformation exceeds clearly named malformed detach/misdrawing acceptance; ambiguous cover retains. Preserve small whole valid message, no active paste wrapper, fresh surface/manual reconnect and no payload/runtime-frequency claims. Same196family with032l6/082/083 support requires canonical reconciliation; earlier high-only/no-highest conclusion superseded, not reason to lower."
+        }
+      ],
+      "collection": {
+        "retain": true,
+        "clearly_refuted_candidate": false,
+        "needs_unfinished_gate": true,
+        "provisional_bucket": "highest",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "legacy-byte-browser-paste-reinterpreted-as-grid-input",
+        "destination": "trailing-legacy-byte-browser-paste-reinterpreted-as-grid-input.md"
+      }
+    },
+    {
+      "key": "g053/f1",
+      "owner": "g053",
+      "id": "f1",
+      "domain": "wire-protocol",
+      "purpose": "wire-protocol: crates/farhelm-proto/src/lib.rs, crates/farhelm-proto/src/grid.rs; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 2,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "f1",
+            "state": "open",
+            "summary": "Old terminal contents and running jobs are deliberately retired",
+            "location": "crates/farhelm-proto/src/lib.rs:1129",
+            "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e (and preceding documentation change dbfc69751215dbf15e1d31d5bed73c3754c4ebc4). TLDR: updating ends any remaining old terminals, their live agents and tabs, and their retained screens; the protocol no longer offers the old byte stream or terminal-kind reporting. Source: lib.rs removal of StreamKind, TerminalKind, SessionInfo terminal-kind fields, TabInfo::kind, Attach::grid and Attached::stream. Contract: SPEC.md:3003-3017, Terminal experience, explicitly requires retirement. Suggested bucket: highest/loss of processes and terminal contents. Confidence: confirmed contract and patch implications; not observed during execution. proposed_drop: explicit specification acceptance, exact text: ‘This release ends them: the first time a host’s supervisor of this release starts, it ends that tmux server, and with it everything that still ran in an old terminal, without needing a tmux program.’ It further states: ‘one whose agent had already ended keeps its outcome, but its terminal’s last screen, which lived in the server, is gone; old tabs are closed.’ And: ‘A failure to end the server or to stop what ran there is logged and never stops the supervisor from starting; those sessions are treated as ended all the same, accepting that a Restart could then start a second agent beside one still running.’ possible_cover: exact specification acceptance only; excluded coverage sources not searched. Could-be-highest: yes, established deliberate process and terminal-content loss; independent drop check required. Caveat: this group assesses removal and replacement contracts, not the separate startup retirement implementation. This is a proposed drop for independently checking an accepted consequence, not a claim that the retirement contradicts the spec."
+          }
+        },
+        {
+          "line": 3,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "f1",
+            "state": "open",
+            "summary": "Old terminal contents and running jobs are deliberately retired",
+            "location": "crates/farhelm-proto/src/lib.rs:1129",
+            "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e (and preceding documentation change dbfc69751215dbf15e1d31d5bed73c3754c4ebc4). TLDR: updating ends any remaining old terminals, their live agents and tabs, and their retained screens; the protocol no longer offers the old byte stream or terminal-kind reporting. Source: lib.rs removal of StreamKind, TerminalKind, SessionInfo terminal-kind fields, TabInfo::kind, Attach::grid and Attached::stream. Contract: SPEC.md:3003-3017, Terminal experience, explicitly requires retirement. Suggested bucket: highest/loss of processes and terminal contents. Confidence: confirmed contract and patch implications; not observed during execution. proposed_drop: explicit specification acceptance, exact text: ‘This release ends them: the first time a host's supervisor of this release starts, it ends that tmux server, and with it everything that still ran in an old terminal, without needing a tmux program.' It further states: ‘one whose agent had already ended keeps its outcome, but its terminal's last screen, which lived in the server, is gone; old tabs are closed.' And: ‘A failure to end the server or to stop what ran there is logged and never stops the supervisor from starting; those sessions are treated as ended all the same, accepting that a Restart could then start a second agent beside one still running.' possible_cover: exact specification acceptance only; excluded coverage sources not searched. Could-be-highest: yes, established deliberate process and terminal-content loss; independent drop check required. Caveat: this group assesses removal and replacement contracts, not the separate startup retirement implementation. This is a proposed drop for independently checking an accepted consequence, not a claim that the retirement contradicts the spec."
+          }
+        },
+        {
+          "line": 8,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "f1",
+            "state": "open",
+            "summary": "Old terminal contents and running jobs are deliberately retired",
+            "location": "crates/farhelm-proto/src/lib.rs:1129",
+            "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e; preceding status-documentation change dbfc69751215dbf15e1d31d5bed73c3754c4ebc4. TLDR: updating ends remaining old terminals, their live agents and tabs, and their retained screens; the protocol no longer offers the old byte stream or terminal-kind reporting. Source: f560 lib.rs removes StreamKind, TerminalKind, SessionInfo terminal-kind fields, TabInfo::kind, Attach::grid and Attached::stream. The shipped retirement premise is established at dbfc: service/core.rs:6434 calls OldTerminals::end_private_server, core/old_terminals.rs:176-279 connects to the private socket, checks ownership and identity, invokes terminate_process_within and removes the server files on success; core.rs:7098-7115 converts launching/running/stop-requested tmux rows with no sentinel through Transition::TerminalEnded. The protocol doc change at dbfc lib.rs:863-875 reflects this classification. Contract: f560 SPEC.md:3003-3017, Terminal experience; dbfc SPEC_impl.md:2954-3003, Terminal substrate, explicitly require retirement. Suggested bucket: highest/loss of processes and terminal contents. Confidence: confirmed source and contract analysis; not observed during execution. proposed_drop: explicit specification acceptance. Exact text from f560 SPEC.md: ‘This release ends them: the first time a host's supervisor of this release starts, it ends that tmux server, and with it everything that still ran in an old terminal, without needing a tmux program.’ It further states: ‘one whose agent had already ended keeps its outcome, but its terminal's last screen, which lived in the server, is gone; old tabs are closed.’ And: ‘A failure to end the server or to stop what ran there is logged and never stops the supervisor from starting; those sessions are treated as ended all the same, accepting that a Restart could then start a second agent beside one still running.’ possible_cover: exact specification acceptance only; excluded coverage sources not searched. Could-be-highest: yes, established deliberate process and terminal-content loss; independent drop check required. Caveat: this group assesses protocol removal and its replacement contract, not a full review of the separately assigned retirement implementation. This is a proposed drop for independent checking of an accepted consequence, not a claim that retirement contradicts the specification. Revision: added concrete startup and status-conversion source checks, and preserved exact apostrophes in quoted acceptance text; the original consequence and bucket are unchanged."
+          }
+        },
+        {
+          "line": 16,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "f1",
+            "state": "open",
+            "summary": "Old terminal contents and running jobs are deliberately retired",
+            "location": "crates/farhelm-proto/src/lib.rs:1129",
+            "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e; preceding status-documentation change dbfc69751215dbf15e1d31d5bed73c3754c4ebc4. Original TLDR and consequence preserved: updating ends remaining old terminals, their live agents and tabs, and their retained screens; the protocol no longer offers the old byte stream or terminal-kind reporting. Suggested bucket: highest/loss of processes and terminal contents. Source: f560 lib.rs removes StreamKind, TerminalKind, SessionInfo terminal-kind fields, TabInfo::kind, Attach::grid and Attached::stream. At dbfc, service/core.rs:6434 calls OldTerminals::end_private_server; core/old_terminals.rs:176-279 checks the socket peer and invokes terminate_process_within, removing server files on success; core.rs:7098-7115 converts launching/running/stop-requested tmux rows with no sentinel through Transition::TerminalEnded. dbfc lib.rs:863-875 documents this classification. Contract: f560 SPEC.md:3003-3017, Terminal experience, and dbfc SPEC_impl.md:2954-3003, Terminal substrate. Confidence: confirmed source and contract analysis, not observed in execution. proposed_drop: explicit specification acceptance, requiring independent check; no drop accepted. Exact acceptance text from f560 SPEC.md: ‘This release ends them: the first time a host's supervisor of this release starts, it ends that tmux server, and with it everything that still ran in an old terminal, without needing a tmux program.’ Also: ‘one whose agent had already ended keeps its outcome, but its terminal's last screen, which lived in the server, is gone; old tabs are closed.’ The original caveat remains: ‘A failure to end the server or to stop what ran there is logged and never stops the supervisor from starting; those sessions are treated as ended all the same, accepting that a Restart could then start a second agent beside one still running.’ possible_cover: this exact specification acceptance only. Parent-supplied related claims: g004/f1 concerns generic installer survival assurance during this destructive migration; g033/r1 concerns failure-hidden duplicate agents. Neither is treated here as coverage or a duplicate of deliberate retirement. Could-be-highest: yes, established deliberate process and terminal-content loss; rarity does not lower it. Synthesis revision: preserved the process/content-loss consequence and its highest bucket while separating the three interfaces. The helm-supervisor protocol-77 bump governs removed raw-stream negotiation; accepted old-page reload governs page-helm rendering; neither relaxes terminal-host compatibility. Source comparison shows no changes to crates/terminal-host/src or supervisor hosts/client.rs across the assigned interval, and old server retirement targets tmux rows rather than justifying termination of existing terminal hosts. Caveat: this is the removal's consequence and replacement-contract review, not an independent full review of startup cleanup. The failure-hidden duplicate-agent branch stays in the quoted historical acceptance and belongs to g033/r1 for its separate defect analysis, not a new duplicate claim here. Excluded coverage sources were not searched."
+          }
+        }
+      ],
+      "latest": {
+        "line": 16,
+        "event": {
+          "version": 1,
+          "kind": "finding",
+          "id": "f1",
+          "state": "open",
+          "summary": "Old terminal contents and running jobs are deliberately retired",
+          "location": "crates/farhelm-proto/src/lib.rs:1129",
+          "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e; preceding status-documentation change dbfc69751215dbf15e1d31d5bed73c3754c4ebc4. Original TLDR and consequence preserved: updating ends remaining old terminals, their live agents and tabs, and their retained screens; the protocol no longer offers the old byte stream or terminal-kind reporting. Suggested bucket: highest/loss of processes and terminal contents. Source: f560 lib.rs removes StreamKind, TerminalKind, SessionInfo terminal-kind fields, TabInfo::kind, Attach::grid and Attached::stream. At dbfc, service/core.rs:6434 calls OldTerminals::end_private_server; core/old_terminals.rs:176-279 checks the socket peer and invokes terminate_process_within, removing server files on success; core.rs:7098-7115 converts launching/running/stop-requested tmux rows with no sentinel through Transition::TerminalEnded. dbfc lib.rs:863-875 documents this classification. Contract: f560 SPEC.md:3003-3017, Terminal experience, and dbfc SPEC_impl.md:2954-3003, Terminal substrate. Confidence: confirmed source and contract analysis, not observed in execution. proposed_drop: explicit specification acceptance, requiring independent check; no drop accepted. Exact acceptance text from f560 SPEC.md: ‘This release ends them: the first time a host's supervisor of this release starts, it ends that tmux server, and with it everything that still ran in an old terminal, without needing a tmux program.’ Also: ‘one whose agent had already ended keeps its outcome, but its terminal's last screen, which lived in the server, is gone; old tabs are closed.’ The original caveat remains: ‘A failure to end the server or to stop what ran there is logged and never stops the supervisor from starting; those sessions are treated as ended all the same, accepting that a Restart could then start a second agent beside one still running.’ possible_cover: this exact specification acceptance only. Parent-supplied related claims: g004/f1 concerns generic installer survival assurance during this destructive migration; g033/r1 concerns failure-hidden duplicate agents. Neither is treated here as coverage or a duplicate of deliberate retirement. Could-be-highest: yes, established deliberate process and terminal-content loss; rarity does not lower it. Synthesis revision: preserved the process/content-loss consequence and its highest bucket while separating the three interfaces. The helm-supervisor protocol-77 bump governs removed raw-stream negotiation; accepted old-page reload governs page-helm rendering; neither relaxes terminal-host compatibility. Source comparison shows no changes to crates/terminal-host/src or supervisor hosts/client.rs across the assigned interval, and old server retirement targets tmux rows rather than justifying termination of existing terminal hosts. Caveat: this is the removal's consequence and replacement-contract review, not an independent full review of startup cleanup. The failure-hidden duplicate-agent branch stays in the quoted historical acceptance and belongs to g033/r1 for its separate defect analysis, not a new duplicate claim here. Excluded coverage sources were not searched."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g053/findings.jsonl",
+        "id": "f1",
+        "line": 16,
+        "disposition": "under-investigation",
+        "group": "g053-f1",
+        "reason": "Record durably acknowledged; parent source/contract validation, cross-group synthesis, coverage/filter matching and any independent drop check remain pending. This preserves the claim and uncertainty without accepting, dropping or lowering it."
+      },
+      "accepted_parent_decision": null,
+      "returned_claim_checks": [
+        {
+          "batch": "claims-033",
+          "key": "g053/f1",
+          "latest_line": 16,
+          "recommendation": "covered",
+          "bucket": "highest",
+          "underlying_key": "deliberate-old-tmux-terminal-retirement",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "Ending old processes, tabs and retained screens is an established deliberate consequence, explicitly accepted by both specifications. Keep highest for the work/process/content consequence until an independent drop check agrees to this narrow acceptance. This is distinct from installer survival wording and hidden failure/duplicate-agent claims.",
+          "checks": [
+            "dbfc69751215dbf15e1d31d5bed73c3754c4ebc4:crates/farhelm-supervisor/src/service/core.rs:6426-6439 calls end_private_server under the state claim before reload. service/core/old_terminals.rs:176-279 checks peer ownership/identity, terminates and removes files on success; it logs and continues on failure.",
+            "dbfc:service/core.rs:7098-7115 converts launching/running/stop-requested tmux rows without a sentinel through Transition::TerminalEnded, irrespective of successful server termination.",
+            "f560058da19e02716e6f943883a9508b447aff4e:SPEC.md:3000-3017 explicitly accepts the lost terminals, agents, tabs and last screens, including the failure/second-agent residual. The protocol patch removes byte/terminal-kind negotiation.",
+            "The cited 647f0227^..08399d09 source diff under crates/terminal-host/src and supervisor hosts/client.rs is empty; f560 hosts/terminal.rs removes only reply-side kind helpers. Existing terminal-host compatibility is not relaxed. No retirement was executed."
+          ],
+          "coverage_checked": {
+            "SPEC.md": "Current Terminal experience, 2998-3018, explicitly accepts deliberate retirement and failure/duplicate-agent residual.",
+            "SPEC_impl.md": "Ending the old private tmux server, 2780-2823, requires the same startup termination/conversion and accepted continuation on failure.",
+            "TODO.md Planned": "Empty. The later phase-3 removal in Mid term is not Planned coverage or a remedy for the intended migration consequence.",
+            "plans/queue": "No unlanded plans. tmux-end-old-terminals and followers are landed (REPORTS.md:29-32).",
+            "BUGS.md": "No matching known bug.",
+            "INDEX.md and queue": "Searched old terminal/tmux retirement, lost screens and byte-stream removal; no exact existing item. Distinct restart/history/grid findings do not cover deliberate retirement.",
+            "TRIAGE_OUTCOMES.md": "No exact active decision apart from specification acceptance.",
+            "FILTER.md": "No filter applied: ordinary upgrade alone is not upgrade plus another rare condition, and established work/process loss excludes general filters."
+          },
+          "exact_cover_quotes": [
+            "Current SPEC.md:3000-3004: 'A supervisor that finds that tmux server when it starts ends it, and with it everything that still ran in an old terminal, without needing a tmux program.'",
+            "Current SPEC.md:3003-3004: 'one whose agent had already ended keeps its outcome, but its terminal's last screen, which lived in the server, is gone; old tabs are closed.'",
+            "Current SPEC.md:3008-3011: 'A failure to end the server or to stop what ran there is logged and never stops the supervisor from starting; those sessions are treated as ended all the same, accepting that a Restart could then start a second agent beside one still running.'"
+          ],
+          "missing_premise": "None for intended retirement/process/screen loss. This is not a complete independent review of cleanup implementation, installer assurances (caller-supplied g004/f1), or the failure-hidden duplicate-agent issue (g033/r1).",
+          "original_stronger_consequence": "Updating ends live old agents and tabs and destroys their retained terminal screens. Original highest is preserved across all wording revisions; the failure branch can leave an old agent running while Restart starts another.",
+          "needs_independent_drop_check": true,
+          "proposed_basis": "Drop only the deliberate-retirement consequence as exact specification acceptance after independent agreement. Do not alias it to g004/f1 or g033/r1, and do not excuse incompatible terminal-host wire changes with page reload or protocol 77."
+        }
+      ],
+      "parent_proposals": [
+        {
+          "artifact": "parent-flagged-judgments-033.json",
+          "key": "g053/f1",
+          "proposal": "claim-checks/claims-033/result.json",
+          "parent_proposal": "exact-spec-accepted-deliberate-old-terminal-process-screen-retirement",
+          "final_independent_gate": "required-before-highest-drop",
+          "reason": "Full033 and parent-read actual current old-terminal passages explicitly require startup termination of old agents/tabs and loss of retained screens, while separately accepting logged failure/second-agent residual. Established work/process/content loss remains highest for gate, not denied or filtered as ordinary upgrade. Proposed exact intentional retirement acceptance only;004f1 installer survival assurance and033r1 hidden cleanup failure are distinct. Protocol77/page reload is not permission to break the permanent terminal-host protocol, whose relevant source did not change."
+        }
+      ],
+      "collection": {
+        "retain": true,
+        "clearly_refuted_candidate": false,
+        "needs_unfinished_gate": true,
+        "provisional_bucket": "highest",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "deliberate-old-tmux-terminal-retirement",
+        "destination": "trailing-deliberate-old-tmux-terminal-retirement.md"
+      }
+    },
+    {
+      "key": "g053/c2",
+      "owner": "g053",
+      "id": "c2",
+      "domain": "wire-protocol",
+      "purpose": "wire-protocol: crates/farhelm-proto/src/lib.rs, crates/farhelm-proto/src/grid.rs; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 4,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c2",
+            "state": "open",
+            "summary": "Removed stream fields cannot admit an older supervisor",
+            "location": "crates/farhelm-proto/src/lib.rs:255",
+            "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e. TLDR: considered whether removing stream negotiation lets a new helm draw old raw terminal bytes as grids or send JSON input to an old terminal. Refuted for the helm-supervisor edge: PROTOCOL_VERSION changes from 76 to 77; crates/farhelm-proto/src/io.rs:581-655 requires a Hello and accepts it only when protocol_version == PROTOCOL_VERSION, otherwise returns version skew. SPEC_impl.md:3009-3027, Grid streams, requires this exact rejection. Suggested bucket if reachable: high/material UX. Confidence: confirmed source analysis, not executed. proposed_drop: source-refuted cross-protocol route; lib.rs:255 plus io.rs:628-655. possible_cover: none beyond the governing specification. Could-be-highest: no established security or user-owned-work-loss route; failure mode considered is wrong renderer/input encoding. Caveat: an already loaded old browser is a separate accepted route recorded as c1; the terminal-host protocol is distinct and untouched by this bump."
+          }
+        },
+        {
+          "line": 10,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c2",
+            "state": "open",
+            "summary": "Removed stream fields cannot admit an older supervisor",
+            "location": "crates/farhelm-proto/src/lib.rs:255",
+            "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e. TLDR and original consequence preserved: considered whether removing stream negotiation lets a new helm draw old raw terminal bytes as grids or send JSON input to an old terminal, degrading attachment/input behavior. Suggested bucket if reachable: high/material UX. Refuted only for the helm-supervisor edge: PROTOCOL_VERSION changes from 76 to 77; crates/farhelm-proto/src/io.rs:581-655 requires a Hello and accepts it only when protocol_version == PROTOCOL_VERSION, otherwise returns version skew. SPEC_impl.md:3009-3027 requires this refusal. Synthesis revision: separately read the complete pinned crates/terminal-host/SPEC.md (529 lines), especially Change policy: ‘Every client must keep working with every host version ever shipped, because hosts outlive the programs that start them.’ Its Input and resource-bound contracts retain MAX_INPUT of 64 KiB and raw input/output byte messages, distinct from JSON grid messages. A source diff from 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513^ through 08399d092d20815ced6619c26df2391944ae2b4a shows no changes under crates/terminal-host/src or to supervisor hosts/client.rs. f560 hosts/terminal.rs removes only reply-side wire_kind/tab_info helpers, not host communication. Therefore no incompatible host-wire change is being excused by the helm-supervisor bump. Confidence: confirmed source analysis, not executed. proposed_drop: source-refuted cross-protocol route at lib.rs:255 and io.rs:628-655; still proposed, no independent drop accepted. possible_cover: none beyond governing contracts. Could-be-highest: no established security or user-owned-work-loss route in the originally considered wrong-renderer/input route. Caveat: the old-browser edge remains distinct and recorded as c1; accepted reload is not a compatibility exception for terminal hosts, and this check does not claim a full audit of unchanged host code."
+          }
+        }
+      ],
+      "latest": {
+        "line": 10,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c2",
+          "state": "open",
+          "summary": "Removed stream fields cannot admit an older supervisor",
+          "location": "crates/farhelm-proto/src/lib.rs:255",
+          "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e. TLDR and original consequence preserved: considered whether removing stream negotiation lets a new helm draw old raw terminal bytes as grids or send JSON input to an old terminal, degrading attachment/input behavior. Suggested bucket if reachable: high/material UX. Refuted only for the helm-supervisor edge: PROTOCOL_VERSION changes from 76 to 77; crates/farhelm-proto/src/io.rs:581-655 requires a Hello and accepts it only when protocol_version == PROTOCOL_VERSION, otherwise returns version skew. SPEC_impl.md:3009-3027 requires this refusal. Synthesis revision: separately read the complete pinned crates/terminal-host/SPEC.md (529 lines), especially Change policy: ‘Every client must keep working with every host version ever shipped, because hosts outlive the programs that start them.’ Its Input and resource-bound contracts retain MAX_INPUT of 64 KiB and raw input/output byte messages, distinct from JSON grid messages. A source diff from 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513^ through 08399d092d20815ced6619c26df2391944ae2b4a shows no changes under crates/terminal-host/src or to supervisor hosts/client.rs. f560 hosts/terminal.rs removes only reply-side wire_kind/tab_info helpers, not host communication. Therefore no incompatible host-wire change is being excused by the helm-supervisor bump. Confidence: confirmed source analysis, not executed. proposed_drop: source-refuted cross-protocol route at lib.rs:255 and io.rs:628-655; still proposed, no independent drop accepted. possible_cover: none beyond governing contracts. Could-be-highest: no established security or user-owned-work-loss route in the originally considered wrong-renderer/input route. Caveat: the old-browser edge remains distinct and recorded as c1; accepted reload is not a compatibility exception for terminal hosts, and this check does not claim a full audit of unchanged host code."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g053/findings.jsonl",
+        "id": "c2",
+        "line": 10,
+        "disposition": "under-investigation",
+        "group": "g053-c2",
+        "reason": "Record durably acknowledged; parent source/contract validation, cross-group synthesis, coverage/filter matching and any independent drop check remain pending. This preserves the claim and uncertainty without accepting, dropping or lowering it."
+      },
+      "accepted_parent_decision": null,
+      "returned_claim_checks": [
+        {
+          "batch": "claims-033",
+          "key": "g053/c2",
+          "latest_line": 10,
+          "recommendation": "refuted",
+          "bucket": "other",
+          "underlying_key": "protocol77-admits-pre77-supervisor-stream",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The new helm and an older supervisor cannot pass their hello with different protocol versions. Removed negotiation therefore does not make this cross-peer renderer/input route reachable. This does not settle the distinct stale browser route or terminal-host compatibility.",
+          "checks": [
+            "f560058da19e02716e6f943883a9508b447aff4e:crates/farhelm-proto/src/lib.rs:255 pins 77; io.rs:581-655 requires Hello and returns success only on exact PROTOCOL_VERSION, otherwise version skew.",
+            "The cited 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513^..08399d092d20815ced6619c26df2391944ae2b4a diff under crates/terminal-host/src and supervisor hosts/client.rs has no changes. f560 hosts/terminal.rs only removes reply-side kind helpers.",
+            "Pinned crates/terminal-host/SPEC.md was read in full (529 lines): raw Input/Output and 64 KiB input limit are a separate permanent negotiated protocol. No handshake or stream was exercised."
+          ],
+          "coverage_checked": {
+            "SPEC.md": "Searched upgrade compatibility/version mismatch; requires incompatible peers to refuse, not silently reinterpret streams.",
+            "SPEC_impl.md": "Grid streams, 2937-2950, states protocol 77's bump and hello refusal. This supports the source result; its separate old-page acceptance is not terminal-host or older-supervisor compatibility.",
+            "TODO.md Planned": "Empty.",
+            "plans/queue": "No unlanded plans.",
+            "BUGS.md": "No matching known bug.",
+            "INDEX.md and queue": "Searched removed streams, StreamKind, protocol skew and terminal-kind negotiation. No exact item for older-supervisor admission.",
+            "TRIAGE_OUTCOMES.md": "No exact active decision.",
+            "FILTER.md": "No filter applied; unreachable route is source-refuted."
+          },
+          "exact_cover_quotes": [
+            "SPEC_impl.md:2947-2948: 'a helm and supervisor of different protocols refuse each other at the hello, so a remote host shows Needs update until it is updated.'",
+            "f560:crates/terminal-host/SPEC.md, Change policy: 'Every client must keep working with every host version ever shipped, because hosts outlive the programs that start them.'"
+          ],
+          "missing_premise": "Admission of a mismatched older supervisor is contradicted by handshake source. No full audit of unchanged terminal-host code is claimed.",
+          "original_stronger_consequence": "Originally considered high/material UX: old raw output drawn as grids or JSON input sent to an old terminal. It was explicitly scoped to the helm-supervisor edge; browser-edge reinterpretation in g053/c1 is separate and remains highest.",
+          "needs_independent_drop_check": true,
+          "proposed_basis": "Refute only the mismatched helm-supervisor route. Marked for conservative independent checking because cross-wire input interpretation can implicate work; do not use this refutation to lower g053/c1."
+        }
+      ],
+      "parent_proposals": [
+        {
+          "artifact": "parent-flagged-judgments-033.json",
+          "key": "g053/c2",
+          "proposal": "claim-checks/claims-033/result.json",
+          "parent_proposal": "source-refuted-pre77-native-supervisor-admission",
+          "final_independent_gate": "required-by-conservative-cross-wire-work-flag",
+          "reason": "Full033 proto77 requires exact hello equality, refusing older native supervisor before mixed rendering/input; unchanged terminal-host raw protocol remains a separate permanent compatibility obligation. Narrow peer-edge refutation only, not browser stale page, which remains highest053c1/196. Preserve the original material UX/cross-wire possible-work concern for conservative fresh check; no handshake runtime or whole unchanged module audit claimed."
+        }
+      ],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": true,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "protocol77-admits-pre77-supervisor-stream",
+        "destination": null
+      }
+    },
+    {
+      "key": "g053/c3",
+      "owner": "g053",
+      "id": "c3",
+      "domain": "wire-protocol",
+      "purpose": "wire-protocol: crates/farhelm-proto/src/lib.rs, crates/farhelm-proto/src/grid.rs; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 5,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c3",
+            "state": "open",
+            "summary": "Removing terminal-kind fields preserves cached session decoding",
+            "location": "crates/farhelm-proto/src/lib.rs:7449",
+            "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e. TLDR: considered whether upgrading hides sessions cached from unreachable hosts because stored JSON still contains the removed terminal-kind keys. Refuted by the tolerant SessionInfo and TabInfo serde structs (no deny_unknown_fields), and the changed test at lib.rs:7449-7509 explicitly decoding prior cached agent_terminal, supervisor_creates_host_terminals and tab kind keys to the same session. SPEC_impl.md:3020-3021 states the cache contract: ‘The helm keeps the last listing of each host in helm.db as SessionInfo JSON, whose decode ignores unknown fields, so rows cached before 77 still read.’ Suggested bucket if it occurred: high/material UX (cached listing disappearance, not deletion of host data or processes). Confidence: confirmed source/serde contract; test inspected but not executed. proposed_drop: source refutation, lib.rs:SessionInfo, TabInfo and a_session_cached_with_terminal_kinds_still_decodes. possible_cover: none; no coverage sources searched. Could-be-highest: no, the suspected loss was visibility of cached listings, with sessions and files retained on their hosts. Caveat: test is a direct JSON decode, not an executed full database-upgrade test."
+          }
+        },
+        {
+          "line": 9,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c3",
+            "state": "open",
+            "summary": "Removing terminal-kind fields preserves cached session decoding",
+            "location": "crates/farhelm-proto/src/lib.rs:7449",
+            "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e. TLDR: considered whether upgrading hides sessions cached from unreachable hosts because stored JSON still contains the removed terminal-kind keys. Original consequence preserved: cached listing disappearance, with sessions/files/processes retained on their hosts; suggested bucket high/material UX, not highest. Refuted by the tolerant SessionInfo and TabInfo serde structs (no deny_unknown_fields), and the changed test at lib.rs:7449-7509 explicitly decoding prior cached agent_terminal, supervisor_creates_host_terminals and tab kind keys to the same session. Revision in synthesis: inspected actual cache readers, helm store.rs:9531-9570 and 9614-9689; both cached_sessions and cached_rows/cached_slice deserialize stored info_json directly with serde_json::from_str::<SessionInfo>. The f560 store diff changes only test construction, with no new cache decoder or migration. Removing these keys does not change the id/created_at consistency guards. SPEC_impl.md:3020-3021 states that pre-77 cached JSON must still read. Confidence: confirmed source/serde contract; tests inspected but not executed. proposed_drop: source refutation at SessionInfo, TabInfo, the cached-session test and the actual database cache read paths; still only proposed, no independent drop accepted. possible_cover: none; no excluded coverage sources searched. Could-be-highest: no established data/process/work-loss route; the original suspicion concerns visibility of cached listings. Caveat: this is source validation, not an executed full database upgrade."
+          }
+        }
+      ],
+      "latest": {
+        "line": 9,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c3",
+          "state": "open",
+          "summary": "Removing terminal-kind fields preserves cached session decoding",
+          "location": "crates/farhelm-proto/src/lib.rs:7449",
+          "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e. TLDR: considered whether upgrading hides sessions cached from unreachable hosts because stored JSON still contains the removed terminal-kind keys. Original consequence preserved: cached listing disappearance, with sessions/files/processes retained on their hosts; suggested bucket high/material UX, not highest. Refuted by the tolerant SessionInfo and TabInfo serde structs (no deny_unknown_fields), and the changed test at lib.rs:7449-7509 explicitly decoding prior cached agent_terminal, supervisor_creates_host_terminals and tab kind keys to the same session. Revision in synthesis: inspected actual cache readers, helm store.rs:9531-9570 and 9614-9689; both cached_sessions and cached_rows/cached_slice deserialize stored info_json directly with serde_json::from_str::<SessionInfo>. The f560 store diff changes only test construction, with no new cache decoder or migration. Removing these keys does not change the id/created_at consistency guards. SPEC_impl.md:3020-3021 states that pre-77 cached JSON must still read. Confidence: confirmed source/serde contract; tests inspected but not executed. proposed_drop: source refutation at SessionInfo, TabInfo, the cached-session test and the actual database cache read paths; still only proposed, no independent drop accepted. possible_cover: none; no excluded coverage sources searched. Could-be-highest: no established data/process/work-loss route; the original suspicion concerns visibility of cached listings. Caveat: this is source validation, not an executed full database upgrade."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g053/findings.jsonl",
+        "id": "c3",
+        "line": 9,
+        "disposition": "excluded",
+        "group": "removed-terminal-kind-breaks-cached-session-json",
+        "reason": "Parent explicitly accepted named refuted proposal from claims-033 after inspecting it. Stored session JSON is decoded directly into tolerant SessionInfo/TabInfo structs. Removed terminal-kind keys are ignored, and no new migration or strict decoder was introduced. Source refutes loss of cached listing visibility through these keys. Refute disappearance caused specifically by the removed terminal-kind JSON keys. Do not generalize to every database upgrade or cache failure. Checked source/results: [\"f560058da19e02716e6f943883a9508b447aff4e:crates/farhelm-proto/src/lib.rs:926-929,1680-1694: SessionInfo and TabInfo derive Deserialize without deny_unknown_fields.\",\"f560:lib.rs:7449-7509, a_session_cached_with_terminal_kinds_still_decodes, explicitly inserts the removed agent_terminal/supervisor_creates_host_terminals/tab kind fields and asserts the same SessionInfo. Test inspected, not executed.\",\"f560:crates/farhelm-helm/src/store.rs:9531-9570,9614-9689: cached_sessions and cached_slice use serde_json::from_str::<SessionInfo>; unchanged id/created_at guards do not reject the removed unknown fields.\",\"No database upgrade or runtime test was run. This is source/serde validation, not observed end-to-end cache persistence.\"] Current coverage/results: {\"SPEC.md\":\"Searched unreachable-host cache visibility and upgrade compatibility; no accepted disappearance of cached listings was found.\",\"SPEC_impl.md\":\"Grid streams, 2948-2950, explicitly requires pre-77 SessionInfo JSON to remain readable via unknown-field tolerance.\",\"TODO.md Planned\":\"Empty.\",\"plans/queue\":\"No unlanded plans.\",\"BUGS.md\":\"No matching known bug.\",\"INDEX.md and queue\":\"Searched cached SessionInfo decoding, agent_terminal and terminal-kind removal; no exact existing item.\",\"TRIAGE_OUTCOMES.md\":\"No exact active decision.\",\"FILTER.md\":\"No filter applied; source refutes the unknown-field decode premise.\"} Exact cited cover: [\"SPEC_impl.md:2948-2950: 'The helm keeps the last listing of each host in helm.db as SessionInfo JSON, whose decode ignores unknown fields, so rows cached before 77 still read.'\"] Original stronger consequence and missing premise remain preserved: \"Originally considered high/material UX: cached listings from unreachable hosts disappear. Sessions, files and processes remain on those hosts; no deletion or loss of user-owned work was alleged.\"; \"The proposed rejection of removed unknown keys contradicts the structs and actual readers. A full database upgrade test was not run, and unrelated cache damage is outside this record.\"."
+      },
+      "accepted_parent_decision": {
+        "key": "g053/c3",
+        "line": 9,
+        "disposition": "excluded",
+        "group": "removed-terminal-kind-breaks-cached-session-json",
+        "bucket": "other",
+        "recording": "refuted",
+        "queue_target_candidate": null,
+        "needs_independent_drop_check": false,
+        "reason": "Parent explicitly accepted named refuted proposal from claims-033 after inspecting it. Stored session JSON is decoded directly into tolerant SessionInfo/TabInfo structs. Removed terminal-kind keys are ignored, and no new migration or strict decoder was introduced. Source refutes loss of cached listing visibility through these keys. Refute disappearance caused specifically by the removed terminal-kind JSON keys. Do not generalize to every database upgrade or cache failure. Checked source/results: [\"f560058da19e02716e6f943883a9508b447aff4e:crates/farhelm-proto/src/lib.rs:926-929,1680-1694: SessionInfo and TabInfo derive Deserialize without deny_unknown_fields.\",\"f560:lib.rs:7449-7509, a_session_cached_with_terminal_kinds_still_decodes, explicitly inserts the removed agent_terminal/supervisor_creates_host_terminals/tab kind fields and asserts the same SessionInfo. Test inspected, not executed.\",\"f560:crates/farhelm-helm/src/store.rs:9531-9570,9614-9689: cached_sessions and cached_slice use serde_json::from_str::<SessionInfo>; unchanged id/created_at guards do not reject the removed unknown fields.\",\"No database upgrade or runtime test was run. This is source/serde validation, not observed end-to-end cache persistence.\"] Current coverage/results: {\"SPEC.md\":\"Searched unreachable-host cache visibility and upgrade compatibility; no accepted disappearance of cached listings was found.\",\"SPEC_impl.md\":\"Grid streams, 2948-2950, explicitly requires pre-77 SessionInfo JSON to remain readable via unknown-field tolerance.\",\"TODO.md Planned\":\"Empty.\",\"plans/queue\":\"No unlanded plans.\",\"BUGS.md\":\"No matching known bug.\",\"INDEX.md and queue\":\"Searched cached SessionInfo decoding, agent_terminal and terminal-kind removal; no exact existing item.\",\"TRIAGE_OUTCOMES.md\":\"No exact active decision.\",\"FILTER.md\":\"No filter applied; source refutes the unknown-field decode premise.\"} Exact cited cover: [\"SPEC_impl.md:2948-2950: 'The helm keeps the last listing of each host in helm.db as SessionInfo JSON, whose decode ignores unknown fields, so rows cached before 77 still read.'\"] Original stronger consequence and missing premise remain preserved: \"Originally considered high/material UX: cached listings from unreachable hosts disappear. Sessions, files and processes remain on those hosts; no deletion or loss of user-owned work was alleged.\"; \"The proposed rejection of removed unknown keys contradicts the structs and actual readers. A full database upgrade test was not run, and unrelated cache damage is outside this record.\"."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-033",
+          "key": "g053/c3",
+          "latest_line": 9,
+          "recommendation": "refuted",
+          "bucket": "other",
+          "underlying_key": "removed-terminal-kind-breaks-cached-session-json",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "Stored session JSON is decoded directly into tolerant SessionInfo/TabInfo structs. Removed terminal-kind keys are ignored, and no new migration or strict decoder was introduced. Source refutes loss of cached listing visibility through these keys.",
+          "checks": [
+            "f560058da19e02716e6f943883a9508b447aff4e:crates/farhelm-proto/src/lib.rs:926-929,1680-1694: SessionInfo and TabInfo derive Deserialize without deny_unknown_fields.",
+            "f560:lib.rs:7449-7509, a_session_cached_with_terminal_kinds_still_decodes, explicitly inserts the removed agent_terminal/supervisor_creates_host_terminals/tab kind fields and asserts the same SessionInfo. Test inspected, not executed.",
+            "f560:crates/farhelm-helm/src/store.rs:9531-9570,9614-9689: cached_sessions and cached_slice use serde_json::from_str::<SessionInfo>; unchanged id/created_at guards do not reject the removed unknown fields.",
+            "No database upgrade or runtime test was run. This is source/serde validation, not observed end-to-end cache persistence."
+          ],
+          "coverage_checked": {
+            "SPEC.md": "Searched unreachable-host cache visibility and upgrade compatibility; no accepted disappearance of cached listings was found.",
+            "SPEC_impl.md": "Grid streams, 2948-2950, explicitly requires pre-77 SessionInfo JSON to remain readable via unknown-field tolerance.",
+            "TODO.md Planned": "Empty.",
+            "plans/queue": "No unlanded plans.",
+            "BUGS.md": "No matching known bug.",
+            "INDEX.md and queue": "Searched cached SessionInfo decoding, agent_terminal and terminal-kind removal; no exact existing item.",
+            "TRIAGE_OUTCOMES.md": "No exact active decision.",
+            "FILTER.md": "No filter applied; source refutes the unknown-field decode premise."
+          },
+          "exact_cover_quotes": [
+            "SPEC_impl.md:2948-2950: 'The helm keeps the last listing of each host in helm.db as SessionInfo JSON, whose decode ignores unknown fields, so rows cached before 77 still read.'"
+          ],
+          "missing_premise": "The proposed rejection of removed unknown keys contradicts the structs and actual readers. A full database upgrade test was not run, and unrelated cache damage is outside this record.",
+          "original_stronger_consequence": "Originally considered high/material UX: cached listings from unreachable hosts disappear. Sessions, files and processes remain on those hosts; no deletion or loss of user-owned work was alleged.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Refute disappearance caused specifically by the removed terminal-kind JSON keys. Do not generalize to every database upgrade or cache failure."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "removed-terminal-kind-breaks-cached-session-json",
+        "destination": null
+      }
+    },
+    {
+      "key": "g053/c4",
+      "owner": "g053",
+      "id": "c4",
+      "domain": "wire-protocol",
+      "purpose": "wire-protocol: crates/farhelm-proto/src/lib.rs, crates/farhelm-proto/src/grid.rs; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 6,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c4",
+            "state": "open",
+            "summary": "Host-terminal capability remains true at both reply boundaries",
+            "location": "crates/farhelm-proto/src/lib.rs:1182",
+            "detail": "Reviewed commit: 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513. TLDR: considered whether the updated statement that every supervisor reports true is false because internal SessionInfo constructors still set supervisor_creates_host_terminals to false, suppressing migration guidance. Refuted: crates/farhelm-supervisor/src/service/status.rs:600-614 unconditionally sets true in report_new_terminals, and both listing.rs:205-207 and core.rs:12285-12299 apply it at the listing and single-session reply boundaries. SPEC.md:3013-3038 requires new terminals for all newly started terminals while preserving guidance for old ones. Suggested bucket if reachable: high/material UX due to lost migration warning. Confidence: confirmed source, no execution. proposed_drop: source refutation at those reply boundaries; the field remains additive/default false for older senders. possible_cover: none; no excluded coverage metadata searched. Could-be-highest: no established route from this documentation-only patch to process or data loss; omission of migration warning was the considered consequence. Caveat: complete create/restart implementations are outside this protocol group; this check covers the report field and its outgoing projection."
+          }
+        },
+        {
+          "line": 13,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c4",
+            "state": "open",
+            "summary": "Host-terminal capability remains coordinated across reply and UI removal",
+            "location": "crates/farhelm-proto/src/lib.rs:1182",
+            "detail": "Reviewed commit: 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513; synthesis also checks f560058da19e02716e6f943883a9508b447aff4e. TLDR and original consequence preserved: considered whether internal SessionInfo constructors that initialize supervisor_creates_host_terminals to false contradict the new always-true report, suppressing migration guidance. Suggested bucket if reachable: high/material UX. At 647f, source refutation remains status.rs:600-614 unconditionally setting true, applied by listing.rs:205-207 and core.rs:12285-12299 at both outgoing reply boundaries; SPEC.md:3013-3038 requires migration guidance then. Synthesis revision: f560 removes the report field and projection together, from status.rs and listing.rs, while UI lib.rs removes its mirrored agent_terminal/supervisor_creates_host_terminals fields and migration module, and session_view.rs removes kind-based renderer selection. A targeted grep at f560 finds no remaining old report-field references in helm or UI source. New terminal.js:3387-3428 builds and fits the grid surface before WebSocket creation, so current pages do not wait for a removed capability report or stream notice. Confidence: confirmed source coordination; no execution. proposed_drop: source-refuted inconsistent outgoing capability or current-client dependence; still proposed, no independent drop accepted. possible_cover: none; excluded coverage metadata not searched. Could-be-highest: no established data/process-loss route from this documentation/report-projection candidate; its original suspected consequence is lost migration guidance. Caveat: deliberate retirement at the intervening dbfc commit remains f1, with its highest process/content-loss consequence preserved; an already loaded old page remains c1, not refuted by current-client coordination."
+          }
+        }
+      ],
+      "latest": {
+        "line": 13,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c4",
+          "state": "open",
+          "summary": "Host-terminal capability remains coordinated across reply and UI removal",
+          "location": "crates/farhelm-proto/src/lib.rs:1182",
+          "detail": "Reviewed commit: 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513; synthesis also checks f560058da19e02716e6f943883a9508b447aff4e. TLDR and original consequence preserved: considered whether internal SessionInfo constructors that initialize supervisor_creates_host_terminals to false contradict the new always-true report, suppressing migration guidance. Suggested bucket if reachable: high/material UX. At 647f, source refutation remains status.rs:600-614 unconditionally setting true, applied by listing.rs:205-207 and core.rs:12285-12299 at both outgoing reply boundaries; SPEC.md:3013-3038 requires migration guidance then. Synthesis revision: f560 removes the report field and projection together, from status.rs and listing.rs, while UI lib.rs removes its mirrored agent_terminal/supervisor_creates_host_terminals fields and migration module, and session_view.rs removes kind-based renderer selection. A targeted grep at f560 finds no remaining old report-field references in helm or UI source. New terminal.js:3387-3428 builds and fits the grid surface before WebSocket creation, so current pages do not wait for a removed capability report or stream notice. Confidence: confirmed source coordination; no execution. proposed_drop: source-refuted inconsistent outgoing capability or current-client dependence; still proposed, no independent drop accepted. possible_cover: none; excluded coverage metadata not searched. Could-be-highest: no established data/process-loss route from this documentation/report-projection candidate; its original suspected consequence is lost migration guidance. Caveat: deliberate retirement at the intervening dbfc commit remains f1, with its highest process/content-loss consequence preserved; an already loaded old page remains c1, not refuted by current-client coordination."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g053/findings.jsonl",
+        "id": "c4",
+        "line": 13,
+        "disposition": "excluded",
+        "group": "host-terminal-capability-false-at-outgoing-reply",
+        "reason": "Parent explicitly accepted named refuted proposal from claims-034 after inspecting it. The suspected loss of migration guidance through false internal defaults is source-refuted. Both outgoing reply boundaries replace the internal default, and the later protocol change removes the field and its current-client consumers together. No user-visible degradation is established; the original hypothetical high consequence is preserved below. Source refutation limited to the capability's outgoing projection and the current client's coordinated removal. Do not use it to dismiss retirement or stale-page claims. Checked source/results: [\"647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513:service/status.rs:600-614 sets supervisor_creates_host_terminals=true unconditionally; service/listing.rs:193-213 applies it to every listed row, including held rows; service/core.rs:12285-12299 applies it to single-session replies.\",\"f560058da19e02716e6f943883a9508b447aff4e diff removes report_new_terminals and its listing projection together. git grep finds no field reference in helm/UI/supervisor source at that revision; remaining proto matches are compatibility tests about removed fields.\",\"f560058da19e02716e6f943883a9508b447aff4e:assets/terminal.js:3387-3428 creates, installs and fits the grid before opening the socket. Current pages do not await the removed capability report.\",\"647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513:SPEC.md:3013-3038 describes the then-required migration band. This is separate from intentional retirement and from already-loaded old pages; neither is refuted here. No runtime execution.\"] Current coverage/results: [\"SPEC.md Terminal experience and SPEC_impl.md Grid streams now describe retirement and a single terminal kind; their acceptance is not needed for this source refutation.\",\"TODO.md Planned is empty. Searches of BUGS.md, active TRIAGE_OUTCOMES.md, plans/queue and the full INDEX.md found no exact false-capability/missing-band item.\",\"plans/queue/tmux-end-old-terminals.md names field/band removal, but plans/REPORTS.md:29 records it landed; it is not unlanded coverage. The full FILTER.md supplies no matching boundary.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Lost migration warning, potentially material UX degradation. The record expressly keeps intentional retirement/process-content loss and an old page's compatibility behavior as separate concerns.\"; \"No outgoing reply that preserves the false internal default was established.\"."
+      },
+      "accepted_parent_decision": {
+        "key": "g053/c4",
+        "line": 13,
+        "disposition": "excluded",
+        "group": "host-terminal-capability-false-at-outgoing-reply",
+        "bucket": "other",
+        "recording": "refuted",
+        "queue_target_candidate": null,
+        "needs_independent_drop_check": false,
+        "reason": "Parent explicitly accepted named refuted proposal from claims-034 after inspecting it. The suspected loss of migration guidance through false internal defaults is source-refuted. Both outgoing reply boundaries replace the internal default, and the later protocol change removes the field and its current-client consumers together. No user-visible degradation is established; the original hypothetical high consequence is preserved below. Source refutation limited to the capability's outgoing projection and the current client's coordinated removal. Do not use it to dismiss retirement or stale-page claims. Checked source/results: [\"647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513:service/status.rs:600-614 sets supervisor_creates_host_terminals=true unconditionally; service/listing.rs:193-213 applies it to every listed row, including held rows; service/core.rs:12285-12299 applies it to single-session replies.\",\"f560058da19e02716e6f943883a9508b447aff4e diff removes report_new_terminals and its listing projection together. git grep finds no field reference in helm/UI/supervisor source at that revision; remaining proto matches are compatibility tests about removed fields.\",\"f560058da19e02716e6f943883a9508b447aff4e:assets/terminal.js:3387-3428 creates, installs and fits the grid before opening the socket. Current pages do not await the removed capability report.\",\"647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513:SPEC.md:3013-3038 describes the then-required migration band. This is separate from intentional retirement and from already-loaded old pages; neither is refuted here. No runtime execution.\"] Current coverage/results: [\"SPEC.md Terminal experience and SPEC_impl.md Grid streams now describe retirement and a single terminal kind; their acceptance is not needed for this source refutation.\",\"TODO.md Planned is empty. Searches of BUGS.md, active TRIAGE_OUTCOMES.md, plans/queue and the full INDEX.md found no exact false-capability/missing-band item.\",\"plans/queue/tmux-end-old-terminals.md names field/band removal, but plans/REPORTS.md:29 records it landed; it is not unlanded coverage. The full FILTER.md supplies no matching boundary.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Lost migration warning, potentially material UX degradation. The record expressly keeps intentional retirement/process-content loss and an old page's compatibility behavior as separate concerns.\"; \"No outgoing reply that preserves the false internal default was established.\"."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-034",
+          "key": "g053/c4",
+          "latest_line": 13,
+          "recommendation": "refuted",
+          "bucket": "other",
+          "underlying_key": "host-terminal-capability-false-at-outgoing-reply",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The suspected loss of migration guidance through false internal defaults is source-refuted. Both outgoing reply boundaries replace the internal default, and the later protocol change removes the field and its current-client consumers together. No user-visible degradation is established; the original hypothetical high consequence is preserved below.",
+          "checks": [
+            "647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513:service/status.rs:600-614 sets supervisor_creates_host_terminals=true unconditionally; service/listing.rs:193-213 applies it to every listed row, including held rows; service/core.rs:12285-12299 applies it to single-session replies.",
+            "f560058da19e02716e6f943883a9508b447aff4e diff removes report_new_terminals and its listing projection together. git grep finds no field reference in helm/UI/supervisor source at that revision; remaining proto matches are compatibility tests about removed fields.",
+            "f560058da19e02716e6f943883a9508b447aff4e:assets/terminal.js:3387-3428 creates, installs and fits the grid before opening the socket. Current pages do not await the removed capability report.",
+            "647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513:SPEC.md:3013-3038 describes the then-required migration band. This is separate from intentional retirement and from already-loaded old pages; neither is refuted here. No runtime execution."
+          ],
+          "coverage_checked": [
+            "SPEC.md Terminal experience and SPEC_impl.md Grid streams now describe retirement and a single terminal kind; their acceptance is not needed for this source refutation.",
+            "TODO.md Planned is empty. Searches of BUGS.md, active TRIAGE_OUTCOMES.md, plans/queue and the full INDEX.md found no exact false-capability/missing-band item.",
+            "plans/queue/tmux-end-old-terminals.md names field/band removal, but plans/REPORTS.md:29 records it landed; it is not unlanded coverage. The full FILTER.md supplies no matching boundary."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": "No outgoing reply that preserves the false internal default was established.",
+          "original_stronger_consequence": "Lost migration warning, potentially material UX degradation. The record expressly keeps intentional retirement/process-content loss and an old page's compatibility behavior as separate concerns.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Source refutation limited to the capability's outgoing projection and the current client's coordinated removal. Do not use it to dismiss retirement or stale-page claims."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "host-terminal-capability-false-at-outgoing-reply",
+        "destination": null
+      }
+    },
+    {
+      "key": "g053/c5",
+      "owner": "g053",
+      "id": "c5",
+      "domain": "wire-protocol",
+      "purpose": "wire-protocol: crates/farhelm-proto/src/lib.rs, crates/farhelm-proto/src/grid.rs; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 7,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c5",
+            "state": "open",
+            "summary": "Standalone grid input cap preserves the former bound",
+            "location": "crates/farhelm-proto/src/grid.rs:424",
+            "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e. TLDR: considered whether removing MAX_TERMINAL_DATA_LEN changes grid message admission or makes escaped pastes fail. Refuted: the old lib.rs constant is 64 * 1024 and the new GRID_MAX_INPUT_MESSAGE is exactly 64 * 1024. GridInput::decode and encode (grid.rs:1648-1664) enforce it; helm client.rs:4111-4133 refuses oversize input per attachment; outbound admission still checks GRID_MAX_MESSAGE (client.rs:836-849). grid-input.js:395-488 counts JSON escaping, including six-byte control escapes, and splits text and paste at the encoded-message budget as well as the raw-text budget. Contract: SPEC_impl.md:3029-3040 requires unchanged frame boundaries, 1 MiB output and 64 KiB input. Suggested bucket if the suspected regression existed: high/material UX. Confidence: confirmed source arithmetic and callers, not executed. proposed_drop: source-refuted numerical change and escaped-paste overflow. possible_cover: none. Could-be-highest: no established security/work-loss route in this constant substitution; the contemplated result was refused paste/attachment. Caveat: this is not a full audit of pre-existing grid-input encoding or all queue races, which the patch does not change."
+          }
+        },
+        {
+          "line": 14,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c5",
+            "state": "open",
+            "summary": "Standalone grid input cap preserves limits and framing across both protocols",
+            "location": "crates/farhelm-proto/src/grid.rs:424",
+            "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e. Original TLDR and consequence preserved: considered whether removing MAX_TERMINAL_DATA_LEN changes grid admission or makes escaped pastes fail/refuse the attachment. Suggested bucket if it occurred: high/material UX. Both the removed lib.rs constant and new GRID_MAX_INPUT_MESSAGE equal 64 * 1024. GridInput::decode/encode (grid.rs:1648-1664), helm client.rs:4111-4133 and browser grid-input.js:395-488 retain the input cap and escaping-aware splitting; output admission remains 1 MiB at client.rs:836-849. Synthesis revision: helm attach_with_policy now always allocates GRID_EVENT_QUEUE, registers the channel before sending Attach, and starts grid flow after Attached (client.rs:4004-4077); the supervisor queues Attached through its reserved permit before spawning GridSender (handlers.rs:1888-1937), so catch-up cannot fill an undrainable pre-reply queue. Its HostAttach decodes each received frame exactly once with GridInput::decode (grid_stream.rs:1064-1095). The JSON grid message is not a terminal-host Input frame: hosts/terminal.rs:3273-3300 splits the collected encoded request into raw-byte chunks of terminal_host::protocol::MAX_INPUT, and hosts/client.rs:835-861 independently enforces that unchanged 64 KiB host-wire bound. Neither the removed raw-terminal stream constant nor the helm-supervisor bump changes the long-lived host protocol. Contract: SPEC_impl.md:3029-3040 requires one grid message per data frame, 1 MiB output and 64 KiB input; terminal-host/SPEC.md Input/Resource bounds/Change policy independently require its version-1 raw input bound. Confidence: confirmed source arithmetic, producers and consumers; not executed. proposed_drop: source-refuted cap/framing change and escaped-paste overflow, still proposed; no independent drop accepted. possible_cover: none. Could-be-highest: no established security or user-work-loss route in this substitution; the original suspected refusal/paste failure is preserved. Caveat: no full audit of unchanged input-pump races, terminal-host wire code or arbitrary malicious grid payloads is claimed."
+          }
+        }
+      ],
+      "latest": {
+        "line": 14,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c5",
+          "state": "open",
+          "summary": "Standalone grid input cap preserves limits and framing across both protocols",
+          "location": "crates/farhelm-proto/src/grid.rs:424",
+          "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e. Original TLDR and consequence preserved: considered whether removing MAX_TERMINAL_DATA_LEN changes grid admission or makes escaped pastes fail/refuse the attachment. Suggested bucket if it occurred: high/material UX. Both the removed lib.rs constant and new GRID_MAX_INPUT_MESSAGE equal 64 * 1024. GridInput::decode/encode (grid.rs:1648-1664), helm client.rs:4111-4133 and browser grid-input.js:395-488 retain the input cap and escaping-aware splitting; output admission remains 1 MiB at client.rs:836-849. Synthesis revision: helm attach_with_policy now always allocates GRID_EVENT_QUEUE, registers the channel before sending Attach, and starts grid flow after Attached (client.rs:4004-4077); the supervisor queues Attached through its reserved permit before spawning GridSender (handlers.rs:1888-1937), so catch-up cannot fill an undrainable pre-reply queue. Its HostAttach decodes each received frame exactly once with GridInput::decode (grid_stream.rs:1064-1095). The JSON grid message is not a terminal-host Input frame: hosts/terminal.rs:3273-3300 splits the collected encoded request into raw-byte chunks of terminal_host::protocol::MAX_INPUT, and hosts/client.rs:835-861 independently enforces that unchanged 64 KiB host-wire bound. Neither the removed raw-terminal stream constant nor the helm-supervisor bump changes the long-lived host protocol. Contract: SPEC_impl.md:3029-3040 requires one grid message per data frame, 1 MiB output and 64 KiB input; terminal-host/SPEC.md Input/Resource bounds/Change policy independently require its version-1 raw input bound. Confidence: confirmed source arithmetic, producers and consumers; not executed. proposed_drop: source-refuted cap/framing change and escaped-paste overflow, still proposed; no independent drop accepted. possible_cover: none. Could-be-highest: no established security or user-work-loss route in this substitution; the original suspected refusal/paste failure is preserved. Caveat: no full audit of unchanged input-pump races, terminal-host wire code or arbitrary malicious grid payloads is claimed."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g053/findings.jsonl",
+        "id": "c5",
+        "line": 14,
+        "disposition": "excluded",
+        "group": "grid-input-cap-substitution-changes-message-admission",
+        "reason": "Parent explicitly accepted named refuted proposal from claims-034 after inspecting it. The removed constant and replacement both equal 64 * 1024. The grid producers count escaped JSON size, and the grid/host boundaries enforce their own bounds. The claimed numerical/framing regression is refuted; this does not certify arbitrary input-pump races. Refute only the claimed cap/framing substitution and escaped-paste overflow. Preserve the record's exclusion of unchanged pump races, host-wire correctness generally, and arbitrary hostile payloads. Checked source/results: [\"f560058da19e02716e6f943883a9508b447aff4e^:proto/lib.rs:496 defines MAX_TERMINAL_DATA_LEN as 64 * 1024. f560:proto/grid.rs:424 defines GRID_MAX_INPUT_MESSAGE as the same value; grid.rs:1648-1664 checks it at decode and encode.\",\"f560:assets/grid-input.js:390-488 counts JSON escaping, including six-byte control/lone-surrogate escapes, and splits text/paste on both raw and encoded budgets. client.rs:4111-4133 refuses oversize grid messages per attachment and forwards one accepted message as one frame.\",\"f560:service/grid_stream.rs:1064-1095 decodes each message once, encodes it, and queues the resulting bytes. hosts/terminal.rs:3273-3300 chunks requests at MAX_INPUT; hosts/client.rs:835-861 rejects empty or over-MAX_INPUT host requests. These are distinct JSON-grid and raw-host boundaries.\",\"f560:SPEC_impl.md:3029-3040 retains one message per frame, 1 MiB output and 64 KiB input. No runtime execution or malicious-input audit.\"] Current coverage/results: [\"SPEC.md Terminal experience and SPEC_impl.md Grid streams supply the terminal/forwarding contract; unchanged admission arithmetic refutes the specific claim.\",\"TODO.md Planned is empty. BUGS.md, active TRIAGE_OUTCOMES.md, plans/queue and the full INDEX.md searches found no exact changed-cap/escaped-paste-refusal entry. Indexed paste receipt and oversized-paste tests concern different boundaries, not coverage of this substitution.\",\"The tmux removal plan is recorded landed in plans/REPORTS.md:29. FILTER.md has no whole-boundary match; no filter is needed.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Refused pastes or attachment failure, suggested high/material UX; no established security or user-work-loss route in the original constant-substitution claim.\"; \"No changed numeric bound or escaped-message producer exceeding the unchanged bound was shown.\"."
+      },
+      "accepted_parent_decision": {
+        "key": "g053/c5",
+        "line": 14,
+        "disposition": "excluded",
+        "group": "grid-input-cap-substitution-changes-message-admission",
+        "bucket": "other",
+        "recording": "refuted",
+        "queue_target_candidate": null,
+        "needs_independent_drop_check": false,
+        "reason": "Parent explicitly accepted named refuted proposal from claims-034 after inspecting it. The removed constant and replacement both equal 64 * 1024. The grid producers count escaped JSON size, and the grid/host boundaries enforce their own bounds. The claimed numerical/framing regression is refuted; this does not certify arbitrary input-pump races. Refute only the claimed cap/framing substitution and escaped-paste overflow. Preserve the record's exclusion of unchanged pump races, host-wire correctness generally, and arbitrary hostile payloads. Checked source/results: [\"f560058da19e02716e6f943883a9508b447aff4e^:proto/lib.rs:496 defines MAX_TERMINAL_DATA_LEN as 64 * 1024. f560:proto/grid.rs:424 defines GRID_MAX_INPUT_MESSAGE as the same value; grid.rs:1648-1664 checks it at decode and encode.\",\"f560:assets/grid-input.js:390-488 counts JSON escaping, including six-byte control/lone-surrogate escapes, and splits text/paste on both raw and encoded budgets. client.rs:4111-4133 refuses oversize grid messages per attachment and forwards one accepted message as one frame.\",\"f560:service/grid_stream.rs:1064-1095 decodes each message once, encodes it, and queues the resulting bytes. hosts/terminal.rs:3273-3300 chunks requests at MAX_INPUT; hosts/client.rs:835-861 rejects empty or over-MAX_INPUT host requests. These are distinct JSON-grid and raw-host boundaries.\",\"f560:SPEC_impl.md:3029-3040 retains one message per frame, 1 MiB output and 64 KiB input. No runtime execution or malicious-input audit.\"] Current coverage/results: [\"SPEC.md Terminal experience and SPEC_impl.md Grid streams supply the terminal/forwarding contract; unchanged admission arithmetic refutes the specific claim.\",\"TODO.md Planned is empty. BUGS.md, active TRIAGE_OUTCOMES.md, plans/queue and the full INDEX.md searches found no exact changed-cap/escaped-paste-refusal entry. Indexed paste receipt and oversized-paste tests concern different boundaries, not coverage of this substitution.\",\"The tmux removal plan is recorded landed in plans/REPORTS.md:29. FILTER.md has no whole-boundary match; no filter is needed.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Refused pastes or attachment failure, suggested high/material UX; no established security or user-work-loss route in the original constant-substitution claim.\"; \"No changed numeric bound or escaped-message producer exceeding the unchanged bound was shown.\"."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-034",
+          "key": "g053/c5",
+          "latest_line": 14,
+          "recommendation": "refuted",
+          "bucket": "other",
+          "underlying_key": "grid-input-cap-substitution-changes-message-admission",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The removed constant and replacement both equal 64 * 1024. The grid producers count escaped JSON size, and the grid/host boundaries enforce their own bounds. The claimed numerical/framing regression is refuted; this does not certify arbitrary input-pump races.",
+          "checks": [
+            "f560058da19e02716e6f943883a9508b447aff4e^:proto/lib.rs:496 defines MAX_TERMINAL_DATA_LEN as 64 * 1024. f560:proto/grid.rs:424 defines GRID_MAX_INPUT_MESSAGE as the same value; grid.rs:1648-1664 checks it at decode and encode.",
+            "f560:assets/grid-input.js:390-488 counts JSON escaping, including six-byte control/lone-surrogate escapes, and splits text/paste on both raw and encoded budgets. client.rs:4111-4133 refuses oversize grid messages per attachment and forwards one accepted message as one frame.",
+            "f560:service/grid_stream.rs:1064-1095 decodes each message once, encodes it, and queues the resulting bytes. hosts/terminal.rs:3273-3300 chunks requests at MAX_INPUT; hosts/client.rs:835-861 rejects empty or over-MAX_INPUT host requests. These are distinct JSON-grid and raw-host boundaries.",
+            "f560:SPEC_impl.md:3029-3040 retains one message per frame, 1 MiB output and 64 KiB input. No runtime execution or malicious-input audit."
+          ],
+          "coverage_checked": [
+            "SPEC.md Terminal experience and SPEC_impl.md Grid streams supply the terminal/forwarding contract; unchanged admission arithmetic refutes the specific claim.",
+            "TODO.md Planned is empty. BUGS.md, active TRIAGE_OUTCOMES.md, plans/queue and the full INDEX.md searches found no exact changed-cap/escaped-paste-refusal entry. Indexed paste receipt and oversized-paste tests concern different boundaries, not coverage of this substitution.",
+            "The tmux removal plan is recorded landed in plans/REPORTS.md:29. FILTER.md has no whole-boundary match; no filter is needed."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": "No changed numeric bound or escaped-message producer exceeding the unchanged bound was shown.",
+          "original_stronger_consequence": "Refused pastes or attachment failure, suggested high/material UX; no established security or user-work-loss route in the original constant-substitution claim.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Refute only the claimed cap/framing substitution and escaped-paste overflow. Preserve the record's exclusion of unchanged pump races, host-wire correctness generally, and arbitrary hostile payloads."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "grid-input-cap-substitution-changes-message-admission",
+        "destination": null
+      }
+    },
+    {
+      "key": "g053/l1",
+      "owner": "g053",
+      "id": "l1",
+      "domain": "wire-protocol",
+      "purpose": "wire-protocol: crates/farhelm-proto/src/lib.rs, crates/farhelm-proto/src/grid.rs; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 11,
+          "event": {
+            "version": 1,
+            "kind": "lead",
+            "id": "l1",
+            "state": "open",
+            "summary": "Check whether primary clipboard notices changed at the protocol removal boundary",
+            "location": "crates/farhelm-supervisor/src/hosts/terminal.rs:3309",
+            "detail": "Reviewed commit under investigation: f560058da19e02716e6f943883a9508b447aff4e, with later protocol-documentation clarification 08399d092d20815ced6619c26df2391944ae2b4a. Source: hosts/terminal.rs deliver_notices forwards only Notice::Clipboard with ClipboardTarget::Clipboard, while terminal.js:4294-4335 counts completed onClipboard callbacks for primary too and SPEC_impl.md says primary writes may suppress drag-copy guidance. Suspected consequence, if this were introduced by the assigned changes: guidance may appear after a program handled a primary-selection copy. Suggested bucket: other/diagnostic UX; could-be-highest: no established security or user-work-loss route, since primary is deliberately not copied to the system clipboard. Confidence: unresolved source lead, not executed. Check already made: f560 hosts/terminal.rs diff removes reply-side kind helpers, not this filter. Missing premise: whether this filtering or its relevant guarantee changes at any assigned protocol patch, versus being unchanged adjacent behavior outside this group. Next check: compare this exact block at the assigned revisions/parents and the changed documentation; do not turn unrelated pre-existing behavior into a new claim. proposed_drop: none yet. possible_cover: none; no coverage sources searched."
+          }
+        },
+        {
+          "line": 12,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "l1",
+            "state": "open",
+            "summary": "Primary clipboard filtering is unchanged adjacent behavior",
+            "location": "crates/farhelm-supervisor/src/hosts/terminal.rs:3310",
+            "detail": "Reviewed commits: f560058da19e02716e6f943883a9508b447aff4e and 08399d092d20815ced6619c26df2391944ae2b4a. Original suspected consequence preserved: drag-copy guidance might appear after a program handled a primary-selection copy, if the assigned changes had introduced a delivery or contract regression. Suggested bucket: other/diagnostic UX. Could-be-highest: no established security or user-owned-work-loss route; primary is intentionally not copied to the system clipboard. Synthesis resolution: compared deliver_notices at 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513^:3210-3222 and 08399d092d20815ced6619c26df2391944ae2b4a:3310-3322. Both filter identically for ClipboardTarget::Clipboard. The interval diff contains no change to that block. The assigned 0839 protocol-documentation patch at grid.rs:231-246 keeps the pre-existing rule that primary is not copied and only removes comparisons with old terminals; it adds no primary-notice delivery promise. The exact missing change premise is therefore refuted. Confidence: confirmed source scope determination, not execution; no conclusion asserted about the independent correctness of unchanged primary-drag guidance. proposed_drop: outside this per-commit protocol scope, unchanged adjacent behavior; still proposed, no independent drop accepted. possible_cover: none, excluded coverage sources not searched. Revision: lead closed as candidate after the available parent/recorded-revision comparison; no investigation of unrelated pre-existing implementation defects was undertaken."
+          }
+        }
+      ],
+      "latest": {
+        "line": 12,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "l1",
+          "state": "open",
+          "summary": "Primary clipboard filtering is unchanged adjacent behavior",
+          "location": "crates/farhelm-supervisor/src/hosts/terminal.rs:3310",
+          "detail": "Reviewed commits: f560058da19e02716e6f943883a9508b447aff4e and 08399d092d20815ced6619c26df2391944ae2b4a. Original suspected consequence preserved: drag-copy guidance might appear after a program handled a primary-selection copy, if the assigned changes had introduced a delivery or contract regression. Suggested bucket: other/diagnostic UX. Could-be-highest: no established security or user-owned-work-loss route; primary is intentionally not copied to the system clipboard. Synthesis resolution: compared deliver_notices at 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513^:3210-3222 and 08399d092d20815ced6619c26df2391944ae2b4a:3310-3322. Both filter identically for ClipboardTarget::Clipboard. The interval diff contains no change to that block. The assigned 0839 protocol-documentation patch at grid.rs:231-246 keeps the pre-existing rule that primary is not copied and only removes comparisons with old terminals; it adds no primary-notice delivery promise. The exact missing change premise is therefore refuted. Confidence: confirmed source scope determination, not execution; no conclusion asserted about the independent correctness of unchanged primary-drag guidance. proposed_drop: outside this per-commit protocol scope, unchanged adjacent behavior; still proposed, no independent drop accepted. possible_cover: none, excluded coverage sources not searched. Revision: lead closed as candidate after the available parent/recorded-revision comparison; no investigation of unrelated pre-existing implementation defects was undertaken."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g053/findings.jsonl",
+        "id": "l1",
+        "line": 12,
+        "disposition": "excluded",
+        "group": "primary-selection-notice-filter-misses-drag-copy-suppression",
+        "reason": "Parent explicitly accepted named out-of-range proposal from claims-034 after inspecting it. The proposed per-commit attribution was too narrow, but a check against the actual exclusive base supports the outside-range conclusion. Both primary-notice filtering and the primary-write suppression promise already exist there. This does not refute the underlying pre-existing mismatch. Outside the whole pinned range, established from exclusive-base implementation and contract rather than only assigned-patch ancestry. Preserve the pre-existing discrepancy rather than calling it source-refuted. Checked source/results: [\"6e423e30068b62c6cfa276c6d720ee35bb70387a:hosts/terminal.rs:3207-3222 already forwards only ClipboardTarget::Clipboard; 08399d092d20815ced6619c26df2391944ae2b4a:hosts/terminal.rs:3303-3322 has the same filter. The full-range diff has no deliver_notices/ClipboardTarget/notices.send change.\",\"Exclusive-base SPEC.md:3048-3061 already promises that any completed program clipboard write, including primary selection, suppresses guidance. Exclusive-base SPEC_impl.md:1830-1839 already says the grid counts both onClipboard targets. The potential implementation/contract discrepancy therefore predates the review range, rather than merely predating one cleanup patch.\",\"Current SPEC_impl.md:2067-2069 also explicitly says primary-selection notices are not sent, while :1746-1752 describes counting primary callbacks. No runtime observation, new defect search, or correctness verdict about the older mismatch.\"] Current coverage/results: [\"SPEC.md:3053-3073 and SPEC_impl.md:1746-1755,2067-2071 describe the exact competing contracts; they do not clearly accept the wrong guidance.\",\"TODO.md Planned is empty. BUGS.md, active TRIAGE_OUTCOMES.md and plans/queue searches found no exact primary-notice/guidance item. The tmux plans are recorded landed at plans/REPORTS.md:29,32.\",\"Read matching queue files detached-grid-retains-program-drag-guidance.md and drag-copy-guidance-gap-stays-stale-after-text-size-change.md: their triggers are takeover and metric changes, not a primary write filtered upstream. They are neither duplicates nor exact coverage. FILTER.md rare-diagnostic filtering would require an established rare trigger, which this record does not supply.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Drag-copy guidance may appear after a program handles primary-selection copying. Other/diagnostic UX; primary is intentionally not written to the system clipboard, and no security or user-work-loss route is claimed.\"; \"No introduction or relevant new guarantee within the pinned range was found; both sides exist at the exclusive base.\"."
+      },
+      "accepted_parent_decision": {
+        "key": "g053/l1",
+        "line": 12,
+        "disposition": "excluded",
+        "group": "primary-selection-notice-filter-misses-drag-copy-suppression",
+        "bucket": "other",
+        "recording": "out-of-range",
+        "queue_target_candidate": null,
+        "needs_independent_drop_check": false,
+        "reason": "Parent explicitly accepted named out-of-range proposal from claims-034 after inspecting it. The proposed per-commit attribution was too narrow, but a check against the actual exclusive base supports the outside-range conclusion. Both primary-notice filtering and the primary-write suppression promise already exist there. This does not refute the underlying pre-existing mismatch. Outside the whole pinned range, established from exclusive-base implementation and contract rather than only assigned-patch ancestry. Preserve the pre-existing discrepancy rather than calling it source-refuted. Checked source/results: [\"6e423e30068b62c6cfa276c6d720ee35bb70387a:hosts/terminal.rs:3207-3222 already forwards only ClipboardTarget::Clipboard; 08399d092d20815ced6619c26df2391944ae2b4a:hosts/terminal.rs:3303-3322 has the same filter. The full-range diff has no deliver_notices/ClipboardTarget/notices.send change.\",\"Exclusive-base SPEC.md:3048-3061 already promises that any completed program clipboard write, including primary selection, suppresses guidance. Exclusive-base SPEC_impl.md:1830-1839 already says the grid counts both onClipboard targets. The potential implementation/contract discrepancy therefore predates the review range, rather than merely predating one cleanup patch.\",\"Current SPEC_impl.md:2067-2069 also explicitly says primary-selection notices are not sent, while :1746-1752 describes counting primary callbacks. No runtime observation, new defect search, or correctness verdict about the older mismatch.\"] Current coverage/results: [\"SPEC.md:3053-3073 and SPEC_impl.md:1746-1755,2067-2071 describe the exact competing contracts; they do not clearly accept the wrong guidance.\",\"TODO.md Planned is empty. BUGS.md, active TRIAGE_OUTCOMES.md and plans/queue searches found no exact primary-notice/guidance item. The tmux plans are recorded landed at plans/REPORTS.md:29,32.\",\"Read matching queue files detached-grid-retains-program-drag-guidance.md and drag-copy-guidance-gap-stays-stale-after-text-size-change.md: their triggers are takeover and metric changes, not a primary write filtered upstream. They are neither duplicates nor exact coverage. FILTER.md rare-diagnostic filtering would require an established rare trigger, which this record does not supply.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Drag-copy guidance may appear after a program handles primary-selection copying. Other/diagnostic UX; primary is intentionally not written to the system clipboard, and no security or user-work-loss route is claimed.\"; \"No introduction or relevant new guarantee within the pinned range was found; both sides exist at the exclusive base.\"."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-034",
+          "key": "g053/l1",
+          "latest_line": 12,
+          "recommendation": "out-of-range",
+          "bucket": "other",
+          "underlying_key": "primary-selection-notice-filter-misses-drag-copy-suppression",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The proposed per-commit attribution was too narrow, but a check against the actual exclusive base supports the outside-range conclusion. Both primary-notice filtering and the primary-write suppression promise already exist there. This does not refute the underlying pre-existing mismatch.",
+          "checks": [
+            "6e423e30068b62c6cfa276c6d720ee35bb70387a:hosts/terminal.rs:3207-3222 already forwards only ClipboardTarget::Clipboard; 08399d092d20815ced6619c26df2391944ae2b4a:hosts/terminal.rs:3303-3322 has the same filter. The full-range diff has no deliver_notices/ClipboardTarget/notices.send change.",
+            "Exclusive-base SPEC.md:3048-3061 already promises that any completed program clipboard write, including primary selection, suppresses guidance. Exclusive-base SPEC_impl.md:1830-1839 already says the grid counts both onClipboard targets. The potential implementation/contract discrepancy therefore predates the review range, rather than merely predating one cleanup patch.",
+            "Current SPEC_impl.md:2067-2069 also explicitly says primary-selection notices are not sent, while :1746-1752 describes counting primary callbacks. No runtime observation, new defect search, or correctness verdict about the older mismatch."
+          ],
+          "coverage_checked": [
+            "SPEC.md:3053-3073 and SPEC_impl.md:1746-1755,2067-2071 describe the exact competing contracts; they do not clearly accept the wrong guidance.",
+            "TODO.md Planned is empty. BUGS.md, active TRIAGE_OUTCOMES.md and plans/queue searches found no exact primary-notice/guidance item. The tmux plans are recorded landed at plans/REPORTS.md:29,32.",
+            "Read matching queue files detached-grid-retains-program-drag-guidance.md and drag-copy-guidance-gap-stays-stale-after-text-size-change.md: their triggers are takeover and metric changes, not a primary write filtered upstream. They are neither duplicates nor exact coverage. FILTER.md rare-diagnostic filtering would require an established rare trigger, which this record does not supply."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": "No introduction or relevant new guarantee within the pinned range was found; both sides exist at the exclusive base.",
+          "original_stronger_consequence": "Drag-copy guidance may appear after a program handles primary-selection copying. Other/diagnostic UX; primary is intentionally not written to the system clipboard, and no security or user-work-loss route is claimed.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Outside the whole pinned range, established from exclusive-base implementation and contract rather than only assigned-patch ancestry. Preserve the pre-existing discrepancy rather than calling it source-refuted."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": false,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "primary-selection-notice-filter-misses-drag-copy-suppression",
+        "destination": null
+      }
+    },
+    {
+      "key": "g053/l2",
+      "owner": "g053",
+      "id": "l2",
+      "domain": "wire-protocol",
+      "purpose": "wire-protocol: crates/farhelm-proto/src/lib.rs, crates/farhelm-proto/src/grid.rs; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 17,
+          "event": {
+            "version": 1,
+            "kind": "lead",
+            "id": "l2",
+            "state": "open",
+            "summary": "Old-page literal paste may be reinterpreted as grid input",
+            "location": "crates/farhelm-proto/src/grid.rs:GridInput::Text",
+            "detail": "Reviewed commit to check: f560058da19e02716e6f943883a9508b447aff4e. Incoming interface lead from caller, g196/l1:10: an old page whose refreshed session kind is unknown constructs xterm; its raw paste may itself be valid GridInput::Text JSON and be successfully decoded by protocol 77 as the JSON data field instead of delivered literally. Original possible consequence: unbracketed inner data/Enter may execute rather than paste literal document content, potentially losing user work or crossing the input authority boundary. Suggested bucket: possibly highest pending source premises. Confidence: uninvestigated lead, not executed. Checks so far from prior own source review: old unknown-kind page takes missing stream notice for bytes; new helm forwards binary browser input unchanged; GridInput::decode accepts tagged JSON text. Missing premises for this specific route: exact old-page paste transformations, valid full-message JSON survival, how text encoding differs from paste sanitization/bracketing, and global client interlocks (g196 owns the latter). proposed_drop: none; c1's generic accepted old-page misdraw/malformed-detach basis must not silently cover successful reinterpretation. possible_cover: none; g196 owns originating route investigation. No reproduction or generated payload requested/performed. Next: finish required neighbour read, then validate wire text/provenance from pinned source and coordinate the conclusion in this log under l2."
+          }
+        },
+        {
+          "line": 19,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "l2",
+            "state": "open",
+            "summary": "Incoming input-reinterpretation lead is incorporated into c1",
+            "location": "crates/farhelm-proto/src/grid.rs:1650",
+            "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e. This closes the incoming g196/l1 protocol-interface lead by recording its source corroboration under original c1, now kind finding; it does not drop the concern. Original possible consequence retained: a literal small JSON document pasted through an old raw-byte xterm page can be decoded as GridInput::Text; escaped Enter/control characters become unbracketed program input with possible command execution and loss of work. Could-be-highest: yes; suggested bucket highest, preserved for independent adjudication. Checks/results: parent terminal.js routes sanitized text through term.paste to onData/sendData as one binary WebSocket message; term-bytes.js removes literal ESC only, and the vendored xterm default bracketedPasteMode is false with one triggerDataEvent for a prepared paste. The new helm forwards that message unchanged. grid.rs:1550-1702 shows serde-tagged Text decode, JSON string unescaping and length-only Text validation; grid_input.rs:151-190 writes Text bytes directly and reserves paste wrapping for Paste. These settle the requested exact wire-text/unescaping distinction. Confidence: confirmed conditional wire/encoder route; global stale-page interlocks belong to g196, whose supplied latest record checks deliberate reconnect and absent terminal build fence. No reproduction, generated payload or runtime observation. proposed_drop: no behavioral drop; merge this supporting lead into c1 and supplied g196/l1 for consolidation. c1 preserves the exact old-page reload-acceptance quotes and the unresolved scope of that proposed drop, so no highest concern is erased here. possible_cover: same supplied g196/l1 and own c1, not an independent discovery. Material caveats preserved in c1: old page, fresh unknown-kind surface, valid small one-line Text JSON, and no already-enabled legacy paste wrapper; ordinary keystrokes still generally detach. No independent unresolved protocol premise remains under l2."
+          }
+        }
+      ],
+      "latest": {
+        "line": 19,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "l2",
+          "state": "open",
+          "summary": "Incoming input-reinterpretation lead is incorporated into c1",
+          "location": "crates/farhelm-proto/src/grid.rs:1650",
+          "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e. This closes the incoming g196/l1 protocol-interface lead by recording its source corroboration under original c1, now kind finding; it does not drop the concern. Original possible consequence retained: a literal small JSON document pasted through an old raw-byte xterm page can be decoded as GridInput::Text; escaped Enter/control characters become unbracketed program input with possible command execution and loss of work. Could-be-highest: yes; suggested bucket highest, preserved for independent adjudication. Checks/results: parent terminal.js routes sanitized text through term.paste to onData/sendData as one binary WebSocket message; term-bytes.js removes literal ESC only, and the vendored xterm default bracketedPasteMode is false with one triggerDataEvent for a prepared paste. The new helm forwards that message unchanged. grid.rs:1550-1702 shows serde-tagged Text decode, JSON string unescaping and length-only Text validation; grid_input.rs:151-190 writes Text bytes directly and reserves paste wrapping for Paste. These settle the requested exact wire-text/unescaping distinction. Confidence: confirmed conditional wire/encoder route; global stale-page interlocks belong to g196, whose supplied latest record checks deliberate reconnect and absent terminal build fence. No reproduction, generated payload or runtime observation. proposed_drop: no behavioral drop; merge this supporting lead into c1 and supplied g196/l1 for consolidation. c1 preserves the exact old-page reload-acceptance quotes and the unresolved scope of that proposed drop, so no highest concern is erased here. possible_cover: same supplied g196/l1 and own c1, not an independent discovery. Material caveats preserved in c1: old page, fresh unknown-kind surface, valid small one-line Text JSON, and no already-enabled legacy paste wrapper; ordinary keystrokes still generally detach. No independent unresolved protocol premise remains under l2."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g053/findings.jsonl",
+        "id": "l2",
+        "line": 19,
+        "disposition": "under-investigation",
+        "group": "g053-l2",
+        "reason": "Record durably acknowledged; parent source/contract validation, cross-group synthesis, coverage/filter matching and any independent drop check remain pending. This preserves the claim and uncertainty without accepting, dropping or lowering it."
+      },
+      "accepted_parent_decision": null,
+      "returned_claim_checks": [
+        {
+          "batch": "claims-034",
+          "key": "g053/l2",
+          "latest_line": 19,
+          "recommendation": "needs-parent",
+          "bucket": "highest",
+          "underlying_key": "old-page-raw-json-paste-reinterpreted-as-grid-text",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "Retain this conditional input-authority/work-loss concern. The protocol-side route is corroborated: valid literal JSON can become decoded Text bytes with control characters, bypassing Paste encoding. The record says it was incorporated into g053/c1 and g196/l1; those records are outside this batch, so the parent must verify consolidation rather than silently close this record.",
+          "checks": [
+            "f560058da19e02716e6f943883a9508b447aff4e^:assets/terminal.js:3799-3821 builds xterm for unknown kind; :5884-5930 treats missing stream notice as bytes. :4158-4196 sends onData chunks as one UTF-8 binary WebSocket message; :4626-4634 inserts via term.paste. term-bytes.js:48-59 removes literal ESC/end markers, not JSON backslash escapes.",
+            "The parent revision's vendored xterm.js (minified line 1) defaults bracketedPasteMode=false, applies the wrapper only when enabled, and emits the prepared paste through one triggerDataEvent. The stated no-legacy-wrapper premise matters.",
+            "f560:client.rs:4111-4133 forwards accepted browser bytes unchanged. proto/grid.rs:1550-1702 uses serde-tagged JSON, decodes Text, and validates its length without stripping control characters. grid_input.rs:151-190 returns Text bytes directly while only Paste uses encode_paste; service/grid_stream.rs:1064-1095 queues that one-off input.",
+            "This is source corroboration of a conditional route, not reproduced command execution or observed loss. Global old-page interlocks and the final alias record are not independently verified in this batch. Ordinary non-JSON keystrokes generally detach; the concern needs valid small one-line Text JSON and an old unknown-kind xterm surface."
+          ],
+          "coverage_checked": [
+            "SPEC_impl.md:2938-2955 explicitly accepts old-page misdrawing and malformed-input detach, but successful JSON reinterpretation is a distinct consequence. SPEC.md Terminal experience describes intentional delivery of pasted content, and its security discussion at :4983-4987 distinguishes that from broader authority.",
+            "TODO.md Planned is empty. BUGS.md, active TRIAGE_OUTCOMES.md, plans/queue and the full INDEX.md searches found no exact stale-page raw-JSON reinterpretation item. Read take-control-skips-recovery-terminals.md: it concerns omitted reconnections and expressly establishes no work loss, so it is not coverage.",
+            "The older-release-plus-rare-condition filter expressly excludes a security or trust-boundary consequence. Neither that filter nor generic retry/display acceptance justifies closing this claimed input-authority route. No filter applied."
+          ],
+          "exact_cover_quotes": [
+            "SPEC_impl.md:2950-2955: 'A page loaded from the previous helm and left open across the update must be reloaded; nothing keeps it working.'",
+            "Same paragraph: 'what is typed into it ends the attachment as malformed input' and 'a reload is the whole remedy.' These statements describe malformed refusal, not successful input reinterpretation."
+          ],
+          "missing_premise": "Parent must reconcile the supplied claims that global old-page interlocks permit the route and that g053/c1/g196/l1 retain the full highest concern. Those named external records were not supplied to this batch. No actual executed command or loss is observed.",
+          "original_stronger_consequence": "A literal small JSON document pasted through an old page is decoded as GridInput::Text; escaped Enter/control characters become unbracketed program input, with possible command execution, input-authority violation and loss of user work. Preserve old page, fresh unknown-kind xterm surface, valid small one-line Text JSON, and no already-enabled legacy paste wrapper caveats.",
+          "needs_independent_drop_check": true,
+          "proposed_basis": "Retain highest and consolidate only after checking the destination record preserves this route and every caveat. This is not an independent drop verdict. General old-page reload acceptance does not establish coverage of the stronger consequence.",
+          "new_interface_evidence": "Source corroboration for the originating g196/l1: the old sanitization removes literal ESC only, whereas serde Text decoding restores JSON-escaped control characters and grid_input writes them directly. No new interface search was performed."
+        }
+      ],
+      "parent_proposals": [
+        {
+          "artifact": "parent-flagged-judgments-034.json",
+          "key": "g053/l2",
+          "proposal": "claim-checks/claims-034/result.json",
+          "parent_proposal": "retain-highest-and-reconcile-raw-legacy-paste-canonical",
+          "final_independent_gate": "required-for-any-original-dropping-or-lowering",
+          "reason": "Parent read full034 and complete053c1 in033. Protocol corroboration matches same successful escaped-control Text interpretation, not malformed-input failure. Global old-page interlocks separately checked032l6, original196 owns whole chain; preserve fresh unknown-kind surface, complete small single-message valid JSON, no legacy paste wrapper, source-only/no executed command or observed loss. Exact alias requires canonical196 preserving all these conditions and security boundary; no general reload or upgrade filter acceptance. New interface evidence already part of earlier196 synthesis, compare actual sent-input record before any redundant reopening."
+        }
+      ],
+      "collection": {
+        "retain": true,
+        "clearly_refuted_candidate": false,
+        "needs_unfinished_gate": true,
+        "provisional_bucket": "highest",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "old-page-raw-json-paste-reinterpreted-as-grid-text",
+        "destination": "trailing-old-page-raw-json-paste-reinterpreted-as-grid-text.md"
+      }
+    }
+  ],
+  "replies": [
+    {
+      "turn": 1,
+      "reply": "Initial pass complete: all five patches and 1,119 assigned lines reviewed; no unread scope or open leads.\n\nRecorded f1: deliberate old-terminal process/content loss, explicitly spec-accepted and proposed for independent drop checking. Candidates c1–c5 were recorded and set aside. No contract violation established.\n\nFindings log and progress updated. No tests or reproductions run."
+    },
+    {
+      "turn": 2,
+      "reply": "Revised f1 and c1–c5 with checked caller contracts and separate protocol boundaries. f1 retains its highest process/content-loss consequence; no drop accepted.\n\nRecorded l1, then closed it as unchanged adjacent behavior. No new contract violation found.\n\nUnresolved lead IDs: none."
+    },
+    {
+      "turn": 3,
+      "reply": "Checked paste transformations, WebSocket framing, JSON decoding, Text/Paste encoding, and the assigned schema, bounds, tests and documentation changes.\n\nRevised c1 with source corroboration of g196/l1; closed l2 into c1. No drop accepted.\n\nNew independent findings: none. New verified/unverified IDs: none. Open leads: none. Discovery count: 1. No runtime execution."
+    }
+  ],
+  "progress": "# g053 initial review\n\nState: assigned initial pass complete. Awaiting the caller's later synthesis/discovery prompt.\n\nTurn type/count: initial / 1. Discovery-pass count: 0. New source-confirmed finding IDs: f1 (highest-impact consequence explicitly accepted by the specification, proposed drop requiring independent check). New unverified finding IDs: none. Candidates: c1-c5. Open leads: none. No contract violation established in this pass.\n\nCoverage: read the complete inventory commits field only. All five assigned patches, 1,119 lines, delivered through the required evidence command: 00762:1-64, 00862:1-16, 01040:1-142, 01041:1-788 in bounded packets, 01527:1-109. No assigned patch material remains unread. Read pinned specification context through context-manifest.json packets and inspected source at each relevant recorded revision. Context includes the migration-band report and outgoing projections at 647f; interrupted-status and retirement contracts at dbfc; grid/version/cache/flow-control contracts at f560; clipboard and input contracts at 0839. The context manifest snapshots are additional context, not a claim to have read those entire specification files.\n\nInterface assumptions checked: protocol 77 refuses a different helm/supervisor protocol during Hello before attachments; terminal-host protocol is separate and unchanged here. Old browser pages left open across an upgrade must reload, explicitly accepted. Cached SessionInfo and TabInfo JSON ignore removed terminal-kind keys. Both outgoing SessionInfo reply boundaries report host-terminal capability at 647f. Grid input remains exactly 64 KiB and output 1 MiB; browser builders account for JSON escaping. At 0839 the clipboard selector mapping, write-only clipboard policy, primary-selection handling and one wheel report/arrow per qualifying event match the clarified documentation.\n\nSource checks established the retirement premise for f1: dbfc service/core.rs:6434 calls the old-server shutdown; core/old_terminals.rs:176-279 verifies and terminates it; core.rs:7098-7115 converts still-live old rows to interrupted. This source context supports the removal's consequence; the full retirement implementation belongs to another group and was not reviewed here for independent defects.\n\nExecution: source-only. No runtime tests, builds or reproductions. No checkout edits. Private artifacts only. Some broad context searches were clipped; the relevant contracts and source were reopened in bounded reads. Mandatory patch evidence packets were not clipped.\n\nNext action: return for the caller's later synthesis turn; retain the complete append-only findings log. The caller owns coverage matching, independent drop checking and final rendering. f1's original process/content-loss consequence remains highest pending that check. No separate final report file was created.\n\nSynthesis turn 2 started. Rechecking independent terminal-host compatibility, changed consumer coordination, cache read path and attach sequencing. No open leads at entry. Prior drops remain proposals; f1 retains deliberate process/content loss independently of g004/f1 and g033/r1.\n\nSynthesis turn 2 complete. Discovery-pass count remains 0. No new contract violation or reported finding. Revised original IDs c1-c5 and f1 with consumer checks and boundary distinctions. New lead l1 was recorded immediately, checked against parent and recorded revisions, then closed as a candidate: primary clipboard filtering is unchanged adjacent behavior; no independent defect claim was added. Open leads: none. No new unverified finding IDs. The accepted deliberate retirement in f1 retains its exact process/content-loss consequence and highest bucket; all drops remain proposals pending the caller's independent checks.\n\nThis turn's source checks: complete pinned terminal-host/SPEC.md (529 lines), no source/client-wire changes across the interval; changed helm client attach/gauge paths; supervisor Attached-before-catch-up ordering and GridInput decoder; actual helm database cache readers; current grid-before-WebSocket mount and prior page missing-stream-notice fallback; migration projection and UI removal together; host raw-input chunking at its own unchanged MAX_INPUT. Distinct concerns supplied by parent (g004/f1 installer assurance; g033/r1 failure-hidden duplicate agents) are not claimed as duplicates or cover for deliberate retirement. No excluded coverage metadata read. No runtime tests, builds or reproductions; no checkout edits.\n\nUnread assigned scope: none (parent audited all five sources/1,119 lines). Interface checks do not claim comprehensive review of unchanged consumers. Next action: return synthesis delta and await the caller's next prompt.\n\nDiscovery turn 3 started; discovery-pass count 1. Read discovery-neighbours.json fully in bounded chunks after reopening the clipped initial read. Incoming g196/l1 input-reinterpretation route logged immediately as l2, pending protocol/paste source checks. This turn first synthesizes that input, then searches only assigned protocol patches for novel issues. No drops accepted; no runtime work.\n\nDiscovery turn 3 complete; discovery-pass count 1. Result: no new independent issue found in the assigned group beyond supplied interface findings and prior records. No new verified independent finding IDs. No new unverified-after-investigation finding IDs. Incoming l2 was recorded before investigation, corroborated through pinned paste/wire/decoder source, then closed into original c1. c1 is now a finding retaining potentially highest literal-paste reinterpretation alongside its original misdraw/detach consequence; its exact reload-acceptance proposed-drop basis remains unresolved and no drop/lowering is accepted. Parent-supplied g196/l1 is the originating same route, with g082/c2 and g083/c5 supporting context; this is interface synthesis, not an independent novel discovery.\n\nUseful new source checks: parent paste interception/insert/term.paste callback, ESC-only sanitizer, onData TextEncoder framing, xterm paste helper's single triggerDataEvent and default bracketedPasteMode=false; reviewed GridInput tagged String decode, object-first-byte check and length-only Text validation; reviewed InputEncoder Text bytes versus Paste handling. These establish successful JSON unescaping and absent paste wrapping for that conditional wire route. No payload was generated and no runtime behavior observed. Global stale-page controls remain g196's owned interface; the supplied latest record provides deliberate reconnect/no-build-fence premises.\n\nSeparate discovery scan after that synthesis re-examined the assigned 647f and dbfc documentation patches, f560 protocol/schema removal, changed Attach/Attached golden tests and cached SessionInfo test, grid frame/text/paste/link bounds, and 0839 cursor/clipboard/key/mouse documentation. No additional novel protocol, test-oracle or documentation defect was established. Supplied neighbour findings remain distinct; production correctness was not used to reject their separate documentation/test claims. No prohibited coverage search, checkout edit, runtime test, reproduction or live-install action.\n\nRemaining local lead IDs: none. Unread assigned scope: none; all 1,119 mandatory lines remain audited. Next: return discovery checks/delta and await caller direction. Logs remain the complete record; no separate report file.\n"
+}

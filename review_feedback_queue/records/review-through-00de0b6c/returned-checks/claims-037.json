@@ -1,0 +1,319 @@
+[
+  {
+    "key": "g058/l1",
+    "latest_line": 6,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "podman-literal-image-user-argument-injection",
+    "aliases": ["g059/l1"],
+    "target_queue_file": null,
+    "why": "The implemented consumers preserve argument and shell boundaries. The foundation's absent executor is not the whole-range basis. This refutes the named literal-input injection route, not arbitrary image behavior or semantic cleanup effects.",
+    "checks": [
+      "56659839785691f76da3af5d8f51b511cff4ba8b: proto recipes.rs:726-729,788-798 preserves nonempty NUL-free reference/user; podman/build.rs:137-151 sends the reference to pull_base and helper/run and the user to login.",
+      "Same revision: podman.rs:206-215 puts -- before image-exists input; build.rs:808-832 puts -- before pull/inspect references; podman.rs:430-452 puts -- before run's image. build.rs:65-90 uses getent passwd -- with shell_quote(requested), then retains observed account coordinates.",
+      "Same revision: access.rs:207-230 puts observed account/home in consumed --user/--workdir/--env values; podman_probe.rs:143-157 keeps command argv positional; access.rs:73-80 retains local argv and :343-374 quotes SSH argv; proto text.rs:82-99 always single-quotes and escapes embedded quotes.",
+      "Diff from 56659839785691f76da3af5d8f51b511cff4ba8b to 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db: build.rs unchanged; access/probe only comments; podman.rs only an unrelated lifecycle lock helper. No execution."
+    ],
+    "coverage_checked": {
+      "specifications": "Current SPEC.md:450-488 and SPEC_impl.md:5985-6007,6010-6092 describe literal account/reference inputs and layered quoting; no accepted injection exception.",
+      "planned_and_plans": "TODO.md:25-26 Planned is empty. plans/queue/INDEX.md has no unlanded entries. Recipe/provider plan files found by search do not supply an active exact repair.",
+      "bugs": "BUGS.md has only the local-SSH-output-held-open install hang; unrelated trigger and consequence.",
+      "queue": "INDEX.md searched for literal image/account, Podman, injection and recipe terms; nearby image-inspection and routing entries concern ambient configuration, not argument injection. No exact item.",
+      "triage": "Active TRIAGE_OUTCOMES.md searched for recipe, Podman, image, injection and credential references. The settings-save delivery outcome concerns file replacement, not this route. Archive not read.",
+      "filter": "No filter used; this is source refutation of a security hypothesis, not rarity-based omission."
+    },
+    "exact_cover_quotes": [],
+    "missing_premise": "No injection premise remains in the checked path; an unrelated consumer or external-engine parsing defect is not established by this claim.",
+    "original_stronger_consequence": "Leading-hyphen image/account or shell syntax could execute or alter commands on the container host. The initial foundation-only refutation was reopened and replaced by checking executable consumers; no earlier drop was accepted.",
+    "needs_independent_drop_check": true,
+    "proposed_basis": "Source-refute only literal-input option/shell injection at the named consumers; submit the security drop to the independent check."
+  },
+  {
+    "key": "g058/c2",
+    "latest_line": 16,
+    "recommendation": "retain-verified",
+    "bucket": "highest",
+    "underlying_key": "podman-owned-image-removal-prunes-user-base",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "Cleanup verifies only the explicitly removed owned image, then invokes Podman's default parent-pruning removal. An accepted untagged user base can therefore be removed with its last owned descendant. Sole-copy loss is conditional, but the source route is established. The earlier serialization refutation does not cover this mechanism.",
+    "checks": [
+      "56659839785691f76da3af5d8f51b511cff4ba8b: proto recipes.rs:788-798 accepts a local image ID; podman/build.rs:808-839 reuses an existing base without assigning it a protecting tag. :137-151 creates the helper from it; :208-224 commits and publishes an owned child, retaining the base only as provenance.",
+      "Same revision: tensorlake/recipes.rs:593-615 dispatches provider cleanup before final row deletion. podman/build.rs:781-788 retires current images; :690-743 checks explicit target labels and container users, then sends image rm -- ID without --no-prune. :744-757 confirms only that explicit image's absence.",
+      "Primary engine source checked directly: https://raw.githubusercontent.com/containers/podman/v4.9.3/cmd/podman/images/rm.go:55-70 defaults NoPrune false. Its vendored github.com/containers/common/libimage/image.go:470-518 recursively removes a dangling parent unless NoPrune is set. oci.go:60-94 and layer_tree.go:263-340 recognize committed ancestry using layers and history. These are source semantics, not runtime observations.",
+      "Earlier narrow proposal remains supported: 56659839785691f76da3af5d8f51b511cff4ba8b tensorlake/build.rs:320-367 transactionally reads/modifies/serializes full state; tensorlake/recipes.rs save updates only spec_json and final deletion checks aggregate needs_cleanup. That protects recorded bookkeeping from the alleged cross-provider clobber, not implicitly pruned ancestors.",
+      "Relevant build/state/recipe files are unchanged through 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db. No reproduction, build or test."
+    ],
+    "coverage_checked": {
+      "specifications": "Current SPEC.md:4885-4889 explicitly retains user-owned bases. SPEC_impl.md:6039-6050 requires ownership retention and separation; :6087-6092 requires replacement before retirement and forbids deleting a user's base. At reviewed revision the corresponding prohibition is SPEC_impl.md:6566-6570. These contradict rather than accept the behavior.",
+      "planned_and_plans": "TODO.md Planned is empty; plans/queue/INDEX.md has no unlanded plan. The historical Podman plan's Superseded images paragraph also says user images are never removed; it is not active repair coverage.",
+      "bugs": "BUGS.md's sole SSH install-hang entry does not cover image pruning.",
+      "queue": "INDEX.md searched for user/base images, pruning, retirement, cleanup and recipes. Read snapshot-cleanup-spec-omits-unrecorded-builder-exception.md and snapshot-cleanup-races-new-host-registration.md: both concern Tensorlake-generated snapshots, not untagged user-owned Podman bases. No exact queue item or useful extension of those roots.",
+      "triage": "Active TRIAGE_OUTCOMES.md searched for pruning, Podman, image/base and recipe cleanup; no matching outcome. Archive not read.",
+      "filter": "No filter matches the whole consequence: user-owned sole-copy loss is outside rare diagnostic/retry filters, and no older-release upgrade is needed."
+    },
+    "exact_cover_quotes": [],
+    "missing_premise": "Actual loss needs an untagged local user base recognized as an ancestor, removal of its owned descendants, no other protecting image/container references, and no other retained copy. Tagged or protected bases are not claimed affected. No runtime harm observed.",
+    "original_stronger_consequence": "Initially considered edits/deletes forgetting another provider's ownership and losing control of billed resources or work; narrow cross-place clobber/explicit-target refutations remain proposed only. Reopened c2 now establishes conditional user-base loss through implicit pruning. The history reports g061/l8 as an alias supplied by the parent; that outside-batch record was not independently inspected here.",
+    "needs_independent_drop_check": true,
+    "proposed_basis": "Retain the pruning finding at highest. Any separate dismissal of c2's original ownership-clobber mechanism needs the independent check; its transactional proof must not dismiss the pruning route."
+  },
+  {
+    "key": "g058/c3",
+    "latest_line": 10,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "shared-recipe-move-breaks-existing-schema",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "Existing stored spellings and historical snapshot defaults survive the move, and later writers use the same full-state serializer. Required prepared-image login has no predecessor runtime writer in the checked history. This does not promise old-client support for the new container base or arbitrary fabricated state.",
+    "checks": [
+      "56659839785691f76da3af5d8f51b511cff4ba8b proto recipes.rs:75-92 explicitly retains tensorlake_ubuntu/image/snapshot spellings; :187-289 keeps strict save mirrors and deny_unknown_fields, including ManagedUbuntu {}.",
+      "56040bb964270bb40d191902173dbb84b3ba78fc proto tensorlake/recipes.rs reexports crate::recipes::*; foundation-to-consumer proto recipes.rs diff adds only RecipePlaceView reexport.",
+      "Consumer tensorlake/build.rs:198-204 defaults historical BuiltSnapshot, with RecipeBase default ManagedUbuntu; :320-367 serializes the whole shared state. Podman build.rs:208-224 stores base.clone and :368-375 writes login with prepared facts.",
+      "git grep for PreparedImage { at the foundation and exact pre-consumer parent 52cc5d7250d262f93b730d91a07c240d33c2ea5f returns only its type declaration in helm source. That parent's environment tree has no Podman build/runtime module. Relevant proto/state/Tensorlake files remain unchanged through review tip. No decoding experiment."
+    ],
+    "coverage_checked": {
+      "specifications": "Current SPEC_impl.md:6010-6050 and :6396-6428 require legacy spellings, separate writers, historical defaults and retained ownership; SPEC.md:450-488,550-564 describes recipe retention. No accepted schema-loss exception.",
+      "planned_and_plans": "TODO.md Planned and unlanded plans index are empty; no active schema compatibility repair.",
+      "bugs": "BUGS.md contains no recipe schema exception.",
+      "queue": "INDEX.md searched for recipe schema, migration, defaults and ownership. Read detached-recipe-write-crosses-recreated-generation.md and old-recipe-admission-builds-same-name-replacement.md: they concern name-generation races, not type-move serde compatibility. No exact item.",
+      "triage": "Active TRIAGE_OUTCOMES.md searched for recipe persistence, schema, migration and provenance; no same trigger/consequence. Archive not read.",
+      "filter": "No filter used; source refutation, not an upgrade-plus-rare-condition exception."
+    },
+    "exact_cover_quotes": [],
+    "missing_premise": "No supported prior payload or production writer is shown that the changed serializer invalidates. Downgrade and unknown new-variant compatibility are outside the narrow claim.",
+    "original_stronger_consequence": "Existing recipes or ownership/provenance might become unreadable or lose fields on writes, preventing safe resource cleanup. The later required-login subcase was checked rather than silently omitted.",
+    "needs_independent_drop_check": true,
+    "proposed_basis": "Source-refute compatibility loss from this type move and the checked production writer transition; independent check required for the ownership-loss hypothesis."
+  },
+  {
+    "key": "g058/l2",
+    "latest_line": 15,
+    "recommendation": "retain-verified",
+    "bucket": "high",
+    "underlying_key": "podman-rebuild-retires-fallback-before-success",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "A failed maintenance Rebuild can remove the last usable software/prepared images before replacement succeeds. A continuing base/package/installer outage then prevents new launches of a previously working recipe. This is distinct from implicit user-base pruning.",
+    "checks": [
+      "56659839785691f76da3af5d8f51b511cff4ba8b podman.rs:913-941 is the shipped Rebuild implementation and passes true into prepare_images.",
+      "Same revision podman/build.rs:250-260 takes both image and prepared into retired_images before replacement work. :128-132 would otherwise reuse the software image, but its record has already been removed. :267-286 reconciles helpers, retires images on error, and records failure without restoration.",
+      "Same revision :689-757 removes unused retired images and clears records. :505-531 requires both current source and preparation for freshness; podman.rs:992-1015 starts fresh work when absent. build.rs is unchanged through 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db.",
+      "Boundary preserved: failure before successful replacement software publication discards fallback; failure during preparation after successful software publication need not roll software back. A fix must force actual rebuilding while retaining prior records and preserve active-job joining. No runtime reproduction."
+    ],
+    "coverage_checked": {
+      "specifications": "Current SPEC.md:4885-4889 and SPEC_impl.md:6087-6092 require retiring superseded images after successful replacement; reviewed SPEC_impl.md:6566-6570 says the same. Tensorlake's explicit failure fallback at SPEC.md:550-564 is consistent context, not a Podman exception.",
+      "planned_and_plans": "TODO.md Planned is empty; plans/queue/INDEX.md contains no unlanded plan. Historical Superseded images paragraph requires success before retirement; not active repair coverage.",
+      "bugs": "BUGS.md has no failed-Rebuild fallback exception.",
+      "queue": "Searched INDEX.md for failed Rebuild, fallback, prior images and retirement. Read packages-build-result-retired-under-changed-image-source.md and snapshot-cleanup-races-new-host-registration.md: different Tensorlake source/admission races, not failed explicit Podman Rebuild. No exact item or useful same-root extension.",
+      "triage": "Active TRIAGE_OUTCOMES.md searched for Rebuild, fallback, prior images and recipe cleanup; no exact outcome. Archive not read.",
+      "filter": "No full filter match: explicit Rebuild is ordinary; the missing durable fallback and continued launch failure are not merely a rare diagnostic or next-refresh glitch."
+    },
+    "exact_cover_quotes": [],
+    "missing_premise": "Loss of container files/processes is not established by this fallback mechanism. Its high consequence needs replacement failure and a later launch, and becomes prolonged if the dependency failure continues. Separate user-base loss remains highest under g058/c2.",
+    "original_stronger_consequence": "Previous working software and installation checkpoints are removed after failed Rebuild, forcing rebuilds or blocking launches. The history reports g061/l1 as a parent-supplied alias, not inspected in this batch. Earlier nonforcing-removal rationale does not establish protection from implicit ancestor pruning; that separate route is retained under c2.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Retain high for established recipe availability loss; preserve the separate highest pruning route without using this bucket to lower it."
+  },
+  {
+    "key": "g058/c4",
+    "latest_line": 12,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "shared-recipe-helper-move-bypasses-credential-boundary",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The moved save/view helpers retain credential names only. Their actual create/update consumers still check credential existence and kind inside the immediate write transaction; secret resolution remains separate and transient.",
+    "checks": [
+      "56040bb964270bb40d191902173dbb84b3ba78fc environment/recipes.rs:94-110 separates StoredEndpoint names/URL from non-Serialize/non-Debug ResolvedEndpoint; :137-180 validates the save and projects names/URLs only.",
+      "Same revision tensorlake/recipes.rs:75-122 checks all required credential kinds; create :259-282 and update :307-335 perform these checks in their write transactions. :347-370 resolves actual token/revision/incarnation separately for setup.",
+      "Consumer 56659839785691f76da3af5d8f51b511cff4ba8b retains these shared types and writers; recipe/state files unchanged through review tip. This checks relocation, not all delivery machinery. No execution."
+    ],
+    "coverage_checked": {
+      "specifications": "Current SPEC.md:450-488 requires names-only recipe storage and missing/wrong-kind refusal. SPEC_impl.md:5848-5865 explicitly requires transactional credential metadata checks and transient secret resolution. No accepted bypass/disclosure exception.",
+      "planned_and_plans": "TODO.md Planned and unlanded plans index are empty. Historical endpoint-credential-ownership plan concerns credentials retained in agent configuration, not metadata admission by recipe writes.",
+      "bugs": "BUGS.md's install hang is unrelated.",
+      "queue": "INDEX.md searched for recipe credential admission, secret exposure and references. Its settings-save-races-final-replacement.md concerns delivery overwriting a settings edit, not save/view helpers or credential catalog admission. No exact item.",
+      "triage": "Read active settings-save-races-final-replacement.md ledger entry at TRIAGE_OUTCOMES.md:1756-1785; it plans delivery/spec changes for a different file-write race. Other searched recipe credential terms provide no exact coverage. Archive not read.",
+      "filter": "No filter used; source-refuted security premise."
+    },
+    "exact_cover_quotes": [],
+    "missing_premise": "No actual consumer bypassing transactional credential checks or returning a secret through the moved view is shown.",
+    "original_stronger_consequence": "Wider constructor visibility or shared read shape could bypass credential-reference checks or disclose endpoint secrets. The source proposal closes only that relocation route, not unrelated delivery code.",
+    "needs_independent_drop_check": true,
+    "proposed_basis": "Source-refute the moved-helper credential bypass/disclosure claim; independent security drop check required."
+  },
+  {
+    "key": "g059/l1",
+    "latest_line": 8,
+    "recommendation": "duplicate",
+    "bucket": "other",
+    "underlying_key": "podman-literal-image-user-argument-injection",
+    "aliases": ["g058/l1"],
+    "target_queue_file": null,
+    "why": "Exact same literal image/account injection hypothesis as g058/l1. Both the reference terminators and shell/account lowering were checked directly through the executable consumer revision and later tip. Consolidation does not accept a security drop.",
+    "checks": [
+      "56659839785691f76da3af5d8f51b511cff4ba8b podman.rs:206-215,430-452 and podman/build.rs:808-839 put -- before free image operands; build.rs:65-90 quotes account lookup after getent passwd -- and records observed identity.",
+      "Same revision podman_probe.rs:143-157, access.rs:73-80,207-230,343-374 and proto text.rs:82-99 retain argv and quote each SSH shell layer. Later diff through 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db leaves these behavioral boundaries intact.",
+      "The initial no-executor conclusion at 56040bb964270bb40d191902173dbb84b3ba78fc was superseded by direct checking of the later runtime; it is not used to dismiss the whole range. No execution."
+    ],
+    "coverage_checked": {
+      "specifications": "Current SPEC.md:450-488 and SPEC_impl.md:5985-6007,6010-6092 do not accept injection; they describe literal values and layered command lowering.",
+      "planned_and_plans": "TODO.md Planned and unlanded plans index are empty; no active exact repair.",
+      "bugs": "BUGS.md has no matching argument-injection entry.",
+      "queue": "INDEX.md searched for Podman/reference/user/injection and matching recipe terms; ambient image-inspection and engine-routing items have different causes. Exact in-batch alias is g058/l1; no queue file.",
+      "triage": "Active TRIAGE_OUTCOMES.md searched for matching terms; no same trigger, consequence and scope. Archive not read.",
+      "filter": "No filter used; security source refutation is the proposed basis."
+    },
+    "exact_cover_quotes": [],
+    "missing_premise": "No literal-input injection step remains in the traced consumers. This does not certify arbitrary image contents or unrelated engine behavior.",
+    "original_stronger_consequence": "Leading '-' or shell syntax in saved image/account inputs could alter commands on the container host. All initial and reopened potentially highest wording remains relevant to the independent check.",
+    "needs_independent_drop_check": true,
+    "proposed_basis": "Consolidate with g058/l1 and source-refute only that common route, subject to independent drop agreement."
+  },
+  {
+    "key": "g059/l2",
+    "latest_line": 9,
+    "recommendation": "covered",
+    "bucket": "other",
+    "underlying_key": "recipe-delete-warning-omits-container-artifacts",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The historical warning mismatch is real at the runtime-introducing commit. A later commit in this same review range explicitly adds images and every place to the warning, with unchanged text through review tip. This repairs omitted owned-container-artifact wording only. The record's broader claim that custom bases are protected is invalidated by the separate retained pruning route.",
+    "checks": [
+      "56659839785691f76da3af5d8f51b511cff4ba8b tensorlake/recipes.rs:610 and environment/mod.rs:426-445 dispatch both providers; podman/build.rs:764-799 removes owned images. The same revision's recipe_editor.rs:584-585 names only Tensorlake snapshots.",
+      "350a4b33b6d4476f4a78e43cea124bc2b828f462 recipe_editor.rs:580-585 warns unconditionally about Farhelm's images and snapshots, including builds finishing after opening. :544-554 and :873-883 bind the captured name and rendered confirmation token. recipes.rs:448-460 keys the editor by its captured target.",
+      "git diff from 350a4b33b6d4476f4a78e43cea124bc2b828f462 through 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db is empty for both UI files.",
+      "podman/build.rs:740 lacks --no-prune. Therefore labels, nonforcing removal and omission of user bases from retired_images cannot justify this record's general no-user-base-loss assertion. Keep g058/c2's separate highest route. No runtime observation."
+    ],
+    "coverage_checked": {
+      "specifications": "Current SPEC.md:488 requires recipe Delete confirmation; SPEC_impl.md:1069-1097 binds answers to displayed scope. Neither accepts omitted artifact scope. SPEC.md:4887 and SPEC_impl.md:6089 protect user bases rather than accepting pruning.",
+      "planned_and_plans": "TODO.md Planned and plans/queue/INDEX.md are empty. Exact coverage is the checked later source repair, not a planned task.",
+      "bugs": "BUGS.md contains no warning-scope exception.",
+      "queue": "INDEX.md searched for recipe deletion, confirmation, warning, images and snapshots; no exact queued warning mismatch. Nearby snapshot cleanup items have different causes.",
+      "triage": "Active TRIAGE_OUTCOMES.md searched for recipe-delete warning/consent/artifact terms; no exact outcome. Archive not read.",
+      "filter": "No filter used: a destructive scope mismatch is not dismissed as a rare diagnostic."
+    },
+    "exact_cover_quotes": [
+      "350a4b33b6d4476f4a78e43cea124bc2b828f462:crates/farhelm-ui/src/tensorlake/recipe_editor.rs:584: Delete recipe {shown_name}? Running builds are cancelled and Farhelm's images and snapshots for this recipe are deleted. Images in use must be released first."
+    ],
+    "missing_premise": "No ongoing omitted-owned-images wording gap remains at tip. The repaired text does not authorize deleting a user-owned base; the independent check must not treat the wording repair as coverage for pruning or rely on the latest record's disproved broad protection rationale.",
+    "original_stronger_consequence": "Deletion could destroy resources beyond the user's stated consent, potentially user-owned work. The intermediate confirmed consequence was omitted regenerable container artifacts; later wording repair was proposed, not accepted. Its narrowed consequence assessment and every earlier caveat require independent judgment.",
+    "needs_independent_drop_check": true,
+    "proposed_basis": "Propose repair coverage only for the omitted-container-artifact warning, retaining the historical finding and the separate highest pruning route. Reject any broader no-user-base-loss basis.",
+    "new_interface_evidence": "The already named g058/c2 route directly contradicts l2 line9's claim that nonforcing labelled removal protects custom bases: Podman default removal can prune unlabelled unnamed ancestors. This is existing named evidence, not a new defect search."
+  },
+  {
+    "key": "g059/c3",
+    "latest_line": 10,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "recipe-delete-disconnect-loses-shared-admission",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The checked HTTP disconnect cannot drop deletion work or its shared admission: server-owned work retains the guard across both provider cleanups and final deletion. This narrow conclusion does not certify provider image semantics or erase existing same-name/detached-write races.",
+    "checks": [
+      "56659839785691f76da3af5d8f51b511cff4ba8b tensorlake/recipes.rs:584-615 owns deletion through run_owned and retains begin_delete guard through provider cleanup and store deletion; lib.rs:2721-2728 spawns the work independently of the waiter.",
+      "Same revision lib.rs:2465-2472 passes the same build registry to both providers; tensorlake/build.rs:1769-1779 records shared deletion admission; :679-763 rejects Podman job/use admission during deletion and requires the matching cleanup guard; :930-933 and :1958-1971 reject Tensorlake work/source admission.",
+      "Same revision clean_tensorlake :1784-1870 awaits cancelled jobs and preserves failed resource state; podman/build.rs:764-799 waits/cancels work and removes place state only after needs_cleanup is false. tensorlake/recipes.rs:393-430 checks host use and aggregate cleanup in its final immediate transaction.",
+      "Those route/build/state files remain unchanged through review tip; environment/mod.rs's later change adds only a test setter. No execution."
+    ],
+    "coverage_checked": {
+      "specifications": "Current SPEC_impl.md:22-58 owns accepted actions across disconnects; :6039-6050 requires shared admission, awaited cleanup and retained ownership. SPEC.md:462,550-580 states recipe use/cleanup constraints. No disconnect-lifetime exception.",
+      "planned_and_plans": "TODO.md Planned and plans/queue/INDEX.md are empty; no unlanded repair.",
+      "bugs": "BUGS.md has no recipe deletion/disconnect coverage.",
+      "queue": "Read old-recipe-admission-builds-same-name-replacement.md, detached-recipe-write-crosses-recreated-generation.md and snapshot-cleanup-races-new-host-registration.md after INDEX search. Those are distinct admitted-request/row-generation/registration races; the narrow disconnect-lifetime proposal does not refute or cover them.",
+      "triage": "Active TRIAGE_OUTCOMES.md searched for recipe deletion, disconnect and ownership; no exact outcome. Archive not read.",
+      "filter": "No filter used; potentially destructive admission hypothesis requires source/independent checking."
+    },
+    "exact_cover_quotes": [],
+    "missing_premise": "No checked path makes a browser disconnect release deletion admission early. Internal intentional cancellation, detached writes, row reincarnation and implicit image pruning are separate mechanisms and remain outside this refutation.",
+    "original_stronger_consequence": "Cross-provider deletion could forget resource ownership or lose exclusion when the browser disconnects, permitting destructive build/cleanup races or ownership loss. Neither the warning repair nor this narrow admission proof certifies all provider cleanup commands.",
+    "needs_independent_drop_check": true,
+    "proposed_basis": "Source-refute only loss of the checked server-owned deletion admission/lifetime on disconnect; send that destructive hypothesis to independent drop review."
+  },
+  {
+    "key": "g059/c4",
+    "latest_line": 12,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "prepared-image-login-no-predecessor-writer",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The exact predecessor defines the foundation shape but has no production PreparedImage constructor or Podman runtime/build implementation. Updating the fixtures therefore does not conceal a shown production upgrade case. This is a narrow predecessor-writer conclusion, not a general staged-API compatibility rule.",
+    "checks": [
+      "git rev-parse confirms 56659839785691f76da3af5d8f51b511cff4ba8b's parent is 52cc5d7250d262f93b730d91a07c240d33c2ea5f.",
+      "git grep 'PreparedImage {' in that exact parent's helm source returns only environment/recipes.rs:86. Its environment tree contains lifecycle/mod/podman_probe/recipes/recipes_tests, no Podman runtime/build module. Foundation 56040bb964270bb40d191902173dbb84b3ba78fc likewise has only the declaration.",
+      "Consumer environment/recipes.rs:94-100 adds required login, and podman/build.rs:368-375 creates actual prepared records with observed user login. No fabricated-state or downgrade assertion; no decoding experiment."
+    ],
+    "coverage_checked": {
+      "specifications": "Current SPEC.md:5360-5404 makes compatibility feature-specific and does not give blanket permission for destructive migrations. Recipe behavior at :450-488 and SPEC_impl.md:6010-6050,6058-6092 requires retained artifacts and observed login. No exact accepted login-record break is stated; the necessary predecessor writer is absent here.",
+      "planned_and_plans": "TODO.md Planned and unlanded plans index are empty; no active prepared-login migration task.",
+      "bugs": "BUGS.md has no prepared-state decode exception.",
+      "queue": "INDEX.md searched for prepared-image login, recipe decode/schema and upgrade compatibility. No exact item. g058/c3 shares this subcheck but its broader serde/type-move hypothesis is not treated as an exact same-root alias.",
+      "triage": "Active TRIAGE_OUTCOMES.md searched for prepared/login state, migration and recipe decoding; no exact outcome. Archive not read.",
+      "filter": "No upgrade filter applied: ordinary upgrade decode failure would not need an extra rare condition and could break existing state. Basis is absent predecessor writer."
+    },
+    "exact_cover_quotes": [],
+    "missing_premise": "No shipped predecessor writer creating a login-less prepared record is shown. Externally fabricated or downgrade-created state is not claimed supported by this check.",
+    "original_stronger_consequence": "A required-login fixture change could hide inability to read persisted older Podman preparations. Although the owner found no established highest route, unreadable ownership records could implicate cleanup and user work; the proposed dismissal is marked conservatively for independent checking.",
+    "needs_independent_drop_check": true,
+    "proposed_basis": "Source-refute the exact prior-production-record premise, with the stated compatibility limits preserved."
+  },
+  {
+    "key": "g060/c1",
+    "latest_line": 1,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "container-only-recipe-retains-tensorlake-build-action",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The shared list removes the Tensorlake action for unsupported bases, and the build button exists only when that action is present. Retained snapshot-oriented status text is not evidence of a billed build route.",
+    "checks": [
+      "350a4b33b6d4476f4a78e43cea124bc2b828f462 ui tensorlake/recipes.rs:231-235 sets action=None when the base does not support Tensorlake; :509-522 renders the build button only for Some(action).",
+      "The UI file has no subsequent changes through 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db. Proto recipes.rs:99-110 exhaustively marks ContainerImage unsupported for Tensorlake. No runtime observation."
+    ],
+    "coverage_checked": {
+      "specifications": "Current SPEC.md:450-458 requires unsupported recipes visible but disabled with a reason. SPEC_impl.md:6010-6016 makes base/provider support exhaustive; :6052-6055 requires shared provider UI. No accepted billed wrong-provider route.",
+      "planned_and_plans": "TODO.md Planned and plans/queue/INDEX.md are empty; no active exact repair.",
+      "bugs": "BUGS.md's SSH install hang is unrelated.",
+      "queue": "INDEX.md searched for container-only recipes, Tensorlake build action, unsupported recipe and billing; existing recipe/snapshot entries concern different mechanisms. No exact item.",
+      "triage": "Active TRIAGE_OUTCOMES.md searched for unsupported recipe/build-action/wrong-provider terms; no exact outcome. Archive not read.",
+      "filter": "No filter applied; ordinary UI route is source-refuted."
+    },
+    "exact_cover_quotes": [],
+    "missing_premise": "No shipped list control retaining a Tensorlake build action for ContainerImage is shown. Possible confusing status terminology is not an established billed execution consequence.",
+    "original_stronger_consequence": "A container-only recipe might start a billed Tensorlake build; if established the owner suggested high for confusing/refused unsupported action, with no security or work-loss route.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Source-refute the named action/billing route; do not broaden the verdict into a typography/status review."
+  },
+  {
+    "key": "g060/c2",
+    "latest_line": 2,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "recipe-delete-refresh-retargets-captured-editor",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "Refresh does not select the deletion target: editing holds the clicked recipe, the editor is keyed by its name, and both the shown name and submitted name derive from that captured prop. Rendered confirmation tokens prevent an answer from consuming another opening.",
+    "checks": [
+      "350a4b33b6d4476f4a78e43cea124bc2b828f462 tensorlake/recipes.rs:529-532 captures the clicked RecipeView; :448-460 keys RecipeEditor by edit-name and passes that stored view.",
+      "Same revision recipe_editor.rs:544-554 derives delete_name from existing, checks delete_prompt.take(shown), and constructs the request with that name. :576-585 derives shown_name from the same existing prop and warns across places unconditionally; :873-883 captures the rendered token for answers.",
+      "Both UI files are unchanged through 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db. The check concerns UI target/token binding, not provider destruction semantics or same-name server reincarnation. No execution."
+    ],
+    "coverage_checked": {
+      "specifications": "Current SPEC.md:488 requires recipe Delete confirmation; SPEC_impl.md:1069-1097 binds answers to drawn targets and opening tokens. No accepted refresh-retargeting exception.",
+      "planned_and_plans": "TODO.md Planned and unlanded plans index are empty; no active exact repair.",
+      "bugs": "BUGS.md contains no UI deletion-target exception.",
+      "queue": "INDEX.md searched for recipe deletion/target/refresh/confirmation. Read recipe-leave-save-live-draft-mismatch-unresolved.md: it concerns draft Save payload, not fixed delete target. old-recipe-admission-builds-same-name-replacement.md concerns backend incarnation, not a refresh changing the editor target. No exact alias/item.",
+      "triage": "Active TRIAGE_OUTCOMES.md searched for recipe deletion, refreshed target and confirmation; no exact outcome. Archive not read.",
+      "filter": "No filter used; wrong-target destruction is outside rare-glitch filters."
+    },
+    "exact_cover_quotes": [],
+    "missing_premise": "No refresh path changes the captured editing recipe while retaining the answer's target authority. The server's handling of later same-name recreations and provider cleanup are separate questions.",
+    "original_stronger_consequence": "A refreshed list could redirect destructive confirmation to another recipe and delete its user-owned artifacts. The source refutation is limited to that captured-editor/confirmation-binding route.",
+    "needs_independent_drop_check": true,
+    "proposed_basis": "Source-refute refresh-driven UI retargeting, subject to independent checking of the potentially highest wrong-target destruction claim."
+  }
+]

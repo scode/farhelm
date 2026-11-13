@@ -1,0 +1,666 @@
+{
+  "group": {
+    "id": "g137",
+    "domain": "rust-session-agent-regressions",
+    "purpose": "rust-session-agent-regressions: crates/farhelm/tests/e2e/containerized_sessions.rs, crates/farhelm/tests/e2e/launch_sentinel_error_status.rs, crates/farhelm/tests/e2e/boot_id_durable_outcome.rs, crates/farhelm/tests/e2e/codex_identity.rs; phases complete small per-commit changes",
+    "interfaces": [
+      "g005",
+      "g006",
+      "g138",
+      "g139",
+      "g142",
+      "g143",
+      "g144",
+      "g145",
+      "g146"
+    ],
+    "sources": [
+      {
+        "path": "[private-run]/prep/parts/00322-000.patch",
+        "ranges": [
+          [
+            1,
+            1465
+          ]
+        ],
+        "original_path": "crates/farhelm/tests/e2e/containerized_sessions.rs",
+        "commit": "04d85f0c98a9b635709d00b056719a0baa7fd3fc",
+        "notes": "patch header; patch character offsets [0,57974)",
+        "lines": 1465,
+        "bytes": 57974,
+        "start": 0,
+        "end": 57974,
+        "original": "[private-run]/prep/originals/00322.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/00323-000.patch",
+        "ranges": [
+          [
+            1,
+            59
+          ]
+        ],
+        "original_path": "crates/farhelm/tests/e2e/launch_sentinel_error_status.rs",
+        "commit": "04d85f0c98a9b635709d00b056719a0baa7fd3fc",
+        "notes": "patch header; patch character offsets [0,3235)",
+        "lines": 59,
+        "bytes": 3235,
+        "start": 0,
+        "end": 3235,
+        "original": "[private-run]/prep/originals/00323.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/00782-000.patch",
+        "ranges": [
+          [
+            1,
+            68
+          ]
+        ],
+        "original_path": "crates/farhelm/tests/e2e/boot_id_durable_outcome.rs",
+        "commit": "647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513",
+        "notes": "patch header; patch character offsets [0,3359)",
+        "lines": 68,
+        "bytes": 3359,
+        "start": 0,
+        "end": 3359,
+        "original": "[private-run]/prep/originals/00782.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/00783-000.patch",
+        "ranges": [
+          [
+            1,
+            28
+          ]
+        ],
+        "original_path": "crates/farhelm/tests/e2e/codex_identity.rs",
+        "commit": "647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513",
+        "notes": "patch header; patch character offsets [0,866)",
+        "lines": 28,
+        "bytes": 866,
+        "start": 0,
+        "end": 866,
+        "original": "[private-run]/prep/originals/00783.patch"
+      }
+    ],
+    "lines": 1620,
+    "bytes": 65434
+  },
+  "records": [
+    {
+      "key": "g137/c1",
+      "owner": "g137",
+      "id": "c1",
+      "domain": "rust-session-agent-regressions",
+      "purpose": "rust-session-agent-regressions: crates/farhelm/tests/e2e/containerized_sessions.rs, crates/farhelm/tests/e2e/launch_sentinel_error_status.rs, crates/farhelm/tests/e2e/boot_id_durable_outcome.rs, crates/farhelm/tests/e2e/codex_identity.rs; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 1,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c1",
+            "state": "open",
+            "summary": "Retired container isolation tests were deliberately removed",
+            "location": "crates/farhelm/tests/e2e/containerized_sessions.rs:1",
+            "detail": "Reviewed commit: 04d85f0c98a9b635709d00b056719a0baa7fd3fc\n\n## TLDR\nRemoving the old container tests initially raises a security-coverage concern, but the reviewed specification deliberately removes the execution paths those tests exercised. No product defect is established by this removal.\n\n## Details\nThe assigned patch removes real Podman account, wrapper, isolation, tabs, download confinement and retry cleanup tests and replaces them with stored-row refusal and Delete fixtures. SPEC.md, Retired containerized sessions (4816-4823), states: \"The earlier experimental model, whose supervisor stayed outside the container and bind-mounted a host checkout, is retired. Existing sessions support Delete only. Opening terminals or tabs, exec, Stop, Restart, Clone, Replace and Replace with are refused.\" SPEC_impl.md, Rootless Podman sessions (8647-8656), states: \"Remove creation helpers, account selection, launch fields and switches, hooks-off branches, special tab/attach and file-confinement paths once nothing can create or open these sessions. Normal container environments require no supervisor-side Podman implementation.\" Removal of obsolete positive-path tests accords with those contracts; the retained Delete contract still requires separate source review.\n\nSuggested bucket: other (test coverage consideration). Confidence: confirmed specification acceptance, source-only. Could-be-highest: yes, if the old isolation-dependent execution routes remained reachable; this event does not establish that route. Proposed_drop: exact specification acceptance quoted above; caller must independently check any potentially highest disposition. Possible_cover: none; coverage sources were not consulted. Caveat: this does not certify the new disposable-environment model or legacy Delete cleanup."
+          }
+        },
+        {
+          "line": 4,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c1",
+            "state": "open",
+            "summary": "Retired container isolation tests were deliberately removed",
+            "location": "crates/farhelm/tests/e2e/containerized_sessions.rs:1",
+            "detail": "Reviewed commit: 04d85f0c98a9b635709d00b056719a0baa7fd3fc\n\n## TLDR\nRemoving the old container tests initially raises a security-coverage concern, but the reviewed specification deliberately removes the execution paths those tests exercised. No product defect is established by this removal. The replacement tests cover stored-row compatibility and refusal rather than the new container environment.\n\n## Details\nThe assigned patch removes real Podman account, wrapper, isolation, tabs, download confinement and retry cleanup tests and replaces them with stored-row refusal and Delete fixtures. SPEC.md, Retired containerized sessions (4816-4823), states: \"The earlier experimental model, whose supervisor stayed outside the container and bind-mounted a host checkout, is retired. Existing sessions support Delete only. Opening terminals or tabs, exec, Stop, Restart, Clone, Replace and Replace with are refused.\" SPEC_impl.md, Rootless Podman sessions (8647-8656), states: \"Remove creation helpers, account selection, launch fields and switches, hooks-off branches, special tab/attach and file-confinement paths once nothing can create or open these sessions. Normal container environments require no supervisor-side Podman implementation.\" Removal of obsolete positive-path tests accords with those contracts.\n\nFollow-up source checks: read the replacement containerized_sessions.rs:1-227, including the context beyond the assigned patch split; legacy_session asserts its old image_file JSON decodes and survives supervisor restart. farhelm-proto/src/launch.rs:630-668 confirms that exact legacy decoder, including empty image for image_file-only data. service/core.rs:9273-9281 gates direct and recovery creates before allocation. service/teardown.rs:533-577 derives legacy removal from stored launch, acquires the permanent creator lock, revokes the ticket and requires removal success before subsequent teardown. container.rs:126-191 holds that lock and requires Podman's exists status 1, or accepts missing Podman as the specification explicitly permits. Its tests at 222-294 separately assert missing-engine cleanup, permanent-inode waiter serialization, and rejection of live/error exists statuses. The new e2e Delete test exercises an absent-container stored row; it does not establish real-engine removal of a running container, and this review does not claim it does. No concrete removal-contract violation was found in these available checks.\n\nSuggested bucket: other (test coverage consideration). Confidence: confirmed specification acceptance and source checks, source-only. Could-be-highest: yes, if the old isolation-dependent execution routes remained reachable; this event does not establish that route. Proposed_drop: exact specification acceptance quoted above, together with source confirmation that the assigned positive-path tests concern removed behavior; caller must independently check any potentially highest disposition. Possible_cover: none; coverage sources were not consulted. Caveat: this does not certify the new disposable-environment model, every legacy refusal route, or runtime cleanup under real Podman."
+          }
+        },
+        {
+          "line": 7,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c1",
+            "state": "open",
+            "summary": "Retired container isolation tests were deliberately removed",
+            "location": "crates/farhelm/tests/e2e/containerized_sessions.rs:1",
+            "detail": "Reviewed commit: 04d85f0c98a9b635709d00b056719a0baa7fd3fc\n\n## TLDR\nThe removed isolation tests raise a potentially highest security concern if old isolation-dependent execution remains reachable. The specification supports retiring the old positive execution paths and their tests; it does not waive legacy refusal or confirmed Delete. The replacement fixture proves decoding, refusal and absent-resource deletion, not removal of a real running container. No concrete product defect is established by the assigned test changes.\n\n## Details\nOriginal concern preserved: the assigned patch removes real Podman account, wrapper, isolation, tabs, download-confinement and retry-cleanup tests. If the old outside-supervisor execution routes still admitted work, losing those checks could leave containment failures undetected, potentially exposing host files or credentials. No shipped reachable route with that consequence has been established here, and rarity would not lower that impact if such a route were established.\n\nExact narrow acceptance: SPEC.md, Retired containerized sessions (4816-4823), states: \"The earlier experimental model, whose supervisor stayed outside the container and bind-mounted a host checkout, is retired. Existing sessions support Delete only. Opening terminals or tabs, exec, Stop, Restart, Clone, Replace and Replace with are refused. Delete retains the legacy container-removal path and confirms absence. Missing Podman counts as nothing left to remove.\" SPEC_impl.md, Rootless Podman sessions (8647-8656), states: \"Remove creation helpers, account selection, launch fields and switches, hooks-off branches, special tab/attach and file-confinement paths once nothing can create or open these sessions. Normal container environments require no supervisor-side Podman implementation.\" The condition \"once nothing can create or open these sessions\" remains material. This supports removal of retired positive-path tests only; it is not a blanket security or cleanup exception.\n\nSource checks from the initial pass: containerized_sessions.rs:1-227, including the context beyond the assigned split, seeds image_file JSON and asserts the old launch decodes and survives a supervisor restart (:45-105). farhelm-proto/src/launch.rs:630-668 preserves the retired selection with empty image for image_file-only data; preservation does not grant launch authority. service/core.rs:9273-9281 gates direct and recovery creates before allocation. service/teardown.rs:533-577 derives legacy removal from stored launch, acquires the permanent creator lock, revokes the ticket and requires successful removal before later teardown. container.rs:126-191 retains that lock and requires Podman's exists status 1, or accepts missing Podman as explicitly permitted above. Its tests at :222-294 separately assert missing-engine cleanup, permanent-inode waiter serialization and rejection of live/error exists statuses. These source checks established no concrete deletion-contract violation.\n\nSynthesis across batches: git diff --stat from the reviewed revision to 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513 showed no changes to the retained decoder (launch.rs), legacy cleanup implementation (container.rs), replacement containerized_sessions.rs or shared teststate owner (lib.rs). The later legacy_session fixture still retains its TestDir through restart and rechecks the persisted launch. The actual shared TestDir Drop at farhelm-teststate/src/lib.rs:794-818 ends terminal hosts before directory removal, or retains the directory if host end is unconfirmed. That owner protects the fixture's host/database lifetime; it is not evidence that Podman removed an old running container. The fixture creates an ordinary host session running true before rewriting its row and never creates a Podman container. The e2e Delete assertion therefore cannot distinguish successful removal of a running container from an implementation that only handles absence. The focused fake-engine tests establish control-result semantics, not real-engine removal coverage. Caller reports g095 independently confirms lazy missing-engine deletion acceptance and g117/g135 confirm active-launch guards precede filesystem access; those are attributed interface confirmations, not executions or a parent-accepted drop.\n\nSuggested bucket: other for the established test-coverage consideration. Could-be-highest: yes, preserving the original concern if a reachable old isolation-dependent execution route is established. Confidence: confirmed specification text and source analysis for narrow retirement/fixture claims; no runtime observation and no established security route. Proposed_drop: only the obsolete positive-path test-removal concern, under the exact conditional retirement rule quoted above. Legacy refusal and confirmed Delete remain required. Independent potentially-highest check remains the caller's; no parent drop accepted. Possible_cover: none; coverage sources were not consulted. Material caveats: no certification of the new disposable-environment model, all legacy refusal routes, or real running-container cleanup; the absent fixture and shared TestDir cannot supply those premises."
+          }
+        }
+      ],
+      "latest": {
+        "line": 7,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c1",
+          "state": "open",
+          "summary": "Retired container isolation tests were deliberately removed",
+          "location": "crates/farhelm/tests/e2e/containerized_sessions.rs:1",
+          "detail": "Reviewed commit: 04d85f0c98a9b635709d00b056719a0baa7fd3fc\n\n## TLDR\nThe removed isolation tests raise a potentially highest security concern if old isolation-dependent execution remains reachable. The specification supports retiring the old positive execution paths and their tests; it does not waive legacy refusal or confirmed Delete. The replacement fixture proves decoding, refusal and absent-resource deletion, not removal of a real running container. No concrete product defect is established by the assigned test changes.\n\n## Details\nOriginal concern preserved: the assigned patch removes real Podman account, wrapper, isolation, tabs, download-confinement and retry-cleanup tests. If the old outside-supervisor execution routes still admitted work, losing those checks could leave containment failures undetected, potentially exposing host files or credentials. No shipped reachable route with that consequence has been established here, and rarity would not lower that impact if such a route were established.\n\nExact narrow acceptance: SPEC.md, Retired containerized sessions (4816-4823), states: \"The earlier experimental model, whose supervisor stayed outside the container and bind-mounted a host checkout, is retired. Existing sessions support Delete only. Opening terminals or tabs, exec, Stop, Restart, Clone, Replace and Replace with are refused. Delete retains the legacy container-removal path and confirms absence. Missing Podman counts as nothing left to remove.\" SPEC_impl.md, Rootless Podman sessions (8647-8656), states: \"Remove creation helpers, account selection, launch fields and switches, hooks-off branches, special tab/attach and file-confinement paths once nothing can create or open these sessions. Normal container environments require no supervisor-side Podman implementation.\" The condition \"once nothing can create or open these sessions\" remains material. This supports removal of retired positive-path tests only; it is not a blanket security or cleanup exception.\n\nSource checks from the initial pass: containerized_sessions.rs:1-227, including the context beyond the assigned split, seeds image_file JSON and asserts the old launch decodes and survives a supervisor restart (:45-105). farhelm-proto/src/launch.rs:630-668 preserves the retired selection with empty image for image_file-only data; preservation does not grant launch authority. service/core.rs:9273-9281 gates direct and recovery creates before allocation. service/teardown.rs:533-577 derives legacy removal from stored launch, acquires the permanent creator lock, revokes the ticket and requires successful removal before later teardown. container.rs:126-191 retains that lock and requires Podman's exists status 1, or accepts missing Podman as explicitly permitted above. Its tests at :222-294 separately assert missing-engine cleanup, permanent-inode waiter serialization and rejection of live/error exists statuses. These source checks established no concrete deletion-contract violation.\n\nSynthesis across batches: git diff --stat from the reviewed revision to 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513 showed no changes to the retained decoder (launch.rs), legacy cleanup implementation (container.rs), replacement containerized_sessions.rs or shared teststate owner (lib.rs). The later legacy_session fixture still retains its TestDir through restart and rechecks the persisted launch. The actual shared TestDir Drop at farhelm-teststate/src/lib.rs:794-818 ends terminal hosts before directory removal, or retains the directory if host end is unconfirmed. That owner protects the fixture's host/database lifetime; it is not evidence that Podman removed an old running container. The fixture creates an ordinary host session running true before rewriting its row and never creates a Podman container. The e2e Delete assertion therefore cannot distinguish successful removal of a running container from an implementation that only handles absence. The focused fake-engine tests establish control-result semantics, not real-engine removal coverage. Caller reports g095 independently confirms lazy missing-engine deletion acceptance and g117/g135 confirm active-launch guards precede filesystem access; those are attributed interface confirmations, not executions or a parent-accepted drop.\n\nSuggested bucket: other for the established test-coverage consideration. Could-be-highest: yes, preserving the original concern if a reachable old isolation-dependent execution route is established. Confidence: confirmed specification text and source analysis for narrow retirement/fixture claims; no runtime observation and no established security route. Proposed_drop: only the obsolete positive-path test-removal concern, under the exact conditional retirement rule quoted above. Legacy refusal and confirmed Delete remain required. Independent potentially-highest check remains the caller's; no parent drop accepted. Possible_cover: none; coverage sources were not consulted. Material caveats: no certification of the new disposable-environment model, all legacy refusal routes, or real running-container cleanup; the absent fixture and shared TestDir cannot supply those premises."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g137/findings.jsonl",
+        "id": "c1",
+        "line": 7,
+        "disposition": "under-investigation",
+        "group": "g137-c1",
+        "reason": "Record durably acknowledged; parent source/contract validation, cross-group synthesis, coverage/filter matching and any independent drop check remain pending. This preserves the claim and uncertainty without accepting, dropping or lowering it."
+      },
+      "accepted_parent_decision": null,
+      "returned_claim_checks": [
+        {
+          "batch": "claims-087",
+          "key": "g137/c1",
+          "latest_line": 7,
+          "recommendation": "covered",
+          "bucket": "other",
+          "underlying_key": "retired-container-positive-path-test-removal",
+          "aliases": [
+            "g138/c1"
+          ],
+          "target_queue_file": null,
+          "why": "The specification accepts retiring the old positive execution paths and their tests. This proposed disposition covers that narrow concern only. Legacy refusal and confirmed Delete remain required; the separate lost Delete oracle is retained as g137/f1.",
+          "checks": [
+            "04d85f0c98a9b635709d00b056719a0baa7fd3fc:SPEC.md:4816-4823 and SPEC_impl.md:8642-8656 explicitly retire the outside-supervisor model while retaining Delete.",
+            "At that revision, crates/farhelm/tests/e2e/containerized_sessions.rs:45-105 seeds an ordinary true session, rewrites its launch, restarts and asserts the old launch loaded; :135-208 checks retired refusals. It creates no Podman object.",
+            "service/core.rs:9273-9281 requires an active launch before recovery/direct admitted creation; service/teardown.rs:533-577 derives cleanup from the stored launch and awaits guarded removal with propagated errors.",
+            "container.rs:176-191 invokes rm and requires exists status 1, or accepts missing Podman. These source observations establish neither all refusal routes nor real-engine cleanup in execution."
+          ],
+          "coverage_checked": {
+            "SPEC.md": "Current :4892-4900 keeps the same narrow retirement acceptance and retained Delete contract.",
+            "SPEC_impl.md": "Current :8312-8326 allows removing retired positive paths only once nothing can create or open them; it requires legacy removal and confirmed absence.",
+            "TODO.md Planned": "Empty bucket at :24-26; no coverage.",
+            "plans/queue": "podman-environments retirement section :284-295 matches retirement, but plans/REPORTS.md:21 identifies that plan as landed. No unlanded restoration/removal-oracle work found. The matching tmux plans are also landed (:29-30).",
+            "BUGS.md": "Only SSH-helper install/update hang; no matching concern.",
+            "INDEX.md and queue": "Targeted legacy/container/oracle/cleanup searches found no exact item. container-template-replacement-test-reuses-old-config.md concerns template replacement, not these tests.",
+            "TRIAGE_OUTCOMES.md": "No exact retirement-test decision found; archive not read.",
+            "FILTER.md": "No full filter boundary matches this test-removal/security hypothesis."
+          },
+          "exact_cover_quotes": [
+            "SPEC.md, Retired containerized sessions: 'Existing sessions support Delete only. Opening terminals or tabs, exec, Stop, Restart, Clone, Replace and Replace with are refused.'",
+            "SPEC_impl.md, Rootless Podman sessions: 'Remove creation helpers, account selection, launch fields and switches, hooks-off branches, special tab/attach and file-confinement paths once nothing can create or open these sessions.'"
+          ],
+          "missing_premise": "A shipped reachable retired execution route that exposes host files or credentials has not been established. This bounded check does not certify every route or the new environment model.",
+          "original_stronger_consequence": "Removing isolation/account/wrapper/tab/download-confinement tests could conceal host-file or credential exposure if retired outside-supervisor execution remains reachable. The original security concern remains conditional; its rarity would not reduce impact.",
+          "needs_independent_drop_check": true,
+          "proposed_basis": "Narrow specification acceptance of obsolete positive-path tests, conditional on execution retirement; not acceptance of missing refusal or Delete tests. Parent must independently check the potentially highest drop."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": true,
+        "clearly_refuted_candidate": false,
+        "needs_unfinished_gate": true,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "retired-container-positive-path-test-removal",
+        "destination": "trailing-retired-container-positive-path-test-removal.md"
+      }
+    },
+    {
+      "key": "g137/c2",
+      "owner": "g137",
+      "id": "c2",
+      "domain": "rust-session-agent-regressions",
+      "purpose": "rust-session-agent-regressions: crates/farhelm/tests/e2e/containerized_sessions.rs, crates/farhelm/tests/e2e/launch_sentinel_error_status.rs, crates/farhelm/tests/e2e/boot_id_durable_outcome.rs, crates/farhelm/tests/e2e/codex_identity.rs; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 2,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c2",
+            "state": "open",
+            "summary": "Removing tmux guard fields preserves terminal-host fixture ownership",
+            "location": "crates/farhelm/tests/e2e/codex_identity.rs:757",
+            "detail": "Reviewed commit: 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513\n\n## TLDR\nThe removed tmux cleanup fields do not remove cleanup for these test agents. Their state-directory owner still ends terminal hosts, including across supervisor outages. No regression is established in the assigned field removals.\n\n## Details\nChecked codex_identity.rs:757-803 and 1597-1670, boot_id_durable_outcome.rs:81-106, and the same-revision harness.rs:1059-1088, 1114-1150, 2196-2254, 2520-2537. Harness no longer has an _tmux field; constructors and destructuring agree. The state field is still a farhelm_teststate::TestDir, whose documented cleanup contract remains at harness.rs:1075-1084. Both Codex outage sites keep state alive; the first rebuilds Harness with the same state and permit, and the second retains state through the replacement supervisor and report assertions. The boot helper still injects the boot-id source and retains the state and permit. SPEC.md, Durability and resume: \"The supervisor itself restarting — crash, upgrade, manual restart — must not interrupt its sessions. Terminals and agent processes outlive the supervisor process; only a host reboot takes sessions down.\" Removing a guard for a substrate these constructors no longer select does not weaken that ownership contract.\n\nSuggested bucket: other (fixture ownership consideration). Confidence: confirmed by source, no execution. Could-be-highest: no; considered effect is confined to test fixture cleanup, with no catastrophic route established. Proposed_drop: source refutes a cleanup-lifetime regression for these assigned hunks; the TestDir owner remains live. Possible_cover: none; coverage sources not consulted. Caveat: unrelated legacy-tmux migration tests and production migration behavior are outside this group's assigned changes."
+          }
+        },
+        {
+          "line": 5,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c2",
+            "state": "open",
+            "summary": "Removing tmux guard fields preserves terminal-host fixture ownership",
+            "location": "crates/farhelm/tests/e2e/codex_identity.rs:757",
+            "detail": "Reviewed commit: 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513\n\n## TLDR\nThe removed tmux cleanup fields do not remove cleanup for these test agents. Their state-directory owner remains alive across supervisor outages and ends terminal hosts when the fixture is dropped. No regression is established in the assigned field removals.\n\n## Details\nInitial checks: codex_identity.rs:757-803 and 1597-1670, boot_id_durable_outcome.rs:81-106, and harness.rs:1059-1088, 1114-1150, 2196-2254, 2520-2537 at the reviewed revision. Harness no longer has an _tmux field; constructors and destructuring agree. Both Codex outage sites keep state alive: the first rebuilds Harness with the same state and permit, and the second retains state through the replacement supervisor and report assertions. The boot helper still injects the boot-id source and retains state and permit.\n\nSynthesis source check replaces reliance on harness documentation with the actual owner implementation: crates/farhelm-teststate/src/lib.rs:750-756 stores the temporary directory and held lock; :794-807 calls end_hosts before removing the directory, retaining it for retry if host end cannot be confirmed; :810-818 delegates to hosts::stop_hosts_within with one bounded deadline and recursive socket discovery. No callback registration or independent tmux guard is needed to enable that Drop path. The state remains a TestDir at all assigned move sites, so dropping the previous supervisor does not trigger directory cleanup or terminate the vendor during the intended outage. This is compatible with legacy_session retaining the same owner through restart and with sentinel tests explicitly ending a host while retaining the database. Those actions cross different boundaries: supervisor end, terminal-host end, and state-directory drop are not interchangeable.\n\nSPEC.md, Durability and resume: \"The supervisor itself restarting — crash, upgrade, manual restart — must not interrupt its sessions. Terminals and agent processes outlive the supervisor process; only a host reboot takes sessions down.\" Removing a guard for a substrate these constructors no longer select does not weaken that ownership contract.\n\nSuggested bucket: other (fixture ownership consideration). Confidence: confirmed by source, no execution. Could-be-highest: no; considered effect is confined to test fixture cleanup, with no catastrophic route established. Proposed_drop: source refutes a cleanup-lifetime regression for these assigned hunks; TestDir remains live and its actual Drop implementation owns bounded host cleanup. No parent drop accepted; this remains a proposed disposition. Possible_cover: none; coverage sources not consulted. Caveat: unrelated legacy-tmux migration tests and production migration behavior are outside this group's assigned changes; cleanup success under load was not executed or measured."
+          }
+        }
+      ],
+      "latest": {
+        "line": 5,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c2",
+          "state": "open",
+          "summary": "Removing tmux guard fields preserves terminal-host fixture ownership",
+          "location": "crates/farhelm/tests/e2e/codex_identity.rs:757",
+          "detail": "Reviewed commit: 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513\n\n## TLDR\nThe removed tmux cleanup fields do not remove cleanup for these test agents. Their state-directory owner remains alive across supervisor outages and ends terminal hosts when the fixture is dropped. No regression is established in the assigned field removals.\n\n## Details\nInitial checks: codex_identity.rs:757-803 and 1597-1670, boot_id_durable_outcome.rs:81-106, and harness.rs:1059-1088, 1114-1150, 2196-2254, 2520-2537 at the reviewed revision. Harness no longer has an _tmux field; constructors and destructuring agree. Both Codex outage sites keep state alive: the first rebuilds Harness with the same state and permit, and the second retains state through the replacement supervisor and report assertions. The boot helper still injects the boot-id source and retains state and permit.\n\nSynthesis source check replaces reliance on harness documentation with the actual owner implementation: crates/farhelm-teststate/src/lib.rs:750-756 stores the temporary directory and held lock; :794-807 calls end_hosts before removing the directory, retaining it for retry if host end cannot be confirmed; :810-818 delegates to hosts::stop_hosts_within with one bounded deadline and recursive socket discovery. No callback registration or independent tmux guard is needed to enable that Drop path. The state remains a TestDir at all assigned move sites, so dropping the previous supervisor does not trigger directory cleanup or terminate the vendor during the intended outage. This is compatible with legacy_session retaining the same owner through restart and with sentinel tests explicitly ending a host while retaining the database. Those actions cross different boundaries: supervisor end, terminal-host end, and state-directory drop are not interchangeable.\n\nSPEC.md, Durability and resume: \"The supervisor itself restarting — crash, upgrade, manual restart — must not interrupt its sessions. Terminals and agent processes outlive the supervisor process; only a host reboot takes sessions down.\" Removing a guard for a substrate these constructors no longer select does not weaken that ownership contract.\n\nSuggested bucket: other (fixture ownership consideration). Confidence: confirmed by source, no execution. Could-be-highest: no; considered effect is confined to test fixture cleanup, with no catastrophic route established. Proposed_drop: source refutes a cleanup-lifetime regression for these assigned hunks; TestDir remains live and its actual Drop implementation owns bounded host cleanup. No parent drop accepted; this remains a proposed disposition. Possible_cover: none; coverage sources not consulted. Caveat: unrelated legacy-tmux migration tests and production migration behavior are outside this group's assigned changes; cleanup success under load was not executed or measured."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g137/findings.jsonl",
+        "id": "c2",
+        "line": 5,
+        "disposition": "excluded",
+        "group": "codex-outage-fixture-testdir-owner-retained",
+        "reason": "Parent explicitly accepted named refuted proposal from claims-087 after inspecting it. Removing the tmux-only field does not remove these fixtures' terminal-host cleanup owner or end hosts during their intended supervisor outage. Source refutes loss of the cleanup owner at the named move/destructuring sites; preserve the bounded-cleanup caveat. Checked source/results: [\"647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513:crates/farhelm/tests/e2e/harness.rs:1059-1088 retains state as TestDir before the semaphore permit.\",\"At that revision codex_identity.rs:757-803 moves state through handoff into the rebuilt Harness; :1599-1670 holds state across supervisor teardown, hook activity and the new supervisor. boot_id_durable_outcome.rs:84-105 holds both state and permit.\",\"At that revision crates/farhelm-teststate/src/lib.rs:794-818 calls end_hosts before removing the directory and retains it when cleanup cannot be confirmed. Bounded cleanup is an attempt, not proof of success under load.\"] Current coverage/results: {\"SPEC.md\":\"Durability and resume, current :3436-3456, requires sessions to survive supervisor restart. This is compatible context, not blanket acceptance of fixture leaks.\",\"SPEC_impl.md\":\"Terminal host, current :1891 onward and :2159-2177, describes host terminals and harness substrate; no explicit acceptance of a cleanup defect.\",\"TODO.md Planned\":\"Empty; no coverage.\",\"plans/queue\":\"No matching TestDir/outage/guard defect work found; tmux-end-old-terminals is landed per plans/REPORTS.md:29.\",\"BUGS.md\":\"No matching fixture-lifetime bug.\",\"INDEX.md and queue\":\"No exact codex_identity/boot_id/TestDir/guard item found. mac-fixture-cleanup-stop-budget.md was read and concerns a different remote cleanup deadline.\",\"TRIAGE_OUTCOMES.md\":\"No matching fixture-lifetime decision found; archive not read.\",\"FILTER.md\":\"No filter used; source refutation is the basis.\"} Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Removed tmux guards might have weakened cleanup or fixture ownership. The recorded concern was confined to maintainer fixtures, with no catastrophic or user-work-loss route established.\"; \"No cleanup failure or runtime pass measured. Unrelated legacy migration and arbitrary supervisor ownership patterns remain outside this narrow claim.\"."
+      },
+      "accepted_parent_decision": {
+        "key": "g137/c2",
+        "line": 5,
+        "disposition": "excluded",
+        "group": "codex-outage-fixture-testdir-owner-retained",
+        "bucket": "other",
+        "recording": "refuted",
+        "queue_target_candidate": null,
+        "needs_independent_drop_check": false,
+        "reason": "Parent explicitly accepted named refuted proposal from claims-087 after inspecting it. Removing the tmux-only field does not remove these fixtures' terminal-host cleanup owner or end hosts during their intended supervisor outage. Source refutes loss of the cleanup owner at the named move/destructuring sites; preserve the bounded-cleanup caveat. Checked source/results: [\"647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513:crates/farhelm/tests/e2e/harness.rs:1059-1088 retains state as TestDir before the semaphore permit.\",\"At that revision codex_identity.rs:757-803 moves state through handoff into the rebuilt Harness; :1599-1670 holds state across supervisor teardown, hook activity and the new supervisor. boot_id_durable_outcome.rs:84-105 holds both state and permit.\",\"At that revision crates/farhelm-teststate/src/lib.rs:794-818 calls end_hosts before removing the directory and retains it when cleanup cannot be confirmed. Bounded cleanup is an attempt, not proof of success under load.\"] Current coverage/results: {\"SPEC.md\":\"Durability and resume, current :3436-3456, requires sessions to survive supervisor restart. This is compatible context, not blanket acceptance of fixture leaks.\",\"SPEC_impl.md\":\"Terminal host, current :1891 onward and :2159-2177, describes host terminals and harness substrate; no explicit acceptance of a cleanup defect.\",\"TODO.md Planned\":\"Empty; no coverage.\",\"plans/queue\":\"No matching TestDir/outage/guard defect work found; tmux-end-old-terminals is landed per plans/REPORTS.md:29.\",\"BUGS.md\":\"No matching fixture-lifetime bug.\",\"INDEX.md and queue\":\"No exact codex_identity/boot_id/TestDir/guard item found. mac-fixture-cleanup-stop-budget.md was read and concerns a different remote cleanup deadline.\",\"TRIAGE_OUTCOMES.md\":\"No matching fixture-lifetime decision found; archive not read.\",\"FILTER.md\":\"No filter used; source refutation is the basis.\"} Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Removed tmux guards might have weakened cleanup or fixture ownership. The recorded concern was confined to maintainer fixtures, with no catastrophic or user-work-loss route established.\"; \"No cleanup failure or runtime pass measured. Unrelated legacy migration and arbitrary supervisor ownership patterns remain outside this narrow claim.\"."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-087",
+          "key": "g137/c2",
+          "latest_line": 5,
+          "recommendation": "refuted",
+          "bucket": "other",
+          "underlying_key": "codex-outage-fixture-testdir-owner-retained",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "Removing the tmux-only field does not remove these fixtures' terminal-host cleanup owner or end hosts during their intended supervisor outage.",
+          "checks": [
+            "647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513:crates/farhelm/tests/e2e/harness.rs:1059-1088 retains state as TestDir before the semaphore permit.",
+            "At that revision codex_identity.rs:757-803 moves state through handoff into the rebuilt Harness; :1599-1670 holds state across supervisor teardown, hook activity and the new supervisor. boot_id_durable_outcome.rs:84-105 holds both state and permit.",
+            "At that revision crates/farhelm-teststate/src/lib.rs:794-818 calls end_hosts before removing the directory and retains it when cleanup cannot be confirmed. Bounded cleanup is an attempt, not proof of success under load."
+          ],
+          "coverage_checked": {
+            "SPEC.md": "Durability and resume, current :3436-3456, requires sessions to survive supervisor restart. This is compatible context, not blanket acceptance of fixture leaks.",
+            "SPEC_impl.md": "Terminal host, current :1891 onward and :2159-2177, describes host terminals and harness substrate; no explicit acceptance of a cleanup defect.",
+            "TODO.md Planned": "Empty; no coverage.",
+            "plans/queue": "No matching TestDir/outage/guard defect work found; tmux-end-old-terminals is landed per plans/REPORTS.md:29.",
+            "BUGS.md": "No matching fixture-lifetime bug.",
+            "INDEX.md and queue": "No exact codex_identity/boot_id/TestDir/guard item found. mac-fixture-cleanup-stop-budget.md was read and concerns a different remote cleanup deadline.",
+            "TRIAGE_OUTCOMES.md": "No matching fixture-lifetime decision found; archive not read.",
+            "FILTER.md": "No filter used; source refutation is the basis."
+          },
+          "exact_cover_quotes": [],
+          "missing_premise": "No cleanup failure or runtime pass measured. Unrelated legacy migration and arbitrary supervisor ownership patterns remain outside this narrow claim.",
+          "original_stronger_consequence": "Removed tmux guards might have weakened cleanup or fixture ownership. The recorded concern was confined to maintainer fixtures, with no catastrophic or user-work-loss route established.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Source refutes loss of the cleanup owner at the named move/destructuring sites; preserve the bounded-cleanup caveat."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "codex-outage-fixture-testdir-owner-retained",
+        "destination": null
+      }
+    },
+    {
+      "key": "g137/c3",
+      "owner": "g137",
+      "id": "c3",
+      "domain": "rust-session-agent-regressions",
+      "purpose": "rust-session-agent-regressions: crates/farhelm/tests/e2e/containerized_sessions.rs, crates/farhelm/tests/e2e/launch_sentinel_error_status.rs, crates/farhelm/tests/e2e/boot_id_durable_outcome.rs, crates/farhelm/tests/e2e/codex_identity.rs; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 3,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c3",
+            "state": "open",
+            "summary": "Owning-runtime shutdown preserves the sentinel tests' observation boundary",
+            "location": "crates/farhelm/tests/e2e/launch_sentinel_error_status.rs:531",
+            "detail": "Reviewed commit: 04d85f0c98a9b635709d00b056719a0baa7fd3fc\n\n## TLDR\nThe new shutdown calls do not reconcile the session before the test's explicit observation. They establish that the terminal host is gone, which is the premise both launch-error tests need. No weakened assertion or premature outcome write was found.\n\n## Details\nChecked the full test context at launch_sentinel_error_status.rs:522-641; basic_session readiness at harness.rs:1797-1811; the actual runtime accessor at service/core.rs:18423-18436; and hosts/terminal.rs:2340-2369 and 4142-4189. agent_host_for_test clones the existing runtime instead of creating a competing connection. HostTerminal::shutdown sends Control::Shutdown, and its runtime performs protocol shutdown, waits for end, sets Gone only when ended is confirmed, and returns ShutdownReport. That path contains no session-store outcome write or launch-sentinel read. Both changed tests require report.ended and Gone before proceeding. The corrupt-file test additionally checks the durable row is still Running after failed reconciliation and confirms repair permits a later exit write. The live-pane test preserves the same planted sentinel across live and gone observations and requires its exact error detail. SPEC_impl.md's terminal switch-points contract says an unreadable host \"records nothing durable at all (not even a launch sentinel, unlike a renamed tmux pane), lists an unsettled session as unknown\"; runtime shutdown avoids that unrelated unavailable state without weakening the dead-or-absent boundary under test.\n\nSuggested bucket: other (fixture boundary consideration). Confidence: confirmed by source; no execution. Could-be-highest: no; the considered effect is a misleading maintainer test, with no catastrophic consequence established. Proposed_drop: source refutes early reconciliation or sentinel consumption; explicit end assertions and subsequent durable-outcome assertions preserve the contract. Possible_cover: none; coverage sources not consulted. Caveat: the 30-second fixture timeout was not measured under load, and this review makes no runtime pass claim."
+          }
+        },
+        {
+          "line": 6,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c3",
+            "state": "open",
+            "summary": "Owning-runtime shutdown preserves the sentinel tests' observation boundary",
+            "location": "crates/farhelm/tests/e2e/launch_sentinel_error_status.rs:531",
+            "detail": "Reviewed commit: 04d85f0c98a9b635709d00b056719a0baa7fd3fc\n\n## TLDR\nThe new shutdown calls establish that the terminal host is gone without recording the session outcome before the tests' explicit reconciliation. The host-end receipt and the durable session outcome represent separate facts. No weakened assertion or premature outcome write was found.\n\n## Details\nInitial checks: launch_sentinel_error_status.rs:522-641; basic_session readiness at harness.rs:1797-1811; runtime accessor at service/core.rs:18423-18436; hosts/terminal.rs:2340-2369 and 4142-4189. agent_host_for_test clones the existing runtime instead of creating a competing connection. HostTerminal::shutdown sends Control::Shutdown; the runtime performs protocol shutdown, waits for end, sets Gone only when ended is confirmed, and returns ShutdownReport. That path contains no session-store outcome write or launch-sentinel read. Both changed tests require report.ended and Gone before proceeding. The corrupt-file test additionally checks the durable row remains Running after failed reconciliation and confirms repair permits a later exit write. The live-pane test preserves the same planted sentinel across live and gone observations and requires its exact error detail.\n\nSynthesis resolved the readily checkable asynchronous-caller premise: these tests use harness(), not ServeTask. harness.rs:1251-1260 connects directly through handle_connection. The ticker has one production start site, serve (service/ticker.rs:31-39; actual call at service/core.rs:8669-8687), so the host's liveness notification does not create a concurrent ticker observation in these fixtures. hosts/terminal.rs:4176-4188 publishes Gone before sending the successful shutdown receipt, making the tests' immediate liveness assertion valid without another wait. Retaining the TestDir owner preserves the database and sentinel paths after explicit host end; TestDir's Drop cleanup is a later, separate boundary. The later revision 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513 removes a different tmux-only denied-directory test and its boot-helper import; the two reviewed sentinel shutdown tests retain these host-end assertions. That context confirms compatibility with removal of harness_believing_boot_tmux without rejudging the earlier patch at the later revision.\n\nSPEC_impl.md's terminal switch-points contract says an unreadable host \"records nothing durable at all (not even a launch sentinel, unlike a renamed tmux pane), lists an unsettled session as unknown\"; runtime shutdown avoids that unrelated unavailable state without weakening the dead-or-absent boundary under test.\n\nSuggested bucket: other (fixture boundary consideration). Confidence: confirmed by source; no execution. Could-be-highest: no; the considered effect is a misleading maintainer test, with no catastrophic consequence established. Proposed_drop: source refutes early reconciliation or sentinel consumption; explicit end assertions and subsequent durable-outcome assertions preserve the contract. No parent drop accepted; this remains a proposed disposition. Possible_cover: none; coverage sources not consulted. Caveat: the 30-second fixture timeout was not measured under load; this review makes no runtime pass claim and does not assess the unrelated removed denied-directory test as an independent assignment."
+          }
+        }
+      ],
+      "latest": {
+        "line": 6,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c3",
+          "state": "open",
+          "summary": "Owning-runtime shutdown preserves the sentinel tests' observation boundary",
+          "location": "crates/farhelm/tests/e2e/launch_sentinel_error_status.rs:531",
+          "detail": "Reviewed commit: 04d85f0c98a9b635709d00b056719a0baa7fd3fc\n\n## TLDR\nThe new shutdown calls establish that the terminal host is gone without recording the session outcome before the tests' explicit reconciliation. The host-end receipt and the durable session outcome represent separate facts. No weakened assertion or premature outcome write was found.\n\n## Details\nInitial checks: launch_sentinel_error_status.rs:522-641; basic_session readiness at harness.rs:1797-1811; runtime accessor at service/core.rs:18423-18436; hosts/terminal.rs:2340-2369 and 4142-4189. agent_host_for_test clones the existing runtime instead of creating a competing connection. HostTerminal::shutdown sends Control::Shutdown; the runtime performs protocol shutdown, waits for end, sets Gone only when ended is confirmed, and returns ShutdownReport. That path contains no session-store outcome write or launch-sentinel read. Both changed tests require report.ended and Gone before proceeding. The corrupt-file test additionally checks the durable row remains Running after failed reconciliation and confirms repair permits a later exit write. The live-pane test preserves the same planted sentinel across live and gone observations and requires its exact error detail.\n\nSynthesis resolved the readily checkable asynchronous-caller premise: these tests use harness(), not ServeTask. harness.rs:1251-1260 connects directly through handle_connection. The ticker has one production start site, serve (service/ticker.rs:31-39; actual call at service/core.rs:8669-8687), so the host's liveness notification does not create a concurrent ticker observation in these fixtures. hosts/terminal.rs:4176-4188 publishes Gone before sending the successful shutdown receipt, making the tests' immediate liveness assertion valid without another wait. Retaining the TestDir owner preserves the database and sentinel paths after explicit host end; TestDir's Drop cleanup is a later, separate boundary. The later revision 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513 removes a different tmux-only denied-directory test and its boot-helper import; the two reviewed sentinel shutdown tests retain these host-end assertions. That context confirms compatibility with removal of harness_believing_boot_tmux without rejudging the earlier patch at the later revision.\n\nSPEC_impl.md's terminal switch-points contract says an unreadable host \"records nothing durable at all (not even a launch sentinel, unlike a renamed tmux pane), lists an unsettled session as unknown\"; runtime shutdown avoids that unrelated unavailable state without weakening the dead-or-absent boundary under test.\n\nSuggested bucket: other (fixture boundary consideration). Confidence: confirmed by source; no execution. Could-be-highest: no; the considered effect is a misleading maintainer test, with no catastrophic consequence established. Proposed_drop: source refutes early reconciliation or sentinel consumption; explicit end assertions and subsequent durable-outcome assertions preserve the contract. No parent drop accepted; this remains a proposed disposition. Possible_cover: none; coverage sources not consulted. Caveat: the 30-second fixture timeout was not measured under load; this review makes no runtime pass claim and does not assess the unrelated removed denied-directory test as an independent assignment."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g137/findings.jsonl",
+        "id": "c3",
+        "line": 6,
+        "disposition": "excluded",
+        "group": "sentinel-fixture-host-end-is-not-outcome-reconciliation",
+        "reason": "Parent explicitly accepted named refuted proposal from claims-087 after inspecting it. The shutdown receipt establishes host end without consuming the sentinel or writing the session outcome before the fixture's explicit reconciliation. Source refutes early outcome recording/consumption in this fixture and preserves its explicit assertions. Checked source/results: [\"04d85f0c98a9b635709d00b056719a0baa7fd3fc:crates/farhelm/tests/e2e/launch_sentinel_error_status.rs:527-584 asserts ended/Gone, corrupt evidence retention, durable Running after failed reconciliation and exit after repair. :594-641 preserves the same planted error across live and gone observations.\",\"At that revision service/core.rs:18423-18436 clones the existing host runtime. hosts/terminal.rs:4142-4189 sends shutdown, waits for host end, publishes Gone before the receipt and has no session-store write or sentinel read.\",\"harness.rs:1251-1260 uses handle_connection directly; service/ticker.rs:31-39 and service/core.rs:8669-8687 locate ticker startup in serve, which these fixtures do not run. Thus a liveness notification does not introduce a serving ticker observation here.\"] Current coverage/results: {\"SPEC.md\":\"Durability/status sections provide context; no permission to weaken this sentinel oracle found.\",\"SPEC_impl.md\":\"Current terminal switch points :2134-2159 distinguish gone from unreadable; unreadable records no durable sentinel outcome. This supports the fixture boundary, not a waiver.\",\"TODO.md Planned\":\"Empty; no coverage.\",\"plans/queue\":\"No matching sentinel/oracle/owning-runtime work found; tmux plans are landed per plans/REPORTS.md:29-30.\",\"BUGS.md\":\"No matching sentinel fixture defect.\",\"INDEX.md and queue\":\"No exact launch_sentinel/sentinel-reconciliation item in targeted searches.\",\"TRIAGE_OUTCOMES.md\":\"No exact matching decision found; archive not read.\",\"FILTER.md\":\"No filter used. A test-oracle concern is not itself a session-status filter match.\"} Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Shutdown might reconcile early or consume the sentinel and make a misleading maintainer test pass. No catastrophic or shipped user-work-loss consequence was claimed.\"; \"No runtime execution or timeout-under-load measurement. This does not judge the separately deleted denied-directory test.\"."
+      },
+      "accepted_parent_decision": {
+        "key": "g137/c3",
+        "line": 6,
+        "disposition": "excluded",
+        "group": "sentinel-fixture-host-end-is-not-outcome-reconciliation",
+        "bucket": "other",
+        "recording": "refuted",
+        "queue_target_candidate": null,
+        "needs_independent_drop_check": false,
+        "reason": "Parent explicitly accepted named refuted proposal from claims-087 after inspecting it. The shutdown receipt establishes host end without consuming the sentinel or writing the session outcome before the fixture's explicit reconciliation. Source refutes early outcome recording/consumption in this fixture and preserves its explicit assertions. Checked source/results: [\"04d85f0c98a9b635709d00b056719a0baa7fd3fc:crates/farhelm/tests/e2e/launch_sentinel_error_status.rs:527-584 asserts ended/Gone, corrupt evidence retention, durable Running after failed reconciliation and exit after repair. :594-641 preserves the same planted error across live and gone observations.\",\"At that revision service/core.rs:18423-18436 clones the existing host runtime. hosts/terminal.rs:4142-4189 sends shutdown, waits for host end, publishes Gone before the receipt and has no session-store write or sentinel read.\",\"harness.rs:1251-1260 uses handle_connection directly; service/ticker.rs:31-39 and service/core.rs:8669-8687 locate ticker startup in serve, which these fixtures do not run. Thus a liveness notification does not introduce a serving ticker observation here.\"] Current coverage/results: {\"SPEC.md\":\"Durability/status sections provide context; no permission to weaken this sentinel oracle found.\",\"SPEC_impl.md\":\"Current terminal switch points :2134-2159 distinguish gone from unreadable; unreadable records no durable sentinel outcome. This supports the fixture boundary, not a waiver.\",\"TODO.md Planned\":\"Empty; no coverage.\",\"plans/queue\":\"No matching sentinel/oracle/owning-runtime work found; tmux plans are landed per plans/REPORTS.md:29-30.\",\"BUGS.md\":\"No matching sentinel fixture defect.\",\"INDEX.md and queue\":\"No exact launch_sentinel/sentinel-reconciliation item in targeted searches.\",\"TRIAGE_OUTCOMES.md\":\"No exact matching decision found; archive not read.\",\"FILTER.md\":\"No filter used. A test-oracle concern is not itself a session-status filter match.\"} Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Shutdown might reconcile early or consume the sentinel and make a misleading maintainer test pass. No catastrophic or shipped user-work-loss consequence was claimed.\"; \"No runtime execution or timeout-under-load measurement. This does not judge the separately deleted denied-directory test.\"."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-087",
+          "key": "g137/c3",
+          "latest_line": 6,
+          "recommendation": "refuted",
+          "bucket": "other",
+          "underlying_key": "sentinel-fixture-host-end-is-not-outcome-reconciliation",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The shutdown receipt establishes host end without consuming the sentinel or writing the session outcome before the fixture's explicit reconciliation.",
+          "checks": [
+            "04d85f0c98a9b635709d00b056719a0baa7fd3fc:crates/farhelm/tests/e2e/launch_sentinel_error_status.rs:527-584 asserts ended/Gone, corrupt evidence retention, durable Running after failed reconciliation and exit after repair. :594-641 preserves the same planted error across live and gone observations.",
+            "At that revision service/core.rs:18423-18436 clones the existing host runtime. hosts/terminal.rs:4142-4189 sends shutdown, waits for host end, publishes Gone before the receipt and has no session-store write or sentinel read.",
+            "harness.rs:1251-1260 uses handle_connection directly; service/ticker.rs:31-39 and service/core.rs:8669-8687 locate ticker startup in serve, which these fixtures do not run. Thus a liveness notification does not introduce a serving ticker observation here."
+          ],
+          "coverage_checked": {
+            "SPEC.md": "Durability/status sections provide context; no permission to weaken this sentinel oracle found.",
+            "SPEC_impl.md": "Current terminal switch points :2134-2159 distinguish gone from unreadable; unreadable records no durable sentinel outcome. This supports the fixture boundary, not a waiver.",
+            "TODO.md Planned": "Empty; no coverage.",
+            "plans/queue": "No matching sentinel/oracle/owning-runtime work found; tmux plans are landed per plans/REPORTS.md:29-30.",
+            "BUGS.md": "No matching sentinel fixture defect.",
+            "INDEX.md and queue": "No exact launch_sentinel/sentinel-reconciliation item in targeted searches.",
+            "TRIAGE_OUTCOMES.md": "No exact matching decision found; archive not read.",
+            "FILTER.md": "No filter used. A test-oracle concern is not itself a session-status filter match."
+          },
+          "exact_cover_quotes": [],
+          "missing_premise": "No runtime execution or timeout-under-load measurement. This does not judge the separately deleted denied-directory test.",
+          "original_stronger_consequence": "Shutdown might reconcile early or consume the sentinel and make a misleading maintainer test pass. No catastrophic or shipped user-work-loss consequence was claimed.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Source refutes early outcome recording/consumption in this fixture and preserves its explicit assertions."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "sentinel-fixture-host-end-is-not-outcome-reconciliation",
+        "destination": null
+      }
+    },
+    {
+      "key": "g137/f1",
+      "owner": "g137",
+      "id": "f1",
+      "domain": "rust-session-agent-regressions",
+      "purpose": "rust-session-agent-regressions: crates/farhelm/tests/e2e/containerized_sessions.rs, crates/farhelm/tests/e2e/launch_sentinel_error_status.rs, crates/farhelm/tests/e2e/boot_id_durable_outcome.rs, crates/farhelm/tests/e2e/codex_identity.rs; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 8,
+          "event": {
+            "version": 1,
+            "kind": "lead",
+            "id": "f1",
+            "state": "open",
+            "summary": "Check the lost Delete oracle for an existing legacy container",
+            "location": "crates/farhelm/tests/e2e/containerized_sessions.rs:215",
+            "detail": "Reviewed commit: 04d85f0c98a9b635709d00b056719a0baa7fd3fc\n\n## TLDR\nThe removed real-Podman tests checked that Delete removed an existing container. The replacement fixture starts with no Podman container, so it cannot detect a Delete implementation that only confirms absence and never removes an existing object. Determine whether an equivalent oracle remains anywhere in the pinned range before deciding whether to report a narrow test-coverage defect.\n\n## Details\nAvailable initial-pass evidence: assigned patch 00322-000.patch:801-900 removes a real lifecycle fixture that proves a running container, calls Stop, then Delete, and asserts Podman container exists returns 1. Earlier account fixtures also checked real-object deletion after Stop. The replacement at containerized_sessions.rs:211-227 explicitly creates no container and checks the session disappears. The retained specification still requires legacy Delete and confirmed absence; retirement accepts removal of positive creation/execution paths but not this cleanup contract. Need inspect exact deleted assertions and through-tip test replacements, distinguishing existing-running, existing-stopped and already-absent objects.\n\nSuggested bucket: other if confirmed, loss of a maintainer regression oracle. Confidence: source-supported substantive lead requiring replacement-oracle search; no runtime failure alleged. Could-be-highest: no for this distinct test-only concern; original potentially-highest isolation concern remains separately preserved under c1 and is not narrowed here. Proposed_drop: false pending source investigation. Possible_cover: none known; supplied neighbors do not report this oracle. Missing premise: whether a retained equivalent test distinguishes removal from absence-only handling for an existing legacy object. What settles it: source analysis of remaining tests and later changes through pinned tip 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db. No tests or reproductions run."
+          }
+        },
+        {
+          "line": 9,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "f1",
+            "state": "open",
+            "summary": "Legacy Delete loses its existing-container removal oracle",
+            "location": "crates/farhelm/tests/e2e/containerized_sessions.rs:215",
+            "detail": "Reviewed commit: 04d85f0c98a9b635709d00b056719a0baa7fd3fc; replacement search extends through pinned tip 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db.\n\n## TLDR\nThe remaining legacy Delete tests can pass if Delete stops attempting to remove containers and only handles objects that are already absent. The deleted tests distinguished that regression by deleting an existing Podman container. This is loss of a required cleanup regression check, not evidence that today's Delete fails.\n\n## Details\nPrecise removed oracle: at the reviewed commit's parent, containerized_sessions.rs:820-827 calls Stop, asserts the real container is exited, calls delete_session and asserts Podman container exists returns 1. The account and wrapper fixtures have the same existing-object-to-absence oracle at parent :408-417 and :578-587. These deletion assertions are in this group's assigned patch. Correction to the requested running-container premise: these successful Delete assertions act on an existing stopped container, not a still-running one. The removed helper failed_spec_retry_removes_its_predecessor_container does remove a running predecessor through a failed Create retry, a different operation that retirement removes. Do not claim an old successful Delete-on-running oracle was demonstrated.\n\nThe replacement at reviewed containerized_sessions.rs:45-105 creates an ordinary session running true, changes its persisted launch to legacy JSON and restarts the supervisor; it creates no Podman container. :211-227 only deletes that row and verifies it disappears. Existing absence can succeed even when no removal is attempted. The retained focused fake-engine test at container.rs:274-293 is not an equivalent removal oracle: its shell at :280 exits 125 on rm and returns the loop's fixed code for every other command, without changing state or asserting rm was invoked. Consequently removing the production rm call leaves its code=1 case passing and its code=0/125 cases refusing just as before. This is a source-level discrimination argument, not an executed mutation or reproduction. Ticket/inode tests at :222-269 use no engine and test a different invariant.\n\nThrough-tip checks so far: git log for containerized_sessions.rs and container.rs over the whole pinned range finds only the retirement change and 1ed482dde220452e424973faf38a5e1318986333, whose only later container.rs change is comment wording. Searches for legacy/retired container references, ContainerRuntime, remove_with_podman, old container names and container-launch fixtures identify this replacement, the focused tests, refusal tests and one pending-retry fence fixture still to inspect. e2e/tests/retired-container-sessions.spec.ts:1-4 expressly creates no Podman environment; :68-70 intercepts Delete with 409, so it proves UI dispatch/refusal rather than engine removal. New provider-backed environment removal is a different contract and route. No equivalent removal oracle has been found; finish checking the remaining fence-fixture search hit before closing the search premise.\n\nContract: SPEC_impl.md at reviewed :8652-8656 requires \"Retain only the legacy `podman rm -f` removal, confirmed-absence check and lock/ticket handling still required to serialize deletion with an already-started creator.\" SPEC.md:4819-4821 retains Delete and confirmed absence. Retirement of positive execution paths cannot refute this independently retained cleanup oracle. A focused stateful engine fixture requiring the correctly named rm to transition an existing object to absent, exercised through Delete, or a real legacy-object Delete fixture could restore the missing distinction without restoring retired creation APIs.\n\nSuggested bucket: other, loss of maintainer regression coverage. Confidence: confirmed source-level oracle weakness and deleted discriminating check; final alternative-fixture check pending. Could-be-highest: no for this finding; no shipped removal failure, security impact or loss-of-work route is established. Original potentially-highest old-isolation concern remains independently recorded under c1. Proposed_drop: false. Possible_cover: none known; supplied neighbor records contain no equivalent finding and prohibited coverage sources were not searched. Material caveats: current production still invokes rm and requires confirmed absence; production correctness does not supply the missing test oracle. No runtime tests, mutation tests or reproductions were run."
+          }
+        },
+        {
+          "line": 10,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "f1",
+            "state": "open",
+            "summary": "Legacy Delete loses its existing-container removal oracle",
+            "location": "crates/farhelm/tests/e2e/containerized_sessions.rs:215",
+            "detail": "Reviewed commit: 04d85f0c98a9b635709d00b056719a0baa7fd3fc; replacement search extends through pinned tip 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db.\n\n## TLDR\nThe remaining legacy Delete tests can pass if Delete stops attempting to remove containers and only handles objects that are already absent. The deleted tests distinguished that regression by deleting an existing Podman container. This is loss of a required cleanup regression check, not evidence that today's Delete fails.\n\n## Details\nPrecise removed oracle: at the reviewed commit's parent, containerized_sessions.rs:820-827 calls Stop, asserts the real container is exited, calls delete_session and asserts Podman container exists returns 1. Account and wrapper fixtures carry the same existing-object-to-absence oracle at parent :408-417 and :578-587; these assertions are in this group's assigned patch. The positive creation/execution paths may be retired, but Delete of old existing containers remains required. Correction to the caller's running-container premise: these successful Delete assertions act on an existing stopped container, not a still-running one. The removed failed_spec_retry_removes_its_predecessor_container helper removes a running predecessor through failed Create retry, a different operation removed by retirement. No old successful Delete-on-running oracle was demonstrated.\n\nThe replacement at reviewed containerized_sessions.rs:45-105 creates an ordinary session running true, changes its persisted launch to legacy JSON and restarts the supervisor; it creates no Podman container. :211-227 only deletes that row and verifies it disappears. Existing absence succeeds even when no removal is attempted. The retained focused fake-engine test at container.rs:274-293 does not replace the removal oracle: its shell at :280 exits 125 on rm and returns the loop's fixed code for every other command, without changing state or asserting rm was invoked. Consequently omitting the production rm call leaves its code=1 case passing and code=0/125 cases refusing just as before. This is source-level discrimination analysis, not an executed mutation or reproduction. Ticket/inode tests at :222-269 use no engine and test a separate invariant.\n\nThrough-tip alternative checks: git log over the whole pinned range for containerized_sessions.rs and container.rs finds only retirement and 1ed482dde220452e424973faf38a5e1318986333; that later container.rs patch changes one comment, so the replacement and focused tests remain as above. Searches across crates, browser tests and scripts for legacy/retired container references, ContainerRuntime::for_session, remove_with_podman, the old container name and container-launch fixtures found no equivalent existing-object removal assertion. The remaining pending-retry fixture at pinned-tip service/core.rs:27207-27322 seeds ticket/marker bytes and explicitly asserts no removal was dispatched; it is not a Delete fixture. The browser retirement test at e2e/tests/retired-container-sessions.spec.ts:1-4 expressly creates no Podman environment, and :68-70 intercepts Delete with 409. Its normal fixture cleanup cannot test legacy removal because retirement exists only in intercepted presentation. podman_environments.rs tests the new provider-backed environment's helm-side whole-environment deletion and does not exercise the legacy ContainerRuntime or ContainerConfig route. No equivalent removal oracle was found. All readily checkable replacement premises are settled for this bounded finding.\n\nContract: SPEC_impl.md at reviewed :8652-8656 requires \"Retain only the legacy `podman rm -f` removal, confirmed-absence check and lock/ticket handling still required to serialize deletion with an already-started creator.\" SPEC.md:4819-4821 retains Delete and confirmed absence. Retirement of positive execution paths cannot refute this independently retained cleanup oracle. A focused stateful engine fixture requiring correctly named rm to transition an existing object to absent, exercised through Delete, or a real legacy-object Delete fixture could restore the distinction without restoring retired creation APIs.\n\nSuggested bucket: other, loss of maintainer regression coverage. Confidence: confirmed by source, including through-tip replacement checks; no execution. Could-be-highest: no for this distinct finding; no shipped removal failure, security impact or user-work-loss route is established. The original potentially-highest old-isolation concern remains independently preserved under c1. Proposed_drop: false. Possible_cover: none known; supplied neighbor records contain no equivalent finding and prohibited coverage sources were not searched. Material caveats: current production still invokes rm and requires confirmed absence; production correctness does not provide the missing test oracle. No tests, builds, mutation tests, reproductions or live-install actions were run. No remaining open source lead for this ID."
+          }
+        }
+      ],
+      "latest": {
+        "line": 10,
+        "event": {
+          "version": 1,
+          "kind": "finding",
+          "id": "f1",
+          "state": "open",
+          "summary": "Legacy Delete loses its existing-container removal oracle",
+          "location": "crates/farhelm/tests/e2e/containerized_sessions.rs:215",
+          "detail": "Reviewed commit: 04d85f0c98a9b635709d00b056719a0baa7fd3fc; replacement search extends through pinned tip 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db.\n\n## TLDR\nThe remaining legacy Delete tests can pass if Delete stops attempting to remove containers and only handles objects that are already absent. The deleted tests distinguished that regression by deleting an existing Podman container. This is loss of a required cleanup regression check, not evidence that today's Delete fails.\n\n## Details\nPrecise removed oracle: at the reviewed commit's parent, containerized_sessions.rs:820-827 calls Stop, asserts the real container is exited, calls delete_session and asserts Podman container exists returns 1. Account and wrapper fixtures carry the same existing-object-to-absence oracle at parent :408-417 and :578-587; these assertions are in this group's assigned patch. The positive creation/execution paths may be retired, but Delete of old existing containers remains required. Correction to the caller's running-container premise: these successful Delete assertions act on an existing stopped container, not a still-running one. The removed failed_spec_retry_removes_its_predecessor_container helper removes a running predecessor through failed Create retry, a different operation removed by retirement. No old successful Delete-on-running oracle was demonstrated.\n\nThe replacement at reviewed containerized_sessions.rs:45-105 creates an ordinary session running true, changes its persisted launch to legacy JSON and restarts the supervisor; it creates no Podman container. :211-227 only deletes that row and verifies it disappears. Existing absence succeeds even when no removal is attempted. The retained focused fake-engine test at container.rs:274-293 does not replace the removal oracle: its shell at :280 exits 125 on rm and returns the loop's fixed code for every other command, without changing state or asserting rm was invoked. Consequently omitting the production rm call leaves its code=1 case passing and code=0/125 cases refusing just as before. This is source-level discrimination analysis, not an executed mutation or reproduction. Ticket/inode tests at :222-269 use no engine and test a separate invariant.\n\nThrough-tip alternative checks: git log over the whole pinned range for containerized_sessions.rs and container.rs finds only retirement and 1ed482dde220452e424973faf38a5e1318986333; that later container.rs patch changes one comment, so the replacement and focused tests remain as above. Searches across crates, browser tests and scripts for legacy/retired container references, ContainerRuntime::for_session, remove_with_podman, the old container name and container-launch fixtures found no equivalent existing-object removal assertion. The remaining pending-retry fixture at pinned-tip service/core.rs:27207-27322 seeds ticket/marker bytes and explicitly asserts no removal was dispatched; it is not a Delete fixture. The browser retirement test at e2e/tests/retired-container-sessions.spec.ts:1-4 expressly creates no Podman environment, and :68-70 intercepts Delete with 409. Its normal fixture cleanup cannot test legacy removal because retirement exists only in intercepted presentation. podman_environments.rs tests the new provider-backed environment's helm-side whole-environment deletion and does not exercise the legacy ContainerRuntime or ContainerConfig route. No equivalent removal oracle was found. All readily checkable replacement premises are settled for this bounded finding.\n\nContract: SPEC_impl.md at reviewed :8652-8656 requires \"Retain only the legacy `podman rm -f` removal, confirmed-absence check and lock/ticket handling still required to serialize deletion with an already-started creator.\" SPEC.md:4819-4821 retains Delete and confirmed absence. Retirement of positive execution paths cannot refute this independently retained cleanup oracle. A focused stateful engine fixture requiring correctly named rm to transition an existing object to absent, exercised through Delete, or a real legacy-object Delete fixture could restore the distinction without restoring retired creation APIs.\n\nSuggested bucket: other, loss of maintainer regression coverage. Confidence: confirmed by source, including through-tip replacement checks; no execution. Could-be-highest: no for this distinct finding; no shipped removal failure, security impact or user-work-loss route is established. The original potentially-highest old-isolation concern remains independently preserved under c1. Proposed_drop: false. Possible_cover: none known; supplied neighbor records contain no equivalent finding and prohibited coverage sources were not searched. Material caveats: current production still invokes rm and requires confirmed absence; production correctness does not provide the missing test oracle. No tests, builds, mutation tests, reproductions or live-install actions were run. No remaining open source lead for this ID."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g137/findings.jsonl",
+        "id": "f1",
+        "line": 10,
+        "disposition": "verified",
+        "group": "legacy-container-delete-existing-object-removal-oracle-lost",
+        "reason": "Parent explicitly accepted named retain-verified proposal from claims-087 after inspecting it. The removed tests distinguished deletion of an existing stopped container from absence-only handling. The replacement and focused fake-engine matrix cannot distinguish omission of rm. This is a maintainer regression-oracle gap, not a demonstrated product cleanup failure. Retain the narrow source-verified test-oracle defect as other. A stateful fake requiring correctly named rm to change existing to absent, or a real-object Delete test, could restore the distinction. No fix authorized. Checked source/results: [\"04d85f0c98a9b635709d00b056719a0baa7fd3fc^:crates/farhelm/tests/e2e/containerized_sessions.rs:820-827 stops the object, proves exited, deletes and requires Podman exists status 1. This proves an existing-stopped-object oracle, not Delete on a still-running container.\",\"04d85f0c98a9b635709d00b056719a0baa7fd3fc:containerized_sessions.rs:45-105 creates no container, and :211-227 only checks row disappearance. container.rs:274-293 returns a fixed exists result independent of rm; rm itself always exits 125, with no invocation assertion. Removing rm preserves all matrix expectations by source analysis.\",\"git log over the entire pinned range shows only 04d85f0c and 1ed482dd for these two files; the reviewed-revision-to-tip diff changes only one container.rs comment. The defective oracles remain through 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db.\",\"At pinned tip, service/core.rs:27207-27322 is a pending-retry refusal test requiring that removal was not dispatched. e2e/tests/retired-container-sessions.spec.ts:1-4 creates no old container and :68-70 intercepts Delete with 409. Targeted legacy/retired/ContainerRuntime/remove_with_podman searches found no equivalent existing-object removal test.\",\"Production container.rs:176-191 still invokes rm and checks absence, and service/teardown.rs:533-577 propagates cleanup failure. Correct production code does not replace the lost oracle. No test, mutation or reproduction was executed.\"] Current coverage/results: {\"SPEC.md\":\"Current :4892-4900 retains legacy Delete and confirmed absence; it does not accept losing its existing-object regression check.\",\"SPEC_impl.md\":\"Current :8312-8326 expressly retains podman rm -f and confirmed absence. Positive-path retirement is not coverage of this independent retained contract.\",\"TODO.md Planned\":\"Empty. Near-term agent-started Podman stopping at :68 onward concerns marked agent subprocesses, not this legacy Delete oracle.\",\"plans/queue\":\"podman-environments :284-295 and :453-468 require retirement/Delete and replacement tests, but the plan is landed per plans/REPORTS.md:21. No unlanded plan promising this exact oracle was found.\",\"BUGS.md\":\"No matching cleanup-oracle acceptance.\",\"INDEX.md and queue\":\"No exact existing-object Delete oracle item found. Read container-template-replacement-test-reuses-old-config.md: different template-apply oracle. Read mac-fixture-cleanup-stop-budget.md: different deadline defect. Neither covers this finding.\",\"TRIAGE_OUTCOMES.md\":\"No exact legacy Delete oracle decision found; archive not read.\",\"FILTER.md\":\"No filter covers persistent missing test discrimination; neither safe retry nor status-after-crash boundaries match.\"} Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"The initial lead described removal of a running container. Later source analysis corrected that to deletion of an existing stopped container; a running predecessor was removed only by the separately retired failed-Create retry path. The potentially highest isolation concern remains under g137/c1, not this test-only finding.\"; \"No current product removal failure, security impact or user-work-loss route established. Existing-running Delete coverage was not demonstrated by the deleted successful Delete assertions. A bounded alternative-test search found no replacement, but this consultation is not a new repository-wide inventory.\"."
+      },
+      "accepted_parent_decision": {
+        "key": "g137/f1",
+        "line": 10,
+        "disposition": "verified",
+        "group": "legacy-container-delete-existing-object-removal-oracle-lost",
+        "bucket": "other",
+        "recording": "retain-verified",
+        "queue_target_candidate": null,
+        "needs_independent_drop_check": false,
+        "reason": "Parent explicitly accepted named retain-verified proposal from claims-087 after inspecting it. The removed tests distinguished deletion of an existing stopped container from absence-only handling. The replacement and focused fake-engine matrix cannot distinguish omission of rm. This is a maintainer regression-oracle gap, not a demonstrated product cleanup failure. Retain the narrow source-verified test-oracle defect as other. A stateful fake requiring correctly named rm to change existing to absent, or a real-object Delete test, could restore the distinction. No fix authorized. Checked source/results: [\"04d85f0c98a9b635709d00b056719a0baa7fd3fc^:crates/farhelm/tests/e2e/containerized_sessions.rs:820-827 stops the object, proves exited, deletes and requires Podman exists status 1. This proves an existing-stopped-object oracle, not Delete on a still-running container.\",\"04d85f0c98a9b635709d00b056719a0baa7fd3fc:containerized_sessions.rs:45-105 creates no container, and :211-227 only checks row disappearance. container.rs:274-293 returns a fixed exists result independent of rm; rm itself always exits 125, with no invocation assertion. Removing rm preserves all matrix expectations by source analysis.\",\"git log over the entire pinned range shows only 04d85f0c and 1ed482dd for these two files; the reviewed-revision-to-tip diff changes only one container.rs comment. The defective oracles remain through 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db.\",\"At pinned tip, service/core.rs:27207-27322 is a pending-retry refusal test requiring that removal was not dispatched. e2e/tests/retired-container-sessions.spec.ts:1-4 creates no old container and :68-70 intercepts Delete with 409. Targeted legacy/retired/ContainerRuntime/remove_with_podman searches found no equivalent existing-object removal test.\",\"Production container.rs:176-191 still invokes rm and checks absence, and service/teardown.rs:533-577 propagates cleanup failure. Correct production code does not replace the lost oracle. No test, mutation or reproduction was executed.\"] Current coverage/results: {\"SPEC.md\":\"Current :4892-4900 retains legacy Delete and confirmed absence; it does not accept losing its existing-object regression check.\",\"SPEC_impl.md\":\"Current :8312-8326 expressly retains podman rm -f and confirmed absence. Positive-path retirement is not coverage of this independent retained contract.\",\"TODO.md Planned\":\"Empty. Near-term agent-started Podman stopping at :68 onward concerns marked agent subprocesses, not this legacy Delete oracle.\",\"plans/queue\":\"podman-environments :284-295 and :453-468 require retirement/Delete and replacement tests, but the plan is landed per plans/REPORTS.md:21. No unlanded plan promising this exact oracle was found.\",\"BUGS.md\":\"No matching cleanup-oracle acceptance.\",\"INDEX.md and queue\":\"No exact existing-object Delete oracle item found. Read container-template-replacement-test-reuses-old-config.md: different template-apply oracle. Read mac-fixture-cleanup-stop-budget.md: different deadline defect. Neither covers this finding.\",\"TRIAGE_OUTCOMES.md\":\"No exact legacy Delete oracle decision found; archive not read.\",\"FILTER.md\":\"No filter covers persistent missing test discrimination; neither safe retry nor status-after-crash boundaries match.\"} Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"The initial lead described removal of a running container. Later source analysis corrected that to deletion of an existing stopped container; a running predecessor was removed only by the separately retired failed-Create retry path. The potentially highest isolation concern remains under g137/c1, not this test-only finding.\"; \"No current product removal failure, security impact or user-work-loss route established. Existing-running Delete coverage was not demonstrated by the deleted successful Delete assertions. A bounded alternative-test search found no replacement, but this consultation is not a new repository-wide inventory.\"."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-087",
+          "key": "g137/f1",
+          "latest_line": 10,
+          "recommendation": "retain-verified",
+          "bucket": "other",
+          "underlying_key": "legacy-container-delete-existing-object-removal-oracle-lost",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The removed tests distinguished deletion of an existing stopped container from absence-only handling. The replacement and focused fake-engine matrix cannot distinguish omission of rm. This is a maintainer regression-oracle gap, not a demonstrated product cleanup failure.",
+          "checks": [
+            "04d85f0c98a9b635709d00b056719a0baa7fd3fc^:crates/farhelm/tests/e2e/containerized_sessions.rs:820-827 stops the object, proves exited, deletes and requires Podman exists status 1. This proves an existing-stopped-object oracle, not Delete on a still-running container.",
+            "04d85f0c98a9b635709d00b056719a0baa7fd3fc:containerized_sessions.rs:45-105 creates no container, and :211-227 only checks row disappearance. container.rs:274-293 returns a fixed exists result independent of rm; rm itself always exits 125, with no invocation assertion. Removing rm preserves all matrix expectations by source analysis.",
+            "git log over the entire pinned range shows only 04d85f0c and 1ed482dd for these two files; the reviewed-revision-to-tip diff changes only one container.rs comment. The defective oracles remain through 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db.",
+            "At pinned tip, service/core.rs:27207-27322 is a pending-retry refusal test requiring that removal was not dispatched. e2e/tests/retired-container-sessions.spec.ts:1-4 creates no old container and :68-70 intercepts Delete with 409. Targeted legacy/retired/ContainerRuntime/remove_with_podman searches found no equivalent existing-object removal test.",
+            "Production container.rs:176-191 still invokes rm and checks absence, and service/teardown.rs:533-577 propagates cleanup failure. Correct production code does not replace the lost oracle. No test, mutation or reproduction was executed."
+          ],
+          "coverage_checked": {
+            "SPEC.md": "Current :4892-4900 retains legacy Delete and confirmed absence; it does not accept losing its existing-object regression check.",
+            "SPEC_impl.md": "Current :8312-8326 expressly retains podman rm -f and confirmed absence. Positive-path retirement is not coverage of this independent retained contract.",
+            "TODO.md Planned": "Empty. Near-term agent-started Podman stopping at :68 onward concerns marked agent subprocesses, not this legacy Delete oracle.",
+            "plans/queue": "podman-environments :284-295 and :453-468 require retirement/Delete and replacement tests, but the plan is landed per plans/REPORTS.md:21. No unlanded plan promising this exact oracle was found.",
+            "BUGS.md": "No matching cleanup-oracle acceptance.",
+            "INDEX.md and queue": "No exact existing-object Delete oracle item found. Read container-template-replacement-test-reuses-old-config.md: different template-apply oracle. Read mac-fixture-cleanup-stop-budget.md: different deadline defect. Neither covers this finding.",
+            "TRIAGE_OUTCOMES.md": "No exact legacy Delete oracle decision found; archive not read.",
+            "FILTER.md": "No filter covers persistent missing test discrimination; neither safe retry nor status-after-crash boundaries match."
+          },
+          "exact_cover_quotes": [],
+          "missing_premise": "No current product removal failure, security impact or user-work-loss route established. Existing-running Delete coverage was not demonstrated by the deleted successful Delete assertions. A bounded alternative-test search found no replacement, but this consultation is not a new repository-wide inventory.",
+          "original_stronger_consequence": "The initial lead described removal of a running container. Later source analysis corrected that to deletion of an existing stopped container; a running predecessor was removed only by the separately retired failed-Create retry path. The potentially highest isolation concern remains under g137/c1, not this test-only finding.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Retain the narrow source-verified test-oracle defect as other. A stateful fake requiring correctly named rm to change existing to absent, or a real-object Delete test, could restore the distinction. No fix authorized."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": true,
+        "clearly_refuted_candidate": false,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Source-confirmed by an existing parent decision; not runtime reproduced",
+        "deduplication_key": "legacy-container-delete-existing-object-removal-oracle-lost",
+        "destination": "trailing-legacy-container-delete-existing-object-removal-oracle-lost.md"
+      }
+    },
+    {
+      "key": "g137/c4",
+      "owner": "g137",
+      "id": "c4",
+      "domain": "rust-session-agent-regressions",
+      "purpose": "rust-session-agent-regressions: crates/farhelm/tests/e2e/containerized_sessions.rs, crates/farhelm/tests/e2e/launch_sentinel_error_status.rs, crates/farhelm/tests/e2e/boot_id_durable_outcome.rs, crates/farhelm/tests/e2e/codex_identity.rs; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 11,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c4",
+            "state": "open",
+            "summary": "The legacy fixture's stored-launch rewrite is not overwritten by outcome confirmation",
+            "location": "crates/farhelm/tests/e2e/containerized_sessions.rs:74",
+            "detail": "Reviewed commit: 04d85f0c98a9b635709d00b056719a0baa7fd3fc\n\n## TLDR\nConsidered whether the fixture's direct database rewrite races the ordinary session's fast exit or launch confirmation and gets replaced by the original non-container launch. The inspected write paths update outcome and terminal coordinates separately; they do not overwrite the seeded launch. No setup race was established.\n\n## Details\ncontainerized_sessions.rs:45-105 first creates an ordinary true launch, writes historical session_launch JSON through a separate SQLite connection, then drains/restarts the supervisor and explicitly asserts the decoded old launch was loaded. Checked the enum's internal kind tag in farhelm-proto/src/session_launch.rs:70-71 and launch-write references in store.rs. Outcome transition/confirmation SQL at store.rs:5099-5161 updates terminal_address and outcome/exit/annotation/error columns, not session_launch, so a fast exit does not replace the seed. The production direct launch update at store.rs:5216-5247 is explicitly Restart-with-only, generation-fenced, with its sole service caller at service/core.rs:13631; the fixture does not request Restart with during its setup. Schema conversion writes occur while opening the database before the fixture obtains its created row, rather than asynchronously overwriting this later seed. The restart's equality assertion also rejects a lost rewrite instead of silently exercising an active row.\n\nSuggested bucket: other if a fixture-race defect were established. Confidence: source refutation; no execution. Could-be-highest: no; the considered consequence is a flaky or invalid maintainer fixture, not shipped user-work loss or a security route. Proposed_drop: inspected confirmation/outcome writes do not touch the seeded launch, no concurrent Restart-with caller exists in this fixture, and the reloaded-value assertion establishes the required premise. No parent drop accepted. Possible_cover: none known; prohibited coverage sources not searched. Caveats: this does not certify every arbitrary direct database mutation and makes no runtime flake claim. This candidate is separate from f1's established removal-oracle gap and from c1's potentially-highest isolation concern. No open lead remains for this consideration."
+          }
+        }
+      ],
+      "latest": {
+        "line": 11,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c4",
+          "state": "open",
+          "summary": "The legacy fixture's stored-launch rewrite is not overwritten by outcome confirmation",
+          "location": "crates/farhelm/tests/e2e/containerized_sessions.rs:74",
+          "detail": "Reviewed commit: 04d85f0c98a9b635709d00b056719a0baa7fd3fc\n\n## TLDR\nConsidered whether the fixture's direct database rewrite races the ordinary session's fast exit or launch confirmation and gets replaced by the original non-container launch. The inspected write paths update outcome and terminal coordinates separately; they do not overwrite the seeded launch. No setup race was established.\n\n## Details\ncontainerized_sessions.rs:45-105 first creates an ordinary true launch, writes historical session_launch JSON through a separate SQLite connection, then drains/restarts the supervisor and explicitly asserts the decoded old launch was loaded. Checked the enum's internal kind tag in farhelm-proto/src/session_launch.rs:70-71 and launch-write references in store.rs. Outcome transition/confirmation SQL at store.rs:5099-5161 updates terminal_address and outcome/exit/annotation/error columns, not session_launch, so a fast exit does not replace the seed. The production direct launch update at store.rs:5216-5247 is explicitly Restart-with-only, generation-fenced, with its sole service caller at service/core.rs:13631; the fixture does not request Restart with during its setup. Schema conversion writes occur while opening the database before the fixture obtains its created row, rather than asynchronously overwriting this later seed. The restart's equality assertion also rejects a lost rewrite instead of silently exercising an active row.\n\nSuggested bucket: other if a fixture-race defect were established. Confidence: source refutation; no execution. Could-be-highest: no; the considered consequence is a flaky or invalid maintainer fixture, not shipped user-work loss or a security route. Proposed_drop: inspected confirmation/outcome writes do not touch the seeded launch, no concurrent Restart-with caller exists in this fixture, and the reloaded-value assertion establishes the required premise. No parent drop accepted. Possible_cover: none known; prohibited coverage sources not searched. Caveats: this does not certify every arbitrary direct database mutation and makes no runtime flake claim. This candidate is separate from f1's established removal-oracle gap and from c1's potentially-highest isolation concern. No open lead remains for this consideration."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g137/findings.jsonl",
+        "id": "c4",
+        "line": 11,
+        "disposition": "excluded",
+        "group": "legacy-fixture-launch-rewrite-not-clobbered-by-outcome",
+        "reason": "Parent explicitly accepted named refuted proposal from claims-087 after inspecting it. The inspected outcome/confirmation writes do not overwrite session_launch, and the fixture checks that its rewritten launch loaded after restart. The named outcome write path does not modify the seeded column and the restart assertion witnesses the premise. Checked source/results: [\"04d85f0c98a9b635709d00b056719a0baa7fd3fc:crates/farhelm/tests/e2e/containerized_sessions.rs:45-105 writes the stored old launch then restarts and asserts exact equality.\",\"At that revision store.rs:5099-5161 writes terminal_address and outcome columns only. store.rs:5216-5247 documents and implements the generation-fenced Restart-with-only launch update; this fixture requests no Restart with.\",\"The reloaded-value assertion fails if the seed is lost; it does not silently proceed against an ordinary row. No source-supported race from the ordinary session's fast exit was established.\"] Current coverage/results: {\"SPEC.md\":\"Retired containerized sessions requires readable old configuration, not acceptance of fixture races.\",\"SPEC_impl.md\":\"Rootless Podman sessions preserves stored decoding; no fixture-race waiver found.\",\"TODO.md Planned\":\"Empty; no coverage.\",\"plans/queue\":\"No matching stored-launch fixture-clobber work found; retirement plan landed per plans/REPORTS.md:21.\",\"BUGS.md\":\"No matching fixture mutation race.\",\"INDEX.md and queue\":\"No exact containerized_sessions rewrite/outcome item found. Template configuration replacement item is a different trigger and assertion.\",\"TRIAGE_OUTCOMES.md\":\"No matching decision found; archive not read.\",\"FILTER.md\":\"No filter used; source refutation is the basis.\"} Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"A setup race might invalidate or flake the maintainer fixture. No security or shipped user-owned-work consequence was claimed; f1's Delete oracle remains separate.\"; \"No runtime flake measurement and no certification of arbitrary direct database mutation patterns.\"."
+      },
+      "accepted_parent_decision": {
+        "key": "g137/c4",
+        "line": 11,
+        "disposition": "excluded",
+        "group": "legacy-fixture-launch-rewrite-not-clobbered-by-outcome",
+        "bucket": "other",
+        "recording": "refuted",
+        "queue_target_candidate": null,
+        "needs_independent_drop_check": false,
+        "reason": "Parent explicitly accepted named refuted proposal from claims-087 after inspecting it. The inspected outcome/confirmation writes do not overwrite session_launch, and the fixture checks that its rewritten launch loaded after restart. The named outcome write path does not modify the seeded column and the restart assertion witnesses the premise. Checked source/results: [\"04d85f0c98a9b635709d00b056719a0baa7fd3fc:crates/farhelm/tests/e2e/containerized_sessions.rs:45-105 writes the stored old launch then restarts and asserts exact equality.\",\"At that revision store.rs:5099-5161 writes terminal_address and outcome columns only. store.rs:5216-5247 documents and implements the generation-fenced Restart-with-only launch update; this fixture requests no Restart with.\",\"The reloaded-value assertion fails if the seed is lost; it does not silently proceed against an ordinary row. No source-supported race from the ordinary session's fast exit was established.\"] Current coverage/results: {\"SPEC.md\":\"Retired containerized sessions requires readable old configuration, not acceptance of fixture races.\",\"SPEC_impl.md\":\"Rootless Podman sessions preserves stored decoding; no fixture-race waiver found.\",\"TODO.md Planned\":\"Empty; no coverage.\",\"plans/queue\":\"No matching stored-launch fixture-clobber work found; retirement plan landed per plans/REPORTS.md:21.\",\"BUGS.md\":\"No matching fixture mutation race.\",\"INDEX.md and queue\":\"No exact containerized_sessions rewrite/outcome item found. Template configuration replacement item is a different trigger and assertion.\",\"TRIAGE_OUTCOMES.md\":\"No matching decision found; archive not read.\",\"FILTER.md\":\"No filter used; source refutation is the basis.\"} Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"A setup race might invalidate or flake the maintainer fixture. No security or shipped user-owned-work consequence was claimed; f1's Delete oracle remains separate.\"; \"No runtime flake measurement and no certification of arbitrary direct database mutation patterns.\"."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-087",
+          "key": "g137/c4",
+          "latest_line": 11,
+          "recommendation": "refuted",
+          "bucket": "other",
+          "underlying_key": "legacy-fixture-launch-rewrite-not-clobbered-by-outcome",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The inspected outcome/confirmation writes do not overwrite session_launch, and the fixture checks that its rewritten launch loaded after restart.",
+          "checks": [
+            "04d85f0c98a9b635709d00b056719a0baa7fd3fc:crates/farhelm/tests/e2e/containerized_sessions.rs:45-105 writes the stored old launch then restarts and asserts exact equality.",
+            "At that revision store.rs:5099-5161 writes terminal_address and outcome columns only. store.rs:5216-5247 documents and implements the generation-fenced Restart-with-only launch update; this fixture requests no Restart with.",
+            "The reloaded-value assertion fails if the seed is lost; it does not silently proceed against an ordinary row. No source-supported race from the ordinary session's fast exit was established."
+          ],
+          "coverage_checked": {
+            "SPEC.md": "Retired containerized sessions requires readable old configuration, not acceptance of fixture races.",
+            "SPEC_impl.md": "Rootless Podman sessions preserves stored decoding; no fixture-race waiver found.",
+            "TODO.md Planned": "Empty; no coverage.",
+            "plans/queue": "No matching stored-launch fixture-clobber work found; retirement plan landed per plans/REPORTS.md:21.",
+            "BUGS.md": "No matching fixture mutation race.",
+            "INDEX.md and queue": "No exact containerized_sessions rewrite/outcome item found. Template configuration replacement item is a different trigger and assertion.",
+            "TRIAGE_OUTCOMES.md": "No matching decision found; archive not read.",
+            "FILTER.md": "No filter used; source refutation is the basis."
+          },
+          "exact_cover_quotes": [],
+          "missing_premise": "No runtime flake measurement and no certification of arbitrary direct database mutation patterns.",
+          "original_stronger_consequence": "A setup race might invalidate or flake the maintainer fixture. No security or shipped user-owned-work consequence was claimed; f1's Delete oracle remains separate.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "The named outcome write path does not modify the seeded column and the restart assertion witnesses the premise."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "legacy-fixture-launch-rewrite-not-clobbered-by-outcome",
+        "destination": null
+      }
+    }
+  ],
+  "replies": [
+    {
+      "turn": 1,
+      "reply": "Initial pass complete. Reviewed all 1,620 assigned patch lines at their pinned revisions.\n\nNo substantive findings established. Logged candidates c1–c3 with disposition evidence; c1 needs the caller’s independent specification check. No open leads or unread assigned scope.\n\nFindings log and progress updated. No tests or reproductions run."
+    },
+    {
+      "turn": 2,
+      "reply": "Revised c1–c3 under their original IDs:\n\n- c1 preserves the potentially highest isolation concern and narrows retirement acceptance; running-container removal coverage remains unproven.\n- c2 verifies cleanup ownership through the actual `TestDir` implementation.\n- c3 confirms no concurrent ticker and `Gone` publication before the end receipt.\n\nNo new findings. Unresolved lead IDs: none. No drops accepted."
+    },
+    {
+      "turn": 3,
+      "reply": "Discovery found one new source-confirmed finding: **f1**, loss of the test that verifies Delete removes an existing legacy container.\n\nChecked deleted assertions, retained fake-engine tests, browser fixtures and replacements through the pinned tip. The old Delete oracle used a stopped container; no equivalent remains.\n\nNew verified IDs: f1. New unverified IDs: none. Open leads: none. No runtime execution."
+    },
+    {
+      "turn": 4,
+      "reply": "Discovery pass 2 found no new reportable issue.\n\nChecked fixture database writes, launch-update callers, sentinel finalization, boot-helper equivalence and Codex outage lifetimes. Logged the source-refuted setup-race concern as c4.\n\nNew verified finding IDs: none. New unverified IDs: none. Open leads: none. No execution performed."
+    }
+  ],
+  "progress": "Group: g137, rust-session-agent-regressions.\nState: discovery pass 2 complete; turn type discovery, turn count 4, discovery-pass count 2. Result: no new finding. A source-refuted setup-race consideration is recorded as candidate c4. Await caller-directed next action.\nCoverage: all original 1,620 mandatory patch lines remain delivered and audited, with no assigned unread scope. This turn read refreshed discovery-neighbours.json completely (128 lines, 36,293 bytes), in two bounded reads. Neighbor records are context/novelty input only. Earlier durable records remain retained; no parent drop or lowering accepted.\nChecks made this pass: rechecked exact assigned fixture setup and observation boundaries beyond f1/c1; traced the legacy fixture's direct session_launch rewrite against ordinary launch/outcome SQL, the production generation-fenced update_launch method and its actual Restart-with caller; searched insert/replacement statements as a cross-check against a whole-row overwrite. Outcome confirmation updates terminal coordinates and outcomes, not the historical launch seed; the sole direct production launch-update caller is conditional on an explicit published Restart-with bundle, which this setup does not request. The fixture verifies the decoded launch after supervisor restart. Checked the sentinel runtime's finalization and process-end wait: finalization settles pending input receipts rather than consuming launch artifacts or writing a session outcome. Compared the boot helper against its parent: the default path keeps the same boot-id injection and default seams after the helper is inlined. Rechecked the Codex outage tail retains state through report-slot and restored-capture assertions.\nRecords this pass: appended c4 immediately upon deciding the proposed seed-overwrite race was refuted by source. No revision to f1 was needed. Parent independently corroborates f1's narrow existing-stopped-object removal-oracle loss; current production still removes, and no successful old Delete-on-running oracle is claimed. That confirmation is not a drop, lowering or runtime observation.\nNew verified finding IDs: none. New unverified-after-investigation IDs: none. New candidate IDs: c4. Remaining open lead IDs: none. Explicit discovery result: nothing new reportable found.\nInterface synthesis: refreshed g138/c4 concerns a real-vendor /new oracle outside this assignment; refreshed g139-c2 concerns upload survival across refused Delete, also outside this assignment. g143-l4 is a distinct alternate-screen documentation issue. Existing g144 ownership concern involves explicit old-tmux guards, unlike the assigned default host fixtures. No neighboring record supplies a new concrete route into an assigned change, so this pass did not broaden scope to investigate those records.\nExecution: source-only. No runtime tests, builds, reproductions, mutation tests or live-install actions. No checkout changes or prohibited coverage searches. No separate report file written.\nNext: caller-directed synthesis or delivery. Preserve f1 and prior candidates with their original consequences and proposed-drop bases; no uninvestigated source lead remains from this pass.\n"
+}

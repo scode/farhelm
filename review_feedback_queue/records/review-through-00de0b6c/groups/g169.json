@@ -1,0 +1,740 @@
+{
+  "group": {
+    "id": "g169",
+    "domain": "retired-supervisor-tmux",
+    "purpose": "retired-supervisor-tmux: crates/farhelm-supervisor/src/tmux/sink.rs, crates/farhelm-supervisor/src/tmux/test_support.rs, crates/farhelm-supervisor/src/tmux.rs; phases complete small per-commit changes",
+    "interfaces": [
+      "g001",
+      "g006",
+      "g007",
+      "g008",
+      "g009",
+      "g012",
+      "g071",
+      "g072",
+      "g073",
+      "g097",
+      "g098",
+      "g099",
+      "g100",
+      "g101",
+      "g102",
+      "g103",
+      "g104",
+      "g105",
+      "g106",
+      "g107",
+      "g108",
+      "g109",
+      "g110",
+      "g111",
+      "g112",
+      "g113",
+      "g114",
+      "g115",
+      "g116",
+      "g117",
+      "g118",
+      "g119",
+      "g120",
+      "g121",
+      "g127",
+      "g128",
+      "g129",
+      "g130",
+      "g131",
+      "g132",
+      "g133",
+      "g134",
+      "g144",
+      "g145",
+      "g146",
+      "g149",
+      "g150",
+      "g151",
+      "g152",
+      "g153",
+      "g154",
+      "g155",
+      "g156",
+      "g157",
+      "g158",
+      "g159",
+      "g160",
+      "g161",
+      "g162",
+      "g163",
+      "g164",
+      "g165",
+      "g166",
+      "g168",
+      "g170",
+      "g173"
+    ],
+    "sources": [
+      {
+        "path": "[private-run]/prep/parts/00956-000.patch",
+        "ranges": [
+          [
+            1,
+            513
+          ]
+        ],
+        "original_path": "crates/farhelm-supervisor/src/tmux/sink.rs",
+        "commit": "1ed482dde220452e424973faf38a5e1318986333",
+        "notes": "patch header; patch character offsets [0,23331)",
+        "lines": 513,
+        "bytes": 23367,
+        "start": 0,
+        "end": 23331,
+        "original": "[private-run]/prep/originals/00956.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/00958-000.patch",
+        "ranges": [
+          [
+            1,
+            373
+          ]
+        ],
+        "original_path": "crates/farhelm-supervisor/src/tmux/test_support.rs",
+        "commit": "1ed482dde220452e424973faf38a5e1318986333",
+        "notes": "patch header; patch character offsets [0,17366)",
+        "lines": 373,
+        "bytes": 17396,
+        "start": 0,
+        "end": 17366,
+        "original": "[private-run]/prep/originals/00958.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/01281-000.patch",
+        "ranges": [
+          [
+            1,
+            327
+          ]
+        ],
+        "original_path": "crates/farhelm-supervisor/src/tmux.rs",
+        "commit": "500548b9253b07a26fd03119679184b69544e31d",
+        "notes": "patch header; patch character offsets [0,15442)",
+        "lines": 327,
+        "bytes": 15470,
+        "start": 0,
+        "end": 15442,
+        "original": "[private-run]/prep/originals/01281.patch"
+      }
+    ],
+    "lines": 1213,
+    "bytes": 56233
+  },
+  "records": [
+    {
+      "key": "g169/c1",
+      "owner": "g169",
+      "id": "c1",
+      "domain": "retired-supervisor-tmux",
+      "purpose": "retired-supervisor-tmux: crates/farhelm-supervisor/src/tmux/sink.rs, crates/farhelm-supervisor/src/tmux/test_support.rs, crates/farhelm-supervisor/src/tmux.rs; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 1,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c1",
+            "state": "open",
+            "summary": "Sink removal does not leave an active filtered tmux client",
+            "location": "crates/farhelm-supervisor/src/tmux/sink.rs:1 (deleted)",
+            "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. TLDR: Considered whether removing the always-drained sink could leave unattended terminals blocked on output. Details: The deleted sink.rs:96-150 describes its dependency on per-terminal tmux clients filtering foreign panes. A revision-wide git grep across supervisor, helm, and UI source for SessionSink, open_session_sink, silence_pane_args, OutputStream, and TmuxDriver found no surviving implementation or call; the only OutputStream hit is an obsolete explanatory comment in service/connection.rs:986. The remaining tmux.rs is installation/version probing, not a pane driver. SPEC_impl.md, Terminal host, at this revision states: 'every terminal the supervisor serves is a host.' SPEC.md, Terminal experience, states that in a new terminal no viewer slows the agent. Suggested bucket if the suspected stall existed: high/material UX. Confidence: confirmed source refutation for the sink dependency; no execution observed. proposed_drop: source refutes the necessary surviving filtered-client premise. possible_cover: none. Could-be-highest: false for this output-stall concern; deliberate termination of legacy terminals is a separate retirement-contract check. This does not independently certify the complete host output implementation, which belongs to neighboring assigned groups."
+          }
+        },
+        {
+          "line": 8,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c1",
+            "state": "open",
+            "summary": "Sink removal does not leave an active filtered tmux client",
+            "location": "crates/farhelm-supervisor/src/tmux/sink.rs:1 (deleted)",
+            "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. TLDR (original consequence preserved): Considered whether removing the always-drained sink could leave unattended terminals blocked on output. Details: Deleted sink.rs:96-150 depends on per-terminal tmux clients filtering foreign panes. Initial pinned searches found no surviving SessionSink/open_session_sink/silence_pane_args/TmuxDriver implementation or caller; the lone OutputStream reference is an obsolete comment in service/connection.rs:986. Synthesis checked the actual replacement mechanism, not just names: terminal-host/src/host.rs:307-350 polls and reads each open PTY irrespective of whether a client exists or its socket can take output; :505-543 pushes read bytes into the bounded journal; :628-652 fills only the client queue to its high-water mark; :658-700 returns on a full nonblocking socket without disabling PTY reads. Every host owns one PTY, so the removed shared-server foreign-pane filter has no replacement dependency on a session sink. Governing terminal-host/SPEC.md Journal and Reading sections :170-254 were read in full; exact contract: 'The host never blocks on a slow client. It writes as much as the socket accepts and keeps the rest in the journal; a client that falls behind far enough to have its next records trimmed receives the gap and continues after it.' SPEC_impl.md Terminal host states 'every terminal the supervisor serves is a host.' Existing grid_stream/tests.rs:472-548 explicitly asserts output processing while the viewer is paused or its writer queue is full, then checks every expected history line, but these are source assertions, not executions observed in this review. Suggested bucket for the original suspected stall: high/material UX. Confidence: confirmed source refutation of the removed sink's necessary dependency. proposed_drop: no filtered tmux client remains, and replacement PTY reads are independent of output-consumer readiness. This is a proposal only; no drop accepted yet. possible_cover: none. Could-be-highest: false for the output-stall concern as originally stated; deliberate loss of legacy processes/screens is separately preserved in f1. Caveat: the bounded journal can lose output under its separately specified gap contract; this record does not excuse a distinct host journal bug, nor claim comprehensive review of the host runtime."
+          }
+        }
+      ],
+      "latest": {
+        "line": 8,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c1",
+          "state": "open",
+          "summary": "Sink removal does not leave an active filtered tmux client",
+          "location": "crates/farhelm-supervisor/src/tmux/sink.rs:1 (deleted)",
+          "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. TLDR (original consequence preserved): Considered whether removing the always-drained sink could leave unattended terminals blocked on output. Details: Deleted sink.rs:96-150 depends on per-terminal tmux clients filtering foreign panes. Initial pinned searches found no surviving SessionSink/open_session_sink/silence_pane_args/TmuxDriver implementation or caller; the lone OutputStream reference is an obsolete comment in service/connection.rs:986. Synthesis checked the actual replacement mechanism, not just names: terminal-host/src/host.rs:307-350 polls and reads each open PTY irrespective of whether a client exists or its socket can take output; :505-543 pushes read bytes into the bounded journal; :628-652 fills only the client queue to its high-water mark; :658-700 returns on a full nonblocking socket without disabling PTY reads. Every host owns one PTY, so the removed shared-server foreign-pane filter has no replacement dependency on a session sink. Governing terminal-host/SPEC.md Journal and Reading sections :170-254 were read in full; exact contract: 'The host never blocks on a slow client. It writes as much as the socket accepts and keeps the rest in the journal; a client that falls behind far enough to have its next records trimmed receives the gap and continues after it.' SPEC_impl.md Terminal host states 'every terminal the supervisor serves is a host.' Existing grid_stream/tests.rs:472-548 explicitly asserts output processing while the viewer is paused or its writer queue is full, then checks every expected history line, but these are source assertions, not executions observed in this review. Suggested bucket for the original suspected stall: high/material UX. Confidence: confirmed source refutation of the removed sink's necessary dependency. proposed_drop: no filtered tmux client remains, and replacement PTY reads are independent of output-consumer readiness. This is a proposal only; no drop accepted yet. possible_cover: none. Could-be-highest: false for the output-stall concern as originally stated; deliberate loss of legacy processes/screens is separately preserved in f1. Caveat: the bounded journal can lose output under its separately specified gap contract; this record does not excuse a distinct host journal bug, nor claim comprehensive review of the host runtime."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g169/findings.jsonl",
+        "id": "c1",
+        "line": 8,
+        "disposition": "excluded",
+        "group": "retired-tmux-session-sink-unattended-output-stall",
+        "reason": "Parent explicitly accepted named refuted proposal from claims-106 after inspecting it. No filtered tmux client remains to need the deleted sink. The host polls its PTY independently of client readiness and stops filling only the client's outgoing queue when it is full. Source refutation of the deleted-sink dependency. Bounded journal gaps are a separate contract, and no broad host-runtime correctness verdict is made. Checked source/results: [\"At 1ed482dde220452e424973faf38a5e1318986333, pinned grep found no SessionSink/open_session_sink/silence_pane_args/TmuxDriver consumer.\",\"Read terminal-host/src/host.rs:307-350,505-543,628-700: an open PTY is always polled for input; read bytes enter the journal; refill stops at the client's high-water mark and a WouldBlock socket write returns without disabling PTY reads.\",\"Read terminal-host/SPEC.md:170-254 in full: output retention is capped by journal trimming/snapshot policy, and slow clients cannot block the host.\",\"Read grid_stream/tests.rs:485-548: output is explicitly processed while the viewer is paused or queue full, then exact complete history is checked. These are source assertions only, not observed passes or comprehensive host-socket test coverage.\"] Current coverage/results: {\"SPEC.md\":\"Terminal experience says no viewer slows the agent; stalled output is not accepted.\",\"SPEC_impl.md\":\"Terminal host says every terminal served is a host. This removes the deleted sink's premise rather than accepting a stall.\",\"TODO.md Planned\":\"Empty; no cover.\",\"plans/queue\":\"No unlanded exact unattended-output/sink repair; tmux plans are landed.\",\"BUGS.md\":\"No matching item.\",\"INDEX.md and matching queue files\":\"Read stopped-reader-output-witness.md: it concerns browser flood overlap, not PTY draining or the retired sink. No alias. Other receipt/history items have different roots.\",\"TRIAGE_OUTCOMES.md\":\"No exact decision.\",\"FILTER.md\":\"No filter used.\"} Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Removing the always-drained sink could leave unattended terminals blocked on output. Suggested high for material UX; no established highest route. Deliberate legacy process/screen loss is preserved separately in g169/f1.\"; \"The removed sink's surviving all-clients-filter-foreign-pane mechanism is absent.\"."
+      },
+      "accepted_parent_decision": {
+        "key": "g169/c1",
+        "line": 8,
+        "disposition": "excluded",
+        "group": "retired-tmux-session-sink-unattended-output-stall",
+        "bucket": "high",
+        "recording": "refuted",
+        "queue_target_candidate": null,
+        "needs_independent_drop_check": false,
+        "reason": "Parent explicitly accepted named refuted proposal from claims-106 after inspecting it. No filtered tmux client remains to need the deleted sink. The host polls its PTY independently of client readiness and stops filling only the client's outgoing queue when it is full. Source refutation of the deleted-sink dependency. Bounded journal gaps are a separate contract, and no broad host-runtime correctness verdict is made. Checked source/results: [\"At 1ed482dde220452e424973faf38a5e1318986333, pinned grep found no SessionSink/open_session_sink/silence_pane_args/TmuxDriver consumer.\",\"Read terminal-host/src/host.rs:307-350,505-543,628-700: an open PTY is always polled for input; read bytes enter the journal; refill stops at the client's high-water mark and a WouldBlock socket write returns without disabling PTY reads.\",\"Read terminal-host/SPEC.md:170-254 in full: output retention is capped by journal trimming/snapshot policy, and slow clients cannot block the host.\",\"Read grid_stream/tests.rs:485-548: output is explicitly processed while the viewer is paused or queue full, then exact complete history is checked. These are source assertions only, not observed passes or comprehensive host-socket test coverage.\"] Current coverage/results: {\"SPEC.md\":\"Terminal experience says no viewer slows the agent; stalled output is not accepted.\",\"SPEC_impl.md\":\"Terminal host says every terminal served is a host. This removes the deleted sink's premise rather than accepting a stall.\",\"TODO.md Planned\":\"Empty; no cover.\",\"plans/queue\":\"No unlanded exact unattended-output/sink repair; tmux plans are landed.\",\"BUGS.md\":\"No matching item.\",\"INDEX.md and matching queue files\":\"Read stopped-reader-output-witness.md: it concerns browser flood overlap, not PTY draining or the retired sink. No alias. Other receipt/history items have different roots.\",\"TRIAGE_OUTCOMES.md\":\"No exact decision.\",\"FILTER.md\":\"No filter used.\"} Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Removing the always-drained sink could leave unattended terminals blocked on output. Suggested high for material UX; no established highest route. Deliberate legacy process/screen loss is preserved separately in g169/f1.\"; \"The removed sink's surviving all-clients-filter-foreign-pane mechanism is absent.\"."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-106",
+          "key": "g169/c1",
+          "latest_line": 8,
+          "recommendation": "refuted",
+          "bucket": "high",
+          "underlying_key": "retired-tmux-session-sink-unattended-output-stall",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "No filtered tmux client remains to need the deleted sink. The host polls its PTY independently of client readiness and stops filling only the client's outgoing queue when it is full.",
+          "checks": [
+            "At 1ed482dde220452e424973faf38a5e1318986333, pinned grep found no SessionSink/open_session_sink/silence_pane_args/TmuxDriver consumer.",
+            "Read terminal-host/src/host.rs:307-350,505-543,628-700: an open PTY is always polled for input; read bytes enter the journal; refill stops at the client's high-water mark and a WouldBlock socket write returns without disabling PTY reads.",
+            "Read terminal-host/SPEC.md:170-254 in full: output retention is capped by journal trimming/snapshot policy, and slow clients cannot block the host.",
+            "Read grid_stream/tests.rs:485-548: output is explicitly processed while the viewer is paused or queue full, then exact complete history is checked. These are source assertions only, not observed passes or comprehensive host-socket test coverage."
+          ],
+          "coverage_checked": {
+            "SPEC.md": "Terminal experience says no viewer slows the agent; stalled output is not accepted.",
+            "SPEC_impl.md": "Terminal host says every terminal served is a host. This removes the deleted sink's premise rather than accepting a stall.",
+            "TODO.md Planned": "Empty; no cover.",
+            "plans/queue": "No unlanded exact unattended-output/sink repair; tmux plans are landed.",
+            "BUGS.md": "No matching item.",
+            "INDEX.md and matching queue files": "Read stopped-reader-output-witness.md: it concerns browser flood overlap, not PTY draining or the retired sink. No alias. Other receipt/history items have different roots.",
+            "TRIAGE_OUTCOMES.md": "No exact decision.",
+            "FILTER.md": "No filter used."
+          },
+          "exact_cover_quotes": [],
+          "missing_premise": "The removed sink's surviving all-clients-filter-foreign-pane mechanism is absent.",
+          "original_stronger_consequence": "Removing the always-drained sink could leave unattended terminals blocked on output. Suggested high for material UX; no established highest route. Deliberate legacy process/screen loss is preserved separately in g169/f1.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Source refutation of the deleted-sink dependency. Bounded journal gaps are a separate contract, and no broad host-runtime correctness verdict is made."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "high",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "retired-tmux-session-sink-unattended-output-stall",
+        "destination": null
+      }
+    },
+    {
+      "key": "g169/c2",
+      "owner": "g169",
+      "id": "c2",
+      "domain": "retired-supervisor-tmux",
+      "purpose": "retired-supervisor-tmux: crates/farhelm-supervisor/src/tmux/sink.rs, crates/farhelm-supervisor/src/tmux/test_support.rs, crates/farhelm-supervisor/src/tmux.rs; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 2,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c2",
+            "state": "open",
+            "summary": "Version parser removal has no remaining production caller",
+            "location": "crates/farhelm-supervisor/src/tmux.rs:1 (deleted)",
+            "detail": "Reviewed commit: 500548b9253b07a26fd03119679184b69544e31d. TLDR: Considered whether removing the tmux version floor and parser leaves provisioning unable to validate a required terminal dependency. Details: A pinned git grep across crates and .github/release for parse_tmux_version, TMUX_FLOOR, TmuxVersion, tmux_meets_floor, mod tmux, and farhelm_supervisor::tmux found no parser/floor callers. The only mod tmux hits belong to the unrelated teststate guard module. SPEC_impl.md:2786-2791 explicitly says: 'Nothing in an installation requires, looks for or installs a tmux: not the' (continued in the governing section); Linux provisioning no longer uses it. The deletion is coordinated with the provisioning change, not a parser replacement with weaker admission. Suggested bucket if a dangling requirement existed: high/material UX. Confidence: confirmed source refutation of remaining caller premise, source-only. proposed_drop: no surviving production caller or tmux substrate requirement at this revision; the complete governing section will be read before completing the pass. possible_cover: none. Could-be-highest: false for unavailable dependency checks; no route to execution on an unaudited tmux exists through this deleted parser."
+          }
+        },
+        {
+          "line": 3,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c2",
+            "state": "open",
+            "summary": "Version parser removal has no remaining production caller",
+            "location": "crates/farhelm-supervisor/src/tmux.rs:1 (deleted)",
+            "detail": "Reviewed commit: 500548b9253b07a26fd03119679184b69544e31d. TLDR: Considered whether removing the tmux version floor and parser leaves provisioning unable to validate a required terminal dependency. Details: Pinned git grep across crates and .github/release for parse_tmux_version, TMUX_FLOOR, TmuxVersion, tmux_meets_floor, mod tmux, and farhelm_supervisor::tmux found no parser/floor callers; only unrelated teststate tmux guards remain. The same commit removes pub mod tmux from supervisor lib.rs:91. Read SPEC_impl.md:2784-2875 in full. Exact acceptance, Terminal substrate: private tmux server: 'Nothing in an installation requires, looks for or installs a tmux: not the installer, the desktop app, `farhelm helm setup`, or provisioning of a Linux host or a Mac.' The section further states that provisioning no longer inspects, downloads, uploads or installs tmux, and specifies the separate private-binary removal step. Suggested bucket if a dangling requirement existed: high/material UX. Confidence: confirmed source refutation of remaining caller premise; no execution observed. proposed_drop: no surviving production caller or tmux substrate requirement at this revision. possible_cover: none. Could-be-highest: false for this unavailable-dependency concern; no route to execution on an unaudited tmux exists through this deleted parser. Private-binary removal behavior is outside this assigned deletion patch."
+          }
+        },
+        {
+          "line": 10,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c2",
+            "state": "open",
+            "summary": "Version parser removal has no remaining production caller",
+            "location": "crates/farhelm-supervisor/src/tmux.rs:1 (deleted)",
+            "detail": "Reviewed commit: 500548b9253b07a26fd03119679184b69544e31d. TLDR (original consequence preserved): Considered whether removing the tmux version floor and parser leaves provisioning unable to validate a required terminal dependency. Details: Pinned searches across crates and .github/release found no surviving parser/floor consumers; supervisor lib.rs removes pub mod tmux. Synthesis also read the actual provisioning/backend.rs deletion hunks: the same commit removes tmux_meets_floor, its parse_tmux_version/TMUX_FLOOR comparison, the remote reported tmux-path/version decoding and its acceptance computation, and the Reach.needs_tmux/host_tmux projections from parse_reach_output. Thus no permissive substitute parser silently admits a required tmux: admission of that retired dependency is removed as a whole. The removed tmux.rs tests cover only version ordering, strict whole-line parsing and pin equality, so their old assertions do not govern a surviving version check. Exact SPEC_impl.md, Terminal substrate: private tmux server, :2784-2875: 'Nothing in an installation requires, looks for or installs a tmux: not the installer, the desktop app, `farhelm helm setup`, or provisioning of a Linux host or a Mac.' The same section specifies that provisioning no longer inspects, downloads, uploads or installs tmux, and separately specifies removing its previously bundled copy. SPEC.md:181-189 and :3023-3025 state the corresponding operator contract. Suggested bucket if the original dangling dependency existed: high/material UX. Confidence: confirmed source refutation of remaining required parser/caller premise; no execution observed. proposed_drop: no production caller, replacement parser or required tmux substrate survives at this revision. This is a proposal only, not an accepted drop. possible_cover: none. Could-be-highest: false for the unavailable-dependency concern; no route to executing an unaudited tmux exists through the deleted parser. Caveat: deleting a user's own executable would be a distinct highest route; this assigned parser deletion neither selects nor deletes any file, and this review does not use acceptance of dependency removal to excuse such a distinct provisioning error."
+          }
+        }
+      ],
+      "latest": {
+        "line": 10,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c2",
+          "state": "open",
+          "summary": "Version parser removal has no remaining production caller",
+          "location": "crates/farhelm-supervisor/src/tmux.rs:1 (deleted)",
+          "detail": "Reviewed commit: 500548b9253b07a26fd03119679184b69544e31d. TLDR (original consequence preserved): Considered whether removing the tmux version floor and parser leaves provisioning unable to validate a required terminal dependency. Details: Pinned searches across crates and .github/release found no surviving parser/floor consumers; supervisor lib.rs removes pub mod tmux. Synthesis also read the actual provisioning/backend.rs deletion hunks: the same commit removes tmux_meets_floor, its parse_tmux_version/TMUX_FLOOR comparison, the remote reported tmux-path/version decoding and its acceptance computation, and the Reach.needs_tmux/host_tmux projections from parse_reach_output. Thus no permissive substitute parser silently admits a required tmux: admission of that retired dependency is removed as a whole. The removed tmux.rs tests cover only version ordering, strict whole-line parsing and pin equality, so their old assertions do not govern a surviving version check. Exact SPEC_impl.md, Terminal substrate: private tmux server, :2784-2875: 'Nothing in an installation requires, looks for or installs a tmux: not the installer, the desktop app, `farhelm helm setup`, or provisioning of a Linux host or a Mac.' The same section specifies that provisioning no longer inspects, downloads, uploads or installs tmux, and separately specifies removing its previously bundled copy. SPEC.md:181-189 and :3023-3025 state the corresponding operator contract. Suggested bucket if the original dangling dependency existed: high/material UX. Confidence: confirmed source refutation of remaining required parser/caller premise; no execution observed. proposed_drop: no production caller, replacement parser or required tmux substrate survives at this revision. This is a proposal only, not an accepted drop. possible_cover: none. Could-be-highest: false for the unavailable-dependency concern; no route to executing an unaudited tmux exists through the deleted parser. Caveat: deleting a user's own executable would be a distinct highest route; this assigned parser deletion neither selects nor deletes any file, and this review does not use acceptance of dependency removal to excuse such a distinct provisioning error."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g169/findings.jsonl",
+        "id": "c2",
+        "line": 10,
+        "disposition": "excluded",
+        "group": "retired-tmux-version-floor-dangling-provisioning-requirement",
+        "reason": "Parent explicitly accepted named refuted proposal from claims-106 after inspecting it. The version parser is removed together with the production dependency and its admission projections, not replaced with weaker parsing of a still-required terminal substrate. Source refutation of the named dangling-dependency claim only. No dismissal of separate bundled-file selection/removal claims. Checked source/results: [\"At 500548b9253b07a26fd03119679184b69544e31d, git grep across crates and .github/release found no parse_tmux_version/TMUX_FLOOR/TmuxVersion/tmux_meets_floor/farhelm_supervisor::tmux consumers.\",\"The commit removes supervisor/src/tmux.rs and its lib.rs export. Read provisioning/backend.rs deletion hunks: Reach loses needs_tmux/host_tmux; inspect no longer runs command -v tmux or tmux -V; remote tmux-path/version admission is removed.\",\"Current SPEC_impl.md:7996-8020 says the supervisor runs no tmux, provisioning no longer inspects/downloads/uploads/installs it, and removal of the former bundled file is a separate named step.\",\"No execution or dependency-admission test was run. Deleting a user's executable would be a separate issue; these parser checks do not settle the file-removal implementation.\"] Current coverage/results: {\"SPEC.md\":\"Topology/installation and Terminal experience no longer require tmux; no surviving parser requirement.\",\"SPEC_impl.md\":\"Provisioning:7996-8020 explicitly retires the dependency, while retaining a separate precise bundled-copy removal rule.\",\"TODO.md Planned\":\"Empty; no cover.\",\"plans/queue\":\"tmux-drop-from-install requires removal of the whole dependency check and is recorded landed by plans/REPORTS.md:30; no unlanded exact dependency defect cover.\",\"BUGS.md\":\"No matching item.\",\"INDEX.md and matching queue files\":\"No exact dangling parser/dependency item found.\",\"TRIAGE_OUTCOMES.md\":\"No exact decision.\",\"FILTER.md\":\"No filter used.\"} Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Removing the tmux version floor/parser could leave provisioning unable to validate a required terminal dependency. Suggested high; no route to executing an unaudited tmux established. A user's own executable being deleted is a distinct potential-highest provisioning route, not refuted by parser retirement.\"; \"A surviving production tmux requirement or parser/floor caller was not found.\"."
+      },
+      "accepted_parent_decision": {
+        "key": "g169/c2",
+        "line": 10,
+        "disposition": "excluded",
+        "group": "retired-tmux-version-floor-dangling-provisioning-requirement",
+        "bucket": "high",
+        "recording": "refuted",
+        "queue_target_candidate": null,
+        "needs_independent_drop_check": false,
+        "reason": "Parent explicitly accepted named refuted proposal from claims-106 after inspecting it. The version parser is removed together with the production dependency and its admission projections, not replaced with weaker parsing of a still-required terminal substrate. Source refutation of the named dangling-dependency claim only. No dismissal of separate bundled-file selection/removal claims. Checked source/results: [\"At 500548b9253b07a26fd03119679184b69544e31d, git grep across crates and .github/release found no parse_tmux_version/TMUX_FLOOR/TmuxVersion/tmux_meets_floor/farhelm_supervisor::tmux consumers.\",\"The commit removes supervisor/src/tmux.rs and its lib.rs export. Read provisioning/backend.rs deletion hunks: Reach loses needs_tmux/host_tmux; inspect no longer runs command -v tmux or tmux -V; remote tmux-path/version admission is removed.\",\"Current SPEC_impl.md:7996-8020 says the supervisor runs no tmux, provisioning no longer inspects/downloads/uploads/installs it, and removal of the former bundled file is a separate named step.\",\"No execution or dependency-admission test was run. Deleting a user's executable would be a separate issue; these parser checks do not settle the file-removal implementation.\"] Current coverage/results: {\"SPEC.md\":\"Topology/installation and Terminal experience no longer require tmux; no surviving parser requirement.\",\"SPEC_impl.md\":\"Provisioning:7996-8020 explicitly retires the dependency, while retaining a separate precise bundled-copy removal rule.\",\"TODO.md Planned\":\"Empty; no cover.\",\"plans/queue\":\"tmux-drop-from-install requires removal of the whole dependency check and is recorded landed by plans/REPORTS.md:30; no unlanded exact dependency defect cover.\",\"BUGS.md\":\"No matching item.\",\"INDEX.md and matching queue files\":\"No exact dangling parser/dependency item found.\",\"TRIAGE_OUTCOMES.md\":\"No exact decision.\",\"FILTER.md\":\"No filter used.\"} Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Removing the tmux version floor/parser could leave provisioning unable to validate a required terminal dependency. Suggested high; no route to executing an unaudited tmux established. A user's own executable being deleted is a distinct potential-highest provisioning route, not refuted by parser retirement.\"; \"A surviving production tmux requirement or parser/floor caller was not found.\"."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-106",
+          "key": "g169/c2",
+          "latest_line": 10,
+          "recommendation": "refuted",
+          "bucket": "high",
+          "underlying_key": "retired-tmux-version-floor-dangling-provisioning-requirement",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The version parser is removed together with the production dependency and its admission projections, not replaced with weaker parsing of a still-required terminal substrate.",
+          "checks": [
+            "At 500548b9253b07a26fd03119679184b69544e31d, git grep across crates and .github/release found no parse_tmux_version/TMUX_FLOOR/TmuxVersion/tmux_meets_floor/farhelm_supervisor::tmux consumers.",
+            "The commit removes supervisor/src/tmux.rs and its lib.rs export. Read provisioning/backend.rs deletion hunks: Reach loses needs_tmux/host_tmux; inspect no longer runs command -v tmux or tmux -V; remote tmux-path/version admission is removed.",
+            "Current SPEC_impl.md:7996-8020 says the supervisor runs no tmux, provisioning no longer inspects/downloads/uploads/installs it, and removal of the former bundled file is a separate named step.",
+            "No execution or dependency-admission test was run. Deleting a user's executable would be a separate issue; these parser checks do not settle the file-removal implementation."
+          ],
+          "coverage_checked": {
+            "SPEC.md": "Topology/installation and Terminal experience no longer require tmux; no surviving parser requirement.",
+            "SPEC_impl.md": "Provisioning:7996-8020 explicitly retires the dependency, while retaining a separate precise bundled-copy removal rule.",
+            "TODO.md Planned": "Empty; no cover.",
+            "plans/queue": "tmux-drop-from-install requires removal of the whole dependency check and is recorded landed by plans/REPORTS.md:30; no unlanded exact dependency defect cover.",
+            "BUGS.md": "No matching item.",
+            "INDEX.md and matching queue files": "No exact dangling parser/dependency item found.",
+            "TRIAGE_OUTCOMES.md": "No exact decision.",
+            "FILTER.md": "No filter used."
+          },
+          "exact_cover_quotes": [],
+          "missing_premise": "A surviving production tmux requirement or parser/floor caller was not found.",
+          "original_stronger_consequence": "Removing the tmux version floor/parser could leave provisioning unable to validate a required terminal dependency. Suggested high; no route to executing an unaudited tmux established. A user's own executable being deleted is a distinct potential-highest provisioning route, not refuted by parser retirement.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Source refutation of the named dangling-dependency claim only. No dismissal of separate bundled-file selection/removal claims."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "high",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "retired-tmux-version-floor-dangling-provisioning-requirement",
+        "destination": null
+      }
+    },
+    {
+      "key": "g169/f1",
+      "owner": "g169",
+      "id": "f1",
+      "domain": "retired-supervisor-tmux",
+      "purpose": "retired-supervisor-tmux: crates/farhelm-supervisor/src/tmux/sink.rs, crates/farhelm-supervisor/src/tmux/test_support.rs, crates/farhelm-supervisor/src/tmux.rs; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 4,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "f1",
+            "state": "open",
+            "summary": "Retiring tmux intentionally ends running legacy terminals",
+            "location": "crates/farhelm-supervisor/src/tmux/sink.rs:1 (deleted); crates/farhelm-supervisor/src/service/core.rs:6147",
+            "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. TLDR: Updating a host to this release ends any agents and terminal tabs still running in the old terminal system and loses their live terminal contents; they do not survive the supervisor upgrade. Details: This is the potentially-highest consequence considered while reviewing removal of the sink and its driver. core.rs:6147-6151 calls OldTerminals::end_private_server before reload; core/old_terminals.rs:168-172 calls end_server, and core.rs:6675-6679 deliberately resolves every legacy tmux row to no terminal. This departs from the ordinary sessions-outlive-supervisor contract but is explicitly specified. Exact SPEC.md, Terminal experience, lines 3003-3011: 'This release ends them: the first time a host’s supervisor of this release starts, it ends that tmux server, and with it everything that still ran in an old terminal, without needing a tmux program.' (The source uses an ASCII apostrophe in host's.) The same paragraph says a still-live old agent becomes interrupted, an already-ended one keeps its outcome but loses its last screen, and old tabs are closed. Exact SPEC.md, Durability and resume, lines 3470-3473: 'only a host reboot takes sessions down (and, once, the update that ended old terminals; see Terminal experience).' SPEC_impl.md, Terminal substrate: private tmux server, lines 2882-2930, fully specifies this transition, cleanup residuals and continued startup on failure. Suggested bucket: highest/loss of user-owned processes and live terminal work, if treated as a defect. Confidence: confirmed intended source behavior; no execution observed. proposed_drop: exact specification exception above explicitly authorizes ending the legacy tmux terminals and discarding their contents during this upgrade. This must receive the caller's independent highest-bucket drop check; it is not an independently established defect. possible_cover: SPEC.md and SPEC_impl.md retirement contract only; other coverage sources were not read. Could-be-highest: true. Scope caveat: this record concerns the authorized removal itself, not an assertion that all adjacent migration cleanup is correct."
+          }
+        },
+        {
+          "line": 5,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "f1",
+            "state": "open",
+            "summary": "Retiring tmux intentionally ends running legacy terminals",
+            "location": "crates/farhelm-supervisor/src/tmux/sink.rs:1 (deleted); crates/farhelm-supervisor/src/service/core.rs:6147",
+            "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. TLDR: Updating a host to this release ends any agents and terminal tabs still running in the old terminal system and loses their live terminal contents; they do not survive the supervisor upgrade. Details: This is the potentially-highest consequence considered while reviewing removal of the sink and its driver. core.rs:6147-6151 calls OldTerminals::end_private_server before reload; core/old_terminals.rs:168-172 calls end_server, and core.rs:6675-6679 deliberately resolves every legacy tmux row to no terminal. This departs from the ordinary sessions-outlive-supervisor contract but is explicitly specified. Exact SPEC.md, Terminal experience, lines 3006-3008: 'This release ends them: the first time a host's supervisor of this release starts, it ends that tmux server, and with it everything that still ran in an old terminal, without needing a tmux program.' The same paragraph says a still-live old agent becomes interrupted, an already-ended one keeps its outcome but loses its last screen, and old tabs are closed. Exact SPEC.md, Durability and resume, lines 3471-3473: 'only a host reboot takes sessions down (and, once, the update that ended old terminals; see Terminal experience).' SPEC_impl.md, Terminal substrate: private tmux server, lines 2880-2991, was read in full and specifies this transition, cleanup residuals and continued startup on failure. Suggested bucket: highest/loss of user-owned processes and live terminal work, if treated as a defect. Confidence: confirmed intended source behavior; no execution observed. proposed_drop: exact specification exception above explicitly authorizes ending the legacy tmux terminals and discarding their contents during this upgrade. This must receive the caller's independent highest-bucket drop check; it is not an independently established defect. possible_cover: SPEC.md and SPEC_impl.md retirement contract only; other coverage sources were not read. Could-be-highest: true. Scope caveat: this record concerns the authorized removal itself, not an assertion that all adjacent migration cleanup is correct. This revision corrects the preceding event's quote typography to preserve the exact ASCII apostrophe in the specification; the consequence and proposed disposition are unchanged."
+          }
+        },
+        {
+          "line": 12,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "f1",
+            "state": "open",
+            "summary": "Retiring tmux intentionally ends running legacy terminals",
+            "location": "crates/farhelm-supervisor/src/tmux/sink.rs:1 (deleted); crates/farhelm-supervisor/src/service/core.rs:6147",
+            "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. TLDR (original wording preserved): Updating a host to this release ends any agents and terminal tabs still running in the old terminal system and loses their live terminal contents; they do not survive the supervisor upgrade. Details: This potentially-highest consequence was considered while reviewing sink/driver removal. core.rs:6147-6151 calls OldTerminals::end_private_server before reload; core/old_terminals.rs:168-172 calls end_server; core.rs:6675-6679 deliberately resolves every old tmux row to no terminal. Synthesis checked conversion :6805-6825 and sweep/commit/notice ordering :7036-7094: legacy live launches are proposed as TerminalEnded, sweeping precedes transition commit, and the ended notice follows a committed interrupted outcome. Exact SPEC.md, Terminal experience, :3006-3008: 'This release ends them: the first time a host's supervisor of this release starts, it ends that tmux server, and with it everything that still ran in an old terminal, without needing a tmux program.' Its paragraph explicitly discards an ended agent's last screen and closes old tabs. Exact SPEC.md, Durability and resume, :3471-3473: 'only a host reboot takes sessions down (and, once, the update that ended old terminals; see Terminal experience).' Known related residual, now made explicit under this same provenance: failed legacy termination can leave a still-running old agent and allow Restart to start a duplicate. Exact acceptance in SPEC.md :3014-3016: 'A failure to end the server or to stop what ran there is logged and never stops the supervisor from starting; those sessions are treated as ended all the same, accepting that a Restart could then start a second agent beside one still running.' SPEC_impl.md Terminal substrate :2880-2991 specifies both the retirement and this residual. This is not new discovery in synthesis. Suggested bucket: highest/loss of user-owned processes, live screens/history and potentially concurrent agents, if treated as a defect. Confidence: confirmed intended source behavior; no execution observed. proposed_drop: only the exact deliberate-retirement and duplicate-on-failed-termination consequences above are accepted by those specification exceptions. This remains a proposal, requiring the caller's independent highest-bucket check; no drop is accepted yet. possible_cover: cited SPEC.md/SPEC_impl.md retirement contract only; excluded coverage sources not read. Could-be-highest: true. Material caveat: that acceptance does not settle misleading update-survival advice, absence of required warning, wrong-target termination, or falsely successful Delete. No concrete distinct route to those consequences was supplied by these assigned deletion patches or established in the checked retained host responsibilities; no comprehensive correctness claim is made for adjacent migration/provisioning/UI implementations."
+          }
+        }
+      ],
+      "latest": {
+        "line": 12,
+        "event": {
+          "version": 1,
+          "kind": "finding",
+          "id": "f1",
+          "state": "open",
+          "summary": "Retiring tmux intentionally ends running legacy terminals",
+          "location": "crates/farhelm-supervisor/src/tmux/sink.rs:1 (deleted); crates/farhelm-supervisor/src/service/core.rs:6147",
+          "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. TLDR (original wording preserved): Updating a host to this release ends any agents and terminal tabs still running in the old terminal system and loses their live terminal contents; they do not survive the supervisor upgrade. Details: This potentially-highest consequence was considered while reviewing sink/driver removal. core.rs:6147-6151 calls OldTerminals::end_private_server before reload; core/old_terminals.rs:168-172 calls end_server; core.rs:6675-6679 deliberately resolves every old tmux row to no terminal. Synthesis checked conversion :6805-6825 and sweep/commit/notice ordering :7036-7094: legacy live launches are proposed as TerminalEnded, sweeping precedes transition commit, and the ended notice follows a committed interrupted outcome. Exact SPEC.md, Terminal experience, :3006-3008: 'This release ends them: the first time a host's supervisor of this release starts, it ends that tmux server, and with it everything that still ran in an old terminal, without needing a tmux program.' Its paragraph explicitly discards an ended agent's last screen and closes old tabs. Exact SPEC.md, Durability and resume, :3471-3473: 'only a host reboot takes sessions down (and, once, the update that ended old terminals; see Terminal experience).' Known related residual, now made explicit under this same provenance: failed legacy termination can leave a still-running old agent and allow Restart to start a duplicate. Exact acceptance in SPEC.md :3014-3016: 'A failure to end the server or to stop what ran there is logged and never stops the supervisor from starting; those sessions are treated as ended all the same, accepting that a Restart could then start a second agent beside one still running.' SPEC_impl.md Terminal substrate :2880-2991 specifies both the retirement and this residual. This is not new discovery in synthesis. Suggested bucket: highest/loss of user-owned processes, live screens/history and potentially concurrent agents, if treated as a defect. Confidence: confirmed intended source behavior; no execution observed. proposed_drop: only the exact deliberate-retirement and duplicate-on-failed-termination consequences above are accepted by those specification exceptions. This remains a proposal, requiring the caller's independent highest-bucket check; no drop is accepted yet. possible_cover: cited SPEC.md/SPEC_impl.md retirement contract only; excluded coverage sources not read. Could-be-highest: true. Material caveat: that acceptance does not settle misleading update-survival advice, absence of required warning, wrong-target termination, or falsely successful Delete. No concrete distinct route to those consequences was supplied by these assigned deletion patches or established in the checked retained host responsibilities; no comprehensive correctness claim is made for adjacent migration/provisioning/UI implementations."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g169/findings.jsonl",
+        "id": "f1",
+        "line": 12,
+        "disposition": "under-investigation",
+        "group": "g169-f1",
+        "reason": "Record durably acknowledged; parent source/contract validation, cross-group synthesis, coverage/filter matching and any independent drop check remain pending. This preserves the claim and uncertainty without accepting, dropping or lowering it."
+      },
+      "accepted_parent_decision": null,
+      "returned_claim_checks": [
+        {
+          "batch": "claims-106",
+          "key": "g169/f1",
+          "latest_line": 12,
+          "recommendation": "covered",
+          "bucket": "highest",
+          "underlying_key": "intentional-old-tmux-terminal-retirement-and-failed-stop-duplication",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "Both the deliberate ending/loss of old terminals and the duplicate-agent residual after failed termination are explicit specification exceptions. The proposed coverage is limited to those exact consequences and needs an independent highest-bucket drop check.",
+          "checks": [
+            "At 1ed482dde220452e424973faf38a5e1318986333, core.rs:6147-6151 invokes end_private_server before reload; core/old_terminals.rs:168-172 calls the bounded server-ending operation and returns despite logged failure.",
+            "core.rs:6675-6679 ignores old terminal addresses; :6805-6825 converts live old-kind rows to TerminalEnded; :7036-7094 sweeps before committing transitions and emits the notice only after committed Interrupted.",
+            "Read current SPEC.md:2998-3010 and SPEC_impl.md:2780-2823, the complete old-terminal retirement section. They explicitly allow loss of final screens/old tabs and continued startup treating sessions ended after failures, even when Restart may duplicate an agent.",
+            "No execution observed. This source behavior does not establish that every adjacent warning, update message, target selection or Delete implementation complies."
+          ],
+          "coverage_checked": {
+            "SPEC.md": "Exact trigger/consequence/scope match in Terminal experience: old tmux terminals end at supervisor startup, live sessions become interrupted, ended-agent screens disappear, old tabs close, and failed cleanup can lead to a duplicate after Restart.",
+            "SPEC_impl.md": "Ending the old private tmux server:2780-2823 specifies the same retirement, bounded best-effort cleanup and duplicate-agent residual.",
+            "TODO.md Planned": "Empty. Mid term phase-3 removal entry is future cleanup, not a repair of this accepted transition.",
+            "plans/queue": "tmux-end-old-terminals acceptance criterion 1 explicitly accepts the exact process/screen loss and failed-stop duplication; plan is landed per plans/REPORTS.md:29, so it is context rather than an unlanded-plan cover.",
+            "BUGS.md": "No additional matching item.",
+            "INDEX.md and matching queue files": "No exact retirement finding currently queued. Different host retry/receipt/cleanup items do not cover warning or wrong-target defects.",
+            "TRIAGE_OUTCOMES.md": "No additional matching decision found.",
+            "FILTER.md": "No filter needed or applied. An upgrade alone would not satisfy the upgrade-plus-another-rare-condition filter."
+          },
+          "exact_cover_quotes": [
+            {
+              "source": "SPEC.md:3000-3005, Terminal experience",
+              "quote": "A supervisor that finds that tmux server when it starts ends it, and with it everything that still ran in an old terminal, without needing a tmux program. A session whose agent was still launching, running or being stopped in one becomes interrupted, as after a reboot, and gets the notice Status describes; one whose agent had already ended keeps its outcome, but its terminal's last screen, which lived in the server, is gone; old tabs are closed."
+            },
+            {
+              "source": "SPEC.md:3008-3010, Terminal experience",
+              "quote": "A failure to end the server or to stop what ran there is logged and never stops the supervisor from starting; those sessions are treated as ended all the same, accepting that a Restart could then start a second agent beside one still running."
+            },
+            {
+              "source": "SPEC_impl.md:2818-2823, Ending the old private tmux server",
+              "quote": "A failure anywhere is logged and never fatal (the maintainer chose to start anyway and treat old sessions as ended, accepting that a Restart could then start a second agent beside one still running)"
+            }
+          ],
+          "missing_premise": "None for this exact accepted source behavior. Any misleading survival advice, missing required warning, wrong-target termination or falsely successful Delete needs its own concrete route and is not covered by this exception.",
+          "original_stronger_consequence": "Updating a host ends agents and terminal tabs still running in the old terminal system and loses their live contents/history. Failed legacy termination may leave an old agent alive and Restart may start another beside it. Highest process/user-work loss remains the consequence for the drop check.",
+          "needs_independent_drop_check": true,
+          "proposed_basis": "Exact specification acceptance only for deliberate retirement and duplicate-on-failed-retirement consequences. The independent checker must agree before omission; no parent decision inferred."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": true,
+        "clearly_refuted_candidate": false,
+        "needs_unfinished_gate": true,
+        "provisional_bucket": "highest",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "intentional-old-tmux-terminal-retirement-and-failed-stop-duplication",
+        "destination": "trailing-intentional-old-tmux-terminal-retirement-and-failed-stop-duplication.md"
+      }
+    },
+    {
+      "key": "g169/c3",
+      "owner": "g169",
+      "id": "c3",
+      "domain": "retired-supervisor-tmux",
+      "purpose": "retired-supervisor-tmux: crates/farhelm-supervisor/src/tmux/sink.rs, crates/farhelm-supervisor/src/tmux/test_support.rs, crates/farhelm-supervisor/src/tmux.rs; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 6,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c3",
+            "state": "open",
+            "summary": "Retired test harness removal leaves no dependent fixtures",
+            "location": "crates/farhelm-supervisor/src/tmux/test_support.rs:1 (deleted)",
+            "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. TLDR: Considered whether removing the shared private-server test harness loses teardown or concurrency protection for tests still using it. Details: Read the complete deleted test_support.rs patch, including ownership-before-spawn in ScratchServer::start, server-before-directory drop order, the two-permit semaphore, and bounded diagnostics. A pinned git grep across supervisor source and .config/nextest.toml for REAL_TMUX_SLOTS, ScratchServer, pump_own_pane_ticks, shutdown_test_stream, tmux::test_support, and tmux::sink produced no matches. The driver/stream/sink implementations and their module tests are removed together, so no remaining fixture was silently switched to unguarded teardown. SPEC_impl.md Terminal host, test-harness paragraph at 1ed482dde220452e424973faf38a5e1318986333:2712-2727 (section-relative paragraph beginning 'Test harnesses end the hosts they leave behind'; exact line numbering not relied on here) describes the separate teststate host cleanup used by replacement terminal fixtures. Suggested bucket for the suspected maintainer-harness issue: other. Confidence: confirmed source refutation of surviving dependent-fixture premise; no test run observed. proposed_drop: the guard and its dependent retired tests are removed together; no surviving call found. possible_cover: none. Could-be-highest: false; concern confined to removed maintainer test fixtures. This does not assert that all replacement host tests have complete coverage."
+          }
+        },
+        {
+          "line": 7,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c3",
+            "state": "open",
+            "summary": "Retired test harness removal leaves no dependent fixtures",
+            "location": "crates/farhelm-supervisor/src/tmux/test_support.rs:1 (deleted)",
+            "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. TLDR: Considered whether removing the shared private-server test harness loses teardown or concurrency protection for tests still using it. Details: Read the complete deleted test_support.rs patch, including ownership-before-spawn in ScratchServer::start, server-before-directory drop order, the two-permit semaphore, and bounded diagnostics. A pinned git grep across supervisor source and .config/nextest.toml for REAL_TMUX_SLOTS, ScratchServer, pump_own_pane_ticks, shutdown_test_stream, tmux::test_support, and tmux::sink produced no matches. The driver/stream/sink implementations and their module tests are removed together, so no remaining fixture was silently switched to unguarded teardown. SPEC_impl.md Terminal host, test-harness paragraph at 1ed482dde220452e424973faf38a5e1318986333:2688-2699 (paragraph beginning 'Test harnesses end the hosts they leave behind'; exact line numbering not relied on here) describes the separate teststate host cleanup used by replacement terminal fixtures. Suggested bucket for the suspected maintainer-harness issue: other. Confidence: confirmed source refutation of surviving dependent-fixture premise; no test run observed. proposed_drop: the guard and its dependent retired tests are removed together; no surviving call found. possible_cover: none. Could-be-highest: false; concern confined to removed maintainer test fixtures. This does not assert that all replacement host tests have complete coverage."
+          }
+        },
+        {
+          "line": 9,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c3",
+            "state": "open",
+            "summary": "Retired test harness removal leaves no dependent fixtures",
+            "location": "crates/farhelm-supervisor/src/tmux/test_support.rs:1 (deleted)",
+            "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. TLDR (original consequence preserved): Considered whether removing the shared private-server test harness loses teardown or concurrency protection for tests still using it. Details: The complete deleted test_support.rs patch establishes server ownership before spawn, server-before-directory drop order, a two-permit real-tmux semaphore and bounded diagnostics. Pinned searches find no surviving uses of ScratchServer, REAL_TMUX_SLOTS, pump_own_pane_ticks, shutdown_test_stream or tmux::test_support. Synthesis separately checked surviving responsibilities rather than taking production correctness as proof of test sensitivity: hosts/terminal/test_host.rs:1-180 describes its stand-in protocol, owns a real sleep child, and its Drop aborts its task and kills/reaps that owned child (:113-145); no tmux server is started by this replacement. SPEC_impl.md:2688-2699 describes real-host cleanup under owned TestDir state. The sink.rs negative control was specific to tmux's all-clients-filter-a-foreign-pane mechanism, which no longer exists. Surviving terminal-host tests actually assert child completion with no Read subscription (tests/host_lifecycle.rs:589-632), retained output and a gap after the journal cap (:477-505), PTY read budget (src/host.rs:2322-2340), and bounded client queues with contiguous output (:3404-3452). Grid-stream tests :485-548 assert output processing while the viewer is paused or its writer queue full, followed by exact history. Limitation: a_slow_client_loses_nothing connects but sends Read only after child exit, and the queue test preloads its journal, so these are not by themselves a test that a subscribed socket stalled mid-stream cannot gate later PTY reads. The deleted negative control would not test that host behavior either; no allegation of such a surviving-test sensitivity bug was established from this assigned deletion. Suggested bucket for the original teardown/concurrency concern: other (maintainer harness). Confidence: confirmed source refutation for dangling retired fixtures; source-only, no execution observed. proposed_drop: the removed guard and its consumers retire together, replacement stand-ins own their own child cleanup, and no real tmux load remains for the removed semaphore to bound. This is only a proposed disposition. possible_cover: none. Could-be-highest: false for the original maintainer-fixture concern. This does not claim comprehensive replacement test coverage, and the slow-client test limitations above are retained rather than refuted by production correctness."
+          }
+        },
+        {
+          "line": 14,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c3",
+            "state": "open",
+            "summary": "Retired test harness removal leaves no dependent fixtures",
+            "location": "crates/farhelm-supervisor/src/tmux/test_support.rs:1 (deleted)",
+            "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. TLDR (original consequence preserved): Considered whether removing the shared private-server test harness loses teardown or concurrency protection for tests still using it. Details: The deleted harness established ownership before spawn, server-before-directory drop order, a two-slot semaphore and bounded diagnostics. Initial and synthesis pinned searches found no remaining consumers of that harness; the retired real-tmux driver, stream and sink tests are removed with it. Replacement hosts/terminal/test_host.rs:1-180 owns a sleep child and aborts/kills/reaps it on Drop, while SPEC_impl.md:2688-2699 describes independent real-host TestDir cleanup. Discovery checked the additional dangling-reference/configuration consequence: pinned git grep across crates, docs, SPEC.md/SPEC_impl.md, .config, .github and scripts found no remaining deleted harness/sink path references or ScratchServer/REAL_TMUX_SLOTS/pump_own_pane_ticks/shutdown_test_stream references. The same revision's .config/nextest.toml has no tmux/sink/stream filter or group text, so no obsolete nextest filter retains a dependency on the deleted real-tmux module group. This is source-based deletion/configuration analysis, not an executed nextest validation. Synthesis surviving-test evidence remains narrow: terminal-host tests check delayed Read after child completion (host_lifecycle.rs:589-632), gap-at-cap (:477-505), PTY read budget (host.rs:2322-2340), and queue bound/contiguous output (:3404-3452); grid_stream/tests.rs:485-548 checks processing and exact history while viewer delivery is paused/full. Those tests do not collectively establish a specific subscribed socket stalled mid-stream while later PTY output arrives: the delayed-Read fixture subscribes only after exit and the queue fixture preloads its journal. The removed negative control was specific to tmux foreign-pane filtering, which has no surviving implementation, and would not establish that host behavior either. Suggested bucket for original harness teardown/concurrency or dangling-config concern: other. Confidence: confirmed source refutation for surviving retired-fixture/config dependencies; no execution observed. proposed_drop: guard and consumers retire together, replacement stand-ins retain their own process cleanup, and the removed shared-tmux cap has no surviving dependency. This remains a proposal only, with no parent drop accepted. possible_cover: supplied g156/l1 concerns earlier 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513 loss of real-tmux recovery integration tests before retirement, not this later sink/helper deletion; parent owns any cross-group disposition. Could-be-highest: false for this maintainer-fixture concern. Material caveats: correct production alone does not refute a test-oracle defect; no broad equivalence or comprehensive replacement coverage is claimed. The source-test limitations and original consequence remain preserved."
+          }
+        }
+      ],
+      "latest": {
+        "line": 14,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c3",
+          "state": "open",
+          "summary": "Retired test harness removal leaves no dependent fixtures",
+          "location": "crates/farhelm-supervisor/src/tmux/test_support.rs:1 (deleted)",
+          "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. TLDR (original consequence preserved): Considered whether removing the shared private-server test harness loses teardown or concurrency protection for tests still using it. Details: The deleted harness established ownership before spawn, server-before-directory drop order, a two-slot semaphore and bounded diagnostics. Initial and synthesis pinned searches found no remaining consumers of that harness; the retired real-tmux driver, stream and sink tests are removed with it. Replacement hosts/terminal/test_host.rs:1-180 owns a sleep child and aborts/kills/reaps it on Drop, while SPEC_impl.md:2688-2699 describes independent real-host TestDir cleanup. Discovery checked the additional dangling-reference/configuration consequence: pinned git grep across crates, docs, SPEC.md/SPEC_impl.md, .config, .github and scripts found no remaining deleted harness/sink path references or ScratchServer/REAL_TMUX_SLOTS/pump_own_pane_ticks/shutdown_test_stream references. The same revision's .config/nextest.toml has no tmux/sink/stream filter or group text, so no obsolete nextest filter retains a dependency on the deleted real-tmux module group. This is source-based deletion/configuration analysis, not an executed nextest validation. Synthesis surviving-test evidence remains narrow: terminal-host tests check delayed Read after child completion (host_lifecycle.rs:589-632), gap-at-cap (:477-505), PTY read budget (host.rs:2322-2340), and queue bound/contiguous output (:3404-3452); grid_stream/tests.rs:485-548 checks processing and exact history while viewer delivery is paused/full. Those tests do not collectively establish a specific subscribed socket stalled mid-stream while later PTY output arrives: the delayed-Read fixture subscribes only after exit and the queue fixture preloads its journal. The removed negative control was specific to tmux foreign-pane filtering, which has no surviving implementation, and would not establish that host behavior either. Suggested bucket for original harness teardown/concurrency or dangling-config concern: other. Confidence: confirmed source refutation for surviving retired-fixture/config dependencies; no execution observed. proposed_drop: guard and consumers retire together, replacement stand-ins retain their own process cleanup, and the removed shared-tmux cap has no surviving dependency. This remains a proposal only, with no parent drop accepted. possible_cover: supplied g156/l1 concerns earlier 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513 loss of real-tmux recovery integration tests before retirement, not this later sink/helper deletion; parent owns any cross-group disposition. Could-be-highest: false for this maintainer-fixture concern. Material caveats: correct production alone does not refute a test-oracle defect; no broad equivalence or comprehensive replacement coverage is claimed. The source-test limitations and original consequence remain preserved."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g169/findings.jsonl",
+        "id": "c3",
+        "line": 14,
+        "disposition": "excluded",
+        "group": "retired-tmux-test-helper-dangling-fixtures-and-runner-config",
+        "reason": "Parent explicitly accepted named refuted proposal from claims-106 after inspecting it. The removed tmux ownership/semaphore helper and the tests using it retire together. Remaining stand-ins own their own child cleanup, and the pinned runner configuration has no dangling tmux filter. This does not establish comprehensive replacement test sensitivity. Source refutation of surviving retired-helper/configuration dependencies only. No blanket equivalence or complete replacement-test coverage claim; earlier g156/l1 is not dismissed or aliased here. Checked source/results: [\"At 1ed482dde220452e424973faf38a5e1318986333, pinned grep across supervisor source and .config/nextest.toml found no ScratchServer/REAL_TMUX_SLOTS/pump_own_pane_ticks/shutdown_test_stream consumers. The commit removes test_support.rs, driver/stream/sink modules and their tests together.\",\"Read hosts/terminal/test_host.rs:113-145: Drop aborts the stand-in task and kill_child kills and waits for its owned child.\",\"Read the entire pinned .config/nextest.toml (80 lines): no tmux/sink/stream test group/filter remains; e2e concurrency and unrelated setup scripts remain.\",\"Read terminal-host/tests/host_lifecycle.rs:589-632: a_slow_client_loses_nothing connects, waits for child exit, then starts Read. It therefore does not establish that an already-subscribed socket stalled midstream cannot gate later PTY output. Grid-stream tests:485-548 establish their own paused/full-viewer processing and exact history, not that separate host-socket premise.\",\"No replacement test gap is disproved merely by production correctness. No runtime tests or nextest validation were executed.\"] Current coverage/results: {\"SPEC.md\":\"No exact acceptance needed; suspected issue is a maintainer harness dependency.\",\"SPEC_impl.md\":\"Test harnesses end the hosts they leave behind:2590-2601 describes independent owned TestDir/host cleanup, not continued use of deleted tmux fixtures.\",\"TODO.md Planned\":\"Empty; no cover.\",\"plans/queue\":\"tmux-end-old-terminals criterion 5 deletes tests whose subject is tmux and ports surviving responsibilities; tmux-drop-from-tooling criterion 4 removes obsolete nextest group reservations. Both plans are landed per plans/REPORTS.md:29,31. No unlanded exact cover.\",\"BUGS.md\":\"No matching harness item.\",\"INDEX.md and matching queue files\":\"Read stopped-reader-output-witness.md: browser overlap premise, not this removed helper dependency. Gone/receipt entries are distinct. No exact dangling-fixture/configuration item found.\",\"TRIAGE_OUTCOMES.md\":\"No matching trigger/consequence/scope.\",\"FILTER.md\":\"No filter used.\"} Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Removing the private-server test harness might lose teardown/concurrency protection for fixtures still using it or leave dangling configuration. Other bucket, maintainer tooling only. The record retains slow-client test limitations and notes supplied g156/l1 concerns an earlier removal of real-tmux recovery integration tests, not this later helper deletion.\"; \"No surviving consumer of the removed guard/semaphore or dangling runner filter was found. A claim about subscribed host sockets stalled while new output arrives would need its own test-oracle assessment; current cited tests do not settle it.\"."
+      },
+      "accepted_parent_decision": {
+        "key": "g169/c3",
+        "line": 14,
+        "disposition": "excluded",
+        "group": "retired-tmux-test-helper-dangling-fixtures-and-runner-config",
+        "bucket": "other",
+        "recording": "refuted",
+        "queue_target_candidate": null,
+        "needs_independent_drop_check": false,
+        "reason": "Parent explicitly accepted named refuted proposal from claims-106 after inspecting it. The removed tmux ownership/semaphore helper and the tests using it retire together. Remaining stand-ins own their own child cleanup, and the pinned runner configuration has no dangling tmux filter. This does not establish comprehensive replacement test sensitivity. Source refutation of surviving retired-helper/configuration dependencies only. No blanket equivalence or complete replacement-test coverage claim; earlier g156/l1 is not dismissed or aliased here. Checked source/results: [\"At 1ed482dde220452e424973faf38a5e1318986333, pinned grep across supervisor source and .config/nextest.toml found no ScratchServer/REAL_TMUX_SLOTS/pump_own_pane_ticks/shutdown_test_stream consumers. The commit removes test_support.rs, driver/stream/sink modules and their tests together.\",\"Read hosts/terminal/test_host.rs:113-145: Drop aborts the stand-in task and kill_child kills and waits for its owned child.\",\"Read the entire pinned .config/nextest.toml (80 lines): no tmux/sink/stream test group/filter remains; e2e concurrency and unrelated setup scripts remain.\",\"Read terminal-host/tests/host_lifecycle.rs:589-632: a_slow_client_loses_nothing connects, waits for child exit, then starts Read. It therefore does not establish that an already-subscribed socket stalled midstream cannot gate later PTY output. Grid-stream tests:485-548 establish their own paused/full-viewer processing and exact history, not that separate host-socket premise.\",\"No replacement test gap is disproved merely by production correctness. No runtime tests or nextest validation were executed.\"] Current coverage/results: {\"SPEC.md\":\"No exact acceptance needed; suspected issue is a maintainer harness dependency.\",\"SPEC_impl.md\":\"Test harnesses end the hosts they leave behind:2590-2601 describes independent owned TestDir/host cleanup, not continued use of deleted tmux fixtures.\",\"TODO.md Planned\":\"Empty; no cover.\",\"plans/queue\":\"tmux-end-old-terminals criterion 5 deletes tests whose subject is tmux and ports surviving responsibilities; tmux-drop-from-tooling criterion 4 removes obsolete nextest group reservations. Both plans are landed per plans/REPORTS.md:29,31. No unlanded exact cover.\",\"BUGS.md\":\"No matching harness item.\",\"INDEX.md and matching queue files\":\"Read stopped-reader-output-witness.md: browser overlap premise, not this removed helper dependency. Gone/receipt entries are distinct. No exact dangling-fixture/configuration item found.\",\"TRIAGE_OUTCOMES.md\":\"No matching trigger/consequence/scope.\",\"FILTER.md\":\"No filter used.\"} Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Removing the private-server test harness might lose teardown/concurrency protection for fixtures still using it or leave dangling configuration. Other bucket, maintainer tooling only. The record retains slow-client test limitations and notes supplied g156/l1 concerns an earlier removal of real-tmux recovery integration tests, not this later helper deletion.\"; \"No surviving consumer of the removed guard/semaphore or dangling runner filter was found. A claim about subscribed host sockets stalled while new output arrives would need its own test-oracle assessment; current cited tests do not settle it.\"."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-106",
+          "key": "g169/c3",
+          "latest_line": 14,
+          "recommendation": "refuted",
+          "bucket": "other",
+          "underlying_key": "retired-tmux-test-helper-dangling-fixtures-and-runner-config",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The removed tmux ownership/semaphore helper and the tests using it retire together. Remaining stand-ins own their own child cleanup, and the pinned runner configuration has no dangling tmux filter. This does not establish comprehensive replacement test sensitivity.",
+          "checks": [
+            "At 1ed482dde220452e424973faf38a5e1318986333, pinned grep across supervisor source and .config/nextest.toml found no ScratchServer/REAL_TMUX_SLOTS/pump_own_pane_ticks/shutdown_test_stream consumers. The commit removes test_support.rs, driver/stream/sink modules and their tests together.",
+            "Read hosts/terminal/test_host.rs:113-145: Drop aborts the stand-in task and kill_child kills and waits for its owned child.",
+            "Read the entire pinned .config/nextest.toml (80 lines): no tmux/sink/stream test group/filter remains; e2e concurrency and unrelated setup scripts remain.",
+            "Read terminal-host/tests/host_lifecycle.rs:589-632: a_slow_client_loses_nothing connects, waits for child exit, then starts Read. It therefore does not establish that an already-subscribed socket stalled midstream cannot gate later PTY output. Grid-stream tests:485-548 establish their own paused/full-viewer processing and exact history, not that separate host-socket premise.",
+            "No replacement test gap is disproved merely by production correctness. No runtime tests or nextest validation were executed."
+          ],
+          "coverage_checked": {
+            "SPEC.md": "No exact acceptance needed; suspected issue is a maintainer harness dependency.",
+            "SPEC_impl.md": "Test harnesses end the hosts they leave behind:2590-2601 describes independent owned TestDir/host cleanup, not continued use of deleted tmux fixtures.",
+            "TODO.md Planned": "Empty; no cover.",
+            "plans/queue": "tmux-end-old-terminals criterion 5 deletes tests whose subject is tmux and ports surviving responsibilities; tmux-drop-from-tooling criterion 4 removes obsolete nextest group reservations. Both plans are landed per plans/REPORTS.md:29,31. No unlanded exact cover.",
+            "BUGS.md": "No matching harness item.",
+            "INDEX.md and matching queue files": "Read stopped-reader-output-witness.md: browser overlap premise, not this removed helper dependency. Gone/receipt entries are distinct. No exact dangling-fixture/configuration item found.",
+            "TRIAGE_OUTCOMES.md": "No matching trigger/consequence/scope.",
+            "FILTER.md": "No filter used."
+          },
+          "exact_cover_quotes": [],
+          "missing_premise": "No surviving consumer of the removed guard/semaphore or dangling runner filter was found. A claim about subscribed host sockets stalled while new output arrives would need its own test-oracle assessment; current cited tests do not settle it.",
+          "original_stronger_consequence": "Removing the private-server test harness might lose teardown/concurrency protection for fixtures still using it or leave dangling configuration. Other bucket, maintainer tooling only. The record retains slow-client test limitations and notes supplied g156/l1 concerns an earlier removal of real-tmux recovery integration tests, not this later helper deletion.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Source refutation of surviving retired-helper/configuration dependencies only. No blanket equivalence or complete replacement-test coverage claim; earlier g156/l1 is not dismissed or aliased here."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "retired-tmux-test-helper-dangling-fixtures-and-runner-config",
+        "destination": null
+      }
+    },
+    {
+      "key": "g169/c4",
+      "owner": "g169",
+      "id": "c4",
+      "domain": "retired-supervisor-tmux",
+      "purpose": "retired-supervisor-tmux: crates/farhelm-supervisor/src/tmux/sink.rs, crates/farhelm-supervisor/src/tmux/test_support.rs, crates/farhelm-supervisor/src/tmux.rs; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 11,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c4",
+            "state": "open",
+            "summary": "Removing exact-target tmux tests does not remove host identity checks",
+            "location": "crates/farhelm-supervisor/src/tmux/sink.rs:453 (deleted test); crates/farhelm-supervisor/src/tmux/test_support.rs:1 (deleted)",
+            "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. TLDR: Considered whether retiring tmux-specific tests leaves a surviving terminal action able to act on another session's work, or prompts/excerpts able to use stale terminal identity. A wrong-target close or Delete could end user-owned processes; a prompt sent to the wrong terminal could act on unintended work. These consequences are retained for independent checking, although no distinct shipped route from the assigned deletions was established. Details: The removed sink test open_session_sink_does_not_prefix_match_a_name_extending_neighbour tested tmux's prefix-name fallback. The entire sink attach path is gone, rather than reused for hosts. Replacement service/core.rs:11908-12007 holds the session lifecycle claim, obtains that session's host, probes it, requires known live status and caught-up replay, then gates on its emulator's paste mode before delivery. Its surviving host_terminals.rs:541-592 test asserts refusal with zero bytes while paste mode is off and exact bytes after enabling it; :1484-1537 asserts the replay premise, refusal reason and no input while catching up, then delivery after catch-up. service/launch_artifacts.rs:59-76 only excerpts the entry's own host after Owned/dead exit evidence; status.rs:600-675 requires the never-started evidence shape. The surviving host_terminals.rs:184-226 test supplies the failed launch's complaint, exit and unconsumed spec and checks the resulting exact excerpt and classification. Tabs are recovered only when names_tab matches both session and role/tab ID (core/host_tabs.rs:1402-1435 and :1476-1479); close_host_tab_under_claim :907-948 rechecks both requested tab/runtime identity and inequality with the agent runtime. Close :1013-1040 removes the record/cell only after confirmed host end and retains/marks failed endings. The existing host_terminals.rs:1270-1299 test additionally checks that Delete of a tmux-row session with a record naming another session's host refuses, keeps the row and leaves the other child alive. Suggested bucket for an actual wrong-target termination route: highest/loss of user-owned work. Confidence: confirmed source refutation of transferring the retired prefix-fallback mechanism into these host paths; no execution observed. proposed_drop: the retired tmux target selector has no surviving caller, and the checked replacement responsibilities use explicit host identity and preserve uncertainty. This proposal is not accepted; the potentially-highest consequences remain in this record. possible_cover: none. Could-be-highest: true. Caveats: these source checks do not prove every adjacent host path or test is correct. In particular, production identity checks alone are not claimed as proof of comprehensive test sensitivity, and the deliberate retirement acceptance in f1 is not used to excuse misleading warnings or unconfirmed Delete."
+          }
+        },
+        {
+          "line": 13,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c4",
+            "state": "open",
+            "summary": "Retired prefix-target selector is gone; host identity checks are narrower evidence",
+            "location": "crates/farhelm-supervisor/src/tmux/sink.rs:453 (deleted test); crates/farhelm-supervisor/src/tmux/test_support.rs:1 (deleted)",
+            "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. TLDR and original consequences preserved: Considered whether retiring tmux-specific tests leaves a surviving terminal action able to act on another session's work, or prompts/excerpts able to use stale terminal identity. A wrong-target close or Delete could end user-owned processes; a prompt sent to the wrong terminal could act on unintended work. No distinct shipped route from these assigned deletions was established. Details: The removed sink exact-name test exercised tmux prefix fallback; its attach path is entirely removed. Previously checked core.rs:11908-12012 holds the session lifecycle claim, obtains its own host, probes it, checks status, caught-up replay and paste mode. Retained host_terminals.rs:541-592 and :1484-1537 assert exact prompt bytes and replay refusal rather than merely naming the expected behavior. host_tabs.rs:1402-1435,:1476-1479 checks session plus role/tab ID for adoption; :907-948 checks tab/runtime identity and excludes its agent handle; :1013-1040 retains tab/record after an unconfirmed close. host_terminals.rs:1270-1299 asserts that a wrong-session recorded host refuses Delete and its child remains alive. These refute transfer of the removed prefix-selector mechanism, not every possible cleanup defect. Discovery-neighbour reconciliation before new search: supplied g100/c1 establishes a known distinct previous-run excerpt contamination route through resize-promoted inherited history. My prior excerpt checks (launch_artifacts.rs:59-76 requiring the entry's own Owned/dead host, status.rs:600-675 requiring never-started evidence, and host_terminals.rs:184-226 checking a final complaint) prove final-output ordering and the ordinary test fixture, not attribution of all visible rows. They do not refute g100/c1; no new discovery or duplicate claim is made. Supplied g166/c5 separately establishes a known Gone-tab Delete confirmation bypass; source-refuted wrong-session selection is not a refutation of that unconfirmed-end route. Supplied g007/c4 and g128/l1 likewise concern legacy survivor consent, outside this candidate's host identity premise. Suggested bucket for an actual wrong-target termination route: highest/loss of user-owned work. Confidence: confirmed source refutation of the retired prefix-fallback mechanism only, no execution. proposed_drop: that specific deleted selector has no surviving caller and the checked replacements use explicit host identity. This is only a proposal, not an accepted drop. No proposed drop of the independent excerpt contamination, Gone-tab Delete bypass or legacy survivor-consent findings is made. possible_cover: supplied neighbour records g100/c1, g166/c5, g007/c4 and g128/l1 are interface context only; parent owns consolidation. Could-be-highest: true for the original wrong-target loss-of-work consequences. Material caveat: production checks and ordinary passing-test assertions alone do not establish comprehensive test sensitivity. This revision narrows my prior generalized language, preserves its original consequences, and does not treat retirement acceptance as blanket permission for other defects."
+          }
+        }
+      ],
+      "latest": {
+        "line": 13,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c4",
+          "state": "open",
+          "summary": "Retired prefix-target selector is gone; host identity checks are narrower evidence",
+          "location": "crates/farhelm-supervisor/src/tmux/sink.rs:453 (deleted test); crates/farhelm-supervisor/src/tmux/test_support.rs:1 (deleted)",
+          "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. TLDR and original consequences preserved: Considered whether retiring tmux-specific tests leaves a surviving terminal action able to act on another session's work, or prompts/excerpts able to use stale terminal identity. A wrong-target close or Delete could end user-owned processes; a prompt sent to the wrong terminal could act on unintended work. No distinct shipped route from these assigned deletions was established. Details: The removed sink exact-name test exercised tmux prefix fallback; its attach path is entirely removed. Previously checked core.rs:11908-12012 holds the session lifecycle claim, obtains its own host, probes it, checks status, caught-up replay and paste mode. Retained host_terminals.rs:541-592 and :1484-1537 assert exact prompt bytes and replay refusal rather than merely naming the expected behavior. host_tabs.rs:1402-1435,:1476-1479 checks session plus role/tab ID for adoption; :907-948 checks tab/runtime identity and excludes its agent handle; :1013-1040 retains tab/record after an unconfirmed close. host_terminals.rs:1270-1299 asserts that a wrong-session recorded host refuses Delete and its child remains alive. These refute transfer of the removed prefix-selector mechanism, not every possible cleanup defect. Discovery-neighbour reconciliation before new search: supplied g100/c1 establishes a known distinct previous-run excerpt contamination route through resize-promoted inherited history. My prior excerpt checks (launch_artifacts.rs:59-76 requiring the entry's own Owned/dead host, status.rs:600-675 requiring never-started evidence, and host_terminals.rs:184-226 checking a final complaint) prove final-output ordering and the ordinary test fixture, not attribution of all visible rows. They do not refute g100/c1; no new discovery or duplicate claim is made. Supplied g166/c5 separately establishes a known Gone-tab Delete confirmation bypass; source-refuted wrong-session selection is not a refutation of that unconfirmed-end route. Supplied g007/c4 and g128/l1 likewise concern legacy survivor consent, outside this candidate's host identity premise. Suggested bucket for an actual wrong-target termination route: highest/loss of user-owned work. Confidence: confirmed source refutation of the retired prefix-fallback mechanism only, no execution. proposed_drop: that specific deleted selector has no surviving caller and the checked replacements use explicit host identity. This is only a proposal, not an accepted drop. No proposed drop of the independent excerpt contamination, Gone-tab Delete bypass or legacy survivor-consent findings is made. possible_cover: supplied neighbour records g100/c1, g166/c5, g007/c4 and g128/l1 are interface context only; parent owns consolidation. Could-be-highest: true for the original wrong-target loss-of-work consequences. Material caveat: production checks and ordinary passing-test assertions alone do not establish comprehensive test sensitivity. This revision narrows my prior generalized language, preserves its original consequences, and does not treat retirement acceptance as blanket permission for other defects."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g169/findings.jsonl",
+        "id": "c4",
+        "line": 13,
+        "disposition": "under-investigation",
+        "group": "g169-c4",
+        "reason": "Record durably acknowledged; parent source/contract validation, cross-group synthesis, coverage/filter matching and any independent drop check remain pending. This preserves the claim and uncertainty without accepting, dropping or lowering it."
+      },
+      "accepted_parent_decision": null,
+      "returned_claim_checks": [
+        {
+          "batch": "claims-107",
+          "key": "g169/c4",
+          "latest_line": 13,
+          "recommendation": "refuted",
+          "bucket": "other",
+          "underlying_key": "retired-tmux-prefix-selector-dependency",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The deleted sink's tmux prefix fallback is absent from the retained host routes. This refutes only transfer of that mechanism, not every wrong-target, history-attribution, consent, or test-sensitivity concern.",
+          "checks": [
+            "1ed482d^:crates/farhelm-supervisor/src/tmux/sink.rs:457-468 documents and tests the exact-name versus prefix-fallback mechanism. 1ed482d deletes the whole sink; tip 00de0b6 has no surviving replay/OutputStream runtime API caller.",
+            "1ed482d:service/core.rs:11915-12010 holds the session lifecycle claim, takes entry.terminal, requires liveness/caught-up/paste mode, then delivers to that host. service/core/host_tabs.rs:915-948 checks the requested tab runtime and excludes the agent runtime; :1474-1478 matches session and tab role/id.",
+            "1ed482d:service/core/tests/host_terminals.rs:1270-1295 checks refusal, surviving child, empty input and retained row for a foreign-tagged recorded host. Those assertions do not prove that no Shutdown was sent: the existing foreign-host-refusal-test-cannot-observe-shutdown.md explains that separate oracle defect.",
+            "No runtime execution. The record's g100/c1 inherited-history, g166/c5 Gone-tab confirmation, and g007/c4/g128/l1 legacy-survivor consent caveats remain outside this narrow refutation. Their supplied descriptions were not independently re-reviewed."
+          ],
+          "coverage_checked": {
+            "SPEC.md": "Terminal experience:2998-3031 preserves terminal-host sessions and retained viewer history; no acceptance of wrong-target operations.",
+            "SPEC_impl.md": "Ending the old private tmux server:2780-2821 and Grid streams:2551-2588 distinguish retirement from host/viewer ownership; no blanket acceptance of wrong-target operations.",
+            "TODO.md Planned": "Empty at lines 25-26; no cover.",
+            "plans/queue": "INDEX.md contains no unlanded plan. The tmux plans retained on disk are listed as landed in REPORTS.md:29-32, so their sweeps are not future-work coverage.",
+            "BUGS.md": "Only the local-SSH-output-holder provisioning hang; unrelated.",
+            "queue INDEX and matching files": "Read INDEX in full and searched claim terms. foreign-host-refusal-test-cannot-observe-shutdown.md covers a distinct retained test oracle, not transfer of the removed prefix selector. No exact coverage for the hypothetical production concern.",
+            "TRIAGE_OUTCOMES.md": "Searched tmux/old-terminal/prefix/replay/ownership terms; no matching active decision. Archive unread.",
+            "FILTER.md": "No filter covers wrong-target operations or user-work loss. Refutation relies on source, not rarity."
+          },
+          "exact_cover_quotes": [],
+          "missing_premise": "No surviving caller or replacement path using the deleted tmux prefix selector was established. Broader host cleanup correctness and comprehensive test sensitivity are not proven by this check.",
+          "original_stronger_consequence": "Wrong-target close/Delete could end user-owned processes; a prompt delivered to the wrong terminal could act on unintended work, and stale excerpt attribution could mislead users.",
+          "needs_independent_drop_check": true,
+          "proposed_basis": "Source refutation of the retired prefix-selector transfer only. Preserve the stronger consequences and all named independent neighbor routes for the parent's drop register.",
+          "new_interface_evidence": "The cited retained foreign-host refusal test is already known not to observe Shutdown (queue item foreign-host-refusal-test-cannot-observe-shutdown.md). Its child-survival assertion must not be promoted to proof that host shutdown never occurred. This does not establish a production wrong-target route."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": true,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "retired-tmux-prefix-selector-dependency",
+        "destination": null
+      }
+    }
+  ],
+  "replies": [
+    {
+      "turn": 1,
+      "reply": "Initial pass complete: all 1,213 assigned patch lines reviewed; no assigned scope unread.\n\nLogged `c1`–`c3` as source-refuted candidates. Logged `f1` for intentional legacy-terminal loss, with a specification-based proposed drop requiring independent checking.\n\nNo actionable defect or unresolved lead found. Findings and progress logs updated. No tests or reproductions run."
+    },
+    {
+      "turn": 2,
+      "reply": "Revised `c1`–`c3` with replacement lifecycle, caller-removal and actual test-sensitivity checks. Revised `f1` to preserve the known duplicate-after-failed-termination consequence and exact acceptance text.\n\nAdded `c4`: source-refuted identity-path concerns, preserving potentially highest-impact consequences for independent checking. No proposed drop accepted.\n\nNo new actionable defect found. Unresolved lead IDs: none."
+    },
+    {
+      "turn": 3,
+      "reply": "Discovery pass complete. Found no new issues.\n\nChecked deleted-symbol, path, documentation and nextest dependencies at the pinned revisions, plus module exports and complete range history. Revised `c3` and `c4` with supporting checks and narrower conclusions.\n\nNew verified IDs: none. New unverified IDs: none. Open leads: none. Progress updated; no runtime execution."
+    }
+  ],
+  "progress": "# g169 retired-supervisor-tmux\n\nInitial review turn 1 complete. Turn count: 1. Discovery passes: 0 (initial pass only; no later-turn synthesis or discovery performed).\n\nAll assigned patches read with the evidence tool:\n- 00956-000.patch, 1-180, 181-360, 361-513: sink.rs deletion at 1ed482dde220452e424973faf38a5e1318986333.\n- 00958-000.patch, 1-190, 191-373: test_support.rs deletion at the same revision.\n- 01281-000.patch, 1-180, 181-327: tmux.rs deletion at 500548b9253b07a26fd03119679184b69544e31d.\n\nComplete inventory commits field read; no excluded inventory metadata or coverage sources read. Root AGENTS.md End sentinel present. Priority buckets and recording template read. Machine, skillette and scode-voice instructions read. No checkout changes, tests, builds, reproductions, or live-install operations.\n\nGoverning contract reads at 1ed482dde220452e424973faf38a5e1318986333: SPEC.md Terminal experience 2855-3187 and Durability and resume 3453-3771 in full; SPEC_impl.md Terminal substrate: private tmux server 2880-2991 in full; Terminal host introduction/integration paragraphs 1963-2080 and 2600-2760, launch environment/context 2260-2314; GUI Answers bind to what was drawn paragraph and adjacent context 1071-1108. At 500548b9253b07a26fd03119679184b69544e31d: complete Terminal substrate section 2784-2875, SPEC.md changed tmux contract patch and targeted paragraphs 175-196 and 3013-3028. No GUI handlers are in assigned patches.\n\nPinned source context: supervisor service/terminals.rs 1-292, service/core.rs 6135-6190 and 6650-6715, service/core/old_terminals.rs 1-264 at 1ed482dde220452e424973faf38a5e1318986333. The 500548b9253b07a26fd03119679184b69544e31d lib.rs and hosts/spawn.rs patches were read for the parser deletion interface. Pinned git-grep checks established no surviving sink/driver/filter client callers after driver removal, no dependent test harness calls after fixture removal, and no parser/floor callers after provisioning requirement removal. A broad contextual core.rs search output clipped; conclusions use the directly read bounded ranges and focused searches, not its omitted portion. Initial broad specification search output also clipped and was replaced with targeted contract reads. No mandatory assigned material omitted.\n\nInterface assumptions checked: replacement terminal resolution returns HostTerminal only; legacy rows deliberately resolve to no terminal; startup retires the old private server before reloading; remaining tmux at the first revision is installation probing, and the second revision removes its final callers along with its requirement. Neighboring groups own the full replacement host runtime, retirement cleanup implementation, and provisioning step behavior; this pass checks their contracts only as necessary for these three deletions.\n\nDurable IDs: c1 (sink dependency refuted), c2 (parser dependency refuted), c3 (remaining retired-test dependency refuted). f1 records the deliberate loss of old processes/terminal contents with proposed_drop citing exact specification exceptions; could-be-highest=true, so caller must independently check the proposed drop. No independently actionable defect found. No unresolved lead IDs. New verified records this initial pass: c1, c2, c3, f1 (f1 is confirmed intended behavior, not a confirmed defect). New unverified IDs: none.\n\nThe first attempt to record c1 used unsupported state 'closed' and was rejected without appending; it was immediately retried with state 'open' and accepted. Candidates use state=open as audit records, with their completed source refutation in detail. All accepted events remain append-only. c2, c3, and f1 have same-ID revisions refining citations; consequences are preserved.\n\nNext: return to caller for a separate synthesis turn. Unread assigned scope: none. Coverage status: complete initial pass over all 1,213 assigned patch lines; no claim of reviewing all adjacent interface implementations.\n\n## Later-turn synthesis, turn 2\n\nCompleted requested synthesis; turn count 2, synthesis turns 1, discovery-pass count remains 0. No runtime execution, reproduction or checkout changes. No assigned scope unread; mandatory patch delivery was already audited by caller and was not repeated.\n\nDelta records appended immediately as conclusions were reached: revised c1 with actual host PTY polling/journal/socket-write independence; revised c3 to distinguish retired guard ownership from sensitivity of surviving tests and to preserve limitations of those tests; revised c2 with actual removal of provisioning admission projections; appended source-refuted c4 for retained prompt/excerpt/tab identity responsibilities and potentially-highest wrong-target consequences; revised f1 to retain its original process/screen/history loss and explicitly attach the known failed-termination/duplicate-on-Restart residual to its exact specification acceptance. No proposed drop is treated as accepted. f1 remains kind=finding with proposed_drop. c4 is a source-refuted candidate, could-be-highest=true, retained for independent checking. New verified defect IDs: none. New unverified IDs: none. Open unresolved lead IDs: none.\n\nUseful synthesis source reads at 1ed482dde220452e424973faf38a5e1318986333:\n- terminal-host/SPEC.md 117-169 and 170-254: child exit vs host lifetime, explicit endings and journal/slow-client contracts.\n- terminal-host/src/host.rs 258-414, 505-545, 628-700: PTY polling/read remains independent of client queue/socket progress; 2310-2347 and 3380-3465: actual test premises/assertions for read budget and queue backpressure.\n- terminal-host/tests/host_lifecycle.rs 1-61, 477-508 and 579-639: no-read child completion, gap-at-cap, and contiguous delayed output tests. The latter connects but does not subscribe with Read until the child exits; it is not evidence for a subscribed stalled socket while new PTY output arrives.\n- service/grid_stream/tests.rs 472-548: paused/full writer queue processing premise and exact history assertions.\n- hosts/terminal/test_host.rs 1-180: replacement stand-in ownership and child kill/reap Drop; hosts/terminal.rs 2340-2432 and 3005-3050: explicit host shutdown vs runtime abort/drop that leaves host running.\n- service/core/host_launch.rs 1-165 and host_restart.rs 1-113, 418-488: create launch identity, restart new-host/history-only seed, and ordinary lifetime handling. These map the complete lifecycle relevant to the deletions; not a claim of auditing every implementation line in neighboring groups.\n- service/core.rs 11865-12065: prompt holds target lifecycle claim, checks that host's liveness/status, requires replay catch-up and paste mode before delivery. 6790-6843 and 7036-7094: legacy conversion and sweep/commit/notice ordering.\n- service/status.rs 600-675 and service/launch_artifacts.rs 1-124: never-started evidence and final current-generation host screen excerpt.\n- service/core/host_tabs.rs 1-109, 582-715, 865-1045, 1279-1523: new tab identity, recovery tag checks, runtime-aware close, failed-end retention.\n- service/core/tests/host_terminals.rs 175-232, 529-592, 1270-1314, 1469-1539: actual excerpt/prompt/replay and wrong-session Delete assertions. Tests were read only, not run.\nAt 500548b9253b07a26fd03119679184b69544e31d, provisioning/backend.rs tmux version-gate/remotely reported path/admission projection deletion hunks were checked, in addition to first-turn complete parser deletion and no-caller searches.\n\nInterface assumptions resolved: replacing the old per-session shared tmux clients with one independent PTY-owning host per terminal eliminates sink/filter/prefix-selector dependencies; closing a supervisor runtime is distinct from closing that host; create/reload/restart/close retain host-specific identities. Removing obsolete tmux tests is not itself a proof that replacement tests detect every host regression. No concrete distinct misleading-warning, wrong-target termination or unconfirmed-Delete route arose from assigned deletions; deliberate-retirement acceptance was not used to settle those issues.\n\nA broad synthesis test-name search clipped; focused reads above supplied the actual premises/assertions used. No omitted snippet was treated as proof. Next action: return synthesis delta to caller for its next protocol step. Findings log is the record; no separate report created.\n\n## Separate discovery pass, turn 3\n\nTurn count 3; discovery-pass count 1. Completed one separate source-only discovery pass beyond prior records after reading the complete supplied discovery-neighbours.json (945 lines, 251793 bytes). It was read in bounded ranges through its closing brace. One 40-line packet at 281-320 clipped 25 tokens; both 281-300 and 301-320 were reread fully in smaller ranges. No neighbour source-credit claim is made, and no prohibited coverage source was opened.\n\nInterface reconciliation before new search revised original c4 immediately: final host exit evidence does not refute neighbour g100/c1's inherited-history/resize excerpt route; wrong-session checks do not refute neighbour g166/c5's Gone-tab Delete confirmation bypass or g007/c4/g128/l1 legacy-survivor consent. These are supplied known findings, not new discoveries or new IDs. The revision preserves original wrong-target process/work consequences and limits the proposed source refutation to the retired prefix-selector mechanism. It accepts no parent drop or lowering.\n\nNew-search checks/results at the assigned revisions:\n- At 1ed482dde220452e424973faf38a5e1318986333, pinned git grep across crates, docs, SPEC.md, SPEC_impl.md, .config, .github and scripts returned no references to deleted sink/test_support source paths or modules, SessionSink/open_session_sink, ScratchServer/REAL_TMUX_SLOTS, pump_own_pane_ticks or shutdown_test_stream. A separate conceptual search for session-sink, per-session sink, sink client/lease, sink-and-tmux and filtered panes also returned no matches in supervisor source, specifications, docs or nextest configuration. This checked stale code/documentation/configuration dependencies, not just runtime correctness.\n- That revision's .config/nextest.toml search returned no tmux/sink/stream filters/groups. c3 was immediately revised with this additional dependency/configuration result, retaining its earlier test-sensitivity caveats and distinguishing supplied g156/l1's earlier intermediate recovery-test loss.\n- At 500548b9253b07a26fd03119679184b69544e31d, pinned cross-source search returned no parse_tmux_version/parse_tmux_version_number, TMUX_FLOOR/TmuxVersion, tmux_meets_floor, farhelm_supervisor::tmux or supervisor/src/tmux.rs references across crates, docs, specifications, configuration, workflows and scripts. No new dangling parser or documentation prerequisite was found.\n- Read the parent's tmux.rs module/export declarations (1-110) and each reviewed lib.rs declaration area (55-102 / 55-101). The first deletion retires all sink/stream/control/input module siblings together, and the later parser deletion removes the remaining public module declaration. Name-status checks confirmed actual deletions, not misplaced or renamed still-required files.\n- Complete pinned-range path history for the three assigned paths includes 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513, dbfc69751215dbf15e1d31d5bed73c3754c4ebc4, 1ed482dde220452e424973faf38a5e1318986333, 17a3fe858c5511a24b7403af15dd41c93bf69fd7 and 500548b9253b07a26fd03119679184b69544e31d. The assigned patches remain the sink/helper removal at 1ed482d and parser removal at 500548b9; other portions have neighbouring owners. No unrelated retired implementation defects were sought.\n\nResult: empty new-discovery pass. New verified finding IDs: none. New unverified-after-investigation IDs: none. Revisions this turn: c4 (interface-limited basis), c3 (additional source/configuration checks). Open unresolved lead IDs: none. No readily checkable premise is deferred. All assigned scope remains read; no runtime tests, builds, reproductions, helper agents, checkout changes or live-install actions. No separate report file created.\n\nNext action: return this turn's checks/delta and explicit empty result to caller. Existing proposed drops remain unaccepted and durable prior consequences remain intact.\n"
+}

@@ -1,0 +1,536 @@
+{
+  "group": {
+    "id": "g078",
+    "domain": "gui-environment-settings",
+    "purpose": "gui-environment-settings: crates/farhelm-ui/src/container_controls.rs, crates/farhelm-ui/src/environment_ui.rs; phases complete small per-commit changes",
+    "interfaces": [
+      "g058",
+      "g059",
+      "g060",
+      "g077"
+    ],
+    "sources": [
+      {
+        "path": "[private-run]/prep/parts/00311-000.patch",
+        "ranges": [
+          [
+            1,
+            239
+          ]
+        ],
+        "original_path": "crates/farhelm-ui/src/container_controls.rs",
+        "commit": "04d85f0c98a9b635709d00b056719a0baa7fd3fc",
+        "notes": "patch header; patch character offsets [0,11189)",
+        "lines": 239,
+        "bytes": 11191,
+        "start": 0,
+        "end": 11189,
+        "original": "[private-run]/prep/originals/00311.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/00711-000.patch",
+        "ranges": [
+          [
+            1,
+            258
+          ]
+        ],
+        "original_path": "crates/farhelm-ui/src/environment_ui.rs",
+        "commit": "2ef10815f12ed719ab6c51c6e3ac6fcd3f8bc1fa",
+        "notes": "patch header; patch character offsets [0,13593)",
+        "lines": 258,
+        "bytes": 13593,
+        "start": 0,
+        "end": 13593,
+        "original": "[private-run]/prep/originals/00711.patch"
+      }
+    ],
+    "lines": 497,
+    "bytes": 24784
+  },
+  "records": [
+    {
+      "key": "g078/c1",
+      "owner": "g078",
+      "id": "c1",
+      "domain": "gui-environment-settings",
+      "purpose": "gui-environment-settings: crates/farhelm-ui/src/container_controls.rs, crates/farhelm-ui/src/environment_ui.rs; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 1,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c1",
+            "state": "open",
+            "summary": "Removing the legacy container editor is specified retirement",
+            "location": "crates/farhelm-ui/src/container_controls.rs:1",
+            "detail": "Reviewed commit: 04d85f0c98a9b635709d00b056719a0baa7fd3fc. TLDR: The old Containerized editor disappears, but this is the intended retirement rather than an accidental loss of container isolation. Considered consequence: applying a stored setup after editor removal could silently run previously isolated work on the host (could-be-highest: yes, if that route existed). Source checks: the entire deleted module was read; at this revision create_form/draft.rs:222-232 preserves the old ContainerConfig and exposes an explicit refusal, :747-750 refuses structured projection, :1965-1974 and :2650-2656 reject old recent setups before adopting their destination. list/templates.rs:1237-1239 displays the retirement explanation rather than an editor. Contract: SPEC.md:4817-4824, Retired containerized sessions, explicitly says: 'Templates, recent setups and history with that choice still load. Using them drops or refuses the retired choice with an explanation and cannot create another old-style session. The old launcher switch and account-selection flow are gone.' SPEC_impl.md:8647-8656 explicitly requires removal of launch fields and switches after retirement. Suggested bucket: none, not a defect. Confidence: confirmed by source and explicit contract; no behavior executed. proposed_drop: editor removal explicitly specified, and examined stored-choice interfaces preserve/refuse rather than silently projecting the old structured launch. possible_cover: none; no coverage sources searched. Caveat: this does not independently certify every launcher path, which is outside this group's deletion scope."
+          }
+        },
+        {
+          "line": 5,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c1",
+            "state": "open",
+            "summary": "Removing the legacy container editor is specified retirement",
+            "location": "crates/farhelm-ui/src/container_controls.rs:1",
+            "detail": "Reviewed commit: 04d85f0c98a9b635709d00b056719a0baa7fd3fc. TLDR: The old Containerized editor disappears, but this is the intended retirement rather than an accidental loss of container isolation. Considered consequence: applying a stored setup after editor removal could silently run previously isolated work on the host (could-be-highest: yes, if that route existed). Source checks: the entire deleted module was read; at this revision create_form/draft.rs:222-232 preserves the old ContainerConfig and exposes an explicit refusal, :747-750 refuses structured projection, :1965-1974 and :2650-2656 reject old recent setups before adopting their destination. list/templates.rs:1237-1239 displays the retirement explanation rather than an editor. Contract: SPEC.md:4817-4824, Retired containerized sessions, explicitly says: 'Templates, recent setups and history with that choice still load. Using them drops or refuses the retired choice with an explanation and cannot create another old-style session. The old launcher switch and account-selection flow are gone.' SPEC_impl.md:8647-8656 explicitly requires removal of launch fields and switches after retirement. Suggested bucket: none, not a defect. Confidence: confirmed by source and explicit contract; no behavior executed. proposed_drop: editor removal explicitly specified, and examined stored-choice interfaces preserve/refuse rather than silently projecting the old structured launch. possible_cover: none; no coverage sources searched. Caveat: this does not independently certify every launcher path, which is outside this group's deletion scope. Synthesis revision: the refusal is used by actual submit paths, not only a passive editor helper: create_form.rs:5863-5866 refuses before initial structured launch; :6830-6835 repeats that refusal after asynchronous key minting; :9189-9193 refuses saving it as a new template. proto launcher.rs:667-669 rejects any template carrying a non-null stored container object before applying any field. The apparently dropping branch create_form.rs:759-764 only removes a template field matching the already-held restart value; the held draft still retains its refusal. Reset choices is an explicit user action (:9166-9177); its implementation clears the selected harness along with the old container choice (draft.rs:1090-1099), requiring a fresh agent choice, while a restart restores its retained baseline (:2268-2276). This extends the source refutation but does not certify unexamined launcher paths or remove the original potentially highest consequence. proposed_drop remains pending independent check; no drop accepted, no execution performed."
+          }
+        },
+        {
+          "line": 11,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c1",
+            "state": "open",
+            "summary": "Removing the legacy container editor is specified retirement",
+            "location": "crates/farhelm-ui/src/container_controls.rs:1",
+            "detail": "Reviewed commit: 04d85f0c98a9b635709d00b056719a0baa7fd3fc. TLDR: The old Containerized editor disappears, but this is the intended retirement rather than an accidental loss of container isolation. Considered consequence: applying a stored setup after editor removal could silently run previously isolated work on the host (could-be-highest: yes, if that route existed). Source checks: the entire deleted module was read; at this revision create_form/draft.rs:222-232 preserves the old ContainerConfig and exposes an explicit refusal, :747-750 refuses structured projection, :1965-1974 and :2650-2656 reject old recent setups before adopting their destination. list/templates.rs:1237-1239 displays the retirement explanation rather than an editor. Contract: SPEC.md:4817-4824, Retired containerized sessions, explicitly says: 'Templates, recent setups and history with that choice still load. Using them drops or refuses the retired choice with an explanation and cannot create another old-style session. The old launcher switch and account-selection flow are gone.' SPEC_impl.md:8647-8656 explicitly requires removal of launch fields and switches after retirement. Suggested bucket: none, not a defect. Confidence: confirmed by source and explicit contract; no behavior executed. proposed_drop: editor removal explicitly specified, and examined stored-choice interfaces preserve/refuse rather than silently projecting the old structured launch. possible_cover: none; no coverage sources searched. Caveat: this does not independently certify every launcher path, which is outside this group's deletion scope. Synthesis revision: the refusal is used by actual submit paths, not only a passive editor helper: create_form.rs:5863-5866 refuses before initial structured launch; :6830-6835 repeats that refusal after asynchronous key minting; :9189-9193 refuses saving it as a new template. proto launcher.rs:667-669 rejects any template carrying a non-null stored container object before applying any field. The apparently dropping branch create_form.rs:759-764 only removes a template field matching the already-held restart value; the held draft still retains its refusal. Reset choices is an explicit user action (:9166-9177); its implementation clears the selected harness along with the old container choice (draft.rs:1090-1099), requiring a fresh agent choice, while a restart restores its retained baseline (:2268-2276). This extends the source refutation but does not certify unexamined launcher paths or remove the original potentially highest consequence. proposed_drop remains pending independent check; no drop accepted, no execution performed. Discovery pass 1 additional removal checks: re-read the full deleted module from the parent revision, its module registration diff, and LaunchControls integration diff at 04d85f0c98a9b635709d00b056719a0baa7fd3fc. The deleted module declaration and its prop/control mounting are removed together (lib.rs:145 vicinity; launch_controls.rs former :130-132 and :653-663). A pinned git grep for ContainerDraft/ContainerControls/ContainerEdit/container_controls/Containerized/Turn off containerization across UI source finds only the intentional retired Containerized field label in list/templates.rs:554, not an active old toggle or handler. No independent defect in retired implementation was sought. No new finding; the existing original potentially highest host-execution concern and source refutations are preserved, with no accepted drop."
+          }
+        }
+      ],
+      "latest": {
+        "line": 11,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c1",
+          "state": "open",
+          "summary": "Removing the legacy container editor is specified retirement",
+          "location": "crates/farhelm-ui/src/container_controls.rs:1",
+          "detail": "Reviewed commit: 04d85f0c98a9b635709d00b056719a0baa7fd3fc. TLDR: The old Containerized editor disappears, but this is the intended retirement rather than an accidental loss of container isolation. Considered consequence: applying a stored setup after editor removal could silently run previously isolated work on the host (could-be-highest: yes, if that route existed). Source checks: the entire deleted module was read; at this revision create_form/draft.rs:222-232 preserves the old ContainerConfig and exposes an explicit refusal, :747-750 refuses structured projection, :1965-1974 and :2650-2656 reject old recent setups before adopting their destination. list/templates.rs:1237-1239 displays the retirement explanation rather than an editor. Contract: SPEC.md:4817-4824, Retired containerized sessions, explicitly says: 'Templates, recent setups and history with that choice still load. Using them drops or refuses the retired choice with an explanation and cannot create another old-style session. The old launcher switch and account-selection flow are gone.' SPEC_impl.md:8647-8656 explicitly requires removal of launch fields and switches after retirement. Suggested bucket: none, not a defect. Confidence: confirmed by source and explicit contract; no behavior executed. proposed_drop: editor removal explicitly specified, and examined stored-choice interfaces preserve/refuse rather than silently projecting the old structured launch. possible_cover: none; no coverage sources searched. Caveat: this does not independently certify every launcher path, which is outside this group's deletion scope. Synthesis revision: the refusal is used by actual submit paths, not only a passive editor helper: create_form.rs:5863-5866 refuses before initial structured launch; :6830-6835 repeats that refusal after asynchronous key minting; :9189-9193 refuses saving it as a new template. proto launcher.rs:667-669 rejects any template carrying a non-null stored container object before applying any field. The apparently dropping branch create_form.rs:759-764 only removes a template field matching the already-held restart value; the held draft still retains its refusal. Reset choices is an explicit user action (:9166-9177); its implementation clears the selected harness along with the old container choice (draft.rs:1090-1099), requiring a fresh agent choice, while a restart restores its retained baseline (:2268-2276). This extends the source refutation but does not certify unexamined launcher paths or remove the original potentially highest consequence. proposed_drop remains pending independent check; no drop accepted, no execution performed. Discovery pass 1 additional removal checks: re-read the full deleted module from the parent revision, its module registration diff, and LaunchControls integration diff at 04d85f0c98a9b635709d00b056719a0baa7fd3fc. The deleted module declaration and its prop/control mounting are removed together (lib.rs:145 vicinity; launch_controls.rs former :130-132 and :653-663). A pinned git grep for ContainerDraft/ContainerControls/ContainerEdit/container_controls/Containerized/Turn off containerization across UI source finds only the intentional retired Containerized field label in list/templates.rs:554, not an active old toggle or handler. No independent defect in retired implementation was sought. No new finding; the existing original potentially highest host-execution concern and source refutations are preserved, with no accepted drop."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g078/findings.jsonl",
+        "id": "c1",
+        "line": 11,
+        "disposition": "under-investigation",
+        "group": "g078-c1",
+        "reason": "Record durably acknowledged; parent source/contract validation, cross-group synthesis, coverage/filter matching and any independent drop check remain pending. This preserves the claim and uncertainty without accepting, dropping or lowering it."
+      },
+      "accepted_parent_decision": null,
+      "returned_claim_checks": [
+        {
+          "batch": "claims-050",
+          "key": "g078/c1",
+          "latest_line": 11,
+          "recommendation": "covered",
+          "bucket": "other",
+          "underlying_key": "ui-legacy-container-editor-specified-retirement",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "Removing the legacy editor is explicitly required. The examined stored-choice paths refuse the retired isolation choice instead of silently projecting an ordinary agent launch. The original potential isolation-loss consequence still requires an independent drop check.",
+          "checks": [
+            "04d85f0c98a9b635709d00b056719a0baa7fd3fc removes container_controls.rs and its LaunchControls mounting/module wiring in the same patch. The absence of that old editor is the specified target, not accidental feature loss.",
+            "Same revision:crates/farhelm-ui/src/list/create_form/draft.rs:222-232 retains the old configuration and explicit refusal; :747-750 refuses structured projection; :1965-1974 and :2650-2656 refuse old recent setups before adopting their destination.",
+            "Same revision:create_form.rs:5863-5866 and :6830-6835 enforce refusal before structured submission and after key minting; :9189-9193 refuses saving it as a new template. farhelm-proto/src/launcher.rs:667-669 rejects a non-null stored container object before applying fields.",
+            "Same revision:create_form.rs:759-764 only strips a redundant template field matching held restart data; it does not clear the held refusal. draft.rs:1090-1099 clears the old choice only through explicit Reset choices, also clearing the agent. No all-launcher-path certification or runtime execution is claimed."
+          ],
+          "coverage_checked": [
+            "Current SPEC.md:4892-4900 and SPEC_impl.md:8312-8326 explicitly retain the retirement, explained drop/refusal and removal of old launch fields/switches. Historical exact text at the reviewed commit has the same rule.",
+            "TODO.md Planned empty. Searched unlanded plans/queue, BUGS.md, INDEX.md and active TRIAGE_OUTCOMES.md for retired editor/removal silently dropping isolation. The responsible podman-environments plan is landed (plans/REPORTS.md:21), not pending coverage. Existing old template draft-off/on feedback concerns the retired implementation, not this deletion premise.",
+            "FILTER.md is not invoked; an established loss of isolation would be a security boundary concern."
+          ],
+          "exact_cover_quotes": [
+            "04d85f0c:SPEC.md:4822-4823: Templates, recent setups and history with that choice still load. Using them drops or refuses the retired choice with an explanation and cannot create another old-style session. The old launcher switch and account-selection flow are gone.",
+            "04d85f0c:SPEC_impl.md:8647-8650: The earlier supervisor-outside model is retired. Keep decoding stored `ContainerConfig`, including legacy `image_file`, so sessions, templates, recent setups and history remain readable. A retired session supports Delete only. Refuse all other lifecycle, terminal and exec paths, including plain Replace. Drop or refuse retired container selections when using a stored setup, with an explanation. No path creates another old-style session.",
+            "04d85f0c:SPEC_impl.md:8654-8656: Remove creation helpers, account selection, launch fields and switches, hooks-off branches, special tab/attach and file-confinement paths once nothing can create or open these sessions."
+          ],
+          "missing_premise": "The stronger consequence requires an unexamined stored-choice path that silently launches previously isolated agent work on the host. The paths checked here refuse it; that is not a certificate for every launcher path.",
+          "original_stronger_consequence": "Applying a stored setup after editor removal might silently run previously isolated work on the host, potentially highest if established. Every history event preserves that concern and proposes retirement/source-refutation only; no drop was accepted.",
+          "needs_independent_drop_check": true,
+          "proposed_basis": "Propose explicit specification coverage for editor removal and narrow source refutation for the inspected stored-choice bypass hypothesis, preserving the all-path limitation."
+        }
+      ],
+      "parent_proposals": [
+        {
+          "artifact": "parent-flagged-judgments-050.json",
+          "key": "g078/c1",
+          "proposal": "claim-checks/claims-050/result.json",
+          "parent_proposal": "exact-retired-editor-removal-cover-and-bounded-stored-choice-refusal",
+          "final_independent_gate": "required-before-original-highest-isolation-drop",
+          "reason": "Full050 explicit retired supervisor-outside model removes old editor/module/wiring. Actual captured draft retains retired choice/refusal, recent/template paths reject before destination or field application, structured submit/key-mint/save gates refuse; explicit Reset choices clears agent with choice, redundant restart-field stripping does not remove held refusal. Cover editor removal and refute named silent outside-host launch consumers only, not every launcher path. Preserve original stored isolation/security possibility and explanation requirement for fresh gate."
+        }
+      ],
+      "collection": {
+        "retain": true,
+        "clearly_refuted_candidate": false,
+        "needs_unfinished_gate": true,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "ui-legacy-container-editor-specified-retirement",
+        "destination": "trailing-ui-legacy-container-editor-specified-retirement.md"
+      }
+    },
+    {
+      "key": "g078/c2",
+      "owner": "g078",
+      "id": "c2",
+      "domain": "gui-environment-settings",
+      "purpose": "gui-environment-settings: crates/farhelm-ui/src/container_controls.rs, crates/farhelm-ui/src/environment_ui.rs; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 2,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c2",
+            "state": "open",
+            "summary": "Delete wording and dispatched scope stay bound to the drawn question",
+            "location": "crates/farhelm-ui/src/environment_ui.rs:129",
+            "detail": "Reviewed commit: 2ef10815f12ed719ab6c51c6e3ac6fcd3f8bc1fa. TLDR: A connectivity change while a Delete question is open does not silently change a session Delete into deletion of its whole sandbox or container. Considered consequence: a live-state scope lookup could destroy other sessions and files without the warning the user accepted (could-be-highest: yes). Source checks: environment_ui.rs:129-191 supplies distinct both-outcomes and whole-resource warnings/labels; row.rs:1227-1250 picks wording from the drawn question token, and :2529-2538 sends that token with render-captured environment facts. list/view.rs:3287-3300 consumes that exact token and obtains the scope through token.key().answered(environment). session_view.rs:2073-2087 selects wording from header_delete_shown, and :2790-2800 takes that token and dispatches with its scope. lifecycle.rs:430-435,473-491,505-508 draws the bulk consequences from the token's captured targets and sends the same token. Contract: SPEC_impl.md:1071-1085, Answers bind to what was drawn, says: 'A handler for something the user answered or confirmed acts on what the render that drew the control showed, never on state it reads when it runs.' SPEC.md:1508-1543 separately specifies both-outcomes session consent, warned whole-resource consent and per-target bulk behavior. Suggested bucket: none, source refutes the hypothesized scope drift in the examined consumers. Confidence: confirmed by source; no behavior executed. proposed_drop: source refutation; the scope comes from the answered token rather than current connectivity. possible_cover: none; no coverage sources searched. Caveat: the parent owns the complete caller groups; this record covers the consumers examined to validate the assigned wording patch."
+          }
+        },
+        {
+          "line": 6,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "c2",
+            "state": "open",
+            "summary": "Retained whole-environment warning can misstate current reachability",
+            "location": "crates/farhelm-ui/src/environment_ui.rs:164",
+            "detail": "Reviewed commit: 2ef10815f12ed719ab6c51c6e3ac6fcd3f8bc1fa. TLDR: A connectivity change while a Delete question is open does not silently change a session Delete into deletion of its whole sandbox or container. Considered consequence: a live-state scope lookup could destroy other sessions and files without the warning the user accepted (could-be-highest: yes). Source checks: environment_ui.rs:129-191 supplies distinct both-outcomes and whole-resource warnings/labels; row.rs:1227-1250 picks wording from the drawn question token, and :2529-2538 sends that token with render-captured environment facts. list/view.rs:3287-3300 consumes that exact token and obtains the scope through token.key().answered(environment). session_view.rs:2073-2087 selects wording from header_delete_shown, and :2790-2800 takes that token and dispatches with its scope. lifecycle.rs:430-435,473-491,505-508 draws the bulk consequences from the token's captured targets and sends the same token. Contract: SPEC_impl.md:1071-1085, Answers bind to what was drawn, says: 'A handler for something the user answered or confirmed acts on what the render that drew the control showed, never on state it reads when it runs.' SPEC.md:1508-1543 separately specifies both-outcomes session consent, warned whole-resource consent and per-target bulk behavior. Suggested bucket: none, source refutes the hypothesized scope drift in the examined consumers. Confidence: confirmed by source; no behavior executed. proposed_drop: source refutation; the scope comes from the answered token rather than current connectivity. possible_cover: none; no coverage sources searched. Caveat: the parent owns the complete caller groups; this record covers the consumers examined to validate the assigned wording patch. Synthesis revision: the original potential highest consequence (unwarned escalation to whole-resource deletion) remains source-refuted by the token paths above and must remain available for independent review. There is a narrower, confirmed wording defect: open Delete while the environment is suspended/disconnected (sandbox_sessions.rs:195-203 selects Whole), then resume/reconnect it in another client while retaining this question. list/view.rs:3245-3258 retains the open lane; its accepted Hosts refresh (:2473-2476) does not replace the question. row.rs:1234-1242 still calls whole_delete_warning from that lane, and environment_ui.rs:167,170 still assert Farhelm cannot ask the environment, although the current connected host can now take the narrower session request. The header uses the same retained-lane wording at session_view.rs:2073-2087. User-facing TLDR: after a sandbox or container reconnects, an already-open Delete warning can still say Farhelm cannot delete just this session, obscuring that the narrower option is now available by canceling and reopening. Actual destructive scope remains correctly and explicitly stated as the whole resource; backend membership is not inferred from renderer state. SPEC.md:1538-1542 expressly snapshots bulk scope at modal opening; SPEC_impl.md Answers bind to what was drawn preserves consent, but neither requires describing a former connectivity failure as current. Fix the rationale to name the earlier failed/unavailable attempt or the question-opening snapshot, with guidance to cancel/reopen after reconnect; do not silently change an answered lane or infer last-session membership. Suggested bucket revised: other, for misleading diagnostic/recovery wording, not highest. Confidence: confirmed from source and shipped UI sequence, not execution. proposed_drop revised: false for this narrower wording defect; the original scope-escalation hypothesis remains proposed_drop by source refutation and pending independent review, no drop accepted. possible_cover remains none; related g037/f2 and g038/c2 were identified by the parent as scope-token traces but their private logs were not read. Material caveat: keeping a snapshot whole-resource scope is intentional and is not the defect; the actionable claim is only the static present-tense explanation after the reason has ceased to hold."
+          }
+        },
+        {
+          "line": 7,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "c2",
+            "state": "open",
+            "summary": "Retained whole-environment warning can misstate current reachability",
+            "location": "crates/farhelm-ui/src/environment_ui.rs:164",
+            "detail": "Reviewed commit: 2ef10815f12ed719ab6c51c6e3ac6fcd3f8bc1fa. TLDR: A connectivity change while a Delete question is open does not silently change a session Delete into deletion of its whole sandbox or container. Considered consequence: a live-state scope lookup could destroy other sessions and files without the warning the user accepted (could-be-highest: yes). Source checks: environment_ui.rs:129-191 supplies distinct both-outcomes and whole-resource warnings/labels; row.rs:1227-1250 picks wording from the drawn question token, and :2529-2538 sends that token with render-captured environment facts. list/view.rs:3287-3300 consumes that exact token and obtains the scope through token.key().answered(environment). session_view.rs:2073-2087 selects wording from header_delete_shown, and :2790-2800 takes that token and dispatches with its scope. lifecycle.rs:430-435,473-491,505-508 draws the bulk consequences from the token's captured targets and sends the same token. Contract: SPEC_impl.md:1071-1085, Answers bind to what was drawn, says: 'A handler for something the user answered or confirmed acts on what the render that drew the control showed, never on state it reads when it runs.' SPEC.md:1508-1543 separately specifies both-outcomes session consent, warned whole-resource consent and per-target bulk behavior. Suggested bucket: none, source refutes the hypothesized scope drift in the examined consumers. Confidence: confirmed by source; no behavior executed. proposed_drop: source refutation; the scope comes from the answered token rather than current connectivity. possible_cover: none; no coverage sources searched. Caveat: the parent owns the complete caller groups; this record covers the consumers examined to validate the assigned wording patch. Synthesis revision: the original potential highest consequence (unwarned escalation to whole-resource deletion) remains source-refuted by the token paths above and must remain available for independent review. There is a narrower, confirmed wording defect: open Delete while the environment is suspended/disconnected (sandbox_sessions.rs:195-203 selects Whole), then resume/reconnect it in another client while retaining this question. list/view.rs:3245-3258 retains the open lane; its accepted Hosts refresh (:2473-2476) does not replace the question. row.rs:1234-1242 still calls whole_delete_warning from that lane, and environment_ui.rs:167,170 still assert Farhelm cannot ask the environment, although the current connected host can now take the narrower session request. The header uses the same retained-lane wording at session_view.rs:2073-2087. User-facing TLDR: after a sandbox or container reconnects, an already-open Delete warning can still say Farhelm cannot delete just this session, obscuring that the narrower option is now available by canceling and reopening. Actual destructive scope remains correctly and explicitly stated as the whole resource; backend membership is not inferred from renderer state. SPEC.md:1538-1542 expressly snapshots bulk scope at modal opening; SPEC_impl.md Answers bind to what was drawn preserves consent, but neither requires describing a former connectivity failure as current. Fix the rationale to name the earlier failed/unavailable attempt or the question-opening snapshot, with guidance to cancel/reopen after reconnect; do not silently change an answered lane or infer last-session membership. Suggested bucket revised: other, for misleading diagnostic/recovery wording, not highest. Confidence: confirmed from source and shipped UI sequence, not execution. proposed_drop revised: false for this narrower wording defect; the original scope-escalation hypothesis remains proposed_drop by source refutation and pending independent review, no drop accepted. possible_cover remains none; related g037/f2 and g038/c2 were identified by the parent as scope-token traces but their private logs were not read. Material caveat: keeping a snapshot whole-resource scope is intentional and is not the defect; the actionable claim is only the static present-tense explanation after the reason has ceased to hold. Final synthesis source checks: HostsRead keeps its last successful host identity on failed reads (hosts.rs:1554-1570,1592-1595), while lookup marks the failure (:1612-1625); delete_scope maps uncertain reads to Session rather than Whole (sandbox_sessions.rs:195-203). If metadata genuinely disappears and a retained renderer falls back to ordinary wording/request, backend sessions/sandbox.rs:382-394 refuses a session-owned host without explicit whole-resource consent rather than destroying it, independently preserving the original source refutation. An extant row question survives listing refreshes while its session remains listed (list/view.rs:2228-2248), completing the retained-warning premise above. These checks establish diagnostic wording staleness only; no unwarned destruction or new highest route was found. No drop has been accepted."
+          }
+        }
+      ],
+      "latest": {
+        "line": 7,
+        "event": {
+          "version": 1,
+          "kind": "finding",
+          "id": "c2",
+          "state": "open",
+          "summary": "Retained whole-environment warning can misstate current reachability",
+          "location": "crates/farhelm-ui/src/environment_ui.rs:164",
+          "detail": "Reviewed commit: 2ef10815f12ed719ab6c51c6e3ac6fcd3f8bc1fa. TLDR: A connectivity change while a Delete question is open does not silently change a session Delete into deletion of its whole sandbox or container. Considered consequence: a live-state scope lookup could destroy other sessions and files without the warning the user accepted (could-be-highest: yes). Source checks: environment_ui.rs:129-191 supplies distinct both-outcomes and whole-resource warnings/labels; row.rs:1227-1250 picks wording from the drawn question token, and :2529-2538 sends that token with render-captured environment facts. list/view.rs:3287-3300 consumes that exact token and obtains the scope through token.key().answered(environment). session_view.rs:2073-2087 selects wording from header_delete_shown, and :2790-2800 takes that token and dispatches with its scope. lifecycle.rs:430-435,473-491,505-508 draws the bulk consequences from the token's captured targets and sends the same token. Contract: SPEC_impl.md:1071-1085, Answers bind to what was drawn, says: 'A handler for something the user answered or confirmed acts on what the render that drew the control showed, never on state it reads when it runs.' SPEC.md:1508-1543 separately specifies both-outcomes session consent, warned whole-resource consent and per-target bulk behavior. Suggested bucket: none, source refutes the hypothesized scope drift in the examined consumers. Confidence: confirmed by source; no behavior executed. proposed_drop: source refutation; the scope comes from the answered token rather than current connectivity. possible_cover: none; no coverage sources searched. Caveat: the parent owns the complete caller groups; this record covers the consumers examined to validate the assigned wording patch. Synthesis revision: the original potential highest consequence (unwarned escalation to whole-resource deletion) remains source-refuted by the token paths above and must remain available for independent review. There is a narrower, confirmed wording defect: open Delete while the environment is suspended/disconnected (sandbox_sessions.rs:195-203 selects Whole), then resume/reconnect it in another client while retaining this question. list/view.rs:3245-3258 retains the open lane; its accepted Hosts refresh (:2473-2476) does not replace the question. row.rs:1234-1242 still calls whole_delete_warning from that lane, and environment_ui.rs:167,170 still assert Farhelm cannot ask the environment, although the current connected host can now take the narrower session request. The header uses the same retained-lane wording at session_view.rs:2073-2087. User-facing TLDR: after a sandbox or container reconnects, an already-open Delete warning can still say Farhelm cannot delete just this session, obscuring that the narrower option is now available by canceling and reopening. Actual destructive scope remains correctly and explicitly stated as the whole resource; backend membership is not inferred from renderer state. SPEC.md:1538-1542 expressly snapshots bulk scope at modal opening; SPEC_impl.md Answers bind to what was drawn preserves consent, but neither requires describing a former connectivity failure as current. Fix the rationale to name the earlier failed/unavailable attempt or the question-opening snapshot, with guidance to cancel/reopen after reconnect; do not silently change an answered lane or infer last-session membership. Suggested bucket revised: other, for misleading diagnostic/recovery wording, not highest. Confidence: confirmed from source and shipped UI sequence, not execution. proposed_drop revised: false for this narrower wording defect; the original scope-escalation hypothesis remains proposed_drop by source refutation and pending independent review, no drop accepted. possible_cover remains none; related g037/f2 and g038/c2 were identified by the parent as scope-token traces but their private logs were not read. Material caveat: keeping a snapshot whole-resource scope is intentional and is not the defect; the actionable claim is only the static present-tense explanation after the reason has ceased to hold. Final synthesis source checks: HostsRead keeps its last successful host identity on failed reads (hosts.rs:1554-1570,1592-1595), while lookup marks the failure (:1612-1625); delete_scope maps uncertain reads to Session rather than Whole (sandbox_sessions.rs:195-203). If metadata genuinely disappears and a retained renderer falls back to ordinary wording/request, backend sessions/sandbox.rs:382-394 refuses a session-owned host without explicit whole-resource consent rather than destroying it, independently preserving the original source refutation. An extant row question survives listing refreshes while its session remains listed (list/view.rs:2228-2248), completing the retained-warning premise above. These checks establish diagnostic wording staleness only; no unwarned destruction or new highest route was found. No drop has been accepted."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g078/findings.jsonl",
+        "id": "c2",
+        "line": 7,
+        "disposition": "under-investigation",
+        "group": "g078-c2",
+        "reason": "Record durably acknowledged; parent source/contract validation, cross-group synthesis, coverage/filter matching and any independent drop check remain pending. This preserves the claim and uncertainty without accepting, dropping or lowering it."
+      },
+      "accepted_parent_decision": null,
+      "returned_claim_checks": [
+        {
+          "batch": "claims-050",
+          "key": "g078/c2",
+          "latest_line": 7,
+          "recommendation": "retain-verified",
+          "bucket": "other",
+          "underlying_key": "ui-retained-whole-environment-question-stale-unreachable-rationale",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "A retained whole-environment question continues to state that Farhelm cannot ask the environment after it reconnects. Its whole-resource destructive consequence remains explicit and its scope remains token-bound. Retain the diagnostic/recovery defect while sending the original potential highest consequence lowering to the independent check.",
+          "checks": [
+            "2ef10815f12ed719ab6c51c6e3ac6fcd3f8bc1fa:crates/farhelm-ui/src/sandbox_sessions.rs:195-203 selects Whole for a current known disconnected host. environment_ui.rs:164-170 states Farhelm cannot ask and recommends resuming/updating, in present tense.",
+            "Same revision:list/view.rs:3245-3258 retains the open question; :2473-2476 records a new host read without replacing it; :2228-2248 retains a row question while the session stays listed. list/row.rs:1234-1242 keeps whole_delete_warning by the retained question lane. Thus reconnecting elsewhere can make the rationale stale until cancel/reopen.",
+            "Same revision:list/row.rs:2529-2538 sends the drawn token; list/view.rs:3293-3300 consumes that exact token and derives scope through its key. session_view.rs:2073-2087 selects copy by header_delete_shown, and :2790-2800 derives dispatch scope from that token. list/lifecycle.rs:430-435,473-491,505-508 renders and dispatches one captured bulk target set.",
+            "Same revision:hosts.rs:1554-1570,1592-1625 retains host identity across failures but marks lookup uncertain; sandbox_sessions.rs:195-203 makes uncertain lookup Session, not Whole. If ownership facts disappear, crates/farhelm-helm/src/sessions/sandbox.rs:382-394 refuses unconfirmed whole-resource cleanup. These checks refute the named live-state unwarned escalation route in the examined consumers, not every unrelated Delete path.",
+            "The whole warning explicitly names all sessions/processes/files and the whole resource; no harm beyond that stated consent was established. No runtime reproduction or native event-ordering observation."
+          ],
+          "coverage_checked": [
+            "Current SPEC.md Sandbox sessions and Container sessions retain both-outcomes consent and whole-resource fallback. The bulk rule expressly snapshots reachability at opening. SPEC_impl.md:1069-1093 binds answers to drawn tokens. Those rules require preserved scope but do not require a formerly true inability to be stated as current after reconnection.",
+            "TODO.md Planned empty. Searched unlanded plans/queue, BUGS.md, full INDEX.md and active TRIAGE_OUTCOMES.md for retained whole-delete rationale/reconnected narrower option. No exact coverage or same-root queue alias found. Existing retained lifecycle-answer/outage-card items concern refusal/read failure, not this false present-tense explanation. environment-agent-operations is already landed (plans/REPORTS.md:28).",
+            "FILTER.md rare-diagnostic coverage is ambiguous: reconnecting during a retained question need not require a sub-second or otherwise proved narrow window, and this is wording inside destructive consent. Do not infer the full filter boundary from the diagnostic-only established impact."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": "The stronger consequence needs dispatch to widen beyond the question's explicit whole-resource consent, or some distinct harmful route beyond a person choosing the accurately warned scope despite a stale rationale. Neither was established in the examined consumers.",
+          "original_stronger_consequence": "Original c2 hypothesized that changing connectivity while a Delete question is open could silently turn session Delete into destruction of the whole environment, including other sessions and files without the accepted warning. Later events propose refuting that highest route and retaining only stale diagnostic/recovery wording. No drop or lowering has been accepted by the parent.",
+          "needs_independent_drop_check": true,
+          "proposed_basis": "Retain the source-confirmed stale rationale separately from intentional snapshot scope. Independently check the proposed lowering/refutation of unwarned whole-resource destruction before accepting it."
+        }
+      ],
+      "parent_proposals": [
+        {
+          "artifact": "parent-flagged-judgments-050.json",
+          "key": "g078/c2",
+          "proposal": "claim-checks/claims-050/result.json",
+          "parent_proposal": "retain-stale-Whole-question-rationale-with-unwarned-escalation-priority-gate",
+          "final_independent_gate": "required-before-original-highest-route-refutation-or-lowering",
+          "reason": "Full050 retained Whole question can keep saying cannot ask after reconnect until cancel/reopen; scope remains captured/token-bound and warning explicitly names all sessions/processes/files. Uncertain ownership lookup defaults Session, missing whole authority backend refuses. Retain actual present-tense diagnostic/recovery defect at proposed other; ordinary open-question reconnect is not established rare enough for diagnostic filter, and destructive wording warrants caution. Original live-refresh Session→Whole unwarned loss route is separately proposed refuted by exact row/header/bulk lane binding, not because user misreads a destructive warning. Fresh gate must settle lowering; accurately stated whole consequence does not erase stale rationale."
+        }
+      ],
+      "collection": {
+        "retain": true,
+        "clearly_refuted_candidate": false,
+        "needs_unfinished_gate": true,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "ui-retained-whole-environment-question-stale-unreachable-rationale",
+        "destination": "trailing-ui-retained-whole-environment-question-stale-unreachable-rationale.md"
+      }
+    },
+    {
+      "key": "g078/c3",
+      "owner": "g078",
+      "id": "c3",
+      "domain": "gui-environment-settings",
+      "purpose": "gui-environment-settings: crates/farhelm-ui/src/container_controls.rs, crates/farhelm-ui/src/environment_ui.rs; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 3,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c3",
+            "state": "open",
+            "summary": "The zero-remaining stays message has no shipped producer",
+            "location": "crates/farhelm-ui/src/environment_ui.rs:197",
+            "detail": "Reviewed commit: 2ef10815f12ed719ab6c51c6e3ac6fcd3f8bc1fa. TLDR: The formatter has a zero-count branch saying the environment stays with no other sessions, but the reviewed deletion route cannot produce that message. Considered consequence: misleading deletion completion text could imply an empty environment was retained contrary to the last-session rule. Could-be-highest: no established security or loss-of-work route; this would be an informational defect only. Source checks: list/view.rs:981-990 calls delete_kept only for Session scope and a present environment_remaining count. helm sessions/sandbox.rs:241-261 emits no count for NotFound or Sealed and Some(remaining) only for SealOutcome::Deleted. Supervisor service/handlers.rs:1515-1545 emits Deleted only for SealCount::Others. store.rs:5965-5985 returns Others only when SQL COUNT(*) excluding the deleted session is greater than zero; zero records the seal. Contract: SPEC.md, Sandbox sessions: 'If other sessions remain, only the chosen session is removed' and 'the result says the sandbox stays and how many other sessions it holds, as its Farhelm counted them.' Suggested bucket: none, unreachable formatting fallback in the inspected shipped path. Confidence: confirmed by source; no behavior executed. proposed_drop: source refutation, no production route supplies zero to the formatter. possible_cover: none; no coverage sources searched. Caveat: this does not require changing defensive formatting for a hypothetical future caller or malformed peer reply."
+          }
+        },
+        {
+          "line": 4,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c3",
+            "state": "open",
+            "summary": "The zero-remaining stays message has no shipped producer",
+            "location": "crates/farhelm-ui/src/environment_ui.rs:197",
+            "detail": "Reviewed commit: 2ef10815f12ed719ab6c51c6e3ac6fcd3f8bc1fa. TLDR: The formatter has a zero-count branch saying the environment stays with no other sessions, but the reviewed deletion route cannot produce that message. Considered consequence: misleading deletion completion text could imply an empty environment was retained contrary to the last-session rule. Could-be-highest: no established security or loss-of-work route; this would be an informational defect only. Source checks: list/view.rs:981-990 calls delete_kept only for Session scope and a present environment_remaining count. helm sessions/sandbox.rs:241-261 emits no count for NotFound or Sealed and Some(remaining) only for SealOutcome::Deleted. Supervisor service/handlers.rs:1515-1545 emits Deleted only for SealCount::Others. store.rs:5965-5985 returns Others only when SQL COUNT(*) excluding the deleted session is greater than zero; zero records the seal. Contract: SPEC.md, Sandbox sessions: 'If other sessions remain, only the chosen session is removed' and 'the result says the sandbox stays and how many other sessions it holds, as its Farhelm counted them.' Suggested bucket: none, unreachable formatting fallback in the inspected shipped path. Confidence: confirmed by source; no behavior executed. proposed_drop: source refutation, no production route supplies zero to the formatter. possible_cover: none; no coverage sources searched. Caveat: this does not require changing defensive formatting for a hypothetical future caller or malformed peer reply. Synthesis revision: missing counts do not call the zero-count formatter or establish that the environment was retained/destroyed. list/view.rs:523-540 retires the prior same-host stays count when a successful reply has no count, preserves its separate warning when appropriate, and does not alter a count belonging to another host; :592-602 applies this helper. :3004-3012 publishes both a count-less successful reply and Gone through that path. :492-506 and :605-612 additionally retire a count on a current successful Hosts read showing deletion or absence. This is display invalidation, not backend membership authority. No new observed execution; proposed_drop remains source-based and pending independent check, not accepted."
+          }
+        },
+        {
+          "line": 8,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c3",
+            "state": "open",
+            "summary": "The zero-remaining stays message has no shipped producer",
+            "location": "crates/farhelm-ui/src/environment_ui.rs:197",
+            "detail": "Reviewed commit: 2ef10815f12ed719ab6c51c6e3ac6fcd3f8bc1fa. TLDR: The formatter has a zero-count branch saying the environment stays with no other sessions, but the reviewed deletion route cannot produce that message. Considered consequence: misleading deletion completion text could imply an empty environment was retained contrary to the last-session rule. Could-be-highest: no established security or loss-of-work route; this would be an informational defect only. Source checks: list/view.rs:981-990 calls delete_kept only for Session scope and a present environment_remaining count. helm sessions/sandbox.rs:241-261 emits no count for NotFound or Sealed and Some(remaining) only for SealOutcome::Deleted. Supervisor service/handlers.rs:1515-1545 emits Deleted only for SealCount::Others. store.rs:5965-5985 returns Others only when SQL COUNT(*) excluding the deleted session is greater than zero; zero records the seal. Contract: SPEC.md, Sandbox sessions: 'If other sessions remain, only the chosen session is removed' and 'the result says the sandbox stays and how many other sessions it holds, as its Farhelm counted them.' Suggested bucket: none, unreachable formatting fallback in the inspected shipped path. Confidence: confirmed by source; no behavior executed. proposed_drop: source refutation, no production route supplies zero to the formatter. possible_cover: none; no coverage sources searched. Caveat: this does not require changing defensive formatting for a hypothetical future caller or malformed peer reply. Synthesis revision: missing counts do not call the zero-count formatter or establish that the environment was retained/destroyed. list/view.rs:523-540 retires the prior same-host stays count when a successful reply has no count, preserves its separate warning when appropriate, and does not alter a count belonging to another host; :592-602 applies this helper. :3004-3012 publishes both a count-less successful reply and Gone through that path. :492-506 and :605-612 additionally retire a count on a current successful Hosts read showing deletion or absence. This is display invalidation, not backend membership authority. No new observed execution; proposed_drop remains source-based and pending independent check, not accepted. Further synthesis: the accepted Hosts refresh actually calls delete_notice.reconcile_hosts after recording its result (list/view.rs:2473-2476), so the invalidation helper is wired into production. The separate possibility of a positive stays count briefly surviving another window deleting the final session is explicitly accepted by SPEC.md:1523-1524: Two windows deleting a sandbox last two sessions can briefly show the sandbox stays in one window before the other seals it; the list then shows the truth. This is a snapshot result and not backend authority or a guarantee that no later Delete occurred. The zero-count production refutation is unchanged; no new defect or highest consequence established, no execution performed, no drop accepted."
+          }
+        },
+        {
+          "line": 9,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c3",
+            "state": "open",
+            "summary": "The zero-remaining stays message has no shipped producer",
+            "location": "crates/farhelm-ui/src/environment_ui.rs:197",
+            "detail": "Reviewed commit: 2ef10815f12ed719ab6c51c6e3ac6fcd3f8bc1fa. TLDR: The formatter has a zero-count branch saying the environment stays with no other sessions, but the reviewed deletion route cannot produce that message. Considered consequence: misleading deletion completion text could imply an empty environment was retained contrary to the last-session rule. Could-be-highest: no established security or loss-of-work route; this would be an informational defect only. Source checks: list/view.rs:981-990 calls delete_kept only for Session scope and a present environment_remaining count. helm sessions/sandbox.rs:241-261 emits no count for NotFound or Sealed and Some(remaining) only for SealOutcome::Deleted. Supervisor service/handlers.rs:1515-1545 emits Deleted only for SealCount::Others. store.rs:5965-5985 returns Others only when SQL COUNT(*) excluding the deleted session is greater than zero; zero records the seal. Contract: SPEC.md, Sandbox sessions: 'If other sessions remain, only the chosen session is removed' and 'the result says the sandbox stays and how many other sessions it holds, as its Farhelm counted them.' Suggested bucket: none, unreachable formatting fallback in the inspected shipped path. Confidence: confirmed by source; no behavior executed. proposed_drop: source refutation, no production route supplies zero to the formatter. possible_cover: none; no coverage sources searched. Caveat: this does not require changing defensive formatting for a hypothetical future caller or malformed peer reply. Synthesis revision: missing counts do not call the zero-count formatter or establish that the environment was retained/destroyed. list/view.rs:523-540 retires the prior same-host stays count when a successful reply has no count, preserves its separate warning when appropriate, and does not alter a count belonging to another host; :592-602 applies this helper. :3004-3012 publishes both a count-less successful reply and Gone through that path. :492-506 and :605-612 additionally retire a count on a current successful Hosts read showing deletion or absence. This is display invalidation, not backend membership authority. No new observed execution; proposed_drop remains source-based and pending independent check, not accepted. Further synthesis: the accepted Hosts refresh actually calls delete_notice.reconcile_hosts after recording its result (list/view.rs:2473-2476), so the invalidation helper is wired into production. The separate possibility of a positive stays count briefly surviving another window deleting the final session is explicitly accepted by SPEC.md:1523-1524: Two windows deleting a sandbox last two sessions can briefly show the sandbox stays in one window before the other seals it; the list then shows the truth. This is a snapshot result and not backend authority or a guarantee that no later Delete occurred. The zero-count production refutation is unchanged; no new defect or highest consequence established, no execution performed, no drop accepted. Exact specification acceptance for the transient positive-count case, SPEC.md:1523-1524: \"Two windows deleting a sandbox's last two sessions at once can briefly show \\\"the sandbox stays\\\" in one window just before the other window's Delete seals it; the list then shows the truth.\" This does not accept the distinct present-tense reachability wording defect recorded under c2."
+          }
+        }
+      ],
+      "latest": {
+        "line": 9,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c3",
+          "state": "open",
+          "summary": "The zero-remaining stays message has no shipped producer",
+          "location": "crates/farhelm-ui/src/environment_ui.rs:197",
+          "detail": "Reviewed commit: 2ef10815f12ed719ab6c51c6e3ac6fcd3f8bc1fa. TLDR: The formatter has a zero-count branch saying the environment stays with no other sessions, but the reviewed deletion route cannot produce that message. Considered consequence: misleading deletion completion text could imply an empty environment was retained contrary to the last-session rule. Could-be-highest: no established security or loss-of-work route; this would be an informational defect only. Source checks: list/view.rs:981-990 calls delete_kept only for Session scope and a present environment_remaining count. helm sessions/sandbox.rs:241-261 emits no count for NotFound or Sealed and Some(remaining) only for SealOutcome::Deleted. Supervisor service/handlers.rs:1515-1545 emits Deleted only for SealCount::Others. store.rs:5965-5985 returns Others only when SQL COUNT(*) excluding the deleted session is greater than zero; zero records the seal. Contract: SPEC.md, Sandbox sessions: 'If other sessions remain, only the chosen session is removed' and 'the result says the sandbox stays and how many other sessions it holds, as its Farhelm counted them.' Suggested bucket: none, unreachable formatting fallback in the inspected shipped path. Confidence: confirmed by source; no behavior executed. proposed_drop: source refutation, no production route supplies zero to the formatter. possible_cover: none; no coverage sources searched. Caveat: this does not require changing defensive formatting for a hypothetical future caller or malformed peer reply. Synthesis revision: missing counts do not call the zero-count formatter or establish that the environment was retained/destroyed. list/view.rs:523-540 retires the prior same-host stays count when a successful reply has no count, preserves its separate warning when appropriate, and does not alter a count belonging to another host; :592-602 applies this helper. :3004-3012 publishes both a count-less successful reply and Gone through that path. :492-506 and :605-612 additionally retire a count on a current successful Hosts read showing deletion or absence. This is display invalidation, not backend membership authority. No new observed execution; proposed_drop remains source-based and pending independent check, not accepted. Further synthesis: the accepted Hosts refresh actually calls delete_notice.reconcile_hosts after recording its result (list/view.rs:2473-2476), so the invalidation helper is wired into production. The separate possibility of a positive stays count briefly surviving another window deleting the final session is explicitly accepted by SPEC.md:1523-1524: Two windows deleting a sandbox last two sessions can briefly show the sandbox stays in one window before the other seals it; the list then shows the truth. This is a snapshot result and not backend authority or a guarantee that no later Delete occurred. The zero-count production refutation is unchanged; no new defect or highest consequence established, no execution performed, no drop accepted. Exact specification acceptance for the transient positive-count case, SPEC.md:1523-1524: \"Two windows deleting a sandbox's last two sessions at once can briefly show \\\"the sandbox stays\\\" in one window just before the other window's Delete seals it; the list then shows the truth.\" This does not accept the distinct present-tense reachability wording defect recorded under c2."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g078/findings.jsonl",
+        "id": "c3",
+        "line": 9,
+        "disposition": "under-investigation",
+        "group": "g078-c3",
+        "reason": "Record durably acknowledged; parent source/contract validation, cross-group synthesis, coverage/filter matching and any independent drop check remain pending. This preserves the claim and uncertainty without accepting, dropping or lowering it."
+      },
+      "accepted_parent_decision": null,
+      "returned_claim_checks": [
+        {
+          "batch": "claims-051",
+          "key": "g078/c3",
+          "latest_line": 9,
+          "recommendation": "refuted",
+          "bucket": "other",
+          "underlying_key": "environment-delete-zero-remaining-kept-notice",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The zero-count formatting branch exists, but the inspected shipped producer supplies a positive count only. The claimed misleading zero-count completion has no established production route. This agrees with the latest proposed refutation, narrowly; no runtime observation was made.",
+          "checks": [
+            "At 2ef10815f12ed719ab6c51c6e3ac6fcd3f8bc1fa, crates/farhelm-ui/src/environment_ui.rs:194-203 accepts zero defensively; git grep identifies list/view.rs:981-990 as the only non-test caller. It requires Session scope and Some(environment_remaining).",
+            "At that revision, crates/farhelm-helm/src/sessions/sandbox.rs:241-261 supplies Some(remaining) only for SealOutcome::Deleted; NotFound and Sealed return the count-less default. service/handlers.rs:1515-1545 constructs Deleted only from SealCount::Others. store.rs:5965-5985 returns Others only for SQL COUNT(*) > 0; zero seals instead. Conversion saturates oversized positive counts rather than wrapping to zero.",
+            "At that revision, list/view.rs:523-540,592-612,2473-2476,3004-3012 retires a same-host count on count-less success/Gone and retires it on an accepted Hosts read showing deletion/absence. Pending/failed reads do not retire it; another host's result does not prove this host's membership.",
+            "At review tip 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db, environment_ui.rs:194-203 is unchanged and store.rs:5970-5990 retains the positive-only Others branch. The reviewed introducing commit is within the pinned range (both ancestry checks exited zero). No runtime tests or reproductions ran."
+          ],
+          "coverage_checked": [
+            "Current SPEC.md Sandbox sessions, including :1509-1547, and SPEC_impl.md Environment ownership and refusal / Environment Delete and the seal (:6093-6150), require the supervisor's count and final-session seal. They do not accept a reachable zero-count kept result.",
+            "SPEC.md:1528-1529 explicitly accepts the separate transient positive-count result when two windows delete the last two sessions. This covers only that historical expansion, not zero-count reachability or the distinct c2 retained-warning wording issue.",
+            "TODO.md Planned (:25-26) is empty. plans/queue/INDEX.md contains no unlanded entries. Historical environment-agent-operations.md:492-560 describes the already landed count/seal behavior and is not an unlanded fix covering a remaining defect.",
+            "BUGS.md contains only the local ssh-helper output-pipe hang, unrelated to this claim. Searches of current INDEX.md, queue Markdown and active TRIAGE_OUTCOMES.md for zero/remaining/stays/environment-delete warning terms found no exact trigger/consequence/scope match. No archive was read.",
+            "FILTER.md read in full. No filter is needed for the source refutation. The rare-diagnostic filter is not asserted as a blanket acceptance of an arbitrary malformed peer or future caller."
+          ],
+          "exact_cover_quotes": [
+            {
+              "source": "SPEC.md:1528-1529 at recording-time main 24bc058066fd57848e788b465719b0e6da2f98f7",
+              "quote": "Two windows deleting a sandbox's last two sessions at once can briefly show \"the sandbox stays\" in one window just before the other window's Delete seals it; the list then shows the truth.",
+              "scope": "Only the separate concurrent positive-count snapshot; not coverage of a reachable zero-count result."
+            }
+          ],
+          "missing_premise": "A shipped producer of Deleted { remaining: 0 }, or another real caller supplying zero. No backend retention/destruction error or loss-of-work route was established. Hypothetical malformed peer replies and future callers remain outside the narrow refutation.",
+          "original_stronger_consequence": "The original candidate considered misleading completion text implying an empty environment had been retained contrary to the last-session rule. Every history entry classified this as informational and stated no established security or user-work-loss route. Later entries separately considered briefly stale positive counts and preserved c2 as distinct.",
+          "needs_independent_drop_check": true,
+          "proposed_basis": "Propose source refutation only for production reachability of the zero-count stays notice. Keep the whole history and caveats in the parent's disposition. Flag conservatively for independent checking because the discussion concerns the result of deletion of user-owned work; this consultation authorizes no drop."
+        }
+      ],
+      "parent_proposals": [
+        {
+          "artifact": "parent-flagged-judgments-051.json",
+          "key": "g078/c3",
+          "proposal": "claim-checks/claims-051/result.json",
+          "parent_proposal": "source-refuted-zero-remaining-kept-notice-production-producer",
+          "final_independent_gate": "required-by-conservative-destructive-result-flag",
+          "reason": "Parent read full051. Defensive zero formatter exists, but sole actual consumer needs Session/Some(count), and supervisor produces Deleted/Others only for positive SQL count; zero seals and returns no count. Oversize conversion saturates, not zero-wrap. Same-host count-less success/Gone or accepted deletion/absence host read retires stale count. Separate briefly positive two-window snapshot is explicitly accepted, not permission for zero. Refute exact zero producer reachability, not arbitrary malformed future peer input or c2 stale rationale. Original informational/no established work loss preserved under conservative gate."
+        }
+      ],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": true,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "environment-delete-zero-remaining-kept-notice",
+        "destination": null
+      }
+    },
+    {
+      "key": "g078/c4",
+      "owner": "g078",
+      "id": "c4",
+      "domain": "gui-environment-settings",
+      "purpose": "gui-environment-settings: crates/farhelm-ui/src/container_controls.rs, crates/farhelm-ui/src/environment_ui.rs; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 10,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c4",
+            "state": "open",
+            "summary": "Longer row Delete warnings are not truncated by the menu layout",
+            "location": "crates/farhelm-ui/src/environment_ui.rs:164",
+            "detail": "Reviewed commit: 2ef10815f12ed719ab6c51c6e3ac6fcd3f8bc1fa. TLDR: considered whether the substantially longer whole-environment warning is cut off by the row menu, concealing the deletion scope before the user answers. Original considered consequence: destructive consent could omit unseen sessions/files through a newly clipped warning (could-be-highest: yes if such a shipped clipping route were established). Checks/results: reread the assigned warning additions and row/header/bulk use sites; row.rs:2468-2477 renders the consequence separately from the ellipsized title. app.css:2988-3027 bounds the row panel and gives it overflow-y:auto; :3093-3100 preserves that scroll in the flyout; :3442-3447 prevents the consequence from shrinking and applies no ellipsis/hidden overflow to it, while :3449-3457 confines ellipsis to confirm-title. The static warning contains normal breakable prose. Header context :2278-2318 gives the separate confirmation a wrapping layout and full-line normal-white-space consequence, rather than using the title truncation rule. This source refutes the particular row-menu truncation concern; it is not a certification of arbitrary viewport/header geometry. Contract: SPEC.md:1526-1536 requires the whole-resource warning to name every session/process/file/checkout/unpushed change/snapshot and unlisted sessions; SPEC_impl.md Answers bind to what was drawn requires that consent match the action. Suggested bucket: no established defect from this check. Confidence: confirmed source refutation limited to the examined shrink/ellipsis/scroll rules; no visual execution, reproduction or runtime test. proposed_drop: source refutation of the row-warning truncation premise, proposed only; no drop accepted. possible_cover: none; neighbour logs were read only as explicitly requested interface context. Material caveat: c2 remains a distinct retained-warning factual-wording finding; these layout checks do not drop or lower it."
+          }
+        }
+      ],
+      "latest": {
+        "line": 10,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c4",
+          "state": "open",
+          "summary": "Longer row Delete warnings are not truncated by the menu layout",
+          "location": "crates/farhelm-ui/src/environment_ui.rs:164",
+          "detail": "Reviewed commit: 2ef10815f12ed719ab6c51c6e3ac6fcd3f8bc1fa. TLDR: considered whether the substantially longer whole-environment warning is cut off by the row menu, concealing the deletion scope before the user answers. Original considered consequence: destructive consent could omit unseen sessions/files through a newly clipped warning (could-be-highest: yes if such a shipped clipping route were established). Checks/results: reread the assigned warning additions and row/header/bulk use sites; row.rs:2468-2477 renders the consequence separately from the ellipsized title. app.css:2988-3027 bounds the row panel and gives it overflow-y:auto; :3093-3100 preserves that scroll in the flyout; :3442-3447 prevents the consequence from shrinking and applies no ellipsis/hidden overflow to it, while :3449-3457 confines ellipsis to confirm-title. The static warning contains normal breakable prose. Header context :2278-2318 gives the separate confirmation a wrapping layout and full-line normal-white-space consequence, rather than using the title truncation rule. This source refutes the particular row-menu truncation concern; it is not a certification of arbitrary viewport/header geometry. Contract: SPEC.md:1526-1536 requires the whole-resource warning to name every session/process/file/checkout/unpushed change/snapshot and unlisted sessions; SPEC_impl.md Answers bind to what was drawn requires that consent match the action. Suggested bucket: no established defect from this check. Confidence: confirmed source refutation limited to the examined shrink/ellipsis/scroll rules; no visual execution, reproduction or runtime test. proposed_drop: source refutation of the row-warning truncation premise, proposed only; no drop accepted. possible_cover: none; neighbour logs were read only as explicitly requested interface context. Material caveat: c2 remains a distinct retained-warning factual-wording finding; these layout checks do not drop or lower it."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g078/findings.jsonl",
+        "id": "c4",
+        "line": 10,
+        "disposition": "under-investigation",
+        "group": "g078-c4",
+        "reason": "Record durably acknowledged; parent source/contract validation, cross-group synthesis, coverage/filter matching and any independent drop check remain pending. This preserves the claim and uncertainty without accepting, dropping or lowering it."
+      },
+      "accepted_parent_decision": null,
+      "returned_claim_checks": [
+        {
+          "batch": "claims-051",
+          "key": "g078/c4",
+          "latest_line": 10,
+          "recommendation": "refuted",
+          "bucket": "other",
+          "underlying_key": "environment-delete-row-warning-ellipsis-clipping",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "Source refutes the particular allegation that the row's title ellipsis/shrink rules truncate the longer environment consequence. The consequence has its own nonshrinking element within a vertically scrollable panel. This does not establish arbitrary viewport or native geometry safety.",
+          "checks": [
+            "At 2ef10815f12ed719ab6c51c6e3ac6fcd3f8bc1fa, environment_ui.rs:164-170 supplies normal breakable warning prose naming all sessions/processes/files/checkouts/unpushed changes and sandbox snapshots, including unlisted sessions.",
+            "At that revision, crates/farhelm-ui/src/list/row.rs:2462-2485 renders the consequence separately before PeerTitle.confirm-title. assets/app.css:3442-3457 gives confirm-consequence flex-shrink:0 and confines overflow:hidden/text-overflow:ellipsis/white-space:nowrap to confirm-title. The menu is a column (:3009-3010), with gap/padding but no truncation added by .menu-prompt (:3168-3171).",
+            "At that revision, app.css:2988-3027 uses border-box sizing, a viewport-relative maximum height and overflow-y:auto; the flyout override :3093-3100 preserves overflow-y:auto and inherited maximum height. These are source facts, not a measured assertion that every possible box is reachable.",
+            "Header context is app.css:2278-2318, not list/view.rs:2278-2318: the header wraps and gives its consequence a full line with normal whitespace. session_view.rs:2763-2775 renders the environment consequence separately. The source supports the report's limited header contrast, not certification of all header geometry.",
+            "At tip 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db, app.css:3090-3097,3439-3454 preserves the same flyout scrolling and consequence/title distinction. The reviewed commit lies inside the pinned range. No visual execution, runtime reproduction or test ran."
+          ],
+          "coverage_checked": [
+            "Current SPEC.md Sandbox sessions (:1531-1547), and SPEC_impl.md GUI: Dioxus / Answers bind to what was drawn (:1040-1104) plus Environment ownership and refusal / Environment Delete and the seal (:6093-6150), require the destructive scope to be disclosed. They do not accept clipping that makes required consent unreachable.",
+            "TODO.md Planned is empty; plans/queue/INDEX.md has no unlanded plans. Historical environment-agent-operations.md:541-560 requires both-outcomes and whole-environment warnings; it is already landed and does not cover an outstanding clipping issue.",
+            "BUGS.md has no related layout acceptance. Searches of current INDEX.md and queue files found adjacent native-confirmation-reopen-paint-order-source-gap.md, pinned-host-dialog-chrome-can-hide-content.md and header-confirmation-lowers-link-refusal.md; all three were read in full. They concern an unmeasured reopening, Host Settings footer clipping, and lowered refusal text respectively, not truncation of this row consequence. No exact alias or useful extension is established.",
+            "Active TRIAGE_OUTCOMES.md searches found no exact match. The nearby trash-alias-refresh-skips-movement-pause decision concerns a different pointer/movement route, not this text layout. No archive was read.",
+            "FILTER.md Dialog explanations out of view but reachable by scrolling could cover a proven small-window/large-content scroll-only case, but this claim originally alleged unseen, clipped destructive scope. No full filter match is asserted, and no filter is the proposed basis."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": "A supported rendered layout in which the required warning becomes unreachable or hidden while the confirming answer remains usable. Source rules refute the named title-ellipsis/shrink route; arbitrary viewport/header geometry and keyboard/screen-reader reachability were not visually tested.",
+          "original_stronger_consequence": "The candidate considered destructive consent omitting unseen sessions or files through newly clipped warning text, potentially highest if a shipped clipping route exists. The latest record proposes only a source-limited refutation and explicitly preserves c2's separate factual-wording finding.",
+          "needs_independent_drop_check": true,
+          "proposed_basis": "Propose refutation of the row-warning title-ellipsis/shrink premise only, subject to the independent drop check because the original consequence involved destruction beyond disclosed consent. Do not expand this to arbitrary viewport/header geometry or use it to lower/drop c2."
+        }
+      ],
+      "parent_proposals": [
+        {
+          "artifact": "parent-flagged-judgments-051.json",
+          "key": "g078/c4",
+          "proposal": "claim-checks/claims-051/result.json",
+          "parent_proposal": "source-refuted-row-consequence-title-ellipsis-shrink-path-only",
+          "final_independent_gate": "required-before-original-unseen-destructive-consent-drop",
+          "reason": "Full051 consequence is a separate nonshrinking element; nowrap/overflow-hidden/ellipsis apply only to title. Column menu and flyout retain viewport-relative maxheight/vertical scrolling; header separately wraps its consequence. This refutes named title-ellipsis/shrink truncation, not every native viewport/keyboard/screen-reader layout. No visual execution or supported still-hidden-warning/usable-confirmation geometry established. Preserve original potential beyond-warning destruction and c2 factual rationale as separate; no scrolling filter assumed without actual reachable layout proof."
+        }
+      ],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": true,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "environment-delete-row-warning-ellipsis-clipping",
+        "destination": null
+      }
+    }
+  ],
+  "replies": [
+    {
+      "turn": 1,
+      "reply": "Initial review complete: all 497 assigned patch lines and the complete commits list read.\n\nNo confirmed findings or unresolved leads. Candidates c1–c3 and their source refutations are recorded in `findings.jsonl`; `progress.md` is updated. No tests or reproductions run, and no checkout files changed."
+    },
+    {
+      "turn": 2,
+      "reply": "Revised c1–c3 in the findings log.\n\nc2 now records a confirmed `other` finding: a retained Delete warning can falsely claim the reconnected environment remains unreachable. Actual scope stays correctly warned and token-bound; the original potentially highest consequence and source refutations remain preserved.\n\nStrengthened c1’s stored-setup refusal checks and c3’s missing-count handling checks. No drops accepted.\n\nUnresolved leads: none."
+    },
+    {
+      "turn": 3,
+      "reply": "Discovery pass 1 found no new defect.\n\nChecked longer-warning rendering, the deleted editor’s integration removal, and orphaned controls. Added source-refuted candidate c4 and strengthened c1’s evidence. Progress updated.\n\nNew verified IDs: none. New unverified IDs: none. Open leads: none. No drops accepted."
+    }
+  ],
+  "progress": "Group g078: gui-environment-settings.\nInitial review, turn 1; discovery passes 0.\nState: brief and commits read; mandatory patch reads and governing contracts next.\nInterface assumptions: environment/provider API and GUI snapshot actions require pinned-source inspection.\nUnread scope: both assigned patches and their governing contract sections.\nNew verified/unverified IDs: none.\n\nInitial review complete (turn type: initial; turn count: 1; discovery-pass count: 0).\nMandatory evidence delivered: 00311-000.patch lines 1-150 and 151-239; 00711-000.patch lines 1-150 and 151-258. All 497 assigned lines read at their recorded revisions. Complete inventory commits field read; excluded coverage metadata not inspected.\nGoverning contracts read: retirement and container-session sections at 04d85f0c98a9b635709d00b056719a0baa7fd3fc; Sandbox sessions and Container sessions at 2ef10815f12ed719ab6c51c6e3ac6fcd3f8bc1fa; SPEC_impl retirement, Answers bind to what was drawn, Environment ownership and refusal, and Environment Delete and the seal. Priority buckets and feedback-file format read. Test-authoring checklist applied to assigned added/deleted tests.\nInterface checks: retired editor replacement preserves/refuses old choices in draft and template interfaces. Row, header and bulk consumers select new wording from captured question tokens; the scope travels with the answer. list/shared.rs:134-148 confirms RowQuestion::answered replaces scope from the answered lane. Remaining-session text comes only from the supervisor result; store.rs:5965-5985 establishes a strictly positive count for the retained-environment result. Provider warning wording retains both destructive outcomes, shared-checkout preservation, unlisted work and Tensorlake-only snapshots.\nDurable records appended this pass: c1, c2, c3 (source-refuted or specified candidates, all confirmed source conclusions). Verified findings: none. Unverified findings: none. Open leads: none. All considered substantive checks are recorded in findings.jsonl; no separate report created.\nUnread assigned scope: none. No runtime tests, builds or reproductions run; this was the requested source-only pass. No checkout files changed. No coverage queues read.\nNext action: return to parent for its later synthesis turn; do not run the later-turn protocol inside this initial turn.\n\nSynthesis complete (turn type: synthesis; turn count: 2; discovery-pass count: 0).\nReviewed interactions: missing-count result publication and prior same-host count retirement; actual Hosts-refresh invalidation call; retained row/header/bulk question wording versus render-captured scope; failed/missing host metadata and backend refusal; retired stored-template application, actual structured submit before/after key minting, and explicit Reset choices versus held restart state.\nRevisions appended under original IDs: c1 strengthens refusal checks with production submit/template paths; c3 strengthens zero-count refutation and count-less/stale-result behavior; c2 revised to a confirmed other-bucket wording finding. c2 preserves the original potentially highest unwarned-scope consequence and precise token/backend refutations for independent checks. No proposed drop accepted.\nNew verified finding this pass: c2 (narrow diagnostic/recovery wording only). A retained Whole question still asserts present inability to ask after a successful reconnect; its destructive scope remains accurately warned and token-bound. No newly established highest route. New unverified IDs: none. Open leads: none.\nInterface assumptions settled through source: membership/last-session authority stays inside the environment supervisor; renderer tokens carry consent scope rather than membership knowledge; missing counts prove neither retained nor destroyed; absent metadata does not authorize whole-resource destruction; old container objects remain refused until an explicit new user choice.\nUnread assigned scope: none. Existing mandatory audit remains complete (497 lines, two sources). No runtime execution/reproduction or checkout changes. Related groups were referenced only from the parent message; their private findings logs and excluded inventory coverage metadata were not read.\nNext action: return delta to parent. Because synthesis made a substantive new discovery under c2, the charter requires a later pass if the parent continues the review; no later discovery protocol was run inside this turn.\n\nDiscovery pass 1 complete (turn type: discovery; turn count: 3; discovery-pass count: 1).\nInterface context: read latest events per ID from g058, g059, g060 and g077 in separate bounded deliveries after the initial combined full-log output clipped. All latest named-interface records were delivered fully. Their known build fallback, recipe deletion repair, status retry, probe coalescing, chooser size and literal-consumer issues were treated as known, not new discoveries or invitations to broaden scope.\nSearch checks: re-read the assigned environment_ui.rs patch at its original revision, including all warning/result/helper additions and their tests; re-read all 233 lines of the deleted editor from its parent; checked module/LaunchControls integration removal and searched UI source for orphaned editor types, handlers and toggle text. Checked longer-warning rendering against separate title/consequence markup and actual row/flyout scroll, shrink and ellipsis CSS, with header wrapping context. No runtime tests, reproductions or live-install actions.\nDurable changes: new candidate c4 records the source-refuted row-warning clipping concern; revised c1 records the additional orphaned-control/integration removal checks. Existing c2 and all original consequences/refutations remain unchanged. No parent drop or priority lowering accepted.\nActual result: no new defect found. New verified finding IDs: none. New unverified-after-investigation finding IDs: none. New candidate IDs: c4 (source-refuted, pending independent check). Open lead IDs: none.\nUnread assigned scope: none. Required 497-line initial audit remains complete. No checkout files changed. Next action: return only this discovery delta and wait for the parent.\n"
+}

@@ -1,0 +1,332 @@
+{
+  "group": {
+    "id": "g173",
+    "domain": "retired-supervisor-tmux",
+    "purpose": "retired-supervisor-tmux: crates/farhelm-supervisor/src/tmux.rs; phases complete small per-commit changes",
+    "interfaces": [
+      "g005",
+      "g012",
+      "g071",
+      "g072",
+      "g073",
+      "g097",
+      "g098",
+      "g099",
+      "g100",
+      "g101",
+      "g102",
+      "g103",
+      "g104",
+      "g105",
+      "g106",
+      "g107",
+      "g108",
+      "g109",
+      "g110",
+      "g111",
+      "g112",
+      "g113",
+      "g114",
+      "g115",
+      "g116",
+      "g117",
+      "g118",
+      "g119",
+      "g120",
+      "g121",
+      "g127",
+      "g128",
+      "g129",
+      "g130",
+      "g131",
+      "g132",
+      "g133",
+      "g134",
+      "g144",
+      "g145",
+      "g146",
+      "g149",
+      "g150",
+      "g151",
+      "g152",
+      "g153",
+      "g154",
+      "g155",
+      "g156",
+      "g157",
+      "g158",
+      "g159",
+      "g160",
+      "g161",
+      "g162",
+      "g163",
+      "g164",
+      "g165",
+      "g166",
+      "g169",
+      "g172"
+    ],
+    "sources": [
+      {
+        "path": "[private-run]/prep/parts/01237-000.patch",
+        "ranges": [
+          [
+            1,
+            1050
+          ]
+        ],
+        "original_path": "crates/farhelm-supervisor/src/tmux.rs",
+        "commit": "17a3fe858c5511a24b7403af15dd41c93bf69fd7",
+        "notes": "patch header; patch character offsets [0,50026)",
+        "lines": 1050,
+        "bytes": 50074,
+        "start": 0,
+        "end": 50026,
+        "original": "[private-run]/prep/originals/01237.patch"
+      }
+    ],
+    "lines": 1050,
+    "bytes": 50074
+  },
+  "records": [
+    {
+      "key": "g173/c1",
+      "owner": "g173",
+      "id": "c1",
+      "domain": "retired-supervisor-tmux",
+      "purpose": "retired-supervisor-tmux: crates/farhelm-supervisor/src/tmux.rs; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 1,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c1",
+            "state": "open",
+            "summary": "Removing local tmux validation is an explicit product change",
+            "location": "crates/farhelm-supervisor/src/tmux.rs:184",
+            "detail": "Reviewed commit: 17a3fe858c5511a24b7403af15dd41c93bf69fd7\n\n## TLDR\nThe Mac app and local Linux setup stop checking for a supported tmux. This is intended because their sessions already use terminal hosts.\n\n## Details\nThe assigned patch deletes TmuxSupport, probe_tmux, PATH discovery, override resolution and their tests after parse_version_component (old tmux.rs:191-665 and 757-1255). A missing local preflight is not itself a regression: SPEC_impl.md:2866-2872 explicitly says, \"The supervisor runs no tmux, and neither `farhelm supervisor run` nor `farhelm helm setup` takes a `--tmux`.\" It further says, \"The Mac app bundles none and needs none, and hands its managed supervisor no tmux.\" SPEC.md:3012-3014 likewise says neither the Mac app nor Linux setup needs tmux while remote Linux provisioning retains its check. Suggested bucket: other (intentional behavior, no established defect). Confidence: confirmed as specification acceptance; remaining caller consistency checks continue. proposed_drop: exact specification acceptance quoted above. possible_cover: none; coverage sources not searched. Could-be-highest: false for this candidate, which concerns removal of an unnecessary dependency check rather than an established route to security or loss of work. Caveat: this does not validate all replacement lifecycles or provisioning paths; those remain under review. Source analysis only, no execution."
+          }
+        },
+        {
+          "line": 3,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c1",
+            "state": "open",
+            "summary": "Removing local tmux validation is an explicit product change",
+            "location": "crates/farhelm-supervisor/src/tmux.rs:184",
+            "detail": "Reviewed commit: 17a3fe858c5511a24b7403af15dd41c93bf69fd7\n\n## TLDR\nThe Mac app and local Linux setup stop checking for a supported tmux. This is intended because their sessions already use terminal hosts.\n\n## Details\nThe assigned patch deletes TmuxSupport, probe_tmux, PATH discovery, override resolution and their tests after parse_version_component (old tmux.rs:191-665 and 757-1255). A missing local preflight is not itself a regression: SPEC_impl.md:2866-2872 explicitly says, \"The supervisor runs no tmux, and neither `farhelm supervisor run` nor `farhelm helm setup` takes a `--tmux`.\" It further says, \"The Mac app bundles none and needs none, and hands its managed supervisor no tmux.\" SPEC.md:3012-3014 likewise says neither the Mac app nor Linux setup needs tmux while remote Linux provisioning retains its check.\n\nCaller checks completed: at the parent revision, deleted symbols are used by setup.rs and desktop/tmux_preflight.rs (including its desktop caller); at the reviewed revision, a git grep over crates and packaging finds no remaining uses of probe_tmux, TmuxSupport, classify_tmux_version, TMUX_PROGRAM_ENV, DEFAULT_TMUX_PROGRAM, resolve_tmux_program, program_display_path, find_on_path or candidates_on_path. The desktop.rs patch removes the import, preflight, spawn inputs and environment assignment together; setup no longer captures PATH/FARHELM_TMUX in main.rs. units.rs:62-72 and :129-146 no longer require a tmux input. Critically, the independent host-launch scrub remains: service/core/host_launch.rs:108-115 contains the literal FARHELM_TMUX and :141-147 removes it after applying launch overrides, so an old unit's variable cannot leak into new terminal children after deleting TMUX_PROGRAM_ENV. Old-terminal startup cleanup's source (:176-200) uses UnixStream::connect and peer credentials, not a tmux binary or this removed probe. No newly unbounded replacement probe was introduced in the assigned module.\n\nSuggested bucket: other (intentional behavior, no established defect). Confidence: confirmed by source and specification. proposed_drop: exact specification acceptance quoted above plus caller consistency checks. possible_cover: none; coverage sources not searched. Could-be-highest: false for this candidate, which concerns removal of an unnecessary dependency check rather than an established route to security or loss of work. Caveat: checking the removal's dependencies is not an independent audit of terminal-host lifecycles, remote provisioning or pre-existing startup cleanup defects. Source analysis only, no execution."
+          }
+        },
+        {
+          "line": 5,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c1",
+            "state": "open",
+            "summary": "Removing local tmux validation is an explicit product change",
+            "location": "crates/farhelm-supervisor/src/tmux.rs:184",
+            "detail": "Reviewed commit: 17a3fe858c5511a24b7403af15dd41c93bf69fd7\n\n## TLDR\nThe Mac app and local Linux setup stop checking for a supported tmux. This is intended because their sessions already use terminal hosts.\n\n## Details\nThe assigned patch deletes TmuxSupport, probe_tmux, PATH discovery, override resolution and their tests after parse_version_component (old tmux.rs:191-665 and 757-1255). A missing local preflight is not itself a regression: SPEC_impl.md:2866-2872 explicitly says, \"The supervisor runs no tmux, and neither `farhelm supervisor run` nor `farhelm helm setup` takes a `--tmux`.\" It further says, \"The Mac app bundles none and needs none, and hands its managed supervisor no tmux.\" SPEC.md:3012-3014 likewise says neither the Mac app nor Linux setup needs tmux while remote Linux provisioning retains its check.\n\nCaller checks completed: at the parent revision, deleted symbols are used by setup.rs and desktop/tmux_preflight.rs (including its desktop caller); at the reviewed revision, a git grep over crates and packaging finds no remaining uses of probe_tmux, TmuxSupport, classify_tmux_version, TMUX_PROGRAM_ENV, DEFAULT_TMUX_PROGRAM, resolve_tmux_program, program_display_path, find_on_path or candidates_on_path. The desktop.rs patch removes the import, preflight, spawn inputs and environment assignment together; setup no longer captures PATH/FARHELM_TMUX in main.rs. units.rs:62-72 and :129-146 no longer require a tmux input. Critically, the independent host-launch scrub remains: service/core/host_launch.rs:108-115 contains the literal FARHELM_TMUX and :141-147 removes it after applying launch overrides, so an old unit's variable cannot leak into new terminal children after deleting TMUX_PROGRAM_ENV. Old-terminal startup cleanup's source (:176-200) uses UnixStream::connect and peer credentials, not a tmux binary or this removed probe. No newly unbounded replacement probe was introduced in the assigned module.\n\nSuggested bucket: other (intentional behavior, no established defect). Confidence: confirmed by source and specification. proposed_drop: exact specification acceptance quoted above plus caller consistency checks. possible_cover: none; coverage sources not searched. Could-be-highest: false for this candidate, which concerns removal of an unnecessary dependency check rather than an established route to security or loss of work. Caveat: checking the removal's dependencies is not an independent audit of terminal-host lifecycles, remote provisioning or pre-existing startup cleanup defects. Source analysis only, no execution.\n\nSynthesis checks: traced retained host-only responsibilities at this same revision. Prompt delivery in service/core.rs:11873-11970 obtains the entry under its lifecycle claim, probes its host, requires caught-up state and bracketed-paste mode, then sends through the selected host; :2192-2232 waits for written paste before submit and bounds delivery. Initial prompts are appended to the resolved argv after placeholder/hook expansion (:14387-14398), not sent through the removed tmux probe. launch_artifacts.rs:59-76 obtains the final screen only from this entry terminal with Owned/dead evidence; it has no removed tmux lookup dependency. host_tabs.rs:1402-1432 checks the discovered tag against recorded session/tab IDs, keeping a foreign tag as an unavailable placeholder; :914-927 cross-checks the current tab runtime and excludes the agent terminal; :1012-1035 retains an unconfirmed host end as a failed tab rather than forgetting it. The inspected implementation files and host_terminals.rs tests are unchanged by this commit (targeted git diff --name-only produced no paths). None imports or calls the removed probe, PATH resolver or version classifier. Thus deleting their old unit tests removes no observed coverage of these host-only identities; those tests exercised version probes, process containment of probe children, PATH discovery and override precedence, not host prompt/excerpt/tab behavior.\n\nProvenance boundary: SPEC.md:2998-3014 and SPEC_impl.md:2784-2834 already declare old private-server retirement, screen loss, and the accepted duplicate-after-failed-termination residual; the caller also identified these as neighbouring groups known consequences. They are not discoveries in this assigned deletion. That acceptance has not been used to dismiss misleading update guidance, omitted warnings, wrong-target signals or unconfirmed Delete: this module removes only version/discovery policy helpers, and its assigned patch supplies no concrete distinct route to those effects. Original c1 wording and impact remain above. proposed_drop remains a proposal pending independent review, not an accepted drop. Could-be-highest remains false for c1 local preflight removal; no security/loss-of-work route has been established for that removal. All checks were source analysis; no runtime observations or reproductions."
+          }
+        }
+      ],
+      "latest": {
+        "line": 5,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c1",
+          "state": "open",
+          "summary": "Removing local tmux validation is an explicit product change",
+          "location": "crates/farhelm-supervisor/src/tmux.rs:184",
+          "detail": "Reviewed commit: 17a3fe858c5511a24b7403af15dd41c93bf69fd7\n\n## TLDR\nThe Mac app and local Linux setup stop checking for a supported tmux. This is intended because their sessions already use terminal hosts.\n\n## Details\nThe assigned patch deletes TmuxSupport, probe_tmux, PATH discovery, override resolution and their tests after parse_version_component (old tmux.rs:191-665 and 757-1255). A missing local preflight is not itself a regression: SPEC_impl.md:2866-2872 explicitly says, \"The supervisor runs no tmux, and neither `farhelm supervisor run` nor `farhelm helm setup` takes a `--tmux`.\" It further says, \"The Mac app bundles none and needs none, and hands its managed supervisor no tmux.\" SPEC.md:3012-3014 likewise says neither the Mac app nor Linux setup needs tmux while remote Linux provisioning retains its check.\n\nCaller checks completed: at the parent revision, deleted symbols are used by setup.rs and desktop/tmux_preflight.rs (including its desktop caller); at the reviewed revision, a git grep over crates and packaging finds no remaining uses of probe_tmux, TmuxSupport, classify_tmux_version, TMUX_PROGRAM_ENV, DEFAULT_TMUX_PROGRAM, resolve_tmux_program, program_display_path, find_on_path or candidates_on_path. The desktop.rs patch removes the import, preflight, spawn inputs and environment assignment together; setup no longer captures PATH/FARHELM_TMUX in main.rs. units.rs:62-72 and :129-146 no longer require a tmux input. Critically, the independent host-launch scrub remains: service/core/host_launch.rs:108-115 contains the literal FARHELM_TMUX and :141-147 removes it after applying launch overrides, so an old unit's variable cannot leak into new terminal children after deleting TMUX_PROGRAM_ENV. Old-terminal startup cleanup's source (:176-200) uses UnixStream::connect and peer credentials, not a tmux binary or this removed probe. No newly unbounded replacement probe was introduced in the assigned module.\n\nSuggested bucket: other (intentional behavior, no established defect). Confidence: confirmed by source and specification. proposed_drop: exact specification acceptance quoted above plus caller consistency checks. possible_cover: none; coverage sources not searched. Could-be-highest: false for this candidate, which concerns removal of an unnecessary dependency check rather than an established route to security or loss of work. Caveat: checking the removal's dependencies is not an independent audit of terminal-host lifecycles, remote provisioning or pre-existing startup cleanup defects. Source analysis only, no execution.\n\nSynthesis checks: traced retained host-only responsibilities at this same revision. Prompt delivery in service/core.rs:11873-11970 obtains the entry under its lifecycle claim, probes its host, requires caught-up state and bracketed-paste mode, then sends through the selected host; :2192-2232 waits for written paste before submit and bounds delivery. Initial prompts are appended to the resolved argv after placeholder/hook expansion (:14387-14398), not sent through the removed tmux probe. launch_artifacts.rs:59-76 obtains the final screen only from this entry terminal with Owned/dead evidence; it has no removed tmux lookup dependency. host_tabs.rs:1402-1432 checks the discovered tag against recorded session/tab IDs, keeping a foreign tag as an unavailable placeholder; :914-927 cross-checks the current tab runtime and excludes the agent terminal; :1012-1035 retains an unconfirmed host end as a failed tab rather than forgetting it. The inspected implementation files and host_terminals.rs tests are unchanged by this commit (targeted git diff --name-only produced no paths). None imports or calls the removed probe, PATH resolver or version classifier. Thus deleting their old unit tests removes no observed coverage of these host-only identities; those tests exercised version probes, process containment of probe children, PATH discovery and override precedence, not host prompt/excerpt/tab behavior.\n\nProvenance boundary: SPEC.md:2998-3014 and SPEC_impl.md:2784-2834 already declare old private-server retirement, screen loss, and the accepted duplicate-after-failed-termination residual; the caller also identified these as neighbouring groups known consequences. They are not discoveries in this assigned deletion. That acceptance has not been used to dismiss misleading update guidance, omitted warnings, wrong-target signals or unconfirmed Delete: this module removes only version/discovery policy helpers, and its assigned patch supplies no concrete distinct route to those effects. Original c1 wording and impact remain above. proposed_drop remains a proposal pending independent review, not an accepted drop. Could-be-highest remains false for c1 local preflight removal; no security/loss-of-work route has been established for that removal. All checks were source analysis; no runtime observations or reproductions."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g173/findings.jsonl",
+        "id": "c1",
+        "line": 5,
+        "disposition": "excluded",
+        "group": "intentional-local-tmux-preflight-removal",
+        "reason": "Parent explicitly accepted named covered proposal from claims-108 after inspecting it. The exact removal of tmux requirements from local setup and the Mac app is explicit product behavior. Their sessions use terminal hosts, and the deleted probe API has no surviving caller. Exact specification acceptance for local preflight removal plus caller consistency and retained environment scrub. Checked source/results: [\"At 17a3fe858c5511a24b7403af15dd41c93bf69fd7, tmux.rs:1-11 limits the remaining module to remote provisioning. A pinned git grep of crates and packaging found none of probe_tmux, TmuxSupport, classify_tmux_version, TMUX_PROGRAM_ENV, DEFAULT_TMUX_PROGRAM, resolve_tmux_program, program_display_path, find_on_path or candidates_on_path.\",\"That commit's desktop.rs diff removes resolution, preflight imports/calls, SpawnInputs fields and FARHELM_TMUX assignment together; main.rs stops capturing PATH/FARHELM_TMUX for setup.\",\"At that hash service/core/host_launch.rs:108-115,141-147 retains the literal FARHELM_TMUX in NOT_INHERITED and removes it after launch overrides. Thus removing the public constant does not remove this scrub. Source only.\"] Current coverage/results: [\"Reviewed SPEC_impl.md:2866-2872 explicitly accepts no local requirement, as does reviewed SPEC.md:3012-3014. Current SPEC_impl.md:7996-8001 retains no-tmux local behavior and legacy-unit scrub; current SPEC.md:181-184 further removes remote provisioning's requirement.\",\"TODO.md Planned empty; matching plans/queue/tmux-drop-from-install.md:40-48 explicitly removes desktop/setup probes but is already landed per plans/REPORTS.md:30. Not counted as unlanded-plan coverage.\",\"BUGS.md, full INDEX.md and exact queue searches, and active TRIAGE_OUTCOMES.md have no additional same-root item. Archive not read. FILTER.md read; no filter used.\"] Exact cited cover: [\"SPEC_impl.md at 17a3fe858c5511a24b7403af15dd41c93bf69fd7:2866: The supervisor runs no tmux, and neither `farhelm supervisor run` nor `farhelm helm setup` takes a `--tmux`.\",\"SPEC_impl.md at that hash:2871-2872: The Mac app bundles none and needs none, and hands its managed supervisor no tmux.\"] Original stronger consequence and missing premise remain preserved: \"Mac/local Linux setup ceases checking for supported tmux. History consistently treats this local preflight removal as intentional; retirement screen loss and failed-termination duplicate agents are explicitly separate predecessor consequences, not discoveries or blanket acceptance here.\"; \"No defect in removing the local dependency check established. This does not settle terminal-host lifecycle, remote provisioning, retirement warning, wrong-target-signal or unconfirmed-Delete findings.\"."
+      },
+      "accepted_parent_decision": {
+        "key": "g173/c1",
+        "line": 5,
+        "disposition": "excluded",
+        "group": "intentional-local-tmux-preflight-removal",
+        "bucket": "other",
+        "recording": "covered",
+        "queue_target_candidate": null,
+        "needs_independent_drop_check": false,
+        "reason": "Parent explicitly accepted named covered proposal from claims-108 after inspecting it. The exact removal of tmux requirements from local setup and the Mac app is explicit product behavior. Their sessions use terminal hosts, and the deleted probe API has no surviving caller. Exact specification acceptance for local preflight removal plus caller consistency and retained environment scrub. Checked source/results: [\"At 17a3fe858c5511a24b7403af15dd41c93bf69fd7, tmux.rs:1-11 limits the remaining module to remote provisioning. A pinned git grep of crates and packaging found none of probe_tmux, TmuxSupport, classify_tmux_version, TMUX_PROGRAM_ENV, DEFAULT_TMUX_PROGRAM, resolve_tmux_program, program_display_path, find_on_path or candidates_on_path.\",\"That commit's desktop.rs diff removes resolution, preflight imports/calls, SpawnInputs fields and FARHELM_TMUX assignment together; main.rs stops capturing PATH/FARHELM_TMUX for setup.\",\"At that hash service/core/host_launch.rs:108-115,141-147 retains the literal FARHELM_TMUX in NOT_INHERITED and removes it after launch overrides. Thus removing the public constant does not remove this scrub. Source only.\"] Current coverage/results: [\"Reviewed SPEC_impl.md:2866-2872 explicitly accepts no local requirement, as does reviewed SPEC.md:3012-3014. Current SPEC_impl.md:7996-8001 retains no-tmux local behavior and legacy-unit scrub; current SPEC.md:181-184 further removes remote provisioning's requirement.\",\"TODO.md Planned empty; matching plans/queue/tmux-drop-from-install.md:40-48 explicitly removes desktop/setup probes but is already landed per plans/REPORTS.md:30. Not counted as unlanded-plan coverage.\",\"BUGS.md, full INDEX.md and exact queue searches, and active TRIAGE_OUTCOMES.md have no additional same-root item. Archive not read. FILTER.md read; no filter used.\"] Exact cited cover: [\"SPEC_impl.md at 17a3fe858c5511a24b7403af15dd41c93bf69fd7:2866: The supervisor runs no tmux, and neither `farhelm supervisor run` nor `farhelm helm setup` takes a `--tmux`.\",\"SPEC_impl.md at that hash:2871-2872: The Mac app bundles none and needs none, and hands its managed supervisor no tmux.\"] Original stronger consequence and missing premise remain preserved: \"Mac/local Linux setup ceases checking for supported tmux. History consistently treats this local preflight removal as intentional; retirement screen loss and failed-termination duplicate agents are explicitly separate predecessor consequences, not discoveries or blanket acceptance here.\"; \"No defect in removing the local dependency check established. This does not settle terminal-host lifecycle, remote provisioning, retirement warning, wrong-target-signal or unconfirmed-Delete findings.\"."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-108",
+          "key": "g173/c1",
+          "latest_line": 5,
+          "recommendation": "covered",
+          "bucket": "other",
+          "underlying_key": "intentional-local-tmux-preflight-removal",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The exact removal of tmux requirements from local setup and the Mac app is explicit product behavior. Their sessions use terminal hosts, and the deleted probe API has no surviving caller.",
+          "checks": [
+            "At 17a3fe858c5511a24b7403af15dd41c93bf69fd7, tmux.rs:1-11 limits the remaining module to remote provisioning. A pinned git grep of crates and packaging found none of probe_tmux, TmuxSupport, classify_tmux_version, TMUX_PROGRAM_ENV, DEFAULT_TMUX_PROGRAM, resolve_tmux_program, program_display_path, find_on_path or candidates_on_path.",
+            "That commit's desktop.rs diff removes resolution, preflight imports/calls, SpawnInputs fields and FARHELM_TMUX assignment together; main.rs stops capturing PATH/FARHELM_TMUX for setup.",
+            "At that hash service/core/host_launch.rs:108-115,141-147 retains the literal FARHELM_TMUX in NOT_INHERITED and removes it after launch overrides. Thus removing the public constant does not remove this scrub. Source only."
+          ],
+          "coverage_checked": [
+            "Reviewed SPEC_impl.md:2866-2872 explicitly accepts no local requirement, as does reviewed SPEC.md:3012-3014. Current SPEC_impl.md:7996-8001 retains no-tmux local behavior and legacy-unit scrub; current SPEC.md:181-184 further removes remote provisioning's requirement.",
+            "TODO.md Planned empty; matching plans/queue/tmux-drop-from-install.md:40-48 explicitly removes desktop/setup probes but is already landed per plans/REPORTS.md:30. Not counted as unlanded-plan coverage.",
+            "BUGS.md, full INDEX.md and exact queue searches, and active TRIAGE_OUTCOMES.md have no additional same-root item. Archive not read. FILTER.md read; no filter used."
+          ],
+          "exact_cover_quotes": [
+            "SPEC_impl.md at 17a3fe858c5511a24b7403af15dd41c93bf69fd7:2866: The supervisor runs no tmux, and neither `farhelm supervisor run` nor `farhelm helm setup` takes a `--tmux`.",
+            "SPEC_impl.md at that hash:2871-2872: The Mac app bundles none and needs none, and hands its managed supervisor no tmux."
+          ],
+          "missing_premise": "No defect in removing the local dependency check established. This does not settle terminal-host lifecycle, remote provisioning, retirement warning, wrong-target-signal or unconfirmed-Delete findings.",
+          "original_stronger_consequence": "Mac/local Linux setup ceases checking for supported tmux. History consistently treats this local preflight removal as intentional; retirement screen loss and failed-termination duplicate agents are explicitly separate predecessor consequences, not discoveries or blanket acceptance here.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Exact specification acceptance for local preflight removal plus caller consistency and retained environment scrub."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": false,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "intentional-local-tmux-preflight-removal",
+        "destination": null
+      }
+    },
+    {
+      "key": "g173/c2",
+      "owner": "g173",
+      "id": "c2",
+      "domain": "retired-supervisor-tmux",
+      "purpose": "retired-supervisor-tmux: crates/farhelm-supervisor/src/tmux.rs; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 2,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c2",
+            "state": "open",
+            "summary": "Deleting the three-way verdict does not remove remote Linux version enforcement",
+            "location": "crates/farhelm-supervisor/src/tmux.rs:76",
+            "detail": "Reviewed commit: 17a3fe858c5511a24b7403af15dd41c93bf69fd7\n\n## TLDR\nRemote Linux setup still rejects an old or unreadable host tmux and requests Farhelm's private build; deleting the local probe's classification API does not weaken that check.\n\n## Details\nConsidered whether removing TmuxSupport/classify_tmux_version and their test also removed the version floor's last enforcement. Source refutes this: tmux.rs:76-80 retains the 3.7c TMUX_FLOOR; :119-184 retains exact whole-line parsing and canonical numeric/patch validation; provisioning/backend.rs:3679-3681 compares the retained parser's version directly against TMUX_FLOOR. Its caller :3915-3928 additionally requires an absolute representable tmux path and sets needs_tmux to the negated verdict. The deleted classifier's three outcomes differ from this boolean only in the above-pin warning local preflight used; the required below-floor rejection remains. Parser/order tests remain at tmux.rs:200-281 and release-pin agreement at :300-320. SPEC_impl.md, Terminal substrate: private tmux server (:2848-2864), requires the floor and accepts above-floor canonical stable releases, and specifically says, \"Anything the parser cannot read exactly — `next-3.8`, release candidates, distro-decorated strings — is refused rather than guessed about: a version Farhelm cannot name is one nobody audited it against.\" Suggested bucket: other (source-refuted candidate). Confidence: confirmed by source; tests read, not run. proposed_drop: source refutation above; no removed enforcement found. possible_cover: none; coverage sources not searched. Could-be-highest: false: no established security or loss-of-work route from removal of this redundant verdict API. Caveat: this check concerns the deleted API's remaining production caller, not an audit of remote provisioning as a whole."
+          }
+        },
+        {
+          "line": 4,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c2",
+            "state": "open",
+            "summary": "Deleting the three-way verdict does not remove remote Linux version enforcement",
+            "location": "crates/farhelm-supervisor/src/tmux.rs:76",
+            "detail": "Reviewed commit: 17a3fe858c5511a24b7403af15dd41c93bf69fd7\n\n## TLDR\nRemote Linux setup still rejects an old or unreadable host tmux and requests Farhelm's private build; deleting the local probe's classification API does not weaken that check.\n\n## Details\nOriginal considered consequence preserved: removing TmuxSupport/classify_tmux_version and their test might remove the version floor's last enforcement. tmux.rs:76-80 retains the 3.7c TMUX_FLOOR; :119-184 retains exact whole-line parsing and canonical numeric/patch validation; provisioning/backend.rs:3679-3681 compares the retained parser's version directly against TMUX_FLOOR. Its caller :3915-3928 additionally requires an absolute representable tmux path and sets needs_tmux to the negated verdict. The deleted classifier's three outcomes differ from this boolean only in the above-pin warning local preflight used; the required below-floor rejection remains. Parser/order tests remain at tmux.rs:200-281 and release-pin agreement at :300-320. SPEC_impl.md, Terminal substrate: private tmux server (:2848-2864), requires the floor and accepts above-floor canonical stable releases, and specifically says, \"Anything the parser cannot read exactly — `next-3.8`, release candidates, distro-decorated strings — is refused rather than guessed about: a version Farhelm cannot name is one nobody audited it against.\"\n\nSynthesis: examined test sensitivity independently of correct production. The removed classification test exercised BelowFloor/AtFloor/AbovePin on a function and warning distinction that are deleted. Surviving responsibilities still have executable assertions: tmux.rs:203-209 distinguishes bare releases, patch letters, numeric minor order and floor identity; :225-279 distinguishes exact version lines from malformed/decorated ones; :305-318 enforces exactly one source pin and equality to the floor. provisioning.rs:6863-6875 calls the actual surviving tmux_meets_floor and asserts at-floor acceptance, above-floor acceptance, old-version rejection, and missing/unreadable-version rejection. :7909-7914, :7926-7947 and :7950-7956 assert the actual reach parser's private-payload decision for absent, old, acceptable and relative-path host tmux. These assertions would fail for replacing the surviving verdict with always-accept, always-reject, strict-greater-than, or equality-only. There is no direct remote-policy assertion for 3.7b/3.7d in the inspected test, but the former local classification test did not invoke that remote function either; its deletion does not establish a new end-to-end sensitivity gap. This is source analysis of assertions, not mutation testing or test execution. The deleted probe containment/PATH/override tests concern removed code; no surviving production caller of their deleted API was found.\n\nSuggested bucket: other (source-refuted candidate). Confidence: confirmed by source; tests read, not run. proposed_drop: source refutation and separate surviving-test sensitivity checks above; pending independent decision, not accepted. possible_cover: none; coverage sources not searched. Could-be-highest: false: no established security or loss-of-work route from removal of this redundant verdict API. Caveat: this check concerns the deleted API's remaining production caller and test responsibilities, not an audit of remote provisioning as a whole."
+          }
+        }
+      ],
+      "latest": {
+        "line": 4,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c2",
+          "state": "open",
+          "summary": "Deleting the three-way verdict does not remove remote Linux version enforcement",
+          "location": "crates/farhelm-supervisor/src/tmux.rs:76",
+          "detail": "Reviewed commit: 17a3fe858c5511a24b7403af15dd41c93bf69fd7\n\n## TLDR\nRemote Linux setup still rejects an old or unreadable host tmux and requests Farhelm's private build; deleting the local probe's classification API does not weaken that check.\n\n## Details\nOriginal considered consequence preserved: removing TmuxSupport/classify_tmux_version and their test might remove the version floor's last enforcement. tmux.rs:76-80 retains the 3.7c TMUX_FLOOR; :119-184 retains exact whole-line parsing and canonical numeric/patch validation; provisioning/backend.rs:3679-3681 compares the retained parser's version directly against TMUX_FLOOR. Its caller :3915-3928 additionally requires an absolute representable tmux path and sets needs_tmux to the negated verdict. The deleted classifier's three outcomes differ from this boolean only in the above-pin warning local preflight used; the required below-floor rejection remains. Parser/order tests remain at tmux.rs:200-281 and release-pin agreement at :300-320. SPEC_impl.md, Terminal substrate: private tmux server (:2848-2864), requires the floor and accepts above-floor canonical stable releases, and specifically says, \"Anything the parser cannot read exactly — `next-3.8`, release candidates, distro-decorated strings — is refused rather than guessed about: a version Farhelm cannot name is one nobody audited it against.\"\n\nSynthesis: examined test sensitivity independently of correct production. The removed classification test exercised BelowFloor/AtFloor/AbovePin on a function and warning distinction that are deleted. Surviving responsibilities still have executable assertions: tmux.rs:203-209 distinguishes bare releases, patch letters, numeric minor order and floor identity; :225-279 distinguishes exact version lines from malformed/decorated ones; :305-318 enforces exactly one source pin and equality to the floor. provisioning.rs:6863-6875 calls the actual surviving tmux_meets_floor and asserts at-floor acceptance, above-floor acceptance, old-version rejection, and missing/unreadable-version rejection. :7909-7914, :7926-7947 and :7950-7956 assert the actual reach parser's private-payload decision for absent, old, acceptable and relative-path host tmux. These assertions would fail for replacing the surviving verdict with always-accept, always-reject, strict-greater-than, or equality-only. There is no direct remote-policy assertion for 3.7b/3.7d in the inspected test, but the former local classification test did not invoke that remote function either; its deletion does not establish a new end-to-end sensitivity gap. This is source analysis of assertions, not mutation testing or test execution. The deleted probe containment/PATH/override tests concern removed code; no surviving production caller of their deleted API was found.\n\nSuggested bucket: other (source-refuted candidate). Confidence: confirmed by source; tests read, not run. proposed_drop: source refutation and separate surviving-test sensitivity checks above; pending independent decision, not accepted. possible_cover: none; coverage sources not searched. Could-be-highest: false: no established security or loss-of-work route from removal of this redundant verdict API. Caveat: this check concerns the deleted API's remaining production caller and test responsibilities, not an audit of remote provisioning as a whole."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g173/findings.jsonl",
+        "id": "c2",
+        "line": 4,
+        "disposition": "excluded",
+        "group": "retired-local-classifier-does-not-remove-remote-tmux-floor",
+        "reason": "Parent explicitly accepted named refuted proposal from claims-108 after inspecting it. The deleted three-way local verdict is not remote provisioning's enforcement. Its surviving remote caller still parses the complete version and directly compares it with the floor, with independent policy assertions. Direct surviving remote enforcement and independently read retained test assertions refute the specific deletion claim; preserve the adjacent patch-letter coverage caveat. Checked source/results: [\"At 17a3fe858c5511a24b7403af15dd41c93bf69fd7, tmux.rs:76-80 retains 3.7c; :119-184 validates canonical whole-line versions; :203-209 asserts patch/numeric ordering, :225-279 malformed inputs, and :305-318 one release pin equal to the floor.\",\"At that hash provisioning/backend.rs:3679-3681 directly compares parsed version >= TMUX_FLOOR; :3915-3928 also requires an absolute representable path before needs_tmux can be false.\",\"At that hash provisioning.rs:6863-6875 asserts floor/above acceptance and old/unreadable rejection; :7909-7956 asserts absent/old/acceptable/relative-path reach outcomes. The assertions distinguish always-accept, always-reject and strict-floor/equality policy mistakes; no mutation experiment was run.\",\"The remote test does not directly spell 3.7b/3.7d. The deleted classifier's test did not call remote policy either. Source analysis does not establish identical end-to-end coverage.\"] Current coverage/results: [\"Reviewed SPEC_impl.md:2848-2864 requires exact stable parsing and a >= floor policy. Current SPEC.md:181-184 and SPEC_impl.md:8003-8019 intentionally remove the remote tmux dependency later; that later change is not used to deny a historical defect.\",\"TODO.md Planned empty. The relevant install plan is landed (plans/REPORTS.md:30); no unlanded plan covering this alleged enforcement gap found. BUGS.md has no matching item.\",\"Full INDEX.md, matching queue searches and active TRIAGE_OUTCOMES.md show no exact alias/coverage for the deleted-classifier allegation. Archive not read. FILTER.md read; no filter used.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Removing TmuxSupport/classify_tmux_version and its test might remove the last version-floor enforcement, silently accepting old or unreadable host tmux. No security or user-work-loss route was established; the supervisor already no longer runs tmux at this revision.\"; \"No removed remote enforcement path identified. Direct adjacent patch-letter policy examples remain absent from the inspected remote-policy test, but their absence is not introduced by deleting a separate local classifier.\"."
+      },
+      "accepted_parent_decision": {
+        "key": "g173/c2",
+        "line": 4,
+        "disposition": "excluded",
+        "group": "retired-local-classifier-does-not-remove-remote-tmux-floor",
+        "bucket": "other",
+        "recording": "refuted",
+        "queue_target_candidate": null,
+        "needs_independent_drop_check": false,
+        "reason": "Parent explicitly accepted named refuted proposal from claims-108 after inspecting it. The deleted three-way local verdict is not remote provisioning's enforcement. Its surviving remote caller still parses the complete version and directly compares it with the floor, with independent policy assertions. Direct surviving remote enforcement and independently read retained test assertions refute the specific deletion claim; preserve the adjacent patch-letter coverage caveat. Checked source/results: [\"At 17a3fe858c5511a24b7403af15dd41c93bf69fd7, tmux.rs:76-80 retains 3.7c; :119-184 validates canonical whole-line versions; :203-209 asserts patch/numeric ordering, :225-279 malformed inputs, and :305-318 one release pin equal to the floor.\",\"At that hash provisioning/backend.rs:3679-3681 directly compares parsed version >= TMUX_FLOOR; :3915-3928 also requires an absolute representable path before needs_tmux can be false.\",\"At that hash provisioning.rs:6863-6875 asserts floor/above acceptance and old/unreadable rejection; :7909-7956 asserts absent/old/acceptable/relative-path reach outcomes. The assertions distinguish always-accept, always-reject and strict-floor/equality policy mistakes; no mutation experiment was run.\",\"The remote test does not directly spell 3.7b/3.7d. The deleted classifier's test did not call remote policy either. Source analysis does not establish identical end-to-end coverage.\"] Current coverage/results: [\"Reviewed SPEC_impl.md:2848-2864 requires exact stable parsing and a >= floor policy. Current SPEC.md:181-184 and SPEC_impl.md:8003-8019 intentionally remove the remote tmux dependency later; that later change is not used to deny a historical defect.\",\"TODO.md Planned empty. The relevant install plan is landed (plans/REPORTS.md:30); no unlanded plan covering this alleged enforcement gap found. BUGS.md has no matching item.\",\"Full INDEX.md, matching queue searches and active TRIAGE_OUTCOMES.md show no exact alias/coverage for the deleted-classifier allegation. Archive not read. FILTER.md read; no filter used.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Removing TmuxSupport/classify_tmux_version and its test might remove the last version-floor enforcement, silently accepting old or unreadable host tmux. No security or user-work-loss route was established; the supervisor already no longer runs tmux at this revision.\"; \"No removed remote enforcement path identified. Direct adjacent patch-letter policy examples remain absent from the inspected remote-policy test, but their absence is not introduced by deleting a separate local classifier.\"."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-108",
+          "key": "g173/c2",
+          "latest_line": 4,
+          "recommendation": "refuted",
+          "bucket": "other",
+          "underlying_key": "retired-local-classifier-does-not-remove-remote-tmux-floor",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The deleted three-way local verdict is not remote provisioning's enforcement. Its surviving remote caller still parses the complete version and directly compares it with the floor, with independent policy assertions.",
+          "checks": [
+            "At 17a3fe858c5511a24b7403af15dd41c93bf69fd7, tmux.rs:76-80 retains 3.7c; :119-184 validates canonical whole-line versions; :203-209 asserts patch/numeric ordering, :225-279 malformed inputs, and :305-318 one release pin equal to the floor.",
+            "At that hash provisioning/backend.rs:3679-3681 directly compares parsed version >= TMUX_FLOOR; :3915-3928 also requires an absolute representable path before needs_tmux can be false.",
+            "At that hash provisioning.rs:6863-6875 asserts floor/above acceptance and old/unreadable rejection; :7909-7956 asserts absent/old/acceptable/relative-path reach outcomes. The assertions distinguish always-accept, always-reject and strict-floor/equality policy mistakes; no mutation experiment was run.",
+            "The remote test does not directly spell 3.7b/3.7d. The deleted classifier's test did not call remote policy either. Source analysis does not establish identical end-to-end coverage."
+          ],
+          "coverage_checked": [
+            "Reviewed SPEC_impl.md:2848-2864 requires exact stable parsing and a >= floor policy. Current SPEC.md:181-184 and SPEC_impl.md:8003-8019 intentionally remove the remote tmux dependency later; that later change is not used to deny a historical defect.",
+            "TODO.md Planned empty. The relevant install plan is landed (plans/REPORTS.md:30); no unlanded plan covering this alleged enforcement gap found. BUGS.md has no matching item.",
+            "Full INDEX.md, matching queue searches and active TRIAGE_OUTCOMES.md show no exact alias/coverage for the deleted-classifier allegation. Archive not read. FILTER.md read; no filter used."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": "No removed remote enforcement path identified. Direct adjacent patch-letter policy examples remain absent from the inspected remote-policy test, but their absence is not introduced by deleting a separate local classifier.",
+          "original_stronger_consequence": "Removing TmuxSupport/classify_tmux_version and its test might remove the last version-floor enforcement, silently accepting old or unreadable host tmux. No security or user-work-loss route was established; the supervisor already no longer runs tmux at this revision.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Direct surviving remote enforcement and independently read retained test assertions refute the specific deletion claim; preserve the adjacent patch-letter coverage caveat."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "retired-local-classifier-does-not-remove-remote-tmux-floor",
+        "destination": null
+      }
+    }
+  ],
+  "replies": [
+    {
+      "turn": 1,
+      "reply": "Initial review complete: all 1,050 assigned patch lines and the complete commit list read.\n\nNo reportable defects found. Recorded rejected candidates `c1` and `c2`; no open leads or unread assigned scope. Findings and progress are saved in the assigned group directory.\n\nSource-only review; no tests or reproductions run."
+    },
+    {
+      "turn": 2,
+      "reply": "Revised `c1` with prompt, excerpt and tab-identity checks; revised `c2` with surviving-test sensitivity analysis. Both proposed drops remain pending independent review.\n\nNo new findings. Unresolved lead IDs: none. Source analysis only; no runtime reproduction."
+    },
+    {
+      "turn": 3,
+      "reply": "Discovery pass complete; nothing new found.\n\nChecks: read all neighbour context, expanded deleted-API searches, inspected added lines and range history, and verified the retained version pin.\n\nNew verified IDs: none. New unverified IDs: none. Revised IDs: none. Open leads: none.\n\nProgress updated. Source-only; no runtime execution."
+    }
+  ],
+  "progress": "# g173 initial review\n\nTurn type/count: initial / 1. Discovery passes: 0 (initial pass complete; no later-turn synthesis performed).\nState: assigned initial source review complete. No reportable defect established.\nScope: all 1,050 assigned patch lines for crates/farhelm-supervisor/src/tmux.rs at 17a3fe858c5511a24b7403af15dd41c93bf69fd7, delivered through six evidence packets. Read the entire inventory commits field; excluded coverage metadata was not read.\n\nContracts read at the reviewed revision: SPEC_impl.md, Terminal substrate: private tmux server (2784-2876); SPEC.md, Terminal experience (2851-3174), Supported user environments (5253-5335). Priority buckets and What goes in a feedback file read. The root End sentinel was present. Removed tests reviewed against the brief's verbatim test checklist; retained parser tests inspected in pinned source.\n\nInterface assumptions/results: session terminal hosts predate this patch. Deleted probe, verdict, discovery and override symbols have no remaining references in crates or packaging at the reviewed revision. Desktop preflight/spawn plumbing disappears together. Remote Linux provisioning still uses exact parser + TMUX_FLOOR; no remote probe replacement is introduced here. Literal FARHELM_TMUX remains excluded from terminal children even for old units. Startup cleanup connects directly to the old private server socket, so deleting binary discovery does not remove its dependency. These checks concern deletion/replacement contracts, not independent audits of retired code or adjacent groups.\n\nDurable records: c1 created then revised with caller/scrub checks (intentional local preflight removal); c2 created (retained provisioning floor enforcement). Both are rejected candidates with proposed_drop and could-be-highest stated. New verified defect IDs: none. New unverified defect IDs: none. Open leads: none.\nUnread assigned scope: none. An initial broad SPEC search output was clipped; governing sections were subsequently delivered completely in bounded reads. No prohibited coverage sources were searched/read. No runtime tests, builds or reproductions run: source-only assignment. No checkout files changed.\nNext action: return to caller for its later synthesis/discovery turn; do not start an additional pass in this turn.\n\n# Synthesis turn\n\nTurn type/count: synthesis / 2. Discovery passes: 0.\nState: later-turn synthesis complete; no new reportable defect or unresolved premise found.\nDelta records: c2 revised with independent surviving-test sensitivity analysis; c1 revised with retained host prompt/excerpt/tab identity checks and known-retirement provenance. Both remain open proposals for independent drop review; the earlier progress wording calling them rejected candidates was descriptive of my recommendation, not an accepted drop decision. No candidate in this log asserts a could-be-highest consequence, so no conversion to finding was required. Original details were preserved.\n\nUseful checks/results: actual provisioning tests assert floor/above-floor acceptance and old/missing/unreadable rejection; reach-parser tests assert payload selection and usable/relative executable identity. Reviewed assertions separately from production; did not claim a passing run or perform mutation tests. Host prompt path holds lifecycle identity, probes the entry host, requires replay caught-up and paste mode, and checks written paste before submit. Failed-launch excerpt reads only owned/dead entry host screen. Tab adoption checks record session/tab identity against the host tag; close excludes the agent runtime and retains unconfirmed ends. Targeted diff shows these host-only implementations, their host-terminal tests and old-terminal cleanup are unchanged by this commit; no dependency on the removed tmux probe APIs was found. Known old-terminal retirement/history loss and duplicate-after-failed-termination consequences remain attributed to prior SPEC contracts and caller-reported neighbouring reviews; no new distinct route arose from assigned source.\n\nInterface assumptions: unchanged from initial turn, now checked against surviving implementations as well as module contracts. Open leads: none. New verified IDs this turn: none. New unverified IDs this turn: none. New candidate IDs: none. Revised IDs: c1, c2.\nUnread assigned scope: none. No runtime tests, builds or reproductions run. No checkout files changed. Next: return delta to caller; any further discovery pass awaits its separate prompt.\n\n# Separate discovery turn\n\nTurn type/count: discovery / 3. Discovery passes: 1.\nState/result: complete; empty discovery. No new issue, candidate, or substantive unresolved lead found. Existing findings history remains append-only and its proposed drops remain pending independent review.\n\nContext synthesis before search: read discovery-neighbours.json completely, lines 1-872, in bounded chunks. Named pending cross-group questions: empty. Neighbour migration, excerpt, process-identity, orphan-host, test-oracle and documentation records supply novelty/provenance context; none is claimed as newly discovered here. The prior c1 check that removed version-probe APIs are not dependencies of host prompt/excerpt/tab paths is not a blanket correctness claim for those paths and does not refute the distinct neighbour findings. No separate source investigation outside this assigned deletion was launched.\n\nFresh source checks/results at 17a3fe858c5511a24b7403af15dd41c93bf69fd7: expanded deleted-API search to include TmuxProbe and TmuxProbeError as well as the verdict, probe, PATH and override symbols across crates/packaging; git grep returned status 1 with empty output (no matches, not a runtime check). Inspected all added lines and hunk boundaries of the assigned tmux.rs diff: every added line is documentation; executable changes remove the obsolete API and tests/imports, leaving the parser/order/floor implementation unchanged. Checked .github/release/source-pins.env at the reviewed revision directly: exactly one TMUX_VERSION=3.7c assignment is present, matching the retained floor and its retained include_str test dependency. Scoped full-range path history identifies the earlier terminal retirement/driver changes and later complete module removal; no concern was attributed merely by comparing the immediate parent or by auditing unrelated retired implementation.\n\nRevised IDs this pass: none. New verified IDs: none. New unverified-after-investigation IDs: none. New candidate IDs: none. Open lead IDs: none. Unread assigned scope: none. Checks were source/history only; no tests, builds, reproductions or live-install actions. No checkout files changed. Next: return discovery delta to caller.\n"
+}

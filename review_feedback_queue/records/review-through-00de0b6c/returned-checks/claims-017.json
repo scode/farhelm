@@ -1,0 +1,165 @@
+[
+  {
+    "key": "g030/c1",
+    "latest_line": 7,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "helm-seal-finisher-state-directory-ownership-lifetime",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "Source refutes the named pre-claim and post-claim startup/runtime routes. This proposes a disposition only; the original destruction consequence still requires the independent drop check.",
+    "checks": [
+      "At 222bf6253bcd168db04bcbb1df20180c88306998, crates/farhelm-helm/src/lib.rs:2330-2346 routes embedded serving through run_with_ready. Lines 2365-2379 declare ownership before Runtime and pass its slot into serving; runtime teardown therefore precedes release of the claim, including unwind.",
+      "At the same revision, lib.rs:2438 acquires claim_serving_ownership before the store opens at 2445 and the seal finisher starts at 2521. The corrected line numbers in history event 5 are accurate; event 1's approximate 2444/2519 references were inaccurate.",
+      "At the same revision, token_control.rs:79-88 retains the lock File and unlocks at Drop; 140-162 does not proceed on contention; 514-541 returns OwnershipLock only after successful LOCK_EX|LOCK_NB flock.",
+      "At the same revision, sessions/sandbox.rs:281-305 acquires the provisioning guard and records the outcome, and 344-360 spawns the finisher on the owned runtime. hosts.rs:1450-1472 re-reads and requires a session-owned, machine-deleting host; 1506-1576 retains the guard through provider destruction and registry cleanup. manager.rs:2699-2706,5117-5131 rejects foreign-host seals as destruction authority.",
+      "Source checks only. No execution or reproduction. This does not audit provider destruction internals or deliberate same-account lock-file replacement."
+    ],
+    "coverage_checked": [
+      "Current SPEC.md:1514-1549 requires finishing destruction of a sealed sandbox and preserves warned whole-sandbox deletion; it does not accept duplicate state-directory ownership. SPEC_impl.md:22-59 and 6106-6165 require runtime-held ownership and a helm-owned finisher for actionable seals.",
+      "TODO.md:23-26 has an empty Planned bucket. plans/queue/INDEX.md contains no unlanded plan entries. The stored environment-agent-operations plan describes the landed seal feature, not an outstanding fix for this concern.",
+      "BUGS.md, review_feedback_queue/INDEX.md and active TRIAGE_OUTCOMES.md were searched for seal finisher, serving ownership and state-directory claim routes; no exact trigger/consequence/scope cover or alias was found. Archive not read.",
+      "FILTER.md does not match unauthorized environment destruction; rarity alone cannot filter it."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": "No missing premise remains for the narrowly stated startup/runtime ownership refutation. A harmful finding would need a route around the exclusive claim or work surviving its runtime teardown; neither was established.",
+    "original_stronger_consequence": "A second or no-longer-owning helm could destroy a sealed environment without authority, losing its processes/files or crossing ownership boundaries: hypothetical highest. History events 1,5,6,7 preserve that consequence and propose refutation rather than an observed destructive failure.",
+    "needs_independent_drop_check": true,
+    "proposed_basis": "Source refutation of the two named ownership routes, not coverage or a filter. Established harmful consequence is absent, hence other if a bucket is needed for the proposed disposition; independent review must still judge the retained hypothetical highest consequence before any drop."
+  },
+  {
+    "key": "g030/c2",
+    "latest_line": 8,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "production-environment-provider-build-registry-place-cache-identity",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The production composition passes the same registry/cache handles through providers, actors and AppState. The hypothesized independent assembly is absent in the checked source.",
+    "checks": [
+      "At 56659839785691f76da3af5d8f51b511cff4ba8b, lib.rs:2450-2498 constructs Podman with sources.delivery.places(), the same delivery Arc and tensorlake.builds(); installs that Podman Arc with a Tensorlake clone in Providers before starting the manager; and supplies the same concrete handles to AppState.",
+      "At that revision, lib.rs:615-618 exposes the supplied Tensorlake build registry; 631-674 replaces the detached constructor defaults with supplied providers while taking podman_places from provisioning.credential_delivery().places(). credential_delivery.rs:261-264 clones its existing places Arc, and provisioning/service.rs:515-534,2164-2166 retains and clones sources.delivery.",
+      "At that revision, environment/podman.rs:124-138 stores the supplied Arcs without replacement; 750-765 uses the shared builds registry to refuse referenced leftovers; 1000-1034 uses it for build admission and prepared-artifact use. tensorlake/mod.rs:75-95,239-242 makes Tensorlake clones share its Inner/builds Arc.",
+      "At that revision, manager.rs:1488-1497,1530-1561 installs Providers before sync_registry; 1977-1983 clones it into actors; 4198-4201 and 4237-4242 dispatch status/connected resources through it. environment/lifecycle.rs:18-44 dispatches through manager.providers(). tensorlake/recipes.rs:602-615 takes the same builds deletion guard and calls manager.providers().clean_recipe under it.",
+      "At that revision, environment/mod.rs:482-506,597-618 explains the test-only split: scripted status observations and actual lifecycle services use one adapter. This is not a second production assembly. No runtime observation or provider-internal cleanup audit is claimed."
+    ],
+    "coverage_checked": [
+      "Current SPEC.md's sandbox/container cleanup rules and SPEC_impl.md:6010-6057 were checked. The specification requires one build registry and guarded recipe cleanup; it does not accept a production identity split.",
+      "TODO.md Planned is empty and plans/queue/INDEX.md has no unlanded entries. Stored podman-environments/environment-agent-operations plans concern the landed feature; no outstanding exact fix supplies coverage.",
+      "BUGS.md, queue INDEX and active TRIAGE_OUTCOMES.md were searched for provider registry, recipe admission/cleanup and cache identity. snapshot-cleanup-races-new-host-registration.md was read: its root is missing admission between registration and snapshot cleanup, not independent registry instances. It is neither an alias nor exact coverage of this refuted construction concern.",
+      "No FILTER.md boundary matches destruction from independent admission registries. No archive read."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": "The independent registry/cache required by the concern is source-refuted. No established route to cleanup of in-use user resources follows from this production assembly.",
+    "original_stronger_consequence": "Independent build admissions could conflict with preparation/creation; independent place caches could split UI availability from routing. Event 8 preserves the stronger hypothetical that a second admission registry might allow cleanup to destroy in-use user resources, which could be highest. Event 2 had no established destructive route.",
+    "needs_independent_drop_check": true,
+    "proposed_basis": "Source refutation of duplicate production wiring only. Do not extend this disposition to provider-internal admission algorithms, other recipe races, or every consumer without separate evidence."
+  },
+  {
+    "key": "g030/c3",
+    "latest_line": 4,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "removed-farhelm-tmux-setting-legacy-cleanup-dependency",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "Removing the unused executable setting cannot remove the checked cleanup's capability: that cleanup connects directly to the private socket and signals its verified peer.",
+    "checks": [
+      "At 17a3fe858c5511a24b7403af15dd41c93bf69fd7, crates/farhelm-helm/units/farhelm-supervisor.service.in contains no FARHELM_TMUX assignment. crates/farhelm-helm/src/units.rs:62-68 says the supervisor ignores old assignments and excludes them from sessions.",
+      "At that revision, crates/farhelm-supervisor/src/service/core/old_terminals.rs:159-280 obtains state_dir/tmux.sock with UnixStream::connect, requires same-user peer credentials, obtains the peer process, and invokes terminate_process_within with names_tmux_server_socket. It does not invoke a tmux program or read FARHELM_TMUX. The surrounding module docs and 1-320 were read.",
+      "Event 3's explicitly missing implementation premise is closed by this source. Event 4 refutes the removed-setting regression only; it does not claim all residual old-terminal cleanup failures are impossible. No runtime behavior was tested."
+    ],
+    "coverage_checked": [
+      "Current SPEC.md:2998-3010 and SPEC_impl.md:2780-2825 explicitly require legacy shutdown without a tmux program. They also accept separately described cleanup failures, but those are not the hypothesized dependency on this removed setting.",
+      "TODO.md Planned is empty. TODO.md:226-232's phase-3 removal is Mid term, not Planned and not exact coverage. plans/queue/INDEX.md has no unlanded entries. Stored tmux plans describe the already landed socket-only cleanup and removed setting.",
+      "BUGS.md, queue INDEX and active TRIAGE_OUTCOMES.md searches for FARHELM_TMUX, legacy cleanup and tmux executable dependency found no exact unresolved item or decision. No archive read.",
+      "The upgrade filter requires another rare condition as well as an older release; the concern as stated is ordinary upgrade cleanup, so that filter would not apply."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": "None for the narrow executable-dependency refutation. Broader residual cleanup and process-identity behavior are outside this claim.",
+    "original_stronger_consequence": "Removing Environment=FARHELM_TMUX might strand old terminals during an upgrade; event 3 suggested high if cleanup were broken. Event 4 withdraws that dependency concern on source evidence. No wrong-target signal or loss-of-work route was established.",
+    "needs_independent_drop_check": true,
+    "proposed_basis": "Source refutation, not general acceptance of upgrade defects. Conservatively route the proposed dismissal through the independent check because the candidate concerns cleanup of user-owned terminal processes, even though its stated stronger consequence was high rather than established highest."
+  },
+  {
+    "key": "g030/c4",
+    "latest_line": 10,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "test-restart-tensorlake-provider-external-api-selection",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The restart fixture's selected Tensorlake backend is offline in the test compilation. Persisted fixture account/sandbox rows do not make that constructor select the real HTTP API.",
+    "checks": [
+      "At 56659839785691f76da3af5d8f51b511cff4ba8b, lib.rs:283-288 compiles rest_harness only under cfg(test). rest_harness.rs:1013-1039 calls Tensorlake::production_with_delivery and installs that service before manager actor startup.",
+      "At that revision, tensorlake/mod.rs:151-178 selects Offline::test(), OfflineShell and None under cfg!(test), bypassing production_seams. This closes event 9's named external-client premise.",
+      "At that revision, provisioning/tensorlake_add_tests.rs:375-406 restarts the harness then constructs injected fake API/shell/preparer services for fixture operations. Actual restart callers at 2504 and 2586 retain sandbox data; 2520-2532 admits install coordinates and observes the same fake supervisor as a positive control. No constructor override before actors start appears at those callers.",
+      "No runtime test, external request or reproduction was performed. This establishes backend isolation, not the sensitivity or completeness of every fake-model test oracle."
+    ],
+    "coverage_checked": [
+      "Both current specifications were searched for restart-fixture/external-test API behavior. Product Tensorlake API rules do not accept accidental test I/O; SPEC_impl.md:6227 describes an offline implementation for test-built helms. Its ntfy offline rule at 5824 is a different service and is not used as exact coverage.",
+      "TODO.md Planned is empty; plans/queue/INDEX.md has no unlanded entries. BUGS.md, queue INDEX and active TRIAGE_OUTCOMES.md searches found no exact fixture-restart external-API item or decision. No archive read.",
+      "No FILTER.md boundary applies to this test-backend selection concern."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": "No missing premise remains for the narrowly stated external-Tensorlake-I/O concern: the required real API client is not selected. This does not resolve unrelated fake-model sensitivity questions.",
+    "original_stronger_consequence": "New restart provider activation might contact Tensorlake using persisted test account data and sandbox rows. Both history events bound this to other/test isolation; no real user credential, security or user-work loss route was established.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Source refutation by the cfg(test) constructor branch. Keep the original lead and scope caveat in the parent's disposition record; do not turn this into a production-correctness dismissal of a different test defect."
+  },
+  {
+    "key": "g030/c5",
+    "latest_line": 12,
+    "recommendation": "retain-verified",
+    "bucket": "other",
+    "underlying_key": "cancelled-trash-observation-test-misses-fleet-publication",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The changed assertion checks the epoch but does not witness the separate fleet publication its message promises. Source establishes the bounded test-sensitivity gap; it does not establish a current production lost wake.",
+    "checks": [
+      "At 06d4b68f3a9e913f47cd426fedee5946a4eed77b, notices.rs:700-742 blocks SQLite, polls observe_trash, drops the observer at 719, waits for both guards, then checks the notice row and epoch only. The new 737-741 assertion says cancellation cannot lose the committed observation's wake but reads no fleet revision or bump witness.",
+      "At that revision, notices.rs:107-112 increments only the private epoch map. feed.rs:149-159 separately advances the watch revision. notices.rs:254-275 correctly publishes both in the database closure today. Relocating only the changed-only bump after the awaited database call would preserve the cancelled test's row/epoch/guard observations while cancellation suppresses publication. This is a source counterexample, not an executed mutant.",
+      "At that revision, notices.rs:869-909 checks fleet revisions for completed HTTP requests. These requests are awaited, so they do not distinguish the described relocation. At pinned tip 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db, targeted searches found the same cancellation test and ordinary revision tests; observe_bumps call sites belong to other host/preferences behavior, with none in notices.rs.",
+      "git log over exclusive 6e423e30068b62c6cfa276c6d720ee35bb70387a through inclusive 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db lists only 06d4b68f3a9e913f47cd426fedee5946a4eed77b for notices.rs. Its diff adds the epoch/wake assertion to the older cancellation test. Attribution is to that changed assertion's claimed coverage; the older absence of a cancellation-specific bump assertion is not falsely claimed to have originated here.",
+      "At 06d4b68f3a9e913f47cd426fedee5946a4eed77b, SPEC_impl.md:4538-4543 pairs epoch publication with the fleet wake; 4591-4599 requires started blocking work to own changed-only invalidation despite HTTP cancellation. No runtime work was performed."
+    ],
+    "coverage_checked": [
+      "Current SPEC.md's archived-trash and notification-bell rules and SPEC_impl.md:3945-4110 were checked. SPEC_impl.md:4048-4053 pairs epoch and wake, and 4101-4110 retains cancellation-safe fleet invalidation. These require the behavior; they do not accept the missing regression oracle.",
+      "TODO.md Planned is empty and plans/queue/INDEX.md has no unlanded entries. Stored bell-trash-reads.md acceptance/outline describes the landed epoch work and ordinary cross-window checks, not an outstanding cancellation-publication oracle fix.",
+      "BUGS.md and active TRIAGE_OUTCOMES.md were searched. TRIAGE_OUTCOMES.md:1362-1372 discards trash-failed-host-refresh-test-lacks-application-witness.md, whose browser response-application witness is a different trigger, consequence and test scope; it does not discard cancellation-owned fleet publication coverage.",
+      "Queue INDEX and matching files were checked. trash-failed-host-refresh-test-lacks-application-witness.md and trash-read-eligibility-can-remain-cached.md concern browser refresh/eligibility; unmeasured-notices-can-be-marked-read.md, large-notice-history-exceeds-mark-budget.md and notice-retry-error-hides-clear-failure.md concern acknowledgement/display/API limits. None has this root. No exact queue cover or useful same-root extension found; archive not read.",
+      "FILTER.md's rare self-correcting glitch filter does not cover a regression-test oracle defect. No complete filter boundary matches."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": "None for the bounded source-level assertion gap. A current production bug or measured mutant survival would require additional evidence; neither is claimed.",
+    "original_stronger_consequence": "From event 11 onward this was other/test quality: a competing regression could lose the fleet wake after a cancelled Trash observation while the test passes. Event 12 confirms the source-level gap and explicitly preserves correct current production behavior; no security or user-work loss route was alleged or lowered.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Retain one other/test-quality finding. Describe the cancelled future, the separate epoch and watch publication, the specific undetected relocation and the in-range assertion change. Keep source analysis distinct from runtime reproduction."
+  },
+  {
+    "key": "g030/c6",
+    "latest_line": 13,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "release-missing-linux-archive-fixture-cardinality",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The fixture has three entries and the test compares against four archive members minus the one deliberately missing. The extra installer entry in published manifests is outside this helper's archive inventory.",
+    "checks": [
+      "At cb762a313abbe6da03ae0bf041f07486c4ed4df9, provisioning/assets.rs:43-64 defines four RELEASE_ARCHIVES; 88-109 explicitly documents and implements sums_members as only those archive names, excluding install.sh.",
+      "At that revision, provisioning/release_payloads.rs:2502-2544 selects the arm64 Linux archive, verifies its absence, and requires listed.len() == assets::sums_members().len() - 1. tests/fixtures/release/variants/without-linux-aarch64/SHA256SUMS has exactly the two Apple-silicon archives and x86_64 Linux archive. The cardinality premise holds by source.",
+      "No signature verification, download, test run or cryptographic correctness claim was performed. The disposition concerns fixture membership/count only."
+    ],
+    "coverage_checked": [
+      "Both current specifications were searched for signed manifests/checksums. SPEC_impl.md:8060-8078 distinguishes four payload archives plus install.sh in the published manifest; product signature rules do not require this test helper to count the installer. This is supporting context, not acceptance of a fixture defect.",
+      "TODO.md Planned is empty and plans/queue/INDEX.md has no unlanded entries. Stored tmux-drop-from-install.md names the landed checksum inventory migration; it is not an outstanding exact fix.",
+      "BUGS.md, queue INDEX and active TRIAGE_OUTCOMES.md were searched for sums_members, checksum cardinality and missing-Linux-archive fixtures; no exact cover, alias or decision was found. No archive read.",
+      "No FILTER.md boundary matches fixture cardinality."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": "None for the count refutation. Signature correctness is outside this named premise and remains untested by this consultation.",
+    "original_stronger_consequence": "Suspected mismatch after replacing the missing-tmux variant could invalidate the missing-asset test premise. The sole event classifies this as other/test correctness and source-refutes it; no production security consequence was alleged.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Source refutation from the explicit four-element archive inventory and three-entry variant. Do not equate a source membership check with executing the fixture test or validating its signature."
+  }
+]

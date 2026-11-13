@@ -1,0 +1,140 @@
+[
+  {
+    "key": "g146/c3",
+    "latest_line": 13,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "grid-only-helper-attachment-contract",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The removed byte/grid discrimination matches the client at the same revision. This refutes the introduced helper/input mismatch, not every transcript assertion. The raw drain is real but already present at the exclusive base; its correctness is not certified here.",
+    "checks": [
+      "f560058da19e02716e6f943883a9508b447aff4e:crates/farhelm/tests/e2e/harness.rs:103-145 retains raw scripted sources while TermStream always selects grid decoding; :334-368 sends bounded UTF-8 grid Text messages.",
+      "f560058d:crates/farhelm-helm/src/client.rs:3941-3943,4007-4065 attaches through the grid queue without a byte-stream selector. The assigned harness diff removes the selector and registry together with that contract.",
+      "f560058d:harness.rs:147-164,191-206 explicitly preserves repeated rows, row-order versus print-order, wrapped-row limits, and later history resets. Initial replay completion is not a post-attach-production witness.",
+      "6e423e30068b62c6cfa276c6d720ee35bb70387a:crates/farhelm/tests/e2e/terminal_backpressure.rs:206-231 already appends raw Data bytes. f560058d:harness.rs:2000-2022 does the same. This implementation is outside the range as a newly introduced defect.",
+      "Base terminal_tabs.rs:2226-2250 and f560058d:terminal_tabs.rs:1366-1393 keep the same ASCII cross-terminal absence markers and drains. These reads establish no newly changed raw-drain assertion route; they do not prove arbitrary grid JSON can be searched as normalized terminal text.",
+      "The full terminal_tabs base-to-revision diff exceeded output bounds; no conclusion relies on its omitted portion. The named drain/marker blocks were then read directly at both hashes. No runtime observation or reproduction."
+    ],
+    "coverage_checked": [
+      "SPEC.md searched for grid/harness/drain/terminal behavior; Terminal experience describes terminal-host output, not a guarantee that test transcripts are byte streams.",
+      "SPEC_impl.md:2160-2177 and Grid streams:2937-2958 explicitly require grid attachments and grid text helpers. Historical f560058d:SPEC_impl.md:2161-2178 has the same helper contract.",
+      "TODO.md Planned:25-26 is empty. BUGS.md in full concerns SSH transfer output, not terminal helper interpretation.",
+      "plans/queue searched for grid helpers, drain_for, raw-grid drains and attachment behavior. tmux-end-old-terminals and its tooling/docs followers already landed (plans/REPORTS.md:29-32); no unlanded exact fix was found.",
+      "INDEX.md read in full; matching queue files grid-text-omits-blank-columns.md and grid-row-is-not-program-line.md read in full. They cover omitted-column and synthetic-newline consumers, not the eliminated stream selector. They neither refute nor settle general raw-drain correctness.",
+      "Active TRIAGE_OUTCOMES.md searched for tmux/grid/harness/replay/drains; no decision matching this selector-removal trigger and consequence. Archive not read.",
+      "FILTER.md read in full; no filter needed or claimed. Source refutation is narrower than a general acceptance of test observer defects."
+    ],
+    "exact_cover_quotes": [
+      {
+        "source": "SPEC_impl.md:2165-2166",
+        "quote": "The e2e harness's terminal helpers read a grid stream's rows as text and type as grid `text` input."
+      }
+    ],
+    "missing_premise": "For the dismissed mismatch: a surviving byte attachment routed through these changed helpers. Source supplies no such attachment. For the separate raw-drain caveat: a new in-range assertion route and its consequential unsupported match remain unestablished by this record; g145/l1 owns that peer caveat and was not independently supplied to this batch.",
+    "original_stronger_consequence": "Removing byte/grid discrimination could make tests decode terminal bytes as grids or type through the wrong input path. Later records explicitly preserve raw-drain, repeated-history, exactly-once and post-attach-printing limitations rather than claiming universal transcript correctness.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Refute only g146/c3's newly introduced stream-kind mismatch. Do not drop an independently retained g145 raw-drain finding or either existing queue observer item on this basis. No security, user-owned-work or catastrophic tooling route is proposed by this named claim."
+  },
+  {
+    "key": "g146/c4",
+    "latest_line": 11,
+    "recommendation": "retain-verified",
+    "bucket": "other",
+    "underlying_key": "consumed-restart-drops-testdir-before-outer-tmux-guard",
+    "aliases": ["g144/c3"],
+    "target_queue_file": null,
+    "why": "A failed consumed restart can remove the private socket directory before the caller's path-only server guard drops. The guard then cannot acquire authority, so its normal shutdown cannot reach a server that remains alive. This is a conditional source conclusion, confined to maintainer test resources, not an observed timeout or user-session loss.",
+    "checks": [
+      "647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513:harness.rs:1127-1150 consumes Harness, owns state inside the restart future, and awaits retirement before the next supervisor starts.",
+      "dbfc69751215dbf15e1d31d5bed73c3754c4ebc4:crates/farhelm/tests/e2e/old_terminals.rs:25-48 stores paths and a separate guard, with remain-on-exit enabled; :90-99 passes session markers to the pane launch, not the server. :248-266 constructs Harness before OldServer; :331-334 consumes Harness while OldServer remains outside the await.",
+      "dbfc6975:harness.rs:1093-1109 can panic at its ten-second reference-drain deadline; :1130-1137 retains TestDir inside the awaited future. On that failure the inner directory is destroyed before unwinding reaches the caller's outer server guard.",
+      "dbfc6975:crates/farhelm-teststate/src/lib.rs:794-818 only performs terminal-host cleanup on TestDir Drop; successful host cleanup allows removal of the whole directory. It does not end this separately constructed tmux server.",
+      "303a1264b7bd791e8f6f6de2c7bb6136c08e8bab:tmux/guard.rs:17-27 states guard-before-directory order but retains only a socket pathname and executable resolution. :55-83 acquires diagnostics and shutdown authority at Drop.",
+      "303a1264:tmux.rs:266-268 returns refusal on validate_socket failure; :391-392 requires parent metadata; :314-320 records no protocol attempt, no fallback and unobserved death. Missing parent therefore prevents the guard's shutdown.",
+      "303a1264:harness.rs:937-981 preserves retirement-before-startup and consumed state; inclusive tip 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db:old_terminals.rs:269-270 still constructs the outer server from Harness state.",
+      "Original API-removal concern checked separately: 303a1264:guard.rs:46-83 still resolves once and emits diagnostics before shutdown. git grep found no diagnostic_text/with_environment callers in teststate or farhelm e2e. OldServer launches inherited tmux; session_lifecycle.rs:4237-4252 explicitly launches and guards /usr/bin/tmux. harness/tmux_guard.rs:49-139 reads Drop tracing after a boundary with a live-session premise. This narrow API refutation does not dispose of the lifetime failure.",
+      "No runtime test, reproduction, build, process operation or live-install action."
+    ],
+    "coverage_checked": [
+      "SPEC.md:2998-3013 accepts failure of production startup's old-server shutdown, not deletion of a test's cleanup authority before its explicit guard runs.",
+      "SPEC_impl.md:2590-2604 describes TestDir host cleanup and retention on uncertain host death. Ending the old private tmux server:2780-2823 governs production startup; neither accepts this test-owned guard/directory ordering. Testing:8163-8229 accepts specified local trust/PID conventions, not resource orphaning by lost directory ownership.",
+      "TODO.md Planned:25-26 is empty. Its later phase-3 tmux removal wish is outside Planned and is not authorized coverage. BUGS.md in full concerns SSH transfer output only.",
+      "plans/queue searched for OldServer, TmuxServerGuard, restart_supervisor and guard/directory lifetimes: no exact fix. The tmux end/tooling/docs plans are already landed per plans/REPORTS.md:29-32; the tooling acceptance criteria retain the real-server cleanup/sweep, so they are not unlanded coverage.",
+      "INDEX.md read in full. pending-test-host-start-cleanup.md and mac-process-lookup-truncates-live-host-command.md read in full: they also orphan test resources but through late host creation and truncated process discovery, respectively. They do not cover this explicit tmux guard losing its directory during consumed restart.",
+      "Active TRIAGE_OUTCOMES.md searched for tmux, guard, directory cleanup and fixture restart; no matching active disposition. Archive not read.",
+      "FILTER.md has no matching boundary: persistent orphaned resources are not a self-correcting display, safe retry or diagnostic-only consequence; the trigger is not a hung systemd manager or an upgraded installed session."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": "No missing source premise for the conditional failure. Actual reference-drain timeout/cancellation occurrence and leak duration were not observed. The route requires failure before successor startup ends the old server, successful host cleanup/directory removal, and the private server still alive. No security, user-owned-work or catastrophic tooling consequence is established.",
+    "original_stronger_consequence": "The original candidate suspected removed explicit-environment/diagnostic-text APIs could break private-server fixture cleanup or lose diagnostics. Those particular API regressions remain source-refuted. The later, distinct consumed-future ownership route establishes potential orphaning of the test's server; it was not withdrawn or lowered from an established highest consequence.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Retain once as verified conditional maintainer-tooling cleanup failure, other priority. The supplied history explicitly names g144/c3 as the same route; that record itself was not an input to this batch, so the parent must reconcile the alias rather than infer that this consultation authorizes a duplicate drop. No existing queue item fully covers it."
+  },
+  {
+    "key": "g146/c5",
+    "latest_line": 8,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "machine-tmux-fixture-selection-and-substrate-skip",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The real-server fixture launches the canonical executable it resolves, and found-program setup failures remain failures. Missing-tmux branches are explicit and confined to real-server premises; the dead-socket reap assertion still runs without tmux. This does not make an early-return JUnit pass evidence of substrate coverage.",
+    "checks": [
+      "d751ff1633bb479c7bf53920f2e4ea4ba932a1c2:crates/farhelm-teststate/src/tmux.rs:232-240 resolves using inherited PATH/current directory and prints SKIPPED on lookup failure.",
+      "d751ff16:tmux.rs:1644-1701 resolves before allocating the private directory and launches Command::new(&executable). Ready requires successful bounded setup plus verified peer acquisition. Other setup/acquisition failures panic after cleanup; unsupported peer descriptors have their own explicit skip with required cleanup success.",
+      "d751ff16:tmux.rs:1729-1737 asserts the resolved program passes executable validation. tmux/guard.rs:130-169 resolves relative and empty PATH entries against supplied cwd and uses the platform default when PATH is absent.",
+      "d751ff16:lib.rs:1267-1307 conditionally skips only the external failed-kill premise; reap and both removal assertions execute regardless. :1446-1497 returns before allocating the real-server fixture when lookup is unavailable.",
+      "Pinned git grep found no set_current_dir in teststate or farhelm e2e at d751ff16. Remaining old-server commands inherit PATH; the separately explicit stock test launches/guards /usr/bin/tmux (303a1264:session_lifecycle.rs:4237-4252).",
+      "Lookup collapses unavailable cwd and resolver errors into the same SKIPPED message, so literal absence is not proven by that text. External PATH/executable replacement is not ruled out; no source producer for that route is established. No runtime execution."
+    ],
+    "coverage_checked": [
+      "SPEC.md searched for tmux/test substrate; its old-terminal startup rules do not require a product tmux program. SPEC_impl.md:2160-2177,2780-2823 and Testing:8163-8229 distinguish product startup from hand-built real-server tests; no contract to treat failed real-server setup as success.",
+      "TODO.md Planned:25-26 empty; BUGS.md in full has no tmux fixture selection/skip item.",
+      "plans/queue/tmux-drop-from-tooling.md:37-45 explicitly specifies machine tmux and visible SKIPPED, with skips not evidence of a pass. This plan already landed (plans/REPORTS.md:31), so it is contextual acceptance, not an unlanded fix. No other exact unlanded coverage found by named resolver/guard/test searches.",
+      "INDEX.md read in full and queue searched for machine-tmux, missing tmux, skip, guard and executable-selection routes; no exact item. Broader cleanup failures do not cover a supposed resolver mismatch.",
+      "Active TRIAGE_OUTCOMES.md searched for tmux, fixture, harness and substrate-related routes; no matching active decision. Archive not read.",
+      "FILTER.md read in full; no filter invoked. The inaccurate literal no-tmux wording remains a bounded caveat, not proof all lookup failures mean absence."
+    ],
+    "exact_cover_quotes": [
+      {
+        "source": "plans/queue/tmux-drop-from-tooling.md:43-45 (landed context only)",
+        "quote": "If no tmux is present, those tests skip with a visible `SKIPPED` message the recorder output shows"
+      }
+    ],
+    "missing_premise": "A changed fixture route that resolves one program but launches another, or treats found-but-failed setup as a ready fixture. None is established. Path mutation outside the process and unavailable cwd can affect lookup, but no ordinary supplied test path causes them. An executed gate must still inspect retained SKIPPED output.",
+    "original_stronger_consequence": "Switching from pinned lookup might select the wrong executable, silently treat a broken server as successful, or skip cleanup assertions beyond their real-tmux premise. The no-tmux wording and early-return pass caveats remain; no user-owned-work consequence was established.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Refute the stated ordinary resolver/setup/assertion regression from pinned source. Do not use this to certify cleanup generally, literal machine absence from a skip line, or runtime substrate coverage."
+  },
+  {
+    "key": "g146/c6",
+    "latest_line": 12,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "replay-fixture-primary-screen-clear-history-rationale",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The actual primary-screen emulator path preserves the explanation: clearing the screen scrolls populated viewport content into history, while the separate saved-history erase removes it. This is a source check of the changed comment's rationale, not an inference from unrelated production correctness.",
+    "checks": [
+      "08399d092d20815ced6619c26df2391944ae2b4a:crates/farhelm-fixtures/src/fake_agent.rs:293-296 dispatches Replay directly to replay_transcript; :2532-2542 prints READY then home, ESC[2J and ESC[3J. The assigned diff removes tmux-specific wording but retains this behavior and history rationale.",
+      "08399d09:vendor/alacritty_terminal/src/term/mod.rs:2281-2307 sends ClearMode::All on the primary screen through grid.clear_viewport and ClearMode::Saved through clear_history. Alternate-screen ClearMode::All instead resets its active region.",
+      "08399d09:vendor/alacritty_terminal/src/grid/mod.rs:367-389 computes populated viewport extent and scrolls it upward before resetting rotated rows. READY can therefore survive the screen erase in history until ESC[3J.",
+      "The direct Replay startup does not select the separate Altscreen script; this conclusion is confined to the fresh primary-screen fixture. No test, reproduction, screenshot or observed capture behavior."
+    ],
+    "coverage_checked": [
+      "SPEC.md Terminal experience searched for clear-screen/history/alternate-screen behavior; its full-fidelity and history-clear rules do not contradict this fixture rationale. SPEC.md:2936-2942 concerns recovery history notices, a different consequence.",
+      "SPEC_impl.md, The supervisor's terminal emulator:2670-2705 read in full, identifies the vendored alacritty/vte interpreter. Searches found no specification statement contradicting the primary-screen clear/history distinction.",
+      "TODO.md Planned:25-26 is empty. BUGS.md read in full, unrelated.",
+      "plans/queue searched for replay_transcript, history-clear, clear-screen and replay-fixture behavior; no exact unlanded work. The tmux docs/comment sweep already landed (plans/REPORTS.md:32), so it is not future coverage.",
+      "INDEX.md read in full and queue searched for replay/history-clear/clear-screen routes. empty-history-clear-keeps-missing-history-notice concerns a recovery notice, not this fixture's screen/history erase explanation; no exact queue item or extension found.",
+      "Active TRIAGE_OUTCOMES.md searched for replay, clear-screen, scrollback, history-clear and fixture behavior; no matching active decision. Archive not read.",
+      "FILTER.md read in full; no filter invoked because the suspected documentation error is source-refuted."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": "A fresh Replay fixture entering the alternate screen before its initial clear, or a primary-screen clear implementation that discards rather than scrolls the marker. Neither is supplied by the checked route. Alternate-screen semantics are explicitly outside this rationale.",
+    "original_stronger_consequence": "Generalizing a tmux-specific comment to the terminal might introduce a false reason to retain ESC[3J. The actual primary-screen source supports it. No security or user-owned-work loss consequence was claimed.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Refute the changed fixture-comment claim only for its actual fresh primary-screen startup path. Preserve the alternate-screen qualification and lack of runtime observation."
+  }
+]

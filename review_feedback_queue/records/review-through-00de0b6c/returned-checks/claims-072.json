@@ -1,0 +1,266 @@
+[
+  {
+    "key": "g111/l1",
+    "latest_line": 13,
+    "recommendation": "filtered",
+    "bucket": "highest",
+    "underlying_key": "old-terminal-migration-unprotected-spare-retained-subtree-removal",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The conditional borrower-work-loss route is supported by source and is in range through dbfc6975, rather than newly introduced by 1ed482d. The current older-release-plus-rare-condition filter appears to cover the whole named migration route, including its work-loss consequence. This is a proposed filter disposition requiring an independent drop check, not an accepted dismissal.",
+    "checks": [
+      "At 1ed482dde220452e424973faf38a5e1318986333, core.rs:7822-7866 omits old-kind rows from protected claims and :8065-8070 passes the sample to the cache sweep. old_terminals.rs:162-200 returns normally after connection/identity failures; :306-318 logs a failed agent sweep and continues.",
+      "spare_checkouts.rs:542-556 removes unprotected generated claims; :611-618 parks and verifies the root before opened-handle traversal. checkout_trash.rs:320-349 retains child directory descriptors, and :374-380 checks the original child name only after traversing contents. That check does not prevent deleting contents through a descriptor after the child has moved.",
+      "spare_take.rs:38-40 explicitly takes no cache lock; :142-174 checks and preflights the destination then moves entries through retained descriptors. Its :176-181 final original-name unlink fails after parking, preventing its own later merge/hook/agent. This narrows but does not refute the retained-borrower route.",
+      "store.rs:3389-3393 permits existing-directory membership; core.rs:12202-12217 explicitly distinguishes borrowers using incomplete contents from the origin's Ready requirement. An already running host-backed borrower is therefore a source-supported writer outside the private spare namespace.",
+      "git log over 6e423e3..00de0b6 includes dbfc69751215dbf15e1d31d5bed73c3754c4ebc4. That predecessor's core.rs:6426-6438 already runs migration then unconditionally marks the tmux driver absent. No new regression is attributed solely to the driver simplification.",
+      "No runtime execution, occurrence or reproduction is established. The route needs failed migration termination, an in-flight older take, cleanup opening a child before its move, and a retained writer acting while traversal can still delete it."
+    ],
+    "coverage_checked": [
+      "Current SPEC.md managed-checkout paragraphs at 1748-1755 and SPEC_impl.md:3807-3814 retain live/uncertain clone claims. The out-of-band replacement acceptance does not describe this legitimate claim or borrower writes after movement.",
+      "Current SPEC.md:2998-3011 and SPEC_impl.md:2780-2823 accept retirement failures and possible later duplicate Restart. They do not explicitly accept cleanup following moved descendants into a retained borrower's work. Isolated claim cleanup remains an interpretation conflict; the broader Restart exception is not exact coverage for this route.",
+      "TODO.md Planned is empty. BUGS.md has no matching claim. Searches of active TRIAGE_OUTCOMES.md and INDEX.md found no matching traversal/legacy-claim decision or item. spare-ancestry-fallback-skips-destination-recheck.md was read: it concerns replacement of an empty allocation during ancestry refusal, a different root and trigger.",
+      "Matching plans include the tmux removal series, all marked landed in plans/REPORTS.md:29-32; their presence in plans/queue does not make them unlanded cover. Searches of other queue plans found no stated fix for this removal/movement interaction.",
+      "FILTER.md, Upgrades from older releases combined with another rare condition, matches the necessary old live preparation plus failed retirement and narrow traversal/write ordering. The named consequence is work loss within affected sessions, expressly included by this filter; no bricked installation, Farhelm database corruption, failed update path or independent security consequence is established."
+    ],
+    "exact_cover_quotes": [
+      "FILTER.md: 'The trigger needs something carried across an upgrade from an older Farhelm release: state an older release wrote, a session or agent that kept running through the upgrade, or a hook or report an older release installed.'",
+      "FILTER.md: 'The trigger also needs another rare condition on top of that: a narrow timing window, a crash or fault at a specific point, or an unusual sequence of user or agent actions.'",
+      "FILTER.md: 'Unlike the filters above, this one also covers losing user-owned work within the affected sessions, such as resuming the wrong conversation.'"
+    ],
+    "missing_premise": "No missing shipped-code premise was found for the conditional borrower route. Runtime occurrence/frequency is unobserved. Independent adjudication is required before filtering this highest-consequence claim; if it considers moved-subtree deletion a separate security/trust-boundary consequence, the filter must not apply.",
+    "original_stronger_consequence": "Initial hypothesis: deleting user-owned work in an allocated checkout. The initial blanket confinement/lowering and replacement-rule policy drop were withdrawn. The origin's own later hook/agent loss is refuted by final-unlink failure, but the latest record restores highest through an independent retained borrower writing a moved subtree. Attribution to 1ed482d alone was withdrawn; dbfc6975 introduces the relevant migration within the whole range.",
+    "needs_independent_drop_check": true,
+    "proposed_basis": "Apply the exact current older-release-plus-rare-condition filter only after the independent drop consultation agrees. Preserve the source route, highest consequence, prior withdrawals and migration attribution in that register. Do not use the general retirement acceptance or replaced-spare acceptance as substitute coverage."
+  },
+  {
+    "key": "g111/c1",
+    "latest_line": 3,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "host-launch-hold-direct-probe-equivalence",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The removed async terminal abstraction already delegated host probing directly to the same runtime. The held-mark/PID gate remains; no newly unsafe release of a starting launch's version is shown.",
+    "checks": [
+      "At 1ed482d^ service/terminals.rs:154-158 delegates Terminal::Host to host.probe(). At 1ed482d hosts/terminal.rs:818-831 returns Running only for a pinned live child and errors for unavailable/process-read failures.",
+      "At 1ed482d core.rs:7798-7806 requires the held mark to equal Running(pid), returns false on errors and settles only dead/gone otherwise. :7735-7787 retains queue/start-count synchronization and bounded waiting.",
+      "No runtime observation or reproduction was made."
+    ],
+    "coverage_checked": [
+      "Searched both specifications for launch holds, shutdown and current-child settlement; no acceptance is needed for the source-equivalence conclusion.",
+      "TODO Planned empty; BUGS, active ledger, queue index and unlanded-plan searches found no exact issue. Read recovered-agent-retains-stale-launch-hold-handle.md: it concerns an already captured ended handle after recovery, not whether this direct probe preserves the old host branch. It is not exact cover or a new extension here."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": "The proposed regression requires a changed host probe/settlement behavior; the checked source does not supply one.",
+    "original_stronger_consequence": "Shutdown could release the installed version before a starting session protects it, potentially losing its session process/work. That considered highest consequence is source-refuted on this change, rather than lowered for rarity.",
+    "needs_independent_drop_check": true,
+    "proposed_basis": "Independent drop check for the original potentially highest consequence: direct host-probe equivalence plus unchanged mark/PID matching. Do not extend this to the distinct stale-captured-handle queue finding."
+  },
+  {
+    "key": "g111/c2",
+    "latest_line": 7,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "shutdown-attachment-drain-admission-lock",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "Attachment admission and installation share the same mutex as the closed flag and drain, so a successful drain cannot be followed by an admitted stream that escaped it.",
+    "checks": [
+      "At 1ed482d handlers.rs:1739-1750 takes the attachments lock and checks stopping. :1928-1967 constructs and inserts the new attachment under the same guard; :1968 releases it.",
+      "teardown.rs:1237-1253 takes that mutex, sets attachments_closed and drains before joining. Its timeout includes lock acquisition and reports failure, not a successful empty drain, if the budget expires.",
+      "No runtime execution or reproduction."
+    ],
+    "coverage_checked": [
+      "Searched SPEC.md/SPEC_impl.md for attachment shutdown and supervisor restart contracts; no contrary acceptance or uncovered changed contract was found.",
+      "TODO Planned empty. Searches of BUGS, INDEX, active ledger and plans found no exact post-drain-install finding or planned repair. General attachment and nonblocking-action entries do not match this lock ordering. No filter is needed."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": "An installation outside the drain mutex or admission check outside it is required for the alleged race; both are inside it.",
+    "original_stronger_consequence": "High if established: a new viewer stream escapes shutdown's drain and gives inconsistent viewer shutdown. No security or user-work-loss route was claimed or established.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Source refutation restricted to install-after-successful-drain ordering. A timed-out drain remains a reported failure."
+  },
+  {
+    "key": "g111/c3",
+    "latest_line": 9,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "old-terminal-retry-takeover-preserves-kind-and-refuses",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "A retried old-kind reservation is refused before allocation or terminal start; refusal preserves an allocation that may already exist. The removed existence query does not establish a duplicate host launch or lost allocation ownership.",
+    "checks": [
+      "At 1ed482d store.rs:4303-4309 returns Launched if the stored kind, address, generation or other settlement evidence changed. core.rs:10819-10820 returns for resolved/launched takeover outcomes.",
+      "core.rs:10823-10837 explicitly refuses TerminalKind::Tmux before allocation/start. :14716-14736 settles the no-fresh-plan record, while :14738-14756 rolls back only positively Planned allocation state and retains Allocated/unknown state for inspection and deletion.",
+      "No runtime execution or reproduction."
+    ],
+    "coverage_checked": [
+      "SPEC_impl.md's creating-agent-host takeover contract requires preserving old kind and refusal rather than guessing a host launch; the checked implementation follows that boundary.",
+      "TODO Planned empty. BUGS, queue/index, active-ledger and plan searches found no exact retry-kind conversion/allocated-refusal finding. The migration/spare route under g111/l1 and generic duplicate-Restart policy under g112/c1 are distinct. No filter is needed."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": "Successful host start after old-kind takeover, or deletion of Allocated ownership on refusal, is required for the suspected harm and is prevented by the checked guards.",
+    "original_stronger_consequence": "Highest if established: a retry starts a duplicate agent in the user's working directory, or refusal discards an already allocated checkout's ownership. Both are source-refuted for this route.",
+    "needs_independent_drop_check": true,
+    "proposed_basis": "Independent drop check for the considered highest route, based on transactional kind revalidation, pre-allocation old-kind refusal and allocation-state-specific retention. This does not dismiss the separate migration residual."
+  },
+  {
+    "key": "g111/c4",
+    "latest_line": 14,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "removed-tmux-excerpt-field-does-not-gate-host-excerpts",
+    "aliases": ["g112/c4"],
+    "target_queue_file": null,
+    "why": "The removed field was never read by the host excerpt branch. This refutes evidence loss caused by removing that field, but does not establish that inherited history can never contaminate the current screen.",
+    "checks": [
+      "At 1ed482d^ launch_artifacts.rs:78-96 the host branch reads final host-screen evidence and returns before :101-106 reads launch_excerpt. At 1ed482d :59-76 the replacement preserves that processed-exit/direct-screen branch.",
+      "At 1ed482d vendor/alacritty_terminal/src/grid/resize.rs:25-28,46-71 height growth promotes history into visible rows. The inherited-blank-screen rationale at launch_artifacts.rs:54-56 is therefore not a general provenance proof. See the separately preserved qualification in g112/c4.",
+      "Source-only check; no runtime reproduction."
+    ],
+    "coverage_checked": [
+      "Current SPEC.md:2888-2894 requires safely attributable failed-launch excerpts. SPEC_impl.md:2658-2667 still claims blank initial screen prevents previous-run quotation; that is competing rationale, not exact acceptance of contamination.",
+      "TODO Planned empty; BUGS, INDEX, active ledger and unlanded-plan searches found no exact removed-field omission or excerpt-provenance coverage. The tmux docs plan is landed per REPORTS.md:32. Supplied g100/g013 neighbour ownership is not independently established by this batch and is not treated as current queue coverage."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": "A host-path dependency on the removed field is absent. A broad assertion that no previous-run text can be quoted is not established and must not be carried forward as the basis for dismissal.",
+    "original_stronger_consequence": "A failed host launch loses its final explanation or quotes a different run because the launch_excerpt field was removed. Only the causal claim about field removal is refuted; the known resize/provenance route and distinct temporary-allocation issue remain untouched.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Refute only the removed-field regression. Reconcile this narrow scope with g112/c4; do not use host identity, processed exit or initial blank screen to dismiss resize contamination.",
+    "new_interface_evidence": "The parent host branch returns before touching launch_excerpt (1ed482d^ launch_artifacts.rs:78-106), while the current reducer still reads a visible grid whose grow_lines can promote seeded history. Cache independence and current-cell provenance are separate facts."
+  },
+  {
+    "key": "g111/l2",
+    "latest_line": 17,
+    "recommendation": "retain-verified",
+    "bucket": "other",
+    "underlying_key": "sentinel-reload-comment-denies-recorded-host-delete-fallback",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The changed comment incorrectly presents the in-memory handle as necessary to keep the ordinary host reachable by Delete. The retained record supplies an independent path. Correct runtime behavior does not refute this documentation defect.",
+    "checks": [
+      "At 1ed482d core.rs:6792-6799 says a terminal-less SessionEntry leaks the host out from under Delete teardown. At inclusive tip 00de0b6c core.rs:6791-6798 retains that assertion.",
+      "At 1ed482d host_launch.rs:553-579 writes the .host record before starting.finish. launch_artifacts.rs:483-494 deliberately preserves .host on sentinel settlement, and :764-778 retains it during startup sweeps.",
+      "session_hosts.rs:238-260 includes recorded hosts when no runtime holds their socket; :272-324 settles/classifies and retains them; :743-791 ends attributable recorded hosts or refuses if end cannot be confirmed.",
+      "The same core.rs:10367-10370 explicitly says Delete finds terminal-less entries' hosts by launch records. Retaining the handle is still needed for Attach/final-screen access; removing that branch is not proposed.",
+      "The host-specific comment rewrite is in 1ed482d and survives the remaining in-range changes. No actual runtime leak, security consequence or work loss is claimed; no execution was performed."
+    ],
+    "coverage_checked": [
+      "Current SPEC_impl.md:2345-2399 explicitly defines agent/tab runtimes plus retained launch records as Delete ownership sources. This supports the defect rather than accepting the false explanation. Current SPEC.md lifecycle/terminal sections give no exception making the runtime Delete's sole record.",
+      "TODO Planned empty. BUGS, INDEX and active TRIAGE_OUTCOMES searches found no exact comment/recorded-host dependency issue. The existing launch-hold and spare queue matches are unrelated.",
+      "The matching tmux docs/comments plan is landed per plans/REPORTS.md:32 and did not remove the assertion at the reviewed tip; its generic audit is not unlanded exact coverage. Other plan searches supplied no targeted repair. FILTER.md's rare-diagnostic rules do not match an unconditional maintainer-facing ownership explanation."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": "None for the documentation mismatch. A deleted-out-of-band .host record could remove the fallback, but that is not the ordinary branch the comment describes and does not rescue its unconditional rationale.",
+    "original_stronger_consequence": "Inaccurate maintainer-facing lifecycle documentation; the initial lead explicitly did not claim a production host leak. The final source confirms the documentation defect, not a runtime leak.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Record an other-priority comment-correctness finding explaining Attach/final-screen retention and the independent recorded-host Delete fallback. No behavior change is needed."
+  },
+  {
+    "key": "g112/c1",
+    "latest_line": 7,
+    "recommendation": "covered",
+    "bucket": "high",
+    "underlying_key": "old-terminal-retirement-survivor-duplicate-restart-policy",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The exact retirement policy accepts a later Restart beside an old survivor. The earlier claim that startup failure alone establishes successful duplication was too strong: Restart still performs fresh cleanup. Preserve the possible work-loss consequence and route-certainty correction for independent adjudication.",
+    "checks": [
+      "At 1ed482d core.rs:12413-12417 settles outstanding hosts; :12458-12483 reaps the prior recorded scope and AgentOnly markers with ScopeKillFailure::Refuse before relaunch. Old runtime absence does not skip that fresh cleanup.",
+      "old_terminals.rs:162-200 and :306-318 show startup can return despite failed retirement. This does not prove a later successful reap misses the same process.",
+      "The duplicate residual requires a survivor outside successful cleanup selectors, such as no usable scope/root/readable matching marker. No concrete surviving installed agent shape or runtime trace establishing that stronger ordinary-agent premise was supplied or reproduced.",
+      "dbfc69751215dbf15e1d31d5bed73c3754c4ebc4 is in the full review range and introduces the retirement fallback, so this is not out of range merely because the later driver-removal patch preserves it."
+    ],
+    "coverage_checked": [
+      "Current SPEC.md:2998-3011 and SPEC_impl.md:2780-2823 explicitly retain the failure/duplicate-Restart acceptance. Current SPEC.md cleanup rules at 2068-2130 separately describe unreadable-marker residuals and refusal when cleanup cannot be confirmed.",
+      "TODO Planned empty. BUGS, active ledger, index and unlanded-plan searches found no independent exact finding/fix beyond the accepted product policy. tmux plan files are landed per REPORTS.md:29-32.",
+      "The retirement acceptance does not cover g111/l1's moved-subtree deletion or the supplied hidden-live Delete consent concerns. Those consequences require their own dispositions. No broad filter is needed for this exact policy cover."
+    ],
+    "exact_cover_quotes": [
+      "SPEC.md:3008-3010: 'A failure to end the server or to stop what ran there is logged and never stops the supervisor from starting; those sessions are treated as ended all the same, accepting that a Restart could then start a second agent beside one still running.'",
+      "SPEC_impl.md:2819-2821: 'A failure anywhere is logged and never fatal (the maintainer chose to start anyway and treat old sessions as ended, accepting that a Restart could then start a second agent beside one still running)'"
+    ],
+    "missing_premise": "A concrete old agent surviving a later successful fresh reap outside every applicable selector is missing for the stronger runtime overlap claim. Work-overwrite occurrence is also unobserved. These gaps qualify certainty; they do not authorize dropping a potentially highest consequence without independent review.",
+    "original_stronger_consequence": "A second agent starts beside a retirement survivor in the same working directory and may overwrite user work. Earlier histories treated overlap as established and briefly suggested highest, then high; latest explicitly withdraws that route certainty while preserving original possible highest harm and prior high proposal.",
+    "needs_independent_drop_check": true,
+    "proposed_basis": "Independent drop check of exact retirement/duplicate-Restart acceptance, including the original work-loss consequence and the latest fresh-reap qualification. Keep high as the prior proposed bucket for consultation rather than claiming a proven material overlap; do not extend this cover to hidden-live Delete consent or spare cleanup."
+  },
+  {
+    "key": "g112/c2",
+    "latest_line": 8,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "removed-tmux-tab-enumeration-retains-delete-cleanup-fallback",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The missing-cleanup claim is refuted by the retained portable/scope cleanup paths. That conclusion does not refute the supplied distinct claim that guarded Delete can kill hidden old work without the required consent.",
+    "checks": [
+      "At 1ed482d core.rs:13418-13427 includes held host tabs and marks discovery incomplete for terminal-less or post-first-generation sessions. teardown.rs:402-419 requires the sweep for incomplete/missing inventory and adds recorded-host tab scopes; :431-449 independently enumerates tab and launch scope globs.",
+      "core.rs:13307-13376 checks terminal-less Launching uncertainty, held-host evidence and SessionHosts inventory, not a separate old-tmux process inventory. old_terminals.rs:179-189 can return no attributed panes after connection failure, and :296-298 skips its sweep when both converted rows and panes are empty.",
+      "Those checks support the latest distinction between cleanup completeness and consent. This batch does not claim to have independently reconstructed every UI route owned by supplied g007/c4 or g128/l1. No runtime execution."
+    ],
+    "coverage_checked": [
+      "Current SPEC.md:2068-2091 requires the portable sweep for incomplete discovery. SPEC_impl.md:2810-2817 explicitly leaves unattributed old tabs to session Delete. That supports the cleanup fallback, not permission to bypass the guard.",
+      "Current SPEC.md:2051-2067 says confirmation authorizes only its displayed consequence and no-live Delete refuses a running agent or tab. This acceptance/guard distinction remains unresolved for the separate supplied consent findings.",
+      "TODO Planned empty; BUGS, INDEX, active-ledger and unlanded-plan searches found no exact original missing-cleanup issue. Landed tmux plans do not supply unlanded coverage. The retirement exception is not treated as exact consent coverage."
+    ],
+    "exact_cover_quotes": [
+      "SPEC_impl.md:2811-2812: 'what cannot be attributed to an old tab is left for the session's Delete, which sweeps the whole session.'",
+      "SPEC.md:2051: 'a destructive confirmation authorizes only what the prompt the user answered said would happen.'"
+    ],
+    "missing_premise": "No missing premise remains for the narrow missing-cleanup refutation. Full UI/guard/kill chains for the separately owned hidden-live consent claims were not assigned to this batch and are not dismissed here.",
+    "original_stronger_consequence": "Original: deleting a migrated session leaves historical tab jobs running after tab enumeration removal. Latest preserves the separate potentially highest consequence that a no-live Delete kills hidden live old tabs/agents without matching consent; successful cleanup does not refute that harm.",
+    "needs_independent_drop_check": true,
+    "proposed_basis": "Refute only omitted historical cleanup. Have any register wording that dismisses or lowers hidden-work consent reviewed independently; this batch supplies no such dismissal."
+  },
+  {
+    "key": "g112/c3",
+    "latest_line": 4,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "restart-in-process-grid-forwarder-cancellation",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "Restart cancels and joins its in-process output forwarder; a blocked stream send is inside the canceled future. The removed external tmux client no longer supplies a reap obligation on this host path.",
+    "checks": [
+      "At 1ed482d core.rs:13227-13252 removes the agent attachment, requests forwarder shutdown and joins before the Restart notice. This is scoped to the agent attachment.",
+      "grid_stream.rs:937-963 selects shutdown against the entire stream.run future and dispatches the final report synchronously. :1169-1175 cancels HostAttach's owned input pump on drop.",
+      "No runtime execution or reproduction; no security or user-work-loss consequence was established by the named concern."
+    ],
+    "coverage_checked": [
+      "Both specifications were searched for Restart attachment/output lifetime. The source follows the detach-old-agent-before-relaunch contract; no exception is needed for this refutation.",
+      "TODO Planned empty. BUGS, INDEX, active-ledger and unlanded-plan searches found no exact external-reap-barrier regression. FILTER.md's displaced-input-poll acceptance concerns a distinct already-running input handoff and is not used as cover here."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": "A surviving external output client or stream send outside cancellation is required by the suspected route; neither exists in the checked path.",
+    "original_stronger_consequence": "An old viewer continues streaming or cleanup waits behind a stalled viewer after removing the external output-client reap barrier. No highest consequence was claimed or established.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Narrow source refutation of the output-client cleanup regression. This does not certify unrelated input-handoff ordering."
+  },
+  {
+    "key": "g112/c4",
+    "latest_line": 11,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "removed-tmux-excerpt-field-does-not-gate-host-excerpts",
+    "aliases": ["g111/c4"],
+    "target_queue_file": null,
+    "why": "The deleted cache initialization does not remove host failure evidence. The earlier extra assurance that a blank Restart seed proves later cell provenance was withdrawn correctly and must remain withdrawn.",
+    "checks": [
+      "At 1ed482d^ launch_artifacts.rs:78-96 reads the host screen and returns before consulting the tmux cache at :101-106. At 1ed482d :59-76 retains direct processed-final-screen evidence, and :96-123 selects nonblank visible rows.",
+      "vendor/alacritty_terminal/src/grid/resize.rs:25-28,46-71 promotes history into the visible grid on growth. host_launch.rs:579-646 adopts and returns the runtime without waiting for the login shell to consume the launch spec. Thus processed exit/current host identity alone does not establish inherited-cell provenance.",
+      "The implementation specification at 1ed482d:2756-2765 contains the one-child/blank-screen proof; current SPEC_impl.md:2658-2667 retains it. The direct-screen cache-independence refutation does not validate that proof.",
+      "The supplied history says runtime contamination predates the exclusive base while the false implementation-specification proof is added in range. This batch verified the primary resize/proof distinction but did not rerun the other groups' whole-range attribution. No reproduction or execution."
+    ],
+    "coverage_checked": [
+      "Current SPEC.md:2888-2894 requires omitting an excerpt that cannot safely be attributed to the launch. SPEC_impl.md's conflicting blank-screen proof is not exact acceptance of contamination.",
+      "TODO Planned empty. BUGS, INDEX, active-ledger and unlanded-plan searches found no exact removed-cache omission or resize-provenance item. The tmux docs plan is landed per REPORTS.md:32. Supplied g100/c1 and g013/f2 ownership is preserved as interface context, not treated as verified current queue coverage. The allocation concern under supplied g100/l1 is distinct."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": "There is no host dependency on the removed cache. The complete separate resize-contamination finding and its base-vs-in-range documentation attribution remain with their supplied owners; this refutation does not settle those findings.",
+    "original_stronger_consequence": "Lost or misleading failed-launch explanation. Earlier blank-screen reasoning purported to exclude quoting prior-run visible content; that assurance was withdrawn after history-promoting resize counterevidence. Keep that withdrawal and do not convert the narrow deleted-cache refutation into a general provenance refutation.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Refute only additional host evidence loss caused by deleting the tmux cache initialization. Reconcile as the same underlying narrow cause as g111/c4, while preserving the separate resize/provenance defect and false specification rationale."
+  }
+]

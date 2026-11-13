@@ -1,0 +1,240 @@
+[
+  {
+    "key": "g159/f1",
+    "latest_line": 6,
+    "recommendation": "covered",
+    "bucket": "highest",
+    "underlying_key": "intentional-old-tmux-terminal-retirement",
+    "aliases": ["g160/c1"],
+    "target_queue_file": null,
+    "why": "The specified upgrade deliberately ends old agents and tabs, discards their retained terminal contents, and accepts a second agent after failed retirement. These are established work-loss consequences, not consequences lowered because they are intentional. Current and reviewed specifications explicitly accept the exact trigger, consequence and old-terminal scope. This proposal requires the separate independent drop check.",
+    "checks": [
+      "dbfc69751215dbf15e1d31d5bed73c3754c4ebc4:SPEC.md:3003-3016 explicitly requires retirement, lost screens, closed tabs, empty Restart/Clone/Replace and the duplicate-agent failure residual.",
+      "dbfc69751215dbf15e1d31d5bed73c3754c4ebc4:crates/farhelm-supervisor/src/service/core.rs:6426-6438 invokes OldTerminals::end_private_server only with state ownership, before reload, then unconditionally calls no_server_after_startup. tmux.rs:3038-3044 sets presence absent.",
+      "1ed482dde220452e424973faf38a5e1318986333:service/core.rs:6142-6184 preserves retirement before reload; :6675-6715 distinguishes old-kind rows from host rows. This check does not certify replacement cleanup's process identification or signalling safety. No runtime work performed."
+    ],
+    "coverage_checked": [
+      "Current SPEC.md:2998-3011 and SPEC_impl.md:2780-2823 explicitly cover this old-terminal retirement and its failure residual.",
+      "TODO.md Planned at :25-26 is empty. The phase-3 removal entry at :225-232 is outside Planned and is not needed as coverage.",
+      "Searched plans/queue for old-terminal, tmux-driver, parser and cleanup claims; read matching retirement acceptance and subsequent removal-plan sections. Their broad removal work does not add coverage beyond the explicit specifications.",
+      "Searched BUGS.md, review_feedback_queue/INDEX.md and active TRIAGE_OUTCOMES.md for old-terminal retirement, retained history and duplicate-agent claims; no exact existing item or active decision found. No archive read.",
+      "FILTER.md read in full; no filter needed or asserted. An ordinary upgrade alone does not meet the older-upgrade-plus-another-rare-condition filter."
+    ],
+    "exact_cover_quotes": [
+      "SPEC.md:3000-3002: A supervisor that finds that tmux server when it starts ends it, and with it everything that still ran in an old terminal, without needing a tmux program.",
+      "SPEC.md:3003-3004: one whose agent had already ended keeps its outcome, but its terminal's last screen, which lived in the server, is gone; old tabs are closed.",
+      "SPEC.md:3008-3011: A failure to end the server or to stop what ran there is logged and never stops the supervisor from starting; those sessions are treated as ended all the same, accepting that a Restart could then start a second agent beside one still running. Restart, Clone and Replace start such a session in a new, empty terminal."
+    ],
+    "missing_premise": null,
+    "original_stronger_consequence": "Updating ends running old-terminal agents and tabs and loses retained screens/scrollback. Failed retirement can leave an old agent running while Restart starts another. All remain highest consequences for this proposed coverage decision.",
+    "needs_independent_drop_check": true,
+    "proposed_basis": "Exact explicit specification acceptance; consolidate g160/c1 with this record without erasing either record's consequences or history."
+  },
+  {
+    "key": "g159/c1",
+    "latest_line": 5,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "retired-excerpt-fence-setters-have-test-only-callers",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The cfg(test) restriction preserves the remaining callers. The suspected production caller removal or compilation break is not established. This is a narrow source conclusion, not a claim that all launch diagnostics are correct.",
+    "checks": [
+      "At 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513, git grep finds only service/core.rs:22361 and service/ticker.rs:2567 outside tmux.rs for establish_launch_excerpt_fence, and no outside-module relaunch_in_pane_with_excerpt_fence caller.",
+      "The core caller is inside the cfg(test) module beginning core.rs:17564-17565; the ticker caller is inside ticker.rs:2194-2195's cfg(test) module. tmux.rs:3670-3681 and :3773-3782 put both setters behind cfg(test) and explain why.",
+      "Same revision service/core.rs:11749-11779 calls spawn_agent_in_host and constructs Terminal::Host. SPEC_impl.md:2294-2318 requires all new terminals in hosts while retaining existing old terminals. No execution performed."
+    ],
+    "coverage_checked": [
+      "Both current specifications searched for old terminals, launch excerpts and fence contracts; current SPEC.md:2890-2893 governs optional safely attributed excerpts and SPEC_impl.md:2160 onward requires host creation. They do not require removed production fence setters.",
+      "TODO Planned is empty. Searched plans/queue for excerpt, fence, parser and old-terminal contracts; broad driver removal is not treated as coverage for a compilation defect.",
+      "Searched BUGS.md, full INDEX.md and active TRIAGE_OUTCOMES.md; no exact item or decision for these cfg gates. FILTER.md provides no applicable filter."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": "A production caller requiring either test-only setter; the reviewed source search and cfg boundaries refute that premise.",
+    "original_stronger_consequence": "Possible removed production launch path or production compilation failure. No security or user-work-loss route was alleged or established.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Source-refuted caller-removal hypothesis, limited to the two setters and observed callers."
+  },
+  {
+    "key": "g159/c2",
+    "latest_line": 7,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "retired-pane-parser-has-no-retained-consumer",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The old pane parser and its input path disappear together. Removing its forgery tests does not leave a retained consumer of that parser without validation. This does not settle the replacement startup cleanup's independent trust boundaries or test quality.",
+    "checks": [
+      "At 1ed482dde220452e424973faf38a5e1318986333, git grep across all crates for parse_pane_facts, join_pane_markers, control_codec, TmuxDriver, capture_pane_tail and pane_in_session returned exit 1 with no matches.",
+      "Same revision SPEC_impl.md:2880-2893 explicitly says the running supervisor issues no tmux commands and its old-terminal driver is gone. Current SPEC_impl.md:2786-2816 instead describes startup cleanup using peer credentials, a pinned process identity, process-table subtree and markers. No runtime behavior observed."
+    ],
+    "coverage_checked": [
+      "Both specifications searched for pane parsing, attribution, old-terminal driver removal and cleanup. They describe removal rather than acceptance of an unvalidated retained parser.",
+      "TODO Planned is empty; matching plans/queue retirement and removal sections do not identify a surviving pane-parser consumer.",
+      "Searched BUGS.md, full INDEX.md and active TRIAGE_OUTCOMES.md for the actual parser/forgery/attribution claim; no exact existing coverage. FILTER.md does not justify dropping a security or wrong-process consequence."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": "A retained consumer of the removed pane-listing parser or driver. The reviewed crate-wide search refutes that premise; replacement cleanup safety remains a distinct question.",
+    "original_stronger_consequence": "A hypothetical retained attribution/cleanup consumer could consume unvalidated pane listings and signal unrelated processes or cross a security boundary. No such retained consumer or consequence was established.",
+    "needs_independent_drop_check": true,
+    "proposed_basis": "Narrow source refutation of the retained-parser route. The hypothetical security/process-loss consequence still requires independent drop review."
+  },
+  {
+    "key": "g159/c3",
+    "latest_line": 8,
+    "recommendation": "out-of-range",
+    "bucket": "other",
+    "underlying_key": "pre-range-tmux-probe-fixture-process-oracles",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The complete cited helper and test interval is byte-for-byte identical to the exclusive range base. That settles attribution of the considered fixture/oracle concerns, not their correctness. The hypothetical stale-PID signal route remains explicitly unestablished and must go through the independent drop check.",
+    "checks": [
+      "Compared git show output for 6e423e30068b62c6cfa276c6d720ee35bb70387a:crates/farhelm-supervisor/src/tmux.rs:6101-6468 and 1ed482dde220452e424973faf38a5e1318986333:same path:831-1198. Both contain 368 lines; byte-line arrays compare equal, True.",
+      "The equality includes the full pidfile_arg/probe_fixture helper and seven test/helper blocks, so the cited lifetime, readiness, escaped-descendant, version/refusal, PATH and override responsibilities were not introduced by relocation. No reproduction or process action performed."
+    ],
+    "coverage_checked": [
+      "Both specifications searched for probe, process identity and old-terminal policy; no exact acceptance of the hypothetical stale fixture PID signal found.",
+      "TODO Planned is empty. Matching tmux removal plans retire version-policy/probe tooling but are not used to excuse a wrong-process signal defect.",
+      "BUGS.md, full INDEX.md and active TRIAGE_OUTCOMES.md searched for probe fixture, escaped descendant and stale PID. Active owner-death-child-precedes-pid-publication concerns a different helper and pre-publication process leak; probe-timeout-discard concerns remote provisioning metadata. Matching sections read; neither covers this trigger/consequence.",
+      "FILTER.md's process-number reuse filter covers the production terminal-host verification-to-signal handoff, not stale fixture PID cleanup. No filter asserted."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": "A concrete stale recorded PID reaching an unrelated live process is not established. Independently, the cited source bodies predate the entire review range.",
+    "original_stronger_consequence": "A stale recorded PID in escaped-descendant test cleanup could signal an unrelated process and lose its work. No occurrence or in-range introduction was established; equality does not prove general fixture correctness.",
+    "needs_independent_drop_check": true,
+    "proposed_basis": "Whole-range source attribution only, not rarity, product correctness or acceptance of wrong-process signalling."
+  },
+  {
+    "key": "g159/c4",
+    "latest_line": 9,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "retired-startup-prose-has-explicit-historical-qualifiers",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The cited source text explicitly marks adoption and stale-client reaping as no longer called by startup. The remaining present-tense historical explanation is awkward, but does not establish the alleged false current-lifecycle promise.",
+    "checks": [
+      "dbfc69751215dbf15e1d31d5bed73c3754c4ebc4:tmux.rs:2662-2667 puts '(No longer called: startup ends the server, service::core::old_terminals.)' immediately before the old startup description.",
+      "Same revision tmux.rs:3046 onward marks adopt_running_server '(No longer called by startup, see Self::no_server_after_startup.)'; presence.rs:11-13 explicitly says startup now ends the server instead and sets no server. These are documentation checks independent of production correctness."
+    ],
+    "coverage_checked": [
+      "Both current specifications searched and matching old-terminal lifecycle sections read; they confirm startup retirement. No specification accepts misleading lifecycle prose as such.",
+      "TODO Planned is empty. The matching tmux-drop-from-docs comment/rationale sweep is broader than this exact wording claim and is not needed as coverage.",
+      "BUGS.md, full INDEX.md and active TRIAGE_OUTCOMES.md searched for retired startup/adoption/reaping prose; no exact item or decision. No FILTER boundary asserted."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": "A statement that promises current startup adoption/reaping without its immediately adjacent retirement qualifier.",
+    "original_stronger_consequence": "Possible maintainer confusion from present-tense adoption and client-reaping descriptions; no suspected security or user-work-loss route.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "The actual source prose already supplies the missing lifecycle qualification."
+  },
+  {
+    "key": "g159/c5",
+    "latest_line": 10,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "deleted-first-tmux-create-test-has-no-shipped-create-contract",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The removed test protects creating a new private tmux server, a behavior the same revision removes from shipped launches. This is distinct from still-required adoption/serving of existing old terminals and from a hypothetical smoke test for the test-only driver.",
+    "checks": [
+      "647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513's tmux.rs diff deletes the_first_old_terminal_starts_the_server_and_its_end_ends_it, including generated-config options and last-session exit assertions; the removed test explicitly describes a future driver starting old terminals after adoption found nothing.",
+      "Same revision SPEC_impl.md:2294-2318 states every new terminal is a host and the supervisor never starts a tmux server, while existing-server adoption remains supported. service/core.rs:11749-11779 confirms host creation. No test execution performed."
+    ],
+    "coverage_checked": [
+      "Both specifications searched for first-create, private-server creation and adoption; reviewed contract removes new-server creation rather than accepting loss of still-supported adoption coverage.",
+      "TODO Planned is empty. Searched matching tmux-removal plans; broader removal is not treated as equivalent test coverage.",
+      "BUGS.md, full INDEX.md and active TRIAGE_OUTCOMES.md searched for first-create/generated-config oracle loss; no exact existing item. No FILTER boundary asserted."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": "A remaining shipped new-tmux-server creation contract protected by this specific removed test. Test-only fixture creation is not that product contract.",
+    "original_stronger_consequence": "Loss of an end-to-end oracle for first private-server creation, options and server lifetime. No established security or user-work-loss consequence from deleting this obsolete product-path test.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Narrow test-responsibility source refutation; no claim that correct production code replaces an oracle for still-supported adoption."
+  },
+  {
+    "key": "g160/c1",
+    "latest_line": 14,
+    "recommendation": "duplicate",
+    "bucket": "highest",
+    "underlying_key": "intentional-old-tmux-terminal-retirement",
+    "aliases": ["g159/f1"],
+    "target_queue_file": null,
+    "why": "This is the same intentional retirement, retained-screen loss, empty restart and accepted duplicate-agent fallback as g159/f1. Consolidate without losing its explicit caveat that no accidental destruction of already-host-backed terminals was established. The deletion commit's parent already retired old terminals, but retirement is still inside the full review range; do not mark it out-of-range on immediate-parent attribution alone.",
+    "checks": [
+      "1ed482dde220452e424973faf38a5e1318986333:SPEC.md:3004-3016 explicitly requires these consequences; current SPEC.md:2998-3011 preserves them.",
+      "Reviewed core.rs:6142-6184 retires before reload; :6675-6715 maps old-kind rows to no terminal while independently adopting host-kind rows.",
+      "Reviewed host_restart.rs:34-60 preserves host scrollback above a blank screen and identifies empty fallback cases; :216-257 passes the retained history blob to the new host. This is source-only deletion-interface checking, not an exhaustive review of replacement code."
+    ],
+    "coverage_checked": [
+      "Exact coverage is current SPEC.md:2998-3011 and SPEC_impl.md:2780-2823, as quoted below and in g159/f1.",
+      "TODO Planned is empty. Matching retirement and subsequent removal plans do not accept accidental loss of host-backed work; no such loss is established here.",
+      "BUGS.md, full INDEX.md and active TRIAGE_OUTCOMES.md searched for exact retirement/history/duplicate-Restart consequences; no exact queued item or active decision found. No archive read.",
+      "FILTER.md read; no filter asserted. Exact specification acceptance, rather than a generic upgrade filter, supplies the proposed basis."
+    ],
+    "exact_cover_quotes": [
+      "SPEC.md:3000-3002: A supervisor that finds that tmux server when it starts ends it, and with it everything that still ran in an old terminal, without needing a tmux program.",
+      "SPEC.md:3008-3011: A failure to end the server or to stop what ran there is logged and never stops the supervisor from starting; those sessions are treated as ended all the same, accepting that a Restart could then start a second agent beside one still running. Restart, Clone and Replace start such a session in a new, empty terminal."
+    ],
+    "missing_premise": null,
+    "original_stronger_consequence": "Ending old-terminal agents and tabs loses running work and retained screens; Restart starts empty. Failed cleanup can leave an old agent running beside a restarted one. The highest consequence is preserved despite explicit acceptance.",
+    "needs_independent_drop_check": true,
+    "proposed_basis": "Exact same-root alias of g159/f1, with explicit specification acceptance. Separate independent check required before either record is dropped."
+  },
+  {
+    "key": "g160/c2",
+    "latest_line": 26,
+    "recommendation": "retain-unverified",
+    "bucket": "other",
+    "underlying_key": "delete-gone-adopted-tab-host-without-process-confirmation",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "Keep the conditional orphan-host concern and its missing production premise visible for parent consolidation. The dispatch mismatch is real, but a live real host becoming Gone despite process discovery is unestablished; the core branches already existed at the exclusive range base. Earlier blanket production-route confirmation was withdrawn. Earlier missing-symbol, prompt-gate, exit-notifier and mode-replay deletion hypotheses remain narrowly source-refuted. The former potential highest lost-control/work-loss consequences are preserved for independent judgment rather than silently replaced by the orphan-only consequence.",
+    "checks": [
+      "1ed482dde220452e424973faf38a5e1318986333:service/session_hosts.rs:245-260 retains non-placeholder tabs and excludes their held sockets from record settlement. :733-740 ends them through end_launch_host; core/host_launch.rs:694-696 treats shutdown Err(Gone) as success. core/host_tabs.rs:1052-1062 instead checks the adopted process for Gone close. session_hosts.rs:771-790 only aggregates errors actually returned.",
+      "Reviewed hosts/client.rs:1220-1238 converts Gone to Unavailable when a matching process exists or the whole search fails. hosts/process.rs:190-247 recognizes a real host's trailing --socket absolute path by random file name, while unreadable individual rows/argv may be skipped. The test runner stand-in does not establish a shipped real-host producer.",
+      "Reviewed terminal.rs:4280-4332 retains unconfirmed shutdown as Unavailable and uses guarded reconnect; terminal-host/src/host.rs:247-265 removes the real socket during failed readiness or service exit, not an ordinary adopted-live-host transition.",
+      "Exclusive base 6e423e30068b62c6cfa276c6d720ee35bb70387a already has the same tab dispatch at service/session_hosts.rs:746-752 and Gone-success branch at core/host_launch.rs:684-686. This is not sufficient by itself to certify that no other in-range caller change could expose it.",
+      "Reviewed service/terminals.rs:105-141 resolves interactive terminals as HostTerminal. grid_stream.rs:423-461 reads emulator screen/state directly, and grid_output.rs:328-360 reads grid and absolute cursor, supporting the narrow refutation of textual PaneModes-prefill loss. No runtime tests, mutation tests or observed orphan claimed."
+    ],
+    "coverage_checked": [
+      "Reviewed SPEC_impl.md:2423-2461 and current :2345 onward require Delete to end every host and retain records/session for unconfirmed ends. They do not accept the conditional bypass.",
+      "Both specifications searched for Gone, orphan hosts, cleanup, input and replay. TODO Planned is empty. Searched plans/queue for Gone-tab/end_launch_host and exact cleanup consequence; no stated unlanded fix found.",
+      "Searched BUGS.md, full INDEX.md and active TRIAGE_OUTCOMES.md. Read review_feedback_queue/gone-retry-forgets-pinned-foreground-child.md: it concerns discarding an already pinned foreground child during retry, not forgetting the adopted host process itself. It is related but not exact coverage or an exact alias.",
+      "FILTER.md does not cover false successful Delete or a host that ordinary operations can no longer reach. No filter asserted. Known neighbour identities in the supplied history are parent consolidation context, not independently inspected claims in this batch."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": "A supported event must leave an adopted real host alive, make its socket unusable and owning connection end, and still allow Gone despite the live-host process guard. A concrete per-row/argv-read omission combined with that actual transition, or an existing real-host trace, would settle it. A stand-in whose argv does not identify a real host does not supply this premise. In-range introduction also remains unsupported for the identified branches.",
+    "original_stronger_consequence": "Deleted control-mode interfaces might leave current sessions unable to attach, receive input or clean up, potentially losing control of owned processes/work. Later conditional claim: Delete could forget a tab while its adopted host still runs. The latter establishes no child/work loss, wrong-target kill, ordinary shipped producer, runtime occurrence or new test-oracle defect. Prior blanket refutation, subsequent production-route assertion, and that assertion's withdrawal are all retained.",
+    "needs_independent_drop_check": true,
+    "proposed_basis": "Retain uncertainty for parent consolidation and scope judgment. If proposing out-of-range, refutation or a consequence lowering, independently check both the original highest routes and the narrow conditional orphan route; do not use intentional old-terminal retirement as acceptance."
+  },
+  {
+    "key": "g160/c3",
+    "latest_line": 18,
+    "recommendation": "retain-verified",
+    "bucket": "other",
+    "underlying_key": "launch-excerpt-whole-row-intermediate-allocation",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The replacement adds screen-row indexing and whole-row escaped copies before truncation, where the old reducer retained bounded suffixes. That in-range resource-bound change is source-established, with no demonstrated latency, OOM or hard memory-budget breach. The separate inherited-history diagnostic route is conditionally established but already present at the exclusive base. Earlier blanket refutation was withdrawn for both distinct effects; final-output and final-exit ordering checks still stand. Parent should consolidate with its named excerpt records without counting new discoveries here.",
+    "checks": [
+      "1ed482dde220452e424973faf38a5e1318986333^:tmux.rs:175-299 bounds each line/pending-whitespace suffix and keeps five lines. Reviewed service/launch_artifacts.rs:97-121 instead collects every nonblank row reference, copies/escapes all of five selected rows, then trims to 500 UTF-8 bytes. Full-screen extraction was already present at exclusive base launch_artifacts.rs:52-94 and is not the new cost.",
+      "Reviewed launch_artifacts.rs:801-839 asserts exact five escaped lines through blank padding, unsafe-character absence, blank None and byte cap. These assertions support output format/bounds, not equal intermediate allocation; cap assertions use the implementation constant and do not independently detect a mistaken constant increase.",
+      "Reviewed snapshot/v1/mod.rs:242-268 seeds old history above a blank screen. vendor/alacritty_terminal/src/grid/resize.rs:25-28,46-71 pulls available history into a taller visible screen. handlers.rs:2060-2082 permits an owned viewer resize; status.rs:642-652 can quote the resulting screen for an unconsumed-spec failed shell. An unoverwritten imported row is required. Final processed-exit evidence proves ordering, not cell provenance.",
+      "The same no-previous-run rationale and host quoting path are at exclusive base launch_artifacts.rs:52-94; base-to-reviewed diffs for vendor grid/resize.rs and term/mod.rs are empty. Do not attribute runtime provenance contamination newly to this helper move.",
+      "Reviewed hosts/terminal.rs:329-336 still retains 12,000 scrollback lines; core/host_restart.rs:34-60 and :216-257 preserve bounded history seeding and explicit empty fallback. No modern-host history-loss route established from deleting these helpers. No runtime observations or exhaustive replacement/error-classification review."
+    ],
+    "coverage_checked": [
+      "Both specifications searched for excerpts, history seeding, attribution and bounds. SPEC.md:2890-2893 forbids unsafe attribution; SPEC_impl.md:2658-2666 repeats the too-strong blank-screen rationale. That promise is not acceptance of inherited history being misquoted.",
+      "TODO Planned is empty. Matching retirement plan section at plans/queue/tmux-end-old-terminals.md:273-274 says shared excerpt helpers move out, not away; it does not prescribe a later fix for the replacement's intermediate copying. The tmux-docs comment sweep does not exactly cover this provenance rationale or allocation consequence.",
+      "Searched BUGS.md, full INDEX.md and active TRIAGE_OUTCOMES.md for excerpt/nonblank/reducer/allocation/history-diagnostic claims; no exact queued item or active decision. Read host-restart-history-painter-omits-palette.md: palette recoloring is a separate cause/consequence.",
+      "FILTER.md's session-status/history-after-partial-failure boundary may cover the pre-range diagnostic-only consequence if ordinary lifecycle recovery remains available; that does not cover the distinct new allocation consequence. No full-record filter match asserted."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": "Material user-visible delay, OOM or a hard memory-contract breach is not established. The diagnostic route requires retained history, a height increase after replacement publication and before failed-shell classification, an unconsumed spec and a still-visible inherited row. It is conditional source analysis, not a reproduction.",
+    "original_stronger_consequence": "Potential loss of optional launch diagnostics or retained terminal history after deleting shared helpers. No modern-host retained-history loss was established. The historical highest possibility remains preserved for independent checking, alongside deliberate old-terminal loss in g160/c1. Later effects are a misleading durable launch diagnostic and additional bounded temporary allocation; neither establishes security or user-work loss.",
+    "needs_independent_drop_check": true,
+    "proposed_basis": "Retain the in-range intermediate-allocation change as other; preserve the conditional pre-range provenance effect and the earlier highest-history-loss refutation for separate scope/drop judgment. No exact alias among this batch or existing queue items was established."
+  }
+]

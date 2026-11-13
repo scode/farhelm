@@ -1,0 +1,797 @@
+{
+  "group": {
+    "id": "g106",
+    "domain": "supervisor-core-integration",
+    "purpose": "supervisor-core-integration: crates/farhelm-supervisor/src/service/core.rs, crates/farhelm-supervisor/tests/fixtures/grid-mouse.jsonl, crates/farhelm-supervisor/src/agent_kind/screen_reader.rs; phases @@ -12550,12 +12207,12 @@ impl Supervisor {",
+    "interfaces": [
+      "g005",
+      "g006",
+      "g097",
+      "g098",
+      "g099",
+      "g100",
+      "g101",
+      "g102",
+      "g103",
+      "g104",
+      "g105",
+      "g107",
+      "g108",
+      "g109",
+      "g110",
+      "g111",
+      "g112",
+      "g113",
+      "g114",
+      "g115",
+      "g116",
+      "g117",
+      "g118",
+      "g119",
+      "g120",
+      "g121",
+      "g122",
+      "g123",
+      "g124",
+      "g125",
+      "g126",
+      "g127",
+      "g128",
+      "g129",
+      "g130",
+      "g131",
+      "g132",
+      "g133",
+      "g134",
+      "g149",
+      "g150",
+      "g159",
+      "g160",
+      "g161",
+      "g162",
+      "g163",
+      "g164",
+      "g165",
+      "g166",
+      "g167",
+      "g168",
+      "g169",
+      "g170",
+      "g171",
+      "g172",
+      "g173"
+    ],
+    "sources": [
+      {
+        "path": "[private-run]/prep/parts/00766-001.patch",
+        "ranges": [
+          [
+            1,
+            1188
+          ]
+        ],
+        "original_path": "crates/farhelm-supervisor/src/service/core.rs",
+        "commit": "647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513",
+        "notes": "@@ -12550,12 +12207,12 @@ impl Supervisor {; patch character offsets [59787,119549)",
+        "lines": 1188,
+        "bytes": 59822,
+        "start": 59787,
+        "end": 119549,
+        "original": "[private-run]/prep/originals/00766.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/01551-000.patch",
+        "ranges": [
+          [
+            1,
+            15
+          ]
+        ],
+        "original_path": "crates/farhelm-supervisor/tests/fixtures/grid-mouse.jsonl",
+        "commit": "08399d092d20815ced6619c26df2391944ae2b4a",
+        "notes": "patch header; patch character offsets [0,1155)",
+        "lines": 15,
+        "bytes": 1155,
+        "start": 0,
+        "end": 1155,
+        "original": "[private-run]/prep/originals/01551.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/01595-000.patch",
+        "ranges": [
+          [
+            1,
+            27
+          ]
+        ],
+        "original_path": "crates/farhelm-supervisor/src/agent_kind/screen_reader.rs",
+        "commit": "4b489b4f2eeade14f119b186ecb16eeaaf027021",
+        "notes": "patch header; patch character offsets [0,1728)",
+        "lines": 27,
+        "bytes": 1728,
+        "start": 0,
+        "end": 1728,
+        "original": "[private-run]/prep/originals/01595.patch"
+      }
+    ],
+    "lines": 1230,
+    "bytes": 62705
+  },
+  "records": [
+    {
+      "key": "g106/c1",
+      "owner": "g106",
+      "id": "c1",
+      "domain": "supervisor-core-integration",
+      "purpose": "supervisor-core-integration: crates/farhelm-supervisor/src/service/core.rs, crates/farhelm-supervisor/tests/fixtures/grid-mouse.jsonl, crates/farhelm-supervisor/src/agent_kind/screen_reader.rs; phases @@ -12550,12 +12207,12 @@ impl Supervisor {",
+      "history": [
+        {
+          "line": 1,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c1",
+            "state": "open",
+            "summary": "Removing launch excerpt fences does not remove host failure diagnostics",
+            "location": "crates/farhelm-supervisor/src/service/core.rs:12210",
+            "detail": "Reviewed commit: 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513. TLDR: Considered whether clearing the launch excerpt field on create and omitting its installation on restart would hide the terminal output explaining a failed launch. Source checks refute this: service/launch_artifacts.rs:72-97 branches on Terminal::Host before reading the fence, obtains the final visible screen through host.screen_tail, and requires HostEvidence::Owned { dead: true }; only its tmux branch at lines 101-115 needs the fence. core.rs:13603-13642 routes every restart to relaunch_into_host, and host_restart.rs:443-465 starts it through spawn_agent_in_host. Contract: SPEC_impl.md:2275-2281 says a host launch failure is quoted from the emulator's screen with no fence, after the exit record has been processed; service/launch_artifacts.rs:52-64 further documents that a restart seed has history above a blank visible screen. Suggested bucket: other if this diagnostic regression existed. Confidence: confirmed source refutation, no execution. proposed_drop: source refutation; host excerpts do not consult launch_excerpt. possible_cover: none, coverage sources not searched. Could-be-highest: no; the considered consequence was missing failure context, not security or lost work. Caveat: this assesses only the removal of the tmux fence from host creates/restarts, not independent correctness of excerpt classification."
+          }
+        },
+        {
+          "line": 14,
+          "event": {
+            "version": 1,
+            "kind": "lead",
+            "id": "c1",
+            "state": "open",
+            "summary": "Removing launch excerpt fences does not remove host failure diagnostics",
+            "location": "crates/farhelm-supervisor/src/service/core.rs:12210",
+            "detail": "Reviewed commit: 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513. TLDR: Considered whether clearing the launch excerpt field on create and omitting its installation on restart would hide the terminal output explaining a failed launch. Source checks refute this: service/launch_artifacts.rs:72-97 branches on Terminal::Host before reading the fence, obtains the final visible screen through host.screen_tail, and requires HostEvidence::Owned { dead: true }; only its tmux branch at lines 101-115 needs the fence. core.rs:13603-13642 routes every restart to relaunch_into_host, and host_restart.rs:443-465 starts it through spawn_agent_in_host. Contract: SPEC_impl.md:2275-2281 says a host launch failure is quoted from the emulator's screen with no fence, after the exit record has been processed; service/launch_artifacts.rs:52-64 further documents that a restart seed has history above a blank visible screen. Suggested bucket: other if this diagnostic regression existed. Confidence: confirmed source refutation, no execution. proposed_drop: source refutation; host excerpts do not consult launch_excerpt. possible_cover: none, coverage sources not searched. Could-be-highest: no; the considered consequence was missing failure context, not security or lost work. Caveat: this assesses only the removal of the tmux fence from host creates/restarts, not independent correctness of excerpt classification. Discovery pass 2 interface update: g100/c1 now establishes a distinct source route in which height growth promotes inherited Restart history into the new visible screen before a launch failure is quoted. Its route is a prior-run diagnostic, not a missing-fence dependency. Reopen c1 before further reads to narrow the previous blank-screen/provenance rationale rather than treating processed exit as proof of cell origin. The source branch that ignores launch_excerpt for Host still exists; that alone cannot refute this resize route. The neighbour reports this runtime path already at exclusive base and a distinct later documentation change owned by g013/f2; attribution and exact assigned impact need source confirmation. No new loss/security consequence is asserted. No parent drop accepted. Pending: inspect pinned host history resize and excerpt contract, then retain only the supported assigned-removal conclusion."
+          }
+        },
+        {
+          "line": 15,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c1",
+            "state": "open",
+            "summary": "Removing the tmux fence does not hide host diagnostics; blank-screen provenance rationale is limited",
+            "location": "crates/farhelm-supervisor/src/service/core.rs:12210",
+            "detail": "Reviewed commit: 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513. Original TLDR/consequence preserved: considered whether clearing launch_excerpt on create and not installing it on restart hides terminal output explaining failed launches. That specific assigned-removal hypothesis remains source-refuted: service/launch_artifacts.rs:78-95 handles Host before :101-115 reads the tmux fence and quotes host.screen_tail after processed exit evidence. Every assigned restart goes through relaunch_into_host and spawn_agent_in_host, so a missing tmux fence does not suppress host excerpts. Correction following refreshed neighbour g100/c1: processed exit establishes final-output ordering, not provenance of every visible cell. The original blank-seed rationale is insufficient to prove no previous-run text can be quoted. Direct pinned-source checks show grid/resize.rs:25-28 calls grow_lines on height increase; :46-71 promotes up to min(history_size, added_lines) old history rows into the visible grid. launch_artifacts.rs:62-64 claims a blank initial screen means no prior-run quote, but :87-89 reads the final visible screen with no provenance check. A height increase can therefore invalidate that claimed invariant. The neighbour's source-supported conditional route additionally requires a published Restart with retained history, shell startup still pending, and later startup failure leaving a promoted row visible. Its complete control-flow validation is received interface evidence from g100/c1; no runtime occurrence was observed here. Whole-range attribution: git diff from exclusive base 6e423e30068b62c6cfa276c6d720ee35bb70387a through reviewed 647f0227 of launch_artifacts.rs, vendor/alacritty_terminal/src/grid/resize.rs and terminal-emulator snapshot/v1/mod.rs is empty. Thus the host quote branch, initial blank-seed rationale and promotion mechanism predate the entire pinned range before this assigned fence removal. Parent/assigned host calls already pass no launch_excerpt. This candidate's bounded proposed drop is not a claim that all host excerpts are accurate. Contract: SPEC.md Terminal experience requires safely attributing failed-launch output; the later g100/c1/g013/f2 records address the same contamination source and later documentation/promise change, separate from this assigned None field. Suggested bucket: other for missing or misleading launch diagnostics; could-be-highest: no established security or user-work-loss route. Confidence: confirmed source refutation for suppression caused by removing this field, confirmed promotion mechanism and whole-range preexistence, received conditional-route evidence from g100; no execution. proposed_drop: source refutation only of the assigned fence-removal diagnostic-suppression hypothesis. Do not drop or refute the separate inherited resize/provenance concern on the basis of processed exit or one-child host lifetime. possible_cover: supplied g100/c1 directly owns the resize contamination route and cites g013/f2 for a later in-range promise change; preserve their IDs and consequences. No parent drop or lowering accepted. This revision closes the temporary c1 lead with the narrower conclusion; all old records remain append-only. No independent test-oracle or documentation defect is dismissed by this candidate."
+          }
+        }
+      ],
+      "latest": {
+        "line": 15,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c1",
+          "state": "open",
+          "summary": "Removing the tmux fence does not hide host diagnostics; blank-screen provenance rationale is limited",
+          "location": "crates/farhelm-supervisor/src/service/core.rs:12210",
+          "detail": "Reviewed commit: 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513. Original TLDR/consequence preserved: considered whether clearing launch_excerpt on create and not installing it on restart hides terminal output explaining failed launches. That specific assigned-removal hypothesis remains source-refuted: service/launch_artifacts.rs:78-95 handles Host before :101-115 reads the tmux fence and quotes host.screen_tail after processed exit evidence. Every assigned restart goes through relaunch_into_host and spawn_agent_in_host, so a missing tmux fence does not suppress host excerpts. Correction following refreshed neighbour g100/c1: processed exit establishes final-output ordering, not provenance of every visible cell. The original blank-seed rationale is insufficient to prove no previous-run text can be quoted. Direct pinned-source checks show grid/resize.rs:25-28 calls grow_lines on height increase; :46-71 promotes up to min(history_size, added_lines) old history rows into the visible grid. launch_artifacts.rs:62-64 claims a blank initial screen means no prior-run quote, but :87-89 reads the final visible screen with no provenance check. A height increase can therefore invalidate that claimed invariant. The neighbour's source-supported conditional route additionally requires a published Restart with retained history, shell startup still pending, and later startup failure leaving a promoted row visible. Its complete control-flow validation is received interface evidence from g100/c1; no runtime occurrence was observed here. Whole-range attribution: git diff from exclusive base 6e423e30068b62c6cfa276c6d720ee35bb70387a through reviewed 647f0227 of launch_artifacts.rs, vendor/alacritty_terminal/src/grid/resize.rs and terminal-emulator snapshot/v1/mod.rs is empty. Thus the host quote branch, initial blank-seed rationale and promotion mechanism predate the entire pinned range before this assigned fence removal. Parent/assigned host calls already pass no launch_excerpt. This candidate's bounded proposed drop is not a claim that all host excerpts are accurate. Contract: SPEC.md Terminal experience requires safely attributing failed-launch output; the later g100/c1/g013/f2 records address the same contamination source and later documentation/promise change, separate from this assigned None field. Suggested bucket: other for missing or misleading launch diagnostics; could-be-highest: no established security or user-work-loss route. Confidence: confirmed source refutation for suppression caused by removing this field, confirmed promotion mechanism and whole-range preexistence, received conditional-route evidence from g100; no execution. proposed_drop: source refutation only of the assigned fence-removal diagnostic-suppression hypothesis. Do not drop or refute the separate inherited resize/provenance concern on the basis of processed exit or one-child host lifetime. possible_cover: supplied g100/c1 directly owns the resize contamination route and cites g013/f2 for a later in-range promise change; preserve their IDs and consequences. No parent drop or lowering accepted. This revision closes the temporary c1 lead with the narrower conclusion; all old records remain append-only. No independent test-oracle or documentation defect is dismissed by this candidate."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g106/findings.jsonl",
+        "id": "c1",
+        "line": 15,
+        "disposition": "excluded",
+        "group": "tmux-excerpt-fence-removal-does-not-suppress-host-excerpts",
+        "reason": "Parent explicitly accepted named refuted proposal from claims-068 after inspecting it. The assigned fence removal cannot suppress host excerpts: the host branch returns before reading the tmux fence. This narrowly refutes that removal hypothesis. It does not refute the separately reported history-resize contamination or inaccurate blank-screen provenance rationale. Narrow source refutation of fence-removal suppression only. Preserve distinct inherited contamination and later in-range documentation claims for their owners. Checked source/results: [\"647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513:launch_artifacts.rs:78-95 quotes host.screen_tail after processed exit evidence, then returns; 101-115 reads launch_excerpt only in the tmux branch. core.rs:13603-13642 routes every assigned relaunch through relaunch_into_host and host_restart.rs:443-465 through spawn_agent_in_host.\",\"Same revision vendor/alacritty_terminal/src/grid/resize.rs:25-28 invokes grow_lines; 46-71 brings up to min(history_size, added_lines) history rows into the visible grid. Thus processed exit proves final-output ordering, not that every visible row belongs to this run. The earlier blank-screen rationale was too broad.\",\"git diff from exclusive base 6e423e30068b62c6cfa276c6d720ee35bb70387a to reviewed 647f0227 for launch_artifacts.rs, grid/resize.rs and terminal-emulator/src/snapshot/v1/mod.rs is empty. The quote branch and promotion mechanism predate the whole range; no runtime observation was made.\"] Current coverage/results: [\"Current SPEC.md Terminal experience:2888-2894 requires safe attribution, so it does not accept contamination. SPEC_impl.md Launch failure classification describes final exit evidence and blank initial screen, which does not refute later promotion. Neither is needed to dismiss the narrowly refuted suppression mechanism.\",\"TODO.md Planned empty; BUGS.md unrelated; plans/queue searched for excerpt/fence/prior-run screen. Landed removal and docs plans are not unlanded coverage.\",\"INDEX.md, matching queue text and active TRIAGE_OUTCOMES.md searched for launch_excerpt, inherited/prior-run excerpt and resize contamination. No exact suppression item found. The supplied history identifies g100/c1 and g013/f2 as other owners of contamination/later wording; those are not available named claims in this batch and are not adjudicated here. Archive not read.\",\"FILTER.md read. No filter is needed for source refutation, and no filter is proposed for the separate inherited contamination claim.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Missing launch-failure output after removing launch_excerpt was considered and refuted. The temporary reopening withdrew the overly broad claim that a blank initial screen or processed exit proves previous-run text cannot appear. The inherited contamination concern remains with g100/c1/g013/f2 and is not dismissed here.\"; \"No missing premise remains for the fence-removal suppression hypothesis. The full resize-contamination sequence is received evidence from g100/c1; this consultation confirms promotion and preexistence, not a runtime occurrence or its full independent route.\"."
+      },
+      "accepted_parent_decision": {
+        "key": "g106/c1",
+        "line": 15,
+        "disposition": "excluded",
+        "group": "tmux-excerpt-fence-removal-does-not-suppress-host-excerpts",
+        "bucket": "other",
+        "recording": "refuted",
+        "queue_target_candidate": null,
+        "needs_independent_drop_check": false,
+        "reason": "Parent explicitly accepted named refuted proposal from claims-068 after inspecting it. The assigned fence removal cannot suppress host excerpts: the host branch returns before reading the tmux fence. This narrowly refutes that removal hypothesis. It does not refute the separately reported history-resize contamination or inaccurate blank-screen provenance rationale. Narrow source refutation of fence-removal suppression only. Preserve distinct inherited contamination and later in-range documentation claims for their owners. Checked source/results: [\"647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513:launch_artifacts.rs:78-95 quotes host.screen_tail after processed exit evidence, then returns; 101-115 reads launch_excerpt only in the tmux branch. core.rs:13603-13642 routes every assigned relaunch through relaunch_into_host and host_restart.rs:443-465 through spawn_agent_in_host.\",\"Same revision vendor/alacritty_terminal/src/grid/resize.rs:25-28 invokes grow_lines; 46-71 brings up to min(history_size, added_lines) history rows into the visible grid. Thus processed exit proves final-output ordering, not that every visible row belongs to this run. The earlier blank-screen rationale was too broad.\",\"git diff from exclusive base 6e423e30068b62c6cfa276c6d720ee35bb70387a to reviewed 647f0227 for launch_artifacts.rs, grid/resize.rs and terminal-emulator/src/snapshot/v1/mod.rs is empty. The quote branch and promotion mechanism predate the whole range; no runtime observation was made.\"] Current coverage/results: [\"Current SPEC.md Terminal experience:2888-2894 requires safe attribution, so it does not accept contamination. SPEC_impl.md Launch failure classification describes final exit evidence and blank initial screen, which does not refute later promotion. Neither is needed to dismiss the narrowly refuted suppression mechanism.\",\"TODO.md Planned empty; BUGS.md unrelated; plans/queue searched for excerpt/fence/prior-run screen. Landed removal and docs plans are not unlanded coverage.\",\"INDEX.md, matching queue text and active TRIAGE_OUTCOMES.md searched for launch_excerpt, inherited/prior-run excerpt and resize contamination. No exact suppression item found. The supplied history identifies g100/c1 and g013/f2 as other owners of contamination/later wording; those are not available named claims in this batch and are not adjudicated here. Archive not read.\",\"FILTER.md read. No filter is needed for source refutation, and no filter is proposed for the separate inherited contamination claim.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Missing launch-failure output after removing launch_excerpt was considered and refuted. The temporary reopening withdrew the overly broad claim that a blank initial screen or processed exit proves previous-run text cannot appear. The inherited contamination concern remains with g100/c1/g013/f2 and is not dismissed here.\"; \"No missing premise remains for the fence-removal suppression hypothesis. The full resize-contamination sequence is received evidence from g100/c1; this consultation confirms promotion and preexistence, not a runtime occurrence or its full independent route.\"."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-068",
+          "key": "g106/c1",
+          "latest_line": 15,
+          "recommendation": "refuted",
+          "bucket": "other",
+          "underlying_key": "tmux-excerpt-fence-removal-does-not-suppress-host-excerpts",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The assigned fence removal cannot suppress host excerpts: the host branch returns before reading the tmux fence. This narrowly refutes that removal hypothesis. It does not refute the separately reported history-resize contamination or inaccurate blank-screen provenance rationale.",
+          "checks": [
+            "647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513:launch_artifacts.rs:78-95 quotes host.screen_tail after processed exit evidence, then returns; 101-115 reads launch_excerpt only in the tmux branch. core.rs:13603-13642 routes every assigned relaunch through relaunch_into_host and host_restart.rs:443-465 through spawn_agent_in_host.",
+            "Same revision vendor/alacritty_terminal/src/grid/resize.rs:25-28 invokes grow_lines; 46-71 brings up to min(history_size, added_lines) history rows into the visible grid. Thus processed exit proves final-output ordering, not that every visible row belongs to this run. The earlier blank-screen rationale was too broad.",
+            "git diff from exclusive base 6e423e30068b62c6cfa276c6d720ee35bb70387a to reviewed 647f0227 for launch_artifacts.rs, grid/resize.rs and terminal-emulator/src/snapshot/v1/mod.rs is empty. The quote branch and promotion mechanism predate the whole range; no runtime observation was made."
+          ],
+          "coverage_checked": [
+            "Current SPEC.md Terminal experience:2888-2894 requires safe attribution, so it does not accept contamination. SPEC_impl.md Launch failure classification describes final exit evidence and blank initial screen, which does not refute later promotion. Neither is needed to dismiss the narrowly refuted suppression mechanism.",
+            "TODO.md Planned empty; BUGS.md unrelated; plans/queue searched for excerpt/fence/prior-run screen. Landed removal and docs plans are not unlanded coverage.",
+            "INDEX.md, matching queue text and active TRIAGE_OUTCOMES.md searched for launch_excerpt, inherited/prior-run excerpt and resize contamination. No exact suppression item found. The supplied history identifies g100/c1 and g013/f2 as other owners of contamination/later wording; those are not available named claims in this batch and are not adjudicated here. Archive not read.",
+            "FILTER.md read. No filter is needed for source refutation, and no filter is proposed for the separate inherited contamination claim."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": "No missing premise remains for the fence-removal suppression hypothesis. The full resize-contamination sequence is received evidence from g100/c1; this consultation confirms promotion and preexistence, not a runtime occurrence or its full independent route.",
+          "original_stronger_consequence": "Missing launch-failure output after removing launch_excerpt was considered and refuted. The temporary reopening withdrew the overly broad claim that a blank initial screen or processed exit proves previous-run text cannot appear. The inherited contamination concern remains with g100/c1/g013/f2 and is not dismissed here.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Narrow source refutation of fence-removal suppression only. Preserve distinct inherited contamination and later in-range documentation claims for their owners."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "tmux-excerpt-fence-removal-does-not-suppress-host-excerpts",
+        "destination": null
+      }
+    },
+    {
+      "key": "g106/c2",
+      "owner": "g106",
+      "id": "c2",
+      "domain": "supervisor-core-integration",
+      "purpose": "supervisor-core-integration: crates/farhelm-supervisor/src/service/core.rs, crates/farhelm-supervisor/tests/fixtures/grid-mouse.jsonl, crates/farhelm-supervisor/src/agent_kind/screen_reader.rs; phases @@ -12550,12 +12207,12 @@ impl Supervisor {",
+      "history": [
+        {
+          "line": 2,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c2",
+            "state": "open",
+            "summary": "Restart failure recovery still distinguishes a stopped prior terminal from an uncertain replacement",
+            "location": "crates/farhelm-supervisor/src/service/core.rs:13528",
+            "detail": "Reviewed commit: 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513. TLDR: Considered whether deleting the tmux restart/unwind path and simplifying the prior-terminal restoration could leave a replacement running while the session incorrectly appears ended, allowing Delete to stop it without the expected warning. Source checks refute this for the assigned change. core.rs:13603-13642 now routes every new launch to relaunch_into_host, so no launch reuses the prior terminal. core.rs:13524-13530 calls republished_terminal(definitive, prior), whose lines 3414-3416 return no terminal for an ambiguous failure. host_restart.rs:1170-1219 returns ambiguous when an uncertain host cannot be ended or a process-tree sweep fails, and definitive only after cleanup. Its confirmation-error branch at 526-559 publishes the new host as Launching and returns Published, which core.rs:13402-13409 excludes from restoration. Contract: SPEC_impl.md:2456-2458 states, 'Only a replacement host that cannot be confirmed ended keeps the launching record: the session then holds no terminal, the old host’s runtime is stopped, and both hosts stay reachable by their records.' core.rs:3404-3412 explains that naming the old ended terminal would incorrectly bypass Delete's still-running consent. Suggested bucket: highest if such an unconsented process-loss route existed. Confidence: confirmed source refutation, no execution. proposed_drop: source refutation; the changed recovery preserves the no-terminal state for ambiguous new-host launches and preserves published replacements. possible_cover: none, coverage sources not searched. Could-be-highest: yes, the considered route was an unconsented deletion of a still-running replacement, but that route is refuted by the state transitions above. Caveat: this does not independently review all host shutdown machinery; only the deleted tmux path's replacement and recovery contract."
+          }
+        },
+        {
+          "line": 3,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c2",
+            "state": "open",
+            "summary": "Restart failure recovery still distinguishes a stopped prior terminal from an uncertain replacement",
+            "location": "crates/farhelm-supervisor/src/service/core.rs:13528",
+            "detail": "Reviewed commit: 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513. TLDR: Considered whether deleting the tmux restart/unwind path and simplifying the prior-terminal restoration could leave a replacement running while the session incorrectly appears ended, allowing Delete to stop it without the expected warning. Source checks refute this for the assigned change. core.rs:13603-13642 now routes every new launch to relaunch_into_host, so no launch reuses the prior terminal. core.rs:13524-13530 calls republished_terminal(definitive, prior), whose lines 3414-3416 return no terminal for an ambiguous failure. host_restart.rs:1170-1219 returns ambiguous when an uncertain host cannot be ended or a process-tree sweep fails, and definitive only after cleanup. Its confirmation-error branch at 526-559 publishes the new host as Launching and returns Published, which core.rs:13402-13409 excludes from restoration. Contract: SPEC_impl.md:2456-2458 states, 'Only a replacement host that cannot be confirmed ended keeps the launching record: the session then holds no terminal, the old host's runtime is stopped, and both hosts stay reachable by their records.' core.rs:3404-3412 explains that naming the old ended terminal would incorrectly bypass Delete's still-running consent. Suggested bucket: highest if such an unconsented process-loss route existed. Confidence: confirmed source refutation, no execution. proposed_drop: source refutation; the changed recovery preserves the no-terminal state for ambiguous new-host launches and preserves published replacements. possible_cover: none, coverage sources not searched. Could-be-highest: yes, the considered route was an unconsented deletion of a still-running replacement, but that route is refuted by the state transitions above. Caveat: this does not independently review all host shutdown machinery; only the deleted tmux path's replacement and recovery contract."
+          }
+        },
+        {
+          "line": 5,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c2",
+            "state": "open",
+            "summary": "Restart recovery retains uncertainty about replacements and their surviving processes",
+            "location": "crates/farhelm-supervisor/src/service/core.rs:13528",
+            "detail": "Reviewed commit: 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513. TLDR: Considered whether deleting the tmux restart/unwind path and simplifying prior-terminal restoration could leave a replacement or its processes running while the session incorrectly appears ended, allowing Delete to stop them without the expected warning. This original potential unconsented Delete harm is preserved. Source checks: core.rs:13603-13642 routes every new launch to relaunch_into_host; no launch reuses the prior terminal. core.rs:13524-13530 calls republished_terminal(definitive, prior), whose lines 3414-3416 return no terminal for an ambiguous failure. host_restart.rs:1170-1219 returns ambiguous both when a possibly remaining host cannot be confirmed ended and when its process-tree sweep fails; it is not enough merely to end the host. Only successful cleanup reaches the definitive return, apart from test-only crash seams that also retain ambiguity. The confirmation-error branch at host_restart.rs:526-559 publishes the new host as Launching and returns Published, which core.rs:13402-13409 excludes from restoration. Contract: SPEC.md, Lifecycle operations, requires visible failure when required cleanup cannot be confirmed and consent before deleting a session whose agent may still run; core.rs:3404-3412 explains why naming the prior ended terminal would bypass Delete's still-running guard. SPEC_impl.md:2456-2458 says, 'Only a replacement host that cannot be confirmed ended keeps the launching record: the session then holds no terminal, the old host's runtime is stopped, and both hosts stay reachable by their records.' That quoted host-end description is narrower than the actual unwind: the source also preserves ambiguity after failed process-tree cleanup. It is not used as proof that host-end failure is the sole ambiguous outcome. Suggested bucket: highest if the unconsented process-loss route existed. Confidence: confirmed source refutation of the considered regression, no execution. proposed_drop: source refutation; uncertain cleanup leaves no terminal and published replacements bypass restoration. This is a proposed drop only, not a parent-accepted drop. possible_cover: none, coverage sources not searched. Could-be-highest: yes; an incorrectly ended-looking session could otherwise expose a live replacement or its processes to unconsented Delete, but the changed state transitions refute that route. Caveat: this assesses the assigned deletion and replacement integration, not every independent fault in host termination or process-tree cleanup."
+          }
+        },
+        {
+          "line": 6,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c2",
+            "state": "open",
+            "summary": "Restart recovery retains uncertainty about replacements and their surviving processes",
+            "location": "crates/farhelm-supervisor/src/service/core.rs:13528",
+            "detail": "Reviewed commit: 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513. TLDR: Considered whether deleting the tmux restart/unwind path and simplifying prior-terminal restoration could leave a replacement or its processes running while the session incorrectly appears ended, allowing Delete to stop them without the expected warning. This original potential unconsented Delete harm is preserved. Source checks: core.rs:13603-13642 routes every new launch to relaunch_into_host; no launch reuses the prior terminal. core.rs:13524-13530 calls republished_terminal(definitive, prior), whose lines 3414-3416 return no terminal for an ambiguous failure. host_restart.rs:1170-1219 returns ambiguous both when a possibly remaining host cannot be confirmed ended and when its process-tree sweep fails; it is not enough merely to end the host. Only successful cleanup reaches the definitive return, apart from test-only crash seams that also retain ambiguity. The confirmation-error branch at host_restart.rs:526-559 publishes the new host as Launching and returns Published, which core.rs:13402-13409 excludes from restoration. Contract: SPEC.md, Lifecycle operations, requires visible failure when required cleanup cannot be confirmed and consent before deleting a session whose agent may still run; core.rs:3404-3412 explains why naming the prior ended terminal would bypass Delete's still-running guard. SPEC_impl.md:2456-2458 says, 'Only a replacement host that cannot be confirmed ended keeps the launching record: the session then holds no terminal, the old host's runtime is stopped, and both hosts stay reachable by their records.' That quoted host-end description is narrower than the actual unwind: the source also preserves ambiguity after failed process-tree cleanup. It is not used as proof that host-end failure is the sole ambiguous outcome. Suggested bucket: highest if the unconsented process-loss route existed. Confidence: confirmed source refutation of the considered regression, no execution. proposed_drop: source refutation; uncertain cleanup leaves no terminal and published replacements bypass restoration. This is a proposed drop only, not a parent-accepted drop. possible_cover: none, coverage sources not searched. Could-be-highest: yes; an incorrectly ended-looking session could otherwise expose a live replacement or its processes to unconsented Delete, but the changed state transitions refute that route. Caveat: this assesses the assigned deletion and replacement integration, not every independent fault in host termination or process-tree cleanup. Synthesis source checks in turn 2: core.rs:5467-5473 requires both no terminal and LastOutcome::Launching for terminal_less_launch_may_be_live. core.rs:13969-13981 lets an explicitly Unconditional Delete proceed but refuses other Delete guards for that terminal-less launching state before any terminal/host discovery; handlers.rs:1328-1347 calls this under the lifecycle claim before teardown and returns Conflict on the alive answer. This completes the concrete guard route for the potential unconsented Delete harm: an ambiguous unwind is conservatively guarded even when the uncertainty is surviving descendants after a failed process-tree sweep, rather than a still-running host. Re-read host_restart.rs:1160-1221 confirms the failed sweep returns Ambiguous after host cleanup; its host record may already have been removed when that happens, so no claim is made that the record remains in every ambiguous case. The guard depends on the retained launching outcome and absent terminal, not on that record. Parent supplied independent agreement from g100/g097/g110 that host launch excerpts require processed exit and a blank new screen; that interface evidence supports c1 and does not replace the direct source checks recorded there."
+          }
+        },
+        {
+          "line": 7,
+          "event": {
+            "version": 1,
+            "kind": "lead",
+            "id": "c2",
+            "state": "open",
+            "summary": "Restart recovery retains uncertainty about replacements and their surviving processes",
+            "location": "crates/farhelm-supervisor/src/service/core.rs:13528",
+            "detail": "Reviewed commit: 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513. TLDR: Considered whether deleting the tmux restart/unwind path and simplifying prior-terminal restoration could leave a replacement or its processes running while the session incorrectly appears ended, allowing Delete to stop them without the expected warning. This original potential unconsented Delete harm is preserved. Source checks: core.rs:13603-13642 routes every new launch to relaunch_into_host; no launch reuses the prior terminal. core.rs:13524-13530 calls republished_terminal(definitive, prior), whose lines 3414-3416 return no terminal for an ambiguous failure. host_restart.rs:1170-1219 returns ambiguous both when a possibly remaining host cannot be confirmed ended and when its process-tree sweep fails; it is not enough merely to end the host. Only successful cleanup reaches the definitive return, apart from test-only crash seams that also retain ambiguity. The confirmation-error branch at host_restart.rs:526-559 publishes the new host as Launching and returns Published, which core.rs:13402-13409 excludes from restoration. Contract: SPEC.md, Lifecycle operations, requires visible failure when required cleanup cannot be confirmed and consent before deleting a session whose agent may still run; core.rs:3404-3412 explains why naming the prior ended terminal would bypass Delete's still-running guard. SPEC_impl.md:2456-2458 says, 'Only a replacement host that cannot be confirmed ended keeps the launching record: the session then holds no terminal, the old host's runtime is stopped, and both hosts stay reachable by their records.' That quoted host-end description is narrower than the actual unwind: the source also preserves ambiguity after failed process-tree cleanup. It is not used as proof that host-end failure is the sole ambiguous outcome. Suggested bucket: highest if the unconsented process-loss route existed. Confidence: confirmed source refutation of the considered regression, no execution. proposed_drop: source refutation; uncertain cleanup leaves no terminal and published replacements bypass restoration. This is a proposed drop only, not a parent-accepted drop. possible_cover: none, coverage sources not searched. Could-be-highest: yes; an incorrectly ended-looking session could otherwise expose a live replacement or its processes to unconsented Delete, but the changed state transitions refute that route. Caveat: this assesses the assigned deletion and replacement integration, not every independent fault in host termination or process-tree cleanup. Synthesis source checks in turn 2: core.rs:5467-5473 requires both no terminal and LastOutcome::Launching for terminal_less_launch_may_be_live. core.rs:13969-13981 lets an explicitly Unconditional Delete proceed but refuses other Delete guards for that terminal-less launching state before any terminal/host discovery; handlers.rs:1328-1347 calls this under the lifecycle claim before teardown and returns Conflict on the alive answer. This completes the concrete guard route for the potential unconsented Delete harm: an ambiguous unwind is conservatively guarded even when the uncertainty is surviving descendants after a failed process-tree sweep, rather than a still-running host. Re-read host_restart.rs:1160-1221 confirms the failed sweep returns Ambiguous after host cleanup; its host record may already have been removed when that happens, so no claim is made that the record remains in every ambiguous case. The guard depends on the retained launching outcome and absent terminal, not on that record. Parent supplied independent agreement from g100/g097/g110 that host launch excerpts require processed exit and a blank new screen; that interface evidence supports c1 and does not replace the direct source checks recorded there. Turn 3 interface input from g099/l1: ScopeKillFailure::Warn may map failed scope cleanup to Ok after portable cleanup, which cannot discover a daemon whose markers were scrubbed. The prior assertion that only successful cleanup reaches definitive was too broad if successful meant every named scope was confirmed gone. Reopened c2 as a lead before further source reads to distinguish actual Err-to-Ambiguous mapping from Warn-to-Ok policy, preserve the original unconsented Delete consequence, and compare the whole review range for attribution. No parent drop or lowering has been accepted. The assigned mapping refutation remains evidence only for cases where reap_process_tree actually returns Err. Missing check: the exact Warn policy and its introduction relative to the range; not yet investigated in this turn."
+          }
+        },
+        {
+          "line": 8,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c2",
+            "state": "open",
+            "summary": "Restart integration preserves returned ambiguity; Warn cleanup policy is a separate inherited concern",
+            "location": "crates/farhelm-supervisor/src/service/core.rs:13528",
+            "detail": "Reviewed commit: 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513. Original TLDR/consequence preserved: considered whether deleting tmux restart/unwind and simplifying prior-terminal restoration could leave a replacement or its descendants running while the session appears ended, allowing Delete to stop user work without its required warning. Could-be-highest: yes for that unconsented process/work-loss consequence. Suggested bucket: highest if the full route is established; no parent lowering or drop accepted. Source-supported assigned mapping: every relaunch now goes to relaunch_into_host (core.rs:13603-13642); returned Ambiguous leaves LastOutcome::Launching and no terminal (core.rs:13470-13530,3414-3416). That state refuses guarded Delete at core.rs:5467-5473,13969-13981, with handlers.rs:1328-1347 checking under the lifecycle claim before teardown. Published replacements bypass restoration, including confirmation-write failure. Actual host-end failure and an actual Err from reap_process_tree both return Ambiguous (host_restart.rs:1170-1219). These facts refute loss of the returned-ambiguity guard due to the assigned removal; they do not prove complete cleanup in every definitive unwind. Correction after g099/l1 input: sweep.rs:1539-1557 maps a failed recorded scope plus a successful portable sweep to Ok under ScopeKillFailure::Warn. host_restart.rs:1207 passes Warn, so that policy can yield Definitive without the named scope being confirmed gone. sweep.rs:1380-1389 explicitly says an unconfirmed scope can hold a scrubbed daemon the portable sweep cannot see. Prior phrases 'only successful cleanup' and 'uncertain cleanup leaves no terminal' were therefore too broad; read them only as the observable Result mapping, not a guarantee every contained process is gone. No prior claim that every ambiguous result retains its host record survives: the record can be removed before the sweep returns Err. Whole-range attribution checks: the exclusive base 6e423e30068b62c6cfa276c6d720ee35bb70387a already has the same Warn-to-Ok branch at sweep.rs:1539-1557 and the same host unwind Warn call/Definitive return at host_restart.rs:1177-1226. Complete base-to-tip sweep.rs diff changes other callers, scope helpers, tests and comments but not this policy branch. Complete base-to-reviewed host_restart.rs diff changes comments, removed container argument and excerpt fields, not the unwind call or its result mapping. The assigned core removal replaces its tmux branch with the already-selected host branch; that removed tmux unwind also used Warn. Thus merely predating this one commit is not the basis: the actual policy and host caller predate the entire pinned range. This resolves this ID's attribution/mapping lead, while preserving the separate inherited scope-policy concern supplied by g099 for its parent-owned adjudication. Contract: SPEC.md Lifecycle operations requires confirmation of a named scope, not merely a portable sweep, and destructive consent limits later Delete. SPEC_impl.md:2456-2458's statement about a replacement host that cannot be ended describes one ambiguous case and is not an exhaustive proof of cleanup. proposed_drop: source refutation of an assigned returned-ambiguity integration regression only; not a proposed drop of the inherited Warn policy or the original potential highest harm. Confidence: confirmed source/result mapping and whole-range preexistence; no execution and no complete user-work-loss route newly established here. possible_cover: g099/l1 supplied by caller owns the same inherited policy question; neighbour packet did not include that latest lead event. No prohibited coverage source searched. No remaining source lead for this bounded mapping/attribution check; no independent test-oracle or documentation concern is dismissed by production correctness."
+          }
+        }
+      ],
+      "latest": {
+        "line": 8,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c2",
+          "state": "open",
+          "summary": "Restart integration preserves returned ambiguity; Warn cleanup policy is a separate inherited concern",
+          "location": "crates/farhelm-supervisor/src/service/core.rs:13528",
+          "detail": "Reviewed commit: 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513. Original TLDR/consequence preserved: considered whether deleting tmux restart/unwind and simplifying prior-terminal restoration could leave a replacement or its descendants running while the session appears ended, allowing Delete to stop user work without its required warning. Could-be-highest: yes for that unconsented process/work-loss consequence. Suggested bucket: highest if the full route is established; no parent lowering or drop accepted. Source-supported assigned mapping: every relaunch now goes to relaunch_into_host (core.rs:13603-13642); returned Ambiguous leaves LastOutcome::Launching and no terminal (core.rs:13470-13530,3414-3416). That state refuses guarded Delete at core.rs:5467-5473,13969-13981, with handlers.rs:1328-1347 checking under the lifecycle claim before teardown. Published replacements bypass restoration, including confirmation-write failure. Actual host-end failure and an actual Err from reap_process_tree both return Ambiguous (host_restart.rs:1170-1219). These facts refute loss of the returned-ambiguity guard due to the assigned removal; they do not prove complete cleanup in every definitive unwind. Correction after g099/l1 input: sweep.rs:1539-1557 maps a failed recorded scope plus a successful portable sweep to Ok under ScopeKillFailure::Warn. host_restart.rs:1207 passes Warn, so that policy can yield Definitive without the named scope being confirmed gone. sweep.rs:1380-1389 explicitly says an unconfirmed scope can hold a scrubbed daemon the portable sweep cannot see. Prior phrases 'only successful cleanup' and 'uncertain cleanup leaves no terminal' were therefore too broad; read them only as the observable Result mapping, not a guarantee every contained process is gone. No prior claim that every ambiguous result retains its host record survives: the record can be removed before the sweep returns Err. Whole-range attribution checks: the exclusive base 6e423e30068b62c6cfa276c6d720ee35bb70387a already has the same Warn-to-Ok branch at sweep.rs:1539-1557 and the same host unwind Warn call/Definitive return at host_restart.rs:1177-1226. Complete base-to-tip sweep.rs diff changes other callers, scope helpers, tests and comments but not this policy branch. Complete base-to-reviewed host_restart.rs diff changes comments, removed container argument and excerpt fields, not the unwind call or its result mapping. The assigned core removal replaces its tmux branch with the already-selected host branch; that removed tmux unwind also used Warn. Thus merely predating this one commit is not the basis: the actual policy and host caller predate the entire pinned range. This resolves this ID's attribution/mapping lead, while preserving the separate inherited scope-policy concern supplied by g099 for its parent-owned adjudication. Contract: SPEC.md Lifecycle operations requires confirmation of a named scope, not merely a portable sweep, and destructive consent limits later Delete. SPEC_impl.md:2456-2458's statement about a replacement host that cannot be ended describes one ambiguous case and is not an exhaustive proof of cleanup. proposed_drop: source refutation of an assigned returned-ambiguity integration regression only; not a proposed drop of the inherited Warn policy or the original potential highest harm. Confidence: confirmed source/result mapping and whole-range preexistence; no execution and no complete user-work-loss route newly established here. possible_cover: g099/l1 supplied by caller owns the same inherited policy question; neighbour packet did not include that latest lead event. No prohibited coverage source searched. No remaining source lead for this bounded mapping/attribution check; no independent test-oracle or documentation concern is dismissed by production correctness."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g106/findings.jsonl",
+        "id": "c2",
+        "line": 8,
+        "disposition": "under-investigation",
+        "group": "g106-c2",
+        "reason": "Record durably acknowledged; parent source/contract validation, cross-group synthesis, coverage/filter matching and any independent drop check remain pending. This preserves the claim and uncertainty without accepting, dropping or lowering it."
+      },
+      "accepted_parent_decision": null,
+      "returned_claim_checks": [
+        {
+          "batch": "claims-068",
+          "key": "g106/c2",
+          "latest_line": 8,
+          "recommendation": "refuted",
+          "bucket": "other",
+          "underlying_key": "restart-tmux-removal-preserves-returned-ambiguity-delete-guard",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The assigned restart integration preserves returned Ambiguous state and its guarded-Delete refusal. That narrowly refutes loss of this guard due to the removal. The older Warn scope policy is real counterevidence to a blanket cleanup guarantee and must remain with its owner; it is not disproved by the Result mapping.",
+          "checks": [
+            "647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513:core.rs:13402-13409 excludes Published replacements from restoration; 13470-13530 retains Launching/no terminal for Ambiguous; 3414-3416 returns no prior terminal. 5467-5473 recognizes terminal-less Launching; 13969-13981 refuses guarded Delete, and handlers.rs:1328-1347 checks under the lifecycle claim before teardown.",
+            "Same revision host_restart.rs:1170-1219 returns Ambiguous on failed host end or actual Err from reap_process_tree. It removes the host record before the sweep, so not every ambiguous case retains both host records. 526-559 publishes the replacement as Launching on confirmation-write failure and returns Published.",
+            "sweep.rs:1539-1557 maps scope failure plus successful portable sweep to Ok under Warn; host_restart.rs:1207 passes Warn. sweep.rs:1380-1389 says a failed named scope can retain a scrubbed daemon invisible to the sweep. Therefore definitive does not prove every named scope was confirmed gone.",
+            "Exclusive base 6e423e30068b62c6cfa276c6d720ee35bb70387a already contains the same Warn-to-Ok branch and host_restart.rs:1177-1226 caller/result mapping. Base-to-reviewed host_restart diff changes comments, container argument and excerpt fields, not that unwind behavior. Base-to-tip sweep diff leaves this policy branch unchanged. The inherited policy is outside this range; source refutation is only for the assigned returned-ambiguity regression. No execution ran."
+          ],
+          "coverage_checked": [
+            "Current SPEC.md Lifecycle operations:2060-2125 binds destructive consent and requires confirmation of named scopes; it does not broadly accept Warn-to-Ok cleanup. Its coincident-fault exception must not be applied without the entire trigger. Current SPEC_impl.md:2307-2315 incompletely describes ambiguity; it is not proof that host-end failure is the only ambiguous case.",
+            "TODO.md Planned is empty. Maybe later: Require a systemd user manager, including failed-create rollback, is outside Planned and is not exact coverage of failed Restart replacement unwind. BUGS.md unrelated.",
+            "plans/queue searched for unconfirmed scopes/restart rollback; user-tmux-jobs-outlive-cleanup has landed (REPORTS.md:12) and covers intentionally migrated user tmux jobs, not this named-scope policy. No unlanded exact fix found.",
+            "INDEX.md and restart-unwind-omits-tree-sweep-failure.md read in full: it already records the narrower specification omission about actual sweep Err and removed host records, not a new runtime guard regression or the Warn policy. Active TRIAGE_OUTCOMES.md searched for the same consent/ambiguity/scope route; no exact decision found. Archive not read.",
+            "FILTER.md read. No filter is proposed: potential unconsented destruction is outside ordinary diagnostic/status filters. The supplied g099/l1 owns the inherited scope-policy concern; its record was not supplied for independent adjudication or alias determination here."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": "A newly introduced route from this assigned integration to unconsented loss of replacement/descendant work is not established. A failed named scope hidden by Warn is a separate inherited policy; any eventual unconsented-Delete route needs its complete source sequence. The false blanket cleanup rationale cannot stand in for that sequence.",
+          "original_stronger_consequence": "A replacement or its descendants might remain alive while the session appears ended, permitting Delete to stop user work without required consent (potential highest). Earlier broad claims that uncertain cleanup always leaves no terminal, only successful cleanup reaches definitive, and every ambiguous result retains both records were corrected. Narrowly preserve actual Err-to-Ambiguous protection; do not drop the inherited Warn policy or its possible highest consequence.",
+          "needs_independent_drop_check": true,
+          "proposed_basis": "Independent drop check required for the narrowly stated integration refutation and any lowering out of highest. Base-to-tip evidence places the Warn policy outside this review range; the parent must preserve g099/l1's separate adjudication rather than treat this as a whole-safety clearance."
+        }
+      ],
+      "parent_proposals": [
+        {
+          "artifact": "parent-flagged-judgments-068.json",
+          "key": "g106/c2",
+          "proposal": "claim-checks/claims-068/result.json",
+          "parent_proposal": "source-refuted-assigned-integration-drops-returned-Ambiguous-delete-protection",
+          "final_independent_gate": "required-before-original-unconsented-work-loss-drop",
+          "reason": "Full068 actual Err/host-end failures retain Ambiguous terminal-less Launching and guarded Delete refusal; Published replacement stays excluded from restoration. Host record removal before sweep means not both records always survive. Warn can hide a named scope failure despite clean portable sweep and is not refuted by Result mapping; whole-base-to-tip evidence places that policy/caller/restoration outside range, separately owned099l1. Bound to returned-ambiguity integration regression, preserve original work-loss route and corrected overbroad claims for gate. No blanket cleanup or same-fault spec acceptance."
+        }
+      ],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": true,
+        "provisional_bucket": "highest",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "restart-tmux-removal-preserves-returned-ambiguity-delete-guard",
+        "destination": null
+      }
+    },
+    {
+      "key": "g106/c3",
+      "owner": "g106",
+      "id": "c3",
+      "domain": "supervisor-core-integration",
+      "purpose": "supervisor-core-integration: crates/farhelm-supervisor/src/service/core.rs, crates/farhelm-supervisor/tests/fixtures/grid-mouse.jsonl, crates/farhelm-supervisor/src/agent_kind/screen_reader.rs; phases @@ -12550,12 +12207,12 @@ impl Supervisor {",
+      "history": [
+        {
+          "line": 4,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c3",
+            "state": "open",
+            "summary": "Screen-reader wrap comments match the emulator's screen-text contract",
+            "location": "crates/farhelm-supervisor/src/agent_kind/screen_reader.rs:122",
+            "detail": "Reviewed commit: 4b489b4f2eeade14f119b186ecb16eeaaf027021. TLDR: Considered whether replacing the capture-pane explanation with a statement about screen text misdescribes the wrap normalization used to detect workspace-trust questions. Source checks refute this: the patch changes comments only at lines 122-125 and 556-557. The Muse and Claude readers still normalize whitespace, and farhelm-terminal-emulator/src/screen.rs:11-14 specifies one newline per screen row, including physical wraps; screen_text at lines 62-111 emits each grid row separately. Contract: SPEC_impl.md:2677-2681 defines screen text as 'the visible or alternate screen, one line per row, trailing blanks trimmed, tabs over blank cells kept as tabs' and says one set of status-reader rules reads that format and the historical captures. Suggested bucket: other if a misleading comment existed. Confidence: confirmed source refutation, no execution. proposed_drop: source refutation; the replacement comments correctly describe the existing format and do not alter detection. possible_cover: none, coverage sources not searched. Could-be-highest: no; this comment-only change establishes no security or loss-of-work route. Caveat: no claim is made about how any currently installed vendor TUI renders; this check only validates the in-repository format contract."
+          }
+        }
+      ],
+      "latest": {
+        "line": 4,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c3",
+          "state": "open",
+          "summary": "Screen-reader wrap comments match the emulator's screen-text contract",
+          "location": "crates/farhelm-supervisor/src/agent_kind/screen_reader.rs:122",
+          "detail": "Reviewed commit: 4b489b4f2eeade14f119b186ecb16eeaaf027021. TLDR: Considered whether replacing the capture-pane explanation with a statement about screen text misdescribes the wrap normalization used to detect workspace-trust questions. Source checks refute this: the patch changes comments only at lines 122-125 and 556-557. The Muse and Claude readers still normalize whitespace, and farhelm-terminal-emulator/src/screen.rs:11-14 specifies one newline per screen row, including physical wraps; screen_text at lines 62-111 emits each grid row separately. Contract: SPEC_impl.md:2677-2681 defines screen text as 'the visible or alternate screen, one line per row, trailing blanks trimmed, tabs over blank cells kept as tabs' and says one set of status-reader rules reads that format and the historical captures. Suggested bucket: other if a misleading comment existed. Confidence: confirmed source refutation, no execution. proposed_drop: source refutation; the replacement comments correctly describe the existing format and do not alter detection. possible_cover: none, coverage sources not searched. Could-be-highest: no; this comment-only change establishes no security or loss-of-work route. Caveat: no claim is made about how any currently installed vendor TUI renders; this check only validates the in-repository format contract."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g106/findings.jsonl",
+        "id": "c3",
+        "line": 4,
+        "disposition": "excluded",
+        "group": "screen-reader-physical-wrap-comment",
+        "reason": "Parent explicitly accepted named refuted proposal from claims-069 after inspecting it. The replacement explanation agrees with the screen-text producer. It does not change detection or establish a misleading contract. Source refutation of the proposed comment defect, not a rarity filter. Checked source/results: [\"4b489b4f2eeade14f119b186ecb16eeaaf027021:crates/farhelm-supervisor/src/agent_kind/screen_reader.rs:122-125,556-565 normalizes physical wraps with whitespace splitting.\",\"Same revision:crates/farhelm-terminal-emulator/src/screen.rs:11-24,52-103 defines and implements one newline per visible grid row, including wrapped rows. No runtime or vendor-TUI observation was made.\"] Current coverage/results: [\"SPEC_impl.md:2670-2681 explicitly describes one line per row and shared reader rules; SPEC.md terminal experience search adds no contrary text.\",\"TODO.md Planned is empty. Searches of plans/queue, BUGS.md, INDEX.md, matching queue text and active TRIAGE_OUTCOMES.md found no exact wrap-comment defect. The tmux docs cleanup plan is already landed (plans/REPORTS.md:32), not unlanded coverage.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Potential misleading wrap-normalization explanation; no security or user-work loss was claimed.\"; \"None for this bounded source refutation; it says nothing about installed vendor rendering.\"."
+      },
+      "accepted_parent_decision": {
+        "key": "g106/c3",
+        "line": 4,
+        "disposition": "excluded",
+        "group": "screen-reader-physical-wrap-comment",
+        "bucket": "other",
+        "recording": "refuted",
+        "queue_target_candidate": null,
+        "needs_independent_drop_check": false,
+        "reason": "Parent explicitly accepted named refuted proposal from claims-069 after inspecting it. The replacement explanation agrees with the screen-text producer. It does not change detection or establish a misleading contract. Source refutation of the proposed comment defect, not a rarity filter. Checked source/results: [\"4b489b4f2eeade14f119b186ecb16eeaaf027021:crates/farhelm-supervisor/src/agent_kind/screen_reader.rs:122-125,556-565 normalizes physical wraps with whitespace splitting.\",\"Same revision:crates/farhelm-terminal-emulator/src/screen.rs:11-24,52-103 defines and implements one newline per visible grid row, including wrapped rows. No runtime or vendor-TUI observation was made.\"] Current coverage/results: [\"SPEC_impl.md:2670-2681 explicitly describes one line per row and shared reader rules; SPEC.md terminal experience search adds no contrary text.\",\"TODO.md Planned is empty. Searches of plans/queue, BUGS.md, INDEX.md, matching queue text and active TRIAGE_OUTCOMES.md found no exact wrap-comment defect. The tmux docs cleanup plan is already landed (plans/REPORTS.md:32), not unlanded coverage.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Potential misleading wrap-normalization explanation; no security or user-work loss was claimed.\"; \"None for this bounded source refutation; it says nothing about installed vendor rendering.\"."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-069",
+          "key": "g106/c3",
+          "latest_line": 4,
+          "recommendation": "refuted",
+          "bucket": "other",
+          "underlying_key": "screen-reader-physical-wrap-comment",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The replacement explanation agrees with the screen-text producer. It does not change detection or establish a misleading contract.",
+          "checks": [
+            "4b489b4f2eeade14f119b186ecb16eeaaf027021:crates/farhelm-supervisor/src/agent_kind/screen_reader.rs:122-125,556-565 normalizes physical wraps with whitespace splitting.",
+            "Same revision:crates/farhelm-terminal-emulator/src/screen.rs:11-24,52-103 defines and implements one newline per visible grid row, including wrapped rows. No runtime or vendor-TUI observation was made."
+          ],
+          "coverage_checked": [
+            "SPEC_impl.md:2670-2681 explicitly describes one line per row and shared reader rules; SPEC.md terminal experience search adds no contrary text.",
+            "TODO.md Planned is empty. Searches of plans/queue, BUGS.md, INDEX.md, matching queue text and active TRIAGE_OUTCOMES.md found no exact wrap-comment defect. The tmux docs cleanup plan is already landed (plans/REPORTS.md:32), not unlanded coverage."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": "None for this bounded source refutation; it says nothing about installed vendor rendering.",
+          "original_stronger_consequence": "Potential misleading wrap-normalization explanation; no security or user-work loss was claimed.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Source refutation of the proposed comment defect, not a rarity filter."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "screen-reader-physical-wrap-comment",
+        "destination": null
+      }
+    },
+    {
+      "key": "g106/l1",
+      "owner": "g106",
+      "id": "l1",
+      "domain": "supervisor-core-integration",
+      "purpose": "supervisor-core-integration: crates/farhelm-supervisor/src/service/core.rs, crates/farhelm-supervisor/tests/fixtures/grid-mouse.jsonl, crates/farhelm-supervisor/src/agent_kind/screen_reader.rs; phases @@ -12550,12 +12207,12 @@ impl Supervisor {",
+      "history": [
+        {
+          "line": 9,
+          "event": {
+            "version": 1,
+            "kind": "lead",
+            "id": "l1",
+            "state": "open",
+            "summary": "Restart reply documentation still describes removed pane-reuse and post-replacement discovery paths",
+            "location": "crates/farhelm-supervisor/src/service/core.rs:13743",
+            "detail": "Reviewed commit: 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513. TLDR: the restart reply's tabs field may still teach maintainers that it receives different tab snapshots from pane reuse and replacement-window rediscovery, although the assigned patch removes those paths and makes every restart use a new host. This is a potential documentation correctness issue, separate from the known runtime-recovery candidates and neighbouring deleted-test oracles. Source basis already read: core.rs around 13743 says pane reuse carries the preflight list while replacement in a surviving session supplies post-replacement discovery; assigned patch removes replacement_session_tabs and all tmux launch branches, routing only to relaunch_into_host. Useful checks pending: exact pinned lines and caller data flow, parent baseline contract and whole-range attribution/repair history. Suggested bucket: other if confirmed; could-be-highest: no known security or user-work-loss route from this comment. Confidence: unresolved source lead, not execution. proposed_drop: false pending those checks. possible_cover: none in the supplied neighbour findings. This lead is recorded before further source reads; no tests or reproductions requested."
+          }
+        },
+        {
+          "line": 10,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "l1",
+            "state": "open",
+            "summary": "Restart reply comment promises a removed tab rediscovery path",
+            "location": "crates/farhelm-supervisor/src/service/core.rs:13747",
+            "detail": "Reviewed commit: 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513. TLDR: the supervisor's restart-reply documentation tells future maintainers that terminal tabs are re-read after replacement, but this change removes that path. A maintainer using the comment to reason about the freshness and provenance of the reply's tab list is given a false contract. This is a documentation defect, not an established runtime failure or claim that post-restart rediscovery must be restored. Details: core.rs:13747-13749 says, 'Supplied by `relaunch_into_terminal`: pane reuse carries the preflight list, while replacement in a surviving session supplies a post-replacement discovery.' The assigned deletion removes pane reuse, tmux replacement creation, replacement_session_tabs and its post-operation call. New core.rs:13608-13614 obtains session_tabs once before the host start, and :13635-13638 forwards that exact vector into relaunch_into_host. host_restart.rs:393-394 correctly describes the tab strip read beforehand; its confirmation-error publication (:540-549) and successful publication (:569-579) both pass the supplied tabs unchanged. Therefore neither of the stale comment's selection paths remains. Parent proof: parent core.rs:14731-14733 contains the same comment, but parent :14434-14451 still publishes the selected preflight/post-replacement list; its host early-return branch is at :14004-14022. The assigned removal, not merely a wording preference or older unmaintained prose, makes the claimed tmux distinction impossible. Contract: SPEC_impl.md at this revision, Terminal host, Every new terminal in a host and Restarting a host agent, requires every Restart to start a host while keeping the session's tabs running; the new relaunch_into_terminal and host_restart documentation state that same retained-host path. Correct production behavior and nearby accurate prose do not make this false field-level explanation accurate. Fix direction: describe the preflight tab vector carried through the host replacement, which does not add a tmux agent window, instead of implying pane reuse or an additional discovery. Suggested bucket: other (internal documentation correctness). Could-be-highest: no established or suspected security or user-work-loss route from this comment. Confidence: confirmed source/caller comparison, no execution. proposed_drop: false. possible_cover: none in supplied neighbour records; g006/f1 concerns a different stale switch condition in SPEC_impl.md. Material caveat: later-range repair status still being checked; this charter includes the recorded intermediate commit even if a later cleanup fixes the comment. Lead l1 is resolved to this finding, with no unresolved source premise for the reviewed-revision discrepancy."
+          }
+        },
+        {
+          "line": 11,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "l1",
+            "state": "open",
+            "summary": "Restart reply comment promises a removed tab rediscovery path",
+            "location": "crates/farhelm-supervisor/src/service/core.rs:13747",
+            "detail": "Reviewed commit: 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513. TLDR: the supervisor's restart-reply documentation tells future maintainers that terminal tabs are re-read after replacement, but this change removes that path. A maintainer using the comment to reason about the freshness and provenance of the reply's tab list is given a false contract. This is a documentation defect, not an established runtime failure or claim that post-restart rediscovery must be restored. Details: core.rs:13747-13749 says, 'Supplied by `relaunch_into_terminal`: pane reuse carries the preflight list, while replacement in a surviving session supplies a post-replacement discovery.' The assigned deletion removes pane reuse, tmux replacement creation, replacement_session_tabs and its post-operation call. New core.rs:13608-13614 obtains session_tabs once before the host start, and :13635-13638 forwards that exact vector into relaunch_into_host. host_restart.rs:393-394 correctly describes the tab strip read beforehand; its confirmation-error publication (:540-549) and successful publication (:569-579) both pass the supplied tabs unchanged. Therefore neither of the stale comment's selection paths remains. Parent proof: parent core.rs:14731-14733 contains the same comment, but parent :14434-14451 still publishes the selected preflight/post-replacement list; its host early-return branch is at :14004-14022. The assigned removal, not merely a wording preference or older unmaintained prose, makes the claimed tmux distinction impossible. Contract: SPEC_impl.md at this revision, Terminal host, Every new terminal in a host and Restarting a host agent, requires every Restart to start a host while keeping the session's tabs running; the new relaunch_into_terminal and host_restart documentation state that same retained-host path. Correct production behavior and nearby accurate prose do not make this false field-level explanation accurate. Fix direction: describe the preflight tab vector carried through the host replacement, which does not add a tmux agent window, instead of implying pane reuse or an additional discovery. Suggested bucket: other (internal documentation correctness). Could-be-highest: no established or suspected security or user-work-loss route from this comment. Confidence: confirmed source/caller comparison, no execution. proposed_drop: false. possible_cover: none in supplied neighbour records; g006/f1 concerns a different stale switch condition in SPEC_impl.md. Material caveat: later-range repair status still being checked; this charter includes the recorded intermediate commit even if a later cleanup fixes the comment. Lead l1 is resolved to this finding, with no unresolved source premise for the reviewed-revision discrepancy. Later-range status resolved: git log -G over the complete reviewed-to-tip core.rs history finds no change to pane reuse carries/post-replacement discovery; the 08399d09 comment-cleanup diff has no matching hunk. Pinned tip 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db:core.rs:13096-13098 retains the stale comment verbatim. The same tip at :3987-3988 correctly documents Relaunched.tabs as the preflight list because Restart keeps every tab open. Thus this is not repaired by later tmux-driver removal or comment cleanup, and accurate adjacent documentation exposes rather than resolves the contradiction. No later-repair premise remains open."
+          }
+        }
+      ],
+      "latest": {
+        "line": 11,
+        "event": {
+          "version": 1,
+          "kind": "finding",
+          "id": "l1",
+          "state": "open",
+          "summary": "Restart reply comment promises a removed tab rediscovery path",
+          "location": "crates/farhelm-supervisor/src/service/core.rs:13747",
+          "detail": "Reviewed commit: 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513. TLDR: the supervisor's restart-reply documentation tells future maintainers that terminal tabs are re-read after replacement, but this change removes that path. A maintainer using the comment to reason about the freshness and provenance of the reply's tab list is given a false contract. This is a documentation defect, not an established runtime failure or claim that post-restart rediscovery must be restored. Details: core.rs:13747-13749 says, 'Supplied by `relaunch_into_terminal`: pane reuse carries the preflight list, while replacement in a surviving session supplies a post-replacement discovery.' The assigned deletion removes pane reuse, tmux replacement creation, replacement_session_tabs and its post-operation call. New core.rs:13608-13614 obtains session_tabs once before the host start, and :13635-13638 forwards that exact vector into relaunch_into_host. host_restart.rs:393-394 correctly describes the tab strip read beforehand; its confirmation-error publication (:540-549) and successful publication (:569-579) both pass the supplied tabs unchanged. Therefore neither of the stale comment's selection paths remains. Parent proof: parent core.rs:14731-14733 contains the same comment, but parent :14434-14451 still publishes the selected preflight/post-replacement list; its host early-return branch is at :14004-14022. The assigned removal, not merely a wording preference or older unmaintained prose, makes the claimed tmux distinction impossible. Contract: SPEC_impl.md at this revision, Terminal host, Every new terminal in a host and Restarting a host agent, requires every Restart to start a host while keeping the session's tabs running; the new relaunch_into_terminal and host_restart documentation state that same retained-host path. Correct production behavior and nearby accurate prose do not make this false field-level explanation accurate. Fix direction: describe the preflight tab vector carried through the host replacement, which does not add a tmux agent window, instead of implying pane reuse or an additional discovery. Suggested bucket: other (internal documentation correctness). Could-be-highest: no established or suspected security or user-work-loss route from this comment. Confidence: confirmed source/caller comparison, no execution. proposed_drop: false. possible_cover: none in supplied neighbour records; g006/f1 concerns a different stale switch condition in SPEC_impl.md. Material caveat: later-range repair status still being checked; this charter includes the recorded intermediate commit even if a later cleanup fixes the comment. Lead l1 is resolved to this finding, with no unresolved source premise for the reviewed-revision discrepancy. Later-range status resolved: git log -G over the complete reviewed-to-tip core.rs history finds no change to pane reuse carries/post-replacement discovery; the 08399d09 comment-cleanup diff has no matching hunk. Pinned tip 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db:core.rs:13096-13098 retains the stale comment verbatim. The same tip at :3987-3988 correctly documents Relaunched.tabs as the preflight list because Restart keeps every tab open. Thus this is not repaired by later tmux-driver removal or comment cleanup, and accurate adjacent documentation exposes rather than resolves the contradiction. No later-repair premise remains open."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g106/findings.jsonl",
+        "id": "l1",
+        "line": 11,
+        "disposition": "verified",
+        "group": "restart-reply-stale-tab-rediscovery-comment",
+        "reason": "Parent explicitly accepted named retain-verified proposal from claims-069 after inspecting it. The field comment still teaches a removed distinction between pane reuse and post-replacement discovery. Correct production behavior does not repair that false explanation. Retain as an internal documentation defect introduced within the range and still present at its tip. No filter matches the entire consequence. Checked source/results: [\"647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513:crates/farhelm-supervisor/src/service/core.rs:13608-13638 reads tabs once before side effects and forwards them to the host restart; :13747-13749 claims two tmux-specific provenance paths.\",\"Same revision:core/host_restart.rs:393-394,540-549,569-579 documents the preflight list and publishes the supplied vector on both branches.\",\"647f0227^:core.rs:14428-14453 actually selects preflight versus post-replacement tabs, so the removal introduces the mismatch. At 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db:core.rs:13096-13098 the false comment remains, while :3987-3988 correctly describes the preflight list.\"] Current coverage/results: [\"SPEC.md:1925 and SPEC_impl.md Terminal host describe tabs surviving Restart; neither accepts false reply documentation.\",\"TODO.md Planned is empty. Exact phrase/rediscovery searches of plans/queue, BUGS.md, INDEX.md, queue files and active TRIAGE_OUTCOMES.md found no matching item. plans/queue/tmux-drop-from-docs.md criterion 3 would have targeted stale comments, but plans/REPORTS.md:32 says it has landed; it is not unlanded coverage and did not fix this line.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"A maintainer receives a false contract for the freshness and provenance of restart-reply tabs. No runtime failure, security mistake or loss-of-work route is established.\"; null."
+      },
+      "accepted_parent_decision": {
+        "key": "g106/l1",
+        "line": 11,
+        "disposition": "verified",
+        "group": "restart-reply-stale-tab-rediscovery-comment",
+        "bucket": "other",
+        "recording": "retain-verified",
+        "queue_target_candidate": null,
+        "needs_independent_drop_check": false,
+        "reason": "Parent explicitly accepted named retain-verified proposal from claims-069 after inspecting it. The field comment still teaches a removed distinction between pane reuse and post-replacement discovery. Correct production behavior does not repair that false explanation. Retain as an internal documentation defect introduced within the range and still present at its tip. No filter matches the entire consequence. Checked source/results: [\"647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513:crates/farhelm-supervisor/src/service/core.rs:13608-13638 reads tabs once before side effects and forwards them to the host restart; :13747-13749 claims two tmux-specific provenance paths.\",\"Same revision:core/host_restart.rs:393-394,540-549,569-579 documents the preflight list and publishes the supplied vector on both branches.\",\"647f0227^:core.rs:14428-14453 actually selects preflight versus post-replacement tabs, so the removal introduces the mismatch. At 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db:core.rs:13096-13098 the false comment remains, while :3987-3988 correctly describes the preflight list.\"] Current coverage/results: [\"SPEC.md:1925 and SPEC_impl.md Terminal host describe tabs surviving Restart; neither accepts false reply documentation.\",\"TODO.md Planned is empty. Exact phrase/rediscovery searches of plans/queue, BUGS.md, INDEX.md, queue files and active TRIAGE_OUTCOMES.md found no matching item. plans/queue/tmux-drop-from-docs.md criterion 3 would have targeted stale comments, but plans/REPORTS.md:32 says it has landed; it is not unlanded coverage and did not fix this line.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"A maintainer receives a false contract for the freshness and provenance of restart-reply tabs. No runtime failure, security mistake or loss-of-work route is established.\"; null."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-069",
+          "key": "g106/l1",
+          "latest_line": 11,
+          "recommendation": "retain-verified",
+          "bucket": "other",
+          "underlying_key": "restart-reply-stale-tab-rediscovery-comment",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The field comment still teaches a removed distinction between pane reuse and post-replacement discovery. Correct production behavior does not repair that false explanation.",
+          "checks": [
+            "647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513:crates/farhelm-supervisor/src/service/core.rs:13608-13638 reads tabs once before side effects and forwards them to the host restart; :13747-13749 claims two tmux-specific provenance paths.",
+            "Same revision:core/host_restart.rs:393-394,540-549,569-579 documents the preflight list and publishes the supplied vector on both branches.",
+            "647f0227^:core.rs:14428-14453 actually selects preflight versus post-replacement tabs, so the removal introduces the mismatch. At 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db:core.rs:13096-13098 the false comment remains, while :3987-3988 correctly describes the preflight list."
+          ],
+          "coverage_checked": [
+            "SPEC.md:1925 and SPEC_impl.md Terminal host describe tabs surviving Restart; neither accepts false reply documentation.",
+            "TODO.md Planned is empty. Exact phrase/rediscovery searches of plans/queue, BUGS.md, INDEX.md, queue files and active TRIAGE_OUTCOMES.md found no matching item. plans/queue/tmux-drop-from-docs.md criterion 3 would have targeted stale comments, but plans/REPORTS.md:32 says it has landed; it is not unlanded coverage and did not fix this line."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": null,
+          "original_stronger_consequence": "A maintainer receives a false contract for the freshness and provenance of restart-reply tabs. No runtime failure, security mistake or loss-of-work route is established.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Retain as an internal documentation defect introduced within the range and still present at its tip. No filter matches the entire consequence."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": true,
+        "clearly_refuted_candidate": false,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Source-confirmed by an existing parent decision; not runtime reproduced",
+        "deduplication_key": "restart-reply-stale-tab-rediscovery-comment",
+        "destination": "trailing-restart-reply-stale-tab-rediscovery-comment.md"
+      }
+    },
+    {
+      "key": "g106/c4",
+      "owner": "g106",
+      "id": "c4",
+      "domain": "supervisor-core-integration",
+      "purpose": "supervisor-core-integration: crates/farhelm-supervisor/src/service/core.rs, crates/farhelm-supervisor/tests/fixtures/grid-mouse.jsonl, crates/farhelm-supervisor/src/agent_kind/screen_reader.rs; phases @@ -12550,12 +12207,12 @@ impl Supervisor {",
+      "history": [
+        {
+          "line": 12,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c4",
+            "state": "open",
+            "summary": "Deleted tmux replacement anchor does not remove host-migration target verification",
+            "location": "crates/farhelm-supervisor/src/service/core.rs:13623",
+            "detail": "Reviewed commit: 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513. TLDR: considered whether deleting old_agent_window_anchor and tmux replacement-window cleanup could let Restart remove an unrelated shell tab instead of its old agent window. The assigned host-only route preserves the target constraint. core.rs:13623-13633 selects Replacing::TmuxWindow only from the entry's recorded Terminal::Tmux while terminal_survives and the seed holds history; otherwise it selects Nothing. host_restart.rs:603-623 passes exactly that recorded session/pane to kill_window. tmux.rs:3949-3986 checks pane/session identity and kills in one synchronous tmux queue group; a vanished/moved pane does not fall back to the current window. Removed old_agent_window_anchor and replacement_session_tabs belonged to the removed tmux replacement path; they do not supply a missing host-migration identity barrier. The earlier source comparison shows the host branch already used the same Replacing selection and target. Suggested bucket: highest if an unrelated tab/process loss route existed; could-be-highest: yes for the considered wrong-target process loss. Confidence: confirmed source refutation of this removed-barrier hypothesis, no execution. proposed_drop: source refutation limited to the assigned mapping and target verification, not a general safety claim about every lifecycle or cleanup policy. possible_cover: neighbours g108/c3 and g107/c4 cover distinct removed-test oracles; current correct production targeting does not refute those findings. Caveats: no test-oracle deletion is adjudicated here; this record concerns the runtime target carried by the assigned code removal. No missing premise remains for this bounded candidate."
+          }
+        }
+      ],
+      "latest": {
+        "line": 12,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c4",
+          "state": "open",
+          "summary": "Deleted tmux replacement anchor does not remove host-migration target verification",
+          "location": "crates/farhelm-supervisor/src/service/core.rs:13623",
+          "detail": "Reviewed commit: 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513. TLDR: considered whether deleting old_agent_window_anchor and tmux replacement-window cleanup could let Restart remove an unrelated shell tab instead of its old agent window. The assigned host-only route preserves the target constraint. core.rs:13623-13633 selects Replacing::TmuxWindow only from the entry's recorded Terminal::Tmux while terminal_survives and the seed holds history; otherwise it selects Nothing. host_restart.rs:603-623 passes exactly that recorded session/pane to kill_window. tmux.rs:3949-3986 checks pane/session identity and kills in one synchronous tmux queue group; a vanished/moved pane does not fall back to the current window. Removed old_agent_window_anchor and replacement_session_tabs belonged to the removed tmux replacement path; they do not supply a missing host-migration identity barrier. The earlier source comparison shows the host branch already used the same Replacing selection and target. Suggested bucket: highest if an unrelated tab/process loss route existed; could-be-highest: yes for the considered wrong-target process loss. Confidence: confirmed source refutation of this removed-barrier hypothesis, no execution. proposed_drop: source refutation limited to the assigned mapping and target verification, not a general safety claim about every lifecycle or cleanup policy. possible_cover: neighbours g108/c3 and g107/c4 cover distinct removed-test oracles; current correct production targeting does not refute those findings. Caveats: no test-oracle deletion is adjudicated here; this record concerns the runtime target carried by the assigned code removal. No missing premise remains for this bounded candidate."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g106/findings.jsonl",
+        "id": "c4",
+        "line": 12,
+        "disposition": "under-investigation",
+        "group": "g106-c4",
+        "reason": "Record durably acknowledged; parent source/contract validation, cross-group synthesis, coverage/filter matching and any independent drop check remain pending. This preserves the claim and uncertainty without accepting, dropping or lowering it."
+      },
+      "accepted_parent_decision": null,
+      "returned_claim_checks": [
+        {
+          "batch": "claims-069",
+          "key": "g106/c4",
+          "latest_line": 12,
+          "recommendation": "refuted",
+          "bucket": "other",
+          "underlying_key": "restart-removed-tmux-anchor-wrong-target-hypothesis",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "Deleting the former replacement-window machinery does not remove the host migration's recorded target or the driver's identity check. This does not adjudicate deleted-test coverage.",
+          "checks": [
+            "647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513:core.rs:13623-13638 chooses Replacing::TmuxWindow only from the recorded agent terminal with surviving terminal and history seed.",
+            "Same revision:core/host_restart.rs:603-623 forwards exactly the recorded tmux session/pane to kill_window.",
+            "Same revision:crates/farhelm-supervisor/src/tmux.rs:3949-3986 places the identity predicate and targeted kill in one synchronous tmux queue group; refusal does not select a current-window fallback. Source analysis only."
+          ],
+          "coverage_checked": [
+            "Reviewed SPEC_impl.md:2290-2296,2954-3002 describes host migration retaining old tabs; current SPEC.md:2998-3012 and SPEC_impl.md Ending the old private tmux server describe later retirement, not an authorization for wrong-target removal.",
+            "TODO.md Planned empty; searches of plans/queue, BUGS.md, INDEX.md, queue files and active TRIAGE_OUTCOMES.md found no exact removed-anchor wrong-target item. tmux retirement plans have landed (plans/REPORTS.md:29,32)."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": "No missing target barrier is shown by this removal; no general lifecycle-safety conclusion is implied.",
+          "original_stronger_consequence": "Restart could kill an unrelated shell tab and its user-owned processes after removal of old_agent_window_anchor.",
+          "needs_independent_drop_check": true,
+          "proposed_basis": "Bounded source refutation of wrong-target process loss. An independent drop check must agree before disposal."
+        }
+      ],
+      "parent_proposals": [
+        {
+          "artifact": "parent-flagged-judgments-069.json",
+          "key": "g106/c4",
+          "proposal": "claim-checks/claims-069/result.json",
+          "parent_proposal": "source-refuted-removed-window-anchor-changes-migration-kill-target",
+          "final_independent_gate": "required-before-highest-wrong-tab-work-loss-drop",
+          "reason": "Full069 read. Recorded agent session/pane is forwarded to kill_window with synchronous queue-group identity predicate and exact target, no current-window fallback. Refute only alleged loss of target barrier, not deleted-test equivalence or global migration safety. Original unrelated shell/work consequence preserved."
+        }
+      ],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": true,
+        "provisional_bucket": "highest",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "restart-removed-tmux-anchor-wrong-target-hypothesis",
+        "destination": null
+      }
+    },
+    {
+      "key": "g106/c5",
+      "owner": "g106",
+      "id": "c5",
+      "domain": "supervisor-core-integration",
+      "purpose": "supervisor-core-integration: crates/farhelm-supervisor/src/service/core.rs, crates/farhelm-supervisor/tests/fixtures/grid-mouse.jsonl, crates/farhelm-supervisor/src/agent_kind/screen_reader.rs; phases @@ -12550,12 +12207,12 @@ impl Supervisor {",
+      "history": [
+        {
+          "line": 13,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c5",
+            "state": "open",
+            "summary": "Host-agent gate comment describes the agent terminal rather than all session tabs",
+            "location": "crates/farhelm-supervisor/src/service/core.rs:14573",
+            "detail": "Reviewed commit: 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513. TLDR: considered whether the revised comment 'A host agent has no tmux session at all' newly misstates the mixed-session lifecycle by deleting its old qualification about surviving tmux tabs. In context it explains which agent terminal the tab-open gate probes, not a claim that the logical session can hold no old tabs. Source context: core.rs:14491-14495 explicitly says an old agent's session holds its old tmux tabs and new host tabs side by side; :14565-14578 defines the gate by the agent terminal's kind; :14579-14599 probes that tmux agent's session or that host agent's host respectively. New core.rs:13617-13618 also preserves old tabs on migration. SPEC_impl.md, Tabs in hosts, at :2375-2411 separately describes mixed sessions, and the agent's host remains independent of its old tabs' tmux session. No second false universal session/tab contract is established by this shorter gate comment. Suggested bucket: other if wording were materially misleading; could-be-highest: no security or user-work-loss route from this explanatory sentence. Confidence: source/context refutation of the broad reading, no execution. proposed_drop: source refutation of the claim that this sentence changes or denies the mixed-session tab contract; optional wording clarity alone is not retained as a finding. possible_cover: none. Caveat: this does not refute l1, whose comment names actual removed code paths and promises a nonexistent post-operation discovery; that is an unambiguous distinct contract error. No missing source premise remains."
+          }
+        }
+      ],
+      "latest": {
+        "line": 13,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c5",
+          "state": "open",
+          "summary": "Host-agent gate comment describes the agent terminal rather than all session tabs",
+          "location": "crates/farhelm-supervisor/src/service/core.rs:14573",
+          "detail": "Reviewed commit: 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513. TLDR: considered whether the revised comment 'A host agent has no tmux session at all' newly misstates the mixed-session lifecycle by deleting its old qualification about surviving tmux tabs. In context it explains which agent terminal the tab-open gate probes, not a claim that the logical session can hold no old tabs. Source context: core.rs:14491-14495 explicitly says an old agent's session holds its old tmux tabs and new host tabs side by side; :14565-14578 defines the gate by the agent terminal's kind; :14579-14599 probes that tmux agent's session or that host agent's host respectively. New core.rs:13617-13618 also preserves old tabs on migration. SPEC_impl.md, Tabs in hosts, at :2375-2411 separately describes mixed sessions, and the agent's host remains independent of its old tabs' tmux session. No second false universal session/tab contract is established by this shorter gate comment. Suggested bucket: other if wording were materially misleading; could-be-highest: no security or user-work-loss route from this explanatory sentence. Confidence: source/context refutation of the broad reading, no execution. proposed_drop: source refutation of the claim that this sentence changes or denies the mixed-session tab contract; optional wording clarity alone is not retained as a finding. possible_cover: none. Caveat: this does not refute l1, whose comment names actual removed code paths and promises a nonexistent post-operation discovery; that is an unambiguous distinct contract error. No missing source premise remains."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g106/findings.jsonl",
+        "id": "c5",
+        "line": 13,
+        "disposition": "excluded",
+        "group": "host-agent-gate-mixed-session-comment",
+        "reason": "Parent explicitly accepted named refuted proposal from claims-069 after inspecting it. In context the sentence identifies the agent terminal being probed. The same section explicitly says the logical session can contain old tmux tabs and new host tabs. Context refutes the proposed universal reading. This is distinct from g106/l1, which names paths actually removed. Checked source/results: [\"647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513:core.rs:14491-14495 states mixed-session support; :14565-14599 selects the gate by the agent's terminal kind.\",\"Same revision:core.rs:13617-13622 preserves old tmux tabs during agent migration, so the shortened comment does not deny that supported lifecycle. Source/context analysis only.\"] Current coverage/results: [\"Reviewed SPEC_impl.md:2367-2411 explicitly describes mixed sessions. Current SPEC.md terminal experience and SPEC_impl.md Terminal host searches reflect later retirement, not a distinct current comment contract.\",\"TODO.md Planned empty; searches of plans/queue, BUGS.md, INDEX.md, queue files and active TRIAGE_OUTCOMES.md found no exact gate-comment item. Landed tmux cleanup plans are not pending coverage.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Potentially teaching that a host agent's logical session cannot contain old tmux tabs; no harmful reader action was claimed.\"; null."
+      },
+      "accepted_parent_decision": {
+        "key": "g106/c5",
+        "line": 13,
+        "disposition": "excluded",
+        "group": "host-agent-gate-mixed-session-comment",
+        "bucket": "other",
+        "recording": "refuted",
+        "queue_target_candidate": null,
+        "needs_independent_drop_check": false,
+        "reason": "Parent explicitly accepted named refuted proposal from claims-069 after inspecting it. In context the sentence identifies the agent terminal being probed. The same section explicitly says the logical session can contain old tmux tabs and new host tabs. Context refutes the proposed universal reading. This is distinct from g106/l1, which names paths actually removed. Checked source/results: [\"647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513:core.rs:14491-14495 states mixed-session support; :14565-14599 selects the gate by the agent's terminal kind.\",\"Same revision:core.rs:13617-13622 preserves old tmux tabs during agent migration, so the shortened comment does not deny that supported lifecycle. Source/context analysis only.\"] Current coverage/results: [\"Reviewed SPEC_impl.md:2367-2411 explicitly describes mixed sessions. Current SPEC.md terminal experience and SPEC_impl.md Terminal host searches reflect later retirement, not a distinct current comment contract.\",\"TODO.md Planned empty; searches of plans/queue, BUGS.md, INDEX.md, queue files and active TRIAGE_OUTCOMES.md found no exact gate-comment item. Landed tmux cleanup plans are not pending coverage.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Potentially teaching that a host agent's logical session cannot contain old tmux tabs; no harmful reader action was claimed.\"; null."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-069",
+          "key": "g106/c5",
+          "latest_line": 13,
+          "recommendation": "refuted",
+          "bucket": "other",
+          "underlying_key": "host-agent-gate-mixed-session-comment",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "In context the sentence identifies the agent terminal being probed. The same section explicitly says the logical session can contain old tmux tabs and new host tabs.",
+          "checks": [
+            "647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513:core.rs:14491-14495 states mixed-session support; :14565-14599 selects the gate by the agent's terminal kind.",
+            "Same revision:core.rs:13617-13622 preserves old tmux tabs during agent migration, so the shortened comment does not deny that supported lifecycle. Source/context analysis only."
+          ],
+          "coverage_checked": [
+            "Reviewed SPEC_impl.md:2367-2411 explicitly describes mixed sessions. Current SPEC.md terminal experience and SPEC_impl.md Terminal host searches reflect later retirement, not a distinct current comment contract.",
+            "TODO.md Planned empty; searches of plans/queue, BUGS.md, INDEX.md, queue files and active TRIAGE_OUTCOMES.md found no exact gate-comment item. Landed tmux cleanup plans are not pending coverage."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": null,
+          "original_stronger_consequence": "Potentially teaching that a host agent's logical session cannot contain old tmux tabs; no harmful reader action was claimed.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Context refutes the proposed universal reading. This is distinct from g106/l1, which names paths actually removed."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "host-agent-gate-mixed-session-comment",
+        "destination": null
+      }
+    }
+  ],
+  "replies": [
+    {
+      "turn": 1,
+      "reply": "Initial pass complete. All 1,230 assigned patch lines reviewed at their recorded revisions.\n\nNo reportable findings or unresolved leads. Logged source-refuted candidates c1–c3; c2 flags a considered highest-severity consequence for independent drop review. Findings log and progress updated. No tests or reproductions run."
+    },
+    {
+      "turn": 2,
+      "reply": "Redelivered all 1,230 mandatory lines through separate evidence calls with direct stdout. No unread scope.\n\nRevised c2 to cover ambiguous process-tree cleanup and verified the Delete guard, preserving the potential unconsented Delete harm. No new findings or open leads. Synthesis complete; no parent drop treated as accepted."
+    },
+    {
+      "turn": 3,
+      "reply": "Discovery pass 1 complete. Something new was found.\n\n- New verified: l1 — restart-reply documentation promises removed tab rediscovery; persists at the pinned tip.\n- New unverified: none.\n- Open leads: none.\n- Checks: caller data flow, parent/tip attribution, cleanup policy, window identity and tab-open lifecycle.\n- Revised c2; recorded source-refuted candidates c4/c5.\n\nLog and progress updated. No runtime execution."
+    },
+    {
+      "turn": 4,
+      "reply": "Discovery pass 2 complete. No new independent findings.\n\nChecked restart handoff, generation and spawn arguments, reply capability reporting, and mouse-fixture parsing. Narrowed c1 using source and whole-range attribution checks.\n\nNew verified IDs: none. New unverified IDs: none. Open leads: none.\n\nLog and progress updated. No runtime execution."
+    }
+  ],
+  "progress": "Group: g106, supervisor-core-integration.\nTurn type/count: initial review, 1. Discovery-pass count: 0.\nState: initial pass complete. All 1,230 assigned patch lines delivered through evidence read: 00766-001.patch 1-1188; 01551-000.patch 1-15; 01595-000.patch 1-27. Complete inventory commits field read; excluded coverage metadata not read.\nContracts and interfaces checked: pinned lifecycle/restart/consent and session-view contracts; terminal host create/tab/restart/migration contracts; GUI answers-bind rule; host replacement start, publication, unwind and prior-terminal recovery; host-tab opening and publication; terminal-kind reporting; launch excerpt consumers; later pinned screen-text and grid-input contracts. Restart preserves the session's host-tab cell; the removed tmux replacement-tab rediscovery applied only to the removed tmux launch path. No GUI handler changes occur in the assigned scope.\nDurable records: c1, c2, c3 are source-refuted candidates. c2 explicitly identifies the considered could-be-highest consent consequence for the parent's independent drop check. No verified or unverified findings. No open leads.\nEvidence: source and contract analysis only. No runtime tests, builds, reproductions, live-install actions, coverage-source reads, or checkout edits. One record invocation rejected the unsupported state 'closed'; the event was corrected to 'open' and recorded successfully before source review resumed. c2 has a same-ID correction restoring the exact ASCII apostrophe in the cited specification text.\nUnread assigned scope: none. No known unresolved premise remains from this pass.\nNext action: return to caller for the later synthesis turn; do not run a second pass within this initial turn.\n\nTurn 2: coverage repair plus synthesis, per caller override. Source hashes unchanged. Prior packet delivery received no supported credit; redeliver all 1,230 lines with direct stdout, one evidence call per packet. Preserve c1-c3. No open leads. Interface clarification: ambiguous host restart unwind includes both unconfirmed host termination and failed process-tree cleanup; the specification's host-end example is not an exhaustive source proof. No parent drop has been accepted. Discovery-pass count remains 0.\n\nTurn 2 boundary: coverage repair and caller-requested synthesis complete. Delivered all mandatory ranges again through the corrected manifest, each as its own evidence invocation with raw stdout and complete READ/END markers: 00766-001.patch 1-180,181-360,361-540,541-720,721-900,901-1080,1081-1188; 01551-000.patch 1-15; 01595-000.patch 1-27. No unread assigned material. All source hashes matched the unchanged snapshots. Prior unsupported packet coverage is not relied on.\nDelta: revised c2 twice under the same ID. Preserved its original potential highest consequence (unconsented Delete of a replacement or surviving processes), distinguished ambiguous host-end failure from ambiguous process-tree cleanup failure, and checked the actual Delete guard. core.rs:5467-5473 and 13969-13981 conservatively treat a terminal-less Launching entry as potentially live for every guarded Delete; handlers.rs:1328-1347 checks it under the lifecycle claim before teardown. host_restart.rs:1160-1221 confirms a failed sweep returns ambiguous even though its host record may already have been removed; the no-terminal Launching guard remains applicable. c2 remains a source-refuted candidate with proposed_drop, not a parent-accepted drop.\nSynthesis: no new reportable finding. c1's host-excerpt conclusion also has the parent-supplied independent agreement from g100/g097/g110; c3 remains comment-only source refutation. No open leads or missing premises. No new verified/unverified IDs. Discovery-pass count: 0; this was coverage repair plus synthesis, not a discovery pass.\nInterface assumptions unchanged: every new restart/tab goes to a host, uncertain cleanup preserves the launching state, and host status excerpts require processed exit with a fresh visible screen. No runtime behavior was claimed observed. No tests, builds, reproductions, checkout edits, or live-install actions.\nNext action: return delta and coverage status to the parent; wait for its next instruction or audit.\n\nTurn 3: separate discovery pass 1. Complete discovery-neighbours.json read in bounded, unclipped chunks 1-60,61-125,126-190,191-265,266-320,321-385,386-450,451-515,516-580,581-645,646-710,711-763; the earlier combined preview was clipped and is not relied on. Existing complete findings history reused. c2 reopened as a lead for the g099 Warn-to-Ok policy correction before new source reads. First synthesize that interface input, then search only the assigned patch's tab/restart integration and comment contracts beyond c1-c3. No new IDs yet. Source-only; no runtime work authorized.\n\nTurn 3 boundary: discovery pass 1 complete. Found one new verified finding, l1 (restart reply's tabs comment promises removed pane reuse/post-replacement rediscovery). It is source-confirmed at reviewed core.rs:13747-13749; the exact same stale comment persists at pinned tip :13096-13098. Complete parent/reviewed caller checks establish attribution: this removal deletes the two named mechanisms while retaining the comment; host publication carries the one preflight vector unchanged. The later complete core.rs commit list, git log -G, tip source and comment-cleanup diff show no repair. No runtime failure is asserted for l1.\nNamed input synthesized before the new search: c2 now explicitly distinguishes returned Err/Ambiguous mapping from ScopeKillFailure::Warn converting failed scope cleanup plus successful portable sweep to Ok/Definitive. Whole-range source checks show both policy and host unwind Warn caller already exist at exclusive base 6e423e30068b62c6cfa276c6d720ee35bb70387a. No policy-changing hunk exists in the complete base-to-tip sweep.rs diff, nor in the base-to-reviewed host_restart.rs diff. Original potential unconsented Delete/process-loss consequence remains; the assigned mapping refutation is narrow and does not dispose of g099's inherited policy concern. c2's temporary lead is resolved to candidate; no parent drop or lowering accepted.\nRemaining assigned-scope checks completed after l1: host-migration old-window cleanup retains the recorded pane/session, history gate and synchronous tmux identity check (c4 source-refuted candidate); tab opening retains its lifecycle claim on a supervisor-owned task, terminal-kind liveness refusal, working-directory/token validation, and unchanged host call; the mixed-session gate wording was checked in full context (c5 source-refuted candidate). Kept test-oracle concerns separate from production correctness throughout. The two assigned later comment-only patches were reused from complete prior reads and introduce no new executable behavior.\nNew verified finding IDs: l1. New unverified-after-investigation IDs: none. New source-refuted candidates: c4,c5. Revised prior ID: c2. Open lead IDs: none. New discovery: yes, l1. Discovery-pass count: 1. No unread assigned source or neighbour material; mandatory delivery was previously verified by caller and not repeated. No tests, builds, reproductions, prohibited coverage searches, checkout edits or live-install actions.\nNext action: return delta/checks to parent. Because this pass found a substantive new item, any further discovery is a separate later turn, not another pass inside turn 3.\n\nTurn 4: discovery pass 2. Refreshed discovery-neighbours.json (901 lines, 264351 bytes, timestamp 2026-11-13T16:50:55.004Z) read completely in bounded, unclipped chunks 1-60,61-110,111-170,171-225,226-285,286-340,341-395,396-455,456-515,516-570,571-625,626-685,686-745,746-800,801-855,856-901. Complete earlier finding/candidate history retained; no parent drops/lowerings assumed. No named pending question supplied. New interface evidence g100/c1 invalidates an overly broad provenance rationale in c1; reopened same ID as lead immediately. Check its exact source and attribution before new assigned-scope discovery. Other interface findings are novelty context only and do not broaden this group's review. No new finding ID or runtime work yet.\n\nTurn 4 boundary: discovery pass 2 complete; no new independent finding. c1 revised under the original ID after actual checks: launch_artifacts Host branch ignores the removed tmux fence, but resize.grow_lines can promote inherited history, so processed exit/initial blank screen do not prove visible-cell provenance. The complete exclusive-base-to-reviewed diff of launch_artifacts.rs, vendor grid/resize.rs and snapshot/v1/mod.rs is empty, confirming that this separate route and rationale predate the entire range before the assigned fence removal. g100/c1 and its cited g013/f2 retain that route/promise concern; c1's source refutation is limited to diagnostic suppression caused by this field. c1's temporary lead is closed as a candidate, with no parent drop assumed.\nNew assigned-scope search checks/results: traced the supervisor-owned restart task to confirm the lifecycle claim travels with argv, verified cwd, resume selection, seed and optional edited launch; generation opening unconditionally records Host before host spawn; checked host call arguments preserve supplied snapshot, resume phase, cwd, size and scope and omit create-only preparation/initial prompt. Traced reply construction through with_checkout_metadata and listing's held/ordinary rows: both apply current supervisor host capability reporting at their output boundary, not from cached entry fields. Checked the mouse fixture's actual consumer at grid_input/tests.rs:526-537: all changed header lines remain comments filtered by starts_with('#'), so the table's executable rows and schema are untouched. Scoped parent/reviewed adjacent module diffs identify no hidden alternate tab kind or changed host-call contract. No new concrete lead emerged from these checks. This is source analysis, not observed runtime behavior.\nNew verified IDs: none. New unverified-after-investigation IDs: none. Existing ID revised: c1. Open leads: none. Anything new found: no independent finding; only the required narrowing of an existing candidate from received interface evidence. Discovery-pass count: 2. All 901 lines of refreshed neighbour material read and no assigned source scope unread; prior mandatory delivery remains verified. No tests, builds, reproductions, forbidden coverage-source searches, checkout edits or live-install actions. No separate final report file created.\nNext action: return delta and empty discovery result to parent, then await further instruction.\n"
+}

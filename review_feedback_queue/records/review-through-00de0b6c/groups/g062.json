@@ -1,0 +1,1208 @@
+{
+  "group": {
+    "id": "g062",
+    "domain": "release-build-payloads",
+    "purpose": "release-build-payloads: .github/dist-build-setup.yml, .github/workflows/release.yml, scripts/build-pinned-tmux-ci.sh, .github/release/source-pins.env, .github/workflows/sign-sums.yml, crates/farhelm-helm/build.rs, dist-workspace.toml, scripts/build-private-tmux.sh, scripts/build-tmux-assets.sh, scripts/check-static-elf.sh, .github/release/ziglang-requirements.txt, .github/workflows/ci.yml; phases complete small per-commit changes",
+    "interfaces": [
+      "g005",
+      "g006",
+      "g007",
+      "g012",
+      "g061",
+      "g063",
+      "g071",
+      "g072",
+      "g073",
+      "g188",
+      "g189",
+      "g190",
+      "g191",
+      "g192",
+      "g193",
+      "g194",
+      "g195",
+      "g196",
+      "g197"
+    ],
+    "sources": [
+      {
+        "path": "[private-run]/prep/parts/00274-000.patch",
+        "ranges": [
+          [
+            1,
+            42
+          ]
+        ],
+        "original_path": ".github/dist-build-setup.yml",
+        "commit": "04d85f0c98a9b635709d00b056719a0baa7fd3fc",
+        "notes": "patch header; patch character offsets [0,2392)",
+        "lines": 42,
+        "bytes": 2394,
+        "start": 0,
+        "end": 2392,
+        "original": "[private-run]/prep/originals/00274.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/00360-000.patch",
+        "ranges": [
+          [
+            1,
+            27
+          ]
+        ],
+        "original_path": ".github/dist-build-setup.yml",
+        "commit": "d9b5501ba55c3008cebbe2cf8e4fe3eeaff630b2",
+        "notes": "patch header; patch character offsets [0,1630)",
+        "lines": 27,
+        "bytes": 1630,
+        "start": 0,
+        "end": 1630,
+        "original": "[private-run]/prep/originals/00360.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/00361-000.patch",
+        "ranges": [
+          [
+            1,
+            27
+          ]
+        ],
+        "original_path": ".github/workflows/release.yml",
+        "commit": "d9b5501ba55c3008cebbe2cf8e4fe3eeaff630b2",
+        "notes": "patch header; patch character offsets [0,1772)",
+        "lines": 27,
+        "bytes": 1772,
+        "start": 0,
+        "end": 1772,
+        "original": "[private-run]/prep/originals/00361.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/00757-000.patch",
+        "ranges": [
+          [
+            1,
+            37
+          ]
+        ],
+        "original_path": ".github/dist-build-setup.yml",
+        "commit": "647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513",
+        "notes": "patch header; patch character offsets [0,1987)",
+        "lines": 37,
+        "bytes": 1993,
+        "start": 0,
+        "end": 1987,
+        "original": "[private-run]/prep/originals/00757.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/00853-000.patch",
+        "ranges": [
+          [
+            1,
+            27
+          ]
+        ],
+        "original_path": "scripts/build-pinned-tmux-ci.sh",
+        "commit": "647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513",
+        "notes": "patch header; patch character offsets [0,1582)",
+        "lines": 27,
+        "bytes": 1590,
+        "start": 0,
+        "end": 1582,
+        "original": "[private-run]/prep/originals/00853.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/01226-000.patch",
+        "ranges": [
+          [
+            1,
+            13
+          ]
+        ],
+        "original_path": ".github/dist-build-setup.yml",
+        "commit": "17a3fe858c5511a24b7403af15dd41c93bf69fd7",
+        "notes": "patch header; patch character offsets [0,713)",
+        "lines": 13,
+        "bytes": 713,
+        "start": 0,
+        "end": 713,
+        "original": "[private-run]/prep/originals/01226.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/01227-000.patch",
+        "ranges": [
+          [
+            1,
+            13
+          ]
+        ],
+        "original_path": ".github/workflows/release.yml",
+        "commit": "17a3fe858c5511a24b7403af15dd41c93bf69fd7",
+        "notes": "patch header; patch character offsets [0,771)",
+        "lines": 13,
+        "bytes": 771,
+        "start": 0,
+        "end": 771,
+        "original": "[private-run]/prep/originals/01227.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/01259-000.patch",
+        "ranges": [
+          [
+            1,
+            15
+          ]
+        ],
+        "original_path": ".github/dist-build-setup.yml",
+        "commit": "500548b9253b07a26fd03119679184b69544e31d",
+        "notes": "patch header; patch character offsets [0,881)",
+        "lines": 15,
+        "bytes": 881,
+        "start": 0,
+        "end": 881,
+        "original": "[private-run]/prep/originals/01259.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/01260-000.patch",
+        "ranges": [
+          [
+            1,
+            15
+          ]
+        ],
+        "original_path": ".github/workflows/release.yml",
+        "commit": "500548b9253b07a26fd03119679184b69544e31d",
+        "notes": "patch header; patch character offsets [0,931)",
+        "lines": 15,
+        "bytes": 931,
+        "start": 0,
+        "end": 931,
+        "original": "[private-run]/prep/originals/01260.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/01300-000.patch",
+        "ranges": [
+          [
+            1,
+            33
+          ]
+        ],
+        "original_path": ".github/dist-build-setup.yml",
+        "commit": "cb762a313abbe6da03ae0bf041f07486c4ed4df9",
+        "notes": "patch header; patch character offsets [0,1784)",
+        "lines": 33,
+        "bytes": 1790,
+        "start": 0,
+        "end": 1784,
+        "original": "[private-run]/prep/originals/01300.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/01301-000.patch",
+        "ranges": [
+          [
+            1,
+            13
+          ]
+        ],
+        "original_path": ".github/release/source-pins.env",
+        "commit": "cb762a313abbe6da03ae0bf041f07486c4ed4df9",
+        "notes": "patch header; patch character offsets [0,646)",
+        "lines": 13,
+        "bytes": 646,
+        "start": 0,
+        "end": 646,
+        "original": "[private-run]/prep/originals/01301.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/01302-000.patch",
+        "ranges": [
+          [
+            1,
+            78
+          ]
+        ],
+        "original_path": ".github/workflows/sign-sums.yml",
+        "commit": "cb762a313abbe6da03ae0bf041f07486c4ed4df9",
+        "notes": "patch header; patch character offsets [0,4295)",
+        "lines": 78,
+        "bytes": 4307,
+        "start": 0,
+        "end": 4295,
+        "original": "[private-run]/prep/originals/01302.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/01307-000.patch",
+        "ranges": [
+          [
+            1,
+            13
+          ]
+        ],
+        "original_path": "crates/farhelm-helm/build.rs",
+        "commit": "cb762a313abbe6da03ae0bf041f07486c4ed4df9",
+        "notes": "patch header; patch character offsets [0,682)",
+        "lines": 13,
+        "bytes": 684,
+        "start": 0,
+        "end": 682,
+        "original": "[private-run]/prep/originals/01307.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/01328-000.patch",
+        "ranges": [
+          [
+            1,
+            34
+          ]
+        ],
+        "original_path": "dist-workspace.toml",
+        "commit": "cb762a313abbe6da03ae0bf041f07486c4ed4df9",
+        "notes": "patch header; patch character offsets [0,1929)",
+        "lines": 34,
+        "bytes": 1937,
+        "start": 0,
+        "end": 1929,
+        "original": "[private-run]/prep/originals/01328.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/01336-000.patch",
+        "ranges": [
+          [
+            1,
+            50
+          ]
+        ],
+        "original_path": "scripts/build-private-tmux.sh",
+        "commit": "cb762a313abbe6da03ae0bf041f07486c4ed4df9",
+        "notes": "patch header; patch character offsets [0,2982)",
+        "lines": 50,
+        "bytes": 2994,
+        "start": 0,
+        "end": 2982,
+        "original": "[private-run]/prep/originals/01336.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/01337-000.patch",
+        "ranges": [
+          [
+            1,
+            74
+          ]
+        ],
+        "original_path": "scripts/build-tmux-assets.sh",
+        "commit": "cb762a313abbe6da03ae0bf041f07486c4ed4df9",
+        "notes": "patch header; patch character offsets [0,3640)",
+        "lines": 74,
+        "bytes": 3650,
+        "start": 0,
+        "end": 3640,
+        "original": "[private-run]/prep/originals/01337.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/01338-000.patch",
+        "ranges": [
+          [
+            1,
+            25
+          ]
+        ],
+        "original_path": "scripts/check-static-elf.sh",
+        "commit": "cb762a313abbe6da03ae0bf041f07486c4ed4df9",
+        "notes": "patch header; patch character offsets [0,1214)",
+        "lines": 25,
+        "bytes": 1214,
+        "start": 0,
+        "end": 1214,
+        "original": "[private-run]/prep/originals/01338.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/01386-000.patch",
+        "ranges": [
+          [
+            1,
+            208
+          ]
+        ],
+        "original_path": ".github/dist-build-setup.yml",
+        "commit": "d751ff1633bb479c7bf53920f2e4ea4ba932a1c2",
+        "notes": "patch header; patch character offsets [0,12501)",
+        "lines": 208,
+        "bytes": 12505,
+        "start": 0,
+        "end": 12501,
+        "original": "[private-run]/prep/originals/01386.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/01387-000.patch",
+        "ranges": [
+          [
+            1,
+            15
+          ]
+        ],
+        "original_path": ".github/release/source-pins.env",
+        "commit": "d751ff1633bb479c7bf53920f2e4ea4ba932a1c2",
+        "notes": "patch header; patch character offsets [0,689)",
+        "lines": 15,
+        "bytes": 689,
+        "start": 0,
+        "end": 689,
+        "original": "[private-run]/prep/originals/01387.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/01388-000.patch",
+        "ranges": [
+          [
+            1,
+            8
+          ]
+        ],
+        "original_path": ".github/release/ziglang-requirements.txt",
+        "commit": "d751ff1633bb479c7bf53920f2e4ea4ba932a1c2",
+        "notes": "patch header; patch character offsets [0,327)",
+        "lines": 8,
+        "bytes": 327,
+        "start": 0,
+        "end": 327,
+        "original": "[private-run]/prep/originals/01388.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/01389-000.patch",
+        "ranges": [
+          [
+            1,
+            85
+          ]
+        ],
+        "original_path": ".github/workflows/ci.yml",
+        "commit": "d751ff1633bb479c7bf53920f2e4ea4ba932a1c2",
+        "notes": "patch header; patch character offsets [0,5889)",
+        "lines": 85,
+        "bytes": 5889,
+        "start": 0,
+        "end": 5889,
+        "original": "[private-run]/prep/originals/01389.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/01390-000.patch",
+        "ranges": [
+          [
+            1,
+            134
+          ]
+        ],
+        "original_path": ".github/workflows/release.yml",
+        "commit": "d751ff1633bb479c7bf53920f2e4ea4ba932a1c2",
+        "notes": "patch header; patch character offsets [0,8969)",
+        "lines": 134,
+        "bytes": 8969,
+        "start": 0,
+        "end": 8969,
+        "original": "[private-run]/prep/originals/01390.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/01406-000.patch",
+        "ranges": [
+          [
+            1,
+            13
+          ]
+        ],
+        "original_path": "dist-workspace.toml",
+        "commit": "d751ff1633bb479c7bf53920f2e4ea4ba932a1c2",
+        "notes": "patch header; patch character offsets [0,640)",
+        "lines": 13,
+        "bytes": 640,
+        "start": 0,
+        "end": 640,
+        "original": "[private-run]/prep/originals/01406.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/01413-000.patch",
+        "ranges": [
+          [
+            1,
+            91
+          ]
+        ],
+        "original_path": "scripts/build-pinned-tmux-ci.sh",
+        "commit": "d751ff1633bb479c7bf53920f2e4ea4ba932a1c2",
+        "notes": "patch header; patch character offsets [0,4039)",
+        "lines": 91,
+        "bytes": 4051,
+        "start": 0,
+        "end": 4039,
+        "original": "[private-run]/prep/originals/01413.patch"
+      }
+    ],
+    "lines": 1090,
+    "bytes": 62967
+  },
+  "records": [
+    {
+      "key": "g062/c1",
+      "owner": "g062",
+      "id": "c1",
+      "domain": "release-build-payloads",
+      "purpose": "release-build-payloads: .github/dist-build-setup.yml, .github/workflows/release.yml, scripts/build-pinned-tmux-ci.sh, .github/release/source-pins.env, .github/workflows/sign-sums.yml, crates/farhelm-helm/build.rs, dist-workspace.toml, scripts/build-private-tmux.sh, scripts/build-tmux-assets.sh, scripts/check-static-elf.sh, .github/release/ziglang-requirements.txt, .github/workflows/ci.yml; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 1,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c1",
+            "state": "open",
+            "summary": "Deleted pinned-tmux tooling has no remaining executable callers",
+            "location": "scripts/build-pinned-tmux-ci.sh (deleted)",
+            "detail": "Reviewed commit: d751ff1633bb479c7bf53920f2e4ea4ba932a1c2. TLDR: considered whether deleting source pins, the zig wheel requirement and the pinned tmux builder would break release or CI runs. Source check: git grep over .github, scripts and crates for venv, build-private-tmux, build-pinned-tmux, source-pins, ziglang-requirements, build-tmux-assets and tmux-preflight found only ci.yml:221-222 installing python3-venv and creating its separate test-sleep environment; no remaining executable callers of the deleted tooling. The release setup's removed venv installation therefore has no identified remaining consumer in those source trees. Suggested bucket: other (maintainer build tooling). Confidence: confirmed source-only refutation of stale-caller concern; no execution performed. proposed_drop: no remaining callers or requirement found, rather than specification acceptance. possible_cover: none. Could-be-highest: no established security or loss-of-work route. Caveat: this check addresses dangling consumers, not whether replacing pinned tmux with distribution tmux preserves intended test coverage; that contract is reviewed separately."
+          }
+        },
+        {
+          "line": 13,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c1",
+            "state": "open",
+            "summary": "Builder deletion is independent of the remaining conditional compatibility fixtures",
+            "location": "scripts/build-pinned-tmux-ci.sh (deleted)",
+            "detail": "Reviewed commit: d751ff1633bb479c7bf53920f2e4ea4ba932a1c2. TLDR: reconciled the original suspected broken build/test dependency with g063/c1. Both source analyses find the deleted builder's consumers removed together; the remaining compatibility tests consume the machine's tmux, not this builder's output. No defect is proposed from this deletion. Original consequence preserved: a release or CI command could fail after source pins, zig requirements and pinned builder disappear. Prior c1 searches covered .github/scripts/crates and additional e2e/packaging/website script paths, finding no retired-tool executable reference; ci.yml:221-222 retains its own python3-venv installation for its independent test-sleep environment. g063/c1 independently checks the private-builder caller at the parent (build-pinned-tmux-ci.sh:75), coordinated deletion of that caller, archive packer/worker changes and absence of current payload/checksum consumers. This turn's c4 source analysis narrows the interface conclusion: tmux.rs:218-239 and old_terminals.rs:246-250 intentionally use machine tmux with visible skips when its prerequisites are absent; the release setup :157-166 installs the distro package, and :214-228 prepares/exports the user bus before tests. The recorder preserves those non-FARHELM environment variables (:1166-1174) and removes the old --tmux parser/check alongside the caller changes. The compatibility tests can still skip on manager failure or, for the stock-tmux case, absent systemd linkage; this refutes no caller analysis and does not establish that substrates actually executed. Production has no tmux payload dependency after the preceding cb762a313abbe6da03ae0bf041f07486c4ed4df9 removal, independently reflected by the four-archive Rust/workflow inventory recorded under c3. c6 concerns an earlier commit while the pinned builder and stream tests still existed, so it cannot be used to claim those retired tests survive d751. Suggested bucket: other for the hypothetical maintainer command failure. Confidence: confirmed source dependency refutation, no observed execution. proposed_drop: no direct or indirect remaining builder/payload consumer established; proposed only, not an accepted disposition. possible_cover: none; g063/c1 is related source review corroboration, not queue coverage. Could-be-highest: no established security or user-work-loss route from this deletion. Caveat: independence of retired build tooling does not certify all compatibility fixtures or external package features; c4 states their exact limits. No unresolved dependency premise remains for c1. No tests, builds or reproductions performed."
+          }
+        }
+      ],
+      "latest": {
+        "line": 13,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c1",
+          "state": "open",
+          "summary": "Builder deletion is independent of the remaining conditional compatibility fixtures",
+          "location": "scripts/build-pinned-tmux-ci.sh (deleted)",
+          "detail": "Reviewed commit: d751ff1633bb479c7bf53920f2e4ea4ba932a1c2. TLDR: reconciled the original suspected broken build/test dependency with g063/c1. Both source analyses find the deleted builder's consumers removed together; the remaining compatibility tests consume the machine's tmux, not this builder's output. No defect is proposed from this deletion. Original consequence preserved: a release or CI command could fail after source pins, zig requirements and pinned builder disappear. Prior c1 searches covered .github/scripts/crates and additional e2e/packaging/website script paths, finding no retired-tool executable reference; ci.yml:221-222 retains its own python3-venv installation for its independent test-sleep environment. g063/c1 independently checks the private-builder caller at the parent (build-pinned-tmux-ci.sh:75), coordinated deletion of that caller, archive packer/worker changes and absence of current payload/checksum consumers. This turn's c4 source analysis narrows the interface conclusion: tmux.rs:218-239 and old_terminals.rs:246-250 intentionally use machine tmux with visible skips when its prerequisites are absent; the release setup :157-166 installs the distro package, and :214-228 prepares/exports the user bus before tests. The recorder preserves those non-FARHELM environment variables (:1166-1174) and removes the old --tmux parser/check alongside the caller changes. The compatibility tests can still skip on manager failure or, for the stock-tmux case, absent systemd linkage; this refutes no caller analysis and does not establish that substrates actually executed. Production has no tmux payload dependency after the preceding cb762a313abbe6da03ae0bf041f07486c4ed4df9 removal, independently reflected by the four-archive Rust/workflow inventory recorded under c3. c6 concerns an earlier commit while the pinned builder and stream tests still existed, so it cannot be used to claim those retired tests survive d751. Suggested bucket: other for the hypothetical maintainer command failure. Confidence: confirmed source dependency refutation, no observed execution. proposed_drop: no direct or indirect remaining builder/payload consumer established; proposed only, not an accepted disposition. possible_cover: none; g063/c1 is related source review corroboration, not queue coverage. Could-be-highest: no established security or user-work-loss route from this deletion. Caveat: independence of retired build tooling does not certify all compatibility fixtures or external package features; c4 states their exact limits. No unresolved dependency premise remains for c1. No tests, builds or reproductions performed."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g062/findings.jsonl",
+        "id": "c1",
+        "line": 13,
+        "disposition": "excluded",
+        "group": "deleted-pinned-tmux-builders-dangling-consumers",
+        "reason": "Parent explicitly accepted named refuted proposal from claims-039 after inspecting it. Historical executable-source searches find no remaining retired-builder/pin consumer after coordinated deletion. Remaining compatibility fixtures use machine tmux and do not depend on the deleted private build. Dismiss the named broken-dependency suspicion on explicit reviewed-revision searches and coordinated caller removal. Do not convert that into a test-coverage/runtime pass claim. Checked source/results: [\"At d751ff1633bb479c7bf53920f2e4ea4ba932a1c2, git grep over .github, scripts, crates, e2e, packaging and website/scripts for build-private-tmux, build-pinned-tmux, source-pins.env, ziglang-requirements, build-tmux-assets and tmux-preflight finds no caller. python3-venv remains only in ci.yml:221 for its independent checker setup.\",\"Same revision: .github/dist-build-setup.yml:157-166 installs distro tmux; 214-232 prepares rootless Podman/user bus. record-test-run.py:1166-1174 retains non-FARHELM environment values. New release recorder commands at release.yml:225-243 have no --tmux or .ci-tmux dependency.\",\"farhelm-teststate/src/tmux.rs:218-239 resolves machine tmux or prints SKIPPED; farhelm/tests/e2e/old_terminals.rs:244-250 visibly skips if tmux or scope manager is missing. These are the full paths behind the abbreviated latest-record citations.\",\"The supplied g063/c1 is corroboration, not an inspected named alias in this batch. The earlier c3/647f022 driver-selection argument cannot establish that retired drivers survive d751. No tests/builds executed and no claim that every compatibility substrate actually ran.\"] Current coverage/results: [\"Both current specs searched for tmux and release payload requirements; current provisioning contract names only farhelm payloads. No accepted rule requires the deleted test builder.\",\"TODO Planned empty; no matching BUGS or active ledger decision. tmux-drop-from-tooling plan's removal scope is landed per plans/REPORTS.md:31, not an unlanded prospective fix. No other unlanded plan repairs a dangling consumer.\",\"Full INDEX.md and pinned-builder/dependency searches found no exact queue item. No filter used; refutation is source dependency analysis.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Deleting source pins, zig requirements and pinned/private tmux builders might break release or CI commands. Latest record refutes only dangling direct/indirect consumers and preserves compatibility skip limits.\"; \"No remaining executable dependency is established. This does not certify external distribution-package features, actual user-manager availability or fixture execution.\"."
+      },
+      "accepted_parent_decision": {
+        "key": "g062/c1",
+        "line": 13,
+        "disposition": "excluded",
+        "group": "deleted-pinned-tmux-builders-dangling-consumers",
+        "bucket": "other",
+        "recording": "refuted",
+        "queue_target_candidate": null,
+        "needs_independent_drop_check": false,
+        "reason": "Parent explicitly accepted named refuted proposal from claims-039 after inspecting it. Historical executable-source searches find no remaining retired-builder/pin consumer after coordinated deletion. Remaining compatibility fixtures use machine tmux and do not depend on the deleted private build. Dismiss the named broken-dependency suspicion on explicit reviewed-revision searches and coordinated caller removal. Do not convert that into a test-coverage/runtime pass claim. Checked source/results: [\"At d751ff1633bb479c7bf53920f2e4ea4ba932a1c2, git grep over .github, scripts, crates, e2e, packaging and website/scripts for build-private-tmux, build-pinned-tmux, source-pins.env, ziglang-requirements, build-tmux-assets and tmux-preflight finds no caller. python3-venv remains only in ci.yml:221 for its independent checker setup.\",\"Same revision: .github/dist-build-setup.yml:157-166 installs distro tmux; 214-232 prepares rootless Podman/user bus. record-test-run.py:1166-1174 retains non-FARHELM environment values. New release recorder commands at release.yml:225-243 have no --tmux or .ci-tmux dependency.\",\"farhelm-teststate/src/tmux.rs:218-239 resolves machine tmux or prints SKIPPED; farhelm/tests/e2e/old_terminals.rs:244-250 visibly skips if tmux or scope manager is missing. These are the full paths behind the abbreviated latest-record citations.\",\"The supplied g063/c1 is corroboration, not an inspected named alias in this batch. The earlier c3/647f022 driver-selection argument cannot establish that retired drivers survive d751. No tests/builds executed and no claim that every compatibility substrate actually ran.\"] Current coverage/results: [\"Both current specs searched for tmux and release payload requirements; current provisioning contract names only farhelm payloads. No accepted rule requires the deleted test builder.\",\"TODO Planned empty; no matching BUGS or active ledger decision. tmux-drop-from-tooling plan's removal scope is landed per plans/REPORTS.md:31, not an unlanded prospective fix. No other unlanded plan repairs a dangling consumer.\",\"Full INDEX.md and pinned-builder/dependency searches found no exact queue item. No filter used; refutation is source dependency analysis.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Deleting source pins, zig requirements and pinned/private tmux builders might break release or CI commands. Latest record refutes only dangling direct/indirect consumers and preserves compatibility skip limits.\"; \"No remaining executable dependency is established. This does not certify external distribution-package features, actual user-manager availability or fixture execution.\"."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-039",
+          "key": "g062/c1",
+          "latest_line": 13,
+          "recommendation": "refuted",
+          "bucket": "other",
+          "underlying_key": "deleted-pinned-tmux-builders-dangling-consumers",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "Historical executable-source searches find no remaining retired-builder/pin consumer after coordinated deletion. Remaining compatibility fixtures use machine tmux and do not depend on the deleted private build.",
+          "checks": [
+            "At d751ff1633bb479c7bf53920f2e4ea4ba932a1c2, git grep over .github, scripts, crates, e2e, packaging and website/scripts for build-private-tmux, build-pinned-tmux, source-pins.env, ziglang-requirements, build-tmux-assets and tmux-preflight finds no caller. python3-venv remains only in ci.yml:221 for its independent checker setup.",
+            "Same revision: .github/dist-build-setup.yml:157-166 installs distro tmux; 214-232 prepares rootless Podman/user bus. record-test-run.py:1166-1174 retains non-FARHELM environment values. New release recorder commands at release.yml:225-243 have no --tmux or .ci-tmux dependency.",
+            "farhelm-teststate/src/tmux.rs:218-239 resolves machine tmux or prints SKIPPED; farhelm/tests/e2e/old_terminals.rs:244-250 visibly skips if tmux or scope manager is missing. These are the full paths behind the abbreviated latest-record citations.",
+            "The supplied g063/c1 is corroboration, not an inspected named alias in this batch. The earlier c3/647f022 driver-selection argument cannot establish that retired drivers survive d751. No tests/builds executed and no claim that every compatibility substrate actually ran."
+          ],
+          "coverage_checked": [
+            "Both current specs searched for tmux and release payload requirements; current provisioning contract names only farhelm payloads. No accepted rule requires the deleted test builder.",
+            "TODO Planned empty; no matching BUGS or active ledger decision. tmux-drop-from-tooling plan's removal scope is landed per plans/REPORTS.md:31, not an unlanded prospective fix. No other unlanded plan repairs a dangling consumer.",
+            "Full INDEX.md and pinned-builder/dependency searches found no exact queue item. No filter used; refutation is source dependency analysis."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": "No remaining executable dependency is established. This does not certify external distribution-package features, actual user-manager availability or fixture execution.",
+          "original_stronger_consequence": "Deleting source pins, zig requirements and pinned/private tmux builders might break release or CI commands. Latest record refutes only dangling direct/indirect consumers and preserves compatibility skip limits.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Dismiss the named broken-dependency suspicion on explicit reviewed-revision searches and coordinated caller removal. Do not convert that into a test-coverage/runtime pass claim."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "deleted-pinned-tmux-builders-dangling-consumers",
+        "destination": null
+      }
+    },
+    {
+      "key": "g062/c2",
+      "owner": "g062",
+      "id": "c2",
+      "domain": "release-build-payloads",
+      "purpose": "release-build-payloads: .github/dist-build-setup.yml, .github/workflows/release.yml, scripts/build-pinned-tmux-ci.sh, .github/release/source-pins.env, .github/workflows/sign-sums.yml, crates/farhelm-helm/build.rs, dist-workspace.toml, scripts/build-private-tmux.sh, scripts/build-tmux-assets.sh, scripts/check-static-elf.sh, .github/release/ziglang-requirements.txt, .github/workflows/ci.yml; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 2,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c2",
+            "state": "open",
+            "summary": "Initial Podman setup change is present in generated release workflow",
+            "location": ".github/dist-build-setup.yml:218",
+            "detail": "Reviewed commit: 04d85f0c98a9b635709d00b056719a0baa7fd3fc. TLDR: considered whether changing the release setup template without regenerating the workflow left the release gate using an unpinned image or lacking musl-tools. Source refutation: .github/workflows/release.yml:204-213 at this same revision includes the new musl-tools install and exact ubuntu@sha256:fe81560990fae86dc4743202b2cb4d3df98d0bcf949173cecef15ce1127ef852 pull and run. git show --stat also identifies the generated workflow as changed in that commit. Suggested bucket: other, maintainer release tooling. Confidence: confirmed source-only refutation. proposed_drop: generated workflow contains the matching change, no template drift on this concern. possible_cover: none. Could-be-highest: no established security or loss-of-work consequence. Caveat: the brief assigns only this commit's template patch to this group; generated workflow was read as interface context, not counted as assigned evidence."
+          }
+        },
+        {
+          "line": 11,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c2",
+            "state": "open",
+            "summary": "Generated workflow preserves setup and recorder changes across the reviewed batches",
+            "location": ".github/workflows/release.yml:170",
+            "detail": "Reviewed commits: 04d85f0c98a9b635709d00b056719a0baa7fd3fc and d751ff1633bb479c7bf53920f2e4ea4ba932a1c2; intermediate assigned patches at d9b5501ba55c3008cebbe2cf8e4fe3eeaff630b2,647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513,17a3fe858c5511a24b7403af15dd41c93bf69fd7,500548b9253b07a26fd03119679184b69544e31d. TLDR: the original suspected consequence was a release gate missing its new dependencies or using stale commands because only its source template changed. Source parity remains established for the assigned operational edits. Initial event checked 04d85's generated workflow :204-213 contains musl-tools and the exact pinned Ubuntu image. Delivered paired patches establish d9b550's same user-bus preparation/export in template and generated workflow, 647f022's removed focused shutdown step in both, 17a3fe's removed artifact names in both, and 500548's comment-only correction in both. This turn directly checked d751ff's generated workflow :170-172 installs distro tmux, :201-224 has the unchanged exact manager/bus preparation, GITHUB_ENV export and pinned Podman image, :225-243 runs the new recorder commands without .ci-tmux or --tmux, and :349-358 retains the correct smoke artifact names. These agree with template :157-166,207-273 and its collector. cb762a's template edits concern comments only, so no executable regeneration premise arises from that patch. Suggested bucket: other (hypothetical maintainer release break). Confidence: confirmed source-level parity of inspected changes; no generator/build/runtime execution. proposed_drop: no operational template/workflow mismatch found; this remains proposed, not an accepted disposition. possible_cover: none. Could-be-highest: no established security or user-work-loss consequence. Caveat: parity does not prove that future external packages, buses or test substrates execute successfully; c4 retains that distinction."
+          }
+        }
+      ],
+      "latest": {
+        "line": 11,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c2",
+          "state": "open",
+          "summary": "Generated workflow preserves setup and recorder changes across the reviewed batches",
+          "location": ".github/workflows/release.yml:170",
+          "detail": "Reviewed commits: 04d85f0c98a9b635709d00b056719a0baa7fd3fc and d751ff1633bb479c7bf53920f2e4ea4ba932a1c2; intermediate assigned patches at d9b5501ba55c3008cebbe2cf8e4fe3eeaff630b2,647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513,17a3fe858c5511a24b7403af15dd41c93bf69fd7,500548b9253b07a26fd03119679184b69544e31d. TLDR: the original suspected consequence was a release gate missing its new dependencies or using stale commands because only its source template changed. Source parity remains established for the assigned operational edits. Initial event checked 04d85's generated workflow :204-213 contains musl-tools and the exact pinned Ubuntu image. Delivered paired patches establish d9b550's same user-bus preparation/export in template and generated workflow, 647f022's removed focused shutdown step in both, 17a3fe's removed artifact names in both, and 500548's comment-only correction in both. This turn directly checked d751ff's generated workflow :170-172 installs distro tmux, :201-224 has the unchanged exact manager/bus preparation, GITHUB_ENV export and pinned Podman image, :225-243 runs the new recorder commands without .ci-tmux or --tmux, and :349-358 retains the correct smoke artifact names. These agree with template :157-166,207-273 and its collector. cb762a's template edits concern comments only, so no executable regeneration premise arises from that patch. Suggested bucket: other (hypothetical maintainer release break). Confidence: confirmed source-level parity of inspected changes; no generator/build/runtime execution. proposed_drop: no operational template/workflow mismatch found; this remains proposed, not an accepted disposition. possible_cover: none. Could-be-highest: no established security or user-work-loss consequence. Caveat: parity does not prove that future external packages, buses or test substrates execute successfully; c4 retains that distinction."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g062/findings.jsonl",
+        "id": "c2",
+        "line": 11,
+        "disposition": "excluded",
+        "group": "release-setup-template-generated-workflow-operational-drift",
+        "reason": "Parent explicitly accepted named refuted proposal from claims-039 after inspecting it. The inspected operational setup changes are present in the generated workflow at their reviewed revisions. The suspected template-only stale command/dependency route is refuted. Dismiss only operational template/generated-workflow divergence for the named changes. Preserve external-substrate and unrun-generator caveats. Checked source/results: [\"04d85f0c98a9b635709d00b056719a0baa7fd3fc:.github/workflows/release.yml:204-213 installs musl-tools and pulls/runs the pinned Ubuntu digest matching the template concern.\",\"Paired historical patches checked for d9b5501ba55c3008cebbe2cf8e4fe3eeaff630b2 (bus preparation/export), 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513 (focused step removal), 17a3fe858c5511a24b7403af15dd41c93bf69fd7 (retired artifact names) and 500548b9253b07a26fd03119679184b69544e31d (comment correction). Each changes both template and generated counterpart consistently for this claim.\",\"d751ff1633bb479c7bf53920f2e4ea4ba932a1c2:release.yml:170-172,201-243,349-358 agrees with dist-build-setup.yml:157-166,207-273 on distro tmux, prerequisites, bus export, pinned image and recorder selection/artifact collection. No generator or runtime execution was performed.\"] Current coverage/results: [\"Both specs searched for release setup, Podman prerequisites and tmux payload/test requirements; no rule accepts operational generated-workflow drift. The claim is refuted by parity, not spec acceptance.\",\"TODO Planned empty; BUGS and active TRIAGE_OUTCOMES searches found no corresponding workflow-parity decision. Relevant Podman/tmux plans are landed, and no unlanded plan supplies a matching drift fix.\",\"Full INDEX.md and release/workflow/pinned-image searches found no exact item. No filter used.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Release gates might miss dependencies, run an unpinned image or use stale commands because only the source template changed. Initial and latest records propose source refutation; no runtime success was observed.\"; \"Parity does not prove external packages remain available or test prerequisites actually execute. Those are outside the exact template-only omission suspicion.\"."
+      },
+      "accepted_parent_decision": {
+        "key": "g062/c2",
+        "line": 11,
+        "disposition": "excluded",
+        "group": "release-setup-template-generated-workflow-operational-drift",
+        "bucket": "other",
+        "recording": "refuted",
+        "queue_target_candidate": null,
+        "needs_independent_drop_check": false,
+        "reason": "Parent explicitly accepted named refuted proposal from claims-039 after inspecting it. The inspected operational setup changes are present in the generated workflow at their reviewed revisions. The suspected template-only stale command/dependency route is refuted. Dismiss only operational template/generated-workflow divergence for the named changes. Preserve external-substrate and unrun-generator caveats. Checked source/results: [\"04d85f0c98a9b635709d00b056719a0baa7fd3fc:.github/workflows/release.yml:204-213 installs musl-tools and pulls/runs the pinned Ubuntu digest matching the template concern.\",\"Paired historical patches checked for d9b5501ba55c3008cebbe2cf8e4fe3eeaff630b2 (bus preparation/export), 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513 (focused step removal), 17a3fe858c5511a24b7403af15dd41c93bf69fd7 (retired artifact names) and 500548b9253b07a26fd03119679184b69544e31d (comment correction). Each changes both template and generated counterpart consistently for this claim.\",\"d751ff1633bb479c7bf53920f2e4ea4ba932a1c2:release.yml:170-172,201-243,349-358 agrees with dist-build-setup.yml:157-166,207-273 on distro tmux, prerequisites, bus export, pinned image and recorder selection/artifact collection. No generator or runtime execution was performed.\"] Current coverage/results: [\"Both specs searched for release setup, Podman prerequisites and tmux payload/test requirements; no rule accepts operational generated-workflow drift. The claim is refuted by parity, not spec acceptance.\",\"TODO Planned empty; BUGS and active TRIAGE_OUTCOMES searches found no corresponding workflow-parity decision. Relevant Podman/tmux plans are landed, and no unlanded plan supplies a matching drift fix.\",\"Full INDEX.md and release/workflow/pinned-image searches found no exact item. No filter used.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Release gates might miss dependencies, run an unpinned image or use stale commands because only the source template changed. Initial and latest records propose source refutation; no runtime success was observed.\"; \"Parity does not prove external packages remain available or test prerequisites actually execute. Those are outside the exact template-only omission suspicion.\"."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-039",
+          "key": "g062/c2",
+          "latest_line": 11,
+          "recommendation": "refuted",
+          "bucket": "other",
+          "underlying_key": "release-setup-template-generated-workflow-operational-drift",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The inspected operational setup changes are present in the generated workflow at their reviewed revisions. The suspected template-only stale command/dependency route is refuted.",
+          "checks": [
+            "04d85f0c98a9b635709d00b056719a0baa7fd3fc:.github/workflows/release.yml:204-213 installs musl-tools and pulls/runs the pinned Ubuntu digest matching the template concern.",
+            "Paired historical patches checked for d9b5501ba55c3008cebbe2cf8e4fe3eeaff630b2 (bus preparation/export), 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513 (focused step removal), 17a3fe858c5511a24b7403af15dd41c93bf69fd7 (retired artifact names) and 500548b9253b07a26fd03119679184b69544e31d (comment correction). Each changes both template and generated counterpart consistently for this claim.",
+            "d751ff1633bb479c7bf53920f2e4ea4ba932a1c2:release.yml:170-172,201-243,349-358 agrees with dist-build-setup.yml:157-166,207-273 on distro tmux, prerequisites, bus export, pinned image and recorder selection/artifact collection. No generator or runtime execution was performed."
+          ],
+          "coverage_checked": [
+            "Both specs searched for release setup, Podman prerequisites and tmux payload/test requirements; no rule accepts operational generated-workflow drift. The claim is refuted by parity, not spec acceptance.",
+            "TODO Planned empty; BUGS and active TRIAGE_OUTCOMES searches found no corresponding workflow-parity decision. Relevant Podman/tmux plans are landed, and no unlanded plan supplies a matching drift fix.",
+            "Full INDEX.md and release/workflow/pinned-image searches found no exact item. No filter used."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": "Parity does not prove external packages remain available or test prerequisites actually execute. Those are outside the exact template-only omission suspicion.",
+          "original_stronger_consequence": "Release gates might miss dependencies, run an unpinned image or use stale commands because only the source template changed. Initial and latest records propose source refutation; no runtime success was observed.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Dismiss only operational template/generated-workflow divergence for the named changes. Preserve external-substrate and unrun-generator caveats."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "release-setup-template-generated-workflow-operational-drift",
+        "destination": null
+      }
+    },
+    {
+      "key": "g062/c3",
+      "owner": "g062",
+      "id": "c3",
+      "domain": "release-build-payloads",
+      "purpose": "release-build-payloads: .github/dist-build-setup.yml, .github/workflows/release.yml, scripts/build-pinned-tmux-ci.sh, .github/release/source-pins.env, .github/workflows/sign-sums.yml, crates/farhelm-helm/build.rs, dist-workspace.toml, scripts/build-private-tmux.sh, scripts/build-tmux-assets.sh, scripts/check-static-elf.sh, .github/release/ziglang-requirements.txt, .github/workflows/ci.yml; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 3,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c3",
+            "state": "open",
+            "summary": "Removing tmux payloads preserves the current release inventory contract",
+            "location": ".github/workflows/sign-sums.yml:60",
+            "detail": "Reviewed commit: cb762a313abbe6da03ae0bf041f07486c4ed4df9. TLDR: considered whether deleting both tmux release artifacts and their validation could leave provisioning unable to obtain required executables or publish unchecked payloads. Source refutation: crates/farhelm-helm/src/provisioning/assets.rs:43-64 lists precisely the same four archives as sign-sums.yml:60-64; assets.rs:88-108 derives checksum members from only those archives and documents name-based lookup rather than requiring an exact manifest list. crates/farhelm/Cargo.toml no longer declares tmux extra artifacts. sign-sums.yml:139-164 still requires the declared archives and per-archive metadata and rejects unexpected assets; :187-258 validates archive structure, architecture and static Linux linkage. Contract: SPEC_impl.md:8050-8052 says the farhelm binaries are 'the only program a host is sent'; :8074-8077 says SHA256SUMS lists 'the four payload archives' and install.sh, with tmux entries only in releases before this one. Suggested bucket: other for a hypothetical maintainer release mismatch, with no established user failure. Confidence: confirmed source-only refutation; no execution. proposed_drop: removed artifacts have no current producer or consumer requirement, matching the explicit quoted contract. possible_cover: none. Could-be-highest: no; no security bypass or loss-of-work route established. Caveat: no external signing/publication tooling was inspected; it is outside this checkout and the assigned review scope."
+          }
+        },
+        {
+          "line": 15,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c3",
+            "state": "open",
+            "summary": "Removing the bare-tmux copy does not bypass remaining archive/static validation",
+            "location": ".github/workflows/sign-sums.yml:245",
+            "detail": "Reviewed commit: cb762a313abbe6da03ae0bf041f07486c4ed4df9. TLDR: discovery pass checked a narrower validation-loop concern within the original suspected release-inventory mismatch: deleting the bare-tmux copy must not leave an empty or incompletely inspected binary set. Source analysis found no such bypass. Original hypothetical consequences remain provisioning missing a required executable or publishing an unchecked payload. The earlier c3 evidence retains the exact four-archive inventory match at assets.rs:43-64 and sign-sums.yml:60-64, name-based sums lookup, absence of tmux extra artifacts, and the explicit four-payload contract at SPEC_impl.md:8050-8052,8074-8077. New checks: sign-sums.yml:139-164 still requires every inventory member and its per-archive metadata before download; :173-179 downloads every exact declared name and tests the resulting file; :187-234 validates each tar archive and extracts its binary to binaries/<archive-prefix>. Its architecture dispatch :217-225 covers both Linux architectures and Darwin and fails unknown names. Thus removing only cp assets/tmux-*-unknown-linux-musl binaries/ leaves both Linux farhelm binaries produced by the preceding extraction loop. The remaining :248-258 loop derives the correct triple and calls the ELF checker; no nullglob setting turns a missing-match pattern into a silent empty iteration, and its target dispatch refuses an unrecognized pattern. scripts/check-static-elf.sh:51-97 separately fails a missing file, failed file/readelf inspections, wrong machine, NEEDED entries or INTERP. Its body is unchanged across the entire pinned range to this revision; the assigned edit only changes its caller documentation. Those new caller claims are source-supported at test-provision-centos.sh:269, build-podman-test-payloads.sh:38 and devbuild-mac.sh:507-511 (the last conditional on readelf availability). Full-range comparison against 6e423e30068b62c6cfa276c6d720ee35bb70387a confirms the validator's executable changes in this file are the tmux list/copy removals already described, rather than an unrelated newly introduced validator algorithm. Suggested bucket: other for the original hypothetical maintainer release mismatch; confidence: confirmed source-only validation/contract analysis, no executed artifact validation. proposed_drop: no omitted current producer/consumer or lost static/architecture check established, with source basis above; remains proposed, not parent-accepted. possible_cover: none; prohibited coverage sources not consulted. Could-be-highest: no established security bypass or user-work-loss route. Caveats: this does not certify actual release bytes or external signing/publication tooling; source confirms checks are present, not that an unrun release passed. No open lead remains for this candidate. No tests, builds or reproductions performed."
+          }
+        }
+      ],
+      "latest": {
+        "line": 15,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c3",
+          "state": "open",
+          "summary": "Removing the bare-tmux copy does not bypass remaining archive/static validation",
+          "location": ".github/workflows/sign-sums.yml:245",
+          "detail": "Reviewed commit: cb762a313abbe6da03ae0bf041f07486c4ed4df9. TLDR: discovery pass checked a narrower validation-loop concern within the original suspected release-inventory mismatch: deleting the bare-tmux copy must not leave an empty or incompletely inspected binary set. Source analysis found no such bypass. Original hypothetical consequences remain provisioning missing a required executable or publishing an unchecked payload. The earlier c3 evidence retains the exact four-archive inventory match at assets.rs:43-64 and sign-sums.yml:60-64, name-based sums lookup, absence of tmux extra artifacts, and the explicit four-payload contract at SPEC_impl.md:8050-8052,8074-8077. New checks: sign-sums.yml:139-164 still requires every inventory member and its per-archive metadata before download; :173-179 downloads every exact declared name and tests the resulting file; :187-234 validates each tar archive and extracts its binary to binaries/<archive-prefix>. Its architecture dispatch :217-225 covers both Linux architectures and Darwin and fails unknown names. Thus removing only cp assets/tmux-*-unknown-linux-musl binaries/ leaves both Linux farhelm binaries produced by the preceding extraction loop. The remaining :248-258 loop derives the correct triple and calls the ELF checker; no nullglob setting turns a missing-match pattern into a silent empty iteration, and its target dispatch refuses an unrecognized pattern. scripts/check-static-elf.sh:51-97 separately fails a missing file, failed file/readelf inspections, wrong machine, NEEDED entries or INTERP. Its body is unchanged across the entire pinned range to this revision; the assigned edit only changes its caller documentation. Those new caller claims are source-supported at test-provision-centos.sh:269, build-podman-test-payloads.sh:38 and devbuild-mac.sh:507-511 (the last conditional on readelf availability). Full-range comparison against 6e423e30068b62c6cfa276c6d720ee35bb70387a confirms the validator's executable changes in this file are the tmux list/copy removals already described, rather than an unrelated newly introduced validator algorithm. Suggested bucket: other for the original hypothetical maintainer release mismatch; confidence: confirmed source-only validation/contract analysis, no executed artifact validation. proposed_drop: no omitted current producer/consumer or lost static/architecture check established, with source basis above; remains proposed, not parent-accepted. possible_cover: none; prohibited coverage sources not consulted. Could-be-highest: no established security bypass or user-work-loss route. Caveats: this does not certify actual release bytes or external signing/publication tooling; source confirms checks are present, not that an unrun release passed. No open lead remains for this candidate. No tests, builds or reproductions performed."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g062/findings.jsonl",
+        "id": "c3",
+        "line": 15,
+        "disposition": "under-investigation",
+        "group": "g062-c3",
+        "reason": "Record durably acknowledged; parent source/contract validation, cross-group synthesis, coverage/filter matching and any independent drop check remain pending. This preserves the claim and uncertainty without accepting, dropping or lowering it."
+      },
+      "accepted_parent_decision": null,
+      "returned_claim_checks": [
+        {
+          "batch": "claims-039",
+          "key": "g062/c3",
+          "latest_line": 15,
+          "recommendation": "refuted",
+          "bucket": "other",
+          "underlying_key": "removed-tmux-release-assets-required-consumer-or-static-check-gap",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The retired tmux artifacts are absent from both production inventory and the validator's declared set, while each remaining archive still produces a binary for architecture/static checks. The exact omitted-current-payload or bypass suspicion is source-refuted.",
+          "checks": [
+            "cb762a313abbe6da03ae0bf041f07486c4ed4df9:provisioning/assets.rs:43-64 declares the same four archives as sign-sums.yml:60-64. assets.rs:88-108 derives checksum names and documents name-based consumer lookup; Cargo.toml has no tmux extra-artifact entry.",
+            "Same revision: sign-sums.yml:139-164 requires every declared archive and metadata member and rejects extras; 173-179 downloads every exact name; 187-234 checks structure/architecture and extracts its binary; 248-258 still dispatches both Linux triples to check-static-elf.sh.",
+            "check-static-elf.sh:51-97 fails missing files, failed inspections, wrong architecture, dynamic dependencies or an interpreter. Removing the bare tmux copy does not empty the set of Linux farhelm binaries extracted by the preceding archive loop.",
+            "Current SPEC_impl.md:8038-8066 describes farhelm as the only host program and four archives plus install.sh in signed sums. The reviewed record cites the corresponding cb762a specification at 8050-8052,8074-8077. External signing/publication tooling was not inspected, and actual artifact bytes were not validated by execution."
+          ],
+          "coverage_checked": [
+            "Both current specifications searched for payloads, checksum lists, tmux and release inventory; SPEC_impl.md's provisioning contract explicitly names the four-archive set. This supports current requirements, not blanket acceptance of missing validation.",
+            "TODO Planned empty; no matching BUGS or active TRIAGE_OUTCOMES decision. tmux-drop-from-install.md release-payload scope is already landed per plans/REPORTS.md:30, and its external-publication caveat is not evidence of a remaining checkout consumer. No unlanded repair covers a separate gap.",
+            "Full INDEX.md and checksum/static-validator/payload-removal searches found no exact queued finding. No filter is used."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": "No required current payload or omitted remaining static/architecture check is established. External publication behavior and the contents of unrun release artifacts remain unverified.",
+          "original_stronger_consequence": "Removing tmux artifacts and their validation could leave provisioning without a needed executable or publish an unchecked payload. Latest record narrows and refutes the specific inventory/extraction-loop bypass concern while retaining external tooling and actual-byte caveats.",
+          "needs_independent_drop_check": true,
+          "proposed_basis": "Propose dismissing the exact inventory/static-validation omission on source parity and complete remaining extraction/check paths. Because the original unchecked-payload consequence can involve release integrity, submit this proposed refutation to the independent drop check; this consultation is not that check."
+        }
+      ],
+      "parent_proposals": [
+        {
+          "artifact": "parent-flagged-judgments-039.json",
+          "key": "g062/c3",
+          "proposal": "claim-checks/claims-039/result.json",
+          "parent_proposal": "source-refuted-current-release-payload-inventory-or-static-check-omission",
+          "final_independent_gate": "required-by-conservative-release-integrity-flag",
+          "reason": "Parent read full039. Production assets and signed-sums declared set agree on four archives; validator requires exact archive/metadata set, extracts each remaining binary and still applies architecture/static-ELF checks to both Linux triples. Removing bare tmux does not empty the extracted Linux set. No current required tmux consumer remains. Refute exact inventory/extraction-loop bypass, not external signing/publication tooling or actual unexecuted artifact bytes. Preserve unchecked payload/release integrity possibility for the fresh gate."
+        }
+      ],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": true,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "removed-tmux-release-assets-required-consumer-or-static-check-gap",
+        "destination": null
+      }
+    },
+    {
+      "key": "g062/c4",
+      "owner": "g062",
+      "id": "c4",
+      "domain": "release-build-payloads",
+      "purpose": "release-build-payloads: .github/dist-build-setup.yml, .github/workflows/release.yml, scripts/build-pinned-tmux-ci.sh, .github/release/source-pins.env, .github/workflows/sign-sums.yml, crates/farhelm-helm/build.rs, dist-workspace.toml, scripts/build-private-tmux.sh, scripts/build-tmux-assets.sh, scripts/check-static-elf.sh, .github/release/ziglang-requirements.txt, .github/workflows/ci.yml; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 4,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c4",
+            "state": "open",
+            "summary": "Distribution tmux and recorder arguments match the surviving test contracts",
+            "location": ".github/dist-build-setup.yml:157",
+            "detail": "Reviewed commit: d751ff1633bb479c7bf53920f2e4ea4ba932a1c2. TLDR: considered whether replacing pinned tmux and removing --tmux made the release gate unable to execute its remaining tests. Source refutation: crates/farhelm-teststate/src/tmux.rs:218-239 explicitly selects whatever tmux the machine has and requires a gate to install it; setup :157-166 installs distribution tmux. crates/farhelm/tests/e2e/session_lifecycle.rs:4222-4259 specifically tests /usr/bin/tmux and documents why distribution systemd pane migration is required; no pinned-version requirement is present. scripts/record-test-run.py:223-254 no longer accepts --tmux, so removing that option from both workflows is necessary. Suggested bucket: other (test tooling), confidence: confirmed source-only refutation; no runtime test run. proposed_drop: surviving test and recorder source contracts accept the replacement and updated arguments. possible_cover: none. Could-be-highest: no established security or user-work-loss route. Caveat: actual distribution tmux feature availability is substrate-dependent; the test's later explicit skip checks remain a separate premise from installation."
+          }
+        },
+        {
+          "line": 8,
+          "event": {
+            "version": 1,
+            "kind": "lead",
+            "id": "c4",
+            "state": "open",
+            "summary": "Check whether release preparation establishes compatibility tests' skip-sensitive premises",
+            "location": ".github/dist-build-setup.yml:157",
+            "detail": "Reviewed commit: d751ff1633bb479c7bf53920f2e4ea4ba932a1c2. TLDR: the original hypothetical consequence was that replacing pinned tmux or removing --tmux could prevent the release tests from exercising required behavior. Source now confirms that selecting the tests and installing tmux do not alone prove execution: old_terminals.rs:246-250 returns early without machine tmux or a probed scope manager; session_lifecycle.rs:4232-4244 also skips missing /usr/bin/tmux or scope support, and :4317-4324 returns SKIPPED when the running stock tmux has no libsystemd mapping. The first c4 event correctly limited its claim about feature availability but did not settle whether the gate supplies the scope and pane-migration premises. Checks made: reviewed these caller guards and the matching apt-get tmux replacement. Missing premise: whether the release preparation guarantees the scope probe's requirements and whether the test contract requires pane-migration support, or intentionally permits a distro build without that feature. Next: inspect the actual scope probe and release environment setup, recorder output handling, and relevant source contracts rather than infer runtime success from a selected nextest test. Suggested bucket: other (potential missing maintainer validation); confidence: investigation in progress, not a verified defect. proposed_drop: false pending these source checks. possible_cover: none. Could-be-highest: no established security or user loss-of-work route. No execution, builds or reproductions; exact external distribution linkage will not be claimed from package installation alone."
+          }
+        },
+        {
+          "line": 9,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c4",
+            "state": "open",
+            "summary": "Release setup supplies machine tmux and user bus; feature-dependent skips remain explicit",
+            "location": ".github/dist-build-setup.yml:157",
+            "detail": "Reviewed commit: d751ff1633bb479c7bf53920f2e4ea4ba932a1c2. TLDR: investigated the original suspected missing release-test substrate after replacing pinned tmux and retiring --tmux. The replacement supplies the machine executable and prepares the user manager, while some compatibility cases deliberately remain conditional. No new missing dependency or lost enforcement was established. This closes the c4 synthesis lead as a candidate, not an accepted drop. Details: setup :157-166 installs tmux; :214-228 installs dbus-user-session, enables lingering, starts user@<uid>, asserts its bus and user-manager response, runs a fresh transient scope, and exports XDG_RUNTIME_DIR/DBUS_SESSION_BUS_ADDRESS through GITHUB_ENV. The recorder's controlled_environment at scripts/record-test-run.py:1166-1174 only removes unrequested FARHELM_ variables, so these bus variables and PATH survive. old_terminals.rs:246-250 checks machine tmux and the real ScopeManager probe; harness.rs:2591-2603 intentionally emits SKIPPED and returns None if that probe fails. scope.rs:1305-1346,1478-1549 shows that probe is stronger than the setup's short true command: it creates a held scope, checks visibility, and checks teardown, with deadlines. Thus successful setup supports the needed substrate but does not guarantee that a later busy/unavailable manager passes; source cannot certify actual execution. session_lifecycle.rs:4232-4244 and :4317-4324 additionally skip absent /usr/bin/tmux or a stock server without libsystemd. A parent-to-commit diff confirms these same executable/scope/linkage guards existed before the replacement, and the stock test already deliberately selected /usr/bin/tmux rather than the pinned PATH binary. The removed recorder capture_tmux function compared the PATH executable's pinned version/hash and did not certify that stock binary's systemd linkage or the ScopeManager probe. Therefore removing --tmux required removes no enforcement of those specific conditional premises. The current parser no longer accepts --tmux, making its removal from the workflow necessary. setup :235-237 explicitly states 'Immediate success output retains runtime SKIPPED explanations: a test returning early is still a pass in JUnit, not measured substrate coverage.' No wrapper in these inspected paths converts the printed runtime SKIPPED line to a failure; the recorder's :1927-1938 console completeness option protects forwarding only when requested. Suggested bucket: other for the original hypothetical maintainer validation failure. Confidence: confirmed source-level dependency and selection analysis, not observed runtime coverage. proposed_drop: coordinated replacement matches the surviving test contracts and does not newly remove enforcement of the stock-tmux feature/scope premises. possible_cover: none. Could-be-highest: no established security or user-work-loss route. Material limits: the external distro package's actual libsystemd linkage and each future scope probe's success remain unknown without runtime evidence; they are not treated as passing evidence, nor as a new defect in these patches. No runtime tests, builds or reproductions performed."
+          }
+        }
+      ],
+      "latest": {
+        "line": 9,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c4",
+          "state": "open",
+          "summary": "Release setup supplies machine tmux and user bus; feature-dependent skips remain explicit",
+          "location": ".github/dist-build-setup.yml:157",
+          "detail": "Reviewed commit: d751ff1633bb479c7bf53920f2e4ea4ba932a1c2. TLDR: investigated the original suspected missing release-test substrate after replacing pinned tmux and retiring --tmux. The replacement supplies the machine executable and prepares the user manager, while some compatibility cases deliberately remain conditional. No new missing dependency or lost enforcement was established. This closes the c4 synthesis lead as a candidate, not an accepted drop. Details: setup :157-166 installs tmux; :214-228 installs dbus-user-session, enables lingering, starts user@<uid>, asserts its bus and user-manager response, runs a fresh transient scope, and exports XDG_RUNTIME_DIR/DBUS_SESSION_BUS_ADDRESS through GITHUB_ENV. The recorder's controlled_environment at scripts/record-test-run.py:1166-1174 only removes unrequested FARHELM_ variables, so these bus variables and PATH survive. old_terminals.rs:246-250 checks machine tmux and the real ScopeManager probe; harness.rs:2591-2603 intentionally emits SKIPPED and returns None if that probe fails. scope.rs:1305-1346,1478-1549 shows that probe is stronger than the setup's short true command: it creates a held scope, checks visibility, and checks teardown, with deadlines. Thus successful setup supports the needed substrate but does not guarantee that a later busy/unavailable manager passes; source cannot certify actual execution. session_lifecycle.rs:4232-4244 and :4317-4324 additionally skip absent /usr/bin/tmux or a stock server without libsystemd. A parent-to-commit diff confirms these same executable/scope/linkage guards existed before the replacement, and the stock test already deliberately selected /usr/bin/tmux rather than the pinned PATH binary. The removed recorder capture_tmux function compared the PATH executable's pinned version/hash and did not certify that stock binary's systemd linkage or the ScopeManager probe. Therefore removing --tmux required removes no enforcement of those specific conditional premises. The current parser no longer accepts --tmux, making its removal from the workflow necessary. setup :235-237 explicitly states 'Immediate success output retains runtime SKIPPED explanations: a test returning early is still a pass in JUnit, not measured substrate coverage.' No wrapper in these inspected paths converts the printed runtime SKIPPED line to a failure; the recorder's :1927-1938 console completeness option protects forwarding only when requested. Suggested bucket: other for the original hypothetical maintainer validation failure. Confidence: confirmed source-level dependency and selection analysis, not observed runtime coverage. proposed_drop: coordinated replacement matches the surviving test contracts and does not newly remove enforcement of the stock-tmux feature/scope premises. possible_cover: none. Could-be-highest: no established security or user-work-loss route. Material limits: the external distro package's actual libsystemd linkage and each future scope probe's success remain unknown without runtime evidence; they are not treated as passing evidence, nor as a new defect in these patches. No runtime tests, builds or reproductions performed."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g062/findings.jsonl",
+        "id": "c4",
+        "line": 9,
+        "disposition": "excluded",
+        "group": "release-machine-tmux-replacement-required-substrate",
+        "reason": "Parent explicitly accepted named refuted proposal from claims-040 after inspecting it. No missing release dependency or removed enforcement of the scope/linkage premises is established. The release installs machine tmux and prepares the user bus. Actual later execution remains conditional. One historical assertion in the latest record needs correction: the old-terminal tests' machine-tmux early-return guards were added by this commit, not present before it. Source refutation of the missing-dependency/lost-enforcement hypothesis, restricted to the replacement interface. Preserve explicit skip and runtime-evidence limits, and correct the claimed historical identity of old-terminal executable guards. Checked source/results: [\"At d751ff1633bb479c7bf53920f2e4ea4ba932a1c2, .github/dist-build-setup.yml:157-166 installs distribution tmux; :214-228 installs dbus-user-session, enables lingering, starts the user manager, checks its bus and a transient scope, and forwards the bus variables through GITHUB_ENV.\",\"At that revision, scripts/record-test-run.py:1166-1174 removes only unrequested FARHELM_ variables; PATH and the two bus variables survive.\",\"old_terminals.rs:246-250 checks machine tmux and the scope probe. The parent-to-commit diff shows the machine-tmux guard is NEW; the scope guard already existed. This corrects the latest record's claim that the same executable guards existed before replacement.\",\"session_lifecycle.rs:4232-4244 selects /usr/bin/tmux and skips missing scope support; :4317-4324 skips absent libsystemd mapping. Its parent-to-commit diff changes explanatory text, not these guards or executable selection.\",\"harness.rs:2591-2603 deliberately returns None with SKIPPED when the real scope probe fails. scope.rs:1305-1346,1478-1555 checks a held scope and its visibility, beyond the release setup's short true command. Setup success cannot certify every later probe.\",\"The parent recorder's capture_tmux at scripts/record-test-run.py:1181-1250 compares PATH tmux version/hash with .ci-tmux; it does not check the stock binary's libsystemd mapping or the scope probe. These specific guarantees were not lost with --tmux. No runtime test or package-linkage observation was made.\"] Current coverage/results: [\"Current SPEC.md:5257-5258 accepts no production tmux requirement; SPEC_impl.md, Ending the old private tmux server, describes binary-independent startup cleanup. Neither alone settles test coverage or certifies runtime substrate.\",\"TODO.md Planned is empty. The Mid term phase-3 cleanup entry at :225-232 concerns eventual removal of old-terminal handling, not a missing current gate dependency.\",\"plans/queue searched for machine/pinned tmux, skips, release gates and scope prerequisites. tmux-drop-from-tooling.md:37-60 explicitly directs machine tmux, visible skips and gate installation, but plans/REPORTS.md:31 says it already landed; it is context, not unlanded-plan coverage. Other matching plans concern different features or historical commands.\",\"BUGS.md contains only the unrelated SSH-transfer pipe-holder issue. Full INDEX.md and targeted queue searches found no exact release machine-tmux/scope/linkage claim. Active TRIAGE_OUTCOMES.md search found no exact decision. Archive not read.\",\"FILTER.md fully read; no filter is used. A possible lost validation premise is not wholly an affected-host hung-manager finding or rare diagnostic glitch.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Replacing pinned tmux or retiring --tmux could leave required compatibility behavior unexercised in the release gate. No security or user-work-loss route was stated or established.\"; \"Distribution tmux's actual linkage and a future test process's successful real scope probe remain unobserved. Those unknowns prevent claiming execution, but do not establish a dependency omitted by this change.\"."
+      },
+      "accepted_parent_decision": {
+        "key": "g062/c4",
+        "line": 9,
+        "disposition": "excluded",
+        "group": "release-machine-tmux-replacement-required-substrate",
+        "bucket": "other",
+        "recording": "refuted",
+        "queue_target_candidate": null,
+        "needs_independent_drop_check": false,
+        "reason": "Parent explicitly accepted named refuted proposal from claims-040 after inspecting it. No missing release dependency or removed enforcement of the scope/linkage premises is established. The release installs machine tmux and prepares the user bus. Actual later execution remains conditional. One historical assertion in the latest record needs correction: the old-terminal tests' machine-tmux early-return guards were added by this commit, not present before it. Source refutation of the missing-dependency/lost-enforcement hypothesis, restricted to the replacement interface. Preserve explicit skip and runtime-evidence limits, and correct the claimed historical identity of old-terminal executable guards. Checked source/results: [\"At d751ff1633bb479c7bf53920f2e4ea4ba932a1c2, .github/dist-build-setup.yml:157-166 installs distribution tmux; :214-228 installs dbus-user-session, enables lingering, starts the user manager, checks its bus and a transient scope, and forwards the bus variables through GITHUB_ENV.\",\"At that revision, scripts/record-test-run.py:1166-1174 removes only unrequested FARHELM_ variables; PATH and the two bus variables survive.\",\"old_terminals.rs:246-250 checks machine tmux and the scope probe. The parent-to-commit diff shows the machine-tmux guard is NEW; the scope guard already existed. This corrects the latest record's claim that the same executable guards existed before replacement.\",\"session_lifecycle.rs:4232-4244 selects /usr/bin/tmux and skips missing scope support; :4317-4324 skips absent libsystemd mapping. Its parent-to-commit diff changes explanatory text, not these guards or executable selection.\",\"harness.rs:2591-2603 deliberately returns None with SKIPPED when the real scope probe fails. scope.rs:1305-1346,1478-1555 checks a held scope and its visibility, beyond the release setup's short true command. Setup success cannot certify every later probe.\",\"The parent recorder's capture_tmux at scripts/record-test-run.py:1181-1250 compares PATH tmux version/hash with .ci-tmux; it does not check the stock binary's libsystemd mapping or the scope probe. These specific guarantees were not lost with --tmux. No runtime test or package-linkage observation was made.\"] Current coverage/results: [\"Current SPEC.md:5257-5258 accepts no production tmux requirement; SPEC_impl.md, Ending the old private tmux server, describes binary-independent startup cleanup. Neither alone settles test coverage or certifies runtime substrate.\",\"TODO.md Planned is empty. The Mid term phase-3 cleanup entry at :225-232 concerns eventual removal of old-terminal handling, not a missing current gate dependency.\",\"plans/queue searched for machine/pinned tmux, skips, release gates and scope prerequisites. tmux-drop-from-tooling.md:37-60 explicitly directs machine tmux, visible skips and gate installation, but plans/REPORTS.md:31 says it already landed; it is context, not unlanded-plan coverage. Other matching plans concern different features or historical commands.\",\"BUGS.md contains only the unrelated SSH-transfer pipe-holder issue. Full INDEX.md and targeted queue searches found no exact release machine-tmux/scope/linkage claim. Active TRIAGE_OUTCOMES.md search found no exact decision. Archive not read.\",\"FILTER.md fully read; no filter is used. A possible lost validation premise is not wholly an affected-host hung-manager finding or rare diagnostic glitch.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Replacing pinned tmux or retiring --tmux could leave required compatibility behavior unexercised in the release gate. No security or user-work-loss route was stated or established.\"; \"Distribution tmux's actual linkage and a future test process's successful real scope probe remain unobserved. Those unknowns prevent claiming execution, but do not establish a dependency omitted by this change.\"."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-040",
+          "key": "g062/c4",
+          "latest_line": 9,
+          "recommendation": "refuted",
+          "bucket": "other",
+          "underlying_key": "release-machine-tmux-replacement-required-substrate",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "No missing release dependency or removed enforcement of the scope/linkage premises is established. The release installs machine tmux and prepares the user bus. Actual later execution remains conditional. One historical assertion in the latest record needs correction: the old-terminal tests' machine-tmux early-return guards were added by this commit, not present before it.",
+          "checks": [
+            "At d751ff1633bb479c7bf53920f2e4ea4ba932a1c2, .github/dist-build-setup.yml:157-166 installs distribution tmux; :214-228 installs dbus-user-session, enables lingering, starts the user manager, checks its bus and a transient scope, and forwards the bus variables through GITHUB_ENV.",
+            "At that revision, scripts/record-test-run.py:1166-1174 removes only unrequested FARHELM_ variables; PATH and the two bus variables survive.",
+            "old_terminals.rs:246-250 checks machine tmux and the scope probe. The parent-to-commit diff shows the machine-tmux guard is NEW; the scope guard already existed. This corrects the latest record's claim that the same executable guards existed before replacement.",
+            "session_lifecycle.rs:4232-4244 selects /usr/bin/tmux and skips missing scope support; :4317-4324 skips absent libsystemd mapping. Its parent-to-commit diff changes explanatory text, not these guards or executable selection.",
+            "harness.rs:2591-2603 deliberately returns None with SKIPPED when the real scope probe fails. scope.rs:1305-1346,1478-1555 checks a held scope and its visibility, beyond the release setup's short true command. Setup success cannot certify every later probe.",
+            "The parent recorder's capture_tmux at scripts/record-test-run.py:1181-1250 compares PATH tmux version/hash with .ci-tmux; it does not check the stock binary's libsystemd mapping or the scope probe. These specific guarantees were not lost with --tmux. No runtime test or package-linkage observation was made."
+          ],
+          "coverage_checked": [
+            "Current SPEC.md:5257-5258 accepts no production tmux requirement; SPEC_impl.md, Ending the old private tmux server, describes binary-independent startup cleanup. Neither alone settles test coverage or certifies runtime substrate.",
+            "TODO.md Planned is empty. The Mid term phase-3 cleanup entry at :225-232 concerns eventual removal of old-terminal handling, not a missing current gate dependency.",
+            "plans/queue searched for machine/pinned tmux, skips, release gates and scope prerequisites. tmux-drop-from-tooling.md:37-60 explicitly directs machine tmux, visible skips and gate installation, but plans/REPORTS.md:31 says it already landed; it is context, not unlanded-plan coverage. Other matching plans concern different features or historical commands.",
+            "BUGS.md contains only the unrelated SSH-transfer pipe-holder issue. Full INDEX.md and targeted queue searches found no exact release machine-tmux/scope/linkage claim. Active TRIAGE_OUTCOMES.md search found no exact decision. Archive not read.",
+            "FILTER.md fully read; no filter is used. A possible lost validation premise is not wholly an affected-host hung-manager finding or rare diagnostic glitch."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": "Distribution tmux's actual linkage and a future test process's successful real scope probe remain unobserved. Those unknowns prevent claiming execution, but do not establish a dependency omitted by this change.",
+          "original_stronger_consequence": "Replacing pinned tmux or retiring --tmux could leave required compatibility behavior unexercised in the release gate. No security or user-work-loss route was stated or established.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Source refutation of the missing-dependency/lost-enforcement hypothesis, restricted to the replacement interface. Preserve explicit skip and runtime-evidence limits, and correct the claimed historical identity of old-terminal executable guards."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "release-machine-tmux-replacement-required-substrate",
+        "destination": null
+      }
+    },
+    {
+      "key": "g062/c5",
+      "owner": "g062",
+      "id": "c5",
+      "domain": "release-build-payloads",
+      "purpose": "release-build-payloads: .github/dist-build-setup.yml, .github/workflows/release.yml, scripts/build-pinned-tmux-ci.sh, .github/release/source-pins.env, .github/workflows/sign-sums.yml, crates/farhelm-helm/build.rs, dist-workspace.toml, scripts/build-private-tmux.sh, scripts/build-tmux-assets.sh, scripts/check-static-elf.sh, .github/release/ziglang-requirements.txt, .github/workflows/ci.yml; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 5,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c5",
+            "state": "open",
+            "summary": "Removed smoke evidence names no longer have producers",
+            "location": ".github/dist-build-setup.yml:556",
+            "detail": "Reviewed commit: 17a3fe858c5511a24b7403af15dd41c93bf69fd7. TLDR: considered whether removing the two tmux preflight stderr files from failure evidence hid diagnostics for checks still run by the desktop smoke. Source refutation: a revision-specific git grep across scripts, .github, crates/farhelm/tests and crates/farhelm-supervisor/tests finds neither tmux-preflight name nor belowfloor. The same-revision scripts/desktop-smoke.sh still produces pf-bogus-state.stderr at :718-723, which remains explicitly copied by both template and workflow. Its remaining tmux references concern legacy cleanup, liveness and a tool preflight, not the removed missing/below-floor scenarios. Suggested bucket: other (maintainer smoke diagnostics). Confidence: confirmed source-only refutation; no execution. proposed_drop: the removed diagnostic files are no longer generated. possible_cover: none. Could-be-highest: no established security or work-loss consequence. Caveat: this conclusion concerns evidence collection only, not independent correctness of smoke cleanup."
+          }
+        },
+        {
+          "line": 10,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c5",
+            "state": "open",
+            "summary": "Failure-artifact removal is coordinated with deletion of both producers",
+            "location": ".github/dist-build-setup.yml:556",
+            "detail": "Reviewed commit: 17a3fe858c5511a24b7403af15dd41c93bf69fd7. TLDR: revisited whether removing two smoke stderr files hides diagnostics for checks that still run. The same commit deletes both producers; no orphaned diagnostic collection requirement is established. Original suspected consequence remains lost maintainer failure diagnostics. This turn checked the parent-to-commit scripts/desktop-smoke.sh diff, rather than only the absence of names at the endpoint: the missing-tmux scenario's TMUX_PREFLIGHT_STDERR assignment to tmux-preflight-missing.stderr and its app redirection are deleted together; the below-floor scenario's TMUX_PREFLIGHT_BELOWFLOOR_STDERR assignment to tmux-preflight-belowfloor.stderr and its redirection are deleted together. The replacement bootstrap check retains BOGUS_STATE_STDERR pointing to pf-bogus-state.stderr at current script :718-723, and both template/workflow retain that name in the collector. The later d751ff1633bb479c7bf53920f2e4ea4ba932a1c2 generated workflow :349-358 still copies that stderr plus the allowed log/png/txt files, agreeing with the template. Earlier revision-specific grep found neither deleted filename nor belowfloor in the active source paths. Suggested bucket: other (maintainer diagnostics). Confidence: confirmed source-only producer/collector alignment, not an executed smoke. proposed_drop: deleted artifact names have no surviving producer and the replacement diagnostic remains collected; still proposed, not accepted. possible_cover: none. Could-be-highest: no established security or user-work-loss route. Caveat: this is the collection interface only, not a review of independent desktop bootstrap or cleanup correctness. No runtime tests, builds or reproductions performed."
+          }
+        }
+      ],
+      "latest": {
+        "line": 10,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c5",
+          "state": "open",
+          "summary": "Failure-artifact removal is coordinated with deletion of both producers",
+          "location": ".github/dist-build-setup.yml:556",
+          "detail": "Reviewed commit: 17a3fe858c5511a24b7403af15dd41c93bf69fd7. TLDR: revisited whether removing two smoke stderr files hides diagnostics for checks that still run. The same commit deletes both producers; no orphaned diagnostic collection requirement is established. Original suspected consequence remains lost maintainer failure diagnostics. This turn checked the parent-to-commit scripts/desktop-smoke.sh diff, rather than only the absence of names at the endpoint: the missing-tmux scenario's TMUX_PREFLIGHT_STDERR assignment to tmux-preflight-missing.stderr and its app redirection are deleted together; the below-floor scenario's TMUX_PREFLIGHT_BELOWFLOOR_STDERR assignment to tmux-preflight-belowfloor.stderr and its redirection are deleted together. The replacement bootstrap check retains BOGUS_STATE_STDERR pointing to pf-bogus-state.stderr at current script :718-723, and both template/workflow retain that name in the collector. The later d751ff1633bb479c7bf53920f2e4ea4ba932a1c2 generated workflow :349-358 still copies that stderr plus the allowed log/png/txt files, agreeing with the template. Earlier revision-specific grep found neither deleted filename nor belowfloor in the active source paths. Suggested bucket: other (maintainer diagnostics). Confidence: confirmed source-only producer/collector alignment, not an executed smoke. proposed_drop: deleted artifact names have no surviving producer and the replacement diagnostic remains collected; still proposed, not accepted. possible_cover: none. Could-be-highest: no established security or user-work-loss route. Caveat: this is the collection interface only, not a review of independent desktop bootstrap or cleanup correctness. No runtime tests, builds or reproductions performed."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g062/findings.jsonl",
+        "id": "c5",
+        "line": 10,
+        "disposition": "excluded",
+        "group": "desktop-smoke-retired-tmux-stderr-producer-collector",
+        "reason": "Parent explicitly accepted named refuted proposal from claims-040 after inspecting it. The removed diagnostic names belonged to scenarios removed in the same commit. The replacement bootstrap stderr remains collected. No surviving diagnostic producer loses collection through this change. Source refutation: both producers were deleted with their collectors and the replacement producer remains collected. Checked source/results: [\"The 17a3fe858c5511a24b7403af15dd41c93bf69fd7 parent-to-commit scripts/desktop-smoke.sh diff deletes TMUX_PREFLIGHT_STDERR and TMUX_PREFLIGHT_BELOWFLOOR_STDERR assignments and the associated app redirections with their scenarios.\",\"At 17a3fe8, scripts/desktop-smoke.sh:718-723 writes pf-bogus-state.stderr. .github/dist-build-setup.yml:556-563 retains that exact file alongside log/png/txt evidence.\",\"At later d751ff1633bb479c7bf53920f2e4ea4ba932a1c2, generated .github/workflows/release.yml:349-358 still collects pf-bogus-state.stderr. This checks the producer/collector interface, not bootstrap or cleanup correctness. No smoke was executed.\"] Current coverage/results: [\"Both current specifications searched for tmux preflight, desktop bootstrap and release diagnostics. They accept removing the production tmux requirement, but supply no exact acceptance of lost smoke diagnostics.\",\"TODO.md Planned is empty; BUGS.md has no smoke-artifact entry. plans/queue/tmux-drop-from-install.md:40-47 explicitly couples scenario and stderr-collection removal; plans/REPORTS.md:30 records that plan landed, so it is historical context rather than pending coverage.\",\"Full INDEX.md and targeted queue searches found no exact retired-stderr producer/collector item. Active TRIAGE_OUTCOMES.md's preflight-image-history entry concerns release VM image provenance, not these stderr files. Archive not read.\",\"FILTER.md fully read; no filter is used because the source refutes the suspected missing diagnostics.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Removing tmux-preflight-missing.stderr and tmux-preflight-belowfloor.stderr from failure evidence could hide diagnostics for smoke checks still running. Consequence limited to maintainer failure evidence.\"; null."
+      },
+      "accepted_parent_decision": {
+        "key": "g062/c5",
+        "line": 10,
+        "disposition": "excluded",
+        "group": "desktop-smoke-retired-tmux-stderr-producer-collector",
+        "bucket": "other",
+        "recording": "refuted",
+        "queue_target_candidate": null,
+        "needs_independent_drop_check": false,
+        "reason": "Parent explicitly accepted named refuted proposal from claims-040 after inspecting it. The removed diagnostic names belonged to scenarios removed in the same commit. The replacement bootstrap stderr remains collected. No surviving diagnostic producer loses collection through this change. Source refutation: both producers were deleted with their collectors and the replacement producer remains collected. Checked source/results: [\"The 17a3fe858c5511a24b7403af15dd41c93bf69fd7 parent-to-commit scripts/desktop-smoke.sh diff deletes TMUX_PREFLIGHT_STDERR and TMUX_PREFLIGHT_BELOWFLOOR_STDERR assignments and the associated app redirections with their scenarios.\",\"At 17a3fe8, scripts/desktop-smoke.sh:718-723 writes pf-bogus-state.stderr. .github/dist-build-setup.yml:556-563 retains that exact file alongside log/png/txt evidence.\",\"At later d751ff1633bb479c7bf53920f2e4ea4ba932a1c2, generated .github/workflows/release.yml:349-358 still collects pf-bogus-state.stderr. This checks the producer/collector interface, not bootstrap or cleanup correctness. No smoke was executed.\"] Current coverage/results: [\"Both current specifications searched for tmux preflight, desktop bootstrap and release diagnostics. They accept removing the production tmux requirement, but supply no exact acceptance of lost smoke diagnostics.\",\"TODO.md Planned is empty; BUGS.md has no smoke-artifact entry. plans/queue/tmux-drop-from-install.md:40-47 explicitly couples scenario and stderr-collection removal; plans/REPORTS.md:30 records that plan landed, so it is historical context rather than pending coverage.\",\"Full INDEX.md and targeted queue searches found no exact retired-stderr producer/collector item. Active TRIAGE_OUTCOMES.md's preflight-image-history entry concerns release VM image provenance, not these stderr files. Archive not read.\",\"FILTER.md fully read; no filter is used because the source refutes the suspected missing diagnostics.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Removing tmux-preflight-missing.stderr and tmux-preflight-belowfloor.stderr from failure evidence could hide diagnostics for smoke checks still running. Consequence limited to maintainer failure evidence.\"; null."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-040",
+          "key": "g062/c5",
+          "latest_line": 10,
+          "recommendation": "refuted",
+          "bucket": "other",
+          "underlying_key": "desktop-smoke-retired-tmux-stderr-producer-collector",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The removed diagnostic names belonged to scenarios removed in the same commit. The replacement bootstrap stderr remains collected. No surviving diagnostic producer loses collection through this change.",
+          "checks": [
+            "The 17a3fe858c5511a24b7403af15dd41c93bf69fd7 parent-to-commit scripts/desktop-smoke.sh diff deletes TMUX_PREFLIGHT_STDERR and TMUX_PREFLIGHT_BELOWFLOOR_STDERR assignments and the associated app redirections with their scenarios.",
+            "At 17a3fe8, scripts/desktop-smoke.sh:718-723 writes pf-bogus-state.stderr. .github/dist-build-setup.yml:556-563 retains that exact file alongside log/png/txt evidence.",
+            "At later d751ff1633bb479c7bf53920f2e4ea4ba932a1c2, generated .github/workflows/release.yml:349-358 still collects pf-bogus-state.stderr. This checks the producer/collector interface, not bootstrap or cleanup correctness. No smoke was executed."
+          ],
+          "coverage_checked": [
+            "Both current specifications searched for tmux preflight, desktop bootstrap and release diagnostics. They accept removing the production tmux requirement, but supply no exact acceptance of lost smoke diagnostics.",
+            "TODO.md Planned is empty; BUGS.md has no smoke-artifact entry. plans/queue/tmux-drop-from-install.md:40-47 explicitly couples scenario and stderr-collection removal; plans/REPORTS.md:30 records that plan landed, so it is historical context rather than pending coverage.",
+            "Full INDEX.md and targeted queue searches found no exact retired-stderr producer/collector item. Active TRIAGE_OUTCOMES.md's preflight-image-history entry concerns release VM image provenance, not these stderr files. Archive not read.",
+            "FILTER.md fully read; no filter is used because the source refutes the suspected missing diagnostics."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": null,
+          "original_stronger_consequence": "Removing tmux-preflight-missing.stderr and tmux-preflight-belowfloor.stderr from failure evidence could hide diagnostics for smoke checks still running. Consequence limited to maintainer failure evidence.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Source refutation: both producers were deleted with their collectors and the replacement producer remains collected."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "desktop-smoke-retired-tmux-stderr-producer-collector",
+        "destination": null
+      }
+    },
+    {
+      "key": "g062/c6",
+      "owner": "g062",
+      "id": "c6",
+      "domain": "release-build-payloads",
+      "purpose": "release-build-payloads: .github/dist-build-setup.yml, .github/workflows/release.yml, scripts/build-pinned-tmux-ci.sh, .github/release/source-pins.env, .github/workflows/sign-sums.yml, crates/farhelm-helm/build.rs, dist-workspace.toml, scripts/build-private-tmux.sh, scripts/build-tmux-assets.sh, scripts/check-static-elf.sh, .github/release/ziglang-requirements.txt, .github/workflows/ci.yml; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 6,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c6",
+            "state": "open",
+            "summary": "Removing the focused shutdown step does not omit surviving shutdown tests",
+            "location": ".github/dist-build-setup.yml:281",
+            "detail": "Reviewed commit: 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513. TLDR: considered whether removing the dedicated tmux shutdown gate stopped testing the dangerous output-client teardown that could otherwise crash a server holding sessions. Source checks: the deleted scripts/test-tmux-pinned-shutdown.sh selected ten exact tests. Revision-specific grep finds the three stream unit tests still present in crates/farhelm-supervisor/src/tmux/stream.rs:2632,2724,2845; the seven named e2e tests are absent after the same commit's test migration/removal. The ordinary release step still executes cargo nextest run --workspace --exclude farhelm-desktop against the pinned tmux, so it includes the surviving unit regressions. .config/nextest.toml:1-7 states process-per-test execution, and :36-44 keeps the stream tests in the shared tmux budget; the old separate-step rationale of fresh processes does not add isolation beyond the existing runner. Suggested bucket: other for removing a redundant test invocation; no defect established. Confidence: confirmed source-only refutation of omitted surviving tests. proposed_drop: remaining selected shutdown cases still run in the main release suite, and the retired e2e selectors cannot run after their removal. possible_cover: none. Could-be-highest: the underlying shutdown hazard could lose running work, but this patch has no established route to that consequence because the surviving shutdown regression coverage remains selected. Caveat: this record does not certify that deleting the e2e tests elsewhere in the commit preserves every legacy-terminal behavior; those test bodies are outside this group's assigned patches."
+          }
+        },
+        {
+          "line": 7,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c6",
+            "state": "open",
+            "summary": "Surviving shutdown regressions remain selected; runtime substrate is not certified",
+            "location": ".github/dist-build-setup.yml:281",
+            "detail": "Reviewed commit: 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513. TLDR: the original concern remains that removing the dedicated shutdown step could leave a server-crash hazard untested, potentially endangering sessions. The three surviving shutdown regressions remain selected by the ordinary release nextest command; that is not proof that their substrate executed. This revision corrects the earlier wording that they 'still run' to a source-supported selection claim. Details retained: scripts/test-tmux-pinned-shutdown.sh selected ten cases; at this revision stream.rs:2632,2724,2845 retain the three unit regressions, while the seven named e2e cases no longer exist after the same commit. The ordinary release step selects --workspace --exclude farhelm-desktop against the prepared pinned tmux; .config/nextest.toml:1-7 establishes process-per-test execution and :36-44 applies the stream tests' resource group. Later d751ff1633bb479c7bf53920f2e4ea4ba932a1c2 removes production tmux and the pinned test build together, with machine-tmux compatibility fixtures reviewed separately under c4. g063/c1 independently corroborates the coordinated builder deletion but does not establish runtime coverage for this earlier revision. Suggested bucket: other for the hypothesized lost test invocation; no defect established. Confidence: confirmed source selection, no runtime observation. proposed_drop: no surviving selector is omitted by this step removal; substrate and skip premises are being rechecked during synthesis. possible_cover: none. Could-be-highest: the underlying server-crash hazard could lose work, but no route from this patch to such a regression has been established; preserve that consequence rather than treating test selection as proof of safety. Caveats: no tests, builds or reproductions; sibling groups own independent review of retired e2e bodies. This candidate remains a proposed drop, not an accepted disposition."
+          }
+        },
+        {
+          "line": 12,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c6",
+            "state": "open",
+            "summary": "Earlier shutdown gate removal retains selected regressions with fail-on-missing tmux setup",
+            "location": ".github/dist-build-setup.yml:281",
+            "detail": "Reviewed commit: 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513. TLDR: completed the synthesis check of the original concern that deleting the focused shutdown step could stop exercising a server-crash hazard that might end sessions. At this earlier commit the three surviving regressions remain selected, and their fixture fails rather than skips on missing or unsupported tmux. No execution is claimed. Source: stream.rs:2632-2645,2724-2744,2845-2858 each begins directly with ScratchServer::start and creates a real session; there is no machine-tmux or scope-manager early-return guard on these entries. test_support.rs:59-78 creates TmuxDriver::new and calls prepare_server_start().await.expect. tmux.rs:3216-3238 implements that preparation with check_client_floor().await?, so failure propagates to the test rather than a SKIPPED return. At the same revision release setup :163-175 installs python3-venv and invokes the pinned builder; build-pinned-tmux-ci.sh:40-82 loads the source pin, builds when absent and refuses a version mismatch. setup :274-278 prepends .ci-tmux and invokes recorder --tmux required for the full workspace selection. The removed recorder check inspected in the d751 parent diff confirms required mode compared that binary's version/hash against the pin and refused mismatches. Therefore this commit's surviving cases keep both selection and source-level substrate checks. The seven other exact e2e selectors from the deleted script no longer exist in this revision. The later d751 machine-tmux fixtures have different explicit skip boundaries, documented under c4; those later guards must not be retroactively attributed to these earlier stream tests. .config/nextest.toml supplies process-per-test execution and the tmux resource group, so the old dedicated-step isolation rationale adds no fresh process boundary. Suggested bucket: other for the original hypothetical validation loss; confidence: confirmed source selection and fail-on-missing contract, not observed runtime coverage. proposed_drop: no surviving selector or required fixture check is lost by deleting the repeated invocation; still a proposal for the caller. possible_cover: none. Could-be-highest: the underlying server-crash hazard can lose sessions, but no route from this patch to such a regression was established; test selection alone is not used as proof of safety. Caveats: source analysis does not prove a historical gate executed or passed, and this does not independently review the retired e2e bodies. No unresolved premise remains for this candidate's assigned invocation-removal scope. No tests, builds or reproductions performed."
+          }
+        }
+      ],
+      "latest": {
+        "line": 12,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c6",
+          "state": "open",
+          "summary": "Earlier shutdown gate removal retains selected regressions with fail-on-missing tmux setup",
+          "location": ".github/dist-build-setup.yml:281",
+          "detail": "Reviewed commit: 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513. TLDR: completed the synthesis check of the original concern that deleting the focused shutdown step could stop exercising a server-crash hazard that might end sessions. At this earlier commit the three surviving regressions remain selected, and their fixture fails rather than skips on missing or unsupported tmux. No execution is claimed. Source: stream.rs:2632-2645,2724-2744,2845-2858 each begins directly with ScratchServer::start and creates a real session; there is no machine-tmux or scope-manager early-return guard on these entries. test_support.rs:59-78 creates TmuxDriver::new and calls prepare_server_start().await.expect. tmux.rs:3216-3238 implements that preparation with check_client_floor().await?, so failure propagates to the test rather than a SKIPPED return. At the same revision release setup :163-175 installs python3-venv and invokes the pinned builder; build-pinned-tmux-ci.sh:40-82 loads the source pin, builds when absent and refuses a version mismatch. setup :274-278 prepends .ci-tmux and invokes recorder --tmux required for the full workspace selection. The removed recorder check inspected in the d751 parent diff confirms required mode compared that binary's version/hash against the pin and refused mismatches. Therefore this commit's surviving cases keep both selection and source-level substrate checks. The seven other exact e2e selectors from the deleted script no longer exist in this revision. The later d751 machine-tmux fixtures have different explicit skip boundaries, documented under c4; those later guards must not be retroactively attributed to these earlier stream tests. .config/nextest.toml supplies process-per-test execution and the tmux resource group, so the old dedicated-step isolation rationale adds no fresh process boundary. Suggested bucket: other for the original hypothetical validation loss; confidence: confirmed source selection and fail-on-missing contract, not observed runtime coverage. proposed_drop: no surviving selector or required fixture check is lost by deleting the repeated invocation; still a proposal for the caller. possible_cover: none. Could-be-highest: the underlying server-crash hazard can lose sessions, but no route from this patch to such a regression was established; test selection alone is not used as proof of safety. Caveats: source analysis does not prove a historical gate executed or passed, and this does not independently review the retired e2e bodies. No unresolved premise remains for this candidate's assigned invocation-removal scope. No tests, builds or reproductions performed."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g062/findings.jsonl",
+        "id": "c6",
+        "line": 12,
+        "disposition": "under-investigation",
+        "group": "g062-c6",
+        "reason": "Record durably acknowledged; parent source/contract validation, cross-group synthesis, coverage/filter matching and any independent drop check remain pending. This preserves the claim and uncertainty without accepting, dropping or lowering it."
+      },
+      "accepted_parent_decision": null,
+      "returned_claim_checks": [
+        {
+          "batch": "claims-040",
+          "key": "g062/c6",
+          "latest_line": 12,
+          "recommendation": "refuted",
+          "bucket": "other",
+          "underlying_key": "release-focused-tmux-shutdown-step-surviving-selection",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "Within the stated invocation-removal scope, the ordinary release suite retains all three surviving selected regressions and their fail-on-missing fixture checks. This does not decide whether deleting the other seven test bodies preserved every separate test obligation. The original possible loss of running sessions must remain in the independent drop register.",
+          "checks": [
+            "At 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513^, scripts/test-tmux-pinned-shutdown.sh:50-72 invokes ten exact selectors, three library tests and seven e2e cases.",
+            "At 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513, tmux/stream.rs:2632-2645,2724-2744,2845-2858 retains the three library tests. Each starts ScratchServer and a real session without a skip guard. Revision-specific search of crates/farhelm/tests finds none of the seven old exact e2e names.",
+            "Same revision tmux/test_support.rs:59-78 calls prepare_server_start().await.expect; tmux.rs:3216-3238 reaches check_client_floor().await? so unavailable/unsupported tmux fails the fixture rather than returning SKIPPED.",
+            "Same revision .github/dist-build-setup.yml:163-175 prepares the pinned build; :274-278 runs the recorder with --tmux required and cargo nextest run --workspace --exclude farhelm-desktop. The default selection includes these retained library tests.",
+            "Same revision .config/nextest.toml:1-7 documents process-per-test execution; :33-42 gives tmux stream tests the shared resource group. The old separate invocation does not create a missing process-isolation boundary.",
+            "The parent recorder capture_tmux, checked at d751ff16^:1181-1250, validates pinned PATH version/hash. Later machine-tmux skip guards are not attributed retroactively to this earlier revision. No historical gate execution or safety was observed."
+          ],
+          "coverage_checked": [
+            "Both current specifications searched for tmux shutdown, output teardown and release tests. Current production tmux retirement does not by itself refute a historical test-oracle or invocation defect.",
+            "TODO.md Planned is empty. plans/queue/tmux-end-old-terminals.md mentions deleting this script and step; plans/REPORTS.md:29 records the plan landed. No unlanded matching plan was found. BUGS.md has no shutdown-gate coverage.",
+            "Full INDEX.md and targeted queue searches found no exact repeated shutdown-invocation item. Active TRIAGE_OUTCOMES.md:302-323 and shutdown-wait-test-does-not-witness-waiting.md concern the unrelated pending-launch-registration wait oracle, not tmux output-client teardown. Archive not read.",
+            "FILTER.md fully read. No filter is used; none justifies dropping the original possible session-loss consequence."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": "No established route from removing the repeated invocation to an untested surviving regression or session loss. Source selection and fail-on-missing contracts do not prove that the historical release job executed or passed. Deleted e2e bodies' independent obligations remain outside this narrow disposition.",
+          "original_stronger_consequence": "Removing the focused shutdown step could leave dangerous output-client teardown untested; a regression could crash the private tmux server and end running sessions. The record later narrowed its conclusion to retained source selection and fixture checks, with no observed execution.",
+          "needs_independent_drop_check": true,
+          "proposed_basis": "Propose source refutation only of omitted surviving selectors/required fixture checks from deleting the repeated invocation. Independent fresh-context agreement is required before dropping or lowering the preserved possible user-work-loss concern."
+        }
+      ],
+      "parent_proposals": [
+        {
+          "artifact": "parent-flagged-judgments-040.json",
+          "key": "g062/c6",
+          "proposal": "claim-checks/claims-040/result.json",
+          "parent_proposal": "source-refuted-repeated-focused-release-invocation-loses-surviving-selectors",
+          "final_independent_gate": "required-before-original-possible-session-loss-drop",
+          "reason": "Parent read full040. Three surviving exact library regressions remain in ordinary required-tmux workspace nextest selection with real fixtures that fail absent/unsupported tmux, pinned recorder/hash checks and process-per-test isolation. Seven deleted e2e bodies have separate obligations not answered by this invocation proof. No later skip guard is attributed retroactively; current production retirement alone would not refute a historical oracle defect. Proposed narrow repeated-invocation omission refutation, not historical job execution/pass or all deleted test coverage. Preserve potential dangerous teardown/private-server crash/work loss for the fresh check."
+        }
+      ],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": true,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "release-focused-tmux-shutdown-step-surviving-selection",
+        "destination": null
+      }
+    },
+    {
+      "key": "g062/c7",
+      "owner": "g062",
+      "id": "c7",
+      "domain": "release-build-payloads",
+      "purpose": "release-build-payloads: .github/dist-build-setup.yml, .github/workflows/release.yml, scripts/build-pinned-tmux-ci.sh, .github/release/source-pins.env, .github/workflows/sign-sums.yml, crates/farhelm-helm/build.rs, dist-workspace.toml, scripts/build-private-tmux.sh, scripts/build-tmux-assets.sh, scripts/check-static-elf.sh, .github/release/ziglang-requirements.txt, .github/workflows/ci.yml; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 14,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c7",
+            "state": "open",
+            "summary": "Release fixture pre-pulls the exact image required by the real Podman test",
+            "location": ".github/dist-build-setup.yml:225",
+            "detail": "Reviewed commit: 04d85f0c98a9b635709d00b056719a0baa7fd3fc. TLDR: discovery pass considered whether changing the fixture from the mutable Ubuntu tag to a digest could cache the wrong image and leave the real offline-prerequisite test unable to proceed. Source refutation: revision-specific grep finds the identical docker.io/library/ubuntu@sha256:fe81560990fae86dc4743202b2cb4d3df98d0bcf949173cecef15ce1127ef852 at setup :225, generated workflow :211, production environment/podman.rs:27 and the test's UBUNTU at podman_environments.rs:23. The production builder references that same UBUNTU at environment/podman/build.rs:43-44. Test prerequisites use exists(image, UBUNTU) at :197; thus the changed setup does not pre-pull a merely similar tag or another digest. Suggested bucket: other for the hypothetical maintainer test-fixture failure. Confidence: confirmed source identity comparison, not observed image availability or runtime behavior. proposed_drop: exact source pin matches both producer and prerequisite consumers; proposed only, no parent disposition assumed. possible_cover: none; supplied neighbour records contain no such fixture-pin concern and prohibited coverage sources were not searched. Could-be-highest: no security or user-work-loss route established. Caveats: the network pull can still fail normally, and this does not certify remote registry content or successful test execution. No tests, builds, reproductions or live-install actions performed."
+          }
+        }
+      ],
+      "latest": {
+        "line": 14,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c7",
+          "state": "open",
+          "summary": "Release fixture pre-pulls the exact image required by the real Podman test",
+          "location": ".github/dist-build-setup.yml:225",
+          "detail": "Reviewed commit: 04d85f0c98a9b635709d00b056719a0baa7fd3fc. TLDR: discovery pass considered whether changing the fixture from the mutable Ubuntu tag to a digest could cache the wrong image and leave the real offline-prerequisite test unable to proceed. Source refutation: revision-specific grep finds the identical docker.io/library/ubuntu@sha256:fe81560990fae86dc4743202b2cb4d3df98d0bcf949173cecef15ce1127ef852 at setup :225, generated workflow :211, production environment/podman.rs:27 and the test's UBUNTU at podman_environments.rs:23. The production builder references that same UBUNTU at environment/podman/build.rs:43-44. Test prerequisites use exists(image, UBUNTU) at :197; thus the changed setup does not pre-pull a merely similar tag or another digest. Suggested bucket: other for the hypothetical maintainer test-fixture failure. Confidence: confirmed source identity comparison, not observed image availability or runtime behavior. proposed_drop: exact source pin matches both producer and prerequisite consumers; proposed only, no parent disposition assumed. possible_cover: none; supplied neighbour records contain no such fixture-pin concern and prohibited coverage sources were not searched. Could-be-highest: no security or user-work-loss route established. Caveats: the network pull can still fail normally, and this does not certify remote registry content or successful test execution. No tests, builds, reproductions or live-install actions performed."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g062/findings.jsonl",
+        "id": "c7",
+        "line": 14,
+        "disposition": "excluded",
+        "group": "release-podman-offline-base-pin-identity",
+        "reason": "Parent explicitly accepted named refuted proposal from claims-040 after inspecting it. The setup pulls the exact fully qualified digest used by production and by the real test's offline prerequisite. No image-identity mismatch is present. Source refutation by exact identity comparison among setup, generated workflow, production builder and offline prerequisite. Checked source/results: [\"At 04d85f0c98a9b635709d00b056719a0baa7fd3fc, .github/dist-build-setup.yml:225-227 and generated .github/workflows/release.yml:211 use docker.io/library/ubuntu@sha256:fe81560990fae86dc4743202b2cb4d3df98d0bcf949173cecef15ce1127ef852.\",\"Same revision crates/farhelm-helm/src/environment/podman.rs:27 and crates/farhelm/tests/e2e/podman_environments.rs:21-23 contain the identical string. The latter is the correct full test path, not crates/farhelm-helm/tests/podman_environments.rs.\",\"Same revision environment/podman/build.rs:41-44 pulls and passes UBUNTU to the helper; e2e/podman_environments.rs:175-202 requires exists(image, UBUNTU) before allocating resources. No registry pull, content verification or test execution was performed.\"] Current coverage/results: [\"Current SPEC.md's recipe-base paragraph at :454 and SPEC_impl.md:6058-6080 require digest-pinned managed Ubuntu; the concrete digest is an implementation choice. These explain the pin but do not excuse a mismatched offline fixture.\",\"TODO.md Planned is empty. plans/queue/podman-environments.md's managed-base pin sections are related context; plans/REPORTS.md:21 says the plan landed. No unlanded plan was found fixing this alleged identity mismatch. BUGS.md has no matching image-fixture issue.\",\"Full INDEX.md, targeted queue searches and active TRIAGE_OUTCOMES.md searches found no exact release offline-base digest-mismatch item or decision. Podman storage/routing issues have different triggers and consequences. Archive not read.\",\"FILTER.md fully read; no filter is used.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Changing a mutable Ubuntu tag to a digest might cache a different image than the real offline-prerequisite test needs, causing the maintainer release test fixture to fail. Normal network failure and actual registry content remain unobserved.\"; null."
+      },
+      "accepted_parent_decision": {
+        "key": "g062/c7",
+        "line": 14,
+        "disposition": "excluded",
+        "group": "release-podman-offline-base-pin-identity",
+        "bucket": "other",
+        "recording": "refuted",
+        "queue_target_candidate": null,
+        "needs_independent_drop_check": false,
+        "reason": "Parent explicitly accepted named refuted proposal from claims-040 after inspecting it. The setup pulls the exact fully qualified digest used by production and by the real test's offline prerequisite. No image-identity mismatch is present. Source refutation by exact identity comparison among setup, generated workflow, production builder and offline prerequisite. Checked source/results: [\"At 04d85f0c98a9b635709d00b056719a0baa7fd3fc, .github/dist-build-setup.yml:225-227 and generated .github/workflows/release.yml:211 use docker.io/library/ubuntu@sha256:fe81560990fae86dc4743202b2cb4d3df98d0bcf949173cecef15ce1127ef852.\",\"Same revision crates/farhelm-helm/src/environment/podman.rs:27 and crates/farhelm/tests/e2e/podman_environments.rs:21-23 contain the identical string. The latter is the correct full test path, not crates/farhelm-helm/tests/podman_environments.rs.\",\"Same revision environment/podman/build.rs:41-44 pulls and passes UBUNTU to the helper; e2e/podman_environments.rs:175-202 requires exists(image, UBUNTU) before allocating resources. No registry pull, content verification or test execution was performed.\"] Current coverage/results: [\"Current SPEC.md's recipe-base paragraph at :454 and SPEC_impl.md:6058-6080 require digest-pinned managed Ubuntu; the concrete digest is an implementation choice. These explain the pin but do not excuse a mismatched offline fixture.\",\"TODO.md Planned is empty. plans/queue/podman-environments.md's managed-base pin sections are related context; plans/REPORTS.md:21 says the plan landed. No unlanded plan was found fixing this alleged identity mismatch. BUGS.md has no matching image-fixture issue.\",\"Full INDEX.md, targeted queue searches and active TRIAGE_OUTCOMES.md searches found no exact release offline-base digest-mismatch item or decision. Podman storage/routing issues have different triggers and consequences. Archive not read.\",\"FILTER.md fully read; no filter is used.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Changing a mutable Ubuntu tag to a digest might cache a different image than the real offline-prerequisite test needs, causing the maintainer release test fixture to fail. Normal network failure and actual registry content remain unobserved.\"; null."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-040",
+          "key": "g062/c7",
+          "latest_line": 14,
+          "recommendation": "refuted",
+          "bucket": "other",
+          "underlying_key": "release-podman-offline-base-pin-identity",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The setup pulls the exact fully qualified digest used by production and by the real test's offline prerequisite. No image-identity mismatch is present.",
+          "checks": [
+            "At 04d85f0c98a9b635709d00b056719a0baa7fd3fc, .github/dist-build-setup.yml:225-227 and generated .github/workflows/release.yml:211 use docker.io/library/ubuntu@sha256:fe81560990fae86dc4743202b2cb4d3df98d0bcf949173cecef15ce1127ef852.",
+            "Same revision crates/farhelm-helm/src/environment/podman.rs:27 and crates/farhelm/tests/e2e/podman_environments.rs:21-23 contain the identical string. The latter is the correct full test path, not crates/farhelm-helm/tests/podman_environments.rs.",
+            "Same revision environment/podman/build.rs:41-44 pulls and passes UBUNTU to the helper; e2e/podman_environments.rs:175-202 requires exists(image, UBUNTU) before allocating resources. No registry pull, content verification or test execution was performed."
+          ],
+          "coverage_checked": [
+            "Current SPEC.md's recipe-base paragraph at :454 and SPEC_impl.md:6058-6080 require digest-pinned managed Ubuntu; the concrete digest is an implementation choice. These explain the pin but do not excuse a mismatched offline fixture.",
+            "TODO.md Planned is empty. plans/queue/podman-environments.md's managed-base pin sections are related context; plans/REPORTS.md:21 says the plan landed. No unlanded plan was found fixing this alleged identity mismatch. BUGS.md has no matching image-fixture issue.",
+            "Full INDEX.md, targeted queue searches and active TRIAGE_OUTCOMES.md searches found no exact release offline-base digest-mismatch item or decision. Podman storage/routing issues have different triggers and consequences. Archive not read.",
+            "FILTER.md fully read; no filter is used."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": null,
+          "original_stronger_consequence": "Changing a mutable Ubuntu tag to a digest might cache a different image than the real offline-prerequisite test needs, causing the maintainer release test fixture to fail. Normal network failure and actual registry content remain unobserved.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Source refutation by exact identity comparison among setup, generated workflow, production builder and offline prerequisite."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "release-podman-offline-base-pin-identity",
+        "destination": null
+      }
+    }
+  ],
+  "replies": [
+    {
+      "turn": 1,
+      "reply": "Initial review complete: all 24 assigned patches read at their recorded revisions.\n\nNo reportable findings or unresolved leads established. Recorded six refuted candidates (`c1–c6`) in `findings.jsonl` and updated `progress.md`.\n\nNo tests, builds, reproductions, or checkout changes performed. Ready for the later synthesis turn."
+    },
+    {
+      "turn": 2,
+      "reply": "Revised `c1`, `c2`, `c4`, `c5`, and `c6` with cross-batch checks, workflow parity, artifact-producer evidence, and precise skip limitations. Reconciled the builder deletion with `g063/c1`.\n\nNo new findings. `c4`’s synthesis lead is resolved. Unresolved lead IDs: none.\n\nNo builds, tests, or reproductions performed."
+    },
+    {
+      "turn": 3,
+      "reply": "Discovery pass 1 complete.\n\n- Checked image-pin consistency, archive/static-validation paths, changed comments against callers, CI edits, and full-range attribution.\n- Recorded refuted candidate `c7`; revised `c3` with additional source evidence.\n- New verified findings: none.\n- New unverified-after-investigation findings: none.\n- Open leads: none.\n\nNo new defect found. No runtime tests, builds, or reproductions performed."
+    }
+  ],
+  "progress": "Group: g062 (release-build-payloads)\nState: initial review complete; turn 1. Awaiting the caller's later synthesis/discovery turn.\nTurn type/count: initial / 1. Discovery-pass count: 0.\n\nCoverage: all 24 assigned patches (1,090 lines) delivered in 25 evidence packets; the 208-line packet was split at line 180. Complete inventory commits field read; excluded metadata and queue coverage sources were not read. No unread assigned scope. Context was read at each relevant recorded revision, including generated workflow parity, payload inventory and producers, nextest selection, surviving shutdown regressions, recorder arguments, smoke diagnostic producers, and retired-tool callers. Governing implementation contracts read include Provisioning (7771-8154), Cross-compilation and targets (8155-8174), and Testing (8175-8242) at the tmux payload removal/current-tooling revisions, plus the older cross-compilation/testing and tmux transition contracts. Product Topology section read in full at cb762a313abbe6da03ae0bf041f07486c4ed4df9.\n\nResults: no reportable findings or unresolved leads established. New candidate IDs: c1-c6; each records the source refutation and material limits in findings.jsonl. New verified/unverified finding IDs: none. c1's first record attempt used an invalid state and was rejected without an append; it was corrected to open and recorded successfully. Additional dangling-caller search in e2e, packaging and website/scripts returned no retired-tool references.\n\nInterface assumptions: generated release workflow must contain template changes at that revision; published payloads and checksum allowlist must match the same revision's Rust inventory; name-based sums lookup permits old versions to retain their old tmux entries; Linux executable static checks still run after archive extraction. Rootless Podman tests use the exact pre-pulled image and native-musl payload setup, and d9b5501ba55c3008cebbe2cf8e4fe3eeaff630b2 exports the prepared user bus through GITHUB_ENV for later shells. Existing test contracts now use distribution tmux only for the remaining legacy cleanup and user-run-tmux fixtures.\n\nNo runtime tests, builds, reproductions, checkout edits, or live-install actions were performed. All conclusions are source-supported, not observed runtime behavior. Next: caller-directed synthesis; do not treat this initial-pass completion as completion of the later-turn protocol.\n\nTurn 2 started: later-turn synthesis. Mandatory delivery audit supplied by caller: all 1,090 lines, no gaps/rejections. Rechecking cross-revision substrate and skip boundaries, recorder arguments, workflow parity and evidence producers. Read sibling g063/c1's dependency analysis; it agrees on deletion consumers but does not certify compatibility-test execution. c6 wording revised immediately to distinguish selected tests from observed coverage. No open lead IDs at entry.\n\nTurn 2 complete: later-turn synthesis / 2 total turns. Discovery-pass count remains 0. No new verified or unverified findings; no new substantive defect discovered. Revised c1, c2, c4, c5 and c6 under their original IDs. c4 temporarily became a lead and was resolved back to candidate after source checks; no open lead IDs remain. All proposed drops remain proposals; the caller has accepted none.\n\nCross-batch results: d751's generated workflow retains the same machine-tmux installation, user-manager/bus preparation and exports as its template. Recorder controlled_environment preserves PATH, XDG_RUNTIME_DIR and DBUS_SESSION_BUS_ADDRESS because only FARHELM_ values are scrubbed. Later compatibility fixtures intentionally return SKIPPED for absent machine tmux, failed manager probing or missing stock-tmux libsystemd linkage. The manager's production probe is stronger than the setup's short scope command; package installation and the initial check therefore support prerequisites without certifying each test executed. The stock linkage and scope skip guards predate d751, and the retired recorder's pin/hash check did not enforce them. A final pinned-revision grep over .github plus the recorder and desktop smoke found no --tmux, .ci-tmux, deleted-builder or removed-stderr-name reference (expected grep exit 1, empty stdout). Nextest config still emits immediate success output, but a printed runtime SKIPPED line is not a JUnit skip or proof of exercised coverage.\n\nFor earlier 647f022, the three surviving stream shutdown cases start ScratchServer directly. Its preparation expects success and checks the tmux client floor; that revision still builds/checks pinned tmux, prepends its path, and requests recorder --tmux required. Those earlier source-level fixture checks differ from the later compatibility skip path. No test execution was claimed. Parent-to-17a3fe desktop-smoke diff confirms deletion of both removed stderr producers, with pf-bogus-state.stderr preserved and collected by the later generated workflow as well. g063/c1 corroborates the coordinated builder/consumer deletion without broadening this review into retired-code defects.\n\nUnread assigned scope: none; original 1,090-line delivery audit remains supplied by caller. No tests, builds, reproductions, checkout changes or live-install actions performed. Next action: caller-directed discovery or final reconciliation; this reviewer has made no disposition on behalf of the parent.\n\nTurn 3 started: separate discovery pass 1. Read discovery-neighbours.json fully in bounded chunks (lines 1-120,121-165,166-205). No pending cross-group questions were supplied, and no neighbour record identifies a new assigned release-build route to synthesize before discovery. Existing candidates and unaccepted proposed drops retain their history. Search focus: changes to release validation loops/inventory, pinned image prerequisite propagation, and changed build/documentation claims outside the prior builder/recorder/skip investigations.\n\nTurn 3 complete: separate discovery pass 1 / 3 total turns. Result: no new verified or unverified-after-investigation defect found. New candidate c7 records the source-refuted image-cache identity concern; c3 revised under its original ID with new validation-loop and comment/caller checks. No open lead IDs. No parent drop or lowering assumed accepted.\n\nUseful checks/results: the initial digest pin is identical in release setup, generated workflow, production builder and offline test prerequisite. At cb762a, every exact archive is required and downloaded before the validator extracts binaries; removing the tmux copy leaves both Farhelm Linux executables in the static-validation loop. Missing or unrecognized inputs fail that loop/checker, rather than becoming an empty successful selection. New ELF-checker caller comments match the CentOS, Podman-payload and conditional Mac-devbuild invocations. A full pinned-range git log over sign-sums.yml, check-static-elf.sh and farhelm-helm/build.rs returns only cb762a313abbe6da03ae0bf041f07486c4ed4df9, so those assigned edits have no hidden later/intermediate mutation to attribute differently. Rechecked the d751 CI diff: the apt refresh moves to the retained SSH setup; native recorder selections are unchanged apart from the retired option, and distribution-related comment edits do not introduce a new executable dependency. The build-script payload wording matches its runtime-staged/downloaded model; the assigned edit changes no embedding logic.\n\nInterface context was consumed for novelty only, not credited as source delivery or used as coverage exclusions. No unread assigned material and no new out-of-scope investigation. No tests, builds, reproductions, external publication or live-install actions. All checks are source/contract observations, not executed product behavior. Next: caller-directed further discovery or reconciliation.\n"
+}

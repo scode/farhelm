@@ -1,0 +1,584 @@
+{
+  "group": {
+    "id": "g192",
+    "domain": "retired-xterm-vendor",
+    "purpose": "retired-xterm-vendor: crates/farhelm-ui/assets/vendor/xterm.js; phases webpack module 2486 method _restrictCursor: MethodDefinition _restrictCursor | webpack module 2486 method setScrollRegion: MethodDefinition setScrollRegion | bundle wrapper method resize: MethodDefinition resize | webpack module 8801: Property 8801",
+    "interfaces": [
+      "g009",
+      "g010",
+      "g011",
+      "g061",
+      "g062",
+      "g063",
+      "g079",
+      "g080",
+      "g081",
+      "g082",
+      "g083",
+      "g084",
+      "g135",
+      "g136",
+      "g186",
+      "g187",
+      "g188",
+      "g189",
+      "g190",
+      "g191",
+      "g193",
+      "g194",
+      "g195",
+      "g196",
+      "g197"
+    ],
+    "sources": [
+      {
+        "path": "[private-run]/prep/parts/01085-011.patch",
+        "ranges": [
+          [
+            1,
+            1
+          ]
+        ],
+        "original_path": "crates/farhelm-ui/assets/vendor/xterm.js",
+        "commit": "f560058da19e02716e6f943883a9508b447aff4e",
+        "notes": "webpack module 2486 method _restrictCursor: MethodDefinition _restrictCursor; patch character offsets [168286,188247)",
+        "lines": 1,
+        "bytes": 19961,
+        "start": 168286,
+        "end": 188247,
+        "original": "[private-run]/prep/originals/01085.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/01085-012.patch",
+        "ranges": [
+          [
+            1,
+            1
+          ]
+        ],
+        "original_path": "crates/farhelm-ui/assets/vendor/xterm.js",
+        "commit": "f560058da19e02716e6f943883a9508b447aff4e",
+        "notes": "webpack module 2486 method setScrollRegion: MethodDefinition setScrollRegion; patch character offsets [188247,207492)",
+        "lines": 1,
+        "bytes": 19245,
+        "start": 188247,
+        "end": 207492,
+        "original": "[private-run]/prep/originals/01085.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/01085-013.patch",
+        "ranges": [
+          [
+            1,
+            1
+          ]
+        ],
+        "original_path": "crates/farhelm-ui/assets/vendor/xterm.js",
+        "commit": "f560058da19e02716e6f943883a9508b447aff4e",
+        "notes": "bundle wrapper method resize: MethodDefinition resize; patch character offsets [207492,226129)",
+        "lines": 1,
+        "bytes": 18637,
+        "start": 207492,
+        "end": 226129,
+        "original": "[private-run]/prep/originals/01085.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/01085-021.patch",
+        "ranges": [
+          [
+            1,
+            1
+          ]
+        ],
+        "original_path": "crates/farhelm-ui/assets/vendor/xterm.js",
+        "commit": "f560058da19e02716e6f943883a9508b447aff4e",
+        "notes": "webpack module 8801: Property 8801; patch character offsets [339268,346711)",
+        "lines": 1,
+        "bytes": 7443,
+        "start": 339268,
+        "end": 346711,
+        "original": "[private-run]/prep/originals/01085.patch"
+      }
+    ],
+    "lines": 4,
+    "bytes": 65286
+  },
+  "records": [
+    {
+      "key": "g192/c1",
+      "owner": "g192",
+      "id": "c1",
+      "domain": "retired-xterm-vendor",
+      "purpose": "retired-xterm-vendor: crates/farhelm-ui/assets/vendor/xterm.js; phases webpack module 2486 method _restrictCursor: MethodDefinition _restrictCursor | webpack module 2486 method setScrollRegion: MethodDefinition setScrollRegion | bundle wrapper method resize: MethodDefinition resize | webpack module 8801: Property 8801",
+      "history": [
+        {
+          "line": 1,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c1",
+            "state": "open",
+            "summary": "Removing xterm does not leave terminal mounting dependent on its global",
+            "location": "crates/farhelm-ui/assets/vendor/xterm.js:1",
+            "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e. TLDR: considered whether deleting the assigned terminal bundle could prevent terminals from mounting. Source refutes that route: crates/farhelm-ui/src/lib.rs:1440-1496 declares the grid and its helpers, and :1914-1926 injects them without the removed bundle; assets/terminal.js:3191-3228 waits for those grid globals and fonts, with no xterm global prerequisite, and :4294-4367 creates window.farhelmGridTerminal directly. Governing contract: SPEC_impl.md:1506-1513 says, 'Every terminal runs in a terminal host (\"Terminal host\") and is interpreted by the supervisor's emulator, so the browser draws a grid stream with its own grid client'; :1842-1845 assigns pre-socket mounting to terminal.js. Suggested bucket: high if established, because terminals would be unusable. Confidence: confirmed source refutation for the dependency considered; no execution performed. proposed_drop: source-refuted, no surviving constructor or mount prerequisite in the inspected registration/mount path. possible_cover: none searched. Could-be-highest: no established security or loss-of-work route; failed rendering alone does not end terminal-host work. Caveat: this record does not certify every grid feature or deployment packaging path, only the removal's mount dependency."
+          }
+        }
+      ],
+      "latest": {
+        "line": 1,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c1",
+          "state": "open",
+          "summary": "Removing xterm does not leave terminal mounting dependent on its global",
+          "location": "crates/farhelm-ui/assets/vendor/xterm.js:1",
+          "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e. TLDR: considered whether deleting the assigned terminal bundle could prevent terminals from mounting. Source refutes that route: crates/farhelm-ui/src/lib.rs:1440-1496 declares the grid and its helpers, and :1914-1926 injects them without the removed bundle; assets/terminal.js:3191-3228 waits for those grid globals and fonts, with no xterm global prerequisite, and :4294-4367 creates window.farhelmGridTerminal directly. Governing contract: SPEC_impl.md:1506-1513 says, 'Every terminal runs in a terminal host (\"Terminal host\") and is interpreted by the supervisor's emulator, so the browser draws a grid stream with its own grid client'; :1842-1845 assigns pre-socket mounting to terminal.js. Suggested bucket: high if established, because terminals would be unusable. Confidence: confirmed source refutation for the dependency considered; no execution performed. proposed_drop: source-refuted, no surviving constructor or mount prerequisite in the inspected registration/mount path. possible_cover: none searched. Could-be-highest: no established security or loss-of-work route; failed rendering alone does not end terminal-host work. Caveat: this record does not certify every grid feature or deployment packaging path, only the removal's mount dependency."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g192/findings.jsonl",
+        "id": "c1",
+        "line": 1,
+        "disposition": "excluded",
+        "group": "retired-xterm-current-page-mount-dependency",
+        "reason": "Parent explicitly accepted named refuted proposal from claims-120 after inspecting it. The reviewed page mounts the grid directly and has no surviving xterm global mount prerequisite. Source refutation of the same narrow current-page dependency hypothesis as g191/c1; no broader compatibility conclusion. Checked source/results: [\"At f560058da19e02716e6f943883a9508b447aff4e, UI lib.rs:1479-1496,1914-1926 declares/injects grid assets; terminal.js:3191-3228 waits for grid helpers and :4294-4367 creates farhelmGridTerminal.\",\"Pinned product UI grep for retired constructor/asset names returned no references. Source only; deployment packaging and arbitrary grid features were not audited.\"] Current coverage/results: [\"SPEC.md Terminal experience and SPEC_impl.md:1693-1720,1836-1886 require/describe direct grid mounts; no accepted fresh-page unavailability.\",\"TODO Planned empty; BUGS unrelated. Matching tmux-end-old-terminals/docs-cleanup plan sections preserve a working direct grid and provide no separate fix for the hypothesized stale dependency.\",\"INDEX.md fully read and searched with queue/active TRIAGE_OUTCOMES for mount/global/removal terms; no exact queue cover. No FILTER applied.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Hypothetical unusable terminal mount, high; no established work-loss/security route in this record. Its scope excludes previously loaded pages.\"; \"No stale global prerequisite was found.\"."
+      },
+      "accepted_parent_decision": {
+        "key": "g192/c1",
+        "line": 1,
+        "disposition": "excluded",
+        "group": "retired-xterm-current-page-mount-dependency",
+        "bucket": "high",
+        "recording": "refuted",
+        "queue_target_candidate": null,
+        "needs_independent_drop_check": false,
+        "reason": "Parent explicitly accepted named refuted proposal from claims-120 after inspecting it. The reviewed page mounts the grid directly and has no surviving xterm global mount prerequisite. Source refutation of the same narrow current-page dependency hypothesis as g191/c1; no broader compatibility conclusion. Checked source/results: [\"At f560058da19e02716e6f943883a9508b447aff4e, UI lib.rs:1479-1496,1914-1926 declares/injects grid assets; terminal.js:3191-3228 waits for grid helpers and :4294-4367 creates farhelmGridTerminal.\",\"Pinned product UI grep for retired constructor/asset names returned no references. Source only; deployment packaging and arbitrary grid features were not audited.\"] Current coverage/results: [\"SPEC.md Terminal experience and SPEC_impl.md:1693-1720,1836-1886 require/describe direct grid mounts; no accepted fresh-page unavailability.\",\"TODO Planned empty; BUGS unrelated. Matching tmux-end-old-terminals/docs-cleanup plan sections preserve a working direct grid and provide no separate fix for the hypothesized stale dependency.\",\"INDEX.md fully read and searched with queue/active TRIAGE_OUTCOMES for mount/global/removal terms; no exact queue cover. No FILTER applied.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Hypothetical unusable terminal mount, high; no established work-loss/security route in this record. Its scope excludes previously loaded pages.\"; \"No stale global prerequisite was found.\"."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-120",
+          "key": "g192/c1",
+          "latest_line": 1,
+          "recommendation": "refuted",
+          "bucket": "high",
+          "underlying_key": "retired-xterm-current-page-mount-dependency",
+          "aliases": [
+            "g191/c1"
+          ],
+          "target_queue_file": null,
+          "why": "The reviewed page mounts the grid directly and has no surviving xterm global mount prerequisite.",
+          "checks": [
+            "At f560058da19e02716e6f943883a9508b447aff4e, UI lib.rs:1479-1496,1914-1926 declares/injects grid assets; terminal.js:3191-3228 waits for grid helpers and :4294-4367 creates farhelmGridTerminal.",
+            "Pinned product UI grep for retired constructor/asset names returned no references. Source only; deployment packaging and arbitrary grid features were not audited."
+          ],
+          "coverage_checked": [
+            "SPEC.md Terminal experience and SPEC_impl.md:1693-1720,1836-1886 require/describe direct grid mounts; no accepted fresh-page unavailability.",
+            "TODO Planned empty; BUGS unrelated. Matching tmux-end-old-terminals/docs-cleanup plan sections preserve a working direct grid and provide no separate fix for the hypothesized stale dependency.",
+            "INDEX.md fully read and searched with queue/active TRIAGE_OUTCOMES for mount/global/removal terms; no exact queue cover. No FILTER applied."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": "No stale global prerequisite was found.",
+          "original_stronger_consequence": "Hypothetical unusable terminal mount, high; no established work-loss/security route in this record. Its scope excludes previously loaded pages.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Source refutation of the same narrow current-page dependency hypothesis as g191/c1; no broader compatibility conclusion."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "high",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "retired-xterm-current-page-mount-dependency",
+        "destination": null
+      }
+    },
+    {
+      "key": "g192/c2",
+      "owner": "g192",
+      "id": "c2",
+      "domain": "retired-xterm-vendor",
+      "purpose": "retired-xterm-vendor: crates/farhelm-ui/assets/vendor/xterm.js; phases webpack module 2486 method _restrictCursor: MethodDefinition _restrictCursor | webpack module 2486 method setScrollRegion: MethodDefinition setScrollRegion | bundle wrapper method resize: MethodDefinition resize | webpack module 8801: Property 8801",
+      "history": [
+        {
+          "line": 2,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c2",
+            "state": "open",
+            "summary": "Deleting the browser parser does not remove active cursor and scroll-region handling",
+            "location": "crates/farhelm-ui/assets/vendor/xterm.js:1",
+            "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e. TLDR: considered whether removing the assigned _restrictCursor/setScrollRegion and surrounding parser sections removes terminal cursor movement, mode and scroll-region behavior. This removal does not provide that regression route: every terminal is already interpreted by the supervisor. Source: crates/farhelm-terminal-emulator/src/emulator.rs:117-159 constructs a Term and Processor and feeds program bytes into QueryHandler; queries.rs:293-352 delegates cursor movement and set_scrolling_region to Term. vendor/alacritty_terminal/src/term/mod.rs:1637-1737 implements cursor bounds/movement and :2674-2696 implements scroll regions; crates/farhelm-supervisor/src/grid_output.rs:329-362 extracts rows and bounded cursor state from that emulator for the page. Contract: SPEC_impl.md:1837-1839 says, 'A terminal is interpreted by the supervisor's emulator (\"The supervisor's terminal emulator\"), so the browser gets the screen and scrollback as rows of styled runs'; :2673-2679 names the single output interpreter and its responsibilities. SPEC.md:2860 requires cursor movement, alternate screens and resize. Suggested bucket: high if established, because TUIs would misdraw. Confidence: confirmed source refutation of removal-as-loss-of-parser; no execution performed. proposed_drop: source-refuted because the removed parser is no longer in the active output path. possible_cover: none searched. Could-be-highest: no established security or loss-of-work route for this concern. Caveat: this does not claim all emulator sequences match the retired implementation; independent defects in either emulator are outside this deletion assignment."
+          }
+        },
+        {
+          "line": 6,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c2",
+            "state": "open",
+            "summary": "Deleting the browser parser does not remove active cursor and scroll-region handling",
+            "location": "crates/farhelm-ui/assets/vendor/xterm.js:1",
+            "detail": "Synthesis revision: checked the attachment caller rather than relying only on the emulator and specification. Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e. TLDR: considered whether removing the assigned _restrictCursor/setScrollRegion and surrounding parser sections removes terminal cursor movement, mode and scroll-region behavior. Source refutes removal-as-loss-of-parser: service/handlers.rs:1674-1692 resolves a terminal and refuses an unreadable host before takeover; :1906-1943 unconditionally constructs HostAttach and GridStream for that resolved terminal and publishes their channel route. There is no alternate byte-stream renderer branch at this caller. crates/farhelm-terminal-emulator/src/emulator.rs:117-159 constructs a Term and Processor and feeds program bytes into QueryHandler; queries.rs:293-352 delegates cursor movement and set_scrolling_region to Term. vendor/alacritty_terminal/src/term/mod.rs:1637-1737 implements cursor bounds/movement and :2674-2696 implements scroll regions; crates/farhelm-supervisor/src/grid_output.rs:329-362 extracts rows and bounded cursor state for the page. Contract: SPEC_impl.md:1837-1839 says, 'A terminal is interpreted by the supervisor's emulator (\"The supervisor's terminal emulator\"), so the browser gets the screen and scrollback as rows of styled runs'; :2673-2679 names the single output interpreter. SPEC.md:2860 requires cursor movement, alternate screens and resize. Suggested bucket: high if established, because TUIs would misdraw. Confidence: confirmed source refutation for this deletion route; no execution performed. proposed_drop: source-refuted because the removed parser is no longer in the active output path. possible_cover: none searched. Could-be-highest: no established security or loss-of-work route. Caveat: this does not certify parity for every sequence or independent defects in either emulator; those remain outside the deletion assignment."
+          }
+        },
+        {
+          "line": 12,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c2",
+            "state": "open",
+            "summary": "Deleting the browser parser does not remove active cursor and scroll-region handling",
+            "location": "crates/farhelm-ui/assets/vendor/xterm.js:1",
+            "detail": "Discovery-pass revision extending the existing rejected parser-removal candidate to the assigned sections' query/state helpers. Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e. TLDR: no additional loss of cursor, saved state, title, color or hyperlink handling was established from deleting these retired parser sections. Existing source basis is retained: service/handlers.rs:1674-1692 resolves/refuses the host and :1906-1943 unconditionally constructs HostAttach/GridStream; emulator.rs:117-159 feeds program bytes into QueryHandler; queries.rs:293-352 forwards cursor movement, save/restore and scroll regions to Term; vendored term/mod.rs:1637-1737 and :2674-2696 implement cursor movement/scroll regions; grid_output.rs:329-362 extracts current rows/cursor. New checks: queries.rs:1-143 names the supervisor-owned query contract, and :357-367 forwards color changes, title stack and hyperlinks to Term; :381-421 implements identity, cursor-position and mode query answers. Targeted search for registerMarker, requestStatusString, selectProtected, setScrollRegion, saveCursor, restoreCursor, setOrReportIndexedColor, windowOptions, AbstractScrollbar and HorizontalScrollbar found no remaining references in current UI src/assets or emulator src. These names therefore supplied no overlooked surviving browser dependency on the deleted bundle. Contract: SPEC_impl.md:1837-1839 says the supervisor interprets the terminal and the browser receives styled rows; :2673-2679 names the single output interpreter. Its :2685-2695 describes the query table and explicitly accepts a few unparsed unanswered queries; this record relies primarily on the active-path source refutation, not a general waiver for query defects. SPEC.md:2860 still requires full terminal fidelity. Suggested bucket: high if a loss were established, because TUIs could misdraw or stall. Confidence: confirmed source refutation of this deletion-as-loss-of-active-parser route; no runtime behavior observed. proposed_drop: source-refuted; the retired parser is not on the active output path and no remaining consumer of these removed browser helper names was found. possible_cover: none searched. Could-be-highest: no established security or loss-of-work route for this parser-dependency concern; the separate c4 successful-input reinterpretation remains a potentially highest finding and is not refuted here. Caveat: no exhaustive emulator parity claim and no independent retired-library defect search."
+          }
+        }
+      ],
+      "latest": {
+        "line": 12,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c2",
+          "state": "open",
+          "summary": "Deleting the browser parser does not remove active cursor and scroll-region handling",
+          "location": "crates/farhelm-ui/assets/vendor/xterm.js:1",
+          "detail": "Discovery-pass revision extending the existing rejected parser-removal candidate to the assigned sections' query/state helpers. Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e. TLDR: no additional loss of cursor, saved state, title, color or hyperlink handling was established from deleting these retired parser sections. Existing source basis is retained: service/handlers.rs:1674-1692 resolves/refuses the host and :1906-1943 unconditionally constructs HostAttach/GridStream; emulator.rs:117-159 feeds program bytes into QueryHandler; queries.rs:293-352 forwards cursor movement, save/restore and scroll regions to Term; vendored term/mod.rs:1637-1737 and :2674-2696 implement cursor movement/scroll regions; grid_output.rs:329-362 extracts current rows/cursor. New checks: queries.rs:1-143 names the supervisor-owned query contract, and :357-367 forwards color changes, title stack and hyperlinks to Term; :381-421 implements identity, cursor-position and mode query answers. Targeted search for registerMarker, requestStatusString, selectProtected, setScrollRegion, saveCursor, restoreCursor, setOrReportIndexedColor, windowOptions, AbstractScrollbar and HorizontalScrollbar found no remaining references in current UI src/assets or emulator src. These names therefore supplied no overlooked surviving browser dependency on the deleted bundle. Contract: SPEC_impl.md:1837-1839 says the supervisor interprets the terminal and the browser receives styled rows; :2673-2679 names the single output interpreter. Its :2685-2695 describes the query table and explicitly accepts a few unparsed unanswered queries; this record relies primarily on the active-path source refutation, not a general waiver for query defects. SPEC.md:2860 still requires full terminal fidelity. Suggested bucket: high if a loss were established, because TUIs could misdraw or stall. Confidence: confirmed source refutation of this deletion-as-loss-of-active-parser route; no runtime behavior observed. proposed_drop: source-refuted; the retired parser is not on the active output path and no remaining consumer of these removed browser helper names was found. possible_cover: none searched. Could-be-highest: no established security or loss-of-work route for this parser-dependency concern; the separate c4 successful-input reinterpretation remains a potentially highest finding and is not refuted here. Caveat: no exhaustive emulator parity claim and no independent retired-library defect search."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g192/findings.jsonl",
+        "id": "c2",
+        "line": 12,
+        "disposition": "excluded",
+        "group": "retired-browser-parser-current-emulator-dependency",
+        "reason": "Parent explicitly accepted named refuted proposal from claims-120 after inspecting it. The attachment caller always creates the grid stream, and the supervisor's emulator supplies cursor, saved-state, scroll-region and query behavior independently of the removed browser parser. Refute the active-parser dependency only. Related to g191/c3 but narrower in cursor/scroll/query scope; retain independent capability omissions and g192/c4. Checked source/results: [\"At f560058da19e02716e6f943883a9508b447aff4e, service/handlers.rs:1674-1692 refuses an unreadable resolved host; :1906-1943 unconditionally creates HostAttach/GridStream and publishes that channel route.\",\"emulator.rs:117-159 feeds the parser; queries.rs:293-367 delegates cursor movement, save/restore, scroll regions, color, title and links; :381-421 implements identity, position and mode queries. grid_output.rs:329-362 extracts the resulting bounded cursor state. Source only.\"] Current coverage/results: [\"Current SPEC.md:2860 requires fidelity; SPEC_impl.md:1836-1886,2670-2704 assigns interpretation/query ownership. Named unanswered-query exceptions are not a general waiver for parser regressions.\",\"TODO Planned empty; BUGS unrelated. Matching removal/docs plans do not cause a separate missing-parser repair; they preserve the replacement responsibilities.\",\"INDEX.md read fully; existing cursor-color item is a distinct semantic omission. Active TRIAGE_OUTCOMES search found no exact parser-dependency decision. No FILTER applied.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Hypothetical TUI misdraw/stall from losing active parser behavior, suggested high. History explicitly preserves g192/c4's distinct potentially highest successful-input reinterpretation.\"; \"No live output consumer dependent on the removed parser was established. This does not certify parity for every sequence.\"."
+      },
+      "accepted_parent_decision": {
+        "key": "g192/c2",
+        "line": 12,
+        "disposition": "excluded",
+        "group": "retired-browser-parser-current-emulator-dependency",
+        "bucket": "high",
+        "recording": "refuted",
+        "queue_target_candidate": null,
+        "needs_independent_drop_check": false,
+        "reason": "Parent explicitly accepted named refuted proposal from claims-120 after inspecting it. The attachment caller always creates the grid stream, and the supervisor's emulator supplies cursor, saved-state, scroll-region and query behavior independently of the removed browser parser. Refute the active-parser dependency only. Related to g191/c3 but narrower in cursor/scroll/query scope; retain independent capability omissions and g192/c4. Checked source/results: [\"At f560058da19e02716e6f943883a9508b447aff4e, service/handlers.rs:1674-1692 refuses an unreadable resolved host; :1906-1943 unconditionally creates HostAttach/GridStream and publishes that channel route.\",\"emulator.rs:117-159 feeds the parser; queries.rs:293-367 delegates cursor movement, save/restore, scroll regions, color, title and links; :381-421 implements identity, position and mode queries. grid_output.rs:329-362 extracts the resulting bounded cursor state. Source only.\"] Current coverage/results: [\"Current SPEC.md:2860 requires fidelity; SPEC_impl.md:1836-1886,2670-2704 assigns interpretation/query ownership. Named unanswered-query exceptions are not a general waiver for parser regressions.\",\"TODO Planned empty; BUGS unrelated. Matching removal/docs plans do not cause a separate missing-parser repair; they preserve the replacement responsibilities.\",\"INDEX.md read fully; existing cursor-color item is a distinct semantic omission. Active TRIAGE_OUTCOMES search found no exact parser-dependency decision. No FILTER applied.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Hypothetical TUI misdraw/stall from losing active parser behavior, suggested high. History explicitly preserves g192/c4's distinct potentially highest successful-input reinterpretation.\"; \"No live output consumer dependent on the removed parser was established. This does not certify parity for every sequence.\"."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-120",
+          "key": "g192/c2",
+          "latest_line": 12,
+          "recommendation": "refuted",
+          "bucket": "high",
+          "underlying_key": "retired-browser-parser-current-emulator-dependency",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The attachment caller always creates the grid stream, and the supervisor's emulator supplies cursor, saved-state, scroll-region and query behavior independently of the removed browser parser.",
+          "checks": [
+            "At f560058da19e02716e6f943883a9508b447aff4e, service/handlers.rs:1674-1692 refuses an unreadable resolved host; :1906-1943 unconditionally creates HostAttach/GridStream and publishes that channel route.",
+            "emulator.rs:117-159 feeds the parser; queries.rs:293-367 delegates cursor movement, save/restore, scroll regions, color, title and links; :381-421 implements identity, position and mode queries. grid_output.rs:329-362 extracts the resulting bounded cursor state. Source only."
+          ],
+          "coverage_checked": [
+            "Current SPEC.md:2860 requires fidelity; SPEC_impl.md:1836-1886,2670-2704 assigns interpretation/query ownership. Named unanswered-query exceptions are not a general waiver for parser regressions.",
+            "TODO Planned empty; BUGS unrelated. Matching removal/docs plans do not cause a separate missing-parser repair; they preserve the replacement responsibilities.",
+            "INDEX.md read fully; existing cursor-color item is a distinct semantic omission. Active TRIAGE_OUTCOMES search found no exact parser-dependency decision. No FILTER applied."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": "No live output consumer dependent on the removed parser was established. This does not certify parity for every sequence.",
+          "original_stronger_consequence": "Hypothetical TUI misdraw/stall from losing active parser behavior, suggested high. History explicitly preserves g192/c4's distinct potentially highest successful-input reinterpretation.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Refute the active-parser dependency only. Related to g191/c3 but narrower in cursor/scroll/query scope; retain independent capability omissions and g192/c4."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "high",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "retired-browser-parser-current-emulator-dependency",
+        "destination": null
+      }
+    },
+    {
+      "key": "g192/c3",
+      "owner": "g192",
+      "id": "c3",
+      "domain": "retired-xterm-vendor",
+      "purpose": "retired-xterm-vendor: crates/farhelm-ui/assets/vendor/xterm.js; phases webpack module 2486 method _restrictCursor: MethodDefinition _restrictCursor | webpack module 2486 method setScrollRegion: MethodDefinition setScrollRegion | bundle wrapper method resize: MethodDefinition resize | webpack module 8801: Property 8801",
+      "history": [
+        {
+          "line": 3,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c3",
+            "state": "open",
+            "summary": "The retired buffer resize and scrollbar have active replacements",
+            "location": "crates/farhelm-ui/assets/vendor/xterm.js:1",
+            "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e. TLDR: considered whether removing the assigned Buffer.resize/reflow and module 8801 scrollbar sections removes terminal resizing or access to scrollback. The active grid has its own fit and scrolling implementation. Source: assets/grid-terminal.js:463-498 computes fitted dimensions and reports them through onResize; assets/terminal.js:4554-4565 sends the grid size as a resize message and :4593-4636 resends on socket-open and observes window/pane size changes. The host runtime applies resize records through hosts/terminal.rs:3853-3867 and :4040-4051; emulator.rs:207-227 resizes the supervisor's Term after flushing synchronized output; vendor/alacritty_terminal/src/term/mod.rs:735-783 resizes both buffers and resets the scroll region. service/grid_stream.rs:686-718 detects the emulator's changed layout, settles it and reads replacement history; :860-864 includes emulator resizes in that layout identity. The grid's viewShape/scrollToIndex path is assets/grid-terminal.js:530-594, and :966-1039 paints and handles its own scrollbar, including track clicks and document-level drag release. :2106-2139 disposes the drag and fade timer. Contract: SPEC_impl.md:1847-1855 defines the grid fit contract and virtualized renderer; SPEC.md:2910-2916 requires whole-history replacement after rewrap and :2960-2963 assigns terminal dimensions to the attached client. Suggested bucket: high if established, because failed resize or inaccessible scrollback would materially affect terminal use. Confidence: confirmed source refutation that this deletion removes those active responsibilities; no execution performed. proposed_drop: source-refuted; replacement responsibilities already belong to the grid and supervisor. possible_cover: none searched. Could-be-highest: no established security or loss-of-work route for this concern. Caveats: no exhaustive parity claim between the old and new resize algorithms; no independent audit of unrelated emulator or grid defects; no runtime rendering result claimed."
+          }
+        },
+        {
+          "line": 7,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c3",
+            "state": "open",
+            "summary": "The retired buffer resize and scrollbar have active replacements",
+            "location": "crates/farhelm-ui/assets/vendor/xterm.js:1",
+            "detail": "Synthesis revision: traced resize across the browser, helm and supervisor, and checked teardown. Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e. TLDR: considered whether deleting Buffer.resize/reflow and module 8801 removes resizing or access to scrollback. Source refutes that removal route. assets/grid-terminal.js:463-498 fits and reports dimensions; assets/terminal.js:3388-3428 constructs and fits that grid before building the socket URL, :4554-4565 sends later fitted sizes, and :4593-4636 resends at open and observes window/pane changes. crates/farhelm-helm/src/terminal.rs:777-780 routes text resize controls through the original attachment's client and bare session id; client.rs:4187-4200 sends ControlMsg::Resize with the attachment channel. Supervisor service/handlers.rs:1990-2056 resolves the channel's terminal and checks channel plus owning connection under the attachment lock before resizing; attach itself sizes the same host at :1885. The host runtime applies resize records in hosts/terminal.rs:3853-3867 and :4040-4051; emulator.rs:207-227 resizes Term after flushing synchronized output; vendor/alacritty_terminal/src/term/mod.rs:735-783 resizes both buffers and resets the scroll region. service/grid_stream.rs:686-718 settles layout changes and reads replacement history; :860-864 includes emulator resizes in layout identity. assets/grid-terminal.js:530-594 owns scrolling and :966-1039 owns the scrollbar. It disposes drag/fade state at :2106-2139. assets/terminal.js:4761-4786 removes the size listener, pane observer and attachment/notice listeners; :4825-4830 freezes or disposes the grid. Contract: SPEC_impl.md:1847-1855 defines grid fitting/virtualized rendering; SPEC.md:2914-2917 requires replacement history after rewrap and :2959-2963 assigns dimensions to the attached client. Suggested bucket: high if established, because failed resize or inaccessible scrollback materially affects terminal use. Confidence: confirmed source refutation for this deletion route; no execution performed. proposed_drop: source-refuted; active resize, history and scrollbar responsibilities remain connected across their callers. possible_cover: none searched. Could-be-highest: no established security or loss-of-work route. Caveats: no exhaustive parity claim between resize algorithms and no independent audit of unrelated emulator/grid defects; no runtime rendering result claimed."
+          }
+        }
+      ],
+      "latest": {
+        "line": 7,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c3",
+          "state": "open",
+          "summary": "The retired buffer resize and scrollbar have active replacements",
+          "location": "crates/farhelm-ui/assets/vendor/xterm.js:1",
+          "detail": "Synthesis revision: traced resize across the browser, helm and supervisor, and checked teardown. Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e. TLDR: considered whether deleting Buffer.resize/reflow and module 8801 removes resizing or access to scrollback. Source refutes that removal route. assets/grid-terminal.js:463-498 fits and reports dimensions; assets/terminal.js:3388-3428 constructs and fits that grid before building the socket URL, :4554-4565 sends later fitted sizes, and :4593-4636 resends at open and observes window/pane changes. crates/farhelm-helm/src/terminal.rs:777-780 routes text resize controls through the original attachment's client and bare session id; client.rs:4187-4200 sends ControlMsg::Resize with the attachment channel. Supervisor service/handlers.rs:1990-2056 resolves the channel's terminal and checks channel plus owning connection under the attachment lock before resizing; attach itself sizes the same host at :1885. The host runtime applies resize records in hosts/terminal.rs:3853-3867 and :4040-4051; emulator.rs:207-227 resizes Term after flushing synchronized output; vendor/alacritty_terminal/src/term/mod.rs:735-783 resizes both buffers and resets the scroll region. service/grid_stream.rs:686-718 settles layout changes and reads replacement history; :860-864 includes emulator resizes in layout identity. assets/grid-terminal.js:530-594 owns scrolling and :966-1039 owns the scrollbar. It disposes drag/fade state at :2106-2139. assets/terminal.js:4761-4786 removes the size listener, pane observer and attachment/notice listeners; :4825-4830 freezes or disposes the grid. Contract: SPEC_impl.md:1847-1855 defines grid fitting/virtualized rendering; SPEC.md:2914-2917 requires replacement history after rewrap and :2959-2963 assigns dimensions to the attached client. Suggested bucket: high if established, because failed resize or inaccessible scrollback materially affects terminal use. Confidence: confirmed source refutation for this deletion route; no execution performed. proposed_drop: source-refuted; active resize, history and scrollbar responsibilities remain connected across their callers. possible_cover: none searched. Could-be-highest: no established security or loss-of-work route. Caveats: no exhaustive parity claim between resize algorithms and no independent audit of unrelated emulator/grid defects; no runtime rendering result claimed."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g192/findings.jsonl",
+        "id": "c3",
+        "line": 7,
+        "disposition": "excluded",
+        "group": "retired-xterm-resize-scrollback-dependency",
+        "reason": "Parent explicitly accepted named refuted proposal from claims-120 after inspecting it. The grid's fit and scrolling paths are live, and resize reaches the attached terminal's runtime/emulator with ownership checks. Deleting the old resize/scrollbar machinery does not remove these responsibilities. Source-refuted deletion route. g193/c1 overlaps the scrolling subset but does not have this record's resize scope; do not discard unrelated history defects. Checked source/results: [\"At f560058da19e02716e6f943883a9508b447aff4e, grid-terminal.js:463-498 fits, :530-594 tracks scroll position, :966-1039 owns scrollbar events and :2106-2139 disposes them. terminal.js:4554-4565 sends resize, :4593-4636 observes/refits pane/window changes.\",\"helm terminal.rs:777-780 forwards resize on the attachment client/channel; supervisor handlers.rs:1990-2056 resolves and checks the owning connection/channel under the lock, then resizes. Attach-time resize is :1885.\",\"hosts/terminal.rs:3853-3867,4040-4051 applies resize to emulator; emulator.rs:207-227 resizes Term; service/grid_stream.rs:686-718,860-864 reacts to layout/resizes and reads replacement history. Source only, not algorithm parity or measured rendering.\"] Current coverage/results: [\"Current SPEC.md Terminal experience requires resize, retained scrollback and whole-history replacement after rewrap; SPEC_impl.md grid client:1836-1886 describes independent fit/virtualized scrolling. No accepted total loss of resize/scrollback access.\",\"TODO Planned empty; BUGS unrelated; matching removal/docs plan criteria retain fit/scrolling. The Maybe later back-buffer proposal is outside Planned and is not exact defect coverage.\",\"INDEX.md read fully; history notices, cursor and individual copy defects do not cover removal-as-loss-of-resize/scrollbar. Active TRIAGE_OUTCOMES search found no exact decision. No FILTER applied.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Hypothetical failed resize or inaccessible retained output, high. No established deletion of retained history, security or user-work loss.\"; \"No surviving dependency on removed Buffer.resize/reflow or scrollbar modules was found. No exhaustive comparison of resize algorithms.\"."
+      },
+      "accepted_parent_decision": {
+        "key": "g192/c3",
+        "line": 7,
+        "disposition": "excluded",
+        "group": "retired-xterm-resize-scrollback-dependency",
+        "bucket": "high",
+        "recording": "refuted",
+        "queue_target_candidate": null,
+        "needs_independent_drop_check": false,
+        "reason": "Parent explicitly accepted named refuted proposal from claims-120 after inspecting it. The grid's fit and scrolling paths are live, and resize reaches the attached terminal's runtime/emulator with ownership checks. Deleting the old resize/scrollbar machinery does not remove these responsibilities. Source-refuted deletion route. g193/c1 overlaps the scrolling subset but does not have this record's resize scope; do not discard unrelated history defects. Checked source/results: [\"At f560058da19e02716e6f943883a9508b447aff4e, grid-terminal.js:463-498 fits, :530-594 tracks scroll position, :966-1039 owns scrollbar events and :2106-2139 disposes them. terminal.js:4554-4565 sends resize, :4593-4636 observes/refits pane/window changes.\",\"helm terminal.rs:777-780 forwards resize on the attachment client/channel; supervisor handlers.rs:1990-2056 resolves and checks the owning connection/channel under the lock, then resizes. Attach-time resize is :1885.\",\"hosts/terminal.rs:3853-3867,4040-4051 applies resize to emulator; emulator.rs:207-227 resizes Term; service/grid_stream.rs:686-718,860-864 reacts to layout/resizes and reads replacement history. Source only, not algorithm parity or measured rendering.\"] Current coverage/results: [\"Current SPEC.md Terminal experience requires resize, retained scrollback and whole-history replacement after rewrap; SPEC_impl.md grid client:1836-1886 describes independent fit/virtualized scrolling. No accepted total loss of resize/scrollback access.\",\"TODO Planned empty; BUGS unrelated; matching removal/docs plan criteria retain fit/scrolling. The Maybe later back-buffer proposal is outside Planned and is not exact defect coverage.\",\"INDEX.md read fully; history notices, cursor and individual copy defects do not cover removal-as-loss-of-resize/scrollbar. Active TRIAGE_OUTCOMES search found no exact decision. No FILTER applied.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Hypothetical failed resize or inaccessible retained output, high. No established deletion of retained history, security or user-work loss.\"; \"No surviving dependency on removed Buffer.resize/reflow or scrollbar modules was found. No exhaustive comparison of resize algorithms.\"."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-120",
+          "key": "g192/c3",
+          "latest_line": 7,
+          "recommendation": "refuted",
+          "bucket": "high",
+          "underlying_key": "retired-xterm-resize-scrollback-dependency",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The grid's fit and scrolling paths are live, and resize reaches the attached terminal's runtime/emulator with ownership checks. Deleting the old resize/scrollbar machinery does not remove these responsibilities.",
+          "checks": [
+            "At f560058da19e02716e6f943883a9508b447aff4e, grid-terminal.js:463-498 fits, :530-594 tracks scroll position, :966-1039 owns scrollbar events and :2106-2139 disposes them. terminal.js:4554-4565 sends resize, :4593-4636 observes/refits pane/window changes.",
+            "helm terminal.rs:777-780 forwards resize on the attachment client/channel; supervisor handlers.rs:1990-2056 resolves and checks the owning connection/channel under the lock, then resizes. Attach-time resize is :1885.",
+            "hosts/terminal.rs:3853-3867,4040-4051 applies resize to emulator; emulator.rs:207-227 resizes Term; service/grid_stream.rs:686-718,860-864 reacts to layout/resizes and reads replacement history. Source only, not algorithm parity or measured rendering."
+          ],
+          "coverage_checked": [
+            "Current SPEC.md Terminal experience requires resize, retained scrollback and whole-history replacement after rewrap; SPEC_impl.md grid client:1836-1886 describes independent fit/virtualized scrolling. No accepted total loss of resize/scrollback access.",
+            "TODO Planned empty; BUGS unrelated; matching removal/docs plan criteria retain fit/scrolling. The Maybe later back-buffer proposal is outside Planned and is not exact defect coverage.",
+            "INDEX.md read fully; history notices, cursor and individual copy defects do not cover removal-as-loss-of-resize/scrollbar. Active TRIAGE_OUTCOMES search found no exact decision. No FILTER applied."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": "No surviving dependency on removed Buffer.resize/reflow or scrollbar modules was found. No exhaustive comparison of resize algorithms.",
+          "original_stronger_consequence": "Hypothetical failed resize or inaccessible retained output, high. No established deletion of retained history, security or user-work loss.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Source-refuted deletion route. g193/c1 overlaps the scrolling subset but does not have this record's resize scope; do not discard unrelated history defects."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "high",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "retired-xterm-resize-scrollback-dependency",
+        "destination": null
+      }
+    },
+    {
+      "key": "g192/c4",
+      "owner": "g192",
+      "id": "c4",
+      "domain": "retired-xterm-vendor",
+      "purpose": "retired-xterm-vendor: crates/farhelm-ui/assets/vendor/xterm.js; phases webpack module 2486 method _restrictCursor: MethodDefinition _restrictCursor | webpack module 2486 method setScrollRegion: MethodDefinition setScrollRegion | bundle wrapper method resize: MethodDefinition resize | webpack module 8801: Property 8801",
+      "history": [
+        {
+          "line": 4,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c4",
+            "state": "open",
+            "summary": "Previously loaded pages require reload after the grid-only update",
+            "location": "crates/farhelm-ui/assets/vendor/xterm.js:1",
+            "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e. TLDR: considered compatibility of a page loaded before this removal with the updated helm. That old page can misdraw a new attachment as raw terminal bytes and typing can end the attachment; the specification explicitly accepts this consequence and requires reloading the page. Contract: SPEC_impl.md, Grid streams, :3021-3029 states, 'A page loaded from the previous helm and left open across the update must be reloaded; nothing keeps it working.' It then describes the missing kind/stream notice causing grid messages to be drawn as terminal output and malformed input ending the attachment, and concludes, 'Keeping the stream notice for such pages was considered and not done: a reload is the whole remedy.' Correction to the last quoted word: the actual specification says 'remedy' nowhere; its exact final sentence is 'Keeping the stream notice for such pages was considered and not done: a reload is the whole remedy.' This candidate needs an exact-text correction before delivery. Source basis: the removed xterm bundle is the old page's byte-stream renderer; current assets/terminal.js:4294-4367 mounts only the grid, and the assigned deletion removes the bundle. Suggested bucket: high if unaccepted, because an old open terminal can misdraw and lose attachment availability. Confidence: confirmed specification acceptance of the compatibility break, with no execution performed. proposed_drop: specification acceptance in SPEC_impl.md, Grid streams; exact wording must be corrected as noted. possible_cover: this named specification section only; no coverage sources searched. Could-be-highest: no established security or loss-of-work route; the specified failure ends the viewer attachment, not the host terminal or its program. Caveat: this candidate concerns the old page across an update, not a freshly loaded page or mismatched supervisor protocol."
+          }
+        },
+        {
+          "line": 5,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c4",
+            "state": "open",
+            "summary": "Previously loaded pages require reload after the grid-only update",
+            "location": "crates/farhelm-ui/assets/vendor/xterm.js:1",
+            "detail": "Revision of c4: removed an erroneous editorial note about the quotation after checking the exact retained text. The acceptance and consequence are unchanged. Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e. TLDR: considered compatibility of a page loaded before this removal with the updated helm. That old page can misdraw a new attachment as raw terminal bytes and typing can end the attachment; the specification explicitly accepts this consequence and requires reloading the page. Contract: SPEC_impl.md, Grid streams, :3021-3027 states, 'A page loaded from the previous helm and left open across the update must be reloaded; nothing keeps it working.' It then describes the missing kind/stream notice causing grid messages to be drawn as terminal output and malformed input ending the attachment, and concludes, 'Keeping the stream notice for such pages was considered and not done: a reload is the whole remedy.' Source basis: the removed xterm bundle is the old page's byte-stream renderer; current assets/terminal.js:4294-4367 mounts only the grid, and the assigned deletion removes the bundle. Suggested bucket: high if unaccepted, because an old open terminal can misdraw and lose attachment availability. Confidence: confirmed specification acceptance of the compatibility break, with no execution performed. proposed_drop: specification acceptance in SPEC_impl.md, Grid streams, quoted above. possible_cover: this named specification section only; no coverage sources searched. Could-be-highest: no established security or loss-of-work route; the specified failure ends the viewer attachment, not the host terminal or its program. Caveat: this candidate concerns the old page across an update, not a freshly loaded page or mismatched supervisor protocol."
+          }
+        },
+        {
+          "line": 8,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c4",
+            "state": "open",
+            "summary": "Previously loaded pages require reload after the grid-only update",
+            "location": "crates/farhelm-ui/assets/vendor/xterm.js:1",
+            "detail": "Synthesis revision: checked the malformed-input failure path to establish the scope of the accepted compatibility failure. Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e. TLDR: a page loaded before this removal can misdraw a new attachment as terminal bytes, and its ordinary raw input can end that viewer attachment; the specification explicitly accepts this and requires reload. SPEC_impl.md, Grid streams, :3021-3027 states, 'A page loaded from the previous helm and left open across the update must be reloaded; nothing keeps it working.' It describes the missing kind/stream notice, misdrawn grid messages and malformed input ending the attachment, then states, 'Keeping the stream notice for such pages was considered and not done: a reload is the whole remedy.' Source: current assets/terminal.js:3388-3428 constructs the grid before opening the socket, :4466-4474 passes grid data to it, and :4501-4508 encodes grid input. The removed bundle is the former byte-stream renderer. Supervisor service/grid_stream.rs:1064-1079 decodes and validates GridInput before encoding or queueing bytes. On failure, service/connection.rs:536-563 removes the matched attachment, shuts down its forwarder, drops its input and reports a detach; it does not stop or replace the terminal host. Suggested bucket: high if unaccepted, because the old page loses usable display and attachment availability. Confidence: confirmed specification acceptance and source-confirmed containment of malformed-input teardown; no execution performed. proposed_drop: explicit acceptance in SPEC_impl.md, Grid streams, quoted above. possible_cover: that specification section only; no queue/plan/filter sources searched. Could-be-highest: no established security or loss-of-work route for this concern; the checked failure tears down the viewer attachment, not its terminal host or running program. Caveats: this concerns the old page across an update; it does not certify new-page behavior or every imaginable raw byte sequence. The effect of an arbitrary sequence that happens to be a valid grid message is not the stated malformed-input failure."
+          }
+        },
+        {
+          "line": 9,
+          "event": {
+            "version": 1,
+            "kind": "lead",
+            "id": "c4",
+            "state": "open",
+            "summary": "Old-page input compatibility has a distinct potentially destructive JSON route",
+            "location": "crates/farhelm-ui/assets/vendor/xterm.js:1",
+            "detail": "Interface synthesis before discovery pass 1. Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e. TLDR: caller-supplied g196/l1 and neighbour g082/c2 identify a route beyond c4's previously checked malformed-input teardown: a legacy page can paste a small valid GridInput JSON document as one raw frame; the updated supervisor may decode escaped control characters into unbracketed program input instead of inserting literal JSON. Could-be-highest: true for that newly supplied successful reinterpretation route; the prior broad no-highest conclusion must not be applied to it. Confidence: source-supported interface lead, pending local checks of old-page paste default/framing and the current Text decoder/encoder. No runtime execution. Original c4 consequence retained: an old page can misdraw a grid stream and ordinary malformed input ends its viewer attachment, not its terminal host. Prior proposed_drop basis retained narrowly: SPEC_impl.md:3021-3027 says, 'A page loaded from the previous helm and left open across the update must be reloaded; nothing keeps it working.' It describes misdraw/malformed-input detach and says, 'Keeping the stream notice for such pages was considered and not done: a reload is the whole remedy.' That text is not yet established to accept successful JSON reinterpretation; no drop or lowering has been accepted. Source already checked: service/grid_stream.rs:1064-1079 decodes GridInput before queueing; connection.rs:536-563 tears down the attachment only when decoding fails, so this failure path does not refute a valid-JSON route. Missing checks: exact old raw paste framing, Text decoding/unescaping and encoder output, and global build-skew input/mount fencing (g196 owns its global check). Suggested bucket: potentially highest/security or loss of work for the supplied route, with no executed command or loss observed here. possible_cover: caller-supplied g196/l1, g082/c2 and g083/c5 for consolidation only; no prohibited sources searched. This is interface synthesis, not a new independent discovery."
+          }
+        },
+        {
+          "line": 10,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "c4",
+            "state": "open",
+            "summary": "Old-page paste can reinterpret literal JSON as unbracketed terminal input",
+            "location": "crates/farhelm-ui/assets/vendor/xterm.js:1",
+            "detail": "Interface-synthesis revision before independent discovery pass 1. Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e. TLDR: the old-page compatibility break includes a distinct potentially destructive consequence: a pasted JSON document can be interpreted as a new terminal-input instruction, unescaping carriage returns into unbracketed command input rather than inserting literal JSON. Original c4 consequence is preserved: ordinary malformed input detaches the old viewer, with misdrawing until reload; that source-refuted process-stop route is not a refutation of successful valid-JSON decoding. Locally checked source: parent assets/vendor/xterm.js:1, webpack module 7861, paste function r normalizes actual line endings, conditionally brackets according to decPrivateModes.bracketedPasteMode, then calls triggerDataEvent once; the core default sets bracketedPasteMode false. Parent terminal.js:2649-2676 routes text paste through insert, :2232-2235 sanitizes literal ESC only, :4628-4634 invokes term.paste, :4191-4196 sends onData through sendData, and :4158-4160 sends the whole encoded text as one binary WebSocket message. Parent :4651-4666 constructs xterm for an unknown terminal kind. Reviewed grid.rs:1565-1566 tags GridInput by t; :1610-1612 defines Text data; :1650-1655 uses serde_json decoding; :1686-1693 only bounds Text length. grid_input.rs:175 emits data.as_bytes directly, with no paste wrapping. service/grid_stream.rs:1064-1079 decodes before queueing, so only invalid input reaches the previously checked attachment-failure teardown. Caller-supplied g196/l1 also traces missing-kind listings, absent stream notice, unchanged binary relay and manual reconnect across skew. Suggested bucket: highest/security or loss of work; Could-be-highest: true because literal escaped controls can become active command input. Confidence: likely, with the remaining named premise that the pre-update page is on a fresh default-mode xterm attachment and stays attached until the paste; no execution or command effect observed. proposed_drop: potential specification acceptance retained for independent judgment, not accepted here. Exact prior basis: SPEC_impl.md:3021-3027 says, 'A page loaded from the previous helm and left open across the update must be reloaded; nothing keeps it working.' It describes misdraw/malformed-input detach and says, 'Keeping the stream notice for such pages was considered and not done: a reload is the whole remedy.' It does not expressly name successful JSON reinterpretation into unbracketed program input. possible_cover: exact supplied g196/l1, g082/c2 and g083/c5 for parent consolidation; no prohibited sources searched. Caveats: old page plus unknown-kind fresh mount and valid small GridInput-shaped paste are required; program output that enables the old renderer's bracketed-paste mode can prevent this particular raw-frame route; ordinary keystrokes usually detach first. Further local check: old-page mount/input build-skew interlocks, without broadening into an independent protocol review. This is refinement of a supplied interface finding, not new independent discovery."
+          }
+        },
+        {
+          "line": 11,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "c4",
+            "state": "open",
+            "summary": "Old-page paste can reinterpret literal JSON as unbracketed terminal input",
+            "location": "crates/farhelm-ui/assets/vendor/xterm.js:1",
+            "detail": "Synthesis revision completing the named cross-group input before discovery pass 1. Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e. TLDR: a page retained across the grid-only update can paste literal JSON that the updated endpoint treats as a Text instruction; escaped carriage returns become unbracketed terminal input and can submit commands embedded in the document. Original consequence retained: the old page also misdraws grid data, and ordinary malformed input ends only the viewer attachment. That invalid-input teardown does not refute this valid-input route. Source checks: parent UI lib.rs:514-521 defaults a missing agent_terminal to None; session_view.rs:1806-1810 passes agent_kind into the spec and :3839-3852 preserves an unknown kind when not restarting. Parent terminal.js:4651-4666 builds a fresh xterm for that unknown kind. Its :3590-3621 mount gate checks helpers/fonts/element, with no build-match prerequisite. :1550-1579 gates automatic recovery/heartbeat on skew but explicitly allows manual reconnect; :1871-1898 remounts on that manual route. :4158-4160 sends encoded input when the socket is open, with no build guard. Parent xterm.js:1 module 7861 paste function r normalizes actual line endings, brackets only when decPrivateModes.bracketedPasteMode is true and triggers one data event; that mode defaults false. Parent terminal.js:2649-2676 handles text paste, :2232-2235 removes literal ESC only, :4628-4634 invokes term.paste, and :4191-4196 sends onData through the whole-frame sendData. Reviewed grid.rs:1565-1566 tags GridInput by t; :1610-1612 defines Text data; :1650-1655 deserializes JSON; :1686-1693 bounds Text length without excluding decoded controls. grid_input.rs:175 emits Text data bytes directly without paste wrapping, irrespective of the real program's bracketed-paste mode. The reviewed helm binary relay was checked at terminal.rs:762-773 in the prior turn. Thus a small one-line GridInput-shaped pasted document can cross as raw bytes and be reinterpreted. Suggested bucket: highest/security or loss of work. Could-be-highest: true; unintended unbracketed command submission is an established source route, although no execution or destructive result was observed. Confidence: confirmed source path under the explicit old-page/unknown-kind fresh-mount/valid-small-JSON-paste conditions; no runtime evidence. proposed_drop: potential specification acceptance remains proposed for independent judgment, not accepted. Exact preserved basis: SPEC_impl.md:3021-3027 says, 'A page loaded from the previous helm and left open across the update must be reloaded; nothing keeps it working.' It describes misdrawing and malformed-input detach and says, 'Keeping the stream notice for such pages was considered and not done: a reload is the whole remedy.' It does not expressly name successful JSON reinterpretation as unbracketed program input. possible_cover: supplied g196/l1 is the same route; g082/c2 and g083/c5 also retain it. Parent owns consolidation; no prohibited coverage searches. Caveats: ordinary keystrokes usually detach first; program output that enables the old surface's bracketed-paste mode can prevent this particular raw-frame route. Full arbitrary-byte behavior and actual shell execution were not tested. This resolves the local readily checkable premises and replaces the earlier broad no-highest treatment. It is a revision from supplied interface evidence, not a new independent discovery."
+          }
+        }
+      ],
+      "latest": {
+        "line": 11,
+        "event": {
+          "version": 1,
+          "kind": "finding",
+          "id": "c4",
+          "state": "open",
+          "summary": "Old-page paste can reinterpret literal JSON as unbracketed terminal input",
+          "location": "crates/farhelm-ui/assets/vendor/xterm.js:1",
+          "detail": "Synthesis revision completing the named cross-group input before discovery pass 1. Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e. TLDR: a page retained across the grid-only update can paste literal JSON that the updated endpoint treats as a Text instruction; escaped carriage returns become unbracketed terminal input and can submit commands embedded in the document. Original consequence retained: the old page also misdraws grid data, and ordinary malformed input ends only the viewer attachment. That invalid-input teardown does not refute this valid-input route. Source checks: parent UI lib.rs:514-521 defaults a missing agent_terminal to None; session_view.rs:1806-1810 passes agent_kind into the spec and :3839-3852 preserves an unknown kind when not restarting. Parent terminal.js:4651-4666 builds a fresh xterm for that unknown kind. Its :3590-3621 mount gate checks helpers/fonts/element, with no build-match prerequisite. :1550-1579 gates automatic recovery/heartbeat on skew but explicitly allows manual reconnect; :1871-1898 remounts on that manual route. :4158-4160 sends encoded input when the socket is open, with no build guard. Parent xterm.js:1 module 7861 paste function r normalizes actual line endings, brackets only when decPrivateModes.bracketedPasteMode is true and triggers one data event; that mode defaults false. Parent terminal.js:2649-2676 handles text paste, :2232-2235 removes literal ESC only, :4628-4634 invokes term.paste, and :4191-4196 sends onData through the whole-frame sendData. Reviewed grid.rs:1565-1566 tags GridInput by t; :1610-1612 defines Text data; :1650-1655 deserializes JSON; :1686-1693 bounds Text length without excluding decoded controls. grid_input.rs:175 emits Text data bytes directly without paste wrapping, irrespective of the real program's bracketed-paste mode. The reviewed helm binary relay was checked at terminal.rs:762-773 in the prior turn. Thus a small one-line GridInput-shaped pasted document can cross as raw bytes and be reinterpreted. Suggested bucket: highest/security or loss of work. Could-be-highest: true; unintended unbracketed command submission is an established source route, although no execution or destructive result was observed. Confidence: confirmed source path under the explicit old-page/unknown-kind fresh-mount/valid-small-JSON-paste conditions; no runtime evidence. proposed_drop: potential specification acceptance remains proposed for independent judgment, not accepted. Exact preserved basis: SPEC_impl.md:3021-3027 says, 'A page loaded from the previous helm and left open across the update must be reloaded; nothing keeps it working.' It describes misdrawing and malformed-input detach and says, 'Keeping the stream notice for such pages was considered and not done: a reload is the whole remedy.' It does not expressly name successful JSON reinterpretation as unbracketed program input. possible_cover: supplied g196/l1 is the same route; g082/c2 and g083/c5 also retain it. Parent owns consolidation; no prohibited coverage searches. Caveats: ordinary keystrokes usually detach first; program output that enables the old surface's bracketed-paste mode can prevent this particular raw-frame route. Full arbitrary-byte behavior and actual shell execution were not tested. This resolves the local readily checkable premises and replaces the earlier broad no-highest treatment. It is a revision from supplied interface evidence, not a new independent discovery."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g192/findings.jsonl",
+        "id": "c4",
+        "line": 11,
+        "disposition": "under-investigation",
+        "group": "g192-c4",
+        "reason": "Record durably acknowledged; parent source/contract validation, cross-group synthesis, coverage/filter matching and any independent drop check remain pending. This preserves the claim and uncertainty without accepting, dropping or lowering it."
+      },
+      "accepted_parent_decision": null,
+      "returned_claim_checks": [
+        {
+          "batch": "claims-120",
+          "key": "g192/c4",
+          "latest_line": 11,
+          "recommendation": "retain-verified",
+          "bucket": "highest",
+          "underlying_key": "legacy-page-raw-paste-decoded-as-grid-text-command",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "Under the stated old-page/fresh unknown-kind attachment conditions, a literal GridInput-shaped JSON paste crosses as one binary frame and is deserialized as Text. Escaped carriage returns become active unbracketed terminal input. The spec's reload requirement describes misdraw and malformed-input detach, not this successful reinterpretation consequence.",
+          "checks": [
+            "At f560058da19e02716e6f943883a9508b447aff4e parent, UI lib.rs:514-521 defaults absent agent_terminal to None; session_view.rs:1806-1810,3839-3852 passes unknown kind. terminal.js:4651-4666 builds fresh xterm when kind is unknown; :3590-3621 has helper/font/element mount gates, not build equality.",
+            "Parent terminal.js:1550-1579 explicitly leaves manual reconnect allowed on skew; :1871-1898 remounts it; :2649-2676,2232-2235,4628-4634 sends text paste through sanitizer/term.paste; :4158-4160,4191-4196 sends onData as a complete binary WebSocket message.",
+            "Parent vendor/xterm.js minified paste function normalizes actual newlines, conditionally adds bracketed-paste markers, then calls triggerDataEvent once. decPrivateModes.bracketedPasteMode defaults false. JSON's escaped control notation survives this stage.",
+            "Reviewed helm terminal.rs:762-773 relays binary input. grid.rs:1565-1566,1610-1612,1650-1655 decodes tagged JSON Text; :1686-1693 bounds length without excluding decoded CR. grid_input.rs:175 emits data.as_bytes directly, unlike Paste. grid_stream.rs:1064-1091 queues the successful bytes; invalid decode alone reaches connection.rs:536-563 attachment teardown.",
+            "This establishes a conditional source route, not an executed command or observed damage. Ordinary keystrokes usually detach first; output that sets bracketed-paste mode on the old renderer can block this raw-frame route."
+          ],
+          "coverage_checked": [
+            "Current SPEC_impl.md Grid streams:2939-3013 read in full. Its :2950-2957 accepts old-page reload, misdraw and malformed-input attachment loss; whether its broad opening sentence also accepts successful command reinterpretation is ambiguous. SPEC.md Terminal experience does not expressly accept that stronger consequence.",
+            "TODO Planned empty; BUGS unrelated. Searched all plans/queue for old-page/GridInput/paste/reload and read matching removal/docs-plan acceptance sections: removal of kind/stream notices is specified, but no unlanded cause-removing work or explicit valid-JSON command acceptance was found.",
+            "INDEX.md read fully and matching queue text searched for old-page/literal JSON/reinterpret/GridInput/unbracketed command. Auth-remount/shortcut/version items have different mechanisms; no exact existing item found. Active TRIAGE_OUTCOMES search found no exact decision.",
+            "FILTER.md rare/self-correcting and upgrade-plus-rare filters do not authorize dismissal: this route changes program input and can submit commands; security/trust-boundary consequences are excluded even from the upgrade filter. Rarity alone is insufficient."
+          ],
+          "exact_cover_quotes": [
+            "Potential but ambiguous basis, SPEC_impl.md:2949-2950: A page loaded from the previous helm and left open across the update must be reloaded; nothing keeps it working.",
+            "Same section: it draws grid messages as terminal output, and what is typed into it ends the attachment as malformed input.",
+            "Same section: Keeping the stream notice for such pages was considered and not done: a reload is the whole remedy."
+          ],
+          "missing_premise": "No missing local source premise for the conditional reinterpretation chain. Actual execution/destruction was not reproduced. Parent should consolidate the supplied g196/l1, g082/c2 and g083/c5 records only after comparing their histories; they were not included in this batch and were not independently read here.",
+          "original_stronger_consequence": "Initial records proposed spec-covered high for old-page misdraw/malformed-input detach and no host-process loss. Lines 9-11 explicitly withdrew that broad no-highest conclusion for valid JSON, establishing potential unbracketed command submission/security or work loss. The original contained malformed-input consequence remains true but does not refute successful input.",
+          "needs_independent_drop_check": true,
+          "proposed_basis": "Retain highest on the established unintended-command source route. Preserve the earlier proposed specification drop as unresolved and send it for an independent fresh-context drop check before any dismissal or consequence lowering. This consultation does not approve that drop."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": true,
+        "clearly_refuted_candidate": false,
+        "needs_unfinished_gate": true,
+        "provisional_bucket": "highest",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "legacy-page-raw-paste-decoded-as-grid-text-command",
+        "destination": "trailing-legacy-page-raw-paste-decoded-as-grid-text-command.md"
+      }
+    }
+  ],
+  "replies": [
+    {
+      "turn": 1,
+      "reply": "Initial pass complete. Read all four assigned packets and governing contracts.\n\nNo reportable findings or unresolved leads. Recorded candidates c1–c4 in [findings.jsonl]([private-run]/g192/findings.jsonl); updated progress. No assigned scope unread. Source-only review; no tests or reproductions run."
+    },
+    {
+      "turn": 2,
+      "reply": "Revised c2–c4 with source evidence for grid-only attachments, resize routing and attachment-only malformed-input teardown. No new findings.\n\nUnresolved lead IDs: none."
+    },
+    {
+      "turn": 3,
+      "reply": "Checked legacy paste framing, build-skew interlocks, Text decoding, and remaining query/state/scrollbar dependencies.\n\nRevised c4 to retain g196’s potentially highest input-reinterpretation finding; extended c2’s source checks.\n\nIndependent discovery: nothing new found. New verified IDs: none. New unverified IDs: none. Open leads: none. No runtime execution."
+    }
+  ],
+  "progress": "# g192 review progress\n\nInitial review, turn 1 complete. Discovery passes: 0. Assigned scope: retired xterm bundle deletion in f560058da19e02716e6f943883a9508b447aff4e, packets 01085-011, 012, 013, and 021. Read the complete brief and the complete inventory commits field, without reading its excluded coverage metadata. The path's range history shows this deletion is its only commit in the review range.\n\nAll four mandatory packets were delivered through the assigned evidence command, each in its own tool call. No assigned patch material remains unread. Findings: none. Open leads: none. New candidates this pass: c1-c4. No verified or unverified findings. c4 was revised under its original ID to correct an erroneous editorial note about a quotation; its consequence and acceptance are unchanged. The findings log is append-only and is the complete record of considered candidates.\n\nInterface assumptions checked: every active attachment is a grid stream; the supervisor interprets program output, cursor movement, scroll regions and buffer resize; the page fits and draws the grid and owns its scrollbar. Source registration and mount prerequisites no longer name the deleted library. The old-page compatibility break is explicitly accepted and recorded as c4. No independent defects in the retired library were sought.\n\nGoverning contracts read through contracts-manifest.json at f560058: SPEC.md:2855-3177 (Terminal experience); SPEC_impl.md:1504-1887 (Terminal widget and grid client), :2671-2730 (supervisor emulator), :2784-2895 (retired terminal substrate), :3009-3110 (grid streams), :1069-1104 (render-bound answers and adjacent dialog rule). Root AGENTS.md was fully injected with its End sentinel. The priority and recording instructions, machine instructions and writing skills were read. A combined instruction output clipped part of the queue instructions; those files were reread separately in full.\n\nSource context at f560058: UI lib.rs:1440-1500,1908-1932; terminal.js:3191-3255,4285-4390,4540-4674,4785-4838; grid-terminal.js:450-595,950-1048,1970-2075,2080-2158; emulator.rs:97-160,207-268; queries.rs:286-356; vendored term/mod.rs:735-820,1634-1738,2668-2708; grid_output.rs:314-363; hosts/terminal.rs:3850-3868,4036-4053; service/grid_stream.rs:450-510,666-723,850-864. Targeted searches located these responsibilities and found no remaining window.Terminal/new Terminal/XTERM asset references in current UI sources/assets. Some broad search/context commands clipped incidental output; they were not used as proof of complete coverage. The oversized original-patch context output was used only for its six-line deletion header, not as assigned read evidence; all assigned packet bytes were already delivered separately.\n\nNo runtime tests, builds or reproductions were run. Conclusions come from source and contracts. No checkout files were changed, and no live install or foreign process was touched. Only private group artifacts were written.\n\nNext: wait for the caller's later synthesis/discovery prompt. Do not treat this initial pass as the later-turn completion protocol. Unread assigned scope: none. Parent owns queue coverage and evidence audit.\n\n## Synthesis turn 2\n\nCompleted the requested later-turn synthesis. Discovery-pass count remains 0. No new findings or leads; no verified or unverified finding IDs this turn. Revised candidates c2, c3 and c4 under their original IDs with caller evidence. c1 is unchanged.\n\nChecked the interaction between the assigned cursor/parser deletion and the attachment caller: the resolver returns HostTerminal for the agent or tab, refuses a missing terminal without fallback, and the attach handler unconditionally creates HostAttach/GridStream. Checked browser initial fit before socket construction, grid receive/input encoding, resize controls through the original helm connection and channel, supervisor ownership checks, terminal-host resize records, and existing history relayout handling. Checked unmount cancellation, observer/listener disposal and retained-grid freeze. Checked malformed-input decoding before queueing and attachment-only failure teardown; c4 now records the source-confirmed boundary of the specification-accepted old-page failure. These are source conclusions, not observed execution.\n\nAdditional source context read at f560058: service/terminals.rs:108-147,225-302; service/handlers.rs:1666-1699,1875-1943,1978-2058; helm terminal.rs:750-802; helm client.rs:4176-4204; UI terminal.js:3380-3435,4450-4520,4745-4787,4825-4870; service/grid_stream.rs:930-1094,1132-1174; service/connection.rs:492-572. Targeted searches located those callers; no tests or reproductions were run.\n\nOpen lead IDs: none. Unread assigned scope: none. No checkout files changed. Next: await the caller's discovery or completion instruction; the parent retains queue-coverage and audit ownership.\n\n## Discovery turn 3\n\nRead discovery-neighbours.json completely in bounded chunks, then synthesized the named g196/l1 input before starting the independent search. Revised original c4 from candidate to lead immediately, then to finding after checking the supplied route. No original event was removed. Its old misdraw/malformed-input-detach consequence and proposed reload-acceptance basis remain in the revisions; the earlier broad no-highest claim does not cover successful valid-JSON reinterpretation. No parent drop or lowering is accepted.\n\nUseful source checks: the parent xterm module 7861 emits a whole paste in one event and brackets it only when its initially-false bracketedPasteMode is set. The old page's text-paste pipeline strips literal ESC but retains JSON backslash escapes; onData sends the whole encoded string as one binary frame. Missing-kind session listings map to an unknown-kind spec and therefore a fresh xterm surface. The old mount gate has no build-match condition, skew policy retains manual reconnect, and sendData checks only socket-open state. The reviewed decoder deserializes Text data, accepts decoded controls within the bound, and the encoder emits Text bytes without bracketed-paste handling. c4 now retains the source-confirmed conditional command-input route as highest/security or loss of work, with no claim of observed execution. It aliases supplied g196/l1 for parent consolidation; it is not an independent discovery.\n\nCompleted separate discovery pass 1 after that synthesis. Searched the less-inspected assigned parser sections' query/state responsibilities and marker/scrollbar consumers. No remaining UI/emulator references were found to the retired browser helper names. Read the supervisor's query-contract table and forwarding/answer methods, and checked the grid owns its scrollbar DOM/constants. Extended original c2 with those checks; no additional defect or unresolved concrete lead emerged. This pass did not search independent defects in the retired implementation or broaden into other groups' tests/tooling.\n\nAdditional source reads at f560058 parent: UI terminal.js:2232-2235,2648-2678,4145-4164,4185-4204,4620-4668,1550-1598,1871-1908,3590-3630,3870-3945,6380-6455; UI lib.rs:504-526; session_view.rs:1798-1813,3836-3854. Read exact bounded minified matches in parent xterm.js:1 for core defaults and module 7861 paste, not the entire unassigned bundle. Additional reviewed-revision reads: proto grid.rs:1555-1573,1600-1618,1640-1660,1678-1698; supervisor grid_input.rs:156-186; emulator queries.rs:1-143,357-450; UI grid-terminal.js:174-184,330-364. Existing source/contract reads and assigned evidence were reused; no compaction occurred.\n\nDiscovery count: 1 completed. New independent verified IDs: none. New independent unverified-after-investigation IDs: none. Revised IDs: c2 and c4. Current retained findings: c4, source-confirmed conditional route supplied by an interface group. Open lead IDs: none. Anything new independently found: no. No unread assigned scope; no tests, reproductions, builds or live-install actions; no checkout writes. Next: caller's requested follow-up or completion; parent owns consolidation and any independent specification-drop judgment.\n"
+}

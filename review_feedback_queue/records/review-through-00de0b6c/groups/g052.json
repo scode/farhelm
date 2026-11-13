@@ -1,0 +1,1420 @@
+{
+  "group": {
+    "id": "g052",
+    "domain": "wire-protocol",
+    "purpose": "wire-protocol: crates/farhelm-proto/src/environment.rs, crates/farhelm-proto/src/lib.rs, crates/farhelm-proto/src/launcher.rs, crates/farhelm-proto/src/launch.rs, crates/farhelm-proto/src/http.rs, crates/farhelm-proto/src/open_extensions.rs, crates/farhelm-proto/src/approvals.rs; phases complete small per-commit changes",
+    "interfaces": [
+      "g001",
+      "g004",
+      "g018",
+      "g019",
+      "g020",
+      "g021",
+      "g053",
+      "g054",
+      "g074",
+      "g075",
+      "g076",
+      "g079",
+      "g080",
+      "g081",
+      "g082",
+      "g083",
+      "g084",
+      "g085",
+      "g086",
+      "g087",
+      "g122",
+      "g123",
+      "g124",
+      "g125",
+      "g126"
+    ],
+    "sources": [
+      {
+        "path": "[private-run]/prep/parts/00101-000.patch",
+        "ranges": [
+          [
+            1,
+            47
+          ]
+        ],
+        "original_path": "crates/farhelm-proto/src/environment.rs",
+        "commit": "ee39aeacdaccfeaa0cea25246540b20008c868f0",
+        "notes": "patch header; patch character offsets [0,1964)",
+        "lines": 47,
+        "bytes": 1964,
+        "start": 0,
+        "end": 1964,
+        "original": "[private-run]/prep/originals/00101.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/00102-000.patch",
+        "ranges": [
+          [
+            1,
+            14
+          ]
+        ],
+        "original_path": "crates/farhelm-proto/src/lib.rs",
+        "commit": "ee39aeacdaccfeaa0cea25246540b20008c868f0",
+        "notes": "patch header; patch character offsets [0,377)",
+        "lines": 14,
+        "bytes": 377,
+        "start": 0,
+        "end": 377,
+        "original": "[private-run]/prep/originals/00102.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/00137-000.patch",
+        "ranges": [
+          [
+            1,
+            35
+          ]
+        ],
+        "original_path": "crates/farhelm-proto/src/environment.rs",
+        "commit": "56040bb964270bb40d191902173dbb84b3ba78fc",
+        "notes": "patch header; patch character offsets [0,1447)",
+        "lines": 35,
+        "bytes": 1447,
+        "start": 0,
+        "end": 1447,
+        "original": "[private-run]/prep/originals/00137.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/00138-000.patch",
+        "ranges": [
+          [
+            1,
+            25
+          ]
+        ],
+        "original_path": "crates/farhelm-proto/src/lib.rs",
+        "commit": "56040bb964270bb40d191902173dbb84b3ba78fc",
+        "notes": "patch header; patch character offsets [0,943)",
+        "lines": 25,
+        "bytes": 943,
+        "start": 0,
+        "end": 943,
+        "original": "[private-run]/prep/originals/00138.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/00171-000.patch",
+        "ranges": [
+          [
+            1,
+            51
+          ]
+        ],
+        "original_path": "crates/farhelm-proto/src/environment.rs",
+        "commit": "52cc5d7250d262f93b730d91a07c240d33c2ea5f",
+        "notes": "patch header; patch character offsets [0,1812)",
+        "lines": 51,
+        "bytes": 1812,
+        "start": 0,
+        "end": 1812,
+        "original": "[private-run]/prep/originals/00171.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/00172-000.patch",
+        "ranges": [
+          [
+            1,
+            13
+          ]
+        ],
+        "original_path": "crates/farhelm-proto/src/lib.rs",
+        "commit": "52cc5d7250d262f93b730d91a07c240d33c2ea5f",
+        "notes": "patch header; patch character offsets [0,461)",
+        "lines": 13,
+        "bytes": 461,
+        "start": 0,
+        "end": 461,
+        "original": "[private-run]/prep/originals/00172.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/00217-000.patch",
+        "ranges": [
+          [
+            1,
+            87
+          ]
+        ],
+        "original_path": "crates/farhelm-proto/src/environment.rs",
+        "commit": "56659839785691f76da3af5d8f51b511cff4ba8b",
+        "notes": "patch header; patch character offsets [0,3288)",
+        "lines": 87,
+        "bytes": 3288,
+        "start": 0,
+        "end": 3288,
+        "original": "[private-run]/prep/originals/00217.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/00218-000.patch",
+        "ranges": [
+          [
+            1,
+            16
+          ]
+        ],
+        "original_path": "crates/farhelm-proto/src/lib.rs",
+        "commit": "56659839785691f76da3af5d8f51b511cff4ba8b",
+        "notes": "patch header; patch character offsets [0,533)",
+        "lines": 16,
+        "bytes": 533,
+        "start": 0,
+        "end": 533,
+        "original": "[private-run]/prep/originals/00218.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/00224-000.patch",
+        "ranges": [
+          [
+            1,
+            266
+          ]
+        ],
+        "original_path": "crates/farhelm-proto/src/launcher.rs",
+        "commit": "350a4b33b6d4476f4a78e43cea124bc2b828f462",
+        "notes": "patch header; patch character offsets [0,10509)",
+        "lines": 266,
+        "bytes": 10509,
+        "start": 0,
+        "end": 10509,
+        "original": "[private-run]/prep/originals/00224.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/00225-000.patch",
+        "ranges": [
+          [
+            1,
+            44
+          ]
+        ],
+        "original_path": "crates/farhelm-proto/src/lib.rs",
+        "commit": "350a4b33b6d4476f4a78e43cea124bc2b828f462",
+        "notes": "patch header; patch character offsets [0,2072)",
+        "lines": 44,
+        "bytes": 2072,
+        "start": 0,
+        "end": 2072,
+        "original": "[private-run]/prep/originals/00225.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/00288-000.patch",
+        "ranges": [
+          [
+            1,
+            67
+          ]
+        ],
+        "original_path": "crates/farhelm-proto/src/launch.rs",
+        "commit": "04d85f0c98a9b635709d00b056719a0baa7fd3fc",
+        "notes": "patch header; patch character offsets [0,3783)",
+        "lines": 67,
+        "bytes": 3783,
+        "start": 0,
+        "end": 3783,
+        "original": "[private-run]/prep/originals/00288.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/00289-000.patch",
+        "ranges": [
+          [
+            1,
+            99
+          ]
+        ],
+        "original_path": "crates/farhelm-proto/src/launcher.rs",
+        "commit": "04d85f0c98a9b635709d00b056719a0baa7fd3fc",
+        "notes": "patch header; patch character offsets [0,4850)",
+        "lines": 99,
+        "bytes": 4850,
+        "start": 0,
+        "end": 4850,
+        "original": "[private-run]/prep/originals/00289.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/00290-000.patch",
+        "ranges": [
+          [
+            1,
+            15
+          ]
+        ],
+        "original_path": "crates/farhelm-proto/src/lib.rs",
+        "commit": "04d85f0c98a9b635709d00b056719a0baa7fd3fc",
+        "notes": "patch header; patch character offsets [0,808)",
+        "lines": 15,
+        "bytes": 808,
+        "start": 0,
+        "end": 808,
+        "original": "[private-run]/prep/originals/00290.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/00533-000.patch",
+        "ranges": [
+          [
+            1,
+            21
+          ]
+        ],
+        "original_path": "crates/farhelm-proto/src/http.rs",
+        "commit": "ba7cc0264028eebb39647deb1d25b055e6886935",
+        "notes": "patch header; patch character offsets [0,1337)",
+        "lines": 21,
+        "bytes": 1337,
+        "start": 0,
+        "end": 1337,
+        "original": "[private-run]/prep/originals/00533.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/00588-000.patch",
+        "ranges": [
+          [
+            1,
+            54
+          ]
+        ],
+        "original_path": "crates/farhelm-proto/src/open_extensions.rs",
+        "commit": "6d610d435dd12bbe8458b1a31b0988d95ff7338c",
+        "notes": "patch header; patch character offsets [0,2483)",
+        "lines": 54,
+        "bytes": 2483,
+        "start": 0,
+        "end": 2483,
+        "original": "[private-run]/prep/originals/00588.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/00656-000.patch",
+        "ranges": [
+          [
+            1,
+            130
+          ]
+        ],
+        "original_path": "crates/farhelm-proto/src/approvals.rs",
+        "commit": "190d844e58c96cf197aa838d0b0eea8062f48435",
+        "notes": "patch header; patch character offsets [0,6336)",
+        "lines": 130,
+        "bytes": 6336,
+        "start": 0,
+        "end": 6336,
+        "original": "[private-run]/prep/originals/00656.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/00657-000.patch",
+        "ranges": [
+          [
+            1,
+            185
+          ]
+        ],
+        "original_path": "crates/farhelm-proto/src/lib.rs",
+        "commit": "190d844e58c96cf197aa838d0b0eea8062f48435",
+        "notes": "patch header; patch character offsets [0,8528)",
+        "lines": 185,
+        "bytes": 8528,
+        "start": 0,
+        "end": 8528,
+        "original": "[private-run]/prep/originals/00657.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/00679-000.patch",
+        "ranges": [
+          [
+            1,
+            251
+          ]
+        ],
+        "original_path": "crates/farhelm-proto/src/lib.rs",
+        "commit": "47f33bbdbd5ff4a6e437e97a800f9083be43096e",
+        "notes": "patch header; patch character offsets [0,12530)",
+        "lines": 251,
+        "bytes": 12532,
+        "start": 0,
+        "end": 12530,
+        "original": "[private-run]/prep/originals/00679.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/00701-000.patch",
+        "ranges": [
+          [
+            1,
+            21
+          ]
+        ],
+        "original_path": "crates/farhelm-proto/src/http.rs",
+        "commit": "222bf6253bcd168db04bcbb1df20180c88306998",
+        "notes": "patch header; patch character offsets [0,1300)",
+        "lines": 21,
+        "bytes": 1300,
+        "start": 0,
+        "end": 1300,
+        "original": "[private-run]/prep/originals/00701.patch"
+      }
+    ],
+    "lines": 1441,
+    "bytes": 65363
+  },
+  "records": [
+    {
+      "key": "g052/c1",
+      "owner": "g052",
+      "id": "c1",
+      "domain": "wire-protocol",
+      "purpose": "wire-protocol: crates/farhelm-proto/src/environment.rs, crates/farhelm-proto/src/lib.rs, crates/farhelm-proto/src/launcher.rs, crates/farhelm-proto/src/launch.rs, crates/farhelm-proto/src/http.rs, crates/farhelm-proto/src/open_extensions.rs, crates/farhelm-proto/src/approvals.rs; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 1,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c1",
+            "state": "open",
+            "summary": "Raster formats are intentionally allowed for native file opening",
+            "location": "crates/farhelm-proto/src/open_extensions.rs:12",
+            "detail": "Reviewed commit: 6d610d435dd12bbe8458b1a31b0988d95ff7338c. TLDR: the default native modifier-click behavior now opens agent-controlled raster image files with the user's default app. Considered whether treating these extensions as safe silently expands the cross-host execution boundary. Details: DEFAULT adds png/jpg/jpeg/gif/webp/bmp/avif and warning_kind marks the same exact list Safe; SVG remains Html. SPEC.md Security at this revision explicitly says the shared list defaults to md/txt/json, '(amended 2026-11-12 at the maintainer’s request: the default also lists .png, .jpg, .jpeg, .gif, .webp, .bmp and .avif)' and 'The click authorizes this transfer across the host boundary, including for agent-controlled files.' It also explicitly includes 'the default’s image types' among types exempt from the settings warning. Suggested bucket: highest if this were unauthorized unsafe opening; could-be-highest: yes (agent-controlled files cross hosts and enter a native handler). Confidence: confirmed specification acceptance, not a demonstrated executable-image route. proposed_drop: exact specified default and warning policy; native modifier-click authorization is explicit. possible_cover: none; no coverage sources consulted. Caveats: source-only review; no execution or image-handler behavior tested. SPEC_impl.md Session-host file reads retains older md/txt/json wording, but the newer explicit dated SPEC.md amendment governs the default."
+          }
+        },
+        {
+          "line": 10,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c1",
+            "state": "open",
+            "summary": "Raster default and warning exemption are the dated product policy",
+            "location": "crates/farhelm-proto/src/open_extensions.rs:12",
+            "detail": "Reviewed commit: 6d610d435dd12bbe8458b1a31b0988d95ff7338c. TLDR: original consequence preserved: native modifier-click can open agent-controlled raster files in the user's default application, so an unauthorized expansion of that cross-host effect could be security-impacting. Synthesis confirms only the narrow dated policy, not safety of arbitrary image bytes or handlers. Details: DEFAULT adds exactly png, jpg, jpeg, gif, webp, bmp and avif; warning_kind marks those exact extensions Safe and keeps svg under Html. The module's first paragraph explicitly says 'This is an allowlist of final extensions, not a claim that a listed file is safe.' SPEC.md:4881-4883 explicitly amends the default: '(amended 2026-11-12 at the maintainer's request: the default also lists .png, .jpg, .jpeg, .gif, .webp, .bmp and .avif).' The same Security passage says 'The click authorizes this transfer across the host boundary, including for agent-controlled files.' Its settings-warning rule excludes 'the default's image types'. Source changes agree with those exact sets and retain SVG's warning. Suggested bucket: highest if unsafe native opening were unauthorized; could-be-highest: yes. Confidence: confirmed source/explicit contract acceptance only; no executable-image or handler-exploitation route established or tested. proposed_drop: the exact dated default and warning policy accepts this specific extension expansion; no broader security drop, and no independent drop accepted. possible_cover: none. Caveats: source-only, no runtime/reproduction. SPEC_impl.md's older md/txt/json default wording is stale against the explicit dated SPEC.md amendment and is not treated as a competing safety guarantee. No unresolved premise remains for this narrow policy check."
+          }
+        }
+      ],
+      "latest": {
+        "line": 10,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c1",
+          "state": "open",
+          "summary": "Raster default and warning exemption are the dated product policy",
+          "location": "crates/farhelm-proto/src/open_extensions.rs:12",
+          "detail": "Reviewed commit: 6d610d435dd12bbe8458b1a31b0988d95ff7338c. TLDR: original consequence preserved: native modifier-click can open agent-controlled raster files in the user's default application, so an unauthorized expansion of that cross-host effect could be security-impacting. Synthesis confirms only the narrow dated policy, not safety of arbitrary image bytes or handlers. Details: DEFAULT adds exactly png, jpg, jpeg, gif, webp, bmp and avif; warning_kind marks those exact extensions Safe and keeps svg under Html. The module's first paragraph explicitly says 'This is an allowlist of final extensions, not a claim that a listed file is safe.' SPEC.md:4881-4883 explicitly amends the default: '(amended 2026-11-12 at the maintainer's request: the default also lists .png, .jpg, .jpeg, .gif, .webp, .bmp and .avif).' The same Security passage says 'The click authorizes this transfer across the host boundary, including for agent-controlled files.' Its settings-warning rule excludes 'the default's image types'. Source changes agree with those exact sets and retain SVG's warning. Suggested bucket: highest if unsafe native opening were unauthorized; could-be-highest: yes. Confidence: confirmed source/explicit contract acceptance only; no executable-image or handler-exploitation route established or tested. proposed_drop: the exact dated default and warning policy accepts this specific extension expansion; no broader security drop, and no independent drop accepted. possible_cover: none. Caveats: source-only, no runtime/reproduction. SPEC_impl.md's older md/txt/json default wording is stale against the explicit dated SPEC.md amendment and is not treated as a competing safety guarantee. No unresolved premise remains for this narrow policy check."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g052/findings.jsonl",
+        "id": "c1",
+        "line": 10,
+        "disposition": "under-investigation",
+        "group": "g052-c1",
+        "reason": "Record durably acknowledged; parent source/contract validation, cross-group synthesis, coverage/filter matching and any independent drop check remain pending. This preserves the claim and uncertainty without accepting, dropping or lowering it."
+      },
+      "accepted_parent_decision": null,
+      "returned_claim_checks": [
+        {
+          "batch": "claims-033",
+          "key": "g052/c1",
+          "latest_line": 10,
+          "recommendation": "covered",
+          "bucket": "other",
+          "underlying_key": "raster-default-native-opening-policy",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The exact extension expansion and warning exemption are explicitly accepted. This does not establish that arbitrary image bytes or native handlers are safe. No exploit or unconsented native-open route was established; the earlier possible-highest consequence must still receive an independent drop check.",
+          "checks": [
+            "6d610d435dd12bbe8458b1a31b0988d95ff7338c:crates/farhelm-proto/src/open_extensions.rs:1-12,118-128: DEFAULT adds precisely png/jpg/jpeg/gif/webp/bmp/avif; warning_kind exempts those same formats and retains SVG's HTML warning. The module explicitly disclaims file safety.",
+            "6d610d435dd12bbe8458b1a31b0988d95ff7338c:SPEC.md:4877-4897 contains the dated amendment and explicit modifier-click authority. Source only; no image handler or downloaded file was exercised."
+          ],
+          "coverage_checked": {
+            "SPEC.md": "Current Security, Local authority and trust between hosts, 4950-4966, expressly accepts this extension set and image warning exemption; Settings and Downloads repeat it.",
+            "SPEC_impl.md": "Searched opening/default-extension policy. Older md/txt/json wording is not an acceptance of image-handler safety and does not override the explicit dated product amendment.",
+            "TODO.md Planned": "Empty bucket at 25-26.",
+            "plans/queue": "INDEX.md contains no unlanded plan. cmd-click-images is listed as landed in plans/REPORTS.md:26; its retained file is not unlanded coverage.",
+            "BUGS.md": "Only the unrelated SSH transfer-output hang is recorded.",
+            "INDEX.md and queue": "Searched raster, image types, opening extensions, OpenExtensions and native file opening; no exact queued claim.",
+            "TRIAGE_OUTCOMES.md": "Searched the same opening/extension terms; no exact active decision.",
+            "FILTER.md": "No applicable boundary; native-handler security effects would exclude the general rare-glitch filter."
+          },
+          "exact_cover_quotes": [
+            "SPEC.md:4954-4955: '(amended 2026-11-12 at the maintainer's request: the default also lists .png, .jpg, .jpeg, .gif, .webp, .bmp and .avif).'",
+            "SPEC.md:4959-4961: 'The click authorizes this transfer across the host boundary, including for agent-controlled files.' Listed types outside the named text formats and 'the default's image types' get the warning."
+          ],
+          "missing_premise": "A concrete executable-image/handler exploit or a route opening without the specified modifier-click was never established. The policy check has no unresolved extension-set premise.",
+          "original_stronger_consequence": "An unauthorized expansion of agent-controlled files opened by native handlers across hosts could be security-impacting (original possible highest). No such exploit was reproduced or established.",
+          "needs_independent_drop_check": true,
+          "proposed_basis": "Drop only the assertion that adding these exact default extensions and exempting their settings warnings is unauthorized. Do not generalize this acceptance to arbitrary image safety."
+        }
+      ],
+      "parent_proposals": [
+        {
+          "artifact": "parent-flagged-judgments-033.json",
+          "key": "g052/c1",
+          "proposal": "claim-checks/claims-033/result.json",
+          "parent_proposal": "exact-spec-accepted-raster-opening-defaults-and-warning-exemption",
+          "final_independent_gate": "required-before-original-possible-highest-policy-drop",
+          "reason": "Parent reread033 in two bounded complete outputs after the first clipped output earned no credit. Exact dated product amendment adds png/jpg/jpeg/gif/webp/bmp/avif and grants modifier-click cross-host transfer, including agent-controlled files; source adds exactly those formats and keeps SVG HTML warning. Proposed acceptance only of that extension/warning policy, not arbitrary native image-handler safety or opening without the required gesture. No exploit or additional input route was established; preserve the original security possibility for the fresh gate."
+        }
+      ],
+      "collection": {
+        "retain": true,
+        "clearly_refuted_candidate": false,
+        "needs_unfinished_gate": true,
+        "provisional_bucket": "highest",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "raster-default-native-opening-policy",
+        "destination": "trailing-raster-default-native-opening-policy.md"
+      }
+    },
+    {
+      "key": "g052/c2",
+      "owner": "g052",
+      "id": "c2",
+      "domain": "wire-protocol",
+      "purpose": "wire-protocol: crates/farhelm-proto/src/environment.rs, crates/farhelm-proto/src/lib.rs, crates/farhelm-proto/src/launcher.rs, crates/farhelm-proto/src/launch.rs, crates/farhelm-proto/src/http.rs, crates/farhelm-proto/src/open_extensions.rs, crates/farhelm-proto/src/approvals.rs; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 2,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c2",
+            "state": "open",
+            "summary": "Historical container configuration remains readable without launch authority",
+            "location": "crates/farhelm-proto/src/launch.rs:600",
+            "detail": "Reviewed commit: 04d85f0c98a9b635709d00b056719a0baa7fd3fc. TLDR: considered whether retaining the retired container field and its permissive shape validator could run historical isolated commands directly on the outside host. Details: LaunchSelection.container retains its serialized bytes and ContainerConfig.validate checks historical structure only. This is intentional decode compatibility, not admission. launcher.rs apply_template rejects Some(Some(config)) before applying any other template field; an explicit null only clears the draft choice. The supervisor launch-spec consumer at crates/farhelm-supervisor/src/launch.rs:1171 rejects spec.container.is_some() before argv execution, and container.rs:18-22 identifies retired stored launches by the same retained field. Helm admission paths also refuse selections with this field. Contract: SPEC.md Retired containerized sessions says 'Existing sessions support Delete only' and 'Stored sessions still decode their old container configuration, including image_file.' It then says using stored choices 'drops or refuses the retired choice with an explanation and cannot create another old-style session.' Suggested bucket: highest if isolation were silently removed; could-be-highest: yes. Confidence: confirmed source refutation of this route. proposed_drop: decoding and structural validation grant no execution; the reviewed new template and launch-spec admission checks reject retained isolation before executing. possible_cover: none. Caveats: source-only; the retired deletion implementation was not searched for unrelated defects."
+          }
+        },
+        {
+          "line": 8,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c2",
+            "state": "open",
+            "summary": "Retired-container decoding preserves the refusal marker, not launch authority",
+            "location": "crates/farhelm-proto/src/launch.rs:600",
+            "detail": "Reviewed commit: 04d85f0c98a9b635709d00b056719a0baa7fd3fc. TLDR: original suspected consequence preserved: if decoding erased historical isolation while retaining its command, executing that command on the outside host could expose credentials or user-owned work. The reviewed retirement changes retain the isolation marker and refuse execution. Details: LaunchSelection.container remains present for historical records. Rechecked launch.rs:642-669: ContainerConfigWire accepts image_file as IgnoredAny and does NOT retain that path or its exact bytes; From retains the engine, current image (or empty default), proxy port and token-file choice. This corrects the initial record's overly broad 'retains its serialized bytes' wording. Presence of the container object, not retention of every retired field, is the refusal invariant. Template application at launcher.rs:667 rejects Some(Some(container)) before changing the cloned state; omission preserves the draft and explicit null can remove the choice. ContainerConfig.validate is structural only. As checked initially, supervisor launch.rs:1171 rejects a present container config before argv execution, and container.rs:18-22 identifies retired sessions by LaunchSelection.container.is_some(). No compatibility bump is needed solely for these comment/retirement admission edits: the readable serialized type and historical discriminator remain present; PROTOCOL_VERSION stays 74 at this revision, following the earlier target-field bump. Exact contract: SPEC.md Retired containerized sessions: 'Existing sessions support Delete only.' Also: 'Stored sessions still decode their old container configuration, including `image_file`.' And: 'Using them drops or refuses the retired choice with an explanation and cannot create another old-style session.' Suggested bucket: highest if isolation were silently removed; could-be-highest: yes. Confidence: confirmed source refutation of this narrow launch-authority route. proposed_drop: the marker survives decoding and is refused before template application or launch-spec execution; no independent drop accepted. possible_cover: none. Caveats: source-only; no claim of exact retired archive-byte preservation or of unrelated deletion correctness, and no runtime/reproduction performed. No unresolved decoding premise remains."
+          }
+        }
+      ],
+      "latest": {
+        "line": 8,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c2",
+          "state": "open",
+          "summary": "Retired-container decoding preserves the refusal marker, not launch authority",
+          "location": "crates/farhelm-proto/src/launch.rs:600",
+          "detail": "Reviewed commit: 04d85f0c98a9b635709d00b056719a0baa7fd3fc. TLDR: original suspected consequence preserved: if decoding erased historical isolation while retaining its command, executing that command on the outside host could expose credentials or user-owned work. The reviewed retirement changes retain the isolation marker and refuse execution. Details: LaunchSelection.container remains present for historical records. Rechecked launch.rs:642-669: ContainerConfigWire accepts image_file as IgnoredAny and does NOT retain that path or its exact bytes; From retains the engine, current image (or empty default), proxy port and token-file choice. This corrects the initial record's overly broad 'retains its serialized bytes' wording. Presence of the container object, not retention of every retired field, is the refusal invariant. Template application at launcher.rs:667 rejects Some(Some(container)) before changing the cloned state; omission preserves the draft and explicit null can remove the choice. ContainerConfig.validate is structural only. As checked initially, supervisor launch.rs:1171 rejects a present container config before argv execution, and container.rs:18-22 identifies retired sessions by LaunchSelection.container.is_some(). No compatibility bump is needed solely for these comment/retirement admission edits: the readable serialized type and historical discriminator remain present; PROTOCOL_VERSION stays 74 at this revision, following the earlier target-field bump. Exact contract: SPEC.md Retired containerized sessions: 'Existing sessions support Delete only.' Also: 'Stored sessions still decode their old container configuration, including `image_file`.' And: 'Using them drops or refuses the retired choice with an explanation and cannot create another old-style session.' Suggested bucket: highest if isolation were silently removed; could-be-highest: yes. Confidence: confirmed source refutation of this narrow launch-authority route. proposed_drop: the marker survives decoding and is refused before template application or launch-spec execution; no independent drop accepted. possible_cover: none. Caveats: source-only; no claim of exact retired archive-byte preservation or of unrelated deletion correctness, and no runtime/reproduction performed. No unresolved decoding premise remains."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g052/findings.jsonl",
+        "id": "c2",
+        "line": 8,
+        "disposition": "under-investigation",
+        "group": "g052-c2",
+        "reason": "Record durably acknowledged; parent source/contract validation, cross-group synthesis, coverage/filter matching and any independent drop check remain pending. This preserves the claim and uncertainty without accepting, dropping or lowering it."
+      },
+      "accepted_parent_decision": null,
+      "returned_claim_checks": [
+        {
+          "batch": "claims-033",
+          "key": "g052/c2",
+          "latest_line": 8,
+          "recommendation": "refuted",
+          "bucket": "other",
+          "underlying_key": "retired-container-decode-erases-isolation-marker",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "Decoding retains the container object's presence, and execution refuses that marker. The original route from historical isolated command to ordinary outside-host execution is source-refuted. The initial exact-byte-preservation assertion was withdrawn and corrected, not verified.",
+          "checks": [
+            "04d85f0c98a9b635709d00b056719a0baa7fd3fc:crates/farhelm-proto/src/launch.rs:600-606,642-669: container remains Option<ContainerConfig>; image_file is accepted as IgnoredAny and discarded. The marker survives even though archive path and exact bytes do not.",
+            "04d85f0c98a9b635709d00b056719a0baa7fd3fc:crates/farhelm-proto/src/launcher.rs:655-674: Some(Some(container)) is refused before cloning/applying the draft.",
+            "04d85f0c98a9b635709d00b056719a0baa7fd3fc:crates/farhelm-supervisor/src/launch.rs:1150-1182: a deserialized launch spec with container.is_some() returns a recorded failure before argv checks or execution.",
+            "ContainerConfig.validate remains a historical structural validator, not an admission grant. No runtime decode, launch or deletion was run."
+          ],
+          "coverage_checked": {
+            "SPEC.md": "Retired containerized sessions, 4892-4900, requires Delete-only retirement and refusal or removal of retired choices.",
+            "SPEC_impl.md": "Searched retired-container decoding and lifecycle policy; Rootless Podman sessions states retired selections must be dropped or refused. No acceptance of erasing isolation and executing outside was found.",
+            "TODO.md Planned": "Empty.",
+            "plans/queue": "No unlanded plans in INDEX.md. podman-environments is landed (REPORTS.md:21).",
+            "BUGS.md": "No matching known bug.",
+            "INDEX.md and queue": "Searched retired containers, image_file, containerized sessions and launch markers. template-container-off-on-discards-editor-values.md was read: it concerns temporary unsaved editor buffers, not decode-to-outside-host execution.",
+            "TRIAGE_OUTCOMES.md": "No exact active decision for this execution route.",
+            "FILTER.md": "No applicable filter; isolation loss would be a security/trust-boundary effect."
+          },
+          "exact_cover_quotes": [
+            "SPEC.md:4895-4899: 'Existing sessions support Delete only.' 'Stored sessions still decode their old container configuration, including `image_file`.' 'Using them drops or refuses the retired choice with an explanation and cannot create another old-style session.'"
+          ],
+          "missing_premise": "The alleged erased marker is contradicted by the decoder. No claim is made about exact historical fingerprints or unrelated deletion correctness.",
+          "original_stronger_consequence": "If historical isolation were erased while the command survived, executing it on the outside host could expose credentials or user-owned work; original possible highest. Initial 'retains its serialized bytes' wording was corrected because image_file is discarded.",
+          "needs_independent_drop_check": true,
+          "proposed_basis": "Refute only the launch-authority route: marker presence survives and is refused before execution. Do not treat the corrected byte-retention assertion as verified."
+        }
+      ],
+      "parent_proposals": [
+        {
+          "artifact": "parent-flagged-judgments-033.json",
+          "key": "g052/c2",
+          "proposal": "claim-checks/claims-033/result.json",
+          "parent_proposal": "source-refuted-erased-retired-isolation-marker-execution",
+          "final_independent_gate": "required-before-original-highest-isolation-drop",
+          "reason": "Full bounded033: historical container Option remains present despite image_file being discarded as IgnoredAny. Launcher rejects the marker before draft application; supervisor rejects container-bearing launch before argv/execution. The earlier exact-byte-preservation claim was wrong and withdrawn; do not restore it. Refute only decode-erases-isolation→outside-host execution, not archival fingerprint preservation or other deletion paths. Preserve credential/work exposure consequence for the fresh check."
+        }
+      ],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": true,
+        "provisional_bucket": "highest",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "retired-container-decode-erases-isolation-marker",
+        "destination": null
+      }
+    },
+    {
+      "key": "g052/c3",
+      "owner": "g052",
+      "id": "c3",
+      "domain": "wire-protocol",
+      "purpose": "wire-protocol: crates/farhelm-proto/src/environment.rs, crates/farhelm-proto/src/lib.rs, crates/farhelm-proto/src/launcher.rs, crates/farhelm-proto/src/launch.rs, crates/farhelm-proto/src/http.rs, crates/farhelm-proto/src/open_extensions.rs, crates/farhelm-proto/src/approvals.rs; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 3,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c3",
+            "state": "open",
+            "summary": "New environment approvals cannot be mistaken for ordinary launch cards",
+            "location": "crates/farhelm-proto/src/approvals.rs:203",
+            "detail": "Reviewed commit: 190d844e58c96cf197aa838d0b0eea8062f48435. TLDR: considered whether an agent could create a billed sandbox or container through an old launch card or a host's standing permission without the user's creation confirmation. Details: the added LaunchEnvironment variant has a distinct serialized kind, is unconditionally true in requires_direct_allow (approvals.rs:339), and contains the recipe/place plus launch and prompt shown to the user. The caller in crates/farhelm-helm/src/agent_requests.rs constructs that exact variant, waits for approved, then submits the captured resolved launch. Old decoders cannot interpret the new tag as an ordinary Launch. SPEC.md Agents and environments says 'Each of these always shows its own card, whatever the requesting host’s permissions say, with Allow and Deny only' and 'It is a card kind an older UI cannot decode.' Older-list decoding failures are also explicitly accepted in SPEC_impl.md Launch templates: 'its approval-list decoder fails the whole list while such a card waits and keeps showing its last successfully decoded list; this is the accepted older-UI behavior'. Suggested bucket: highest if this allowed unconfirmed billed creation; could-be-highest: yes. Confidence: confirmed source refutation of authorization bypass and explicit compatibility acceptance. proposed_drop: new tag plus direct-Allow classification and actual caller enforce the confirmation; older-list unavailability is the specified compatibility policy. possible_cover: none. Caveats: source-only. No runtime decoder or browser behavior observed; no claim about unrelated approval rendering."
+          }
+        },
+        {
+          "line": 5,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c3",
+            "state": "open",
+            "summary": "Distinct environment-card gating does not establish endpoint binding",
+            "location": "crates/farhelm-proto/src/approvals.rs:203",
+            "detail": "Reviewed commit: 190d844e58c96cf197aa838d0b0eea8062f48435. TLDR: the new card tag and mandatory direct Allow prevent a billed sandbox or container launch from being silently authorized through an old ordinary launch card or a host's standing permission. They do not establish that a pending card remains bound to the physical container host it showed. Original considered consequence preserved: unconfirmed billed creation or execution beyond the user's creation confirmation would be highest. Details: LaunchEnvironment has its own serialized kind and requires_direct_allow returns true. Its representation holds recipe:String, place:Place and place_name:Option<String>, plus the resolved launch and prompt. Place::PodmanHost carries only the registry i64, not destination, connection, identity or route evidence. Therefore c3's original proposed drop is restricted to old-decoder/standing-permission gating. It cannot refute retargeting while this distinct card waits. Cross-group input g020/l1 latest event establishes the cold-place retarget route and delivery of configured recipe credentials to the new physical endpoint; that is an existing finding, not a new g052 report. SPEC.md Agents and environments: 'Each of these always shows its own card, whatever the requesting host’s permissions say, with Allow and Deny only.' SPEC_impl.md Launch templates accepts older approval-list decoding failure while an unknown card waits. These clauses justify kind-level fail-closed behavior only. SPEC_impl.md's separate 'What a card shows is what an approval does' contract still governs endpoint authority. Suggested bucket: highest if this allowed unconfirmed billed creation or changed-endpoint credential/execution effects; could-be-highest: yes. Confidence: confirmed narrow tag/direct-Allow source result; representation/caller endpoint synthesis continuing. proposed_drop: only the distinct-kind/standing-permission bypass is source-refuted; no drop proposed for the known physical-endpoint issue, and no independent drop has been accepted for c3. possible_cover: g020/l1 for the changed physical Podman-place authority, supplied by caller. Caveats: source-only; no runtime decoder/browser observation or reproduction. This revision narrows the original record rather than declaring all new-environment authorization safe."
+          }
+        },
+        {
+          "line": 7,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c3",
+            "state": "open",
+            "summary": "Distinct environment approvals do not bind the physical Podman endpoint",
+            "location": "crates/farhelm-proto/src/approvals.rs:203",
+            "detail": "Reviewed commit: 190d844e58c96cf197aa838d0b0eea8062f48435. TLDR: the new card tag and direct Allow enforce the creation question, but do not prevent a pending card naming one container host from launching on its retargeted physical endpoint. The latter is already recorded as g020/l1; it is not a second g052 finding. Original consequence preserved: unconfirmed billed creation or execution beyond the user's creation confirmation could be highest; g020/l1 separately establishes changed-endpoint command execution and recipe-credential delivery. Details: independently rechecked proto approvals.rs:203-228 and environment.rs:18-29: LaunchEnvironment carries recipe:String, Place::PodmanHost(i64), place_name:Option<String>, resolved launch and prompt, without destination/connection/route evidence. UI approvals.rs:1070-1128 renders the captured place_name and provider consequence, not live endpoint evidence. Helm agent_requests.rs:4485-4515 captures that name before approved; 4519-4528 rechecks only a clone source, and 4541-4550 passes the same symbolic place to provisioning. Thus the new fields faithfully carry the original display but cannot certify physical target authority; a separate private planned-target snapshot/revalidation could fix the caller without necessarily changing the wire shape. Direct-Allow gating remains sound in its narrower scope: helm approvals.rs:439-473 excludes such actions from standing permissions, and 790-813 refuses AlwaysAllow. The new enum tag makes older decoders fail rather than read an ordinary Launch. Exact contract for that narrow result: SPEC.md Agents and environments says 'Each of these always shows its own card, whatever the requesting host’s permissions say, with Allow and Deny only.' Endpoint authority has a separate exact rule, SPEC_impl.md:9548-9556: 'What a card shows is what an approval does' and 'A launch is also refused if the target host’s connection changed while the card waited, since the approval was for the machine the card named.' Reusable recipe/place encoding does not refute that confirmation rule. Suggested bucket: highest for the independently owned changed-endpoint credential/execution route; could-be-highest: yes. Confidence: confirmed source analysis of representation and immediate consumers, no runtime observation. proposed_drop: only the hypothesized ordinary-card/standing-permission bypass is source-refuted, and older unknown-card list refusal is explicitly accepted in SPEC_impl.md Launch templates. No proposed or accepted drop of g020/l1 or its consequence. possible_cover: g020/l1, caller-supplied existing finding; no duplicate report. Caveats: this record does not re-prove the full retarget/credential path owned by g020 and does not assert the wire format alone must contain private route evidence. No readily checkable representation/caller premise remains unresolved."
+          }
+        },
+        {
+          "line": 18,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c3",
+            "state": "open",
+            "summary": "Environment-card gating is sound; endpoint authority has competing contract clauses",
+            "location": "crates/farhelm-proto/src/approvals.rs:203",
+            "detail": "Reviewed commit: 190d844e58c96cf197aa838d0b0eea8062f48435. Original TLDR/consequence preserved: unconfirmed billed creation would be highest, and the separately owned g020/l1 source route can run the approved command and deliver configured recipe credentials on a physical container host different from the one behind the captured name when the card opened. The new tag/direct Allow prevent ordinary-card and standing-permission bypass, but do not freeze the physical endpoint. Source results remain: LaunchEnvironment carries recipe, symbolic Place::PodmanHost(i64), captured place_name, resolved launch and prompt; UI renders that captured name; after Allow the caller rechecks a clone source but forwards the same symbolic place. A private planned-target snapshot could freeze the endpoint without necessarily growing the wire shape, IF that is the intended contract. No duplicate g052 finding is asserted for g020/l1.\n\nLate-input synthesis, original c3 attribution/caveat revised: read COMPLETE local findings history before revising, then directly read reviewed SPEC.md:399-409, SPEC_impl.md:9539-9568 and both documents' introductory authority text. SPEC.md:401-405 explicitly says 'Approvals, settings changes and confirmed operations therefore follow the entry' and that an in-flight 'create or clone' 'may be carried out against the entry's new machine, and Farhelm adds no check of the installation identity to prevent that.' It gives agent host edits/removals the narrower explicit-destination exception at 405-406. This is a stronger directly relevant acceptance argument than recipe mutability, and c3's previous assertion that the machine-named rule alone governed endpoint authority was incomplete. The competing SPEC_impl.md:9548-9556 says 'What a card shows is what an approval does' and 'A launch is also refused if the target host's connection changed while the card waited, since the approval was for the machine the card named.' Neither exact clause may be silently erased. The documents do contain an explicit precedence rule: SPEC_impl.md introductory NOTE says 'SPEC.md defines what the product does; when this document and SPEC.md disagree about observable behavior, SPEC.md wins.' Thus precedence itself is settled by source, not unavailable intent. Remaining scope check: whether the broad logical-entry create/clone allowance applies specifically to the container PLACE entry in an environment-launch card, rather than only an installed target host. The product's separate environment-card paragraph names the container host but must be read with that allowance; checking its complete context and current retained wording next.\n\nSuggested bucket: retain original highest/security consequence proposal for the separately owned changed-endpoint credential/execution concern pending correct specification-acceptance scope; could-be-highest: yes. Confidence: confirmed source representation/consumer facts and confirmed competing clauses/precedence rule; normative scope synthesis still in progress, no runtime observation. proposed_drop: preserve all prior bases as proposals only: direct-Allow plus distinct tag source-refute standing-permission/ordinary-card bypass; SPEC_impl.md Launch templates explicitly accepts older unknown-kind approval-list failure. Those bases do NOT refute physical retargeting. Newly relevant possible drop basis for that separate route is explicit SPEC.md logical-entry acceptance, with the exact clause above and SPEC-over-implementation precedence, subject to checking applicability to container-place approvals; no parent drop/lowering accepted. possible_cover: g020/l1 remains the separate owner of the established retarget/credential route. Caveats: consequence is source-established, its characterization as beyond consent depends on the conflicting rules' scope, and c3 does not adjudicate g020's final disposition. No recipe-mutability argument resolves this conflict. No runtime tests, build, reproduction, coverage search or checkout edit."
+          }
+        },
+        {
+          "line": 19,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c3",
+            "state": "open",
+            "summary": "Environment endpoint authority needs reconciliation with logical-entry consent",
+            "location": "crates/farhelm-proto/src/approvals.rs:203",
+            "detail": "Reviewed commit: 190d844e58c96cf197aa838d0b0eea8062f48435; contract persistence checked at range endpoint 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db. Original TLDR and strongest consequence preserved: an ordinary-card/standing-permission bypass could allow unconfirmed billed creation; the separately owned g020/l1 route can execute the captured command and deliver configured recipe credentials on the new physical endpoint of a retargeted container-place entry after the card captured its old display name. Do not erase that credential/execution effect or recast source observation as runtime evidence. Its classification as beyond the user's consent is now investigated uncertainty because an exact product rule explicitly permits some approval retargeting. No parent drop or lowering accepted.\n\nAssigned representation/consumer results remain confirmed and narrow. LaunchEnvironment at proto approvals.rs:203-220 holds recipe:String, symbolic Place::PodmanHost(i64), captured place_name, resolved launch and prompt; no place destination/connection evidence is encoded. UI renders the captured name. The handler forwards that numeric place after Allow, checking the clone source where applicable rather than the physical place endpoint. Direct-Allow at proto approvals.rs and helm approvals.rs excludes standing permissions and AlwaysAllow, and the distinct enum tag prevents older UIs interpreting it as ordinary Launch. These facts refute only the original bypass/old-card hypotheses, not physical retargeting. A separate private snapshot could bind the endpoint without necessarily changing this wire shape IF that is the intended authority contract.\n\nLate synthesis checks/results: read all 17 prior local log events before revision. Read reviewed SPEC.md:399-409, the COMPLETE Agents and environments subsection at 4289-4342, the origin-connection paragraph at 4084-4099, SPEC_impl.md's opening authority NOTE and 9539-9568, then the current versions of the logical-entry and machine-named clauses and the opening NOTE. Targeted searches of these pinned specs plus immediate protocol/caller files found no explicit container-place exception to the logical-entry rule. Directly checked proto place-field docs (207-210) and plan_environment_create (agent_requests.rs:4191-4205): --container-host resolves an ordinary registry host by display name and stores its id. This is a real logical registry entry, not an unrelated cloud account or a newly created environment row. SPEC.md:4091-4092 and SPEC_impl.md:9311-9315 bind the requesting connection; they do not independently establish a place-target veto, and g020's supplied route keeps its different origin connected.\n\nCompeting exact authority text retained: reviewed SPEC.md:399-405 says 'a host entry is one logical host from the user's point of view', 'Approvals, settings changes and confirmed operations therefore follow the entry', and includes in-flight 'create or clone' operations that 'may be carried out against the entry's new machine, and Farhelm adds no check of the installation identity to prevent that.' Lines 405-406 name agent host edit/removal cards as narrower because they explicitly show destination; the environment-card requirement at 4330-4334 names the container host and creation consequence but does not itself demand displaying or freezing its destination. Conversely SPEC_impl.md:9548 says 'What a card shows is what an approval does', and 9555-9556 says 'A launch is also refused if the target host's connection changed while the card waited, since the approval was for the machine the card named.' Both statements persist at endpoint SPEC.md:405-415 and SPEC_impl.md:9090-9098. They must not be reconciled by silently omitting one. Precedence itself is explicit: the SPEC_impl.md opening NOTE says 'SPEC.md defines what the product does; when this document and SPEC.md disagree about observable behavior, SPEC.md wins.' This favors the product's logical-entry allowance when the clauses cover the same operation. Recipe mutability does not resolve this conflict and is not the acceptance basis here.\n\nRemaining exact missing premise: whether that general logical-entry create/clone allowance was intended to include a pending environment-creation card's CONTAINER PLACE, or whether these cards have an unstated physical-machine exception matching the implementation document. Source establishes entry identity, symbolic request representation, physical retarget route and textual precedence, but cannot establish an unstated scope exception or maintainer intent. A contract clarification explicitly applying or excluding logical-entry retarget consent for container-place approvals would settle it; more execution cannot resolve normative intent. Best supported acceptance argument is the broad product allowance plus precedence, but it remains a proposed specification-acceptance interpretation for the independent caller check.\n\nSuggested bucket: preserve the original highest/security concern proposal for the separately owned changed-endpoint credential/execution effect, conditional on its being outside accepted logical-entry consent; no independent lowering/drop by g052. Could-be-highest: yes, original consequence retained. Confidence: confirmed source mechanics; unverified after investigation as a reportable authorization violation because of the exact competing authority scope above. proposed_drop: retain every prior proposal narrowly: (1) direct-Allow/unknown-tag source refutation of standing-permission or ordinary-card bypass; (2) explicit accepted older-UI unknown-kind list-decoding failure in SPEC_impl.md Launch templates; neither drops endpoint retargeting. New possible acceptance basis (3): SPEC.md's quoted logical-entry allowance, with explicit SPEC-over-implementation precedence, could accept this separately established route if it applies to the container place. No one has accepted any drop or lowering. The machine-named clause remains contrary evidence, not erased. possible_cover: g020/l1 remains the separate finding owner; this record only reconciles the assigned added representation and caller assumptions, not a duplicate retarget finding. Caveats: no claim that the wire alone must carry private endpoint evidence, no claim of observed credential exposure, and no broader approval or recipe-definition conclusion. All readily checkable source premises resolved; the remaining issue is investigated contract-scope uncertainty, not an uninvestigated source lead. No runtime tests, builds, reproductions, live-install actions, checkout edits, coverage searches or nested agents."
+          }
+        }
+      ],
+      "latest": {
+        "line": 19,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c3",
+          "state": "open",
+          "summary": "Environment endpoint authority needs reconciliation with logical-entry consent",
+          "location": "crates/farhelm-proto/src/approvals.rs:203",
+          "detail": "Reviewed commit: 190d844e58c96cf197aa838d0b0eea8062f48435; contract persistence checked at range endpoint 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db. Original TLDR and strongest consequence preserved: an ordinary-card/standing-permission bypass could allow unconfirmed billed creation; the separately owned g020/l1 route can execute the captured command and deliver configured recipe credentials on the new physical endpoint of a retargeted container-place entry after the card captured its old display name. Do not erase that credential/execution effect or recast source observation as runtime evidence. Its classification as beyond the user's consent is now investigated uncertainty because an exact product rule explicitly permits some approval retargeting. No parent drop or lowering accepted.\n\nAssigned representation/consumer results remain confirmed and narrow. LaunchEnvironment at proto approvals.rs:203-220 holds recipe:String, symbolic Place::PodmanHost(i64), captured place_name, resolved launch and prompt; no place destination/connection evidence is encoded. UI renders the captured name. The handler forwards that numeric place after Allow, checking the clone source where applicable rather than the physical place endpoint. Direct-Allow at proto approvals.rs and helm approvals.rs excludes standing permissions and AlwaysAllow, and the distinct enum tag prevents older UIs interpreting it as ordinary Launch. These facts refute only the original bypass/old-card hypotheses, not physical retargeting. A separate private snapshot could bind the endpoint without necessarily changing this wire shape IF that is the intended authority contract.\n\nLate synthesis checks/results: read all 17 prior local log events before revision. Read reviewed SPEC.md:399-409, the COMPLETE Agents and environments subsection at 4289-4342, the origin-connection paragraph at 4084-4099, SPEC_impl.md's opening authority NOTE and 9539-9568, then the current versions of the logical-entry and machine-named clauses and the opening NOTE. Targeted searches of these pinned specs plus immediate protocol/caller files found no explicit container-place exception to the logical-entry rule. Directly checked proto place-field docs (207-210) and plan_environment_create (agent_requests.rs:4191-4205): --container-host resolves an ordinary registry host by display name and stores its id. This is a real logical registry entry, not an unrelated cloud account or a newly created environment row. SPEC.md:4091-4092 and SPEC_impl.md:9311-9315 bind the requesting connection; they do not independently establish a place-target veto, and g020's supplied route keeps its different origin connected.\n\nCompeting exact authority text retained: reviewed SPEC.md:399-405 says 'a host entry is one logical host from the user's point of view', 'Approvals, settings changes and confirmed operations therefore follow the entry', and includes in-flight 'create or clone' operations that 'may be carried out against the entry's new machine, and Farhelm adds no check of the installation identity to prevent that.' Lines 405-406 name agent host edit/removal cards as narrower because they explicitly show destination; the environment-card requirement at 4330-4334 names the container host and creation consequence but does not itself demand displaying or freezing its destination. Conversely SPEC_impl.md:9548 says 'What a card shows is what an approval does', and 9555-9556 says 'A launch is also refused if the target host's connection changed while the card waited, since the approval was for the machine the card named.' Both statements persist at endpoint SPEC.md:405-415 and SPEC_impl.md:9090-9098. They must not be reconciled by silently omitting one. Precedence itself is explicit: the SPEC_impl.md opening NOTE says 'SPEC.md defines what the product does; when this document and SPEC.md disagree about observable behavior, SPEC.md wins.' This favors the product's logical-entry allowance when the clauses cover the same operation. Recipe mutability does not resolve this conflict and is not the acceptance basis here.\n\nRemaining exact missing premise: whether that general logical-entry create/clone allowance was intended to include a pending environment-creation card's CONTAINER PLACE, or whether these cards have an unstated physical-machine exception matching the implementation document. Source establishes entry identity, symbolic request representation, physical retarget route and textual precedence, but cannot establish an unstated scope exception or maintainer intent. A contract clarification explicitly applying or excluding logical-entry retarget consent for container-place approvals would settle it; more execution cannot resolve normative intent. Best supported acceptance argument is the broad product allowance plus precedence, but it remains a proposed specification-acceptance interpretation for the independent caller check.\n\nSuggested bucket: preserve the original highest/security concern proposal for the separately owned changed-endpoint credential/execution effect, conditional on its being outside accepted logical-entry consent; no independent lowering/drop by g052. Could-be-highest: yes, original consequence retained. Confidence: confirmed source mechanics; unverified after investigation as a reportable authorization violation because of the exact competing authority scope above. proposed_drop: retain every prior proposal narrowly: (1) direct-Allow/unknown-tag source refutation of standing-permission or ordinary-card bypass; (2) explicit accepted older-UI unknown-kind list-decoding failure in SPEC_impl.md Launch templates; neither drops endpoint retargeting. New possible acceptance basis (3): SPEC.md's quoted logical-entry allowance, with explicit SPEC-over-implementation precedence, could accept this separately established route if it applies to the container place. No one has accepted any drop or lowering. The machine-named clause remains contrary evidence, not erased. possible_cover: g020/l1 remains the separate finding owner; this record only reconciles the assigned added representation and caller assumptions, not a duplicate retarget finding. Caveats: no claim that the wire alone must carry private endpoint evidence, no claim of observed credential exposure, and no broader approval or recipe-definition conclusion. All readily checkable source premises resolved; the remaining issue is investigated contract-scope uncertainty, not an uninvestigated source lead. No runtime tests, builds, reproductions, live-install actions, checkout edits, coverage searches or nested agents."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g052/findings.jsonl",
+        "id": "c3",
+        "line": 7,
+        "disposition": "under-investigation",
+        "group": "g052-c3",
+        "reason": "Record durably acknowledged; parent source/contract validation, cross-group synthesis, coverage/filter matching and any independent drop check remain pending. This preserves the claim and uncertainty without accepting, dropping or lowering it."
+      },
+      "accepted_parent_decision": null,
+      "returned_claim_checks": [
+        {
+          "batch": "claims-033",
+          "key": "g052/c3",
+          "latest_line": 7,
+          "recommendation": "needs-parent",
+          "bucket": "highest",
+          "underlying_key": "environment-approval-symbolic-place-retargeting",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The original old-card/standing-permission bypass is refuted, but the record expressly preserves a separate physical-endpoint authority defect owned by g020/l1. The fields and immediate caller do not bind the physical container host. Parent must consolidate with that owner rather than discard this record as a blanket authorization refutation.",
+          "checks": [
+            "190d844e58c96cf197aa838d0b0eea8062f48435:crates/farhelm-proto/src/approvals.rs:195-228,336-343: LaunchEnvironment has a distinct tag and unconditionally requires direct Allow.",
+            "190d844e58c96cf197aa838d0b0eea8062f48435:crates/farhelm-helm/src/approvals.rs:439-473,790-813: standing permissions do not bypass direct-Allow actions, and AlwaysAllow is refused.",
+            "190d844e58c96cf197aa838d0b0eea8062f48435:crates/farhelm-proto/src/environment.rs:18-29: Place::PodmanHost is only a registry i64.",
+            "190d844e58c96cf197aa838d0b0eea8062f48435:crates/farhelm-helm/src/agent_requests.rs:4485-4550: captures place_name before approved(), revalidates only clone source ownership afterward, then submits the same symbolic place. No physical-place snapshot is present at this boundary. Full provisioning/credential route was not re-reviewed or reproduced."
+          ],
+          "coverage_checked": {
+            "SPEC.md": "Agents and environments, 4253-4305: direct Allow is required and the card names recipe/place. This supports the narrow gating result, not endpoint retargeting.",
+            "SPEC_impl.md": "Agent requests and environments, 6167-6210; Launch templates' accepted old approval-list refusal, 8687-8692; Permission prompts, 9090-9098, separately requires dispatch to match the shown machine.",
+            "TODO.md Planned": "Empty.",
+            "plans/queue": "No unlanded plans in INDEX.md; environment-agent-operations and podman-environments are landed. Their broad feature scope is not exact pending coverage.",
+            "BUGS.md": "No matching known bug.",
+            "INDEX.md and queue": "Searched environment approvals, endpoint/place retargeting, LaunchEnvironment and container approval. No exact existing item identified. update-preplanning-retarget-consent wording in INDEX concerns Update preplanning, a different confirmation boundary.",
+            "TRIAGE_OUTCOMES.md": "No exact active decision. Recipe credential-delivery decisions concern how credentials are installed, not permission to send them to a changed machine.",
+            "FILTER.md": "Wrong-machine execution and credential delivery cannot use the general race/glitch filters."
+          },
+          "exact_cover_quotes": [
+            "SPEC.md:4294: 'Each of these always shows its own card, whatever the requesting host's permissions say, with Allow and Deny only.'",
+            "SPEC_impl.md:8688-8690: 'its approval-list decoder fails the whole list while such a card waits and keeps showing its last successfully decoded list; this is the accepted older-UI behavior'.",
+            "SPEC_impl.md:9090,9096-9098: 'What a card shows is what an approval does.' 'A launch is also refused if the target host's connection changed while the card waited, since the approval was for the machine the card named.' This is a requirement, not coverage of the endpoint defect."
+          ],
+          "missing_premise": "The full cold-place retarget and recipe-credential route is owned by g020/l1 and supplied by the caller; this consultation confirms the wire/caller boundary only. A private provisioning snapshot could repair it without changing the wire fields.",
+          "original_stronger_consequence": "Unconfirmed billed creation or execution beyond the creation confirmation could be highest. Latest history adds the independently owned changed-endpoint command/recipe-credential consequence and explicitly does not withdraw it.",
+          "needs_independent_drop_check": true,
+          "proposed_basis": "Independent check may drop only the ordinary-card/standing-permission bypass and accept the explicitly specified unknown-card list refusal. Retain/consolidate the endpoint consequence with g020/l1; it is not accepted by those clauses."
+        }
+      ],
+      "parent_proposals": [
+        {
+          "artifact": "parent-flagged-judgments-033.json",
+          "key": "g052/c3",
+          "proposal": "claim-checks/claims-033/result.json",
+          "parent_proposal": "split-direct-Allow-gating-refutation-from-pending-place-authority-root",
+          "final_independent_gate": "required-before-original-authorization-drop-or-lowering",
+          "reason": "Full033 distinct LaunchEnvironment tag requires direct Allow, standing permissions cannot bypass and AlwaysAllow refuses; older UI whole-list decoding refusal is explicitly accepted. These narrow facts do not freeze physical Podman place: the i64/name is captured before approval, only clone source rechecked later. Preserve supporting evidence under020l1/041l2 and pending parent010 logical-host-vs-physical-place contract question; no blanket refutation of credentials/commands reaching a changed endpoint. A private later provisioning snapshot would require its own proof; direct-Allow fields alone do not provide it."
+        }
+      ],
+      "collection": {
+        "retain": true,
+        "clearly_refuted_candidate": false,
+        "needs_unfinished_gate": true,
+        "provisional_bucket": "highest",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "g052/c3",
+        "destination": "trailing-environment-endpoint-authority-needs-reconciliation-with-logical-entry-consent.md"
+      }
+    },
+    {
+      "key": "g052/c4",
+      "owner": "g052",
+      "id": "c4",
+      "domain": "wire-protocol",
+      "purpose": "wire-protocol: crates/farhelm-proto/src/environment.rs, crates/farhelm-proto/src/lib.rs, crates/farhelm-proto/src/launcher.rs, crates/farhelm-proto/src/launch.rs, crates/farhelm-proto/src/http.rs, crates/farhelm-proto/src/open_extensions.rs, crates/farhelm-proto/src/approvals.rs; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 4,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c4",
+            "state": "open",
+            "summary": "Environment fallback header is staged behind a page opt-in",
+            "location": "crates/farhelm-proto/src/http.rs:93",
+            "detail": "Reviewed commit: 222bf6253bcd168db04bcbb1df20180c88306998. TLDR: considered whether the newly documented environment-unasked response marker is ignored by the shipped page, leaving a user unable to choose its stated fallback after an unanswered Delete. Details: git grep for ENVIRONMENT_UNASKED_HEADER at this revision finds the typed helm producer and protocol definition, but no UI consumer. Source inspection shows the page's delete_url (crates/farhelm-ui/src/api.rs:4250) sends only its existing ordinary deletion guards; it never opts into delete_environment_session. The helm's new path is separately selected by that query (sessions.rs:3635), while the old whole-environment deletion path is retained. Thus this is a staged backend vocabulary, not a reachable new UI path missing fallback handling in this commit. SPEC_impl.md Environment Delete and the seal explicitly says 'the new path is opted into by a query only new pages send; a plain DELETE of a session on a session-owned host is still refused, so an older page cannot reach it'. Suggested bucket: other for premature documentation only; could-be-highest: no established route, because the old page cannot send the opting-in request. Confidence: confirmed source refutation of reachable broken fallback. proposed_drop: no shipped UI caller of the new query at the reviewed intermediate revision; producer and query gate agree. possible_cover: none. Caveats: the comment describes the eventual consumer; this does not judge later UI implementation assigned elsewhere. Source-only; no HTTP request executed."
+          }
+        },
+        {
+          "line": 6,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c4",
+            "state": "open",
+            "summary": "Foundation-page opt-in result does not judge later Delete integration",
+            "location": "crates/farhelm-proto/src/http.rs:93",
+            "detail": "Reviewed commit: 222bf6253bcd168db04bcbb1df20180c88306998. TLDR: original concern preserved: ignoring the new environment-unasked marker on a reachable environment-session Delete could leave the user without the stated warned fallback after an unanswered Delete. Details: at this specific foundation revision the existing page's delete_url does not send delete_environment_session, and the helm gates the new request path on that query. This refutes a broken new-path fallback in that intermediate page only. It says nothing about later UI integration in the reviewed range; later controls and fallback rendering require their owning groups' review. SPEC_impl.md Environment Delete and the seal says 'the new path is opted into by a query only new pages send; a plain DELETE of a session on a session-owned host is still refused, so an older page cannot reach it'. That clause protects the old confirmation boundary rather than accepting missing fallback in pages that do opt in. Suggested bucket: other for a missing reachable fallback with no established destructive effect; could-be-highest: no established route in this candidate, but unconfirmed automatic whole-environment escalation would be a different highest consequence that this record does not refute. Confidence: confirmed source result confined to the foundation revision. proposed_drop: only the absence-of-consumer concern at 222bf6253bcd168db04bcbb1df20180c88306998, because its page cannot request the new path; not a range-wide drop and no independent drop accepted. possible_cover: caller assigns later UI integration to its own groups; no specific finding claimed. Caveats: source-only, no HTTP execution. The added header is an indication to offer an explicit confirmation, never destruction authority by itself; its typed producer remains subject to synthesis checks."
+          }
+        },
+        {
+          "line": 9,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c4",
+            "state": "open",
+            "summary": "Later Delete API consumes the typed fallback marker",
+            "location": "crates/farhelm-proto/src/http.rs:93",
+            "detail": "Reviewed commit: 222bf6253bcd168db04bcbb1df20180c88306998, with immediate later API consumer checked at 2ef10815f12ed719ab6c51c6e3ac6fcd3f8bc1fa and located at range endpoint 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db. TLDR: original consequence preserved: ignoring the environment-unasked marker on a reachable session Delete could leave the user without the stated warned fallback. The foundation-page absence cannot refute later UI bugs. Details: initial source result still holds only at 222bf625: the old page sends no delete_environment_session query. Synthesis checked later integration's immediate API boundary, not its whole UI: crates/farhelm-ui/src/api/sandbox_sessions.rs:159-175 at 2ef10815 classifies only a 409 carrying the exact ENVIRONMENT_UNASKED_HEADER/ENVIRONMENT_UNASKED value as Unasked; 404 is Gone and all other responses are Refused. Its environment_delete_url at 188-198 sends separate Session and Whole query opt-ins. Thus later integration does consume the new protocol marker and keeps it separate from a whole-environment request. The enum contract at 144-155 explicitly says a warned confirmation is opened and the wider Delete requires the user's answer; confirmation rendering/handlers remain for the owning UI groups to judge. Exact foundation contract in SPEC_impl.md Environment Delete and the seal: 'the new path is opted into by a query only new pages send; a plain DELETE of a session on a session-owned host is still refused, so an older page cannot reach it'. This does not accept missing fallback once a new page opts in. Suggested bucket: other for a missing fallback without an established destructive effect; could-be-highest: no established route here, but unauthorized automatic wider deletion would be a separate highest consequence not refuted by this record. Confidence: confirmed protocol-marker producer/immediate-consumer agreement from source only. proposed_drop: only the specific missing-marker-consumer suspicion; neither a blanket later-UI drop nor an accepted independent drop. possible_cover: later UI review belongs to caller's assigned UI groups; no duplicate finding claimed. Caveats: no runtime HTTP/browser evidence, no reproduction, and no conclusion about all later confirmation-handler behavior. No unresolved protocol-consumer premise remains."
+          }
+        }
+      ],
+      "latest": {
+        "line": 9,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c4",
+          "state": "open",
+          "summary": "Later Delete API consumes the typed fallback marker",
+          "location": "crates/farhelm-proto/src/http.rs:93",
+          "detail": "Reviewed commit: 222bf6253bcd168db04bcbb1df20180c88306998, with immediate later API consumer checked at 2ef10815f12ed719ab6c51c6e3ac6fcd3f8bc1fa and located at range endpoint 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db. TLDR: original consequence preserved: ignoring the environment-unasked marker on a reachable session Delete could leave the user without the stated warned fallback. The foundation-page absence cannot refute later UI bugs. Details: initial source result still holds only at 222bf625: the old page sends no delete_environment_session query. Synthesis checked later integration's immediate API boundary, not its whole UI: crates/farhelm-ui/src/api/sandbox_sessions.rs:159-175 at 2ef10815 classifies only a 409 carrying the exact ENVIRONMENT_UNASKED_HEADER/ENVIRONMENT_UNASKED value as Unasked; 404 is Gone and all other responses are Refused. Its environment_delete_url at 188-198 sends separate Session and Whole query opt-ins. Thus later integration does consume the new protocol marker and keeps it separate from a whole-environment request. The enum contract at 144-155 explicitly says a warned confirmation is opened and the wider Delete requires the user's answer; confirmation rendering/handlers remain for the owning UI groups to judge. Exact foundation contract in SPEC_impl.md Environment Delete and the seal: 'the new path is opted into by a query only new pages send; a plain DELETE of a session on a session-owned host is still refused, so an older page cannot reach it'. This does not accept missing fallback once a new page opts in. Suggested bucket: other for a missing fallback without an established destructive effect; could-be-highest: no established route here, but unauthorized automatic wider deletion would be a separate highest consequence not refuted by this record. Confidence: confirmed protocol-marker producer/immediate-consumer agreement from source only. proposed_drop: only the specific missing-marker-consumer suspicion; neither a blanket later-UI drop nor an accepted independent drop. possible_cover: later UI review belongs to caller's assigned UI groups; no duplicate finding claimed. Caveats: no runtime HTTP/browser evidence, no reproduction, and no conclusion about all later confirmation-handler behavior. No unresolved protocol-consumer premise remains."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g052/findings.jsonl",
+        "id": "c4",
+        "line": 9,
+        "disposition": "under-investigation",
+        "group": "g052-c4",
+        "reason": "Record durably acknowledged; parent source/contract validation, cross-group synthesis, coverage/filter matching and any independent drop check remain pending. This preserves the claim and uncertainty without accepting, dropping or lowering it."
+      },
+      "accepted_parent_decision": null,
+      "returned_claim_checks": [
+        {
+          "batch": "claims-033",
+          "key": "g052/c4",
+          "latest_line": 9,
+          "recommendation": "refuted",
+          "bucket": "other",
+          "underlying_key": "environment-delete-unasked-marker-missing-consumer",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The foundation page could not opt into the new Delete path. The later immediate API consumer recognizes the exact typed marker and separates session deletion from whole-environment deletion. This refutes missing protocol-marker consumption, not every later confirmation handler.",
+          "checks": [
+            "222bf6253bcd168db04bcbb1df20180c88306998:crates/farhelm-ui/src/api.rs:4248-4257: delete_url emits only ordinary deletion guards, never delete_environment_session.",
+            "222bf6253bcd168db04bcbb1df20180c88306998:crates/farhelm-helm/src/sessions.rs:3635-3658: new path is explicitly query-gated and refuses simultaneous whole/session opt-ins or ordinary guards.",
+            "222bf6253bcd168db04bcbb1df20180c88306998:crates/farhelm-proto/src/http.rs:86-96: typed marker promises a warned fallback, never automatic deletion.",
+            "2ef10815f12ed719ab6c51c6e3ac6fcd3f8bc1fa:crates/farhelm-ui/src/api/sandbox_sessions.rs:144-198: only exact 409/header/value becomes Unasked; 404 is Gone; Session and Whole use distinct opt-ins. No HTTP/browser execution or complete UI handler review."
+          ],
+          "coverage_checked": {
+            "SPEC.md": "Searched environment Delete, fallback and confirmations; no policy accepts omitting the warned fallback once reachable.",
+            "SPEC_impl.md": "Environment Delete and the seal, 6106-6153, explicitly documents old-page opt-in refusal and the warned whole-environment fallback after no decision.",
+            "TODO.md Planned": "Empty.",
+            "plans/queue": "No unlanded plan in INDEX.md. Environment Delete feature work is already landed.",
+            "BUGS.md": "No matching known bug.",
+            "INDEX.md and queue": "Searched unasked, ENVIRONMENT_UNASKED, fallback and environment Delete. No exact queued missing-consumer item.",
+            "TRIAGE_OUTCOMES.md": "No exact active decision for the marker/consumer claim.",
+            "FILTER.md": "No filter applied. Any separate automatic wider-deletion route would be outside the rare-glitch boundary."
+          },
+          "exact_cover_quotes": [
+            "SPEC_impl.md:6137-6139: 'the new path is opted into by a query only new pages send; a plain DELETE of a session on a session-owned host is still refused, so an older page cannot reach it'. This is a gate requirement, not acceptance of missing fallback in an opted-in page."
+          ],
+          "missing_premise": "No unresolved protocol-consumer premise. Full confirmation rendering/action binding belongs to the UI owners. Unauthorized automatic whole-environment escalation was never established by this candidate.",
+          "original_stronger_consequence": "Ignoring the marker on a reachable session Delete could leave the user without the stated warned fallback. The histories expressly preserve that concern while restricting the refutation to the actual marker consumer; a different unauthorized wider Delete could lose work but is not refuted here.",
+          "needs_independent_drop_check": true,
+          "proposed_basis": "Drop only the missing-marker-consumer suspicion. Do not use the intermediate-page gate or typed enum documentation as proof of all later destructive confirmation behavior."
+        }
+      ],
+      "parent_proposals": [
+        {
+          "artifact": "parent-flagged-judgments-033.json",
+          "key": "g052/c4",
+          "proposal": "claim-checks/claims-033/result.json",
+          "parent_proposal": "source-refuted-missing-Unasked-protocol-consumer",
+          "final_independent_gate": "required-by-conservative-destructive-fallback-flag",
+          "reason": "Full bounded033 foundation old page cannot opt into new query-gated Delete, later immediate API consumer recognizes exact409/header/value, maps404Gone and uses separate Session/Whole opt-ins. Refutes the named absent marker consumer, not every later rendered confirmation/automatic escalation route. Preserve original missing warned fallback and conservative destructive-context flag; typed documentation or intermediate gate alone is not complete UI correctness evidence."
+        }
+      ],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": true,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "environment-delete-unasked-marker-missing-consumer",
+        "destination": null
+      }
+    },
+    {
+      "key": "g052/c5",
+      "owner": "g052",
+      "id": "c5",
+      "domain": "wire-protocol",
+      "purpose": "wire-protocol: crates/farhelm-proto/src/environment.rs, crates/farhelm-proto/src/lib.rs, crates/farhelm-proto/src/launcher.rs, crates/farhelm-proto/src/launch.rs, crates/farhelm-proto/src/http.rs, crates/farhelm-proto/src/open_extensions.rs, crates/farhelm-proto/src/approvals.rs; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 11,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c5",
+            "state": "open",
+            "summary": "Desktop CORS header exposure does not hide ordinary lifecycle markers",
+            "location": "crates/farhelm-proto/src/http.rs:83",
+            "detail": "Reviewed commit: ba7cc0264028eebb39647deb1d25b055e6886935. TLDR: considered whether the new host-busy marker is hidden by CORS in the desktop app, preventing a launch from retrying the only lifecycle refusal that waiting can clear. Details: middleware.rs:364-372 exposes only the build stamp to webview JavaScript, which initially appeared incompatible with api.rs:5687 reading HOST_BUSY_HEADER. Source checks settle the transport premise: ordinary lifecycle calls use the Rust reqwest client, whose api.rs:2085-2098 native_desktop branch constructs a native no_proxy client; browser builds use their platform transport on the served helm origin. Helm lib.rs:1042-1115 keeps ordinary suspend/resume among protected routes and applies the restricted desktop CORS wrapper separately to the device-validation router. Its comment explicitly says this is 'without widening any ordinary REST route'. The special cross-origin browser operations are not the ordinary native lifecycle client. Therefore CORS exposure does not hide the typed header on this client path. Protocol producers and consumers use identical header/value constants; transport failure is not classified as busy. Suggested bucket: other for the hypothesized missing retry marker; could-be-highest: no established security/data-loss route. Confidence: confirmed source refutation of the cross-origin-header premise. proposed_drop: ordinary native reqwest responses are not subject to browser CORS header filtering; no independent drop accepted. possible_cover: none. Caveats: source-only; no desktop/browser request executed. This is not a blanket CORS review or a conclusion about later confirmation handlers."
+          }
+        }
+      ],
+      "latest": {
+        "line": 11,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c5",
+          "state": "open",
+          "summary": "Desktop CORS header exposure does not hide ordinary lifecycle markers",
+          "location": "crates/farhelm-proto/src/http.rs:83",
+          "detail": "Reviewed commit: ba7cc0264028eebb39647deb1d25b055e6886935. TLDR: considered whether the new host-busy marker is hidden by CORS in the desktop app, preventing a launch from retrying the only lifecycle refusal that waiting can clear. Details: middleware.rs:364-372 exposes only the build stamp to webview JavaScript, which initially appeared incompatible with api.rs:5687 reading HOST_BUSY_HEADER. Source checks settle the transport premise: ordinary lifecycle calls use the Rust reqwest client, whose api.rs:2085-2098 native_desktop branch constructs a native no_proxy client; browser builds use their platform transport on the served helm origin. Helm lib.rs:1042-1115 keeps ordinary suspend/resume among protected routes and applies the restricted desktop CORS wrapper separately to the device-validation router. Its comment explicitly says this is 'without widening any ordinary REST route'. The special cross-origin browser operations are not the ordinary native lifecycle client. Therefore CORS exposure does not hide the typed header on this client path. Protocol producers and consumers use identical header/value constants; transport failure is not classified as busy. Suggested bucket: other for the hypothesized missing retry marker; could-be-highest: no established security/data-loss route. Confidence: confirmed source refutation of the cross-origin-header premise. proposed_drop: ordinary native reqwest responses are not subject to browser CORS header filtering; no independent drop accepted. possible_cover: none. Caveats: source-only; no desktop/browser request executed. This is not a blanket CORS review or a conclusion about later confirmation handlers."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g052/findings.jsonl",
+        "id": "c5",
+        "line": 11,
+        "disposition": "excluded",
+        "group": "native-lifecycle-busy-header-cors-filtering",
+        "reason": "Parent explicitly accepted named refuted proposal from claims-033 after inspecting it. The hypothesized CORS filtering premise does not hold for native lifecycle requests: they use Rust reqwest. Browser lifecycle requests use the served helm origin. Restricted webview CORS concerns separate browser operations. Refute the ordinary lifecycle-header CORS route only. This is not a blanket CORS audit or a later-handler verdict. Checked source/results: [\"ba7cc0264028eebb39647deb1d25b055e6886935:crates/farhelm-ui/src/api.rs:2085-2098: native_desktop constructs a native no_proxy reqwest client.\",\"ba7cc0264028eebb39647deb1d25b055e6886935:crates/farhelm-ui/src/api.rs:5677-5700: post_lifecycle uses that client and reads the exact HOST_BUSY_HEADER/HOST_BUSY_OPERATION pair; transport errors are never busy.\",\"ba7cc0264028eebb39647deb1d25b055e6886935:crates/farhelm-helm/src/lib.rs:1074-1115: suspend/resume are ordinary protected routes; the separate device-validation router gets desktop_webview_cors without widening ordinary REST.\",\"ba7cc0264028eebb39647deb1d25b055e6886935:crates/farhelm-helm/src/middleware.rs:364-372 exposes only the build stamp, but this does not browser-filter native reqwest responses. No desktop or browser request was run.\"] Current coverage/results: {\"SPEC.md\":\"Searched suspension, wake and busy-host retry policy; no acceptance of a missing retry marker found.\",\"SPEC_impl.md\":\"Host lifecycle wake policy around 6733 explicitly names x-farhelm-host-busy; desktop CORS is a separate browser-operation boundary.\",\"TODO.md Planned\":\"Empty.\",\"plans/queue\":\"No unlanded plans; sandbox-suspend-overlap is landed (REPORTS.md:23).\",\"BUGS.md\":\"No matching known bug.\",\"INDEX.md and queue\":\"Searched HOST_BUSY, CORS, lifecycle markers and busy retry; no exact matching item.\",\"TRIAGE_OUTCOMES.md\":\"No exact active marker/CORS decision.\",\"FILTER.md\":\"No filter needed; source refutes the transport premise.\"} Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Missing busy classification could prevent a launch from retrying a lifecycle refusal that waiting can clear. The history alleges no security, process or user-data loss.\"; \"A shipped ordinary lifecycle client subject to cross-origin browser response-header filtering was not found; native transport contradicts it.\"."
+      },
+      "accepted_parent_decision": {
+        "key": "g052/c5",
+        "line": 11,
+        "disposition": "excluded",
+        "group": "native-lifecycle-busy-header-cors-filtering",
+        "bucket": "other",
+        "recording": "refuted",
+        "queue_target_candidate": null,
+        "needs_independent_drop_check": false,
+        "reason": "Parent explicitly accepted named refuted proposal from claims-033 after inspecting it. The hypothesized CORS filtering premise does not hold for native lifecycle requests: they use Rust reqwest. Browser lifecycle requests use the served helm origin. Restricted webview CORS concerns separate browser operations. Refute the ordinary lifecycle-header CORS route only. This is not a blanket CORS audit or a later-handler verdict. Checked source/results: [\"ba7cc0264028eebb39647deb1d25b055e6886935:crates/farhelm-ui/src/api.rs:2085-2098: native_desktop constructs a native no_proxy reqwest client.\",\"ba7cc0264028eebb39647deb1d25b055e6886935:crates/farhelm-ui/src/api.rs:5677-5700: post_lifecycle uses that client and reads the exact HOST_BUSY_HEADER/HOST_BUSY_OPERATION pair; transport errors are never busy.\",\"ba7cc0264028eebb39647deb1d25b055e6886935:crates/farhelm-helm/src/lib.rs:1074-1115: suspend/resume are ordinary protected routes; the separate device-validation router gets desktop_webview_cors without widening ordinary REST.\",\"ba7cc0264028eebb39647deb1d25b055e6886935:crates/farhelm-helm/src/middleware.rs:364-372 exposes only the build stamp, but this does not browser-filter native reqwest responses. No desktop or browser request was run.\"] Current coverage/results: {\"SPEC.md\":\"Searched suspension, wake and busy-host retry policy; no acceptance of a missing retry marker found.\",\"SPEC_impl.md\":\"Host lifecycle wake policy around 6733 explicitly names x-farhelm-host-busy; desktop CORS is a separate browser-operation boundary.\",\"TODO.md Planned\":\"Empty.\",\"plans/queue\":\"No unlanded plans; sandbox-suspend-overlap is landed (REPORTS.md:23).\",\"BUGS.md\":\"No matching known bug.\",\"INDEX.md and queue\":\"Searched HOST_BUSY, CORS, lifecycle markers and busy retry; no exact matching item.\",\"TRIAGE_OUTCOMES.md\":\"No exact active marker/CORS decision.\",\"FILTER.md\":\"No filter needed; source refutes the transport premise.\"} Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Missing busy classification could prevent a launch from retrying a lifecycle refusal that waiting can clear. The history alleges no security, process or user-data loss.\"; \"A shipped ordinary lifecycle client subject to cross-origin browser response-header filtering was not found; native transport contradicts it.\"."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-033",
+          "key": "g052/c5",
+          "latest_line": 11,
+          "recommendation": "refuted",
+          "bucket": "other",
+          "underlying_key": "native-lifecycle-busy-header-cors-filtering",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The hypothesized CORS filtering premise does not hold for native lifecycle requests: they use Rust reqwest. Browser lifecycle requests use the served helm origin. Restricted webview CORS concerns separate browser operations.",
+          "checks": [
+            "ba7cc0264028eebb39647deb1d25b055e6886935:crates/farhelm-ui/src/api.rs:2085-2098: native_desktop constructs a native no_proxy reqwest client.",
+            "ba7cc0264028eebb39647deb1d25b055e6886935:crates/farhelm-ui/src/api.rs:5677-5700: post_lifecycle uses that client and reads the exact HOST_BUSY_HEADER/HOST_BUSY_OPERATION pair; transport errors are never busy.",
+            "ba7cc0264028eebb39647deb1d25b055e6886935:crates/farhelm-helm/src/lib.rs:1074-1115: suspend/resume are ordinary protected routes; the separate device-validation router gets desktop_webview_cors without widening ordinary REST.",
+            "ba7cc0264028eebb39647deb1d25b055e6886935:crates/farhelm-helm/src/middleware.rs:364-372 exposes only the build stamp, but this does not browser-filter native reqwest responses. No desktop or browser request was run."
+          ],
+          "coverage_checked": {
+            "SPEC.md": "Searched suspension, wake and busy-host retry policy; no acceptance of a missing retry marker found.",
+            "SPEC_impl.md": "Host lifecycle wake policy around 6733 explicitly names x-farhelm-host-busy; desktop CORS is a separate browser-operation boundary.",
+            "TODO.md Planned": "Empty.",
+            "plans/queue": "No unlanded plans; sandbox-suspend-overlap is landed (REPORTS.md:23).",
+            "BUGS.md": "No matching known bug.",
+            "INDEX.md and queue": "Searched HOST_BUSY, CORS, lifecycle markers and busy retry; no exact matching item.",
+            "TRIAGE_OUTCOMES.md": "No exact active marker/CORS decision.",
+            "FILTER.md": "No filter needed; source refutes the transport premise."
+          },
+          "exact_cover_quotes": [],
+          "missing_premise": "A shipped ordinary lifecycle client subject to cross-origin browser response-header filtering was not found; native transport contradicts it.",
+          "original_stronger_consequence": "Missing busy classification could prevent a launch from retrying a lifecycle refusal that waiting can clear. The history alleges no security, process or user-data loss.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Refute the ordinary lifecycle-header CORS route only. This is not a blanket CORS audit or a later-handler verdict."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "native-lifecycle-busy-header-cors-filtering",
+        "destination": null
+      }
+    },
+    {
+      "key": "g052/l6",
+      "owner": "g052",
+      "id": "l6",
+      "domain": "wire-protocol",
+      "purpose": "wire-protocol: crates/farhelm-proto/src/environment.rs, crates/farhelm-proto/src/lib.rs, crates/farhelm-proto/src/launcher.rs, crates/farhelm-proto/src/launch.rs, crates/farhelm-proto/src/http.rs, crates/farhelm-proto/src/open_extensions.rs, crates/farhelm-proto/src/approvals.rs; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 12,
+          "event": {
+            "version": 1,
+            "kind": "lead",
+            "id": "l6",
+            "state": "open",
+            "summary": "Clone host documentation becomes false when environment clones require no host",
+            "location": "crates/farhelm-proto/src/lib.rs:2077",
+            "detail": "Reviewed commit: 190d844e58c96cf197aa838d0b0eea8062f48435. TLDR: the shared protocol documentation says an omitted clone host is accepted only for decoding and refusal, while the new environment-clone contract requires that omission. This could misdirect future callers or maintainers into supplying a host that the new path rejects. Source checks so far: numbered lib.rs:2064-2079 at this revision says Clone targets an explicitly named host and None exists only for an old wire shape to be refused. The exclusive base already has that wording; full-range history through the reviewed revision identifies 190d844e as the Clone-related protocol change. Thus old wording alone is not outside-range attribution: the in-range new environment-clone contract can make it newly false. Caller-supplied g090/c3:13 flags this exact representation boundary; no duplicate-runtime issue is inferred. Suggested bucket: other, internal contract documentation. Could-be-highest: no established security/data-loss route from this wording. Confidence: source-supported lead pending actual clone admission, complete explicit contract and later wording-repair checks. Missing premise: establish the successful omitted-host environment path and the exact commit that introduces it, and whether later source corrects this comment. proposed_drop: false pending those checks; executable fail-closed behavior cannot refute a distinct documentation error. possible_cover: g090/c3:13 supplied as handoff context, not a separately established documentation finding here. No runtime execution or reproduction."
+          }
+        },
+        {
+          "line": 13,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "l6",
+            "state": "open",
+            "summary": "Clone protocol docs reject the omission required by environment clones",
+            "location": "crates/farhelm-proto/src/lib.rs:2077",
+            "detail": "# Clone protocol docs reject the omission required by environment clones\n\nReviewed commit: 190d844e58c96cf197aa838d0b0eea8062f48435\n\n## TLDR\n\nThe shared clone-request documentation tells future callers that a missing target host is only tolerated to decode and refuse old requests. In this change, cloning a sandbox or container requires exactly that missing host. Following the documented contract would construct a request that the new environment path rejects. This is an internal documentation defect, not a runtime acceptance bug.\n\n## Details\n\nAt crates/farhelm-proto/src/lib.rs:2064-2066, Clone is described as copying onto an explicitly named host. At 2077-2078, host says: 'The target host's display NAME. `None` is retained only so an old wire shape can be decoded and refused.' The complete contract added by the reviewed commit contradicts that exclusivity: SPEC.md:4327-4328 says '`farhelm agent clone` of a sandbox or container session takes no `--host` or `--cwd`; it targets the source's recipe at the source's place, with the source's launch and repository intent, never a copy of its disk.'\n\nThe executable boundary agrees with the new product contract. The same commit changes ParsedAgentVerb::Clone.host from required to optional and routes a session-owned source through clone_environment_for_agent before requiring a host for ordinary clone. At agent_requests.rs:4316-4321, any Some(host) is refused for an environment clone; absent host continues through source validation and launch_environment_for_agent at 4368-4390. Thus omission is current supported intent, not merely legacy wire tolerance. Document the two cases: ordinary clone requires the named target host, while environment clone omits it and retains source recipe/place. The top-level Clone summary should carry the same exception.\n\nAttribution was checked over the whole pinned range. Exclusive base 6e423e30068b62c6cfa276c6d720ee35bb70387a already had the quoted host wording, which was then true for its ordinary-clone-only path. The 190d844e parent-to-child agent_requests.rs patch introduces the optional parse and early environment branch, making the unchanged protocol comment newly false inside the assigned range. Range endpoint 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db retains the same host comment at lib.rs:1954-1955. The correct production refusal is not a refutation of this separately misleading documentation.\n\nSuggested bucket: other (internal protocol contract accuracy). Confidence: confirmed from pinned source, introducing behavior patch, exact product contract and endpoint check; no runtime observation or reproduction. Could-be-highest: no established security or loss-of-work route from the stale contract. proposed_drop: false. possible_cover: caller supplied g090/c3:13 as this protocol-documentation handoff; do not count its separate fail-closed runtime concern as a second new finding. Caveats: ordinary clones still require a host; this finding does not allege successful wrong-host execution. All readily checkable premises resolved; l6 is closed as this finding."
+          }
+        }
+      ],
+      "latest": {
+        "line": 13,
+        "event": {
+          "version": 1,
+          "kind": "finding",
+          "id": "l6",
+          "state": "open",
+          "summary": "Clone protocol docs reject the omission required by environment clones",
+          "location": "crates/farhelm-proto/src/lib.rs:2077",
+          "detail": "# Clone protocol docs reject the omission required by environment clones\n\nReviewed commit: 190d844e58c96cf197aa838d0b0eea8062f48435\n\n## TLDR\n\nThe shared clone-request documentation tells future callers that a missing target host is only tolerated to decode and refuse old requests. In this change, cloning a sandbox or container requires exactly that missing host. Following the documented contract would construct a request that the new environment path rejects. This is an internal documentation defect, not a runtime acceptance bug.\n\n## Details\n\nAt crates/farhelm-proto/src/lib.rs:2064-2066, Clone is described as copying onto an explicitly named host. At 2077-2078, host says: 'The target host's display NAME. `None` is retained only so an old wire shape can be decoded and refused.' The complete contract added by the reviewed commit contradicts that exclusivity: SPEC.md:4327-4328 says '`farhelm agent clone` of a sandbox or container session takes no `--host` or `--cwd`; it targets the source's recipe at the source's place, with the source's launch and repository intent, never a copy of its disk.'\n\nThe executable boundary agrees with the new product contract. The same commit changes ParsedAgentVerb::Clone.host from required to optional and routes a session-owned source through clone_environment_for_agent before requiring a host for ordinary clone. At agent_requests.rs:4316-4321, any Some(host) is refused for an environment clone; absent host continues through source validation and launch_environment_for_agent at 4368-4390. Thus omission is current supported intent, not merely legacy wire tolerance. Document the two cases: ordinary clone requires the named target host, while environment clone omits it and retains source recipe/place. The top-level Clone summary should carry the same exception.\n\nAttribution was checked over the whole pinned range. Exclusive base 6e423e30068b62c6cfa276c6d720ee35bb70387a already had the quoted host wording, which was then true for its ordinary-clone-only path. The 190d844e parent-to-child agent_requests.rs patch introduces the optional parse and early environment branch, making the unchanged protocol comment newly false inside the assigned range. Range endpoint 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db retains the same host comment at lib.rs:1954-1955. The correct production refusal is not a refutation of this separately misleading documentation.\n\nSuggested bucket: other (internal protocol contract accuracy). Confidence: confirmed from pinned source, introducing behavior patch, exact product contract and endpoint check; no runtime observation or reproduction. Could-be-highest: no established security or loss-of-work route from the stale contract. proposed_drop: false. possible_cover: caller supplied g090/c3:13 as this protocol-documentation handoff; do not count its separate fail-closed runtime concern as a second new finding. Caveats: ordinary clones still require a host; this finding does not allege successful wrong-host execution. All readily checkable premises resolved; l6 is closed as this finding."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g052/findings.jsonl",
+        "id": "l6",
+        "line": 13,
+        "disposition": "verified",
+        "group": "clone-protocol-docs-omit-environment-hostless-contract",
+        "reason": "Parent explicitly accepted named retain-verified proposal from claims-033 after inspecting it. The protocol documentation says missing clone hosts exist only to decode and refuse old requests, while the newly supported environment-clone path requires omission. Correct fail-closed execution does not refute inaccurate caller documentation. Record one internal protocol-documentation finding. Preserve ordinary clone's host requirement while documenting the environment exception; parent may consolidate the handoff with g090 without duplicating its separate runtime concern. Checked source/results: [\"190d844e58c96cf197aa838d0b0eea8062f48435:crates/farhelm-proto/src/lib.rs:2064-2079: Clone summary requires an explicitly named host and host=None is described as old-wire refusal only.\",\"190d844e58c96cf197aa838d0b0eea8062f48435:crates/farhelm-helm/src/agent_requests.rs:3871-3884 routes a session-owned source before requiring an ordinary target host; 4313-4328 refuses Some(host), cwd and keys; 4368-4390 proceeds to environment launch.\",\"The 190d844e parent/child patch changes parsed Clone.host from required to optional and adds that branch. The quoted comment exists in exclusive base 6e423e30068b62c6cfa276c6d720ee35bb70387a, when the new behavior was absent; new behavior makes it false in range.\",\"00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db:crates/farhelm-proto/src/lib.rs:1940-1956 retains the false exclusivity. No runtime execution.\"] Current coverage/results: {\"SPEC.md\":\"Agents and environments explicitly requires environment clone to omit --host and --cwd; this establishes the contradiction, not acceptance of the stale documentation.\",\"SPEC_impl.md\":\"Agent requests and environments describes clone following source recipe/place; no acceptance of the obsolete exclusive host rule.\",\"TODO.md Planned\":\"Empty.\",\"plans/queue\":\"No unlanded plans. Landed environment-agent-operations is not future corrective coverage.\",\"BUGS.md\":\"No matching known bug.\",\"INDEX.md and queue\":\"Searched Clone protocol/docs, AgentVerb::Clone and omitted/missing target host; no exact existing item. clone-read-overwrites-manual-recipe-choice.md concerns a GUI draft race, not this wire comment.\",\"TRIAGE_OUTCOMES.md\":\"No active decision for this stale host contract.\",\"FILTER.md\":\"Not a diagnostic/glitch; this is persistent internal API documentation. No filter applies.\"} Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Following the documented host requirement makes a valid environment-clone request fail. No successful wrong-host execution, security effect or loss of work is alleged.\"; \"None for the documentation defect. Caller-supplied g090/c3:13 is a handoff, not proof of a duplicate queue record.\"."
+      },
+      "accepted_parent_decision": {
+        "key": "g052/l6",
+        "line": 13,
+        "disposition": "verified",
+        "group": "clone-protocol-docs-omit-environment-hostless-contract",
+        "bucket": "other",
+        "recording": "retain-verified",
+        "queue_target_candidate": null,
+        "needs_independent_drop_check": false,
+        "reason": "Parent explicitly accepted named retain-verified proposal from claims-033 after inspecting it. The protocol documentation says missing clone hosts exist only to decode and refuse old requests, while the newly supported environment-clone path requires omission. Correct fail-closed execution does not refute inaccurate caller documentation. Record one internal protocol-documentation finding. Preserve ordinary clone's host requirement while documenting the environment exception; parent may consolidate the handoff with g090 without duplicating its separate runtime concern. Checked source/results: [\"190d844e58c96cf197aa838d0b0eea8062f48435:crates/farhelm-proto/src/lib.rs:2064-2079: Clone summary requires an explicitly named host and host=None is described as old-wire refusal only.\",\"190d844e58c96cf197aa838d0b0eea8062f48435:crates/farhelm-helm/src/agent_requests.rs:3871-3884 routes a session-owned source before requiring an ordinary target host; 4313-4328 refuses Some(host), cwd and keys; 4368-4390 proceeds to environment launch.\",\"The 190d844e parent/child patch changes parsed Clone.host from required to optional and adds that branch. The quoted comment exists in exclusive base 6e423e30068b62c6cfa276c6d720ee35bb70387a, when the new behavior was absent; new behavior makes it false in range.\",\"00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db:crates/farhelm-proto/src/lib.rs:1940-1956 retains the false exclusivity. No runtime execution.\"] Current coverage/results: {\"SPEC.md\":\"Agents and environments explicitly requires environment clone to omit --host and --cwd; this establishes the contradiction, not acceptance of the stale documentation.\",\"SPEC_impl.md\":\"Agent requests and environments describes clone following source recipe/place; no acceptance of the obsolete exclusive host rule.\",\"TODO.md Planned\":\"Empty.\",\"plans/queue\":\"No unlanded plans. Landed environment-agent-operations is not future corrective coverage.\",\"BUGS.md\":\"No matching known bug.\",\"INDEX.md and queue\":\"Searched Clone protocol/docs, AgentVerb::Clone and omitted/missing target host; no exact existing item. clone-read-overwrites-manual-recipe-choice.md concerns a GUI draft race, not this wire comment.\",\"TRIAGE_OUTCOMES.md\":\"No active decision for this stale host contract.\",\"FILTER.md\":\"Not a diagnostic/glitch; this is persistent internal API documentation. No filter applies.\"} Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Following the documented host requirement makes a valid environment-clone request fail. No successful wrong-host execution, security effect or loss of work is alleged.\"; \"None for the documentation defect. Caller-supplied g090/c3:13 is a handoff, not proof of a duplicate queue record.\"."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-033",
+          "key": "g052/l6",
+          "latest_line": 13,
+          "recommendation": "retain-verified",
+          "bucket": "other",
+          "underlying_key": "clone-protocol-docs-omit-environment-hostless-contract",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The protocol documentation says missing clone hosts exist only to decode and refuse old requests, while the newly supported environment-clone path requires omission. Correct fail-closed execution does not refute inaccurate caller documentation.",
+          "checks": [
+            "190d844e58c96cf197aa838d0b0eea8062f48435:crates/farhelm-proto/src/lib.rs:2064-2079: Clone summary requires an explicitly named host and host=None is described as old-wire refusal only.",
+            "190d844e58c96cf197aa838d0b0eea8062f48435:crates/farhelm-helm/src/agent_requests.rs:3871-3884 routes a session-owned source before requiring an ordinary target host; 4313-4328 refuses Some(host), cwd and keys; 4368-4390 proceeds to environment launch.",
+            "The 190d844e parent/child patch changes parsed Clone.host from required to optional and adds that branch. The quoted comment exists in exclusive base 6e423e30068b62c6cfa276c6d720ee35bb70387a, when the new behavior was absent; new behavior makes it false in range.",
+            "00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db:crates/farhelm-proto/src/lib.rs:1940-1956 retains the false exclusivity. No runtime execution."
+          ],
+          "coverage_checked": {
+            "SPEC.md": "Agents and environments explicitly requires environment clone to omit --host and --cwd; this establishes the contradiction, not acceptance of the stale documentation.",
+            "SPEC_impl.md": "Agent requests and environments describes clone following source recipe/place; no acceptance of the obsolete exclusive host rule.",
+            "TODO.md Planned": "Empty.",
+            "plans/queue": "No unlanded plans. Landed environment-agent-operations is not future corrective coverage.",
+            "BUGS.md": "No matching known bug.",
+            "INDEX.md and queue": "Searched Clone protocol/docs, AgentVerb::Clone and omitted/missing target host; no exact existing item. clone-read-overwrites-manual-recipe-choice.md concerns a GUI draft race, not this wire comment.",
+            "TRIAGE_OUTCOMES.md": "No active decision for this stale host contract.",
+            "FILTER.md": "Not a diagnostic/glitch; this is persistent internal API documentation. No filter applies."
+          },
+          "exact_cover_quotes": [],
+          "missing_premise": "None for the documentation defect. Caller-supplied g090/c3:13 is a handoff, not proof of a duplicate queue record.",
+          "original_stronger_consequence": "Following the documented host requirement makes a valid environment-clone request fail. No successful wrong-host execution, security effect or loss of work is alleged.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Record one internal protocol-documentation finding. Preserve ordinary clone's host requirement while documenting the environment exception; parent may consolidate the handoff with g090 without duplicating its separate runtime concern."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": true,
+        "clearly_refuted_candidate": false,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Source-confirmed by an existing parent decision; not runtime reproduced",
+        "deduplication_key": "clone-protocol-docs-omit-environment-hostless-contract",
+        "destination": "trailing-clone-protocol-docs-omit-environment-hostless-contract.md"
+      }
+    },
+    {
+      "key": "g052/l7",
+      "owner": "g052",
+      "id": "l7",
+      "domain": "wire-protocol",
+      "purpose": "wire-protocol: crates/farhelm-proto/src/environment.rs, crates/farhelm-proto/src/lib.rs, crates/farhelm-proto/src/launcher.rs, crates/farhelm-proto/src/launch.rs, crates/farhelm-proto/src/http.rs, crates/farhelm-proto/src/open_extensions.rs, crates/farhelm-proto/src/approvals.rs; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 14,
+          "event": {
+            "version": 1,
+            "kind": "lead",
+            "id": "l7",
+            "state": "open",
+            "summary": "Check whether explicit environment wire requests can silently discard intent keys",
+            "location": "crates/farhelm-proto/src/lib.rs:2105",
+            "detail": "Reviewed commit: 190d844e58c96cf197aa838d0b0eea8062f48435. TLDR: an environment launch is expressly not retry-safe under an idempotency key. Considered whether a raw explicit-environment wire request carrying intent_key can silently lose that key and proceed, rather than receiving the promised refusal. Source basis: AgentVerb's internally tagged derive at lib.rs:1937-1940 has no deny_unknown_fields, and new CreateEnvironment at 2105-2112 has no intent_key field. By the existing permissive variant shape, an extra intent_key cannot reach the helm's typed admission checks. Exact known contract: SPEC.md Agents and environments says an idempotency key is refused, and SPEC_impl.md Agent requests and environments says keyed environment launches are refused before anything else. Missing checks: inspect the new explicit CLI producer and relay decoder, determine whether any supported producer sends this combination and whether unknown-field tolerance is itself an explicit protocol contract. Suggested bucket: other absent an established shipped retry/duplicate consequence. Could-be-highest: no established work-loss or security route; duplicate environment/billing alone is the considered consequence. Confidence: investigated source lead, not yet a finding; no runtime decode/reproduction performed. proposed_drop: undecided. possible_cover: none identified in supplied neighbour records. Next checks are source-only producer and decoder contracts; do not infer a bundled-CLI route from arbitrary hand-written JSON."
+          }
+        },
+        {
+          "line": 15,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "l7",
+            "state": "open",
+            "summary": "Supported environment-create producers refuse keys before wire construction",
+            "location": "crates/farhelm-proto/src/lib.rs:2105",
+            "detail": "Reviewed commit: 190d844e58c96cf197aa838d0b0eea8062f48435. TLDR: original suspicion retained: silently losing an idempotency key could lead someone to retry an environment launch and create another resource or bill. Source checks refute that sequence for supported command producers, while confirming that an unknown raw JSON key is not part of the new verb's typed contract. Details: CreateEnvironment has no intent_key field; AgentVerb is a permissive tagged enum, so an invented extra intent_key property would be ignored, not validated or retained. No runtime decode was executed; this follows from the derive and absent field. The new CLI at main.rs:337-343 makes --recipe conflict with idempotency_key before AgentCmd::verb is called. main.rs:712-728 constructs CreateEnvironment only from a recipe command, and keeps intent_key only on ordinary Create. The other supported environment routes retain typed keys and refuse them: agent_requests.rs:2004-2008 refuses a keyed ordinary create whose final template placement is an environment, and clone_environment_for_agent at 4313-4315 refuses a clone key. Thus no shipped CLI producer sends the alleged combination and no current typed receiver promises to act on that unknown property. The protocol's documented additive discipline (lib.rs:209-218) distinguishes known semantic fields from ignorable extensions; explicit launch and template structures are the stated strict-decoder exceptions (221-228), while this request enum is not one. Contract context is SPEC.md Agents and environments, describing farhelm agent create/clone flags and saying an idempotency key is refused; that behavior holds on the checked CLI/template/clone paths. Suggested bucket: other for the hypothesized retry-safety mismatch; could-be-highest: no established security/work-loss route. Confidence: confirmed source refutation of the shipped-producer premise, with raw unknown-field tolerance explicitly retained as a fact rather than claimed refused. proposed_drop: no supported producer can silently lose a supplied key on explicit environment-create construction; no independent drop accepted. possible_cover: none identified from supplied neighbour context. Caveats: this does not certify arbitrary hand-written protocol JSON as retry-safe, nor assert that all unknown semantic fields are harmless; a future supported key-bearing producer would need a field and rejection rather than relying on omission. No source premise remains unresolved for the considered current-producer route; l7 is closed as this candidate. No runtime tests or reproduction."
+          }
+        }
+      ],
+      "latest": {
+        "line": 15,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "l7",
+          "state": "open",
+          "summary": "Supported environment-create producers refuse keys before wire construction",
+          "location": "crates/farhelm-proto/src/lib.rs:2105",
+          "detail": "Reviewed commit: 190d844e58c96cf197aa838d0b0eea8062f48435. TLDR: original suspicion retained: silently losing an idempotency key could lead someone to retry an environment launch and create another resource or bill. Source checks refute that sequence for supported command producers, while confirming that an unknown raw JSON key is not part of the new verb's typed contract. Details: CreateEnvironment has no intent_key field; AgentVerb is a permissive tagged enum, so an invented extra intent_key property would be ignored, not validated or retained. No runtime decode was executed; this follows from the derive and absent field. The new CLI at main.rs:337-343 makes --recipe conflict with idempotency_key before AgentCmd::verb is called. main.rs:712-728 constructs CreateEnvironment only from a recipe command, and keeps intent_key only on ordinary Create. The other supported environment routes retain typed keys and refuse them: agent_requests.rs:2004-2008 refuses a keyed ordinary create whose final template placement is an environment, and clone_environment_for_agent at 4313-4315 refuses a clone key. Thus no shipped CLI producer sends the alleged combination and no current typed receiver promises to act on that unknown property. The protocol's documented additive discipline (lib.rs:209-218) distinguishes known semantic fields from ignorable extensions; explicit launch and template structures are the stated strict-decoder exceptions (221-228), while this request enum is not one. Contract context is SPEC.md Agents and environments, describing farhelm agent create/clone flags and saying an idempotency key is refused; that behavior holds on the checked CLI/template/clone paths. Suggested bucket: other for the hypothesized retry-safety mismatch; could-be-highest: no established security/work-loss route. Confidence: confirmed source refutation of the shipped-producer premise, with raw unknown-field tolerance explicitly retained as a fact rather than claimed refused. proposed_drop: no supported producer can silently lose a supplied key on explicit environment-create construction; no independent drop accepted. possible_cover: none identified from supplied neighbour context. Caveats: this does not certify arbitrary hand-written protocol JSON as retry-safe, nor assert that all unknown semantic fields are harmless; a future supported key-bearing producer would need a field and rejection rather than relying on omission. No source premise remains unresolved for the considered current-producer route; l7 is closed as this candidate. No runtime tests or reproduction."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g052/findings.jsonl",
+        "id": "l7",
+        "line": 15,
+        "disposition": "excluded",
+        "group": "environment-create-supported-producer-loses-idempotency-key",
+        "reason": "Parent explicitly accepted named refuted proposal from claims-033 after inspecting it. No supported producer silently discards a supplied key while constructing explicit environment-create. Raw hand-written JSON with an invented intent_key is still ignored by the permissive enum; that fact is preserved and must not be described as a receiver refusal. Drop only the alleged shipped producer losing a key. Do not say raw JSON is rejected or that arbitrary protocol clients are retry-safe. A future supported producer would need a typed key and refusal. Checked source/results: [\"190d844e58c96cf197aa838d0b0eea8062f48435:crates/farhelm-proto/src/lib.rs:1937-1940,2105-2112: AgentVerb is permissive and CreateEnvironment has no intent_key. Ignoring an unknown raw property is a source/serde conclusion, not an executed decoder observation.\",\"190d844e58c96cf197aa838d0b0eea8062f48435:crates/farhelm/src/main.rs:337-343: --recipe conflicts with idempotency_key. At 712-728 only ordinary Create carries that typed key.\",\"190d844e58c96cf197aa838d0b0eea8062f48435:crates/farhelm-helm/src/agent_requests.rs:1996-2008 and 4313-4315 refuse typed keys on template-environment create and environment clone.\",\"190d844e58c96cf197aa838d0b0eea8062f48435:crates/farhelm-proto/src/lib.rs:209-228 documents ignorable additive fields and strict launch/template exceptions. No runtime or handwritten payload reproduction.\"] Current coverage/results: {\"SPEC.md\":\"Agents and environments describes supported create/clone flags and refusal of idempotency keys; the inspected supported paths satisfy it.\",\"SPEC_impl.md\":\"Agent requests and environments, 6205-6208, requires keyed environment launches be refused. No clause explicitly promises arbitrary unknown JSON keys become known semantic fields.\",\"TODO.md Planned\":\"Empty.\",\"plans/queue\":\"No unlanded plans.\",\"BUGS.md\":\"No matching known bug.\",\"INDEX.md and queue\":\"Searched CreateEnvironment, unknown intent_key, environment idempotency and retry-safety mismatch; no exact item.\",\"TRIAGE_OUTCOMES.md\":\"No exact active decision.\",\"FILTER.md\":\"No filter applied; refutation is limited to the supported-producer premise, not an input-never-sent blanket filter.\"} Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"If someone supplied a meaningful key that was silently lost and then retried, another environment or bill could result. No security or user-work-loss route was established.\"; \"A supported key-bearing explicit-environment producer, or an explicit contract treating this unknown raw property as supported intent, was never established. Unknown raw-key tolerance remains true and is not certified retry-safe.\"."
+      },
+      "accepted_parent_decision": {
+        "key": "g052/l7",
+        "line": 15,
+        "disposition": "excluded",
+        "group": "environment-create-supported-producer-loses-idempotency-key",
+        "bucket": "other",
+        "recording": "refuted",
+        "queue_target_candidate": null,
+        "needs_independent_drop_check": false,
+        "reason": "Parent explicitly accepted named refuted proposal from claims-033 after inspecting it. No supported producer silently discards a supplied key while constructing explicit environment-create. Raw hand-written JSON with an invented intent_key is still ignored by the permissive enum; that fact is preserved and must not be described as a receiver refusal. Drop only the alleged shipped producer losing a key. Do not say raw JSON is rejected or that arbitrary protocol clients are retry-safe. A future supported producer would need a typed key and refusal. Checked source/results: [\"190d844e58c96cf197aa838d0b0eea8062f48435:crates/farhelm-proto/src/lib.rs:1937-1940,2105-2112: AgentVerb is permissive and CreateEnvironment has no intent_key. Ignoring an unknown raw property is a source/serde conclusion, not an executed decoder observation.\",\"190d844e58c96cf197aa838d0b0eea8062f48435:crates/farhelm/src/main.rs:337-343: --recipe conflicts with idempotency_key. At 712-728 only ordinary Create carries that typed key.\",\"190d844e58c96cf197aa838d0b0eea8062f48435:crates/farhelm-helm/src/agent_requests.rs:1996-2008 and 4313-4315 refuse typed keys on template-environment create and environment clone.\",\"190d844e58c96cf197aa838d0b0eea8062f48435:crates/farhelm-proto/src/lib.rs:209-228 documents ignorable additive fields and strict launch/template exceptions. No runtime or handwritten payload reproduction.\"] Current coverage/results: {\"SPEC.md\":\"Agents and environments describes supported create/clone flags and refusal of idempotency keys; the inspected supported paths satisfy it.\",\"SPEC_impl.md\":\"Agent requests and environments, 6205-6208, requires keyed environment launches be refused. No clause explicitly promises arbitrary unknown JSON keys become known semantic fields.\",\"TODO.md Planned\":\"Empty.\",\"plans/queue\":\"No unlanded plans.\",\"BUGS.md\":\"No matching known bug.\",\"INDEX.md and queue\":\"Searched CreateEnvironment, unknown intent_key, environment idempotency and retry-safety mismatch; no exact item.\",\"TRIAGE_OUTCOMES.md\":\"No exact active decision.\",\"FILTER.md\":\"No filter applied; refutation is limited to the supported-producer premise, not an input-never-sent blanket filter.\"} Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"If someone supplied a meaningful key that was silently lost and then retried, another environment or bill could result. No security or user-work-loss route was established.\"; \"A supported key-bearing explicit-environment producer, or an explicit contract treating this unknown raw property as supported intent, was never established. Unknown raw-key tolerance remains true and is not certified retry-safe.\"."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-033",
+          "key": "g052/l7",
+          "latest_line": 15,
+          "recommendation": "refuted",
+          "bucket": "other",
+          "underlying_key": "environment-create-supported-producer-loses-idempotency-key",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "No supported producer silently discards a supplied key while constructing explicit environment-create. Raw hand-written JSON with an invented intent_key is still ignored by the permissive enum; that fact is preserved and must not be described as a receiver refusal.",
+          "checks": [
+            "190d844e58c96cf197aa838d0b0eea8062f48435:crates/farhelm-proto/src/lib.rs:1937-1940,2105-2112: AgentVerb is permissive and CreateEnvironment has no intent_key. Ignoring an unknown raw property is a source/serde conclusion, not an executed decoder observation.",
+            "190d844e58c96cf197aa838d0b0eea8062f48435:crates/farhelm/src/main.rs:337-343: --recipe conflicts with idempotency_key. At 712-728 only ordinary Create carries that typed key.",
+            "190d844e58c96cf197aa838d0b0eea8062f48435:crates/farhelm-helm/src/agent_requests.rs:1996-2008 and 4313-4315 refuse typed keys on template-environment create and environment clone.",
+            "190d844e58c96cf197aa838d0b0eea8062f48435:crates/farhelm-proto/src/lib.rs:209-228 documents ignorable additive fields and strict launch/template exceptions. No runtime or handwritten payload reproduction."
+          ],
+          "coverage_checked": {
+            "SPEC.md": "Agents and environments describes supported create/clone flags and refusal of idempotency keys; the inspected supported paths satisfy it.",
+            "SPEC_impl.md": "Agent requests and environments, 6205-6208, requires keyed environment launches be refused. No clause explicitly promises arbitrary unknown JSON keys become known semantic fields.",
+            "TODO.md Planned": "Empty.",
+            "plans/queue": "No unlanded plans.",
+            "BUGS.md": "No matching known bug.",
+            "INDEX.md and queue": "Searched CreateEnvironment, unknown intent_key, environment idempotency and retry-safety mismatch; no exact item.",
+            "TRIAGE_OUTCOMES.md": "No exact active decision.",
+            "FILTER.md": "No filter applied; refutation is limited to the supported-producer premise, not an input-never-sent blanket filter."
+          },
+          "exact_cover_quotes": [],
+          "missing_premise": "A supported key-bearing explicit-environment producer, or an explicit contract treating this unknown raw property as supported intent, was never established. Unknown raw-key tolerance remains true and is not certified retry-safe.",
+          "original_stronger_consequence": "If someone supplied a meaningful key that was silently lost and then retried, another environment or bill could result. No security or user-work-loss route was established.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Drop only the alleged shipped producer losing a key. Do not say raw JSON is rejected or that arbitrary protocol clients are retry-safe. A future supported producer would need a typed key and refusal."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "environment-create-supported-producer-loses-idempotency-key",
+        "destination": null
+      }
+    },
+    {
+      "key": "g052/l8",
+      "owner": "g052",
+      "id": "l8",
+      "domain": "wire-protocol",
+      "purpose": "wire-protocol: crates/farhelm-proto/src/environment.rs, crates/farhelm-proto/src/lib.rs, crates/farhelm-proto/src/launcher.rs, crates/farhelm-proto/src/launch.rs, crates/farhelm-proto/src/http.rs, crates/farhelm-proto/src/open_extensions.rs, crates/farhelm-proto/src/approvals.rs; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 16,
+          "event": {
+            "version": 1,
+            "kind": "lead",
+            "id": "l8",
+            "state": "open",
+            "summary": "Check the shared template context's agent recipe-catalog exclusion",
+            "location": "crates/farhelm-proto/src/launcher.rs:599",
+            "detail": "Reviewed behavior revision: 190d844e58c96cf197aa838d0b0eea8062f48435; assigned TemplateContext addition is in 350a4b33b6d4476f4a78e43cea124bc2b828f462. TLDR: the shared template-context documentation may still tell maintainers that agent callers never supply recipes, after agent environment launches and ordinary template resolution begin supplying them. This is a possible internal caller-contract documentation defect, not a runtime defect. Source basis in retained initial context: TemplateContext.known_recipes says 'Agent callers supply no recipes; GUI callers use their current catalog rather than guessing.' New interface evidence g018/f2 establishes that ordinary agent creates now load recipes/places and use resolve_placed, contrary to a similar helm-layer comment. Missing checks: read exact proto comment at the behavior revision, inspect that resolver's actual TemplateContext construction, compare exclusive base/introducing behavior and endpoint. Determine overlap with supplied g018/f2 rather than claiming duplicate independent novelty. Suggested bucket: other. Could-be-highest: no established security/work-loss route from this documentation. Confidence: concrete source-supported lead pending these checks. proposed_drop: undecided; correct execution would not refute inaccurate documentation. possible_cover: g018/f2 may share the same stale caller-rule cause at a different assigned layer. No runtime tests/reproduction."
+          }
+        },
+        {
+          "line": 17,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "l8",
+            "state": "open",
+            "summary": "Shared template-context docs still exclude all agent recipe catalogs",
+            "location": "crates/farhelm-proto/src/launcher.rs:600",
+            "detail": "# Shared template-context docs still exclude all agent recipe catalogs\n\nReviewed behavior commit: 190d844e58c96cf197aa838d0b0eea8062f48435\n\n## TLDR\n\nThe shared template API tells maintainers that agent callers supply no recipes, although the new agent-launch implementation must supply them, even for an ordinary create whose last template selects an existing host. Following the documented rule would make a valid template stack fail. This is inaccurate internal caller-contract documentation; current execution supplies the catalogs correctly.\n\n## Details\n\nAt crates/farhelm-proto/src/launcher.rs:600-602 the known_recipes field says 'Saved recipe names the caller can launch. Agent callers supply no recipes; GUI callers use their current catalog rather than guessing.' Agent calls now reach exactly this shared API with recipes. agent_launch.rs:233-238 constructs TemplateContext from placement.known_recipes/known_places. agent_requests.rs:2447-2475 explicitly loads the saved recipe catalog and place IDs for ordinary non-spawn creates, then passes them through resolve_placed. Its comment explains the non-obvious reason: a recipe template may appear before a later installed-host template, so the earlier recipe must still be applicable even though the final create uses an ordinary host. Empty recipes would cause the shared fold's known_recipes check to refuse that valid earlier template. The explicit environment-create path also needs this catalog. Spawn retains the restricted empty-catalog path through agent_launch::resolve at 145-151. The field contract should describe caller-supplied admissible recipes and distinguish restricted spawn from fleet agent creation; it must not classify all agent callers together.\n\nContract: SPEC_impl.md Agent requests and environments at 6677-6682 permits plain creates whose named template targets a recipe to use the environment path; the same section and shared-template contract preserve ordinary template application semantics. The new resolve_placed contract at agent_launch.rs:176-180 explicitly requires knowledge of both installs and recipes because later placement replaces earlier placement. Correct production behavior does not refute the independently false shared-API explanation.\n\nFull-range attribution: the exclusive base 6e423e30068b62c6cfa276c6d720ee35bb70387a already has this sentence at launcher.rs:588-589, while agent resolution still hardcodes empty recipe/place slices. The complete range history through 190d844e finds only that behavior commit changing those resolver inputs; its parent-to-child patch changes TemplateContext construction from known_recipes:&[] to placement.known_recipes and adds resolve_placed. Thus the new behavior makes the old statement false inside the assigned range. Pinned endpoint 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db retains the same sentence at launcher.rs:600-601.\n\nSuggested bucket: other, internal API documentation. Confidence: confirmed pinned-source, actual caller construction, introducing behavior patch and endpoint comparison; no runtime evidence. Could-be-highest: no established security or user-work-loss route. proposed_drop: false. possible_cover: supplied g018/f2 reports the same incorrect agent-catalog distinction in helm Placement documentation plus a separate unresolved helper link. This is an additional assigned proto-field manifestation requiring its own wording change, not a claimed new independent runtime/root-cause issue; parent owns consolidation. Caveats: do not remove the legitimate empty-catalog restriction from spawn, and do not imply recipe catalogs alone grant environment-launch approval. All readily checkable premises resolved; l8 is closed as this documentation finding. No test, build or reproduction."
+          }
+        }
+      ],
+      "latest": {
+        "line": 17,
+        "event": {
+          "version": 1,
+          "kind": "finding",
+          "id": "l8",
+          "state": "open",
+          "summary": "Shared template-context docs still exclude all agent recipe catalogs",
+          "location": "crates/farhelm-proto/src/launcher.rs:600",
+          "detail": "# Shared template-context docs still exclude all agent recipe catalogs\n\nReviewed behavior commit: 190d844e58c96cf197aa838d0b0eea8062f48435\n\n## TLDR\n\nThe shared template API tells maintainers that agent callers supply no recipes, although the new agent-launch implementation must supply them, even for an ordinary create whose last template selects an existing host. Following the documented rule would make a valid template stack fail. This is inaccurate internal caller-contract documentation; current execution supplies the catalogs correctly.\n\n## Details\n\nAt crates/farhelm-proto/src/launcher.rs:600-602 the known_recipes field says 'Saved recipe names the caller can launch. Agent callers supply no recipes; GUI callers use their current catalog rather than guessing.' Agent calls now reach exactly this shared API with recipes. agent_launch.rs:233-238 constructs TemplateContext from placement.known_recipes/known_places. agent_requests.rs:2447-2475 explicitly loads the saved recipe catalog and place IDs for ordinary non-spawn creates, then passes them through resolve_placed. Its comment explains the non-obvious reason: a recipe template may appear before a later installed-host template, so the earlier recipe must still be applicable even though the final create uses an ordinary host. Empty recipes would cause the shared fold's known_recipes check to refuse that valid earlier template. The explicit environment-create path also needs this catalog. Spawn retains the restricted empty-catalog path through agent_launch::resolve at 145-151. The field contract should describe caller-supplied admissible recipes and distinguish restricted spawn from fleet agent creation; it must not classify all agent callers together.\n\nContract: SPEC_impl.md Agent requests and environments at 6677-6682 permits plain creates whose named template targets a recipe to use the environment path; the same section and shared-template contract preserve ordinary template application semantics. The new resolve_placed contract at agent_launch.rs:176-180 explicitly requires knowledge of both installs and recipes because later placement replaces earlier placement. Correct production behavior does not refute the independently false shared-API explanation.\n\nFull-range attribution: the exclusive base 6e423e30068b62c6cfa276c6d720ee35bb70387a already has this sentence at launcher.rs:588-589, while agent resolution still hardcodes empty recipe/place slices. The complete range history through 190d844e finds only that behavior commit changing those resolver inputs; its parent-to-child patch changes TemplateContext construction from known_recipes:&[] to placement.known_recipes and adds resolve_placed. Thus the new behavior makes the old statement false inside the assigned range. Pinned endpoint 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db retains the same sentence at launcher.rs:600-601.\n\nSuggested bucket: other, internal API documentation. Confidence: confirmed pinned-source, actual caller construction, introducing behavior patch and endpoint comparison; no runtime evidence. Could-be-highest: no established security or user-work-loss route. proposed_drop: false. possible_cover: supplied g018/f2 reports the same incorrect agent-catalog distinction in helm Placement documentation plus a separate unresolved helper link. This is an additional assigned proto-field manifestation requiring its own wording change, not a claimed new independent runtime/root-cause issue; parent owns consolidation. Caveats: do not remove the legitimate empty-catalog restriction from spawn, and do not imply recipe catalogs alone grant environment-launch approval. All readily checkable premises resolved; l8 is closed as this documentation finding. No test, build or reproduction."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g052/findings.jsonl",
+        "id": "l8",
+        "line": 17,
+        "disposition": "duplicate",
+        "group": "agent-launch-placement-docs-obsolete-caller-contract",
+        "reason": "Parent read complete claims-033 g052/l8 and claims-009 g018/f2. Both falsely document every agent caller as lacking recipe/place catalogs after190d844e ordinary non-spawn creates begin supplying them through resolve_placed. The proto TemplateContext field comment at launcher.rs:600-602 is an additional manifestation of the same changed caller invariant already retained with the Placement/resolve comments and renamed helper links in g018/f2. Preserve the added source location and its base-true/new-consumer-false attribution; fixing only the helm wording would leave this field misleading. Runtime ordered-template behavior is correct, spawn remains restricted, and no current refusal/security/work-loss route is alleged. No exact current coverage or filter accepts the false invariant; this combines the documentary defect without dropping its separate manifestations."
+      },
+      "accepted_parent_decision": {
+        "key": "g052/l8",
+        "line": 17,
+        "disposition": "duplicate",
+        "group": "agent-launch-placement-docs-obsolete-caller-contract",
+        "bucket": "other",
+        "recording": "same-stale-agent-catalog-contract",
+        "needs_independent_drop_check": false,
+        "reason": "Parent read complete claims-033 g052/l8 and claims-009 g018/f2. Both falsely document every agent caller as lacking recipe/place catalogs after190d844e ordinary non-spawn creates begin supplying them through resolve_placed. The proto TemplateContext field comment at launcher.rs:600-602 is an additional manifestation of the same changed caller invariant already retained with the Placement/resolve comments and renamed helper links in g018/f2. Preserve the added source location and its base-true/new-consumer-false attribution; fixing only the helm wording would leave this field misleading. Runtime ordered-template behavior is correct, spawn remains restricted, and no current refusal/security/work-loss route is alleged. No exact current coverage or filter accepts the false invariant; this combines the documentary defect without dropping its separate manifestations."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-033",
+          "key": "g052/l8",
+          "latest_line": 17,
+          "recommendation": "retain-verified",
+          "bucket": "other",
+          "underlying_key": "agent-template-catalog-comments-stale-after-environment-launches",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "Shared template-context documentation incorrectly excludes all agent recipe catalogs. Ordinary fleet creates now pass those catalogs so earlier recipe templates remain applicable even when later placement selects an installed host. Spawn retains its separate restricted path.",
+          "checks": [
+            "190d844e58c96cf197aa838d0b0eea8062f48435:crates/farhelm-proto/src/launcher.rs:600-602 says agent callers supply no recipes.",
+            "190d844e58c96cf197aa838d0b0eea8062f48435:crates/farhelm-helm/src/agent_launch.rs:145-151,176-180,233-238 distinguishes empty-catalog resolve from resolve_placed and constructs TemplateContext with placement.known_recipes/known_places.",
+            "190d844e58c96cf197aa838d0b0eea8062f48435:crates/farhelm-helm/src/agent_requests.rs:2447-2475 reads the saved catalogs for ordinary non-spawn creates; its comment explains a recipe template followed by an installed-host template.",
+            "Exclusive base 6e423e30068b62c6cfa276c6d720ee35bb70387a:launcher.rs:588-589 already has the wording. The 190d844e patch changes hardcoded empty recipe/place slices to placement inputs. Endpoint 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db:launcher.rs:600-601 retains the stale comment. No runtime tests."
+          ],
+          "coverage_checked": {
+            "SPEC.md": "Agents and environments permits recipe template launches and ordinary ordered template application; no acceptance of excluding every agent catalog.",
+            "SPEC_impl.md": "Agent requests and environments and shared Launch templates describe the supported behavior; the inaccurate internal caller rule is not accepted.",
+            "TODO.md Planned": "Empty.",
+            "plans/queue": "No unlanded plans. The introducing environment-agent-operations work is landed.",
+            "BUGS.md": "No matching known bug.",
+            "INDEX.md and queue": "Searched known_recipes, TemplateContext, agent recipe catalogs and stale caller documentation. No exact existing queued item. clone-read-overwrites-manual-recipe-choice.md was read and concerns GUI draft ownership, not this contract.",
+            "TRIAGE_OUTCOMES.md": "No exact active decision.",
+            "FILTER.md": "Persistent internal caller-contract error; no filter boundary matches."
+          },
+          "exact_cover_quotes": [],
+          "missing_premise": "None for this field's documentation defect. Caller-supplied g018/f2 concerns the same stale agent-catalog distinction in helm Placement documentation plus a separate unresolved helper link; parent must inspect that named record before deciding consolidation.",
+          "original_stronger_consequence": "Following the false empty-catalog rule would refuse an otherwise valid template stack. Current execution supplies the catalogs correctly; no runtime failure or security/work-loss claim is made.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Retain the proto-field manifestation, preferably consolidated with g018/f2's same caller-rule defect if its record agrees. It adds a distinct source location requiring wording repair, not a new runtime defect."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": true,
+        "clearly_refuted_candidate": false,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "agent-launch-placement-docs-obsolete-caller-contract",
+        "destination": "trailing-agent-launch-placement-docs-obsolete-caller-contract.md"
+      }
+    },
+    {
+      "key": "g052/l9",
+      "owner": "g052",
+      "id": "l9",
+      "domain": "wire-protocol",
+      "purpose": "wire-protocol: crates/farhelm-proto/src/environment.rs, crates/farhelm-proto/src/lib.rs, crates/farhelm-proto/src/launcher.rs, crates/farhelm-proto/src/launch.rs, crates/farhelm-proto/src/http.rs, crates/farhelm-proto/src/open_extensions.rs, crates/farhelm-proto/src/approvals.rs; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 20,
+          "event": {
+            "version": 1,
+            "kind": "lead",
+            "id": "l9",
+            "state": "open",
+            "summary": "Environment create projection may replace the mutation's connection evidence",
+            "location": "crates/farhelm-proto/src/lib.rs:2648",
+            "detail": "Reviewed commit: 190d844e58c96cf197aa838d0b0eea8062f48435. TLDR: the named g020/l8 event29 reports an earlier environment-create result marked fresh after reconnect because its original mutation claim was discarded. This is reply freshness, not physical retargeting or execution/work loss. Read COMPLETE 19-event own history and only the named external event before source checks. Independently checked the shared contract at proto/lib.rs:2640-2658: stable host_id can survive staleness, but a mutating reply's host name is pinned to the connection actually used, with host=None/stale when that connection is no longer current; creating verbs are expressly included. agent_requests.rs:4578-4588 obtains a new current claim after result delivery; 4694-4707 compares that newly supplied incarnation to current snapshots. sessions.rs:1793-1794 has discarded the real create claim and qualified only its entry UUID. Thus entry stability cannot itself prove same-connection freshness. Missing checks: follow the complete narrow result boundary and publication ordering, and confirm the new environment verb returns the same Created projection without an explicit freshness exception. Suggested bucket: other for reply accuracy. Could-be-highest: false on this named route; no physical target change, reference misrouting, security or work-loss consequence alleged. Confidence: source-supported interface lead, with g020's complete route supplied but remaining scope/result checks underway here. proposed_drop:false. possible_cover: exact g020/l8 event29 remains owner of the caller defect; this is protocol-contract corroboration, not independent novelty. Original c3 highest approval-authority uncertainty and all its proposals remain separate and unchanged. No runtime observations, tests, builds, reproductions, coverage searches or checkout changes."
+          }
+        },
+        {
+          "line": 21,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "l9",
+            "state": "open",
+            "summary": "Environment creating replies can substitute a replacement connection claim",
+            "location": "crates/farhelm-proto/src/lib.rs:2648",
+            "detail": "# Environment creating replies can substitute a replacement connection claim\n\nReviewed commit: 190d844e58c96cf197aa838d0b0eea8062f48435\n\n## TLDR\n\nAfter creating a new sandbox or container session, the agent can receive an earlier connection's result marked fresh under a connection that replaced it before reply projection. The create still succeeded and the session reference still names the same entry. The issue is inaccurate freshness metadata, not physical retargeting, execution on another machine or loss of work. This corroborates caller-owned g020/l8 event29, not a newly independent discovery.\n\n## Details\n\nRead the complete 19-event local findings history and ONLY the named g020/l8 event29 before synthesis. Independently checked the exact protocol/caller boundary: proto/lib.rs:2640-2644 allows host_id to retain the original entry UUID even for a stale result, while 2648-2658 explicitly includes every mutating reply and the creating verbs in the actual-routed-connection contract. It says the row's host 'is pinned to the connection the mutation actually routed through' and that when that connection is no longer current, host=None accompanies stale. New CreateEnvironment is expressly answered with AgentReply::Created at 2092-2095; the new caller uses agent_created_reply, whose 4662-4680 documentation and implementation share the ordinary mutation projection. No new environment freshness exception is encoded or documented in this representation.\n\nThe narrow data-flow checks independently reproduce g020's source conclusion without execution. sessions.rs:1844-1866 captures the real claim/client before a managed-checkout create and returns that same claim, and the ordinary branch returns it at 1923. But create_in_session_sandbox at 1793-1794 keeps only the qualified SessionInfo and discards the claim. The provisioning completion at tensorlake_add.rs:1018-1026 awaits step publication and a memory lock, then sends only this session result at 1057. The new agent caller samples host_client AFTER receiving the result (agent_requests.rs:4578-4588), using either the current claim or an invalid sentinel only if no client exists. Its existing projection at 4694-4707 compares that sampled claim's incarnation with the current snapshot, which can match a replacement connection and report host:Some/current name with stale:false for earlier data.\n\nConnection replacement is distinct from logical entry identity: manager.rs:5190-5207 explicitly mints a fresh incarnation whenever the client changes, including disappearance; refreshes on one client keep their incarnation. Provisioning releases the environment's connection hold before attach_supervisor (tensorlake_add.rs:612-614); the later result boundary retains neither original claim nor connection lease. The separately owned completion and agent-receiver tasks and intervening awaited bookkeeping permit reconnect before the receiver samples its new claim. Source supports this conditional interleaving; no occurrence, timing frequency or destructive consequence was observed. The correct remedy is to retain the actual mutation claim through the owned result and project against it, or conservatively mark the result stale if that evidence is unavailable. Stable reference qualification alone cannot recreate freshness evidence.\n\nContract reconciliation: SPEC.md logical-host approvals and c3's pending container-place authority uncertainty concern what an approved operation may target. They do not define the incarnation freshness of a completed reply. A permitted stable entry/reference and successful create can coexist with host=None/stale for the old connection. Therefore neither accepting logical-entry targeting nor c3's direct-Allow source refutations settles or drops this separate freshness defect. No new highest consequence is inferred.\n\nSuggested bucket: other (agent reply accuracy). Confidence: confirmed conditional source/data-flow and shared-contract mismatch; no runtime observation. Could-be-highest: false on this record; no physical target change, credential exposure, reference misrouting, security or user-work-loss route alleged. proposed_drop: false. possible_cover: exact g020/l8 event29 owns the complete caller defect and range-attribution/persistence evidence; this is the assigned protocol interface corroboration for consolidation, not a second independent runtime finding or a new false-doc-only report. Caveats: an environment still disconnected at projection uses the stale sentinel as intended; the problem requires a replacement connection current before projection. Ordinary creation remains subject to the same shared freshness contract. Prior c3 highest conditional consequence, both competing authority clauses, its investigated scope uncertainty and all proposals remain unchanged. All readily checkable protocol-scope/result-boundary premises resolved; l9 is closed as this corroborating finding. No tests, builds, reproductions, unrelated search, forbidden coverage reads, checkout edits, nested agents or live actions."
+          }
+        }
+      ],
+      "latest": {
+        "line": 21,
+        "event": {
+          "version": 1,
+          "kind": "finding",
+          "id": "l9",
+          "state": "open",
+          "summary": "Environment creating replies can substitute a replacement connection claim",
+          "location": "crates/farhelm-proto/src/lib.rs:2648",
+          "detail": "# Environment creating replies can substitute a replacement connection claim\n\nReviewed commit: 190d844e58c96cf197aa838d0b0eea8062f48435\n\n## TLDR\n\nAfter creating a new sandbox or container session, the agent can receive an earlier connection's result marked fresh under a connection that replaced it before reply projection. The create still succeeded and the session reference still names the same entry. The issue is inaccurate freshness metadata, not physical retargeting, execution on another machine or loss of work. This corroborates caller-owned g020/l8 event29, not a newly independent discovery.\n\n## Details\n\nRead the complete 19-event local findings history and ONLY the named g020/l8 event29 before synthesis. Independently checked the exact protocol/caller boundary: proto/lib.rs:2640-2644 allows host_id to retain the original entry UUID even for a stale result, while 2648-2658 explicitly includes every mutating reply and the creating verbs in the actual-routed-connection contract. It says the row's host 'is pinned to the connection the mutation actually routed through' and that when that connection is no longer current, host=None accompanies stale. New CreateEnvironment is expressly answered with AgentReply::Created at 2092-2095; the new caller uses agent_created_reply, whose 4662-4680 documentation and implementation share the ordinary mutation projection. No new environment freshness exception is encoded or documented in this representation.\n\nThe narrow data-flow checks independently reproduce g020's source conclusion without execution. sessions.rs:1844-1866 captures the real claim/client before a managed-checkout create and returns that same claim, and the ordinary branch returns it at 1923. But create_in_session_sandbox at 1793-1794 keeps only the qualified SessionInfo and discards the claim. The provisioning completion at tensorlake_add.rs:1018-1026 awaits step publication and a memory lock, then sends only this session result at 1057. The new agent caller samples host_client AFTER receiving the result (agent_requests.rs:4578-4588), using either the current claim or an invalid sentinel only if no client exists. Its existing projection at 4694-4707 compares that sampled claim's incarnation with the current snapshot, which can match a replacement connection and report host:Some/current name with stale:false for earlier data.\n\nConnection replacement is distinct from logical entry identity: manager.rs:5190-5207 explicitly mints a fresh incarnation whenever the client changes, including disappearance; refreshes on one client keep their incarnation. Provisioning releases the environment's connection hold before attach_supervisor (tensorlake_add.rs:612-614); the later result boundary retains neither original claim nor connection lease. The separately owned completion and agent-receiver tasks and intervening awaited bookkeeping permit reconnect before the receiver samples its new claim. Source supports this conditional interleaving; no occurrence, timing frequency or destructive consequence was observed. The correct remedy is to retain the actual mutation claim through the owned result and project against it, or conservatively mark the result stale if that evidence is unavailable. Stable reference qualification alone cannot recreate freshness evidence.\n\nContract reconciliation: SPEC.md logical-host approvals and c3's pending container-place authority uncertainty concern what an approved operation may target. They do not define the incarnation freshness of a completed reply. A permitted stable entry/reference and successful create can coexist with host=None/stale for the old connection. Therefore neither accepting logical-entry targeting nor c3's direct-Allow source refutations settles or drops this separate freshness defect. No new highest consequence is inferred.\n\nSuggested bucket: other (agent reply accuracy). Confidence: confirmed conditional source/data-flow and shared-contract mismatch; no runtime observation. Could-be-highest: false on this record; no physical target change, credential exposure, reference misrouting, security or user-work-loss route alleged. proposed_drop: false. possible_cover: exact g020/l8 event29 owns the complete caller defect and range-attribution/persistence evidence; this is the assigned protocol interface corroboration for consolidation, not a second independent runtime finding or a new false-doc-only report. Caveats: an environment still disconnected at projection uses the stale sentinel as intended; the problem requires a replacement connection current before projection. Ordinary creation remains subject to the same shared freshness contract. Prior c3 highest conditional consequence, both competing authority clauses, its investigated scope uncertainty and all proposals remain unchanged. All readily checkable protocol-scope/result-boundary premises resolved; l9 is closed as this corroborating finding. No tests, builds, reproductions, unrelated search, forbidden coverage reads, checkout edits, nested agents or live actions."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g052/findings.jsonl",
+        "id": "l9",
+        "line": 21,
+        "disposition": "duplicate",
+        "group": "environment-create-result-drops-operation-claim-remints-current",
+        "reason": "Full128exactprotocolcreatingreplyactualoperationconnectioncontractcorroborates020l8. Stablelogicalentryandvalidcreatedreferencearenotfreshness; mandatoryAllow/logicalhostoperationacceptanceofseparatec3approvalauthoritydoesnotwaivereplyprovenance. Retainothercanonicalconditionalmetadatafalsefreshnesswithcurrent-disconnectedfallbackgood,noruntime/security/workloss. Originalhighestc3untouched, nohiddenlowering."
+      },
+      "accepted_parent_decision": {
+        "key": "g052/l9",
+        "line": 21,
+        "disposition": "duplicate",
+        "group": "environment-create-result-drops-operation-claim-remints-current",
+        "bucket": "other",
+        "recording": "new-with-canonical",
+        "needs_independent_drop_check": false,
+        "reason": "Full128exactprotocolcreatingreplyactualoperationconnectioncontractcorroborates020l8. Stablelogicalentryandvalidcreatedreferencearenotfreshness; mandatoryAllow/logicalhostoperationacceptanceofseparatec3approvalauthoritydoesnotwaivereplyprovenance. Retainothercanonicalconditionalmetadatafalsefreshnesswithcurrent-disconnectedfallbackgood,noruntime/security/workloss. Originalhighestc3untouched, nohiddenlowering."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-128",
+          "key": "g052/l9",
+          "latest_line": 21,
+          "recommendation": "duplicate",
+          "bucket": "other",
+          "underlying_key": "environment-create-result-drops-operation-claim-remints-current",
+          "aliases": [
+            "g020/l8"
+          ],
+          "target_queue_file": null,
+          "why": "Exact protocol-interface corroboration of g020/l8. Stable host entry and a valid created reference coexist with stale connection provenance. The mandatory Allow/logical-host approval question in this reviewer's distinct c3 is not part of l9 and cannot refute it.",
+          "checks": [
+            "Read both l9 events at physical lines 20-21. Checked 190d844e proto/lib.rs:2640-2658 actual-routed-connection contract, agent_requests.rs:4662-4680 shared Created projection, :4578-4588 late host_client lookup, :4694-4707 current-incarnation comparison; sessions.rs:1793-1794 original-claim loss; tensorlake_add.rs:1018-1026,1057 separate session-only completion; manager.rs:5190-5207 replacement incarnation. No encoded environment freshness exception was found.",
+            "Checked the reconnect/result boundaries and range introduction/persistence described under canonical g020/l8. Same-entry reconnect suffices. Current-disconnected fallback remains correct. No runtime schedule, timing frequency, changed physical destination or destructive consequence observed."
+          ],
+          "coverage_checked": [
+            "Same exact freshness searches and matching sections as g020/l8 across both specifications, TODO Planned, plans/queue, BUGS, INDEX and matching queue files, active ledger. SPEC.md Agents and environments authorizes logical operations behind Allow and does not waive completed-reply connection provenance. No current queued equivalent found. FILTER rare-diagnostic candidate is considered explicitly; retain canonical while classification of structured success freshness as diagnostic remains unclear."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": "None for l9's conditional source defect; runtime incidence unmeasured. The separate c3 approval-authority uncertainty and any highest consequence there remain untouched and are not independently assessed by this assigned l9 check.",
+          "original_stronger_consequence": "None in l9: it consistently excludes physical retargeting, reference misrouting, security and user-work loss. References to c3's original highest approval-authority concern explicitly preserve that separate record, not a stronger l9 consequence or lowering.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Proposal only: consolidate protocol-contract evidence under g020/l8, preserving its other-priority conditional result and all limits. No parent decision or independent drop verdict inferred."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": true,
+        "clearly_refuted_candidate": false,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "environment-create-result-drops-operation-claim-remints-current",
+        "destination": "trailing-environment-create-result-drops-operation-claim-remints-current.md"
+      }
+    }
+  ],
+  "replies": [
+    {
+      "turn": 1,
+      "reply": "Initial review complete: all 19 assigned patch parts across 11 commits reviewed. No reportable findings established.\n\nRecorded four considered candidates in `findings.jsonl`; no unresolved leads. Updated `progress.md`. No runtime tests or reproductions run."
+    },
+    {
+      "turn": 2,
+      "reply": "Revised c1–c4 and added source-refuted candidate c5.\n\nc3 now explicitly preserves g020/l1’s endpoint-retargeting consequence; c4 distinguishes foundation behavior from later UI integration. Compatibility synthesis found no additional reportable defect.\n\nUnresolved lead IDs: none. No drops accepted."
+    },
+    {
+      "turn": 3,
+      "reply": "Checked target application, message contracts, test assertions, and key handling.\n\nNew verified finding: l6, stale clone-host documentation. Logged l7 as a source-refuted candidate.\n\nNew unverified findings: none. Open leads: none.\n\nFound one documentation defect; no new runtime defect."
+    },
+    {
+      "turn": 4,
+      "reply": "Checked protocol types, placement validation, message classification, exports, and test assertions.\n\nNew verified ID: l8, an additional stale documentation location overlapping g018/f2. No new runtime defect found.\n\nNew unverified IDs: none. Open leads: none."
+    },
+    {
+      "turn": 5,
+      "reply": "Revised c3 with both authority clauses and the explicit SPEC.md precedence rule. Preserved the retargeting consequence, separate g020/l1 ownership, and prior narrow refutations; no drop or lowering accepted.\n\nRemaining uncertainty: whether logical-entry consent covers pending container-place approvals. No unresolved source leads."
+    },
+    {
+      "turn": 6,
+      "reply": "Checked wire defaults, tagged deletion outcomes, HTTP markers, placement transitions, and changed test assertions.\n\nNothing new found. New verified IDs: none. New unverified IDs: none. Open source leads: none.\n\nUpdated progress; prior records remain unchanged."
+    },
+    {
+      "turn": 7,
+      "reply": "Recorded l9 corroborating g020/l8: environment-create replies can substitute a replacement connection claim, violating the shared freshness contract. Stable session references remain valid; no retargeting or work loss alleged.\n\nNo unresolved source leads. c3’s prior contract-scope uncertainty remains unchanged."
+    },
+    {
+      "turn": 8,
+      "reply": "Checked error semantics, deletion defaults, template placement and decoding, environment views, retired-container decoding, and approval classification.\n\nNothing new found. New verified IDs: none. New unverified IDs: none. Open source leads: none.\n\nUpdated progress; existing findings and caveats remain unchanged."
+    }
+  ],
+  "progress": "Group g052: wire-protocol.\nTurn type/count: initial review, turn 1 completed. Discovery-pass count: 0. Later synthesis/discovery has not been performed.\nCoverage: all 19 assigned patch parts (1,441 lines) from all 11 assigned commits read through the absolute evidence command in 21 packets; the two parts over 200 lines were split. Full brief and complete inventory commits field read; excluded coverage metadata not read. No unread assigned scope.\nContracts read: pinned SPEC.md environment/topology/recipe rules; SPEC_impl.md Disposable environments and its subsections, Answers bind to what was drawn, Launch templates, Version and skew, Environment Delete and the seal, Agent requests and environments; SPEC.md Agents and environments, Retired containerized sessions and native file-opening security amendment; SPEC_impl.md Session-host file reads and the lifecycle busy-marker contract. Relevant callers checked at recorded revisions, rather than the working tree.\nResults: no reportable finding established. Appended candidates c1 (explicit raster-image default), c2 (decode-only retired container state), c3 (new environment approval kind/direct Allow and older-client refusal), c4 (fallback header staged behind new-page opt-in). Each durable detail includes impact, revision, source/contract basis, bucket, confidence, proposed drop, possible coverage and caveats. No lead IDs remain open. New verified finding IDs: none. New unverified finding IDs: none.\nInterface assumptions checked: provider and place decisions agree with the environment contract; full targets preserve recipe/place and old recipe-only templates preserve account placement; GUI-only recipe templates are filtered/refused on the earlier agent interface; retired container specs refuse before execution; environment create is a mutating distinct verb with direct approval and an extended relay budget; seal request and reply are classified in both correlation helpers; protocol additions carry bumps; lifecycle and unanswered-Delete markers are emitted only from local typed causes; guarded requests cannot reach unconditional environment deletion.\nExecution: source-only; no runtime tests, builds or reproductions run. No repository files changed, no helper agents spawned, no live-install interaction. Only this group's private artifacts were written.\nNext action: return to the caller for the later synthesis turn. Logs preserve four considered candidates for independent drop review, including the explicit could-be-highest cases c1-c3.\n\nSynthesis turn 2 completed. Discovery-pass count remains 0; this was the requested later-turn synthesis, not a discovery pass.\nDelta: c1-c4 revised under their original IDs, and c5 appended. No new reportable finding. No unresolved lead IDs. No drops accepted; all candidate drop bases remain proposals for the caller's independent review.\nc1: re-read dated SPEC.md raster amendment and exact warning set. Kept the original cross-host native-opening consequence explicit; policy acceptance remains narrow, not a statement that raster bytes or their default handlers are safe.\nc2: re-read ContainerConfigWire/From, template refusal and the protocol constant. Corrected the original overly broad serialized-byte claim: image_file is intentionally IgnoredAny, while the present container object survives as the refusal marker. Existing execution refutation and highest-if-isolation-erased consequence retained.\nc3: consumed caller-supplied g020/l1 latest event and independently checked the added representation and immediate UI/helm consumers. Place is only an i64 registry reference; LaunchEnvironment stores the display name but no physical-route snapshot. UI renders that captured name; the handler after Allow rechecks only a clone source and forwards the symbolic place. Distinct tag/direct-Allow checks refute standing-permission/old-card bypass only. They do not refute g020/l1's established changed-endpoint command/credential consequence. No duplicate finding emitted. A private planned-target snapshot could meet the contract without necessarily growing the wire representation.\nc4: foundation absence-of-old-page-opt-in remains bounded to its own intermediate commit. Located later integration at 2ef10815f12ed719ab6c51c6e3ac6fcd3f8bc1fa, checked the immediate API classifier and distinct Session/Whole URL queries, and confirmed those consumers remain at the reviewed range endpoint. Exact marker/value plus 409 becomes Unasked; other refusals do not automatically widen scope. No blanket claim about later UI confirmation handlers, which belong to other groups.\nc5: checked a concrete protocol-consumer suspicion about CORS hiding the lifecycle busy marker. Source refutes it for this path: desktop ordinary requests use native Rust reqwest, while restricted webview CORS wraps separate browser-facing operations. Browser served-origin requests are not the hypothesized cross-origin native path. No runtime observations.\nCompatibility synthesis: TemplateFields remains strict; new target-bearing templates were filtered from earlier agent catalogs, and the target change bumps 73 to 74. CreateEnvironment and LaunchEnvironment have distinct enum tags with the 75 bump, so old peers cannot silently reinterpret new placement as ordinary creation. Seal messages and Sealed error arrive with 76; original request/reply correlation checks remain applicable. Historical container readable shape is preserved through retirement, which changes admission rather than removing the stored discriminator. No additional compatibility defect established.\nValidation/evidence: source and contract analysis only. No tests, builds or reproductions; no repository writes or live-install interaction. All 1,441 assigned lines remain covered by the audited initial evidence reads. Unread assigned scope: none. Next action: return delta and await any requested discovery turn.\n\nDiscovery turn 3 completed. Discovery-pass count: 1.\nFirst read discovery-neighbours.json completely in seven bounded chunks (1-55, 56-100, 101-155, 156-200, 201-250, 251-300, 301-363). These supplied records were used only for interface context/novelty, not mandatory-source credit. No prohibited coverage sources read.\nNamed-question synthesis: caller-supplied g090/c3:13 was investigated as a documentation contract question, distinct from fail-closed runtime correctness. l6 was appended as a lead immediately and revised to a finding when its source premises were checked. Full-range attribution confirms the old Clone.host comment was true at the exclusive base's ordinary-only path; 190d844e58c96cf197aa838d0b0eea8062f48435 introduces the supported environment clone that requires host=None, newly contradicting that comment. Numbered proto source, actual optional parser/early environment dispatch, environment clone's explicit Some(host) refusal, full SPEC.md Agents and environments contract, and range endpoint's retained comment settle the premise. New verified ID: l6 (other/internal protocol documentation). It is the supplied protocol-interface handoff, not a newly claimed runtime bug or duplicate g090 runtime finding.\nSeparate discovery search continued after l6: re-read complete assigned provider/place/target definitions; traced mutual exclusion, host_fixed refusal, place availability, destination reset and all-or-none target application; checked added environment-target tests against their actual assertions; rechecked SessionDeleteOutcome/SealOutcome/seal-message contracts and session-list JSON-shape tests; reviewed CreateEnvironment representation and the older-card decoder test plus retired-container application tests. No additional defect established in those checks. No production correctness result was used to dismiss a distinct documentation or test-oracle defect.\nConcrete additional lead l7: explicit environment-create's absent intent_key plus permissive AgentVerb derive could ignore an invented raw JSON key. Logged before follow-up checks. Checked CLI clap conflicts, exact typed producer, template-create and clone key refusals and protocol additive/strict-decoder documentation. Revised l7 to candidate with original duplicate-resource/billing concern retained: shipped explicit --recipe producer refuses the key before constructing wire intent, and the typed template/clone routes also refuse it. Raw unknown-property tolerance is retained as a fact, not falsely claimed refused. No independent drop accepted.\nPass result: new verified finding IDs [l6]; new unverified-after-investigation finding IDs []; new considered candidate IDs [l7]; unresolved lead IDs []. No new runtime finding discovered beyond known interface issues. Documentation defect l6 is new to this group's durable finding set. The additional exploratory l7 route was source-refuted for supported producers. No runtime tests, builds, reproductions or live-install action. No checkout writes. Unread assigned scope: none.\nNext action: return discovery delta; any later pass is a separate caller-requested turn.\n\nDiscovery turn 4 completed. Discovery-pass count: 2.\nRefreshed discovery-neighbours.json (at 2026-11-13T17:17:10.637Z; 464 lines) in twelve bounded line chunks through its closing brace: 1-55, 56-95, 96-130, 131-175, 176-210, 211-250, 251-290, 291-325, 326-360, 361-395, 396-430, 431-464. No named pending questions were supplied this turn. Existing complete local history remains retained; no finding or proposed-drop basis erased. No parent drops accepted.\nFresh search checks: revisited provider and place discriminators at their introducing revisions, LaunchTarget's independent recipe/place accessors, shape-level placement exclusivity and size enforcement, legacy launch-selection marker contract, new verb's three exhaustive classifications and exact JSON/classification assertions, added seal request/reply classification in both correlation methods and variant names, environment view reexports and TunnelView's serde/equality compatibility, extension-list parsing/default normalization, and typed HTTP marker/approval timeout documentation. No new executable defect or separate test-oracle defect established in these checks. No tests/builds/reproductions or live-install action performed.\nConcrete lead l8 was recorded immediately, then resolved to a finding under the same ID after pinned-source checks. Proto launcher.rs:600-601 still universally excludes agent recipe catalogs. Actual TemplateContext construction at agent_launch.rs:233-238 takes caller recipes; the ordinary non-spawn create path loads recipe/place catalogs at agent_requests.rs:2447-2475. Checked exclusive base, complete relevant in-range history and parent-to-child resolver patch: the base comment described the old empty-catalog path; 190d844e introduces the new catalog-bearing caller and makes it false. Pinned endpoint retains the wording. The legitimate spawn restriction remains separately documented in the finding. This is an additional assigned shared-API documentation location overlapping supplied g018/f2's helm-layer caller-rule issue; do not claim independent runtime/root-cause novelty or duplicate its unresolved helper-link finding. Production correctness does not refute this documentation discrepancy.\nResult: new verified IDs [l8], suggested other/documentation; new unverified-after-investigation IDs []; remaining lead IDs []. New documentation location found, with exact supplied-neighbour overlap disclosed. No independent new runtime issue found. All readily checkable l8 premises resolved. No checkout files changed; only this group's private log/progress/event artifacts written. Unread assigned scope: none. Next action: return the requested delta; any additional discovery is a later caller-requested pass.\n\nReopened late-interface synthesis, turn 5 completed. Discovery-pass count remains 2; no discovery performed this turn.\nRead complete findings history (17 prior events, lines 1-17) before revising. Named input focused claims-010/035 was investigated under original c3. Appended two c3 revisions: an immediate contract-conflict record, then the completed source/contract synthesis. No new finding ID and no accepted drop/lowering.\nConcrete checks: reviewed SPEC.md logical-entry paragraph 399-409, full Agents and environments 4289-4342, origin-connection scope 4084-4099; SPEC_impl.md authority NOTE and machine-named paragraph 9539-9568; retained endpoint clauses at SPEC.md405-415/SPEC_impl9090-9098 and unchanged precedence NOTE. Targeted source/spec searches found no explicit container-place approval exception. Rechecked added proto card place docs and agent_requests explicit container_host resolver, establishing that Place::PodmanHost identifies the same ordinary registry host entry. Distinguished the different requesting origin from that container place; requesting-connection fences do not settle the latter's authority policy.\nDelta to c3: preserve narrow direct-Allow/unknown-card refutations; preserve original highest credential/execution consequence and separate owner g020/l1. Added exact product clause that approvals/create/clone may follow a logical host entry onto its new machine, and exact contrary implementation clause saying the machine named by the card/target connection is fixed. Found explicit textual precedence: SPEC.md wins observable-behavior disagreements. Thus precedence itself is resolved, not missing intent. Remaining investigated uncertainty is whether that general logical-entry allowance includes the pending environment card's container PLACE or whether an unstated place-specific physical-endpoint exception was intended. Product environment-card text names the host but supplies no such explicit destination exception; agent host edit/removal has the stated exception. Source checks cannot manufacture unstated scope intent. Explicit clarification would settle it; runtime evidence would not.\nDisposition: c3 mechanics confirmed, authorization-violation characterization unverified after investigation due contract-scope tension. Original highest proposal retained conditionally; no lowering/drop accepted. The broad logical-entry rule plus SPEC precedence is a possible explicit-acceptance basis for independent judgment, not a unilateral dismissal. All earlier proposed bases remain in append-only history and are preserved narrowly in latest detail. No other records revised. No uninvestigated source lead IDs remain; c3 retains the named investigated normative uncertainty. No unread assigned scope. No tests/builds/reproductions/live action, forbidden searches, nested agents or checkout writes. Next action: return only this turn's c3 delta and unresolved scope; any discovery follows a separate audit/request.\n\nDiscovery turn 6 completed. Discovery-pass count: 3.\nRead refreshed discovery-neighbours.json (2026-11-13T19:52:33.225Z; 482 lines) completely before source search, in bounded chunks 1-3, 4-38, 39-73, 74-89, 90-123, 124-158, 159-199, 200-239, 240-276, 277-310, 311-344, 345-379, 380-414, 415-448, 449-482. No named pending question this turn. Latest interface records used for novelty/context only; no prohibited coverage sources searched. Existing c3 investigated contract-scope caveat is unchanged; no drop/lowering accepted or silently applied.\nFresh source pass focused on remaining wire defaults and test claims rather than reopening known defects. Checked SessionList.sealed's true-only serialization/default-false declaration against its JSON-shape assertions and the added version pin; SessionDeleteOutcome's optional remaining count versus SealOutcome's tagged outcomes and reply notice contract; HTTP marker constants and exact typed-header definitions; recipe/installed-host placement transitions in the changed shared-template test, including folder reset, GitHub preservation, fixed-host refusal and conflict inputs; tri-state retired-container serde declaration; the raster default test's normalized-list and SVG discrimination assertions; new environment approval tag/roundtrip and direct-Allow assertions against the exhaustive permission classification. These are pure source checks. No missing source premise, new contract discrepancy, concrete new runtime lead or separate test-oracle defect established.\nResult: credible empty new discovery. New verified IDs []; new unverified-after-investigation IDs []; new candidate IDs []; remaining open source-lead IDs []. No new finding/candidate revisions appended because no substantive new lead or newly decided drop emerged. Prior findings and all proposed-drop bases remain intact. Existing c3 normative uncertainty remains investigated, not a new source lead or new discovery. No unread assigned scope. No runtime tests, builds, reproductions, payloads, agents, installs, live actions or checkout changes. Only progress.md updated. Next action: return this pass's checks and explicit empty result.\n\nReopened late-interface synthesis, turn 7 completed. Discovery-pass count remains 3; no discovery conducted this turn.\nBefore revisions read COMPLETE own findings history: all 19 events, in chunks 1-4,5-8,9-12,13-17,18-19. Read ONLY the named external g020/l8 event29, not its other history or unrelated findings. No excluded coverage sources searched.\nNamed input protocol/caller synthesis recorded under new local l9 as a lead immediately after independent concrete boundary checks, then revised under l9 to a corroborating finding after resolving result/publication scope. g020/l8 event29 remains the separate caller-finding owner; do not count this as an independently novel runtime discovery or split the caller's local promise into another documentation finding.\nChecked exact reviewed190d844e protocol spans: AgentSession.host_id2640-2644 preserves stable entry identity; AgentSession.host2648-2658 explicitly includes creating replies in actual-routed-connection freshness; new CreateEnvironment2092-2095 names Created as its answer; Created2489-2518 carries the shared AgentSession result without a freshness exemption. Field stale2705-2712 describes last-known state and does not erase the more precise mutating-reply connection rule. Created.current is separately an asking-session comparison, not this freshness bit.\nChecked caller and owned result spans: agent_requests4575-4596 samples a current claim after result completion; agent_created_reply4662-4680 uses the common row projection;4694-4707 matches the supplied claim incarnation against current snapshots. sessions1752-1761 returns SessionInfo only;1793-1794 discards the actual claim;1844-1866 and1923 show the original claim survives the real create until that discard. provisioning/tensorlake_add1018-1057 awaits progress/memory bookkeeping then sends only session data. Connection hold is released at612-614. manager5190-5207 mints a new incarnation for a new client, including disappearance, and independent client.closed handling at4720 exits the live connection. Hence a later reconnect can make the re-minted claim appear current although the data belongs to the earlier operation. Conditional scheduling is source-supported, not observed or reproduced.\nDisposition: l9 verified other/reply-accuracy corroboration, possible_cover exact g020/l8 event29. Stable entry/reference qualification and successful creation remain valid. No changed physical destination, execution on another machine, security/work loss, duplicate create or misrouting asserted. No source premise remains open for the protocol scope or lost claim boundary. Original c3 physical-place consent conflict, highest conditional consequence and investigated normative-scope caveat remain separate and unchanged; nothing in this freshness conclusion settles or drops them. No parent drop/lowering accepted.\nNew local verified record [l9] is interface corroboration only; new independent finding IDs []; new unverified-after-investigation IDs []; unresolved source-lead IDs []. No tests/builds/reproductions/live actions, installs, nested agents, checkout writes or unrelated searches. No unread assigned source scope. Only private findings/event/progress artifacts written. Next action: return this synthesis delta; any new discovery is a separate post-audit turn.\n\nDiscovery turn 8 completed. Discovery-pass count: 4.\nRead complete refreshed discovery-neighbours.json (2026-11-13T20:23:56.496Z; 518 lines) first, in seventeen bounded chunks:1-3,4-38,39-73,74-94,95-104,105-139,140-174,175-213,214-254,255-293,294-328,329-362,363-397,398-432,433-466,467-501,502-518. No named pending synthesis input this turn. Existing complete local history and new interface corroboration l9 reused; no accepted parent drop/lowering assumed.\nFresh search stayed within assigned changes and immediate context: checked Sealed alongside adjacent retry/error semantics, including its distinction from durable definitely-unaccepted refusal; SessionDeleteOutcome defaults/omission behavior and tagged SealOutcome's nonfinal/final meanings; strict template-field decoding, new placement alternatives and legacy mapping, mutual-exclusion/fixed-host/applicability order, home/GitHub destination handling and all-or-none template fold; environment view optional defaults and separation of durable target from transient presentation/health; retired-container marker/decoder conversion and strict unknown-field handling; bounded native-opening policy parser and exact raster/SVG warning sets; new environment card's mandatory direct-Allow classification and its exhaustive non-direct branches. These source checks found no additional contract, executable or test-oracle defect beyond the durable/supplied known records. No new substantive lead emerged and no newly considered drop was made.\nResult: empty new discovery. New verified IDs []; new unverified-after-investigation IDs []; new candidate IDs []; open source-lead IDs []. Existing c3 investigated normative-scope uncertainty remains unchanged and is not counted as a new lead; l9 remains protocol corroboration of g020/l8, not a newly independent caller finding. No findings revisions required this turn; all original consequences, caveats and proposed-drop bases remain intact. Unread assigned scope:none. No runtime tests/builds/reproductions, generated payloads, live-install actions, unrelated/forbidden coverage searches, nested agents or checkout writes. Only progress.md updated. Next action:return explicit empty result and checks; any later work is a separate caller-requested turn.\n"
+}

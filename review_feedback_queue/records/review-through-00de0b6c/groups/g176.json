@@ -1,0 +1,907 @@
+{
+  "group": {
+    "id": "g176",
+    "domain": "browser-terminal-regressions",
+    "purpose": "browser-terminal-regressions: e2e/tests/terminal-link-clicks.spec.ts, e2e/tests/terminal-links.spec.ts, e2e/tests/terminal-migration.spec.ts, e2e/tests/terminal-multihost.spec.ts, e2e/tests/terminal-reconnect.spec.ts, e2e/tests/terminal-tabs.spec.ts; phases -  async function assertRefusalAboveTunnelNotice(page: Page) {",
+    "interfaces": [
+      "g005",
+      "g006",
+      "g079",
+      "g080",
+      "g081",
+      "g082",
+      "g083",
+      "g084",
+      "g091",
+      "g092",
+      "g174",
+      "g175",
+      "g177",
+      "g179",
+      "g180",
+      "g181",
+      "g182"
+    ],
+    "sources": [
+      {
+        "path": "[private-run]/prep/parts/00831-001.patch",
+        "ranges": [
+          [
+            1,
+            694
+          ]
+        ],
+        "original_path": "e2e/tests/terminal-link-clicks.spec.ts",
+        "commit": "647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513",
+        "notes": "-  async function assertRefusalAboveTunnelNotice(page: Page) {; patch character offsets [43199,82272)",
+        "lines": 694,
+        "bytes": 39073,
+        "start": 43199,
+        "end": 82272,
+        "original": "[private-run]/prep/originals/00831.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/00832-000.patch",
+        "ranges": [
+          [
+            1,
+            99
+          ]
+        ],
+        "original_path": "e2e/tests/terminal-links.spec.ts",
+        "commit": "647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513",
+        "notes": "patch header; patch character offsets [0,6321)",
+        "lines": 99,
+        "bytes": 6323,
+        "start": 0,
+        "end": 6321,
+        "original": "[private-run]/prep/originals/00832.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/00833-000.patch",
+        "ranges": [
+          [
+            1,
+            84
+          ]
+        ],
+        "original_path": "e2e/tests/terminal-migration.spec.ts",
+        "commit": "647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513",
+        "notes": "patch header; patch character offsets [0,4789)",
+        "lines": 84,
+        "bytes": 4789,
+        "start": 0,
+        "end": 4789,
+        "original": "[private-run]/prep/originals/00833.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/00834-000.patch",
+        "ranges": [
+          [
+            1,
+            83
+          ]
+        ],
+        "original_path": "e2e/tests/terminal-multihost.spec.ts",
+        "commit": "647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513",
+        "notes": "patch header; patch character offsets [0,4513)",
+        "lines": 83,
+        "bytes": 4513,
+        "start": 0,
+        "end": 4513,
+        "original": "[private-run]/prep/originals/00834.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/00835-000.patch",
+        "ranges": [
+          [
+            1,
+            77
+          ]
+        ],
+        "original_path": "e2e/tests/terminal-reconnect.spec.ts",
+        "commit": "647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513",
+        "notes": "patch header; patch character offsets [0,3657)",
+        "lines": 77,
+        "bytes": 3657,
+        "start": 0,
+        "end": 3657,
+        "original": "[private-run]/prep/originals/00835.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/00838-000.patch",
+        "ranges": [
+          [
+            1,
+            145
+          ]
+        ],
+        "original_path": "e2e/tests/terminal-tabs.spec.ts",
+        "commit": "647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513",
+        "notes": "patch header; patch character offsets [0,6857)",
+        "lines": 145,
+        "bytes": 6865,
+        "start": 0,
+        "end": 6857,
+        "original": "[private-run]/prep/originals/00838.patch"
+      }
+    ],
+    "lines": 1182,
+    "bytes": 65220
+  },
+  "records": [
+    {
+      "key": "g176/l1",
+      "owner": "g176",
+      "id": "l1",
+      "domain": "browser-terminal-regressions",
+      "purpose": "browser-terminal-regressions: e2e/tests/terminal-link-clicks.spec.ts, e2e/tests/terminal-links.spec.ts, e2e/tests/terminal-migration.spec.ts, e2e/tests/terminal-multihost.spec.ts, e2e/tests/terminal-reconnect.spec.ts, e2e/tests/terminal-tabs.spec.ts; phases -  async function assertRefusalAboveTunnelNotice(page: Page) {",
+      "history": [
+        {
+          "line": 1,
+          "event": {
+            "version": 1,
+            "kind": "lead",
+            "id": "l1",
+            "state": "open",
+            "summary": "Removed xterm hyperlink-tag regression despite retained old-terminal contract",
+            "location": "e2e/tests/terminal-links.spec.ts:1075",
+            "detail": "Reviewed commit: 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513. TLDR: the browser regression that verifies the old terminal's private hyperlink tags has been removed even though existing old sessions remain supported. Source basis: assigned 00832-000.patch removes the seven-layout OSC 8 tag checks; SPEC_impl.md:1911-1914 explicitly says a browser test against the vendored bundle pins the private tag's presence and shared tag for both agent layouts. SPEC_impl.md:1958-1966 retains the xterm surface for old or unknown terminals. Suspected consequence: future hyperlink-library drift could escape testing; no product vulnerability or loss-of-work route established by this removal. Suggested bucket: other. Confidence: unverified pending source checks for replacement coverage and old-terminal creation/adoption contract. proposed_drop: false. possible_cover: none (coverage sources not searched). Could-be-highest: no established route; test coverage alone is maintainer tooling. Next check: pinned test tree and replacement grid tests for actual vendored-bundle tag verification, plus whether surviving compatibility tests still exercise xterm."
+          }
+        },
+        {
+          "line": 3,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "l1",
+            "state": "open",
+            "summary": "Keep the vendored-xterm hyperlink-tag contract test",
+            "location": "e2e/tests/terminal-links.spec.ts:1075",
+            "detail": "Reviewed commit: 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513.\n\nTLDR: Existing sessions that still use the old terminal lose the regression check that their wrapped hyperlink warning reads the real destination correctly. A future vendored-library change can silently remove that warning coverage.\n\nDetails: This commit deletes the seven-layout test beginning at parent e2e/tests/terminal-links.spec.ts:1082 (deletion anchored at resulting line 1075). It was the test asserting real vendored-xterm getCell(...).extended.urlId values and shared tags across Claude-style reopened ids, Codex cursor continuations and wraps. SPEC_impl.md:1911-1914 explicitly requires it: \"The field can change at a manual xterm upgrade; a browser test against the vendored bundle pins its presence and shared tag for both agent layouts. Losing it falls back to today's row comparison, never a quieter partial-match rule.\" Old terminals remain supported, per SPEC.md:3014 onward and SPEC_impl.md:1958-1966. The replacement grid test at e2e/grid-client/grid-attach.spec.ts:1247-1277 supplies pre-tagged grid rows via showScreen and cannot read the vendored-xterm field. crates/farhelm-ui/js-tests/terminal-links.test.js:477-496 constructs synthetic cells with the field itself; its adapter tests at 511-541 cannot catch a change in the actual bundle either. Targeted pinned-tree searches for urlId/extended.urlId/xtermLines and tagged-row checks found no retained real-bundle tag test. Preserve this test by mounting the existing static old-terminal harness and feeding OSC output there; creating tmux terminals on a current supervisor is unnecessary.\n\nSuggested bucket: other (regression-test/spec-contract loss in maintainer tooling). Confidence: confirmed by source and contract analysis only; no execution or reproduction. proposed_drop: false. possible_cover: none (forbidden coverage metadata not read). Could-be-highest: no; no current security regression is established, and the existing fallback remains explicitly specified. Caveat: new terminal tag/mismatch behavior retains separate grid and pure-function tests; this finding concerns only the dependency contract of retained old-terminal support, not all wrapped-link coverage."
+          }
+        },
+        {
+          "line": 10,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "l1",
+            "state": "open",
+            "summary": "Intermediate removal of the vendored-xterm tag contract test",
+            "location": "e2e/tests/terminal-links.spec.ts:1075",
+            "detail": "Reviewed commit: 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513.\n\nTLDR: Existing sessions that still use the old terminal lose the regression check that their wrapped hyperlink warning reads the real destination correctly. A future vendored-library change can silently remove that warning coverage.\n\nDetails: This commit deletes the seven-layout test beginning at parent e2e/tests/terminal-links.spec.ts:1082 (deletion anchored at resulting line 1075). It was the test asserting real vendored-xterm getCell(...).extended.urlId values and shared tags across Claude-style reopened ids, Codex cursor continuations and wraps. SPEC_impl.md:1911-1914 explicitly requires it: \"The field can change at a manual xterm upgrade; a browser test against the vendored bundle pins its presence and shared tag for both agent layouts. Losing it falls back to today's row comparison, never a quieter partial-match rule.\" Old terminals remain supported, per SPEC.md:3014 onward and SPEC_impl.md:1958-1966. The replacement grid test at e2e/grid-client/grid-attach.spec.ts:1247-1277 supplies pre-tagged grid rows via showScreen and cannot read the vendored-xterm field. crates/farhelm-ui/js-tests/terminal-links.test.js:477-496 constructs synthetic cells with the field itself; its adapter tests at 511-541 cannot catch a change in the actual bundle either. Targeted pinned-tree searches for urlId/extended.urlId/xtermLines and tagged-row checks found no retained real-bundle tag test. Preserve this test by mounting the existing static old-terminal harness and feeding OSC output there; creating tmux terminals on a current supervisor is unnecessary.\n\nSuggested bucket: other (regression-test/spec-contract loss in maintainer tooling). Confidence: confirmed by source and contract analysis only; no execution or reproduction. proposed_drop: false. possible_cover: none (forbidden coverage metadata not read). Could-be-highest: no; no current security regression is established, and the existing fallback remains explicitly specified. Caveat: new terminal tag/mismatch behavior retains separate grid and pure-function tests; this finding concerns only the dependency contract of retained old-terminal support, not all wrapped-link coverage.\n\nSynthesis turn 2 — range disposition: the original consequence and exact 647f0227 SPEC_impl.md:1911-1914 citation above remain valid at that intermediate revision; no drop is accepted or proposed here. This is not a dependency test still needed at pinned tip 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db. Later dbfc69751215dbf15e1d31d5bed73c3754c4ebc4 retires old terminals at supervisor startup; f560058da19e02716e6f943883a9508b447aff4e then removes the vendored xterm bundle and terminal.js old-surface branches, plus terminal-links.js xtermLines/fromXtermRange/toXtermRange and private extended.urlId reads (diff around original 576-631). Its terminal.js:13-35 mounts grids only. A pinned-tip source search across assets, lib.rs, grid-client browser tests and JS tests found no xtermLines, extended.urlId, urlId, vendor/xterm.js, writeBytes or term.write call. Therefore the future-xterm-upgrade consequence applies only while that intermediate old renderer existed; the tip has no such dependency. Keep this as a confirmed intermediate explicit-test-contract gap, suggested bucket other, not as an instruction to restore an obsolete dependency test on current code. Confidence source/contract only, no execution; proposed_drop remains false; possible_cover none; could-be-highest remains no. The later removal is source evolution, not a searched queue/coverage disposition."
+          }
+        },
+        {
+          "line": 14,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "l1",
+            "state": "open",
+            "summary": "Intermediate removal of the vendored-xterm tag contract test",
+            "location": "e2e/tests/terminal-links.spec.ts:1075",
+            "detail": "Reviewed commit: 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513.\n\nTLDR: Existing sessions that still use the old terminal lose the regression check that their wrapped hyperlink warning reads the real destination correctly. A future vendored-library change can silently remove that warning coverage.\n\nDetails: This commit deletes the seven-layout test beginning at parent e2e/tests/terminal-links.spec.ts:1082 (deletion anchored at resulting line 1075). It was the test asserting real vendored-xterm getCell(...).extended.urlId values and shared tags across Claude-style reopened ids, Codex cursor continuations and wraps. SPEC_impl.md:1911-1914 explicitly requires it: \"The field can change at a manual xterm upgrade; a browser test against the vendored bundle pins its presence and shared tag for both agent layouts. Losing it falls back to today's row comparison, never a quieter partial-match rule.\" Old terminals remain supported, per SPEC.md:3014 onward and SPEC_impl.md:1958-1966. The replacement grid test at e2e/grid-client/grid-attach.spec.ts:1247-1277 supplies pre-tagged grid rows via showScreen and cannot read the vendored-xterm field. crates/farhelm-ui/js-tests/terminal-links.test.js:477-496 constructs synthetic cells with the field itself; its adapter tests at 511-541 cannot catch a change in the actual bundle either. Targeted pinned-tree searches for urlId/extended.urlId/xtermLines and tagged-row checks found no retained real-bundle tag test. Preserve this test by mounting the existing static old-terminal harness and feeding OSC output there; creating tmux terminals on a current supervisor is unnecessary.\n\nSuggested bucket: other (regression-test/spec-contract loss in maintainer tooling). Confidence: confirmed by source and contract analysis only; no execution or reproduction. proposed_drop: false. possible_cover: none (forbidden coverage metadata not read). Could-be-highest: no; no current security regression is established, and the existing fallback remains explicitly specified. Caveat: new terminal tag/mismatch behavior retains separate grid and pure-function tests; this finding concerns only the dependency contract of retained old-terminal support, not all wrapped-link coverage.\n\nSynthesis turn 2 — range disposition: the original consequence and exact 647f0227 SPEC_impl.md:1911-1914 citation above remain valid at that intermediate revision; no drop is accepted or proposed here. This is not a dependency test still needed at pinned tip 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db. Later dbfc69751215dbf15e1d31d5bed73c3754c4ebc4 retires old terminals at supervisor startup; f560058da19e02716e6f943883a9508b447aff4e then removes the vendored xterm bundle and terminal.js old-surface branches, plus terminal-links.js xtermLines/fromXtermRange/toXtermRange and private extended.urlId reads (diff around original 576-631). Its terminal.js:13-35 mounts grids only. A pinned-tip source search across assets, lib.rs, grid-client browser tests and JS tests found no xtermLines, extended.urlId, urlId, vendor/xterm.js, writeBytes or term.write call. Therefore the future-xterm-upgrade consequence applies only while that intermediate old renderer existed; the tip has no such dependency. Keep this as a confirmed intermediate explicit-test-contract gap, suggested bucket other, not as an instruction to restore an obsolete dependency test on current code. Confidence source/contract only, no execution; proposed_drop remains false; possible_cover none; could-be-highest remains no. The later removal is source evolution, not a searched queue/coverage disposition.\n\nRetirement premise source check completed in synthesis: dbfc69751215dbf15e1d31d5bed73c3754c4ebc4 core.rs:6426-6438 invokes OldTerminals::end_private_server while owning the state directory, then disables further tmux use; reload contract at 6664-6681 gives old rows no terminal. old_terminals.rs:1-82 explains the startup-only ending/conversion and accepted failure residuals. The subsequent actual adapter/bundle deletion, rather than the success of cleanup on every machine, establishes that tip has no remaining xterm private-field dependency. No runtime cleanup result was assumed."
+          }
+        }
+      ],
+      "latest": {
+        "line": 14,
+        "event": {
+          "version": 1,
+          "kind": "finding",
+          "id": "l1",
+          "state": "open",
+          "summary": "Intermediate removal of the vendored-xterm tag contract test",
+          "location": "e2e/tests/terminal-links.spec.ts:1075",
+          "detail": "Reviewed commit: 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513.\n\nTLDR: Existing sessions that still use the old terminal lose the regression check that their wrapped hyperlink warning reads the real destination correctly. A future vendored-library change can silently remove that warning coverage.\n\nDetails: This commit deletes the seven-layout test beginning at parent e2e/tests/terminal-links.spec.ts:1082 (deletion anchored at resulting line 1075). It was the test asserting real vendored-xterm getCell(...).extended.urlId values and shared tags across Claude-style reopened ids, Codex cursor continuations and wraps. SPEC_impl.md:1911-1914 explicitly requires it: \"The field can change at a manual xterm upgrade; a browser test against the vendored bundle pins its presence and shared tag for both agent layouts. Losing it falls back to today's row comparison, never a quieter partial-match rule.\" Old terminals remain supported, per SPEC.md:3014 onward and SPEC_impl.md:1958-1966. The replacement grid test at e2e/grid-client/grid-attach.spec.ts:1247-1277 supplies pre-tagged grid rows via showScreen and cannot read the vendored-xterm field. crates/farhelm-ui/js-tests/terminal-links.test.js:477-496 constructs synthetic cells with the field itself; its adapter tests at 511-541 cannot catch a change in the actual bundle either. Targeted pinned-tree searches for urlId/extended.urlId/xtermLines and tagged-row checks found no retained real-bundle tag test. Preserve this test by mounting the existing static old-terminal harness and feeding OSC output there; creating tmux terminals on a current supervisor is unnecessary.\n\nSuggested bucket: other (regression-test/spec-contract loss in maintainer tooling). Confidence: confirmed by source and contract analysis only; no execution or reproduction. proposed_drop: false. possible_cover: none (forbidden coverage metadata not read). Could-be-highest: no; no current security regression is established, and the existing fallback remains explicitly specified. Caveat: new terminal tag/mismatch behavior retains separate grid and pure-function tests; this finding concerns only the dependency contract of retained old-terminal support, not all wrapped-link coverage.\n\nSynthesis turn 2 — range disposition: the original consequence and exact 647f0227 SPEC_impl.md:1911-1914 citation above remain valid at that intermediate revision; no drop is accepted or proposed here. This is not a dependency test still needed at pinned tip 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db. Later dbfc69751215dbf15e1d31d5bed73c3754c4ebc4 retires old terminals at supervisor startup; f560058da19e02716e6f943883a9508b447aff4e then removes the vendored xterm bundle and terminal.js old-surface branches, plus terminal-links.js xtermLines/fromXtermRange/toXtermRange and private extended.urlId reads (diff around original 576-631). Its terminal.js:13-35 mounts grids only. A pinned-tip source search across assets, lib.rs, grid-client browser tests and JS tests found no xtermLines, extended.urlId, urlId, vendor/xterm.js, writeBytes or term.write call. Therefore the future-xterm-upgrade consequence applies only while that intermediate old renderer existed; the tip has no such dependency. Keep this as a confirmed intermediate explicit-test-contract gap, suggested bucket other, not as an instruction to restore an obsolete dependency test on current code. Confidence source/contract only, no execution; proposed_drop remains false; possible_cover none; could-be-highest remains no. The later removal is source evolution, not a searched queue/coverage disposition.\n\nRetirement premise source check completed in synthesis: dbfc69751215dbf15e1d31d5bed73c3754c4ebc4 core.rs:6426-6438 invokes OldTerminals::end_private_server while owning the state directory, then disables further tmux use; reload contract at 6664-6681 gives old rows no terminal. old_terminals.rs:1-82 explains the startup-only ending/conversion and accepted failure residuals. The subsequent actual adapter/bundle deletion, rather than the success of cleanup on every machine, establishes that tip has no remaining xterm private-field dependency. No runtime cleanup result was assumed."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g176/findings.jsonl",
+        "id": "l1",
+        "line": 14,
+        "disposition": "under-investigation",
+        "group": "g176-l1",
+        "reason": "Record durably acknowledged; parent source/contract validation, cross-group synthesis, coverage/filter matching and any independent drop check remain pending. This preserves the claim and uncertainty without accepting, dropping or lowering it."
+      },
+      "accepted_parent_decision": null,
+      "returned_claim_checks": [
+        {
+          "batch": "claims-110",
+          "key": "g176/l1",
+          "latest_line": 14,
+          "recommendation": "needs-parent",
+          "bucket": "other",
+          "underlying_key": "retired-xterm-private-url-tag-test-gap",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The intermediate explicit dependency-test gap is established. Its subject disappears later within the reviewed range. Preserve the historical finding, but do not ask current code to restore an obsolete xterm test. Parent must distinguish recording an intermediate gap from recording an outstanding defect.",
+          "checks": [
+            "647f0227^:e2e/tests/terminal-links.spec.ts:1076-1154 contains seven real-xterm layouts; 1121-1135 reads and asserts actual extended.urlId values and shared tags. 647f0227 deletes that block.",
+            "647f0227:SPEC_impl.md:1892-1915 describes the xterm adapter and explicitly requires a browser test against the vendored bundle. Its grid-client section still supports the old renderer, while synthetic grid tags cannot certify the private xterm field.",
+            "dbfc6975:crates/farhelm-supervisor/src/service/core.rs:6426-6438 invokes startup ending under the state-directory ownership claim, then disables the tmux driver regardless of cleanup success. This is source behavior, not evidence of successful termination on a machine.",
+            "f560058d explicitly deletes assets/vendor/xterm.js and its add-ons. At 00de0b6c a git grep over UI assets, lib.rs, e2e and UI JS tests finds no extended.urlId, xtermLines, vendor/xterm.js, writeBytes, term.write or pendingWrite. The lost private-field dependency is absent at tip."
+          ],
+          "coverage_checked": [
+            "Current SPEC.md:2998-3010 retires old terminals; SPEC_impl.md:1838-1846 mounts grids only. These explain why the dependency test has no current subject, rather than accepting loss of its historical regression protection.",
+            "TODO.md Planned bucket is empty. Searches of unlanded plan text found no restoration of private-tag coverage. plans/queue/tmux-end-old-terminals.md:125-133 prescribes deleting tests with retired subjects; plans/REPORTS.md:29 marks that plan landed, so it is not unlanded-plan coverage.",
+            "BUGS.md contains only the unrelated stalled SSH-helper install/update issue. INDEX.md was read fully; searches of it and active TRIAGE_OUTCOMES.md found no exact private-tag-test item or decision. No archive read.",
+            "FILTER.md has no whole-boundary match for an intermediate dependency-contract test gap. No rare-condition filter was inferred."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": "No current xterm dependency or concrete shipped security regression remains established. An instruction to restore this test on present code would need a surviving consumer that the tip search did not find.",
+          "original_stronger_consequence": "Existing old sessions lost the regression check that wrapped hyperlink warnings read the real destination correctly; a future vendored-library change could silently remove warning protection. No actual misleading warning, opening bypass or work loss was demonstrated. The latest record preserves that intermediate consequence and expressly rejects restoring an obsolete dependency test at tip.",
+          "needs_independent_drop_check": true,
+          "proposed_basis": "Confirmed intermediate test-contract loss, followed by removal of its entire dependency within range. Any parent dismissal of the historical warning-protection claim should preserve this distinction and receive the independent check; this consultation does not authorize a drop."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": true,
+        "clearly_refuted_candidate": false,
+        "needs_unfinished_gate": true,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "retired-xterm-private-url-tag-test-gap",
+        "destination": "trailing-retired-xterm-private-url-tag-test-gap.md"
+      }
+    },
+    {
+      "key": "g176/l2",
+      "owner": "g176",
+      "id": "l2",
+      "domain": "browser-terminal-regressions",
+      "purpose": "browser-terminal-regressions: e2e/tests/terminal-link-clicks.spec.ts, e2e/tests/terminal-links.spec.ts, e2e/tests/terminal-migration.spec.ts, e2e/tests/terminal-multihost.spec.ts, e2e/tests/terminal-reconnect.spec.ts, e2e/tests/terminal-tabs.spec.ts; phases -  async function assertRefusalAboveTunnelNotice(page: Page) {",
+      "history": [
+        {
+          "line": 2,
+          "event": {
+            "version": 1,
+            "kind": "lead",
+            "id": "l2",
+            "state": "open",
+            "summary": "Removal of real-overlay tests may leave link disclosure layering untested",
+            "location": "e2e/tests/terminal-link-clicks.spec.ts:1",
+            "detail": "Reviewed commit: 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513. TLDR: deleting the browser tests removes checks that actual approval cards, tunnel notices, launch pills and destructive confirmations do not hide link destinations or warning text improperly. Assigned patch 00831-001.patch removes real-surface geometry/hit tests and both header-confirmation opening orders. Replacement search found e2e/grid-client/grid-attach.spec.ts:1408-1433 and 1763-1805 use synthetic data-link-cover elements rather than production overlay components. SPEC.md:3137-3140 and file-link paragraphs require full visible disclosure. Suspected consequence is a regression-coverage gap, not an established shipped safety failure. Suggested bucket: other; confidence: unverified pending complete replacement-source and UI-source checks. proposed_drop: false; possible_cover: none. Could-be-highest: no established security or loss-of-work route from test deletion alone. Next: check production layer markers/CSS and other browser tests for these exact real-surface assertions, then settle whether removal is justified by shared implementation coverage."
+          }
+        },
+        {
+          "line": 4,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "l2",
+            "state": "open",
+            "summary": "Preserve production overlay disclosure regression coverage",
+            "location": "e2e/tests/terminal-link-clicks.spec.ts:1",
+            "detail": "Reviewed commit: 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513.\n\nTLDR: Removing this entire browser test file loses the checks that real approval cards, tunnel notices and quick-launch surfaces keep link destinations protected and refusal explanations readable. The remaining synthetic-cover tests cannot detect a missing marker or a wrong layer on the actual interface.\n\nDetails: Assigned patch 00831-001.patch:1-694 removes real-surface overlap/refusal tests, the launch-pill and overflowing-suggestions tests, both Delete-confirmation opening orders, and the final test enumerating every visible marked cover's layer. These guarantees remain shared by new terminals, not only the retired xterm test fixture: SPEC_impl.md:1973-1976 says links, hover checks, downloads and tunnels are shared, and its Session-host file reads section at 4060-4074 says \"every surface that draws at or above the hover's layer and can overlap it carries a `data-link-cover` marker in its own markup\" and \"a browser test checks the explanation's layer against every marked surface it can render.\" Surviving tests e2e/grid-client/grid-attach.spec.ts:1408-1434 and 1763-1805 inject their own div with both marker and z-index:45. They establish the common gate but cannot fail if production launch_sequence.rs:752/774, approvals.rs:229 or tunnels.rs:466 loses its marker, or app.css:1793-1801 no longer raises refusals and lowers them beneath a real destructive confirmation. The static harness page at grid-attach.spec.ts:151-188 contains neither the production overlay components nor header confirmation layout. Pinned-tree searches for data-link-cover, disclosure-refusal, cover/refusal and confirmation/refusal assertions found no remaining real-overlay browser checks. Port the geometry/layer assertions to grid helper input in the real-stack browser suite before removing the xterm-driven versions.\n\nSuggested bucket: other; confidence: confirmed regression-coverage loss by source/contract analysis, no runtime execution. proposed_drop: false. possible_cover: none (excluded coverage sources not read). Could-be-highest: no established current security or data-loss route from the deletion alone; the existing production markers/layers appear present. Caveats: common admission behavior retains synthetic browser and JS tests; this is missing production wiring and paint-order coverage, not a claim that current links bypass admission or that current warnings are hidden."
+          }
+        },
+        {
+          "line": 9,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "l2",
+            "state": "open",
+            "summary": "Preserve production overlay disclosure regression coverage",
+            "location": "e2e/tests/terminal-link-clicks.spec.ts:1398",
+            "detail": "Reviewed commit: 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513.\n\nTLDR: Removing this entire browser test file loses the checks that real approval cards, tunnel notices and quick-launch surfaces keep link destinations protected and refusal explanations readable. The remaining synthetic-cover tests cannot detect a missing marker or a wrong layer on the actual interface.\n\nDetails: Assigned patch 00831-001.patch:1-694 removes real-surface overlap/refusal tests, the launch-pill and overflowing-suggestions tests, both Delete-confirmation opening orders, and the final test enumerating every visible marked cover's layer. These guarantees remain shared by new terminals, not only the retired xterm test fixture: SPEC_impl.md:1967-1969 says links, hover checks, downloads and tunnels are shared, and its Session-host file reads section at 4060-4074 says \"every surface that draws at or above the hover's layer and can overlap it carries a `data-link-cover` marker in its own markup\" and \"a browser test checks the explanation's layer against every marked surface it can render.\" Surviving tests e2e/grid-client/grid-attach.spec.ts:1408-1434 and 1763-1805 inject their own div with both marker and z-index:45. They establish the common gate but cannot fail if production launch_sequence.rs:752/774, approvals.rs:229 or tunnels.rs:466 loses its marker, or app.css:1793-1801 no longer raises refusals and lowers them beneath a real destructive confirmation. The static harness page at grid-attach.spec.ts:151-188 contains neither the production overlay components nor header confirmation layout. Pinned-tree searches for data-link-cover, disclosure-refusal, cover/refusal and confirmation/refusal assertions found no remaining real-overlay browser checks. Port the geometry/layer assertions to grid helper input in the real-stack browser suite before removing the xterm-driven versions.\n\nSuggested bucket: other; confidence: confirmed regression-coverage loss by source/contract analysis, no runtime execution. proposed_drop: false. possible_cover: none (excluded coverage sources not read). Could-be-highest: no established current security or data-loss route from the deletion alone; the existing production markers/layers appear present. Caveats: common admission behavior retains synthetic browser and JS tests; this is missing production wiring and paint-order coverage, not a claim that current links bypass admission or that current warnings are hidden.\n\nReference refinement: the removed layer-enumeration test begins at parent terminal-link-clicks.spec.ts:1398; the real-cover cases begin at 803, tunnel paint probes use helper 775, quick-launch cases begin at 1183, and destructive-confirmation cases at 1300. Production CSS at app.css:1793-1801 and its ladder at 2231-2271 still implements these protections, so this finding is solely their lost regression coverage."
+          }
+        },
+        {
+          "line": 11,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "l2",
+            "state": "open",
+            "summary": "Preserve production overlay disclosure regression coverage",
+            "location": "e2e/tests/terminal-link-clicks.spec.ts:1398",
+            "detail": "Reviewed commit: 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513.\n\nTLDR: Removing this entire browser test file loses the checks that real approval cards, tunnel notices and quick-launch surfaces keep link destinations protected and refusal explanations readable. The remaining synthetic-cover tests cannot detect a missing marker or a wrong layer on the actual interface.\n\nDetails: Assigned patch 00831-001.patch:1-694 removes real-surface overlap/refusal tests, the launch-pill and overflowing-suggestions tests, both Delete-confirmation opening orders, and the final test enumerating every visible marked cover's layer. These guarantees remain shared by new terminals, not only the retired xterm test fixture: SPEC_impl.md:1967-1969 says links, hover checks, downloads and tunnels are shared, and its Session-host file reads section at 4060-4074 says \"every surface that draws at or above the hover's layer and can overlap it carries a `data-link-cover` marker in its own markup\" and \"a browser test checks the explanation's layer against every marked surface it can render.\" Surviving tests e2e/grid-client/grid-attach.spec.ts:1408-1434 and 1763-1805 inject their own div with both marker and z-index:45. They establish the common gate but cannot fail if production launch_sequence.rs:752/774, approvals.rs:229 or tunnels.rs:466 loses its marker, or app.css:1793-1801 no longer raises refusals and lowers them beneath a real destructive confirmation. The static harness page at grid-attach.spec.ts:151-188 contains neither the production overlay components nor header confirmation layout. Pinned-tree searches for data-link-cover, disclosure-refusal, cover/refusal and confirmation/refusal assertions found no remaining real-overlay browser checks. Port the geometry/layer assertions to grid helper input in the real-stack browser suite before removing the xterm-driven versions.\n\nSuggested bucket: other; confidence: confirmed regression-coverage loss by source/contract analysis, no runtime execution. proposed_drop: false. possible_cover: none (excluded coverage sources not read). Could-be-highest: no established current security or data-loss route from the deletion alone; the existing production markers/layers appear present. Caveats: common admission behavior retains synthetic browser and JS tests; this is missing production wiring and paint-order coverage, not a claim that current links bypass admission or that current warnings are hidden.\n\nReference refinement: the removed layer-enumeration test begins at parent terminal-link-clicks.spec.ts:1398; the real-cover cases begin at 803, tunnel paint probes use helper 775, quick-launch cases begin at 1183, and destructive-confirmation cases at 1300. Production CSS at app.css:1793-1801 and its ladder at 2231-2271 still implements these protections, so this finding is solely their lost regression coverage.\n\nSynthesis turn 2 — surviving gap through pinned tip 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db: searched the entire retained e2e tree, including real-stack tests, grid-client suites and docs/media suites, for destination/notice selectors, cover markers, disclosure-refusal, overlap and paint/layer assertions. Inspected concrete surviving witnesses: grid-attach.spec.ts:1099-1125 and 1453-1498 still inject their own marked z-index:45 divs and assert refusal text/no transfer or opener calls; terminal-files.spec.ts:210-265 and 340-415 checks stat refusals, successful download, normal notice position/fade and disappearing-file failure, not clipping/covering/refusal layers; docs-shots/visual-review.spec.ts:475-540 checks unclipped ready/not-found hovers and mismatch content before screenshot, without a covered activation/refusal or destructive confirmation. terminal-files.test.js:682-756 simulates scrollHeight/rectangles and asserts outcome strings, without CSS paint. No retained browser witness found for production overlay markers, refusal paint above real covers or warning paint above refusal.\n\nThe live production contract is unchanged at tip SPEC_impl.md:3584-3596: every overlapping surface at the preview layer marks itself; the refusal sits above every cover except trash; a browser test checks its layer against every rendered marked surface. Production markers still exist at approvals.rs:229, launch_sequence.rs:752/774, tunnels.rs:464/631/932; app.css:1791 raises disclosure refusal to 51, 1795-1799 lowers it for inert content and real header confirmation, and 2229-2271 retains the layer ladder. This is therefore a missing regression witness, not evidence that production is already mislayered.\n\nMeaningful competing regressions a replacement must distinguish: (1) remove data-link-cover from the real quick-launch suggestions child that extends outside its marked parent: the common algorithm and injected-cover tests still pass, but a destination hidden only by that child can open/download. A real-app witness must prove pointer/link identity, actual child/disclosure overlap but no parent overlap, no transfer/open on both file and OSC web activation, then successful same-target activation after canceling the cover. (2) lower the disclosure-refusal rule below the real tunnel notice, or remove the header-confirm lowering selector: refusal strings remain correct and all synthetic text assertions still pass, but either the refusal is unreadable or it paints over the destructive consequence. Witness actual intersecting rectangles and relative paint order via elementsFromPoint with pointer-transparent notice temporarily included; cover both confirmation-before-refusal and refusal-before-confirmation, and fresh-hover recovery. Clipped-window refusal readability is complementary scope supplied by g174/l1 (original patch lines 121-192 and 621-774); reconcile g176/l2 and g174/l1 as one missing production-wiring/readability/layer regression while retaining both IDs and each original scope. This is corroboration, not new discovery. Original consequences and suggested bucket other retained; confidence confirmed source-only; proposed_drop false; possible_cover none; could-be-highest no established current product harm; no reproduction or mutation was performed."
+          }
+        },
+        {
+          "line": 15,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "l2",
+            "state": "open",
+            "summary": "Preserve production overlay disclosure regression coverage",
+            "location": "e2e/tests/terminal-link-clicks.spec.ts:1398",
+            "detail": "Reviewed commit: 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513.\n\nTLDR: Removing this entire browser test file loses the checks that real approval cards, tunnel notices and quick-launch surfaces keep link destinations protected and refusal explanations readable. The remaining synthetic-cover tests cannot detect a missing marker or a wrong layer on the actual interface.\n\nDetails: Assigned patch 00831-001.patch:1-694 removes real-surface overlap/refusal tests, the launch-pill and overflowing-suggestions tests, both Delete-confirmation opening orders, and the final test enumerating every visible marked cover's layer. These guarantees remain shared by new terminals, not only the retired xterm test fixture: SPEC_impl.md:1967-1969 says links, hover checks, downloads and tunnels are shared, and its Session-host file reads section at 4060-4074 says \"every surface that draws at or above the hover's layer and can overlap it carries a `data-link-cover` marker in its own markup\" and \"a browser test checks the explanation's layer against every marked surface it can render.\" Surviving tests e2e/grid-client/grid-attach.spec.ts:1408-1434 and 1763-1805 inject their own div with both marker and z-index:45. They establish the common gate but cannot fail if production launch_sequence.rs:752/774, approvals.rs:229 or tunnels.rs:466 loses its marker, or app.css:1793-1801 no longer raises refusals and lowers them beneath a real destructive confirmation. The static harness page at grid-attach.spec.ts:151-188 contains neither the production overlay components nor header confirmation layout. Pinned-tree searches for data-link-cover, disclosure-refusal, cover/refusal and confirmation/refusal assertions found no remaining real-overlay browser checks. Port the geometry/layer assertions to grid helper input in the real-stack browser suite before removing the xterm-driven versions.\n\nSuggested bucket: other; confidence: confirmed regression-coverage loss by source/contract analysis, no runtime execution. proposed_drop: false. possible_cover: none (excluded coverage sources not read). Could-be-highest: no established current security or data-loss route from the deletion alone; the existing production markers/layers appear present. Caveats: common admission behavior retains synthetic browser and JS tests; this is missing production wiring and paint-order coverage, not a claim that current links bypass admission or that current warnings are hidden.\n\nReference refinement: the removed layer-enumeration test begins at parent terminal-link-clicks.spec.ts:1398; the real-cover cases begin at 803, tunnel paint probes use helper 775, quick-launch cases begin at 1183, and destructive-confirmation cases at 1300. Production CSS at app.css:1793-1801 and its ladder at 2231-2271 still implements these protections, so this finding is solely their lost regression coverage.\n\nSynthesis turn 2 — surviving gap through pinned tip 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db: searched the entire retained e2e tree, including real-stack tests, grid-client suites and docs/media suites, for destination/notice selectors, cover markers, disclosure-refusal, overlap and paint/layer assertions. Inspected concrete surviving witnesses: grid-attach.spec.ts:1099-1125 and 1453-1498 still inject their own marked z-index:45 divs and assert refusal text/no transfer or opener calls; terminal-files.spec.ts:210-265 and 340-415 checks stat refusals, successful download, normal notice position/fade and disappearing-file failure, not clipping/covering/refusal layers; docs-shots/visual-review.spec.ts:475-540 checks unclipped ready/not-found hovers and mismatch content before screenshot, without a covered activation/refusal or destructive confirmation. terminal-files.test.js:682-756 simulates scrollHeight/rectangles and asserts outcome strings, without CSS paint. No retained browser witness found for production overlay markers, refusal paint above real covers or warning paint above refusal.\n\nThe live production contract is unchanged at tip SPEC_impl.md:3584-3596: every overlapping surface at the preview layer marks itself; the refusal sits above every cover except trash; a browser test checks its layer against every rendered marked surface. Production markers still exist at approvals.rs:229, launch_sequence.rs:752/774, tunnels.rs:464/631/932; app.css:1791 raises disclosure refusal to 51, 1795-1799 lowers it for inert content and real header confirmation, and 2229-2271 retains the layer ladder. This is therefore a missing regression witness, not evidence that production is already mislayered.\n\nMeaningful competing regressions a replacement must distinguish: (1) remove data-link-cover from the real quick-launch suggestions child that extends outside its marked parent: the common algorithm and injected-cover tests still pass, but a destination hidden only by that child can open/download. A real-app witness must prove pointer/link identity, actual child/disclosure overlap but no parent overlap, no transfer/open on both file and OSC web activation, then successful same-target activation after canceling the cover. (2) lower the disclosure-refusal rule below the real tunnel notice, or remove the header-confirm lowering selector: refusal strings remain correct and all synthetic text assertions still pass, but either the refusal is unreadable or it paints over the destructive consequence. Witness actual intersecting rectangles and relative paint order via elementsFromPoint with pointer-transparent notice temporarily included; cover both confirmation-before-refusal and refusal-before-confirmation, and fresh-hover recovery. Clipped-window refusal readability is complementary scope supplied by g174/l1 (original patch lines 121-192 and 621-774); reconcile g176/l2 and g174/l1 as one missing production-wiring/readability/layer regression while retaining both IDs and each original scope. This is corroboration, not new discovery. Original consequences and suggested bucket other retained; confidence confirmed source-only; proposed_drop false; possible_cover none; could-be-highest no established current product harm; no reproduction or mutation was performed.\n\nAdditional synthesis premise checks: tip terminal-files.js:33-50 enumerates only rendered data-link-cover elements and takes each own getBoundingClientRect; admitDisclosure:485-490 uses those rectangles at activation. The missing-child-marker competing regression is therefore concrete, not an assumed DOM heuristic. Actual production source at launch_sequence.rs:742-781 documents and renders the overflowing child marker, approvals.rs:216-238 marks the scrolling region, tunnels.rs:455-475 marks the notice, and tooltip.js:373-412 marks tip and pointer. Enumerating all retained spec/config paths found browser suites only under e2e; the earlier entire-e2e search therefore included the retained screenshot/media suites too. tooltip-coverage.spec.ts:229-265 z-index probes test missing hover text and editor attributes, not refusal paint. Searches of media suites and JS CSS tests found no production refusal-layer witness. These checks strengthen l2 without adding a new finding or altering the original consequence/bucket."
+          }
+        }
+      ],
+      "latest": {
+        "line": 15,
+        "event": {
+          "version": 1,
+          "kind": "finding",
+          "id": "l2",
+          "state": "open",
+          "summary": "Preserve production overlay disclosure regression coverage",
+          "location": "e2e/tests/terminal-link-clicks.spec.ts:1398",
+          "detail": "Reviewed commit: 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513.\n\nTLDR: Removing this entire browser test file loses the checks that real approval cards, tunnel notices and quick-launch surfaces keep link destinations protected and refusal explanations readable. The remaining synthetic-cover tests cannot detect a missing marker or a wrong layer on the actual interface.\n\nDetails: Assigned patch 00831-001.patch:1-694 removes real-surface overlap/refusal tests, the launch-pill and overflowing-suggestions tests, both Delete-confirmation opening orders, and the final test enumerating every visible marked cover's layer. These guarantees remain shared by new terminals, not only the retired xterm test fixture: SPEC_impl.md:1967-1969 says links, hover checks, downloads and tunnels are shared, and its Session-host file reads section at 4060-4074 says \"every surface that draws at or above the hover's layer and can overlap it carries a `data-link-cover` marker in its own markup\" and \"a browser test checks the explanation's layer against every marked surface it can render.\" Surviving tests e2e/grid-client/grid-attach.spec.ts:1408-1434 and 1763-1805 inject their own div with both marker and z-index:45. They establish the common gate but cannot fail if production launch_sequence.rs:752/774, approvals.rs:229 or tunnels.rs:466 loses its marker, or app.css:1793-1801 no longer raises refusals and lowers them beneath a real destructive confirmation. The static harness page at grid-attach.spec.ts:151-188 contains neither the production overlay components nor header confirmation layout. Pinned-tree searches for data-link-cover, disclosure-refusal, cover/refusal and confirmation/refusal assertions found no remaining real-overlay browser checks. Port the geometry/layer assertions to grid helper input in the real-stack browser suite before removing the xterm-driven versions.\n\nSuggested bucket: other; confidence: confirmed regression-coverage loss by source/contract analysis, no runtime execution. proposed_drop: false. possible_cover: none (excluded coverage sources not read). Could-be-highest: no established current security or data-loss route from the deletion alone; the existing production markers/layers appear present. Caveats: common admission behavior retains synthetic browser and JS tests; this is missing production wiring and paint-order coverage, not a claim that current links bypass admission or that current warnings are hidden.\n\nReference refinement: the removed layer-enumeration test begins at parent terminal-link-clicks.spec.ts:1398; the real-cover cases begin at 803, tunnel paint probes use helper 775, quick-launch cases begin at 1183, and destructive-confirmation cases at 1300. Production CSS at app.css:1793-1801 and its ladder at 2231-2271 still implements these protections, so this finding is solely their lost regression coverage.\n\nSynthesis turn 2 — surviving gap through pinned tip 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db: searched the entire retained e2e tree, including real-stack tests, grid-client suites and docs/media suites, for destination/notice selectors, cover markers, disclosure-refusal, overlap and paint/layer assertions. Inspected concrete surviving witnesses: grid-attach.spec.ts:1099-1125 and 1453-1498 still inject their own marked z-index:45 divs and assert refusal text/no transfer or opener calls; terminal-files.spec.ts:210-265 and 340-415 checks stat refusals, successful download, normal notice position/fade and disappearing-file failure, not clipping/covering/refusal layers; docs-shots/visual-review.spec.ts:475-540 checks unclipped ready/not-found hovers and mismatch content before screenshot, without a covered activation/refusal or destructive confirmation. terminal-files.test.js:682-756 simulates scrollHeight/rectangles and asserts outcome strings, without CSS paint. No retained browser witness found for production overlay markers, refusal paint above real covers or warning paint above refusal.\n\nThe live production contract is unchanged at tip SPEC_impl.md:3584-3596: every overlapping surface at the preview layer marks itself; the refusal sits above every cover except trash; a browser test checks its layer against every rendered marked surface. Production markers still exist at approvals.rs:229, launch_sequence.rs:752/774, tunnels.rs:464/631/932; app.css:1791 raises disclosure refusal to 51, 1795-1799 lowers it for inert content and real header confirmation, and 2229-2271 retains the layer ladder. This is therefore a missing regression witness, not evidence that production is already mislayered.\n\nMeaningful competing regressions a replacement must distinguish: (1) remove data-link-cover from the real quick-launch suggestions child that extends outside its marked parent: the common algorithm and injected-cover tests still pass, but a destination hidden only by that child can open/download. A real-app witness must prove pointer/link identity, actual child/disclosure overlap but no parent overlap, no transfer/open on both file and OSC web activation, then successful same-target activation after canceling the cover. (2) lower the disclosure-refusal rule below the real tunnel notice, or remove the header-confirm lowering selector: refusal strings remain correct and all synthetic text assertions still pass, but either the refusal is unreadable or it paints over the destructive consequence. Witness actual intersecting rectangles and relative paint order via elementsFromPoint with pointer-transparent notice temporarily included; cover both confirmation-before-refusal and refusal-before-confirmation, and fresh-hover recovery. Clipped-window refusal readability is complementary scope supplied by g174/l1 (original patch lines 121-192 and 621-774); reconcile g176/l2 and g174/l1 as one missing production-wiring/readability/layer regression while retaining both IDs and each original scope. This is corroboration, not new discovery. Original consequences and suggested bucket other retained; confidence confirmed source-only; proposed_drop false; possible_cover none; could-be-highest no established current product harm; no reproduction or mutation was performed.\n\nAdditional synthesis premise checks: tip terminal-files.js:33-50 enumerates only rendered data-link-cover elements and takes each own getBoundingClientRect; admitDisclosure:485-490 uses those rectangles at activation. The missing-child-marker competing regression is therefore concrete, not an assumed DOM heuristic. Actual production source at launch_sequence.rs:742-781 documents and renders the overflowing child marker, approvals.rs:216-238 marks the scrolling region, tunnels.rs:455-475 marks the notice, and tooltip.js:373-412 marks tip and pointer. Enumerating all retained spec/config paths found browser suites only under e2e; the earlier entire-e2e search therefore included the retained screenshot/media suites too. tooltip-coverage.spec.ts:229-265 z-index probes test missing hover text and editor attributes, not refusal paint. Searches of media suites and JS CSS tests found no production refusal-layer witness. These checks strengthen l2 without adding a new finding or altering the original consequence/bucket."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g176/findings.jsonl",
+        "id": "l2",
+        "line": 15,
+        "disposition": "duplicate",
+        "group": "real-app-terminal-disclosure-cover-and-refusal-layer-tests-removed",
+        "reason": "Parent read full109/110: same deleted production-cover/layer browser witnesses, same surviving useful synthetic z45 marked divs lacking actual production markup/paint order. Canonical174l1 retained; preserve clipped disclosure/readmission, real approval/quick-launch marker enumeration and both intersecting header-confirmation/refusal orders. No current unsafe activation/hidden destructive consent alleged. One integration-test-protection item with both scopes/provenance."
+      },
+      "accepted_parent_decision": {
+        "key": "g176/l2",
+        "line": 15,
+        "disposition": "duplicate",
+        "group": "real-app-terminal-disclosure-cover-and-refusal-layer-tests-removed",
+        "bucket": "other",
+        "recording": "new-with-canonical",
+        "needs_independent_drop_check": false,
+        "reason": "Parent read full109/110: same deleted production-cover/layer browser witnesses, same surviving useful synthetic z45 marked divs lacking actual production markup/paint order. Canonical174l1 retained; preserve clipped disclosure/readmission, real approval/quick-launch marker enumeration and both intersecting header-confirmation/refusal orders. No current unsafe activation/hidden destructive consent alleged. One integration-test-protection item with both scopes/provenance."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-110",
+          "key": "g176/l2",
+          "latest_line": 15,
+          "recommendation": "retain-verified",
+          "bucket": "other",
+          "underlying_key": "production-link-disclosure-cover-layer-browser-witness-removed",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The deleted real-interface witnesses exercise production cover markup and relative paint order. Retained synthetic-cover tests supply their own markers and layers, so they cannot detect the named production-wiring regressions. This is a test-sensitivity defect, not a demonstrated current link-admission bypass.",
+          "checks": [
+            "647f0227^:e2e/tests/terminal-link-clicks.spec.ts:1300-1383 checks both confirmation/refusal opening orders, actual intersection and elementsFromPoint order. 1398-1467 enumerates real rendered marked surfaces and their layers. The file is deleted at 647f0227.",
+            "00de0b6c:e2e/grid-client/grid-attach.spec.ts:1099-1125 and 1454-1497 construct their own marked z-index:45 divs and assert refusal text/no transfers or opens. They do not instantiate production approval/quick-launch/header-confirmation components.",
+            "At 00de0b6c, targeted entire-e2e searches for data-link-cover, disclosure-refusal, warningAbove, refusalLayer, cover-layers and covered-activation text find synthetic grid tests and an HTML tunnel preview helper, with no retained production refusal-layer assertion.",
+            "00de0b6c production markers remain at approvals.rs:229, launch_sequence.rs:752/774 and tunnels.rs:464/631/932. app.css:1791 raises refusals to 51 and 1795-1799 lowers them for inert content/header confirmations. Existence of these rules does not replace the removed test witness."
+          ],
+          "coverage_checked": [
+            "Current SPEC.md:3140-3151 requires full visible disclosure and a visible refusal; SPEC_impl.md:3584-3596 requires declarative covers and a browser layer check. These support the finding, not acceptance of missing coverage.",
+            "TODO.md Planned is empty. Searched plans/queue for production cover/refusal tests. The matching approval-cards-fit validation paragraph names the removed file but that plan is landed (plans/REPORTS.md:5); it does not supply replacement coverage. tmux-end-old-terminals:130-133 says surviving test subjects run on hosts, not that shared disclosure coverage may disappear.",
+            "BUGS.md has no matching issue. INDEX.md and active TRIAGE_OUTCOMES.md have no exact lost-witness item or decision. Existing header-confirmation-lowers-link-refusal.md was read fully: it concerns current conditional lowering beneath unrelated covers, not deletion of production-marker/paint-order tests. It is related context, not exact coverage or a same-root alias.",
+            "FILTER.md does not cover the whole consequence of losing explicit regression coverage. No rarity or imprecise-diagnostic exclusion applies."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": "No current production admission bypass or concealed-warning layout was reproduced. Highest would need a concrete shipped security/work-loss route; the established consequence is missing maintainer regression protection.",
+          "original_stronger_consequence": "Removing real approval-card, tunnel-notice, launch-pill/overflowing-suggestion and destructive-confirmation tests loses protection against hidden destinations and unreadable refusals. Synthetic algorithm tests cannot catch missing production markers or incorrect production paint order. Latest history also requests reconciliation with g174/l1's clipped-window scope; that record was not supplied here and is not independently classified as an alias.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Record the production-markup/layer witness loss as other, retaining the original real-cover scope, both destructive-confirmation orders, and the limitation that production correctness itself was not disproved. Parent can reconcile g174/l1 separately without discarding complementary scope."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": true,
+        "clearly_refuted_candidate": false,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "real-app-terminal-disclosure-cover-and-refusal-layer-tests-removed",
+        "destination": "trailing-real-app-terminal-disclosure-cover-and-refusal-layer-tests-removed.md"
+      }
+    },
+    {
+      "key": "g176/c1",
+      "owner": "g176",
+      "id": "c1",
+      "domain": "browser-terminal-regressions",
+      "purpose": "browser-terminal-regressions: e2e/tests/terminal-link-clicks.spec.ts, e2e/tests/terminal-links.spec.ts, e2e/tests/terminal-migration.spec.ts, e2e/tests/terminal-multihost.spec.ts, e2e/tests/terminal-reconnect.spec.ts, e2e/tests/terminal-tabs.spec.ts; phases -  async function assertRefusalAboveTunnelNotice(page: Page) {",
+      "history": [
+        {
+          "line": 5,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c1",
+            "state": "open",
+            "summary": "Remote reboot still ends every terminal created by its stack",
+            "location": "e2e/tests/terminal-multihost.spec.ts:3605",
+            "detail": "Reviewed commit: 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513. TLDR considered: removing tmux kill-server might leave test agents running through a simulated reboot or change the restored supervisor's terminal kind. Source refutation: terminal-multihost.spec.ts:749-759 restores the supervisor with the same state and boot-id-file arguments as e2e/start-stack.sh:516; both use the current supervisor, which no longer has the tmux-creation option. The reboot helper at terminal-multihost.spec.ts:3605-3616 still kills its owned supervisor, runs internal stop-terminal-hosts for the owned remote state and asserts status zero before changing the boot id and respawning. The removed tmux cleanup was for the removed old-terminal run, not terminals this stack now produces. SPEC.md Terminal experience requires new terminals for every new run and retains old terminals only from earlier supervisors. Suggested bucket: other if it existed; confidence: confirmed source-only refutation; proposed_drop: source refutation above. possible_cover: none. Could-be-highest: no; considered harm is test fixture leakage only, no route to user-owned processes shown. Caveat: no runtime teardown was executed, and no claims are made about independent changes outside this assignment."
+          }
+        },
+        {
+          "line": 16,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c1",
+            "state": "open",
+            "summary": "Remote reboot still ends every terminal created by its stack",
+            "location": "e2e/tests/terminal-multihost.spec.ts:3605",
+            "detail": "Reviewed commit: 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513. TLDR considered: removing tmux kill-server might leave test agents running through a simulated reboot or change the restored supervisor's terminal kind. Source refutation: terminal-multihost.spec.ts:749-759 restores the supervisor with the same state and boot-id-file arguments as e2e/start-stack.sh:516; both use the current supervisor, which no longer has the tmux-creation option. The reboot helper at terminal-multihost.spec.ts:3605-3616 still kills its owned supervisor, runs internal stop-terminal-hosts for the owned remote state and asserts status zero before changing the boot id and respawning. The removed tmux cleanup was for the removed old-terminal run, not terminals this stack now produces. SPEC.md Terminal experience requires new terminals for every new run and retains old terminals only from earlier supervisors. Suggested bucket: other if it existed; confidence: confirmed source-only refutation; proposed_drop: source refutation above. possible_cover: none. Could-be-highest: no; considered harm is test fixture leakage only, no route to user-owned processes shown. Caveat: no runtime teardown was executed, and no claims are made about independent changes outside this assignment.\n\nDiscovery pass 1 additional caller/schema check (no new issue): at 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513 the StackInfo consumer at terminal-multihost.spec.ts:95-142 and producer at e2e/start-stack.sh:560-578 agree on binary, isolated state, boot-id path, replacement pidfile and logging fields after new_terminals removal. A targeted search of the assigned test files, playwright.config.ts and global-setup.ts found no remaining new_terminals/NEW_TERMINALS/old-terminal selector dependency. The unchanged process identity and socket-liveness helpers do not inspect the removed option. No new schema mismatch, changed process-targeting premise or missing respawn argument was found. This adds checks to the original candidate without treating its proposed drop as parent-accepted; no source or runtime bug is inferred from removed metadata."
+          }
+        }
+      ],
+      "latest": {
+        "line": 16,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c1",
+          "state": "open",
+          "summary": "Remote reboot still ends every terminal created by its stack",
+          "location": "e2e/tests/terminal-multihost.spec.ts:3605",
+          "detail": "Reviewed commit: 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513. TLDR considered: removing tmux kill-server might leave test agents running through a simulated reboot or change the restored supervisor's terminal kind. Source refutation: terminal-multihost.spec.ts:749-759 restores the supervisor with the same state and boot-id-file arguments as e2e/start-stack.sh:516; both use the current supervisor, which no longer has the tmux-creation option. The reboot helper at terminal-multihost.spec.ts:3605-3616 still kills its owned supervisor, runs internal stop-terminal-hosts for the owned remote state and asserts status zero before changing the boot id and respawning. The removed tmux cleanup was for the removed old-terminal run, not terminals this stack now produces. SPEC.md Terminal experience requires new terminals for every new run and retains old terminals only from earlier supervisors. Suggested bucket: other if it existed; confidence: confirmed source-only refutation; proposed_drop: source refutation above. possible_cover: none. Could-be-highest: no; considered harm is test fixture leakage only, no route to user-owned processes shown. Caveat: no runtime teardown was executed, and no claims are made about independent changes outside this assignment.\n\nDiscovery pass 1 additional caller/schema check (no new issue): at 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513 the StackInfo consumer at terminal-multihost.spec.ts:95-142 and producer at e2e/start-stack.sh:560-578 agree on binary, isolated state, boot-id path, replacement pidfile and logging fields after new_terminals removal. A targeted search of the assigned test files, playwright.config.ts and global-setup.ts found no remaining new_terminals/NEW_TERMINALS/old-terminal selector dependency. The unchanged process identity and socket-liveness helpers do not inspect the removed option. No new schema mismatch, changed process-targeting premise or missing respawn argument was found. This adds checks to the original candidate without treating its proposed drop as parent-accepted; no source or runtime bug is inferred from removed metadata."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g176/findings.jsonl",
+        "id": "c1",
+        "line": 16,
+        "disposition": "excluded",
+        "group": "removed-tmux-test-reboot-cleanup-allegation",
+        "reason": "Parent explicitly accepted named refuted proposal from claims-110 after inspecting it. The simulated reboot retains checked cleanup for the terminal-host substrate its stack creates. Removing tmux kill-server does not leave that stack's created terminals without a termination step or change its respawn arguments. Refute only the removed-tmux-cleanup/respawn allegation. Do not generalize to every test-host cleanup race or certify actual runtime teardown. Checked source/results: [\"647f0227:e2e/tests/terminal-multihost.spec.ts:3606-3615 kills its owned supervisor, invokes internal stop-terminal-hosts with the owned remote state, checks error/status, then changes the boot id and restores the supervisor.\",\"647f0227:e2e/tests/terminal-multihost.spec.ts:749-764 respawns supervisor run with remote state and boot-id file; e2e/start-stack.sh:516 uses the same arguments. Neither selects old terminal creation.\",\"647f0227:crates/farhelm-supervisor/src/service/status.rs:600-614 declares and reports that current supervisors always create terminal hosts. The removed tmux-creation switch is the reason the old fixture cleanup becomes unnecessary. No teardown was executed.\"] Current coverage/results: [\"Both specifications were searched for old-terminal and reboot behavior. Current SPEC.md:2900 onward describes terminal hosts; 2998-3010 describes subsequent retirement. The historical source refutation does not depend on current retirement succeeding.\",\"TODO.md Planned empty; no exact unlanded plan, BUGS.md, INDEX.md or active TRIAGE_OUTCOMES.md coverage found in targeted reboot/old-terminal/cleanup searches. Nearby pending-test-host-start-cleanup and reboot-concurrency entries concern different scheduling/ownership boundaries, not removal of tmux kill-server from this helper.\",\"FILTER.md is not used; this is source refutation of the specified allegation.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Removing tmux kill-server might leave test agents running through the simulated reboot or alter restored terminal kind. This was confined to owned test-fixture leakage; no user-owned process route was alleged or established.\"; \"A surviving tmux terminal produced by this current isolated stack would be needed to establish the alleged missing cleanup. The reviewed stack no longer has that creation path.\"."
+      },
+      "accepted_parent_decision": {
+        "key": "g176/c1",
+        "line": 16,
+        "disposition": "excluded",
+        "group": "removed-tmux-test-reboot-cleanup-allegation",
+        "bucket": "other",
+        "recording": "refuted",
+        "queue_target_candidate": null,
+        "needs_independent_drop_check": false,
+        "reason": "Parent explicitly accepted named refuted proposal from claims-110 after inspecting it. The simulated reboot retains checked cleanup for the terminal-host substrate its stack creates. Removing tmux kill-server does not leave that stack's created terminals without a termination step or change its respawn arguments. Refute only the removed-tmux-cleanup/respawn allegation. Do not generalize to every test-host cleanup race or certify actual runtime teardown. Checked source/results: [\"647f0227:e2e/tests/terminal-multihost.spec.ts:3606-3615 kills its owned supervisor, invokes internal stop-terminal-hosts with the owned remote state, checks error/status, then changes the boot id and restores the supervisor.\",\"647f0227:e2e/tests/terminal-multihost.spec.ts:749-764 respawns supervisor run with remote state and boot-id file; e2e/start-stack.sh:516 uses the same arguments. Neither selects old terminal creation.\",\"647f0227:crates/farhelm-supervisor/src/service/status.rs:600-614 declares and reports that current supervisors always create terminal hosts. The removed tmux-creation switch is the reason the old fixture cleanup becomes unnecessary. No teardown was executed.\"] Current coverage/results: [\"Both specifications were searched for old-terminal and reboot behavior. Current SPEC.md:2900 onward describes terminal hosts; 2998-3010 describes subsequent retirement. The historical source refutation does not depend on current retirement succeeding.\",\"TODO.md Planned empty; no exact unlanded plan, BUGS.md, INDEX.md or active TRIAGE_OUTCOMES.md coverage found in targeted reboot/old-terminal/cleanup searches. Nearby pending-test-host-start-cleanup and reboot-concurrency entries concern different scheduling/ownership boundaries, not removal of tmux kill-server from this helper.\",\"FILTER.md is not used; this is source refutation of the specified allegation.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Removing tmux kill-server might leave test agents running through the simulated reboot or alter restored terminal kind. This was confined to owned test-fixture leakage; no user-owned process route was alleged or established.\"; \"A surviving tmux terminal produced by this current isolated stack would be needed to establish the alleged missing cleanup. The reviewed stack no longer has that creation path.\"."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-110",
+          "key": "g176/c1",
+          "latest_line": 16,
+          "recommendation": "refuted",
+          "bucket": "other",
+          "underlying_key": "removed-tmux-test-reboot-cleanup-allegation",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The simulated reboot retains checked cleanup for the terminal-host substrate its stack creates. Removing tmux kill-server does not leave that stack's created terminals without a termination step or change its respawn arguments.",
+          "checks": [
+            "647f0227:e2e/tests/terminal-multihost.spec.ts:3606-3615 kills its owned supervisor, invokes internal stop-terminal-hosts with the owned remote state, checks error/status, then changes the boot id and restores the supervisor.",
+            "647f0227:e2e/tests/terminal-multihost.spec.ts:749-764 respawns supervisor run with remote state and boot-id file; e2e/start-stack.sh:516 uses the same arguments. Neither selects old terminal creation.",
+            "647f0227:crates/farhelm-supervisor/src/service/status.rs:600-614 declares and reports that current supervisors always create terminal hosts. The removed tmux-creation switch is the reason the old fixture cleanup becomes unnecessary. No teardown was executed."
+          ],
+          "coverage_checked": [
+            "Both specifications were searched for old-terminal and reboot behavior. Current SPEC.md:2900 onward describes terminal hosts; 2998-3010 describes subsequent retirement. The historical source refutation does not depend on current retirement succeeding.",
+            "TODO.md Planned empty; no exact unlanded plan, BUGS.md, INDEX.md or active TRIAGE_OUTCOMES.md coverage found in targeted reboot/old-terminal/cleanup searches. Nearby pending-test-host-start-cleanup and reboot-concurrency entries concern different scheduling/ownership boundaries, not removal of tmux kill-server from this helper.",
+            "FILTER.md is not used; this is source refutation of the specified allegation."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": "A surviving tmux terminal produced by this current isolated stack would be needed to establish the alleged missing cleanup. The reviewed stack no longer has that creation path.",
+          "original_stronger_consequence": "Removing tmux kill-server might leave test agents running through the simulated reboot or alter restored terminal kind. This was confined to owned test-fixture leakage; no user-owned process route was alleged or established.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Refute only the removed-tmux-cleanup/respawn allegation. Do not generalize to every test-host cleanup race or certify actual runtime teardown."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "removed-tmux-test-reboot-cleanup-allegation",
+        "destination": null
+      }
+    },
+    {
+      "key": "g176/c2",
+      "owner": "g176",
+      "id": "c2",
+      "domain": "browser-terminal-regressions",
+      "purpose": "browser-terminal-regressions: e2e/tests/terminal-link-clicks.spec.ts, e2e/tests/terminal-links.spec.ts, e2e/tests/terminal-migration.spec.ts, e2e/tests/terminal-multihost.spec.ts, e2e/tests/terminal-reconnect.spec.ts, e2e/tests/terminal-tabs.spec.ts; phases -  async function assertRefusalAboveTunnelNotice(page: Page) {",
+      "history": [
+        {
+          "line": 6,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c2",
+            "state": "open",
+            "summary": "Deleting the held-xterm-write test does not change recovery ownership",
+            "location": "e2e/tests/terminal-reconnect.spec.ts:2037",
+            "detail": "Reviewed commit: 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513. TLDR considered: deleting the held replay-write callback regression might let a dead attachment stop recovery or replace its outage card. Source refutation of a new functional regression: the assigned patch only removes the old-terminal-tagged xterm-specific test. terminal.js:5202-5218 retains the alive/ended checks before reveal and recovery cancellation, and writeBytes at 5335-5344 retains its dead-mount callback guard. Its grid branch at 5220-5233 flushes and reveals synchronously rather than waiting for term.write callbacks. The adjacent late-evidence-cannot-confirm-a-closing-socket test remains at terminal-reconnect.spec.ts:2037 onward for the shared transport-ending boundary. Suggested bucket: other if a test-coverage concern; confidence: confirmed source-only refutation of behavior regression. proposed_drop: no changed functional path and the removed callback mechanism is xterm-specific, per sources above. possible_cover: none. Could-be-highest: no; stranded recovery is a UX issue, not established security or loss of work. Caveat: this does remove distinct old-renderer regression coverage, and the late-evidence test is not claimed to exercise a held xterm callback. Unlike l1, no explicit spec requirement to retain this exact dependency test was found; removal alone does not substantiate a current recovery failure."
+          }
+        },
+        {
+          "line": 12,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "c2",
+            "state": "open",
+            "summary": "Intermediate loss of late-xterm-flush recovery coverage",
+            "location": "e2e/tests/terminal-reconnect.spec.ts:2037",
+            "detail": "Reviewed commit: 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513. TLDR considered: deleting the held replay-write callback regression might let a dead attachment stop recovery or replace its outage card. Source refutation of a new functional regression: the assigned patch only removes the old-terminal-tagged xterm-specific test. terminal.js:5202-5218 retains the alive/ended checks before reveal and recovery cancellation, and writeBytes at 5335-5344 retains its dead-mount callback guard. Its grid branch at 5220-5233 flushes and reveals synchronously rather than waiting for term.write callbacks. The adjacent late-evidence-cannot-confirm-a-closing-socket test remains at terminal-reconnect.spec.ts:2037 onward for the shared transport-ending boundary. Suggested bucket: other if a test-coverage concern; confidence: confirmed source-only refutation of behavior regression. proposed_drop: no changed functional path and the removed callback mechanism is xterm-specific, per sources above. possible_cover: none. Could-be-highest: no; stranded recovery is a UX issue, not established security or loss of work. Caveat: this does remove distinct old-renderer regression coverage, and the late-evidence test is not claimed to exercise a held xterm callback. Unlike l1, no explicit spec requirement to retain this exact dependency test was found; removal alone does not substantiate a current recovery failure.\n\nSynthesis turn 2 — correction of original disposition: absence of a changed production path does not refute test-only coverage loss. Preserve the original suspected consequence (a dead replay flush retires its successor retry or replaces the outage card), but supersede the original proposed_drop: proposed_drop is now false, no drop accepted. At 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513 old terminals still use term.write callbacks. The removed test specifically receives a replay marker, holds that old terminal write completion, closes its socket, starts recovery, then releases the callback. Removing the ended guard in terminal.js:5215 could reintroduce that race without the deleted witness. Retained terminal-reconnect.spec.ts:2037 onward delivers evidence after socket ending, before attach proof; it does not hold a successful marker flush across a later socket death. Retained terminal-replay-rename.spec.ts:1091-1171 holds the marker itself while navigating away/remounting and checks the alive guard, not a write completion on a socket-ended but still-owned mount. A search across retained intermediate e2e found no heldReplay/late-flush/Terminal.prototype.write witness for this boundary. Thus this is a confirmed distinct intermediate regression-coverage loss, suggested bucket other, confidence source-only; it is not a confirmed production failure.\n\nLater retirement is a separate fact: f560058da19e02716e6f943883a9508b447aff4e deletes the writeBytes/term.write and byte-renderer path. At tip 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db terminal.js:3756-3785 reveals via synchronous grid.flush, endCatchUp:3878-3915 calls reveal directly, and no deferred write completion exists. The shared dead-socket contract remains explicit in tip SPEC_impl.md:778 and the retained late-evidence-cannot-confirm-a-closing-socket at terminal-reconnect.spec.ts:2047-2155 establishes actual successor socket creation and successful input after releasing held real frames. This is meaningful coverage of the surviving queued-frame race, not equivalent coverage of the retired callback mechanism. No recommendation to restore an xterm callback test on tip. Original lower confidence framing and proposed-drop rationale remain above as history, explicitly superseded for the intermediate coverage loss. possible_cover none; could-be-highest no current security/loss-of-work route; no execution/reproduction."
+          }
+        }
+      ],
+      "latest": {
+        "line": 12,
+        "event": {
+          "version": 1,
+          "kind": "finding",
+          "id": "c2",
+          "state": "open",
+          "summary": "Intermediate loss of late-xterm-flush recovery coverage",
+          "location": "e2e/tests/terminal-reconnect.spec.ts:2037",
+          "detail": "Reviewed commit: 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513. TLDR considered: deleting the held replay-write callback regression might let a dead attachment stop recovery or replace its outage card. Source refutation of a new functional regression: the assigned patch only removes the old-terminal-tagged xterm-specific test. terminal.js:5202-5218 retains the alive/ended checks before reveal and recovery cancellation, and writeBytes at 5335-5344 retains its dead-mount callback guard. Its grid branch at 5220-5233 flushes and reveals synchronously rather than waiting for term.write callbacks. The adjacent late-evidence-cannot-confirm-a-closing-socket test remains at terminal-reconnect.spec.ts:2037 onward for the shared transport-ending boundary. Suggested bucket: other if a test-coverage concern; confidence: confirmed source-only refutation of behavior regression. proposed_drop: no changed functional path and the removed callback mechanism is xterm-specific, per sources above. possible_cover: none. Could-be-highest: no; stranded recovery is a UX issue, not established security or loss of work. Caveat: this does remove distinct old-renderer regression coverage, and the late-evidence test is not claimed to exercise a held xterm callback. Unlike l1, no explicit spec requirement to retain this exact dependency test was found; removal alone does not substantiate a current recovery failure.\n\nSynthesis turn 2 — correction of original disposition: absence of a changed production path does not refute test-only coverage loss. Preserve the original suspected consequence (a dead replay flush retires its successor retry or replaces the outage card), but supersede the original proposed_drop: proposed_drop is now false, no drop accepted. At 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513 old terminals still use term.write callbacks. The removed test specifically receives a replay marker, holds that old terminal write completion, closes its socket, starts recovery, then releases the callback. Removing the ended guard in terminal.js:5215 could reintroduce that race without the deleted witness. Retained terminal-reconnect.spec.ts:2037 onward delivers evidence after socket ending, before attach proof; it does not hold a successful marker flush across a later socket death. Retained terminal-replay-rename.spec.ts:1091-1171 holds the marker itself while navigating away/remounting and checks the alive guard, not a write completion on a socket-ended but still-owned mount. A search across retained intermediate e2e found no heldReplay/late-flush/Terminal.prototype.write witness for this boundary. Thus this is a confirmed distinct intermediate regression-coverage loss, suggested bucket other, confidence source-only; it is not a confirmed production failure.\n\nLater retirement is a separate fact: f560058da19e02716e6f943883a9508b447aff4e deletes the writeBytes/term.write and byte-renderer path. At tip 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db terminal.js:3756-3785 reveals via synchronous grid.flush, endCatchUp:3878-3915 calls reveal directly, and no deferred write completion exists. The shared dead-socket contract remains explicit in tip SPEC_impl.md:778 and the retained late-evidence-cannot-confirm-a-closing-socket at terminal-reconnect.spec.ts:2047-2155 establishes actual successor socket creation and successful input after releasing held real frames. This is meaningful coverage of the surviving queued-frame race, not equivalent coverage of the retired callback mechanism. No recommendation to restore an xterm callback test on tip. Original lower confidence framing and proposed-drop rationale remain above as history, explicitly superseded for the intermediate coverage loss. possible_cover none; could-be-highest no current security/loss-of-work route; no execution/reproduction."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g176/findings.jsonl",
+        "id": "c2",
+        "line": 12,
+        "disposition": "rejected",
+        "group": "retired-xterm-deferred-replay-flush-test-gap",
+        "reason": "Full110:647 deletes heldreplacementxtermwrite-callback-aftermarker/socketdeath/release/outage/laterliveecho witness whiledeferredonWrittenstilllives. Unchangedaliveguardsdonotrefutelosttestprotection; adjacentlateevidenceduringsocketcloseisnotheldcompletedmarkerflush. f560removesallterm.write/writeBytescallbacksbytip, synchronousgridflushdifferentboundary. Preserveintermediategap andinitialdismissalwithdrawal, no currentobsoletecallbacktestfix/runtimefailure."
+      },
+      "accepted_parent_decision": {
+        "key": "g176/c2",
+        "line": 12,
+        "disposition": "rejected",
+        "group": "retired-xterm-deferred-replay-flush-test-gap",
+        "bucket": "other",
+        "recording": "retired-in-range",
+        "needs_independent_drop_check": false,
+        "reason": "Full110:647 deletes heldreplacementxtermwrite-callback-aftermarker/socketdeath/release/outage/laterliveecho witness whiledeferredonWrittenstilllives. Unchangedaliveguardsdonotrefutelosttestprotection; adjacentlateevidenceduringsocketcloseisnotheldcompletedmarkerflush. f560removesallterm.write/writeBytescallbacksbytip, synchronousgridflushdifferentboundary. Preserveintermediategap andinitialdismissalwithdrawal, no currentobsoletecallbacktestfix/runtimefailure."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-110",
+          "key": "g176/c2",
+          "latest_line": 12,
+          "recommendation": "needs-parent",
+          "bucket": "other",
+          "underlying_key": "retired-xterm-deferred-replay-flush-test-gap",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The latest correction is valid: unchanged production code does not refute independent loss of the held-flush regression witness. That witness has a real intermediate subject, then loses it when all deferred xterm writes are removed. Parent must decide how to record an intermediate gap with no remaining callback mechanism.",
+          "checks": [
+            "647f0227^:e2e/tests/terminal-reconnect.spec.ts:2038-2092 holds replacement xterm write callbacks after replay marker arrival, ends the socket, releases callbacks, checks the outage surface and a later live input round trip. 647f0227 deletes it.",
+            "647f0227:assets/terminal.js:5202-5218 guards reveal with alive, attachProved and ended; 5335-5363 still invokes onWritten from deferred term.write completion. The guard is present, so no production failure is established, but this is exactly the boundary the removed test could protect.",
+            "00de0b6c:assets/terminal.js:3756-3785 reveals by synchronous grid.flush with the dead-socket guard. A pinned-tip grep finds no term.write or writeBytes in UI assets/tests; f560058d deletes the xterm bundle. The retired callback race is not the retained queued-frame race.",
+            "The deleted test's adjacent late-evidence case (647f0227^:terminal-reconnect.spec.ts:2094 onward) delivers attachment evidence during socket close, rather than a successful marker's deferred write completion after socket death. It is not equivalent coverage for the intermediate callback boundary."
+          ],
+          "coverage_checked": [
+            "Current SPEC_impl.md:773-778 expressly forbids dead-socket replay callbacks retiring new recovery; its grid section mounts only grids. Current SPEC.md Terminal experience retains reconnect usability, but neither spec accepts loss of a still-relevant regression assertion.",
+            "TODO.md Planned is empty; targeted unlanded plans, BUGS.md, full INDEX.md and active TRIAGE_OUTCOMES.md searches found no exact late-xterm-flush witness item. The landed retirement plan (REPORTS.md:29) explains current obsolescence; its test policy deletes tests with their subjects.",
+            "FILTER.md supplies no matching whole-consequence exclusion. No filter or production-correctness argument is used to erase the intermediate gap."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": "No remaining deferred xterm flush exists at tip; no actual recovery failure was observed. A present-code repair would need a surviving equivalent asynchronous completion boundary.",
+          "original_stronger_consequence": "A dead replay flush could retire its successor retry or replace the outage card. The first event proposed dropping this because no production path changed; latest line 12 explicitly supersedes that proposed drop and retains confirmed intermediate regression-test loss. The later callback retirement is separate from functional correctness at the deletion revision.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Preserve confirmed intermediate lost protection and the withdrawn original dismissal rationale. Do not restore an obsolete callback test or assert a current shipped recovery defect."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": true,
+        "clearly_refuted_candidate": false,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "retired-xterm-deferred-replay-flush-test-gap",
+        "destination": "trailing-retired-xterm-deferred-replay-flush-test-gap.md"
+      }
+    },
+    {
+      "key": "g176/c3",
+      "owner": "g176",
+      "id": "c3",
+      "domain": "browser-terminal-regressions",
+      "purpose": "browser-terminal-regressions: e2e/tests/terminal-link-clicks.spec.ts, e2e/tests/terminal-links.spec.ts, e2e/tests/terminal-migration.spec.ts, e2e/tests/terminal-multihost.spec.ts, e2e/tests/terminal-reconnect.spec.ts, e2e/tests/terminal-tabs.spec.ts; phases -  async function assertRefusalAboveTunnelNotice(page: Page) {",
+      "history": [
+        {
+          "line": 7,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c3",
+            "state": "open",
+            "summary": "Grid tab flow control is not driven by xterm write callbacks",
+            "location": "e2e/tests/terminal-tabs.spec.ts:658",
+            "detail": "Reviewed commit: 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513. TLDR considered: deleting the per-tab stalled-write test might remove the mechanism that keeps sibling terminals responsive. Source refutation of behavior regression: patch 00838-000.patch removes only the OLD_TERMINAL_TAG test and its unused fixture import. terminal.js:50-59 and SPEC_impl.md:1992-1998 establish that grids apply messages directly and do not send write-callback pause/resume. Actual new-terminal pacing is tested in farhelm-helm/src/terminal.rs:2511-2571 (slow browser pauses/resumes, browser pause/resume never forwarded) and farhelm-supervisor/src/service/grid_stream/tests.rs:472-511 (paused flood resumes with every retained history line). Terminal tab teardown/restart identity and real sibling interactivity tests remain in terminal-tabs.spec.ts:658-826. Suggested bucket: other if a coverage concern; confidence: source-only refutation of a changed flow-control contract. proposed_drop: the removed test's deliberate term.write stall cannot operate on grid terminals and no flow-control implementation changed in this assigned patch. possible_cover: none. Could-be-highest: no; the considered consequence is responsiveness/test coverage, not established loss of user-owned work. Caveat: backend single-stream tests do not independently prove simultaneous sibling interactivity; distinct old-renderer coverage is removed, but this is not evidence that the retained grid mechanism shares a blocking write callback."
+          }
+        },
+        {
+          "line": 13,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "c3",
+            "state": "open",
+            "summary": "Intermediate loss of old-renderer per-tab flow isolation coverage",
+            "location": "e2e/tests/terminal-tabs.spec.ts:658",
+            "detail": "Reviewed commit: 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513. TLDR considered: deleting the per-tab stalled-write test might remove the mechanism that keeps sibling terminals responsive. Source refutation of behavior regression: patch 00838-000.patch removes only the OLD_TERMINAL_TAG test and its unused fixture import. terminal.js:50-59 and SPEC_impl.md:1992-1998 establish that grids apply messages directly and do not send write-callback pause/resume. Actual new-terminal pacing is tested in farhelm-helm/src/terminal.rs:2511-2571 (slow browser pauses/resumes, browser pause/resume never forwarded) and farhelm-supervisor/src/service/grid_stream/tests.rs:472-511 (paused flood resumes with every retained history line). Terminal tab teardown/restart identity and real sibling interactivity tests remain in terminal-tabs.spec.ts:658-826. Suggested bucket: other if a coverage concern; confidence: source-only refutation of a changed flow-control contract. proposed_drop: the removed test's deliberate term.write stall cannot operate on grid terminals and no flow-control implementation changed in this assigned patch. possible_cover: none. Could-be-highest: no; the considered consequence is responsiveness/test coverage, not established loss of user-owned work. Caveat: backend single-stream tests do not independently prove simultaneous sibling interactivity; distinct old-renderer coverage is removed, but this is not evidence that the retained grid mechanism shares a blocking write callback.\n\nSynthesis turn 2 — correction of original disposition: no changed production path and a grid having no term.write callback do not refute loss of a regression test for old terminals that still existed at 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513. Preserve the original consequence (one stalled tab could block its agent/sibling or fail to resume), and supersede the original proposed_drop: proposed_drop now false, no drop accepted. The deleted witness paused a real producer by holding exactly one xterm instance write callback, proved its agent and sibling interactive with input round trips, then released callbacks and proved that tab resumed. At that intermediate revision terminal.js:5335-5370 still used per-mount pendingWrite/paused state and term.write completion to send pause/resume, and SPEC.md Terminal experience retained old terminal and per-viewer isolation contracts. A competing regression such as making browser pendingWrite/paused bookkeeping page-global would be caught by the removed three-terminal witness; the grid-only single-stream pacing tests and healthy-tab mount/restart tests cited in the first record would not exercise it. Confirmed intermediate test-only coverage gap; suggested bucket other, source-only confidence, no claim that the competing regression exists.\n\nDistinguish the later retirement: dbfc69751215dbf15e1d31d5bed73c3754c4ebc4 ends old terminals; f560058da19e02716e6f943883a9508b447aff4e removes old-renderer browser pause/resume and term.write bookkeeping. At pinned tip 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db terminal.js:13-35 applies grid messages directly and the helm owns each stream flow gauge, so the deleted xterm callback stall is no longer an applicable witness. The surviving shared no-head-of-line-blocking contract has concrete lower-layer coverage: tip farhelm-helm/src/client.rs:6172-6275, a_full_terminal_queue_detaches_that_terminal_without_blocking_the_others, drives the real demux loop, leaves channel 1 undrained, sends a healthy channel 2 frame after overflow, checks it arrives and channel 1 detaches visibly. This directly distinguishes awaiting capacity on one terminal queue from continuing to deliver another. The retained slow-browser/grid-stream pause/resume tests cited originally still cover the separate pause/drain/resume path; they do not establish real simultaneous sibling input under a deliberately paused grid stream, and the demux overflow witness is not misrepresented as that browser test. No current isolation bug is established and no obsolete xterm test should be restored at tip. Original proposed drop/rationale remains above as history, now superseded for the intermediate gap. possible_cover none; could-be-highest no security/loss-of-work route established. No reproduction or runtime execution."
+          }
+        }
+      ],
+      "latest": {
+        "line": 13,
+        "event": {
+          "version": 1,
+          "kind": "finding",
+          "id": "c3",
+          "state": "open",
+          "summary": "Intermediate loss of old-renderer per-tab flow isolation coverage",
+          "location": "e2e/tests/terminal-tabs.spec.ts:658",
+          "detail": "Reviewed commit: 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513. TLDR considered: deleting the per-tab stalled-write test might remove the mechanism that keeps sibling terminals responsive. Source refutation of behavior regression: patch 00838-000.patch removes only the OLD_TERMINAL_TAG test and its unused fixture import. terminal.js:50-59 and SPEC_impl.md:1992-1998 establish that grids apply messages directly and do not send write-callback pause/resume. Actual new-terminal pacing is tested in farhelm-helm/src/terminal.rs:2511-2571 (slow browser pauses/resumes, browser pause/resume never forwarded) and farhelm-supervisor/src/service/grid_stream/tests.rs:472-511 (paused flood resumes with every retained history line). Terminal tab teardown/restart identity and real sibling interactivity tests remain in terminal-tabs.spec.ts:658-826. Suggested bucket: other if a coverage concern; confidence: source-only refutation of a changed flow-control contract. proposed_drop: the removed test's deliberate term.write stall cannot operate on grid terminals and no flow-control implementation changed in this assigned patch. possible_cover: none. Could-be-highest: no; the considered consequence is responsiveness/test coverage, not established loss of user-owned work. Caveat: backend single-stream tests do not independently prove simultaneous sibling interactivity; distinct old-renderer coverage is removed, but this is not evidence that the retained grid mechanism shares a blocking write callback.\n\nSynthesis turn 2 — correction of original disposition: no changed production path and a grid having no term.write callback do not refute loss of a regression test for old terminals that still existed at 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513. Preserve the original consequence (one stalled tab could block its agent/sibling or fail to resume), and supersede the original proposed_drop: proposed_drop now false, no drop accepted. The deleted witness paused a real producer by holding exactly one xterm instance write callback, proved its agent and sibling interactive with input round trips, then released callbacks and proved that tab resumed. At that intermediate revision terminal.js:5335-5370 still used per-mount pendingWrite/paused state and term.write completion to send pause/resume, and SPEC.md Terminal experience retained old terminal and per-viewer isolation contracts. A competing regression such as making browser pendingWrite/paused bookkeeping page-global would be caught by the removed three-terminal witness; the grid-only single-stream pacing tests and healthy-tab mount/restart tests cited in the first record would not exercise it. Confirmed intermediate test-only coverage gap; suggested bucket other, source-only confidence, no claim that the competing regression exists.\n\nDistinguish the later retirement: dbfc69751215dbf15e1d31d5bed73c3754c4ebc4 ends old terminals; f560058da19e02716e6f943883a9508b447aff4e removes old-renderer browser pause/resume and term.write bookkeeping. At pinned tip 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db terminal.js:13-35 applies grid messages directly and the helm owns each stream flow gauge, so the deleted xterm callback stall is no longer an applicable witness. The surviving shared no-head-of-line-blocking contract has concrete lower-layer coverage: tip farhelm-helm/src/client.rs:6172-6275, a_full_terminal_queue_detaches_that_terminal_without_blocking_the_others, drives the real demux loop, leaves channel 1 undrained, sends a healthy channel 2 frame after overflow, checks it arrives and channel 1 detaches visibly. This directly distinguishes awaiting capacity on one terminal queue from continuing to deliver another. The retained slow-browser/grid-stream pause/resume tests cited originally still cover the separate pause/drain/resume path; they do not establish real simultaneous sibling input under a deliberately paused grid stream, and the demux overflow witness is not misrepresented as that browser test. No current isolation bug is established and no obsolete xterm test should be restored at tip. Original proposed drop/rationale remains above as history, now superseded for the intermediate gap. possible_cover none; could-be-highest no security/loss-of-work route established. No reproduction or runtime execution."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g176/findings.jsonl",
+        "id": "c3",
+        "line": 13,
+        "disposition": "rejected",
+        "group": "retired-xterm-per-tab-write-flow-isolation-test-gap",
+        "reason": "Full110:647 deletes one-xtermcallbackhold/observedpause/agent+siblingliveinput/resume-afterrelease browserwitness whileper-mountpendingWriteflowremains. Productionunchangedandrealhelmchanneloverflowunitnot equivalent browserpausedinputoracle; historicalgapisreal. f560retirescallbackflowandtiphasnopendingWrite, no currentobsoletefixturefix. Keep separatefromdeferredreplayflush, latergridisolationquestions, no runtimeblocking/worklossinferred."
+      },
+      "accepted_parent_decision": {
+        "key": "g176/c3",
+        "line": 13,
+        "disposition": "rejected",
+        "group": "retired-xterm-per-tab-write-flow-isolation-test-gap",
+        "bucket": "other",
+        "recording": "retired-in-range",
+        "needs_independent_drop_check": false,
+        "reason": "Full110:647 deletes one-xtermcallbackhold/observedpause/agent+siblingliveinput/resume-afterrelease browserwitness whileper-mountpendingWriteflowremains. Productionunchangedandrealhelmchanneloverflowunitnot equivalent browserpausedinputoracle; historicalgapisreal. f560retirescallbackflowandtiphasnopendingWrite, no currentobsoletefixturefix. Keep separatefromdeferredreplayflush, latergridisolationquestions, no runtimeblocking/worklossinferred."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-110",
+          "key": "g176/c3",
+          "latest_line": 13,
+          "recommendation": "needs-parent",
+          "bucket": "other",
+          "underlying_key": "retired-xterm-per-tab-write-flow-isolation-test-gap",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The removed browser witness genuinely tested one old renderer stalling while the agent and sibling stayed interactive and the stalled tab resumed. Neither unchanged production behavior nor separate grid pacing tests refutes that intermediate loss. The xterm write-flow mechanism itself is gone by tip.",
+          "checks": [
+            "647f0227^:terminal-tabs.spec.ts:660-778 scopes a write-callback hold to one xterm, forces its pause, performs real agent/sibling input round trips and requires resume after callback release. 647f0227 removes it.",
+            "647f0227:assets/terminal.js:5335-5371 still uses pendingWrite/paused and term.write completion to send per-mount pause/resume. Making this bookkeeping page-global is a meaningful competing regression for the deleted test; a healthy-tab teardown test does not exercise it.",
+            "f560058d deletes xterm and its write flow path; pinned-tip UI assets/tests have no term.write, writeBytes or pendingWrite match. Thus its exact callback-stall witness is obsolete at tip.",
+            "00de0b6c:farhelm-helm/src/client.rs:6172-6278 retains a separate real-demux overflow test: channel 1 remains undrained, channel 2 receives a later healthy frame, and channel 1 gets a stall detach. This proves no shared-reader head-of-line block for that boundary, not simultaneous browser input under a paused grid stream."
+          ],
+          "coverage_checked": [
+            "Both specs' terminal/viewer-flow sections were searched. Current SPEC.md:3011 onward says no viewer slows another or the agent; SPEC_impl.md grid section describes application of grid messages and helm-owned pacing. No explicit acceptance of losing the intermediate isolation witness was found.",
+            "TODO.md Planned empty; no exact unlanded plan, BUGS.md, full INDEX.md or active TRIAGE_OUTCOMES.md item found for deletion of the per-tab xterm witness. The retirement plan has landed (REPORTS.md:29), with its test-subject deletion rule at queue/tmux-end-old-terminals.md:130-133.",
+            "FILTER.md does not cover the whole test-protection consequence. Maintainer tooling harm is other, with no established catastrophic or user-owned work loss."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": "No current browser write-callback flow-control mechanism remains. No actual stalled sibling or lost output was reproduced; present grid behavior needs its own relevant witness, not an obsolete xterm test.",
+          "original_stronger_consequence": "One stalled tab could block its agent/sibling or fail to resume if old-renderer flow isolation regressed. Original source-based proposed drop is explicitly superseded at line 13: lack of a new functional bug does not disprove lost test protection. Later retirement removes the test's exact subject but does not retrospectively replace its intermediate protection.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Keep the intermediate regression-protection loss distinct from both a current product isolation bug and the surviving lower-layer demux test. Parent must decide the recording treatment for a subject retired within the review range."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": true,
+        "clearly_refuted_candidate": false,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "retired-xterm-per-tab-write-flow-isolation-test-gap",
+        "destination": "trailing-retired-xterm-per-tab-write-flow-isolation-test-gap.md"
+      }
+    },
+    {
+      "key": "g176/c4",
+      "owner": "g176",
+      "id": "c4",
+      "domain": "browser-terminal-regressions",
+      "purpose": "browser-terminal-regressions: e2e/tests/terminal-link-clicks.spec.ts, e2e/tests/terminal-links.spec.ts, e2e/tests/terminal-migration.spec.ts, e2e/tests/terminal-multihost.spec.ts, e2e/tests/terminal-reconnect.spec.ts, e2e/tests/terminal-tabs.spec.ts; phases -  async function assertRefusalAboveTunnelNotice(page: Page) {",
+      "history": [
+        {
+          "line": 8,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c4",
+            "state": "open",
+            "summary": "Migration tests still distinguish existing old terminals from new creation",
+            "location": "e2e/tests/terminal-migration.spec.ts:100",
+            "detail": "Reviewed commit: 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513. TLDR considered: deleting the old-supervisor no-band case could hide a broken migration banner or misreport newly created terminal kinds. Source refutation of a functional change in this patch: the removed case required the retired switch that made the current supervisor create tmux terminals. status.rs:600-614 now reports current-supervisor creation capability as unconditionally true at reply boundaries; the retained terminal-migration.spec.ts:121-149 verifies actual host terminal kinds and capability end to end. The remaining browser tests at 158-268 seed old agent/tab kinds and check the real UI's band, dismissal/revisit, restart eligibility and mixed tab labels. Old-supervisor false-capability behavior remains in migration.rs:664-691 and 703-740 unit assertions, matching the existing gates at 104 and 281. Suggested bucket: other if a coverage concern; confidence: confirmed source-only refutation. proposed_drop: retained source/tests above distinguish current new creation from retained old-terminal presentation; assigned changes do not change those presentation decisions. possible_cover: none. Could-be-highest: no established loss-of-work or security route. Caveat: the edited file explicitly acknowledges that real-supervisor old-session reporting is no longer checked by the deleted process test; seeded browser rows are not claimed as evidence for that process boundary, and that process-test deletion is outside this assignment."
+          }
+        }
+      ],
+      "latest": {
+        "line": 8,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c4",
+          "state": "open",
+          "summary": "Migration tests still distinguish existing old terminals from new creation",
+          "location": "e2e/tests/terminal-migration.spec.ts:100",
+          "detail": "Reviewed commit: 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513. TLDR considered: deleting the old-supervisor no-band case could hide a broken migration banner or misreport newly created terminal kinds. Source refutation of a functional change in this patch: the removed case required the retired switch that made the current supervisor create tmux terminals. status.rs:600-614 now reports current-supervisor creation capability as unconditionally true at reply boundaries; the retained terminal-migration.spec.ts:121-149 verifies actual host terminal kinds and capability end to end. The remaining browser tests at 158-268 seed old agent/tab kinds and check the real UI's band, dismissal/revisit, restart eligibility and mixed tab labels. Old-supervisor false-capability behavior remains in migration.rs:664-691 and 703-740 unit assertions, matching the existing gates at 104 and 281. Suggested bucket: other if a coverage concern; confidence: confirmed source-only refutation. proposed_drop: retained source/tests above distinguish current new creation from retained old-terminal presentation; assigned changes do not change those presentation decisions. possible_cover: none. Could-be-highest: no established loss-of-work or security route. Caveat: the edited file explicitly acknowledges that real-supervisor old-session reporting is no longer checked by the deleted process test; seeded browser rows are not claimed as evidence for that process boundary, and that process-test deletion is outside this assignment."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g176/findings.jsonl",
+        "id": "c4",
+        "line": 8,
+        "disposition": "excluded",
+        "group": "retired-current-supervisor-tmux-no-band-fixture",
+        "reason": "Parent explicitly accepted named refuted proposal from claims-110 after inspecting it. The particular deleted no-band test requires the removed ability to make the current supervisor create old terminals. The remaining source/tests distinguish new creation, old-session presentation and false old-supervisor capability. This refutation is limited to that no-band fixture allegation; the separately acknowledged deletion of real old-session reporting coverage must not silently disappear. Refute the obsolete current-supervisor no-band fixture claim narrowly. Preserve the separate process-reporting coverage caveat for the parent's range-wide reconciliation; do not use assignment boundaries as an out-of-range decision. Checked source/results: [\"647f0227 diff for terminal-migration.spec.ts deletes the OLD_TERMINAL_TAG case that creates an actual tmux agent/tab and expects supervisor_creates_host_terminals false. That configuration is no longer producible by the current supervisor.\",\"647f0227:service/status.rs:600-614 reports host-creation capability true at reply boundaries. terminal-migration.spec.ts:119-140 checks real host agent/tab kinds, true capability and no band; 150-252 retains seeded old-agent and mixed-tab UI cases.\",\"647f0227:farhelm-ui/src/migration.rs:664-691 checks no band with false capability, and 703-740 checks old/new kind presentation, including switch-off behavior. These retain the relevant policy distinction, without pretending to test old-process reporting end to end.\",\"terminal-migration.spec.ts:12-21 explicitly acknowledges that the old-session-after-switch process-reporting boundary is no longer checked. That distinct intermediate test-loss claim was not proven absent here and is not refuted by correct product behavior. The latest record excludes it from its own assignment; range-wide attribution cannot be settled by that assignment limit alone.\"] Current coverage/results: [\"Both specifications were searched for old terminal creation/migration; current SPEC.md:2998-3010 and SPEC_impl.md's grid-only/old-terminal-ending sections retire the UI distinction later. The historical refutation rests on the removed fixture configuration, not on current retirement alone.\",\"TODO.md Planned empty; targeted plan, BUGS.md, full INDEX.md and active TRIAGE_OUTCOMES.md searches found no exact no-band deletion item. The retirement plan is landed and cannot be counted as unlanded-plan coverage.\",\"No FILTER.md exclusion is used.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Deleting the old-supervisor no-band case could hide a broken migration banner or misreport newly created terminal kinds. The record also acknowledges distinct real old-session reporting coverage removal; seeded UI rows do not certify that process boundary.\"; \"A supported current-supervisor false-capability creation configuration is absent. The separate intermediate old-session-reporting process-test deletion remains a named caveat rather than evidence for this no-band allegation.\"."
+      },
+      "accepted_parent_decision": {
+        "key": "g176/c4",
+        "line": 8,
+        "disposition": "excluded",
+        "group": "retired-current-supervisor-tmux-no-band-fixture",
+        "bucket": "other",
+        "recording": "refuted",
+        "queue_target_candidate": null,
+        "needs_independent_drop_check": false,
+        "reason": "Parent explicitly accepted named refuted proposal from claims-110 after inspecting it. The particular deleted no-band test requires the removed ability to make the current supervisor create old terminals. The remaining source/tests distinguish new creation, old-session presentation and false old-supervisor capability. This refutation is limited to that no-band fixture allegation; the separately acknowledged deletion of real old-session reporting coverage must not silently disappear. Refute the obsolete current-supervisor no-band fixture claim narrowly. Preserve the separate process-reporting coverage caveat for the parent's range-wide reconciliation; do not use assignment boundaries as an out-of-range decision. Checked source/results: [\"647f0227 diff for terminal-migration.spec.ts deletes the OLD_TERMINAL_TAG case that creates an actual tmux agent/tab and expects supervisor_creates_host_terminals false. That configuration is no longer producible by the current supervisor.\",\"647f0227:service/status.rs:600-614 reports host-creation capability true at reply boundaries. terminal-migration.spec.ts:119-140 checks real host agent/tab kinds, true capability and no band; 150-252 retains seeded old-agent and mixed-tab UI cases.\",\"647f0227:farhelm-ui/src/migration.rs:664-691 checks no band with false capability, and 703-740 checks old/new kind presentation, including switch-off behavior. These retain the relevant policy distinction, without pretending to test old-process reporting end to end.\",\"terminal-migration.spec.ts:12-21 explicitly acknowledges that the old-session-after-switch process-reporting boundary is no longer checked. That distinct intermediate test-loss claim was not proven absent here and is not refuted by correct product behavior. The latest record excludes it from its own assignment; range-wide attribution cannot be settled by that assignment limit alone.\"] Current coverage/results: [\"Both specifications were searched for old terminal creation/migration; current SPEC.md:2998-3010 and SPEC_impl.md's grid-only/old-terminal-ending sections retire the UI distinction later. The historical refutation rests on the removed fixture configuration, not on current retirement alone.\",\"TODO.md Planned empty; targeted plan, BUGS.md, full INDEX.md and active TRIAGE_OUTCOMES.md searches found no exact no-band deletion item. The retirement plan is landed and cannot be counted as unlanded-plan coverage.\",\"No FILTER.md exclusion is used.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Deleting the old-supervisor no-band case could hide a broken migration banner or misreport newly created terminal kinds. The record also acknowledges distinct real old-session reporting coverage removal; seeded UI rows do not certify that process boundary.\"; \"A supported current-supervisor false-capability creation configuration is absent. The separate intermediate old-session-reporting process-test deletion remains a named caveat rather than evidence for this no-band allegation.\"."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-110",
+          "key": "g176/c4",
+          "latest_line": 8,
+          "recommendation": "refuted",
+          "bucket": "other",
+          "underlying_key": "retired-current-supervisor-tmux-no-band-fixture",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The particular deleted no-band test requires the removed ability to make the current supervisor create old terminals. The remaining source/tests distinguish new creation, old-session presentation and false old-supervisor capability. This refutation is limited to that no-band fixture allegation; the separately acknowledged deletion of real old-session reporting coverage must not silently disappear.",
+          "checks": [
+            "647f0227 diff for terminal-migration.spec.ts deletes the OLD_TERMINAL_TAG case that creates an actual tmux agent/tab and expects supervisor_creates_host_terminals false. That configuration is no longer producible by the current supervisor.",
+            "647f0227:service/status.rs:600-614 reports host-creation capability true at reply boundaries. terminal-migration.spec.ts:119-140 checks real host agent/tab kinds, true capability and no band; 150-252 retains seeded old-agent and mixed-tab UI cases.",
+            "647f0227:farhelm-ui/src/migration.rs:664-691 checks no band with false capability, and 703-740 checks old/new kind presentation, including switch-off behavior. These retain the relevant policy distinction, without pretending to test old-process reporting end to end.",
+            "terminal-migration.spec.ts:12-21 explicitly acknowledges that the old-session-after-switch process-reporting boundary is no longer checked. That distinct intermediate test-loss claim was not proven absent here and is not refuted by correct product behavior. The latest record excludes it from its own assignment; range-wide attribution cannot be settled by that assignment limit alone."
+          ],
+          "coverage_checked": [
+            "Both specifications were searched for old terminal creation/migration; current SPEC.md:2998-3010 and SPEC_impl.md's grid-only/old-terminal-ending sections retire the UI distinction later. The historical refutation rests on the removed fixture configuration, not on current retirement alone.",
+            "TODO.md Planned empty; targeted plan, BUGS.md, full INDEX.md and active TRIAGE_OUTCOMES.md searches found no exact no-band deletion item. The retirement plan is landed and cannot be counted as unlanded-plan coverage.",
+            "No FILTER.md exclusion is used."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": "A supported current-supervisor false-capability creation configuration is absent. The separate intermediate old-session-reporting process-test deletion remains a named caveat rather than evidence for this no-band allegation.",
+          "original_stronger_consequence": "Deleting the old-supervisor no-band case could hide a broken migration banner or misreport newly created terminal kinds. The record also acknowledges distinct real old-session reporting coverage removal; seeded UI rows do not certify that process boundary.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Refute the obsolete current-supervisor no-band fixture claim narrowly. Preserve the separate process-reporting coverage caveat for the parent's range-wide reconciliation; do not use assignment boundaries as an out-of-range decision."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "retired-current-supervisor-tmux-no-band-fixture",
+        "destination": null
+      }
+    },
+    {
+      "key": "g176/c5",
+      "owner": "g176",
+      "id": "c5",
+      "domain": "browser-terminal-regressions",
+      "purpose": "browser-terminal-regressions: e2e/tests/terminal-link-clicks.spec.ts, e2e/tests/terminal-links.spec.ts, e2e/tests/terminal-migration.spec.ts, e2e/tests/terminal-multihost.spec.ts, e2e/tests/terminal-reconnect.spec.ts, e2e/tests/terminal-tabs.spec.ts; phases -  async function assertRefusalAboveTunnelNotice(page: Page) {",
+      "history": [
+        {
+          "line": 17,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c5",
+            "state": "open",
+            "summary": "Renderer-specific suite header is not newly made stale by assigned deletion",
+            "location": "e2e/tests/terminal-links.spec.ts:1-42",
+            "detail": "Reviewed commit: 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513; range base 6e423e30068b62c6cfa276c6d720ee35bb70387a and tip 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db compared. TLDR considered: the retained header claims this browser suite proves the vendored xterm default-handler and Linkifier path while its remaining tests run on grid terminals, which could mislead maintainers about tested behavior. This is a documentation/test-oracle concern in its own right; correct production behavior would not refute it. Source/attribution checks: the range-base terminal-links.spec.ts:1-42 already contains the identical xterm/WebLinks/Linkifier claims. At that same base playwright.config.ts:68-114 defaults the ordinary run to host terminals and restricts the old run to tagged tests; suite-terminals.ts:37-49 returns host by default and its tagged-file policy explains that other tests run only on new terminals. Thus this misleading general header predates the entire pinned range, not merely the assigned commit. The assigned deletion removes a separately tagged private-cell test, not the existing general suite's backend selection or these sentences. Tip terminal-links.spec.ts:1-40 explicitly rewrites the header around the grid path and explains the historical default-handler origin. No new in-scope documentation defect established. Suggested bucket: other if in scope; confidence: confirmed source-only attribution/refutation. proposed_drop: outside introduced range as established by identical base text plus the already-host-default base runner, with subsequent tip correction; no parent drop accepted. possible_cover: none; no prohibited coverage source searched. Could-be-highest: no security or loss-of-work route from this header claim. No runtime behavior observed; no reproduction."
+          }
+        }
+      ],
+      "latest": {
+        "line": 17,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c5",
+          "state": "open",
+          "summary": "Renderer-specific suite header is not newly made stale by assigned deletion",
+          "location": "e2e/tests/terminal-links.spec.ts:1-42",
+          "detail": "Reviewed commit: 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513; range base 6e423e30068b62c6cfa276c6d720ee35bb70387a and tip 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db compared. TLDR considered: the retained header claims this browser suite proves the vendored xterm default-handler and Linkifier path while its remaining tests run on grid terminals, which could mislead maintainers about tested behavior. This is a documentation/test-oracle concern in its own right; correct production behavior would not refute it. Source/attribution checks: the range-base terminal-links.spec.ts:1-42 already contains the identical xterm/WebLinks/Linkifier claims. At that same base playwright.config.ts:68-114 defaults the ordinary run to host terminals and restricts the old run to tagged tests; suite-terminals.ts:37-49 returns host by default and its tagged-file policy explains that other tests run only on new terminals. Thus this misleading general header predates the entire pinned range, not merely the assigned commit. The assigned deletion removes a separately tagged private-cell test, not the existing general suite's backend selection or these sentences. Tip terminal-links.spec.ts:1-40 explicitly rewrites the header around the grid path and explains the historical default-handler origin. No new in-scope documentation defect established. Suggested bucket: other if in scope; confidence: confirmed source-only attribution/refutation. proposed_drop: outside introduced range as established by identical base text plus the already-host-default base runner, with subsequent tip correction; no parent drop accepted. possible_cover: none; no prohibited coverage source searched. Could-be-highest: no security or loss-of-work route from this header claim. No runtime behavior observed; no reproduction."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g176/findings.jsonl",
+        "id": "c5",
+        "line": 17,
+        "disposition": "excluded",
+        "group": "pre-range-xterm-specific-link-suite-header",
+        "reason": "Parent explicitly accepted named out-of-range proposal from claims-110 after inspecting it. The misleading renderer-specific suite description and host-default runner both exist at the exclusive base. The tested general suite was already on grids before the review range, and the tip rewrites the header accurately. Exclude only as introduced before the exclusive review base; preserve that it was a real documentation concern and was subsequently corrected at tip. Checked source/results: [\"6e423e30:e2e/tests/terminal-links.spec.ts:1-42 already claims vendored WebLinks, xterm default-handler and Linkifier browser coverage.\",\"6e423e30:e2e/playwright.config.ts:68-110 sends the ordinary host run through general tests and reserves only tagged tests for the old-terminal run. suite-terminals.ts:46-49 returns host for unset/empty selection.\",\"00de0b6c:terminal-links.spec.ts:1-40 instead says page linkification/grid mouse handling and identifies the obsolete blanket default handler as historical context. The assigned private-tag deletion does not introduce the misleading general header/backend pairing.\"] Current coverage/results: [\"Both specs were searched for renderer/link rules. Their current grid-only contract agrees with the corrected tip header. This disposition is range attribution, not a claim that correct production behavior refutes documentation defects.\",\"TODO.md Planned empty. Plan searches identify tmux-drop-from-docs' general comments cleanup, now landed (REPORTS.md:32), but no unlanded exact work. BUGS.md, full INDEX.md and active TRIAGE_OUTCOMES.md have no exact stale-header item or decision.\",\"FILTER.md is not used; pre-range origin and later source correction are the basis.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Maintainers could believe grid browser tests prove vendored xterm handler/Linkifier behavior. That is an independent documentation/test-oracle concern, but the identical stale header with an already-host-default runner predates this entire range. No security or work-loss guidance was alleged.\"; null."
+      },
+      "accepted_parent_decision": {
+        "key": "g176/c5",
+        "line": 17,
+        "disposition": "excluded",
+        "group": "pre-range-xterm-specific-link-suite-header",
+        "bucket": "other",
+        "recording": "out-of-range",
+        "queue_target_candidate": null,
+        "needs_independent_drop_check": false,
+        "reason": "Parent explicitly accepted named out-of-range proposal from claims-110 after inspecting it. The misleading renderer-specific suite description and host-default runner both exist at the exclusive base. The tested general suite was already on grids before the review range, and the tip rewrites the header accurately. Exclude only as introduced before the exclusive review base; preserve that it was a real documentation concern and was subsequently corrected at tip. Checked source/results: [\"6e423e30:e2e/tests/terminal-links.spec.ts:1-42 already claims vendored WebLinks, xterm default-handler and Linkifier browser coverage.\",\"6e423e30:e2e/playwright.config.ts:68-110 sends the ordinary host run through general tests and reserves only tagged tests for the old-terminal run. suite-terminals.ts:46-49 returns host for unset/empty selection.\",\"00de0b6c:terminal-links.spec.ts:1-40 instead says page linkification/grid mouse handling and identifies the obsolete blanket default handler as historical context. The assigned private-tag deletion does not introduce the misleading general header/backend pairing.\"] Current coverage/results: [\"Both specs were searched for renderer/link rules. Their current grid-only contract agrees with the corrected tip header. This disposition is range attribution, not a claim that correct production behavior refutes documentation defects.\",\"TODO.md Planned empty. Plan searches identify tmux-drop-from-docs' general comments cleanup, now landed (REPORTS.md:32), but no unlanded exact work. BUGS.md, full INDEX.md and active TRIAGE_OUTCOMES.md have no exact stale-header item or decision.\",\"FILTER.md is not used; pre-range origin and later source correction are the basis.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Maintainers could believe grid browser tests prove vendored xterm handler/Linkifier behavior. That is an independent documentation/test-oracle concern, but the identical stale header with an already-host-default runner predates this entire range. No security or work-loss guidance was alleged.\"; null."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-110",
+          "key": "g176/c5",
+          "latest_line": 17,
+          "recommendation": "out-of-range",
+          "bucket": "other",
+          "underlying_key": "pre-range-xterm-specific-link-suite-header",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The misleading renderer-specific suite description and host-default runner both exist at the exclusive base. The tested general suite was already on grids before the review range, and the tip rewrites the header accurately.",
+          "checks": [
+            "6e423e30:e2e/tests/terminal-links.spec.ts:1-42 already claims vendored WebLinks, xterm default-handler and Linkifier browser coverage.",
+            "6e423e30:e2e/playwright.config.ts:68-110 sends the ordinary host run through general tests and reserves only tagged tests for the old-terminal run. suite-terminals.ts:46-49 returns host for unset/empty selection.",
+            "00de0b6c:terminal-links.spec.ts:1-40 instead says page linkification/grid mouse handling and identifies the obsolete blanket default handler as historical context. The assigned private-tag deletion does not introduce the misleading general header/backend pairing."
+          ],
+          "coverage_checked": [
+            "Both specs were searched for renderer/link rules. Their current grid-only contract agrees with the corrected tip header. This disposition is range attribution, not a claim that correct production behavior refutes documentation defects.",
+            "TODO.md Planned empty. Plan searches identify tmux-drop-from-docs' general comments cleanup, now landed (REPORTS.md:32), but no unlanded exact work. BUGS.md, full INDEX.md and active TRIAGE_OUTCOMES.md have no exact stale-header item or decision.",
+            "FILTER.md is not used; pre-range origin and later source correction are the basis."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": null,
+          "original_stronger_consequence": "Maintainers could believe grid browser tests prove vendored xterm handler/Linkifier behavior. That is an independent documentation/test-oracle concern, but the identical stale header with an already-host-default runner predates this entire range. No security or work-loss guidance was alleged.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Exclude only as introduced before the exclusive review base; preserve that it was a real documentation concern and was subsequently corrected at tip."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": false,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "pre-range-xterm-specific-link-suite-header",
+        "destination": null
+      }
+    }
+  ],
+  "replies": [
+    {
+      "turn": 1,
+      "reply": "Initial pass complete: all 1,182 assigned patch lines reviewed.\n\nRecorded two confirmed coverage gaps, both bucket `other`:\n\n- `l1`: removed real-xterm hyperlink-tag verification required by the specification.\n- `l2`: removed production-overlay disclosure and warning-layer checks; synthetic-cover tests do not replace them.\n\nFour candidates were set aside with source-based reasons. No unresolved leads or unread assigned scope remain. No tests or reproductions ran.\n\nFull record: [findings.jsonl]([private-run]/g176/findings.jsonl)."
+    },
+    {
+      "turn": 2,
+      "reply": "Revised `l1`, `l2`, `c2`, and `c3` under their original IDs:\n\n- `l1`: confirmed intermediate contract gap; later renderer removal eliminates the dependency before tip.\n- `l2`: confirmed coverage gap persists through tip. Recorded concrete competing regressions and distinguishing witnesses; reconciled with complementary `g174/l1`.\n- `c2`, `c3`: promoted to intermediate coverage findings. Superseded earlier drop rationales and distinguished surviving shared-contract tests from retired mechanisms.\n\nOriginal consequences and citations preserved. No drops accepted. Source-only analysis; no reproductions.\n\nUnresolved lead IDs: none."
+    },
+    {
+      "turn": 3,
+      "reply": "Discovery pass 1 complete. Nothing new found.\n\nChecked stack metadata and respawn contracts, retained imports/helpers, project discovery, and removed-test references. Investigated a misleading suite header; exact comparison showed it predates the range, recorded as candidate `c5`. Added caller checks under `c1`.\n\n- New verified finding IDs: none.\n- New unverified-after-investigation IDs: none.\n- Open leads: none.\n\nProgress updated. Source-only review; no runtime tests or reproductions."
+    }
+  ],
+  "progress": "Group g176: browser-terminal-regressions.\nState: assigned initial source-review pass complete; return to caller for a later synthesis turn.\nTurn type/count: initial / 1. Discovery-pass count: 0 (no later-turn protocol performed).\nPinned revision: 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513; parent consulted only for removed test locations.\n\nNew verified IDs in this pass: l1, l2 (both findings, suggested bucket other; regression coverage losses, not observed product failures).\nNew unverified IDs: none. Open leads: none. Leads l1 and l2 were revised to findings.\nCandidates set aside: c1 remote reboot cleanup; c2 held xterm replay callback; c3 xterm tab backpressure; c4 migration mode reporting.\nAll substantive findings/candidates were appended immediately to findings.jsonl; that log is the complete findings record.\n\nMandatory patch coverage: all 1182 assigned lines delivered through evidence read:\n- 00831-001.patch: 1-180, 181-360, 361-540, 541-694 (1-180 re-delivered with raw stdout).\n- 00832-000.patch: 1-99.\n- 00833-000.patch: 1-84.\n- 00834-000.patch: 1-83.\n- 00835-000.patch: 1-77.\n- 00838-000.patch: 1-145.\nUnread assigned patch scope: none.\nComplete inventory.json commits field read; excluded metadata and forbidden coverage sources not read.\n\nGoverning contracts read at pinned revision:\n- SPEC.md Terminal experience: 2865-3264 (section ends before Attachments, subsequent bounded context also delivered).\n- SPEC_impl.md Terminal widget and grid-client sections: 1507-2014 in bounded chunks.\n- SPEC_impl.md GUI answer-binding paragraph and context: 1060-1125 (also GUI context 177-376).\n- SPEC_impl.md Session-host file reads: 3988-4089.\n- SPEC_impl.md Testing: 8602-8670.\n- Root injected AGENTS.md has End sentinel; queue AGENTS.md and recording.md read, missing truncated AGENTS continuation reread 85-240.\n- machine.md and skillette SKILL.md/trigger table read; scripts skillette read before further inline transformations.\n\nImportant context source reads at pinned revision:\n- e2e/grid-client/grid-attach.spec.ts: 60-110, 140-217, 655-700, 1195-1311, 1400-1436, 1763-1806; targeted searches elsewhere in file.\n- crates/farhelm-ui/js-tests/terminal-links.test.js: 440-550.\n- e2e/tests/terminal-reconnect.spec.ts: 1930-2100.\n- e2e/tests/terminal-tabs.spec.ts: 600-755.\n- e2e/tests/terminal-migration.spec.ts: 1-285.\n- e2e/tests/terminal-multihost.spec.ts: 700-805, 3520-3650.\n- crates/farhelm-ui/assets/terminal.js: 30-65, 3600-3780, 4970-4990, 5195-5278, 5320-5392, 5838-5878; targeted replay/grid/flow-control searches.\n- crates/farhelm-helm/src/terminal.rs: 2505-2635.\n- crates/farhelm-supervisor/src/service/grid_stream/tests.rs: 465-565.\n- crates/farhelm-supervisor/src/service/status.rs: 590-625.\n- crates/farhelm-ui/src/migration.rs: 1-190, 655-747.\n- crates/farhelm-ui/assets/app.css: 1778-1805, 2220-2278.\n- e2e/start-stack.sh: 155-180, 475-525.\n- Parent e2e/tests/terminal-links.spec.ts: 1070-1095; parent terminal-link-clicks.spec.ts targeted original-line searches.\nOther targeted pinned-tree searches verified absence of retained real-bundle tag and real-production-overlay regression tests, and checked removed imports/options have no remaining uses in assigned files. Broad initial spec keyword search clipped; used targeted section reads above, not clipped output, for conclusions.\n\nInterface assumptions and conclusions:\n- Current supervisors create only host terminals; old terminal presentation remains supported and is independently reachable through static compatibility harnesses.\n- Grid tagged-row and synthetic-cover tests exercise shared logic, but cannot establish real xterm private fields or production overlay markup/paint order. Those are l1/l2, respectively.\n- Backend grid pause/resume tests are not claimed to prove simultaneous sibling interactivity; deleted held-xterm-write tests are not claimed to have equivalent callback coverage.\n- Migration seeded rows are not claimed to verify the removed real-process old-session reporting test (outside this assignment).\n\nValidation: source/contract analysis only, as requested. No tests, builds, reproductions or live-install actions. No checkout writes.\nTooling note: c1 append initially rejected invalid state closed; corrected to accepted state open and recorded before further source analysis. No events were truncated or removed.\nNext action: caller-defined later synthesis/discovery turn; reread brief and governing instructions after compaction.\n\nSynthesis turn 2 started. Discovery-pass count remains 0.\nRevisiting l1/c2/c3 across renderer retirement through pinned tip; tracing l2 production markup/CSS and every retained browser suite. Cross-group g174/l1 is complementary scope of l2, not a discovery; keep both IDs in parent reconciliation.\nCurrent leads to settle: later-retirement relevance of xterm-only coverage; whether production overlay witnesses survive in other browser suites. These are revisions of existing records, not new IDs. No accepted drops.\n\nSynthesis turn 2 complete. Discovery-pass count: 0; no discovery turn was performed.\nRevised original IDs: l1, l2, c2, c3. No new local IDs. Open/unresolved lead IDs: none.\n- l1 remains a confirmed intermediate explicit-test-contract gap, with later startup retirement and actual bundle/adapter deletion established. No xterm private-field dependency remains at pinned tip; do not restore that obsolete test at tip. No proposed drop.\n- l2 remains a confirmed gap through pinned tip. Entire retained e2e tree and browser spec/config inventory checked, including media suites. Concrete survivors use synthetic cover rectangles or ordinary hover/download assertions. Actual production markers and CSS protections remain present, but their wiring, refusal readability and destructive-warning paint order have no retained browser witness found. Concrete competing regressions and distinguishing real-app witnesses recorded. g174/l1 is complementary corroboration of this same underlying gap; both IDs retained, no new discovery.\n- c2/c3 promoted from candidate to finding for confirmed distinct intermediate test-only gaps. Original proposed-drop reasons preserved and expressly superseded: unchanged production paths cannot refute coverage deletion. Their callback/backpressure mechanisms were removed later; surviving shared-contract tests identified separately without claiming equivalence. Suggested buckets remain other; no current product failure established.\n- c1/c4 unchanged; no parent drops accepted or inferred.\n\nAdditional bounded source evidence this turn:\n- Range commit path history through 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db identified dbfc6975 startup retirement, 1ed482dd driver removal and f560058d renderer/protocol retirement.\n- f560058d terminal.js:1-85 and terminal-links.js deletion diff:1-270. Tip search found no xtermLines/extended.urlId/urlId/vendor-xterm/writeBytes/term.write in UI assets/lib and browser/JS harnesses.\n- dbfc6975 old_terminals.rs:1-150; core.rs:6418-6446,6662-6684.\n- Tip terminal-files.js:24-70,475-512, production launch_sequence.rs:742-781, approvals.rs:216-238, tunnels.rs:455-475; tooltip marker search.\n- Tip app.css:1785-1802,2224-2273 and SPEC_impl.md:3578-3610.\n- Tip grid-attach.spec.ts:1095-1130,1453-1501; terminal-files.test.js:650-765.\n- Tip real-stack terminal-files.spec.ts:210-265,340-415; docs-shots/visual-review.spec.ts:475-540; tooltip-coverage.spec.ts:215-265.\n- Tip terminal.js:3750-3788,3872-3922; terminal-reconnect.spec.ts:2036-2157; SPEC_impl.md:766-785.\n- Intermediate terminal-replay-rename.spec.ts:1085-1185 (retained marker-held unmount guard differs from deleted callback-held socket-ending race).\n- Tip farhelm-helm/src/client.rs:6160-6275,6300-6435,6598-6665,6728-6815,6878-6945. Healthy-channel demux overflow witnesses and grid pause/bounds distinguished from browser callback and true three-terminal pause/resume witnesses.\n\nAll readily checkable requested premises resolved by source and contract analysis. No assigned unread patch scope; no runtime tests, reproduction, queue/coverage-source search, checkout writes or live-install actions. Evidence is source-only. Next: caller-defined discovery or finalization turn.\n\nDiscovery turn 3 started. Discovery-pass count: 1 (in progress).\nRead discovery-neighbours.json in two bounded chunks, lines 1-160 and 161-186. No named pending questions. Interface findings synthesized against current scope: g174/l1 is known l2 corroboration; other neighbour test gaps concern their own deletion slices/files and are novelty boundaries, not a request to widen this group. Own l1/l2/c2/c3 and c1/c4 histories remain authoritative; no drops or lowerings accepted.\nNew search focus: changed test harness type/import/caller contracts and isolated remote respawn/reboot premises; migration test documentation precision; any distinct lost observable within assigned link-click deletion slice beyond known production-cover/layer findings. Source-only; no runtime actions.\n\nDiscovery turn 3 complete. Discovery-pass count: 1.\nResult: no new in-scope finding. New verified finding IDs: none. New unverified-after-investigation finding IDs: none. Open lead IDs: none.\nNew considered-candidate record: c5, source-refuted as a newly introduced header/oracle defect by exact range-base comparison. c1 revised only with additional producer/consumer and option-dependency checks; no original consequence/drop basis removed, and no parent acceptance inferred.\n\nUseful checks/results beyond known issues:\n- Compared deletion-revision multihost StackInfo:95-142 with actual stack metadata producer e2e/start-stack.sh:550-578, remote identity/socket helpers:445-590 and retained respawn arguments already in context. Required state/binary/boot-id/pidfile/log fields still agree; no dangling removed-option consumer found in assigned files or runner setup.\n- Reviewed terminal-links header/helpers:1-112,155-245,335-380 and retained live OSC/normal URL assertions:1030-1142; retained tabs imports/setup:1-100 and reconnect imports/setup:1-108. Geometry/selection helpers still select the live grid path, and removed symbols/imports have no dangling assigned-file uses. No distinct changed oracle failure established.\n- Checked source references to the removed test names/file across e2e/docs/scripts/crates/SPECs: no dangling test-name caller or claimed active file found by this search.\n- Checked same-commit project discovery/filter diff in playwright.config.ts:1-180 as caller context: deleted file and old-only tags are removed together with old-set filtering; retained specs remain discovered for both engines.\n- Investigated a potentially misleading renderer-specific terminal-links suite header independently from production correctness. Read the exact header at range base 6e423e30068b62c6cfa276c6d720ee35bb70387a:1-45, base runner:68-115 and suite-terminals.ts:20-111. Identical claims already accompanied a host-default ordinary run and old-tag-only alternate run before the range. Tip terminal-links.spec.ts:1-50 explicitly corrects the grid description. Recorded c5 immediately on settling that attribution; no new in-range defect.\n- Assigned link-click deletion slice contains no additional distinct regression beyond previously recorded production-cover/paint/clipping witnesses and caller-supplied complementary scope; no expansion into neighbouring deleted gesture/clipboard/replay tests.\n\nNeighbour synthesis: read all 186 lines of discovery-neighbours.json. No pending named questions. Exact neighbour findings were context/novelty constraints only, not mandatory source credit; no queue or excluded coverage metadata read.\nValidation: source/contract analysis only. No runtime test, reproduction, build, live-install action or checkout write. All assigned mandatory patch scope remains read; no unresolved premise or lead retained. Ready to return discovery delta.\n"
+}

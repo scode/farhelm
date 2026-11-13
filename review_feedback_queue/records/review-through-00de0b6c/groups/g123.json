@@ -1,0 +1,695 @@
+{
+  "group": {
+    "id": "g123",
+    "domain": "supervisor-request-admission",
+    "purpose": "supervisor-request-admission: crates/farhelm-supervisor/src/service/handlers.rs; phases complete small per-commit changes",
+    "interfaces": [
+      "g018",
+      "g019",
+      "g020",
+      "g021",
+      "g052",
+      "g053",
+      "g054",
+      "g102",
+      "g103",
+      "g104",
+      "g105",
+      "g106",
+      "g107",
+      "g108",
+      "g109",
+      "g110",
+      "g111",
+      "g112",
+      "g113",
+      "g114",
+      "g115",
+      "g116",
+      "g122",
+      "g124",
+      "g125",
+      "g126"
+    ],
+    "sources": [
+      {
+        "path": "[private-run]/prep/parts/00683-000.patch",
+        "ranges": [
+          [
+            1,
+            1324
+          ]
+        ],
+        "original_path": "crates/farhelm-supervisor/src/service/handlers.rs",
+        "commit": "47f33bbdbd5ff4a6e437e97a800f9083be43096e",
+        "notes": "patch header; patch character offsets [0,59665)",
+        "lines": 1324,
+        "bytes": 59673,
+        "start": 0,
+        "end": 59665,
+        "original": "[private-run]/prep/originals/00683.patch"
+      }
+    ],
+    "lines": 1324,
+    "bytes": 59673
+  },
+  "records": [
+    {
+      "key": "g123/l1",
+      "owner": "g123",
+      "id": "l1",
+      "domain": "supervisor-request-admission",
+      "purpose": "supervisor-request-admission: crates/farhelm-supervisor/src/service/handlers.rs; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 1,
+          "event": {
+            "version": 1,
+            "kind": "lead",
+            "id": "l1",
+            "state": "open",
+            "summary": "Environment Delete decision deadline may exclude teardown preflight",
+            "location": "crates/farhelm-supervisor/src/service/handlers.rs:1490",
+            "detail": "Reviewed commit: 47f33bbdbd5ff4a6e437e97a800f9083be43096e. TLDR: a busy environment might be sealed after the helm has reported that nothing was decided. Source basis: handle_delete_session_or_seal bounds only lock acquisition in timeout(seal_delete_wait), then awaits prepare_teardown and store.seal_unless_other_sessions outside that timeout (assigned patch lines 200-278). Its own contract says decisions after the helm deadline contradict what the user was shown. Suggested bucket: high/material UX provisionally; could-be-highest if a shipped timeout/confirmation route permits destruction beyond the confirmed action, not yet established. Confidence: open source lead, not execution-observed. proposed_drop: false. possible_cover: none. Missing premises: governing deadline contract, preflight bounds, helm timeout recovery semantics. Next checks: pinned SPEC/SPEC_impl sections and prepare_teardown/caller implementations. No runtime reproduction requested or performed."
+          }
+        },
+        {
+          "line": 2,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "l1",
+            "state": "open",
+            "summary": "Late preflight completion has no established false timeout promise",
+            "location": "crates/farhelm-supervisor/src/service/handlers.rs:1505",
+            "detail": "Reviewed commit: 47f33bbdbd5ff4a6e437e97a800f9083be43096e. TLDR considered: an environment Delete might seal after the helm reports that nothing was decided. Checks/results: handler lines 1457-1472 bound lock acquisition only; prepare_teardown (service/teardown.rs:375-623) does further preflight outside that bound, including per-host sweep_roots (session_hosts.rs:512-548). However git grep for DeleteSessionOrSeal at this revision finds no helm sender, only a SessionListing field doc; this is the protocol/supervisor phase. Additional caller context at range endpoint 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db, sessions/sandbox.rs:236-256, gives a 240-second timeout but explicitly answers 'Farhelm cannot tell whether the session was deleted' both on timeout and connection loss, rather than asserting non-deletion. SPEC.md at reviewed revision lines 1514-1518 requires confirmation of session deletion plus destruction of every process/file/snapshot if last; lines 1519-1521 explicitly say 'the helm finishes destroying any sealed sandbox it sees, whether or not it sent the Delete: after a lost reply, a failed destruction or its own restart.' Thus no established incorrect user promise or destruction beyond the already confirmed operation. Suggested bucket: other if a narrower timing-contract issue were established; no report proposed. Confidence: confirmed source analysis, no execution. proposed_drop: no helm caller at recorded revision and real later caller accurately reports ambiguity; specification explicitly permits completing a seal after a lost reply. possible_cover: none. Could-be-highest: false on established route: the original suspicion was a late confirmed deletion after a falsely reassuring timeout, not destruction beyond confirmation; the reassuring timeout premise is refuted. Caveat: there is no global supervisor decision deadline, so a future caller must preserve ambiguous-outcome wording and not promise no effects."
+          }
+        },
+        {
+          "line": 7,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "l1",
+            "state": "open",
+            "summary": "Admission timeout is bounded; no global decision deadline or false late-caller promise established",
+            "location": "crates/farhelm-supervisor/src/service/handlers.rs:1457",
+            "detail": "Reviewed commit: 47f33bbdbd5ff4a6e437e97a800f9083be43096e. TLDR/original consequence preserved: Delete might seal after the helm has falsely reassured the user that nothing was decided. Coverage-repair synthesis rechecked patch and exact pinned contracts, then later caller and UI context. Handler lines 1457-1472 bound the agent fence, general admission, directory admission and lifecycle claim together; expiration drops that future and returns Conflict without continuing it. The sessions-map read, prepare_teardown, and store transaction at 1488-1528 are outside the timeout. There is no global decision deadline; the documentation must not be read as proving one. SPEC_impl.md:6601-6603 states 'with each wait before the decision bounded so that a busy environment gets a definite \"nothing was deleted\" Conflict rather than a decision taken after the helm gave up.' The handler documentation similarly mentions 'nothing was decided'. These statements overstate the admission timeout if read to include every preflight wait. This is not a proof that arbitrary delays cannot happen. At this recorded revision no helm sender exists (git grep DeleteSessionOrSeal across farhelm-helm finds only a SessionListing doc). Later endpoint 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db, sessions/sandbox.rs:221-239, has the 240-second timeout and says exactly 'this environment’s own Farhelm did not answer in time; Farhelm cannot tell whether the session was deleted' (source apostrophe is ASCII); connection loss likewise says 'Farhelm cannot tell whether the session was deleted'. Endpoint UI api/sandbox_sessions.rs:218-235 preserves the response refusal_text in Unasked/Refused; list/view.rs:2998-3025 either offers a newly warned whole-environment question or displays the reason and never automatically sends a wider Delete. SPEC.md:1514-1518 already requires confirmation covering session deletion and, if last, all environment processes/files/snapshots. SPEC.md:1519-1521 explicitly permits finishing a seal after a lost reply: 'the helm finishes destroying any sealed sandbox it sees, whether or not it sent the Delete: after a lost reply, a failed destruction or its own restart.' Suggested bucket: other for the remaining documentation overstatement; no established material-UX or loss-of-work defect from the original false-reassurance premise. Confidence: confirmed source analysis, not execution. proposed_drop: the original false user-facing timeout promise is refuted by the real later caller/UI; proposed only, no parent approval inferred. The discrepancy in comments/spec wording remains explicit rather than claimed fixed by the later wording. possible_cover: none. Could-be-highest: false on established routes: destruction remains within the original conditional confirmation; a future route that starts user work after a definite non-deletion promise would require separate evidence. No runtime reproduction was requested or performed."
+          }
+        },
+        {
+          "line": 8,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "l1",
+            "state": "open",
+            "summary": "Delete documentation overstates the admission timeout's decision guarantee",
+            "location": "crates/farhelm-supervisor/src/service/handlers.rs:1424",
+            "detail": "Reviewed commit: 47f33bbdbd5ff4a6e437e97a800f9083be43096e. TLDR: the new Delete documentation gives maintainers a stronger deadline and no-decision guarantee than this handler implements. A future caller or test relying on it could mistake an expired reply deadline for proof that deletion cannot still occur. The established issue is internal contract documentation, not an observed late deletion or a proved false message in the shipped UI. Exact source: handlers.rs:1424-1427 says 'the waits before the decision are bounded (`SupervisorTimeouts:: seal_delete_wait`): a helm with its own deadline is waiting, and a decision taken after it gave up would contradict the \"nothing was decided\" it showed the user.' The inline claim at 1454-1458 begins 'Every lock this Delete waits for before deciding is inside the bound'. Actual timeout at 1459-1471 contains the agent fence, general permit, directory admission and lifecycle claim only. After it expires successfully, the decision future acquires the sessions-map mutex at 1492-1495, runs prepare_teardown at 1509-1514 and awaits seal_unless_other_sessions at 1515-1518, all outside that timeout. Preflight itself awaits host settling and then serial host-root queries at teardown.rs:492-507 and session_hosts.rs:525-537. Thus the named duration bounds admission acquisition, not every predecision lock/work item or the time of the decision. The word 'Every' is not made true by intending only the four admission locks: the map mutex is another explicit later lock in this very function. Source does not establish a global deadline even if ordinary holds are short. SPEC_impl.md:6601-6603 has parallel decision-before-helm-gives-up motivation; its parenthetical four-lock list can accurately describe those admission waits, but it must not be interpreted as a total preflight/decision bound. Fix direction: explicitly name the admission-only budget, distinguish preflight and store work, and explain that an unanswered request has an uncertain result rather than promising no later decision. If a true global decision bound is intended instead, that needs a different contract and implementation; simply cancelling a store write may not cancel its owned database operation. Original consequence preserved: l1 began as possible late sealing after false user reassurance. That shipped-user premise is refuted by the actual later endpoint caller 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db, sessions/sandbox.rs:221-239: its 240-second deadline answers 'Farhelm cannot tell whether the session was deleted'. api/sandbox_sessions.rs:218-235 preserves that reason; list/view.rs:2998-3025 either displays it or opens a new warned question without automatically widening the Delete. There is no helm sender at the recorded supervisor/protocol-phase revision. These facts refute the original runtime claim, but do not make the new internal documentation accurate. Suggested bucket: other (documentation correctness). Confidence: confirmed by source and exact comment/control-flow comparison, no runtime execution. proposed_drop: false for the documentation defect; prior proposed drop of the whole record based on absence of runtime harm is superseded, with the original runtime-route refutation retained. possible_cover: none; supplied neighbour records concern distinct comments, test oracles and lifecycle bugs. Could-be-highest: false for this established documentation defect; no security or lost-work route is established. All original conditional-confirmation limits remain: the initial Delete consent covers the last environment's processes/files/snapshots, and seal recovery after a lost reply is specified. No parent drop or lowering has been accepted. This revision resolves the parent's doc-disposition question before the fresh discovery search."
+          }
+        }
+      ],
+      "latest": {
+        "line": 8,
+        "event": {
+          "version": 1,
+          "kind": "finding",
+          "id": "l1",
+          "state": "open",
+          "summary": "Delete documentation overstates the admission timeout's decision guarantee",
+          "location": "crates/farhelm-supervisor/src/service/handlers.rs:1424",
+          "detail": "Reviewed commit: 47f33bbdbd5ff4a6e437e97a800f9083be43096e. TLDR: the new Delete documentation gives maintainers a stronger deadline and no-decision guarantee than this handler implements. A future caller or test relying on it could mistake an expired reply deadline for proof that deletion cannot still occur. The established issue is internal contract documentation, not an observed late deletion or a proved false message in the shipped UI. Exact source: handlers.rs:1424-1427 says 'the waits before the decision are bounded (`SupervisorTimeouts:: seal_delete_wait`): a helm with its own deadline is waiting, and a decision taken after it gave up would contradict the \"nothing was decided\" it showed the user.' The inline claim at 1454-1458 begins 'Every lock this Delete waits for before deciding is inside the bound'. Actual timeout at 1459-1471 contains the agent fence, general permit, directory admission and lifecycle claim only. After it expires successfully, the decision future acquires the sessions-map mutex at 1492-1495, runs prepare_teardown at 1509-1514 and awaits seal_unless_other_sessions at 1515-1518, all outside that timeout. Preflight itself awaits host settling and then serial host-root queries at teardown.rs:492-507 and session_hosts.rs:525-537. Thus the named duration bounds admission acquisition, not every predecision lock/work item or the time of the decision. The word 'Every' is not made true by intending only the four admission locks: the map mutex is another explicit later lock in this very function. Source does not establish a global deadline even if ordinary holds are short. SPEC_impl.md:6601-6603 has parallel decision-before-helm-gives-up motivation; its parenthetical four-lock list can accurately describe those admission waits, but it must not be interpreted as a total preflight/decision bound. Fix direction: explicitly name the admission-only budget, distinguish preflight and store work, and explain that an unanswered request has an uncertain result rather than promising no later decision. If a true global decision bound is intended instead, that needs a different contract and implementation; simply cancelling a store write may not cancel its owned database operation. Original consequence preserved: l1 began as possible late sealing after false user reassurance. That shipped-user premise is refuted by the actual later endpoint caller 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db, sessions/sandbox.rs:221-239: its 240-second deadline answers 'Farhelm cannot tell whether the session was deleted'. api/sandbox_sessions.rs:218-235 preserves that reason; list/view.rs:2998-3025 either displays it or opens a new warned question without automatically widening the Delete. There is no helm sender at the recorded supervisor/protocol-phase revision. These facts refute the original runtime claim, but do not make the new internal documentation accurate. Suggested bucket: other (documentation correctness). Confidence: confirmed by source and exact comment/control-flow comparison, no runtime execution. proposed_drop: false for the documentation defect; prior proposed drop of the whole record based on absence of runtime harm is superseded, with the original runtime-route refutation retained. possible_cover: none; supplied neighbour records concern distinct comments, test oracles and lifecycle bugs. Could-be-highest: false for this established documentation defect; no security or lost-work route is established. All original conditional-confirmation limits remain: the initial Delete consent covers the last environment's processes/files/snapshots, and seal recovery after a lost reply is specified. No parent drop or lowering has been accepted. This revision resolves the parent's doc-disposition question before the fresh discovery search."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g123/findings.jsonl",
+        "id": "l1",
+        "line": 8,
+        "disposition": "under-investigation",
+        "group": "g123-l1",
+        "reason": "Record durably acknowledged; parent source/contract validation, cross-group synthesis, coverage/filter matching and any independent drop check remain pending. This preserves the claim and uncertainty without accepting, dropping or lowering it."
+      },
+      "accepted_parent_decision": null,
+      "returned_claim_checks": [
+        {
+          "batch": "claims-078",
+          "key": "g123/l1",
+          "latest_line": 8,
+          "recommendation": "retain-verified",
+          "bucket": "other",
+          "underlying_key": "environment-delete-docs-overstate-admission-timeout-as-decision-bound",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The new comment says every predecision lock is bounded and motivates it with a no-decision promise. The timeout ends before the sessions mutex, preflight, and seal-store operation. This is a concrete internal contract error even though the later shipped caller correctly reports an unknown result.",
+          "checks": [
+            "47f33bbdbd5ff4a6e437e97a800f9083be43096e:handlers.rs:1424-1427 describes bounded waits before decision; 1454-1458 says Every lock. The timeout at 1459-1471 contains only agent fence, general permit, directory admission and lifecycle claim.",
+            "The same function acquires sessions.lock at 1492-1495 and awaits prepare_teardown and seal_unless_other_sessions at 1509-1518 afterward. teardown.rs:492-507 awaits host discovery/roots; session_hosts.rs:525-537 queries hosts serially. These are outside that admission timeout.",
+            "00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db:farhelm-helm/src/sessions/sandbox.rs:221-239 explicitly says Farhelm cannot tell whether the session was deleted on reply expiry or transport loss. This refutes the original falsely reassuring shipped-timeout premise; no runtime late deletion was observed.",
+            "Current SPEC_impl.md:6110-6112 repeats the broader deadline motivation, and 6143-6145 says a missing answer yields a marker that nothing was decided. SPEC.md:1531-1536 similarly uses nothing-is-decided wording; these are not proof the handler implements a global decision deadline."
+          ],
+          "coverage_checked": [
+            "SPEC.md Sandbox sessions and SPEC_impl.md Environment Delete and the seal were read in full for this behavior. They require conditional destruction consent and permit finishing an existing seal after a lost reply; they do not make the stronger bounded-decision documentation true.",
+            "TODO.md Planned is empty. plans/queue/environment-agent-operations.md:550-563 repeats ambiguous/no-decision language but is landed per REPORTS.md:28, not a future fix. Other queue-plan searches found no exact unlanded timeout/doc correction.",
+            "BUGS.md, full INDEX.md and active TRIAGE_OUTCOMES.md searches found no same trigger/consequence/scope item. FILTER.md does not cover an ordinary internal guarantee error."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": "The original stronger runtime claim lacks a shipped false no-deletion message or destruction beyond the consent given. A true global predecision deadline is not established by the current implementation.",
+          "original_stronger_consequence": "Delete might seal after the helm falsely reassures the user that nothing was decided, potentially destroying later user work or exceeding consent. The actual timeout reply preserves uncertainty, and the initial conditional confirmation covers destruction of the last environment. Preserve those limits; absence of a runtime route does not erase the documentation defect.",
+          "needs_independent_drop_check": true,
+          "proposed_basis": "Retain the documentation finding as other. Have the independent check judge the withdrawal/lowering of the earlier potentially destructive false-reassurance route before accepting it.",
+          "new_interface_evidence": "Current SPEC.md:1531-1536 and SPEC_impl.md:6143-6145 retain nothing-was-decided wording for unanswered requests, whereas the pinned endpoint explicitly reports uncertainty. This is adjacent contract context for the same named documentation defect."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": true,
+        "clearly_refuted_candidate": false,
+        "needs_unfinished_gate": true,
+        "provisional_bucket": "high",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "environment-delete-docs-overstate-admission-timeout-as-decision-bound",
+        "destination": "trailing-environment-delete-docs-overstate-admission-timeout-as-decision-bound.md"
+      }
+    },
+    {
+      "key": "g123/c2",
+      "owner": "g123",
+      "id": "c2",
+      "domain": "supervisor-request-admission",
+      "purpose": "supervisor-request-admission: crates/farhelm-supervisor/src/service/handlers.rs; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 3,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c2",
+            "state": "open",
+            "summary": "Seal snapshot taken before listing is eventually refreshed",
+            "location": "crates/farhelm-supervisor/src/service/handlers.rs:616",
+            "detail": "Reviewed commit: 47f33bbdbd5ff4a6e437e97a800f9083be43096e. TLDR considered: a listing started before sealing could omit the seal after cleanup has already changed the session list, delaying destruction of the environment. Checks/results: handlers.rs:616 captures sealed before awaiting list_all; handlers.rs:1559-1563 stores true and hints immediately after the durable transaction, including before cleanup can fail. hints.rs:27-35 retains trailing notifications, lines 48-51 explicitly allow dropping hints to full queues because periodic polling is the backstop; lines 151-163 implement the retained Notify permit and trailing send. A stale first listing therefore does not permanently hide the seal: a subsequent listing reads the monotonic true value and returns it even on listing failure or frame overflow (handlers.rs:620-628,650-670). Contract: SPEC_impl.md Environment Delete and the seal says 'SessionList.sealed carries it on every listing, since the hello is sent once per connection'; the handler documents snapshot concurrency explicitly. Suggested bucket: other; no report proposed because this is a transient snapshot with an independent refresh path, not established incorrect final state. Confidence: confirmed source analysis, no execution. proposed_drop: false-positive concern refuted by post-commit hint plus periodic poll and monotonic seal. possible_cover: none. Could-be-highest: false; suspected consequence was delayed resource destruction/billing, with no demonstrated data-loss or security route. Caveat: eventual propagation assumes a reachable supervisor and a completing list request, as the feature's reconnect contract requires."
+          }
+        },
+        {
+          "line": 5,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c2",
+            "state": "open",
+            "summary": "Seal snapshot taken before listing is eventually refreshed",
+            "location": "crates/farhelm-supervisor/src/service/handlers.rs:616",
+            "detail": "Reviewed commit: 47f33bbdbd5ff4a6e437e97a800f9083be43096e. TLDR considered: a listing started before sealing could omit the seal after cleanup changed the sessions and delay environment destruction. Coverage-repair synthesis rechecked assigned patch plus pinned hints implementation. Correction to prior event: the in-memory seal store and hint are handlers.rs:1550 and 1553, not 1559-1563. They run after the seal transaction and before finish_teardown, so cleanup refusal cannot prevent publication. list_reply returns the seal despite listing errors and the handler substitutes a minimal sealed listing for oversized replies. hints.rs:27-35 retains a trailing notification; hints.rs:120-127 uses try_send, explicitly allowing dropped hints at queue saturation. manager.rs:145-160 documents the independent three-second backstop poll. Exact relevant text: 'The poll stays for anything a hint misses (a dropped hint, a change no hint source covers), which is why it keeps its cadence.' No permanent seal-loss route is established from a stale snapshot. Suggested bucket: other; confidence: confirmed source analysis, not execution. proposed_drop: source refutation by monotonic seal, post-commit hint, and independent poll; proposed only, no parent drop approval inferred. possible_cover: none. Could-be-highest: false; original consequence remains delayed destruction/billing, not established data loss or unauthorized destruction. Caveats: eventual propagation requires connectivity and a completing list request. This does not prove admission safety for other operations; the separately supplied g102/c2 tab proof is limited to tab-open lifecycle claim plus durable-row count."
+          }
+        }
+      ],
+      "latest": {
+        "line": 5,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c2",
+          "state": "open",
+          "summary": "Seal snapshot taken before listing is eventually refreshed",
+          "location": "crates/farhelm-supervisor/src/service/handlers.rs:616",
+          "detail": "Reviewed commit: 47f33bbdbd5ff4a6e437e97a800f9083be43096e. TLDR considered: a listing started before sealing could omit the seal after cleanup changed the sessions and delay environment destruction. Coverage-repair synthesis rechecked assigned patch plus pinned hints implementation. Correction to prior event: the in-memory seal store and hint are handlers.rs:1550 and 1553, not 1559-1563. They run after the seal transaction and before finish_teardown, so cleanup refusal cannot prevent publication. list_reply returns the seal despite listing errors and the handler substitutes a minimal sealed listing for oversized replies. hints.rs:27-35 retains a trailing notification; hints.rs:120-127 uses try_send, explicitly allowing dropped hints at queue saturation. manager.rs:145-160 documents the independent three-second backstop poll. Exact relevant text: 'The poll stays for anything a hint misses (a dropped hint, a change no hint source covers), which is why it keeps its cadence.' No permanent seal-loss route is established from a stale snapshot. Suggested bucket: other; confidence: confirmed source analysis, not execution. proposed_drop: source refutation by monotonic seal, post-commit hint, and independent poll; proposed only, no parent drop approval inferred. possible_cover: none. Could-be-highest: false; original consequence remains delayed destruction/billing, not established data loss or unauthorized destruction. Caveats: eventual propagation requires connectivity and a completing list request. This does not prove admission safety for other operations; the separately supplied g102/c2 tab proof is limited to tab-open lifecycle claim plus durable-row count."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g123/findings.jsonl",
+        "id": "c2",
+        "line": 5,
+        "disposition": "excluded",
+        "group": "seal-snapshot-before-list-await-eventual-refresh",
+        "reason": "Parent explicitly accepted named refuted proposal from claims-078 after inspecting it. A pre-seal listing can be stale, but the source has independent subsequent refreshes and a monotonic seal. The specific permanent-loss inference is refuted; a brief delay is not evidence that destruction stays suppressed. Source-refute permanent seal loss from the stale snapshot using postcommit hint, monotonic seal and independent polling; preserve the possible transient delay. Checked source/results: [\"47f33bbdbd5ff4a6e437e97a800f9083be43096e:handlers.rs:616 snapshots before list_all. 1550 and 1553 set the in-memory seal and hint after the transaction, before finish_teardown can fail. 620-628 and 650-670 preserve a seen seal on error or overflow.\",\"service/hints.rs:27-35 retains a trailing Notify; 120-127 uses nonblocking try_send and can drop a saturated hint. farhelm-helm/src/manager.rs:145-160 documents and defines an independent three-second polling backstop. Source analysis only.\"] Current coverage/results: [\"SPEC_impl.md:6117-6135 requires postcommit seal publication and subsequent SessionList exposure. SPEC.md:1524-1539 allows the related reconnect/unreachable recovery case; no unconditional instantaneous listing consistency promise was found.\",\"TODO.md Planned is empty. plans/queue searches found landed environment-seal work, not an unlanded correction for this snapshot. BUGS.md, full INDEX.md and active TRIAGE_OUTCOMES.md have no exact persistent-seal-loss item.\",\"Do not apply the rare-display filter mechanically: the original consequence includes delayed provider destruction/billing, so a whole-consequence match is unnecessary to and not asserted for this refutation.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"A list begun before sealing could omit the seal after session cleanup and delay environment destruction/billing. No unauthorized destruction, security issue or loss of user work was established.\"; \"Permanent suppression would need a route defeating later completing listings despite connectivity. None is established. Connectivity and completing list requests remain assumptions, not guaranteed by this bounded check.\"."
+      },
+      "accepted_parent_decision": {
+        "key": "g123/c2",
+        "line": 5,
+        "disposition": "excluded",
+        "group": "seal-snapshot-before-list-await-eventual-refresh",
+        "bucket": "other",
+        "recording": "refuted",
+        "queue_target_candidate": null,
+        "needs_independent_drop_check": false,
+        "reason": "Parent explicitly accepted named refuted proposal from claims-078 after inspecting it. A pre-seal listing can be stale, but the source has independent subsequent refreshes and a monotonic seal. The specific permanent-loss inference is refuted; a brief delay is not evidence that destruction stays suppressed. Source-refute permanent seal loss from the stale snapshot using postcommit hint, monotonic seal and independent polling; preserve the possible transient delay. Checked source/results: [\"47f33bbdbd5ff4a6e437e97a800f9083be43096e:handlers.rs:616 snapshots before list_all. 1550 and 1553 set the in-memory seal and hint after the transaction, before finish_teardown can fail. 620-628 and 650-670 preserve a seen seal on error or overflow.\",\"service/hints.rs:27-35 retains a trailing Notify; 120-127 uses nonblocking try_send and can drop a saturated hint. farhelm-helm/src/manager.rs:145-160 documents and defines an independent three-second polling backstop. Source analysis only.\"] Current coverage/results: [\"SPEC_impl.md:6117-6135 requires postcommit seal publication and subsequent SessionList exposure. SPEC.md:1524-1539 allows the related reconnect/unreachable recovery case; no unconditional instantaneous listing consistency promise was found.\",\"TODO.md Planned is empty. plans/queue searches found landed environment-seal work, not an unlanded correction for this snapshot. BUGS.md, full INDEX.md and active TRIAGE_OUTCOMES.md have no exact persistent-seal-loss item.\",\"Do not apply the rare-display filter mechanically: the original consequence includes delayed provider destruction/billing, so a whole-consequence match is unnecessary to and not asserted for this refutation.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"A list begun before sealing could omit the seal after session cleanup and delay environment destruction/billing. No unauthorized destruction, security issue or loss of user work was established.\"; \"Permanent suppression would need a route defeating later completing listings despite connectivity. None is established. Connectivity and completing list requests remain assumptions, not guaranteed by this bounded check.\"."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-078",
+          "key": "g123/c2",
+          "latest_line": 5,
+          "recommendation": "refuted",
+          "bucket": "other",
+          "underlying_key": "seal-snapshot-before-list-await-eventual-refresh",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "A pre-seal listing can be stale, but the source has independent subsequent refreshes and a monotonic seal. The specific permanent-loss inference is refuted; a brief delay is not evidence that destruction stays suppressed.",
+          "checks": [
+            "47f33bbdbd5ff4a6e437e97a800f9083be43096e:handlers.rs:616 snapshots before list_all. 1550 and 1553 set the in-memory seal and hint after the transaction, before finish_teardown can fail. 620-628 and 650-670 preserve a seen seal on error or overflow.",
+            "service/hints.rs:27-35 retains a trailing Notify; 120-127 uses nonblocking try_send and can drop a saturated hint. farhelm-helm/src/manager.rs:145-160 documents and defines an independent three-second polling backstop. Source analysis only."
+          ],
+          "coverage_checked": [
+            "SPEC_impl.md:6117-6135 requires postcommit seal publication and subsequent SessionList exposure. SPEC.md:1524-1539 allows the related reconnect/unreachable recovery case; no unconditional instantaneous listing consistency promise was found.",
+            "TODO.md Planned is empty. plans/queue searches found landed environment-seal work, not an unlanded correction for this snapshot. BUGS.md, full INDEX.md and active TRIAGE_OUTCOMES.md have no exact persistent-seal-loss item.",
+            "Do not apply the rare-display filter mechanically: the original consequence includes delayed provider destruction/billing, so a whole-consequence match is unnecessary to and not asserted for this refutation."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": "Permanent suppression would need a route defeating later completing listings despite connectivity. None is established. Connectivity and completing list requests remain assumptions, not guaranteed by this bounded check.",
+          "original_stronger_consequence": "A list begun before sealing could omit the seal after session cleanup and delay environment destruction/billing. No unauthorized destruction, security issue or loss of user work was established.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Source-refute permanent seal loss from the stale snapshot using postcommit hint, monotonic seal and independent polling; preserve the possible transient delay."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "seal-snapshot-before-list-await-eventual-refresh",
+        "destination": null
+      }
+    },
+    {
+      "key": "g123/c3",
+      "owner": "g123",
+      "id": "c3",
+      "domain": "supervisor-request-admission",
+      "purpose": "supervisor-request-admission: crates/farhelm-supervisor/src/service/handlers.rs; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 4,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c3",
+            "state": "open",
+            "summary": "Session credentials cannot invoke the new sealing handler directly",
+            "location": "crates/farhelm-supervisor/src/service/handlers.rs:3386",
+            "detail": "Reviewed commit: 47f33bbdbd5ff4a6e437e97a800f9083be43096e. TLDR considered: an agent might bypass the user's environment Delete confirmation and permanently seal its environment by sending the new destructive protocol request itself. Checks/results: handle_control dispatches DeleteSessionOrSeal at handlers.rs:3386-3388, but restricted connections use handle_restricted_control, whose only accepted arms are the refused CreateSession special case and AgentRequest (3619-3651); the catch-all at 3851-3861 replies Unauthorized using the request's req_id before calling any handler. The assigned test adds DeleteSessionOrSeal to the existing restricted off-list request test at 8043-8056, which asserts matching req_id and Unauthorized. SPEC_impl.md:6599-6601 requires a full-authority helm connection and refusal for a session-authenticated connection. Thus the new handler is unreachable with ordinary session credentials. Suggested bucket if established would be highest/security or loss of work; no report because the route is source-refuted. Confidence: confirmed source analysis, no execution. proposed_drop: explicit restricted dispatcher refutes the bypass; not an acceptance of harmful behavior by specification. possible_cover: none. Could-be-highest: true for the hypothetical unauthorized seal/destruction; the necessary session-authenticated route is refuted, rather than merely unshown. Caveat: full-authority credentials retain full supervisor authority, as before; compromising them is outside this candidate's premise."
+          }
+        },
+        {
+          "line": 6,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c3",
+            "state": "open",
+            "summary": "Session credentials cannot invoke the new sealing handler directly",
+            "location": "crates/farhelm-supervisor/src/service/handlers.rs:3386",
+            "detail": "Reviewed commit: 47f33bbdbd5ff4a6e437e97a800f9083be43096e. TLDR/original potential highest impact preserved: an agent could bypass user confirmation, permanently seal its environment, and cause destruction of every process and file if ordinary session credentials reached the new request. Coverage-repair synthesis rechecked the actual connection dispatcher as well as the assigned handler patch. connection.rs:613-614 selects 'Some(auth) => handle_restricted_control(&sup, msg, &tx, auth).await'; only the None branch reaches handle_control at line 737. handlers.rs:3619-3651 accepts only the special CreateSession refusal and AgentRequest; handlers.rs:3851-3861 catches every other request and replies Unauthorized, with exact message 'a session-authenticated peer may only send requests to the helm'. The new DeleteSessionOrSeal arm exists only in full-authority handle_control at 3386-3388. Assigned patch adds it to restricted_dispatch_refuses_an_off_list_message_and_any_create at 8043-8055; the assertion requires the matching request id and Unauthorized. SPEC_impl.md:6599-6600 says 'sent only by the helm’s full-authority connection; a session-authenticated one is refused like a create' (apostrophe typographically normalized here; source uses helm's). This is a source-refuted unauthorized route, not specification permission to destroy work without confirmation. Suggested bucket if route existed: highest/security and loss of user-owned work. Confidence: confirmed source analysis, no execution. proposed_drop: source refutation above, proposed for independent check; no parent acceptance inferred. possible_cover: none. Could-be-highest: true for the original bypass; exact required route is refuted. Caveat: full-authority connections can invoke the handler; this record establishes the session-authenticated boundary only and makes no general claim about all admission paths or compromised full-authority credentials."
+          }
+        }
+      ],
+      "latest": {
+        "line": 6,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c3",
+          "state": "open",
+          "summary": "Session credentials cannot invoke the new sealing handler directly",
+          "location": "crates/farhelm-supervisor/src/service/handlers.rs:3386",
+          "detail": "Reviewed commit: 47f33bbdbd5ff4a6e437e97a800f9083be43096e. TLDR/original potential highest impact preserved: an agent could bypass user confirmation, permanently seal its environment, and cause destruction of every process and file if ordinary session credentials reached the new request. Coverage-repair synthesis rechecked the actual connection dispatcher as well as the assigned handler patch. connection.rs:613-614 selects 'Some(auth) => handle_restricted_control(&sup, msg, &tx, auth).await'; only the None branch reaches handle_control at line 737. handlers.rs:3619-3651 accepts only the special CreateSession refusal and AgentRequest; handlers.rs:3851-3861 catches every other request and replies Unauthorized, with exact message 'a session-authenticated peer may only send requests to the helm'. The new DeleteSessionOrSeal arm exists only in full-authority handle_control at 3386-3388. Assigned patch adds it to restricted_dispatch_refuses_an_off_list_message_and_any_create at 8043-8055; the assertion requires the matching request id and Unauthorized. SPEC_impl.md:6599-6600 says 'sent only by the helm’s full-authority connection; a session-authenticated one is refused like a create' (apostrophe typographically normalized here; source uses helm's). This is a source-refuted unauthorized route, not specification permission to destroy work without confirmation. Suggested bucket if route existed: highest/security and loss of user-owned work. Confidence: confirmed source analysis, no execution. proposed_drop: source refutation above, proposed for independent check; no parent acceptance inferred. possible_cover: none. Could-be-highest: true for the original bypass; exact required route is refuted. Caveat: full-authority connections can invoke the handler; this record establishes the session-authenticated boundary only and makes no general claim about all admission paths or compromised full-authority credentials."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g123/findings.jsonl",
+        "id": "c3",
+        "line": 6,
+        "disposition": "under-investigation",
+        "group": "g123-c3",
+        "reason": "Record durably acknowledged; parent source/contract validation, cross-group synthesis, coverage/filter matching and any independent drop check remain pending. This preserves the claim and uncertainty without accepting, dropping or lowering it."
+      },
+      "accepted_parent_decision": null,
+      "returned_claim_checks": [
+        {
+          "batch": "claims-078",
+          "key": "g123/c3",
+          "latest_line": 6,
+          "recommendation": "refuted",
+          "bucket": "highest",
+          "underlying_key": "session-authenticated-delete-session-or-seal-bypass",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The session-authenticated connection dispatcher cannot reach the sealing handler. It accepts only the relay arm and a special create refusal; every other request is Unauthorized before handler dispatch.",
+          "checks": [
+            "47f33bbdbd5ff4a6e437e97a800f9083be43096e:connection.rs:613-614 routes Some(auth) exclusively to handle_restricted_control; only the unrestricted branch reaches handle_control at 737.",
+            "handlers.rs:3619-3651 has CreateSession refusal and AgentRequest arms; 3851-3861 catches other messages with Unauthorized. DeleteSessionOrSeal exists in unrestricted handle_control at 3386-3388.",
+            "handlers.rs:8043-8055 adds this request to the off-list regression and asserts matching request id plus Unauthorized. The test was read, not executed."
+          ],
+          "coverage_checked": [
+            "Current SPEC_impl.md:6108-6110 expressly requires full-authority helm connection and refusal of a session-authenticated one. SPEC.md Agents and environments distinguishes confined session-only Delete from user-owned whole-environment destruction.",
+            "TODO.md Planned is empty. plans/queue environment-agent-operations is landed; no unlanded plan fixes a surviving bypass found here. BUGS.md, full INDEX.md and active TRIAGE_OUTCOMES.md searches found no exact session-auth sealing bypass item.",
+            "No filter can cover the alleged security or work-loss route. The basis is source refutation, not acceptance of unauthorized deletion."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": null,
+          "original_stronger_consequence": "An agent could bypass user confirmation, permanently seal its environment and cause destruction of every process/file if ordinary session credentials could invoke the new request. Full-authority credential compromise and other admission paths are outside the checked premise.",
+          "needs_independent_drop_check": true,
+          "proposed_basis": "Propose source refutation of the explicit session-authenticated dispatcher route; keep highest for the required independent drop check."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": true,
+        "provisional_bucket": "highest",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "session-authenticated-delete-session-or-seal-bypass",
+        "destination": null
+      }
+    },
+    {
+      "key": "g123/l4",
+      "owner": "g123",
+      "id": "l4",
+      "domain": "supervisor-request-admission",
+      "purpose": "supervisor-request-admission: crates/farhelm-supervisor/src/service/handlers.rs; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 9,
+          "event": {
+            "version": 1,
+            "kind": "lead",
+            "id": "l4",
+            "state": "open",
+            "summary": "Directory-admission test may not observe the directory-wait boundary",
+            "location": "crates/farhelm-supervisor/src/service/handlers.rs:12618",
+            "detail": "Reviewed commit: 47f33bbdbd5ff4a6e437e97a800f9083be43096e. TLDR: the new test intended to protect Delete against an in-flight create may count a planted row without proving it actually waited for directory admission. Source basis: assigned patch 1012-1052 (test a_delete_waits_for_a_create_holding_directory_admission_and_counts_it) holds working_copy_operations, dispatches Delete, waits only for claimed_for_test on the earlier agent fence, then plants the competing session and releases directory admission before inspecting the answer. Comment says the outcome proves it waited. Missing premise: whether the fence observer or subsequent scheduling establishes that the Delete has reached/attempted the blocked directory mutex before the planted row can be counted, as opposed to merely being in flight. Next source checks: exact test order, lifecycle-lock test instrumentation, dispatch task ownership and store async scheduling. This is a possible test-oracle defect, not an established production admission bug. Suggested bucket: other if verified. Confidence: concrete open source lead, not execution. proposed_drop: false pending checks. possible_cover: no equivalent in supplied interface records; g126/l1 concerns a different list-reply cache oracle. Could-be-highest: false for test evidence; the hypothetical regression could seal over an admitted launch, but no shipped production bypass is asserted. Preserve this difference when resolving."
+          }
+        },
+        {
+          "line": 10,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "l4",
+            "state": "open",
+            "summary": "Directory-admission test observes the earlier fence, not the blocked directory wait",
+            "location": "crates/farhelm-supervisor/src/service/handlers.rs:12667",
+            "detail": "Reviewed commit: 47f33bbdbd5ff4a6e437e97a800f9083be43096e. TLDR: the new regression test can get its expected remaining-session count without exercising the blocked directory-admission boundary it promises to protect. It therefore gives incomplete evidence that Delete waits for an in-flight create before deciding whether to destroy the environment. This is a test-oracle defect, not a demonstrated production sealing race. Exact test sequence at handlers.rs:12654-12687: hold working_copy_operations, dispatch Delete, wait only until agent_request_locks.claimed_for_test(\"s1\") is true (12667-12673), plant the other row (12674), release directory admission (12675), then join and assert Deleted { remaining: 1 }. No observation of Delete attempting the directory mutex, reaching a post-admission boundary, or refusing to decide while that mutex remains held exists. The comment at 12666 says 'The outcome is the proof: deciding early would have sealed.' That only excludes deciding before the test's planted INSERT, not deciding before release of directory admission. Competing source-supported mechanism: a wrongly reordered handler can acquire the agent fence and proceed through read-only preflight before acquiring directory admission, then later take directory admission only for teardown. It can suspend in preflight, allow the test to plant the second row, and count that row before the held directory mutex is released; the identical Deleted result then passes. The observation cannot distinguish that ordering. This is a control-flow counterexample, not an executed mutation/reproduction. Concrete yield/ordering premises: claimed_for_test is merely a try_lock probe of the earlier keyed mutex (core.rs:2269-2284), not a downstream barrier. dispatch_for_test spawns via handle_control and returns tasks/rx without waiting for completion (handlers.rs:5414-5436). With the planted target's terminal None, prepare_teardown calls other_pane_roots; it first awaits store.has_session_row (teardown.rs:220-224), and store operations await independent blocking tasks (db.rs:230-244). Additional host-record filesystem/preflight work occurs before the actual seal count. Nothing in that preflight requires the test's held directory mutex except the production acquisition whose ordering this test is supposed to detect. plant commits its row directly through insert_session (handlers.rs:12060-12076; store.rs:3279-3284,3307-3310), and deliberately does not acquire working_copy_operations. The test can therefore make the expected row visible during such unrelated suspension. Current production handler is correct at 1459-1469: directory acquisition precedes lifecycle and all preflight/count work. That refutes a runtime bypass, but does not supply the missing negative test oracle. Fix direction: use a deterministic admission-attempt/worker-boundary seam that demonstrates the Delete is parked on the held directory admission, and keep the guard held through a distinguishing observation before allowing the competing row/count phase. Do not infer this boundary merely from an earlier fence being held or a final count after releasing the guard. Contract: the test's own specification at 12648-12652 says it tests waiting for directory admission; the supplied checklist requires 'Wait on the named readiness oracle for the intended boundary' and 'Assert an observable that distinguishes the competing mechanisms.' Attribution: the entire test is added by this assigned commit (also absent at exclusive range base); through pinned tip 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db it remains the same at handlers.rs:12084-12117, with the same earlier-fence probe and plant-before-release sequence. Suggested bucket: other (test validity). Confidence: confirmed source/oracle analysis; no runtime tests, reproduced bug or mutation executed. proposed_drop: false. possible_cover: none in supplied neighbours; g126/l1 is a separate undrained-list-reply cache oracle. Could-be-highest: false for the established test-quality issue; preserve the hypothetical regression consequence (prematurely sealing over a launch) without asserting a shipped destructive route. Material caveat: the test still checks the count/result and can catch some early-count interleavings; it is not claimed to prove nothing or always pass every admission regression. This resolves lead l4 to a verified finding, with no missing source premise."
+          }
+        }
+      ],
+      "latest": {
+        "line": 10,
+        "event": {
+          "version": 1,
+          "kind": "finding",
+          "id": "l4",
+          "state": "open",
+          "summary": "Directory-admission test observes the earlier fence, not the blocked directory wait",
+          "location": "crates/farhelm-supervisor/src/service/handlers.rs:12667",
+          "detail": "Reviewed commit: 47f33bbdbd5ff4a6e437e97a800f9083be43096e. TLDR: the new regression test can get its expected remaining-session count without exercising the blocked directory-admission boundary it promises to protect. It therefore gives incomplete evidence that Delete waits for an in-flight create before deciding whether to destroy the environment. This is a test-oracle defect, not a demonstrated production sealing race. Exact test sequence at handlers.rs:12654-12687: hold working_copy_operations, dispatch Delete, wait only until agent_request_locks.claimed_for_test(\"s1\") is true (12667-12673), plant the other row (12674), release directory admission (12675), then join and assert Deleted { remaining: 1 }. No observation of Delete attempting the directory mutex, reaching a post-admission boundary, or refusing to decide while that mutex remains held exists. The comment at 12666 says 'The outcome is the proof: deciding early would have sealed.' That only excludes deciding before the test's planted INSERT, not deciding before release of directory admission. Competing source-supported mechanism: a wrongly reordered handler can acquire the agent fence and proceed through read-only preflight before acquiring directory admission, then later take directory admission only for teardown. It can suspend in preflight, allow the test to plant the second row, and count that row before the held directory mutex is released; the identical Deleted result then passes. The observation cannot distinguish that ordering. This is a control-flow counterexample, not an executed mutation/reproduction. Concrete yield/ordering premises: claimed_for_test is merely a try_lock probe of the earlier keyed mutex (core.rs:2269-2284), not a downstream barrier. dispatch_for_test spawns via handle_control and returns tasks/rx without waiting for completion (handlers.rs:5414-5436). With the planted target's terminal None, prepare_teardown calls other_pane_roots; it first awaits store.has_session_row (teardown.rs:220-224), and store operations await independent blocking tasks (db.rs:230-244). Additional host-record filesystem/preflight work occurs before the actual seal count. Nothing in that preflight requires the test's held directory mutex except the production acquisition whose ordering this test is supposed to detect. plant commits its row directly through insert_session (handlers.rs:12060-12076; store.rs:3279-3284,3307-3310), and deliberately does not acquire working_copy_operations. The test can therefore make the expected row visible during such unrelated suspension. Current production handler is correct at 1459-1469: directory acquisition precedes lifecycle and all preflight/count work. That refutes a runtime bypass, but does not supply the missing negative test oracle. Fix direction: use a deterministic admission-attempt/worker-boundary seam that demonstrates the Delete is parked on the held directory admission, and keep the guard held through a distinguishing observation before allowing the competing row/count phase. Do not infer this boundary merely from an earlier fence being held or a final count after releasing the guard. Contract: the test's own specification at 12648-12652 says it tests waiting for directory admission; the supplied checklist requires 'Wait on the named readiness oracle for the intended boundary' and 'Assert an observable that distinguishes the competing mechanisms.' Attribution: the entire test is added by this assigned commit (also absent at exclusive range base); through pinned tip 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db it remains the same at handlers.rs:12084-12117, with the same earlier-fence probe and plant-before-release sequence. Suggested bucket: other (test validity). Confidence: confirmed source/oracle analysis; no runtime tests, reproduced bug or mutation executed. proposed_drop: false. possible_cover: none in supplied neighbours; g126/l1 is a separate undrained-list-reply cache oracle. Could-be-highest: false for the established test-quality issue; preserve the hypothetical regression consequence (prematurely sealing over a launch) without asserting a shipped destructive route. Material caveat: the test still checks the count/result and can catch some early-count interleavings; it is not claimed to prove nothing or always pass every admission regression. This resolves lead l4 to a verified finding, with no missing source premise."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g123/findings.jsonl",
+        "id": "l4",
+        "line": 10,
+        "disposition": "verified",
+        "group": "delete-directory-admission-test-observes-only-earlier-agent-fence",
+        "reason": "Parent explicitly accepted named retain-verified proposal from claims-078 after inspecting it. The test observes an earlier fence, inserts the competing row, then releases directory admission before checking the result. That final count can exclude deciding before the INSERT, but cannot establish that no decision occurred before directory-admission release. This is a narrow test-oracle defect, not a shipped sealing race. Retain as other/test validity. Require a distinguishing directory-attempt or parked-boundary observation while the directory guard remains held. Checked source/results: [\"47f33bbdbd5ff4a6e437e97a800f9083be43096e:handlers.rs:12648-12687 promises a directory-wait test but waits only for claimed_for_test(s1), plants launching, drops the held directory guard, joins and asserts Deleted with remaining 1.\",\"core.rs:2269-2284 implements claimed_for_test as an instantaneous try_lock probe of that keyed mutex. It provides no downstream directory-attempt witness. handlers.rs:5414-5436 returns the spawned task/reply set, not a directory-boundary handshake.\",\"handlers.rs:12060-12076 plants through insert_session directly. teardown.rs:220-224 has an asynchronous store read before counting; db.rs:230-244 awaits spawn_blocking. A reordered regression can therefore yield after the earlier fence and allow the inserted row to satisfy the count without proving the required lock ordering. This is a source-supported counterexample, not an executed mutation.\",\"The test is absent at exclusive base and remains at pinned tip 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db:handlers.rs:12084-12117. Production acquisition at reviewed handlers.rs:1459-1469 correctly puts directory admission before preflight.\"] Current coverage/results: [\"SPEC_impl.md:6110-6121 establishes the admission/count ordering; correct production ordering does not supply the test's missing witness. SPEC.md Sandbox sessions supplies the create-versus-last-delete consequence, without accepting this weaker oracle.\",\"TODO.md Planned is empty. plans/queue searches found landed environment work, no unlanded exact oracle repair. BUGS.md, full INDEX.md and active TRIAGE_OUTCOMES.md have no same test/boundary item. Other readiness-witness findings concern different tests and cannot cover it.\",\"FILTER.md has no matching boundary for this regression-test sensitivity defect.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"The hypothetical production regression could seal over an in-flight launch. The record has consistently established only incomplete regression evidence, not a shipped destructive bypass. The test still checks the count and catches some early-count interleavings; it is not wholly ineffective.\"; null."
+      },
+      "accepted_parent_decision": {
+        "key": "g123/l4",
+        "line": 10,
+        "disposition": "verified",
+        "group": "delete-directory-admission-test-observes-only-earlier-agent-fence",
+        "bucket": "other",
+        "recording": "retain-verified",
+        "queue_target_candidate": null,
+        "needs_independent_drop_check": false,
+        "reason": "Parent explicitly accepted named retain-verified proposal from claims-078 after inspecting it. The test observes an earlier fence, inserts the competing row, then releases directory admission before checking the result. That final count can exclude deciding before the INSERT, but cannot establish that no decision occurred before directory-admission release. This is a narrow test-oracle defect, not a shipped sealing race. Retain as other/test validity. Require a distinguishing directory-attempt or parked-boundary observation while the directory guard remains held. Checked source/results: [\"47f33bbdbd5ff4a6e437e97a800f9083be43096e:handlers.rs:12648-12687 promises a directory-wait test but waits only for claimed_for_test(s1), plants launching, drops the held directory guard, joins and asserts Deleted with remaining 1.\",\"core.rs:2269-2284 implements claimed_for_test as an instantaneous try_lock probe of that keyed mutex. It provides no downstream directory-attempt witness. handlers.rs:5414-5436 returns the spawned task/reply set, not a directory-boundary handshake.\",\"handlers.rs:12060-12076 plants through insert_session directly. teardown.rs:220-224 has an asynchronous store read before counting; db.rs:230-244 awaits spawn_blocking. A reordered regression can therefore yield after the earlier fence and allow the inserted row to satisfy the count without proving the required lock ordering. This is a source-supported counterexample, not an executed mutation.\",\"The test is absent at exclusive base and remains at pinned tip 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db:handlers.rs:12084-12117. Production acquisition at reviewed handlers.rs:1459-1469 correctly puts directory admission before preflight.\"] Current coverage/results: [\"SPEC_impl.md:6110-6121 establishes the admission/count ordering; correct production ordering does not supply the test's missing witness. SPEC.md Sandbox sessions supplies the create-versus-last-delete consequence, without accepting this weaker oracle.\",\"TODO.md Planned is empty. plans/queue searches found landed environment work, no unlanded exact oracle repair. BUGS.md, full INDEX.md and active TRIAGE_OUTCOMES.md have no same test/boundary item. Other readiness-witness findings concern different tests and cannot cover it.\",\"FILTER.md has no matching boundary for this regression-test sensitivity defect.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"The hypothetical production regression could seal over an in-flight launch. The record has consistently established only incomplete regression evidence, not a shipped destructive bypass. The test still checks the count and catches some early-count interleavings; it is not wholly ineffective.\"; null."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-078",
+          "key": "g123/l4",
+          "latest_line": 10,
+          "recommendation": "retain-verified",
+          "bucket": "other",
+          "underlying_key": "delete-directory-admission-test-observes-only-earlier-agent-fence",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The test observes an earlier fence, inserts the competing row, then releases directory admission before checking the result. That final count can exclude deciding before the INSERT, but cannot establish that no decision occurred before directory-admission release. This is a narrow test-oracle defect, not a shipped sealing race.",
+          "checks": [
+            "47f33bbdbd5ff4a6e437e97a800f9083be43096e:handlers.rs:12648-12687 promises a directory-wait test but waits only for claimed_for_test(s1), plants launching, drops the held directory guard, joins and asserts Deleted with remaining 1.",
+            "core.rs:2269-2284 implements claimed_for_test as an instantaneous try_lock probe of that keyed mutex. It provides no downstream directory-attempt witness. handlers.rs:5414-5436 returns the spawned task/reply set, not a directory-boundary handshake.",
+            "handlers.rs:12060-12076 plants through insert_session directly. teardown.rs:220-224 has an asynchronous store read before counting; db.rs:230-244 awaits spawn_blocking. A reordered regression can therefore yield after the earlier fence and allow the inserted row to satisfy the count without proving the required lock ordering. This is a source-supported counterexample, not an executed mutation.",
+            "The test is absent at exclusive base and remains at pinned tip 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db:handlers.rs:12084-12117. Production acquisition at reviewed handlers.rs:1459-1469 correctly puts directory admission before preflight."
+          ],
+          "coverage_checked": [
+            "SPEC_impl.md:6110-6121 establishes the admission/count ordering; correct production ordering does not supply the test's missing witness. SPEC.md Sandbox sessions supplies the create-versus-last-delete consequence, without accepting this weaker oracle.",
+            "TODO.md Planned is empty. plans/queue searches found landed environment work, no unlanded exact oracle repair. BUGS.md, full INDEX.md and active TRIAGE_OUTCOMES.md have no same test/boundary item. Other readiness-witness findings concern different tests and cannot cover it.",
+            "FILTER.md has no matching boundary for this regression-test sensitivity defect."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": null,
+          "original_stronger_consequence": "The hypothetical production regression could seal over an in-flight launch. The record has consistently established only incomplete regression evidence, not a shipped destructive bypass. The test still checks the count and catches some early-count interleavings; it is not wholly ineffective.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Retain as other/test validity. Require a distinguishing directory-attempt or parked-boundary observation while the directory guard remains held."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": true,
+        "clearly_refuted_candidate": false,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Source-confirmed by an existing parent decision; not runtime reproduced",
+        "deduplication_key": "delete-directory-admission-test-observes-only-earlier-agent-fence",
+        "destination": "trailing-delete-directory-admission-test-observes-only-earlier-agent-fence.md"
+      }
+    },
+    {
+      "key": "g123/c5",
+      "owner": "g123",
+      "id": "c5",
+      "domain": "supervisor-request-admission",
+      "purpose": "supervisor-request-admission: crates/farhelm-supervisor/src/service/handlers.rs; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 11,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c5",
+            "state": "open",
+            "summary": "Oversized-list fixture's missing store row does not suppress its planted entry",
+            "location": "crates/farhelm-supervisor/src/service/handlers.rs:12976",
+            "detail": "Reviewed commit: 47f33bbdbd5ff4a6e437e97a800f9083be43096e. TLDR considered: the oversized sealed-list test plants only an in-memory session, so a missing persisted row might remove it or force an unrelated listing failure, allowing the minimal sealed reply without exercising frame overflow. Source checks refute that missing-row mechanism. handlers.rs:12976-12983 gives its map entry title MAX_FRAME_LEN bytes and sets sealed. list_all snapshots and describes map entries, then projects optional checkout metadata; it does not require or filter by a persisted session row (listing.rs snapshot and final projection at approximately 124-214). project_checkout_metadata at store.rs:3537-3584 iterates the supplied vector, reads optional origin/membership metadata, changes only github_repo/working_copy, and returns that same vector with no session-row-existence guard or removal. Missing checkout metadata is ordinary absence. Therefore the map-only fixture is not invalid for the reason considered. Suggested bucket: other if a real false-positive route were shown. Confidence: source-refuted candidate, no execution. proposed_drop: the concrete missing-row premise does not cause entry suppression or a mandatory unrelated listing error in the inspected path; proposed for independent check, no parent acceptance inferred. possible_cover: none in supplied neighbours; g126/l1 concerns another test's undrained reply cache. Could-be-highest: false; this was a test-fixture/oracle suspicion without security or work-loss consequence. Material caveat: this is a narrow refutation of the missing-store-row concern, not proof that every possible listing failure can never make an oversized-frame test pass."
+          }
+        }
+      ],
+      "latest": {
+        "line": 11,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c5",
+          "state": "open",
+          "summary": "Oversized-list fixture's missing store row does not suppress its planted entry",
+          "location": "crates/farhelm-supervisor/src/service/handlers.rs:12976",
+          "detail": "Reviewed commit: 47f33bbdbd5ff4a6e437e97a800f9083be43096e. TLDR considered: the oversized sealed-list test plants only an in-memory session, so a missing persisted row might remove it or force an unrelated listing failure, allowing the minimal sealed reply without exercising frame overflow. Source checks refute that missing-row mechanism. handlers.rs:12976-12983 gives its map entry title MAX_FRAME_LEN bytes and sets sealed. list_all snapshots and describes map entries, then projects optional checkout metadata; it does not require or filter by a persisted session row (listing.rs snapshot and final projection at approximately 124-214). project_checkout_metadata at store.rs:3537-3584 iterates the supplied vector, reads optional origin/membership metadata, changes only github_repo/working_copy, and returns that same vector with no session-row-existence guard or removal. Missing checkout metadata is ordinary absence. Therefore the map-only fixture is not invalid for the reason considered. Suggested bucket: other if a real false-positive route were shown. Confidence: source-refuted candidate, no execution. proposed_drop: the concrete missing-row premise does not cause entry suppression or a mandatory unrelated listing error in the inspected path; proposed for independent check, no parent acceptance inferred. possible_cover: none in supplied neighbours; g126/l1 concerns another test's undrained reply cache. Could-be-highest: false; this was a test-fixture/oracle suspicion without security or work-loss consequence. Material caveat: this is a narrow refutation of the missing-store-row concern, not proof that every possible listing failure can never make an oversized-frame test pass."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g123/findings.jsonl",
+        "id": "c5",
+        "line": 11,
+        "disposition": "excluded",
+        "group": "sealed-oversized-list-test-fixture-alternate-error-path",
+        "reason": "Parent explicitly accepted named refuted proposal from claims-078 after inspecting it. This is the missing-store-row subclaim already investigated in g122/l1. Checkout projection returns the planted map entry rather than removing it or requiring a sessions row. Narrow source refutation of missing-session-row suppression/error; reconcile with g122/l1 rather than count an independent defect. Checked source/results: [\"47f33bbdbd5ff4a6e437e97a800f9083be43096e:handlers.rs:12976-12983 plants the oversized map entry. listing.rs:124-214 builds replies from that map snapshot then projects metadata.\",\"store.rs:3537-3584 changes only github_repo/working_copy and returns the same vector. working_copies.rs:968-1000 returns None/empty for missing optional rows; there is no session-row-existence guard. Source reads only.\"] Current coverage/results: [\"Both specs' seal/list sections were checked; neither requires a persisted row for this fabricated listing fixture. They do not establish an alternate failure mechanism.\",\"TODO.md Planned is empty. plans/queue, BUGS.md, full INDEX.md and active TRIAGE_OUTCOMES.md searches found no exact fixture/oracle item. The environment plan is landed and no filter is invoked.\",\"g122/l1 is a same-root alias containing this exact missing-row suspicion plus the separately checked tmux lookup premise. No separate queue entry should be created for the subset.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"The test might silently exercise listing-error fallback rather than oversized-success fallback, missing a regression. No product security or user-work-loss consequence was asserted.\"; \"No concrete missing-row-induced listing error exists in the inspected path. This does not establish immunity to every unrelated database/filesystem failure.\"."
+      },
+      "accepted_parent_decision": {
+        "key": "g123/c5",
+        "line": 11,
+        "disposition": "excluded",
+        "group": "sealed-oversized-list-test-fixture-alternate-error-path",
+        "bucket": "other",
+        "recording": "refuted",
+        "queue_target_candidate": null,
+        "needs_independent_drop_check": false,
+        "reason": "Parent explicitly accepted named refuted proposal from claims-078 after inspecting it. This is the missing-store-row subclaim already investigated in g122/l1. Checkout projection returns the planted map entry rather than removing it or requiring a sessions row. Narrow source refutation of missing-session-row suppression/error; reconcile with g122/l1 rather than count an independent defect. Checked source/results: [\"47f33bbdbd5ff4a6e437e97a800f9083be43096e:handlers.rs:12976-12983 plants the oversized map entry. listing.rs:124-214 builds replies from that map snapshot then projects metadata.\",\"store.rs:3537-3584 changes only github_repo/working_copy and returns the same vector. working_copies.rs:968-1000 returns None/empty for missing optional rows; there is no session-row-existence guard. Source reads only.\"] Current coverage/results: [\"Both specs' seal/list sections were checked; neither requires a persisted row for this fabricated listing fixture. They do not establish an alternate failure mechanism.\",\"TODO.md Planned is empty. plans/queue, BUGS.md, full INDEX.md and active TRIAGE_OUTCOMES.md searches found no exact fixture/oracle item. The environment plan is landed and no filter is invoked.\",\"g122/l1 is a same-root alias containing this exact missing-row suspicion plus the separately checked tmux lookup premise. No separate queue entry should be created for the subset.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"The test might silently exercise listing-error fallback rather than oversized-success fallback, missing a regression. No product security or user-work-loss consequence was asserted.\"; \"No concrete missing-row-induced listing error exists in the inspected path. This does not establish immunity to every unrelated database/filesystem failure.\"."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-078",
+          "key": "g123/c5",
+          "latest_line": 11,
+          "recommendation": "refuted",
+          "bucket": "other",
+          "underlying_key": "sealed-oversized-list-test-fixture-alternate-error-path",
+          "aliases": [
+            "g122/l1"
+          ],
+          "target_queue_file": null,
+          "why": "This is the missing-store-row subclaim already investigated in g122/l1. Checkout projection returns the planted map entry rather than removing it or requiring a sessions row.",
+          "checks": [
+            "47f33bbdbd5ff4a6e437e97a800f9083be43096e:handlers.rs:12976-12983 plants the oversized map entry. listing.rs:124-214 builds replies from that map snapshot then projects metadata.",
+            "store.rs:3537-3584 changes only github_repo/working_copy and returns the same vector. working_copies.rs:968-1000 returns None/empty for missing optional rows; there is no session-row-existence guard. Source reads only."
+          ],
+          "coverage_checked": [
+            "Both specs' seal/list sections were checked; neither requires a persisted row for this fabricated listing fixture. They do not establish an alternate failure mechanism.",
+            "TODO.md Planned is empty. plans/queue, BUGS.md, full INDEX.md and active TRIAGE_OUTCOMES.md searches found no exact fixture/oracle item. The environment plan is landed and no filter is invoked.",
+            "g122/l1 is a same-root alias containing this exact missing-row suspicion plus the separately checked tmux lookup premise. No separate queue entry should be created for the subset."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": "No concrete missing-row-induced listing error exists in the inspected path. This does not establish immunity to every unrelated database/filesystem failure.",
+          "original_stronger_consequence": "The test might silently exercise listing-error fallback rather than oversized-success fallback, missing a regression. No product security or user-work-loss consequence was asserted.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Narrow source refutation of missing-session-row suppression/error; reconcile with g122/l1 rather than count an independent defect."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "sealed-oversized-list-test-fixture-alternate-error-path",
+        "destination": null
+      }
+    },
+    {
+      "key": "g123/l6",
+      "owner": "g123",
+      "id": "l6",
+      "domain": "supervisor-request-admission",
+      "purpose": "supervisor-request-admission: crates/farhelm-supervisor/src/service/handlers.rs; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 12,
+          "event": {
+            "version": 1,
+            "kind": "lead",
+            "id": "l6",
+            "state": "open",
+            "summary": "Check scope and novelty of the relocated listing-failure explanation",
+            "location": "crates/farhelm-supervisor/src/service/handlers.rs:675",
+            "detail": "Reviewed commit: 47f33bbdbd5ff4a6e437e97a800f9083be43096e. TLDR considered: the listing reply documentation might tell maintainers that unreadable launch files fail the listing even though the inspected list_all reads retained state and database metadata. The assigned patch relocates the unreadable-launch-sentinel error clause into list_reply. Newly supplied exact neighbour g125/l4 already reports this error-boundary cause for its later rewritten helper docs, explicitly attributing the earlier stale clause to the exclusive range base. Need verify base-to-assigned attribution directly before deciding whether this assigned slice has any independent new documentation defect beyond that known cause; no new bug is asserted from neighbour prose alone. Available checks: pinned base and parent handlers comment, assigned listing fallible dependencies, scoped later diff. Suggested bucket: other/documentation if independently reportable. Confidence: source lead with attribution/novelty check outstanding, no execution. proposed_drop: false pending source check. possible_cover: supplied g125/l4 same sentinel-failure cause, requiring reconciliation rather than independent discovery. Could-be-highest: false; suspected consequence is misleading internal error/test-fixture guidance, not security or loss of work. Original listing availability is correct in source; that does not by itself refute a prose defect."
+          }
+        },
+        {
+          "line": 13,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "l6",
+            "state": "open",
+            "summary": "Relocated sentinel-listing clause is pre-range; later rewrite is already tracked by g125/l4",
+            "location": "crates/farhelm-supervisor/src/service/handlers.rs:672",
+            "detail": "Reviewed commit: 47f33bbdbd5ff4a6e437e97a800f9083be43096e. TLDR/original concern preserved: misleading internal listing-failure documentation may send maintainers to launch-file failures even though lists do not read those files. Direct source/range checks: exclusive base 6e423e30068b62c6cfa276c6d720ee35bb70387a handlers.rs:619-623 already contains verbatim 'Every failure the listing can hit — an unreadable launch sentinel, an unclassified tmux failure — is an Internal' and the list_all justification. Assigned 47f33bbd relocates it verbatim to handlers.rs:672-676. Pinned listing.rs:92-97 correctly says 'Lists never sample screens, apply reports, read launch artifacts or commit outcomes' and 'A launch artifact read failure leaves lists available; the ticker logs and retries it.' The new helper description at handlers.rs:640-641 uses a tmux failure as its concrete failing-list example, which remains a real fallible dependency at this revision (listing.rs's pane_states await), unlike the sentinel. The scoped diff to 1ed482dde220452e424973faf38a5e1318986333 newly replaces that example with 'an unreadable launch sentinel or checkout registry' and changes the stale inline clause to replace tmux with checkout registry. This is exactly the later rewrite reported by supplied neighbour g125/l4, including its same sentinel-error-boundary cause; do not count it as a new independent g123 discovery. Suggested bucket: other/documentation if considered; confidence: confirmed source attribution and overlap, no execution. proposed_drop: no independent in-range introduction of the already-stale sentinel clause by this assigned relocation, plus supplied exact g125/l4 tracking the later newly false fixture guidance; this is a scoped attribution/novelty disposition, not a claim that correct production code makes the stale prose accurate. possible_cover: g125/l4 explicitly, from allowed discovery-neighbours.json; no prohibited coverage sources searched. Could-be-highest: false; consequence is incorrect internal error/test guidance, no established security or user-work-loss route. Caveats: the entire range was compared, not merely this commit's immediate parent. The pre-range stale clause remains misleading but is not independently reportable under this assignment; the later false new docstring is an in-range issue retained by its assigned owner. Lead l6 is resolved to this candidate; no missing premise remains."
+          }
+        }
+      ],
+      "latest": {
+        "line": 13,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "l6",
+          "state": "open",
+          "summary": "Relocated sentinel-listing clause is pre-range; later rewrite is already tracked by g125/l4",
+          "location": "crates/farhelm-supervisor/src/service/handlers.rs:672",
+          "detail": "Reviewed commit: 47f33bbdbd5ff4a6e437e97a800f9083be43096e. TLDR/original concern preserved: misleading internal listing-failure documentation may send maintainers to launch-file failures even though lists do not read those files. Direct source/range checks: exclusive base 6e423e30068b62c6cfa276c6d720ee35bb70387a handlers.rs:619-623 already contains verbatim 'Every failure the listing can hit — an unreadable launch sentinel, an unclassified tmux failure — is an Internal' and the list_all justification. Assigned 47f33bbd relocates it verbatim to handlers.rs:672-676. Pinned listing.rs:92-97 correctly says 'Lists never sample screens, apply reports, read launch artifacts or commit outcomes' and 'A launch artifact read failure leaves lists available; the ticker logs and retries it.' The new helper description at handlers.rs:640-641 uses a tmux failure as its concrete failing-list example, which remains a real fallible dependency at this revision (listing.rs's pane_states await), unlike the sentinel. The scoped diff to 1ed482dde220452e424973faf38a5e1318986333 newly replaces that example with 'an unreadable launch sentinel or checkout registry' and changes the stale inline clause to replace tmux with checkout registry. This is exactly the later rewrite reported by supplied neighbour g125/l4, including its same sentinel-error-boundary cause; do not count it as a new independent g123 discovery. Suggested bucket: other/documentation if considered; confidence: confirmed source attribution and overlap, no execution. proposed_drop: no independent in-range introduction of the already-stale sentinel clause by this assigned relocation, plus supplied exact g125/l4 tracking the later newly false fixture guidance; this is a scoped attribution/novelty disposition, not a claim that correct production code makes the stale prose accurate. possible_cover: g125/l4 explicitly, from allowed discovery-neighbours.json; no prohibited coverage sources searched. Could-be-highest: false; consequence is incorrect internal error/test guidance, no established security or user-work-loss route. Caveats: the entire range was compared, not merely this commit's immediate parent. The pre-range stale clause remains misleading but is not independently reportable under this assignment; the later false new docstring is an in-range issue retained by its assigned owner. Lead l6 is resolved to this candidate; no missing premise remains."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g123/findings.jsonl",
+        "id": "l6",
+        "line": 13,
+        "disposition": "duplicate",
+        "group": "list-reply-doc-prescribes-nonexistent-sentinel-read-failure",
+        "reason": "Parent read full claims078 and079g125/l4. Same1ed482 newly added helper-doc example wrongly prescribes unreadable launch sentinel as a listing-failure stimulus; listing and checkout projection never read launch files. Original inline clause predates exclusive base and47f33bbd only relocates it; preserve that attribution rather than claiming new inline runtime behavior. Join retained g125/l4 documentation root, preserving both locations and true checkout-registry example. No additional item or exact spec acceptance; no highest harm."
+      },
+      "accepted_parent_decision": {
+        "key": "g123/l6",
+        "line": 13,
+        "disposition": "duplicate",
+        "group": "list-reply-doc-prescribes-nonexistent-sentinel-read-failure",
+        "bucket": "other",
+        "recording": "retain-verified",
+        "needs_independent_drop_check": false,
+        "reason": "Parent read full claims078 and079g125/l4. Same1ed482 newly added helper-doc example wrongly prescribes unreadable launch sentinel as a listing-failure stimulus; listing and checkout projection never read launch files. Original inline clause predates exclusive base and47f33bbd only relocates it; preserve that attribution rather than claiming new inline runtime behavior. Join retained g125/l4 documentation root, preserving both locations and true checkout-registry example. No additional item or exact spec acceptance; no highest harm."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-078",
+          "key": "g123/l6",
+          "latest_line": 13,
+          "recommendation": "needs-parent",
+          "bucket": "other",
+          "underlying_key": "list-reply-docs-falsely-attribute-list-failure-to-launch-sentinel",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The stale inline sentinel clause predates the exclusive base and was merely relocated by 47f33bbd. However the later in-range rewrite newly adds the same false example to the helper docstring. Preserve that in-range remainder for reconciliation with the separately mentioned g125/l4; its record was not supplied in this batch, so an exact duplicate disposition cannot be independently established here.",
+          "checks": [
+            "6e423e30068b62c6cfa276c6d720ee35bb70387a:handlers.rs:619-623 already says an unreadable launch sentinel fails listing. 47f33bbdbd5ff4a6e437e97a800f9083be43096e:handlers.rs:672-676 relocates that clause; helper docs at 640-641 instead cite a real tmux failure.",
+            "47f33bbd:listing.rs:92-97 explicitly says lists never read launch artifacts and a launch-artifact read failure leaves lists available. Its fallible pane_states call at 177-195 makes the tmux example valid at this revision.",
+            "1ed482dde220452e424973faf38a5e1318986333 changes the helper example to an unreadable launch sentinel or checkout registry and replaces tmux with checkout registry in the inline clause. Thus the original stale inline assertion is pre-range, but the entire same-root documentation issue cannot be dismissed as out-of-range. No execution was performed."
+          ],
+          "coverage_checked": [
+            "SPEC.md/SPEC_impl.md listing, seal and reconciliation searches found no explicit acceptance of sentinel failures taking down lists. Correct listing availability does not refute false prose.",
+            "TODO.md Planned is empty. plans/queue tmux documentation/comment sweep is landed per REPORTS.md:32; it is not an unlanded correction. The environment plan is also landed.",
+            "BUGS.md, full INDEX.md and active TRIAGE_OUTCOMES.md searches found no exact listing-sentinel documentation item. FILTER.md does not cover an ordinary internal explanation error. No supplied named record or existing queue item establishes an exact alias to g125/l4."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": "The parent must reconcile the separately owned g125/l4 record before treating the later in-range helper-doc rewrite as already retained elsewhere. This batch can establish source overlap, not that record's final disposition.",
+          "original_stronger_consequence": "Maintainers may be sent toward launch-file failures when diagnosing or constructing listing failures. This is internal error/test-fixture guidance, without established security or work loss. The original relocation-only attribution concern is resolved as pre-range.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Exclude the pre-range inline clause as an independent introduction, but retain/reconcile the later in-range helper-doc error under the common underlying key. Do not silently drop the whole cause on per-commit attribution."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": true,
+        "clearly_refuted_candidate": false,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "list-reply-doc-prescribes-nonexistent-sentinel-read-failure",
+        "destination": "trailing-list-reply-doc-prescribes-nonexistent-sentinel-read-failure.md"
+      }
+    }
+  ],
+  "replies": [
+    {
+      "turn": 1,
+      "reply": "Initial review complete: all 1,324 assigned patch lines reviewed.\n\nNo reportable findings or unresolved leads. Three considered candidates and their source-based dispositions are recorded in `g123/findings.jsonl`; `progress.md` is updated.\n\nNo runtime tests or reproductions performed."
+    },
+    {
+      "turn": 2,
+      "reply": "Coverage repair and requested synthesis complete. All 1,324 mandatory lines were delivered in seven separate direct-stdout evidence packets; no assigned scope remains unread.\n\nRevised `l1`, `c2`, and `c3` with the timeout, seal-propagation, and dispatcher checks. No new reportable findings or open leads. Candidate dispositions remain proposed for independent review. `progress.md` is updated."
+    },
+    {
+      "turn": 3,
+      "reply": "Discovery pass 1 complete. Something new was found.\n\n- Checks: admission ordering, test readiness, async store scheduling, failure replies, and oversized-list fixture behavior.\n- New verified finding: `l4` — directory-admission test oracle gap.\n- Known `l1` promoted to a confirmed documentation finding; `c5` recorded as source-refuted.\n- New unverified findings: none. Open leads: none.\n\nLog and progress updated. No runtime execution performed."
+    },
+    {
+      "turn": 4,
+      "reply": "Discovery pass 2 complete. Nothing new found.\n\n- Checked request classification, reply correlation, teardown errors, seal transactions, and listing-comment attribution.\n- Recorded `l6` as a resolved candidate overlapping the supplied interface finding.\n- New verified/unverified findings: none. Open leads: none.\n\nLog and progress updated. No runtime execution performed."
+    }
+  ],
+  "progress": "Group: g123 supervisor-request-admission\nState: initial review complete; turn type initial, turn count 1; awaiting caller's later synthesis/discovery prompt.\nReviewed commit: 47f33bbdbd5ff4a6e437e97a800f9083be43096e.\nCoverage: all assigned patch lines 1-1324 read via evidence packets 1-190, 191-380, 381-570, 571-760, 761-950, 951-1140, 1141-1324. Complete inventory commits field read; excluded coverage metadata not read. No omitted assigned material.\nContracts read: pinned SPEC.md Sandbox sessions (1439-1568); SPEC_impl.md Environment Delete and the seal (6597-6658), Answers bind to what was drawn (1071-1100); protocol request/reply docs; queue Priority buckets and recording What goes in a feedback file.\nInterface analysis: read-only teardown preflight precedes the count/seal; directory admission excludes launching creates; lifecycle claim excludes target restart/tab opens; store counts persisted rows in any state; durable seal precedes in-memory seal and change hint. Owned mutation survives the connection's waiter. Restricted dispatcher rejects the sealing request before any handler. Monotonic seal and periodic refresh cover a listing snapshot preceding sealing.\nCaller caveat: no helm sender exists at the recorded revision (supervisor/protocol phase). Endpoint caller at 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db was read only as interface context; it accurately reports ambiguity after its 240-second timeout. No global preflight/decision deadline is guaranteed by the supervisor.\nDurable records this pass: l1 initially a lead, revised to candidate after source checks; c2 candidate for seal snapshot propagation; c3 candidate for restricted credential bypass, source-refuted. Verified reportable IDs: none. Unverified finding IDs: none. Open lead IDs: none. Candidates retain their full rationale and consequence in findings.jsonl.\nTool correction: first attempt to revise l1 used invalid state closed; evidence rejected it without appending. Reissued with state open and kind candidate, which closes the lead per tool schema.\nDiscovery-pass count: 0 (this was the initial assigned review, not a later discovery pass).\nValidation: source/contract analysis only; no runtime tests, builds, reproductions, checkout edits, or helper agents.\nNext action: return to caller for its separately requested later turn. No unread assigned scope.\n\nCoverage repair / initial review continuation, actual turn 2: previous delivery is not certified by parent audit. Re-delivering all patch lines 1-1324 as direct stdout evidence packets. Preserve all existing events. Synthesis follows delivery per parent override; discovery passes remain 0.\n\nTurn 2 completion — coverage repair / initial review continuation, then synthesis per explicit parent override.\nMandatory delivery this turn: seven separate exact evidence read shell calls, each output forwarded as r.output directly (no JSON encoding of the shell result): 1-190, 191-380, 381-570, 571-760, 761-950, 951-1140, 1141-1324. Each packet had PERSISTENT_REVIEW_READ_V1 / PERSISTENT_REVIEW_END_V1 and snapshot SHA256 43b23f1d95b6890106c160ac68ed682611ec33f51a258c54cc530ba225643854. All assigned lines delivered; no source byte/hash changes. Parent audit remains the authority for certification. The prior turn's claimed coverage is superseded by this repair.\nRechecks/results: pinned Environment Delete contract and handler admission timeout compared with actual endpoint helm timeout and UI refusal handling. Lock waits are bounded; preflight and seal transaction are outside that bound. Actual later helm text says outcome uncertain; UI preserves the reason or opens a fresh warned question. Remaining documentation overstatement is explicit in l1, not presented as a proved global deadline. Seal publication is at handlers.rs:1550 with hint at 1553, before teardown; hint implementation and independent poll rechecked. Actual connection dispatcher selects restricted handler for Some(auth); only None reaches full-authority handle_control; restricted catch-all refuses the sealing request.\nEvents appended/revised this turn: c2 (corrected line refs and scoped source proof), c3 (preserved hypothetical highest security/loss-of-work consequence and exact dispatcher refutation), l1 (synthesized timeout contract vs actual caller and UI). No new finding IDs; zero verified reportable findings, zero unverified findings, zero open leads. All three candidates remain retained proposals for independent parent check; no parent drop approval inferred. The l1 event's first append attempt had malformed JSON; the tool rejected it, it was corrected, then record succeeded. Earlier events were preserved.\nInterface limit: g102/c2 was supplied by parent as proof limited to tab-open lifecycle claim plus durable-row count preventing an admitted tab after seal. This does not establish safety of arbitrary other operations, and no such generalization is made.\nTurn count: 2. Discovery-pass count: 0. This was repair/initial review plus requested synthesis, not a later discovery pass. New verified/unverified IDs this pass: none. No unread or omitted assigned scope. No runtime execution/reproduction/build, checkout mutation, or helper agent. Next action: return delta and delivery status to parent; await its next explicit protocol turn.\n\nTurn 3: discovery pass 1 started. Read complete discovery-neighbours.json via bounded ranges 1-45, 46-105, 106-165, 166-220, 221-275, 276-330, 331-396; initial broader preview clipped and was fully replaced. No neighbour source assertions adopted as independent verification. Pending parent l1 documentation disposition will be resolved before fresh search.\n\nTurn 3 complete — separate discovery pass 1.\nPre-search synthesis: fully read discovery-neighbours.json in replacement bounded ranges after the first broad preview clipped; reached line 396/end. Neighbour issues were used for novelty and interface limits, not as blanket proof or accepted drops. g126's list-cache and fixture-owner defects are distinct from this group's directory-admission oracle. g102 tab-safety proof remains limited to lifecycle plus durable count; unrelated retirement/host-lifetime findings were not pursued outside assignment.\nParent doc-disposition resolved: l1 revised from candidate to finding, bucket other, for inaccurate deadline/decision documentation at handlers.rs:1424 and :1454. Exact source verifies an additional sessions mutex and preflight/store awaits outside the four-lock timeout. Correct later UI uncertainty refutes the original shipped false-reassurance premise but does not refute the distinct comment defect. Full-range git log -G attributes these comments to assigned 47f33bbd; full-range diff confirms addition rather than predating the review base. No total-decision execution deadline or actual late-deletion occurrence claimed. Minor wording clarification to l1 record: 'After it expires successfully' means after the timeout future completes successfully with acquired guards, not after an elapsed timeout error.\nNew search/checks: reviewed fresh test admission and fixture/readiness boundaries, direct dispatch ownership, KeyedLocks probes, planted-row insertion, Db::call blocking-task scheduling, preflight's store read, teardown-error/reply handling, minimal-list frame fallback and in-memory fixture projection. Also checked assigned test against endpoint and scoped range history for repair. Current production directory order is correct. New l4 lead was immediately appended then resolved to a confirmed test-oracle finding: earlier fence presence plus a planted row before guard release cannot distinguish a true blocked-directory wait from progress through other preflight awaits. It still checks the count and catches some schedules; no claim that it is wholly useless or that production bypasses admission. c5 recorded and source-refuted the narrower concern that map-only oversized-list fixture gets suppressed for lacking a store row; project_checkout_metadata keeps the vector and changes only optional checkout fields.\nDurable changes this turn: l1 promoted to confirmed documentation finding; new l4 appended as lead then finding; new c5 candidate appended with concrete refutation. New verified finding ID beyond known concerns: l4. Newly verified disposition of known ID: l1. New unverified-after-investigation finding IDs: none. Remaining lead IDs: none. Existing c2/c3 proposed dispositions remain retained without assumed parent approval. Result: something new found (l4). Finding an issue did not end the pass; remaining assigned handler/reply/fixture paths were checked afterward.\nTurn count: 3. Discovery-pass count: 1. Assigned mandatory source delivery was already verified by parent; no new mandatory ranges or unread assigned scope. No runtime tests, reproductions, mutation execution, builds, live-install actions, checkout edits, or helper agents. Private log/progress only. Next action: return discovery delta to parent; new substantive discovery requires a separately requested later pass under charter.\n\nTurn 4 / discovery pass 2 started. Read complete updated discovery-neighbours.json (590 lines, 200425 bytes) in bounded chunks 1-45, 46-105, 106-165, 166-225, 226-285, 286-345, 346-405, 406-465, 466-525, 526-590; end reached, no clipping. No pending named questions. Latest g125/l4 covers the sentinel-listing prose cause, so do not treat its earlier moved clause as an independent new discovery without scoped source/attribution checks. Other supplied findings stay within their owners; no parent drops assumed. Existing findings/log preserved.\n\nTurn 4 complete — separate discovery pass 2.\nUpdated neighbour synthesis: all 590 lines read in bounded untruncated packets before source checks. No named pending questions. New neighbour records were scoped to novelty: g125/l4 owns the later rewritten sentinel-listing guidance; request/clone, terminal migration, input ownership, other fixture and consent findings were not broadened into this assignment. No supplied claim treated as an accepted parent drop or blanket operational-safety proof.\nChecks/results: compared exclusive-base listing error clause to assigned relocation and later 1ed482d rewrite; pinned list_all confirms no launch-artifact reads, a real tmux failure source and checkout projection at this revision. l6 was immediately recorded as a lead and resolved to candidate after these source checks: the stale sentinel clause is already verbatim at range base, while the later newly false fixture guidance is exactly supplied g125/l4. No independent new finding for g123. Additional fresh checks covered request_modes' OwnedDelete class/conformance representative, protocol request/reply req_id accessors, full-authority dispatch and unexpected reverse-direction reply handling, exhaustive shared teardown error wording, count transaction/read-only Others branch/committed Sealed branch, and owned mutation result/reply sequencing. No new substantive lead from these paths.\nDurable delta: l6 lead then candidate with full-range attribution and exact allowed peer overlap. Existing l1/l4 findings and c2/c3/c5 candidates unchanged. New verified finding IDs this pass: none. New unverified-after-investigation finding IDs: none. Remaining lead IDs: none. Result: nothing new found beyond already known/interface-tracked causes. The nonreportable l6 attribution result is retained in the complete findings log.\nTurn count: 4. Discovery-pass count: 2. No unread assigned source or neighbour scope; mandatory delivery remains parent-verified from the earlier repair turn. No tests, builds, runtime reproductions, mutation execution, live-install actions, checkout edits or helper agents. Private artifacts only. Next action: return empty discovery delta to parent for protocol disposition.\n"
+}

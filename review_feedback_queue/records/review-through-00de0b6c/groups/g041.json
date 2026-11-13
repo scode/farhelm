@@ -1,0 +1,769 @@
+{
+  "group": {
+    "id": "g041",
+    "domain": "gui-agent-approval-admission",
+    "purpose": "gui-agent-approval-admission: crates/farhelm-ui/src/approvals.rs, crates/farhelm-ui/src/modal_isolation.rs; phases complete small per-commit changes",
+    "interfaces": [
+      "g001",
+      "g018",
+      "g019",
+      "g020",
+      "g021"
+    ],
+    "sources": [
+      {
+        "path": "[private-run]/prep/parts/00060-000.patch",
+        "ranges": [
+          [
+            1,
+            85
+          ]
+        ],
+        "original_path": "crates/farhelm-ui/src/approvals.rs",
+        "commit": "9ff03ce91f191ea59f3ce16cefbd0b76d7fe599d",
+        "notes": "patch header; patch character offsets [0,4785)",
+        "lines": 85,
+        "bytes": 4785,
+        "start": 0,
+        "end": 4785,
+        "original": "[private-run]/prep/originals/00060.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/00062-000.patch",
+        "ranges": [
+          [
+            1,
+            41
+          ]
+        ],
+        "original_path": "crates/farhelm-ui/src/modal_isolation.rs",
+        "commit": "9ff03ce91f191ea59f3ce16cefbd0b76d7fe599d",
+        "notes": "patch header; patch character offsets [0,2279)",
+        "lines": 41,
+        "bytes": 2279,
+        "start": 0,
+        "end": 2279,
+        "original": "[private-run]/prep/originals/00062.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/00310-000.patch",
+        "ranges": [
+          [
+            1,
+            132
+          ]
+        ],
+        "original_path": "crates/farhelm-ui/src/approvals.rs",
+        "commit": "04d85f0c98a9b635709d00b056719a0baa7fd3fc",
+        "notes": "patch header; patch character offsets [0,5372)",
+        "lines": 132,
+        "bytes": 5372,
+        "start": 0,
+        "end": 5372,
+        "original": "[private-run]/prep/originals/00310.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/00661-000.patch",
+        "ranges": [
+          [
+            1,
+            183
+          ]
+        ],
+        "original_path": "crates/farhelm-ui/src/approvals.rs",
+        "commit": "190d844e58c96cf197aa838d0b0eea8062f48435",
+        "notes": "patch header; patch character offsets [0,8072)",
+        "lines": 183,
+        "bytes": 8072,
+        "start": 0,
+        "end": 8072,
+        "original": "[private-run]/prep/originals/00661.patch"
+      }
+    ],
+    "lines": 441,
+    "bytes": 20508
+  },
+  "records": [
+    {
+      "key": "g041/c1",
+      "owner": "g041",
+      "id": "c1",
+      "domain": "gui-agent-approval-admission",
+      "purpose": "gui-agent-approval-admission: crates/farhelm-ui/src/approvals.rs, crates/farhelm-ui/src/modal_isolation.rs; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 1,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c1",
+            "state": "open",
+            "summary": "Removing activity-gated modal admission does not retain an automatic agent opener",
+            "location": "crates/farhelm-ui/src/modal_isolation.rs:76",
+            "detail": "Reviewed commit: 9ff03ce91f191ea59f3ce16cefbd0b76d7fe599d. TLDR: considered whether removing the active-window admission check lets an unsolicited host-add request open over the user's work; the same commit removes the only automatic opening producer. Source: approvals.rs:128-154 now only reconciles waiting IDs; :185-193 drains explicit openings; :271-285 queues HostAdd only from the card's captured action. hosts.rs:3063-3068 preserves the manual form/submission and admits that captured card through HostModal. The removed require_active policy only applied to automatic openings, and those no longer exist. Contract: SPEC.md:4177-4183 says 'The request never opens the dialog by itself, because the user did not start it' and 'An existing draft or another modal is kept.' SPEC_impl.md:9204-9211 says 'Only the card’s explicit open action queues the ordinary add dialog' (ASCII apostrophe in source) and 'Explicit opens are presented in click order after the current form closes'. Suggested bucket: other (no established defect). Confidence: confirmed by source; no execution. proposed_drop: source refutes the suspected unsolicited-opening route; no changed path creates an opening from a listing or focus event. possible_cover: none; no coverage sources searched. Could-be-highest: no established security or loss-of-work route; focus interference alone is not such a route. Caveat: this checks the removal and its producers, not independent pre-existing deferred-focus behavior of explicit host actions."
+          }
+        }
+      ],
+      "latest": {
+        "line": 1,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c1",
+          "state": "open",
+          "summary": "Removing activity-gated modal admission does not retain an automatic agent opener",
+          "location": "crates/farhelm-ui/src/modal_isolation.rs:76",
+          "detail": "Reviewed commit: 9ff03ce91f191ea59f3ce16cefbd0b76d7fe599d. TLDR: considered whether removing the active-window admission check lets an unsolicited host-add request open over the user's work; the same commit removes the only automatic opening producer. Source: approvals.rs:128-154 now only reconciles waiting IDs; :185-193 drains explicit openings; :271-285 queues HostAdd only from the card's captured action. hosts.rs:3063-3068 preserves the manual form/submission and admits that captured card through HostModal. The removed require_active policy only applied to automatic openings, and those no longer exist. Contract: SPEC.md:4177-4183 says 'The request never opens the dialog by itself, because the user did not start it' and 'An existing draft or another modal is kept.' SPEC_impl.md:9204-9211 says 'Only the card’s explicit open action queues the ordinary add dialog' (ASCII apostrophe in source) and 'Explicit opens are presented in click order after the current form closes'. Suggested bucket: other (no established defect). Confidence: confirmed by source; no execution. proposed_drop: source refutes the suspected unsolicited-opening route; no changed path creates an opening from a listing or focus event. possible_cover: none; no coverage sources searched. Could-be-highest: no established security or loss-of-work route; focus interference alone is not such a route. Caveat: this checks the removal and its producers, not independent pre-existing deferred-focus behavior of explicit host actions."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g041/findings.jsonl",
+        "id": "c1",
+        "line": 1,
+        "disposition": "under-investigation",
+        "group": "g041-c1",
+        "reason": "Record durably acknowledged; parent source/contract validation, cross-group synthesis, coverage/filter matching and any independent drop check remain pending. This preserves the claim and uncertainty without accepting, dropping or lowering it."
+      },
+      "accepted_parent_decision": null,
+      "returned_claim_checks": [
+        {
+          "batch": "claims-025",
+          "key": "g041/c1",
+          "latest_line": 1,
+          "recommendation": "refuted",
+          "bucket": "other",
+          "underlying_key": "agent-host-add-automatic-opening-producer-removed",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The removed active-window admission policy has no remaining automatic opener at the reviewed commit. Only the card's explicit action enqueues an Add-host opening. This does not settle delayed focus after an explicit open.",
+          "checks": [
+            "9ff03ce91f191ea59f3ce16cefbd0b76d7fe599d:crates/farhelm-ui/src/approvals.rs:128-154 reconciles existing openings against waiting IDs without creating any; :185-193 drains only explicitly queued openings; :271-285 queues HostAdd from the captured card action.",
+            "9ff03ce91f191ea59f3ce16cefbd0b76d7fe599d:crates/farhelm-ui/src/modal_isolation.rs:76-108 retains modal-owner admission but removes active-window rejection. hosts.rs:3063-3074 still defers the captured opening behind a manual draft or pending submission.",
+            "git log over the exclusive/inclusive review range lists 9ff03ce9 as the relevant in-range change. Source/contract check only; no runtime observation."
+          ],
+          "coverage_checked": [
+            "Current SPEC.md:4193-4205 and SPEC_impl.md:8987-8999 require card-only arrival and explicit opening; their complete host-add paragraphs were read. They agree with the checked source.",
+            "TODO.md:25-26 Planned is empty. BUGS.md was read in full; its one SSH-transfer hang is unrelated.",
+            "plans/queue searched for automatic host-add and admission. agent-host-add-card.md:8-99 describes the checked fix, and plans/REPORTS.md:20 records it landed in #3326; it is not an unlanded future cover.",
+            "INDEX.md and matching queue files ordinary-setup-discards-deferred-agent-add.md and queued-agent-dialog-inherits-elapsed-arm-timer.md concern dropped or already-armed deferred openings, not a remaining automatic producer. Active TRIAGE_OUTCOMES.md:183-205 and :954-967 preserve those different scopes.",
+            "FILTER.md read in full; no filter is needed for this source refutation."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": null,
+          "original_stronger_consequence": "Suspected removal of active-window admission could let an unsolicited host-add dialog interrupt the user's work. The record established no security or loss-of-work route and explicitly excluded independent deferred-focus behavior after an explicit card action.",
+          "needs_independent_drop_check": true,
+          "proposed_basis": "Source-refuted automatic-opening route. Conservatively include in the independent drop register because an unsolicited approval dialog could implicate unintended host authorization; this consultation does not authorize a drop."
+        }
+      ],
+      "parent_proposals": [
+        {
+          "artifact": "parent-flagged-judgments-025.json",
+          "key": "g041/c1",
+          "proposal": "claim-checks/claims-025/result.json",
+          "parent_proposal": "source-refuted-remaining-automatic-agent-add-opener",
+          "final_independent_gate": "required-by-conservative-unsolicited-authorization-flag",
+          "reason": "Parent read full025 sourceonlyexplicitcapturedcardactionqueuesHostAdd; waitingIDreconcile/drainexistingqueuecreatesnone. Removedactivewindowrejectionthereforehasnoremainingunsolicitedproducer. Manualdraft/pendingadmissiondeferralretained. Narrowrefutationnotlaterfocusafterexplicitopen norolddeferredopening/armtimerqueueitems. Preserveoriginalpossibleauthorizationframingforconservativefreshgate despiteestablishedUX-onlyconcern."
+        }
+      ],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": true,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "agent-host-add-automatic-opening-producer-removed",
+        "destination": null
+      }
+    },
+    {
+      "key": "g041/c2",
+      "owner": "g041",
+      "id": "c2",
+      "domain": "gui-agent-approval-admission",
+      "purpose": "gui-agent-approval-admission: crates/farhelm-ui/src/approvals.rs, crates/farhelm-ui/src/modal_isolation.rs; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 2,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c2",
+            "state": "open",
+            "summary": "Historical container configuration is no longer a runnable option hidden by the card",
+            "location": "crates/farhelm-ui/src/approvals.rs:1408",
+            "detail": "Reviewed commit: 04d85f0c98a9b635709d00b056719a0baa7fd3fc. TLDR: considered whether replacing image, proxy-port and token-path facts with a retirement explanation hides an isolation choice the user still needs to approve. The launch path now refuses that choice. Source: approvals.rs:1406-1417 distinguishes stored retired configuration, explicit removal and omission; farhelm-proto/src/launcher.rs:656-669 refuses applying any template with a non-null historical container configuration. The changed test at approvals.rs:2368 onward checks all three states; its fixture uses historical image_file decoding and does not change process environment. Contract: SPEC.md:4818-4823: 'The earlier experimental model, whose supervisor stayed outside the container and bind-mounted a host checkout, is retired.' and 'Using them drops or refuses the retired choice with an explanation and cannot create another old-style session.' Suggested bucket: other, no established defect. Confidence: confirmed by source; no execution. proposed_drop: the omitted facts cannot authorize runnable isolation under the new contract and executable application refusal. possible_cover: none; no coverage sources searched. Could-be-highest: considered a security consequence from obscuring isolation, but source establishes that this configuration cannot launch, so that route is refuted. Caveat: this does not independently audit the retired implementation, per deletion scope."
+          }
+        }
+      ],
+      "latest": {
+        "line": 2,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c2",
+          "state": "open",
+          "summary": "Historical container configuration is no longer a runnable option hidden by the card",
+          "location": "crates/farhelm-ui/src/approvals.rs:1408",
+          "detail": "Reviewed commit: 04d85f0c98a9b635709d00b056719a0baa7fd3fc. TLDR: considered whether replacing image, proxy-port and token-path facts with a retirement explanation hides an isolation choice the user still needs to approve. The launch path now refuses that choice. Source: approvals.rs:1406-1417 distinguishes stored retired configuration, explicit removal and omission; farhelm-proto/src/launcher.rs:656-669 refuses applying any template with a non-null historical container configuration. The changed test at approvals.rs:2368 onward checks all three states; its fixture uses historical image_file decoding and does not change process environment. Contract: SPEC.md:4818-4823: 'The earlier experimental model, whose supervisor stayed outside the container and bind-mounted a host checkout, is retired.' and 'Using them drops or refuses the retired choice with an explanation and cannot create another old-style session.' Suggested bucket: other, no established defect. Confidence: confirmed by source; no execution. proposed_drop: the omitted facts cannot authorize runnable isolation under the new contract and executable application refusal. possible_cover: none; no coverage sources searched. Could-be-highest: considered a security consequence from obscuring isolation, but source establishes that this configuration cannot launch, so that route is refuted. Caveat: this does not independently audit the retired implementation, per deletion scope."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g041/findings.jsonl",
+        "id": "c2",
+        "line": 2,
+        "disposition": "under-investigation",
+        "group": "g041-c2",
+        "reason": "Record durably acknowledged; parent source/contract validation, cross-group synthesis, coverage/filter matching and any independent drop check remain pending. This preserves the claim and uncertainty without accepting, dropping or lowering it."
+      },
+      "accepted_parent_decision": null,
+      "returned_claim_checks": [
+        {
+          "batch": "claims-025",
+          "key": "g041/c2",
+          "latest_line": 2,
+          "recommendation": "refuted",
+          "bucket": "other",
+          "underlying_key": "retired-container-template-facts-not-runnable",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The card's omitted legacy image, port and token-path details no longer describe a runnable isolation choice. Applying a template carrying a non-null retired container selection is refused.",
+          "checks": [
+            "04d85f0c98a9b635709d00b056719a0baa7fd3fc:crates/farhelm-ui/src/approvals.rs:1406-1417 labels retained configuration as a retired container setting, explicit removal as removal, and omits an absent field.",
+            "04d85f0c98a9b635709d00b056719a0baa7fd3fc:crates/farhelm-proto/src/launcher.rs:656-669 returns TemplateRefusal before applying any non-null historical container choice.",
+            "04d85f0c98a9b635709d00b056719a0baa7fd3fc:SPEC.md:4816-4823 explicitly retires the supervisor-outside model and forbids creating another old-style session. The change is in the pinned review range. No runtime test or independent audit of the retired implementation was performed."
+          ],
+          "coverage_checked": [
+            "Current SPEC.md:4892-4901 and SPEC_impl.md:8312-8326 explicitly require retained decoding plus refusal or dropping of retired choices. Full matching retirement sections were read.",
+            "TODO.md Planned is empty; BUGS.md has no matching item.",
+            "plans/queue/podman-environments.md was found by retirement search; plans/REPORTS.md:21 says it landed in #3305 through #3330. It supplies implementation history, not unlanded coverage.",
+            "INDEX.md, matching queue text and active TRIAGE_OUTCOMES.md searched for retired container approval/isolation. Existing legacy container template and cleanup items concern editable drafts, test oracles, teardown or process promises; no exact same-root queued approval claim was found.",
+            "FILTER.md read in full; no filter basis proposed."
+          ],
+          "exact_cover_quotes": [
+            {
+              "source": "SPEC.md:4899-4901 (same rule at reviewed SPEC.md:4821-4823)",
+              "quote": "Using them drops or refuses the retired choice with an explanation and cannot create another old-style session."
+            },
+            {
+              "source": "SPEC_impl.md:8319-8320",
+              "quote": "Drop or refuse retired container selections when using a stored setup, with an explanation. No path creates another old-style session."
+            }
+          ],
+          "missing_premise": null,
+          "original_stronger_consequence": "Omitting historical image, proxy-port and token-path facts might hide an isolation choice the user still authorizes, potentially a security consequence. The checked application path refuses that choice; this does not independently audit the retired implementation.",
+          "needs_independent_drop_check": true,
+          "proposed_basis": "Refute only the claim that these hidden historical facts can still authorize runnable legacy isolation. Preserve the original security concern for the independent drop check."
+        }
+      ],
+      "parent_proposals": [
+        {
+          "artifact": "parent-flagged-judgments-025.json",
+          "key": "g041/c2",
+          "proposal": "claim-checks/claims-025/result.json",
+          "parent_proposal": "source-refuted-retired-template-isolation-facts-runnable-authorization",
+          "final_independent_gate": "required-before-original-security-drop",
+          "reason": "Full025 oldimage/port/tokenpathhiddenbutcardlabelsretiredsetting; nonnullhistoricalcontainerTemplateRefusalbeforeapply, SPECretiredmodelnopathrelaunch. Proposedonlylackofrunnablelegacyisolationauthorizationfromhiddenfacts, notindependentauditretiredimplementation/migration. Originalrequested-isolationsecurityconcernpreservedfreshgate, nofilter."
+        }
+      ],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": true,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "retired-container-template-facts-not-runnable",
+        "destination": null
+      }
+    },
+    {
+      "key": "g041/l1",
+      "owner": "g041",
+      "id": "l1",
+      "domain": "gui-agent-approval-admission",
+      "purpose": "gui-agent-approval-admission: crates/farhelm-ui/src/approvals.rs, crates/farhelm-ui/src/modal_isolation.rs; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 3,
+          "event": {
+            "version": 1,
+            "kind": "lead",
+            "id": "l1",
+            "state": "open",
+            "summary": "Check whether named recipe changes require additional approval-card binding",
+            "location": "crates/farhelm-ui/src/approvals.rs:1094",
+            "detail": "Reviewed commit: 190d844e58c96cf197aa838d0b0eea8062f48435. TLDR: investigating whether a new environment's recipe can change while its creation card waits, making Allow authorize a different configuration. Source checked: approvals.rs adds a recipe-name fact with no recipe configuration snapshot; agent_requests.rs:4448-4451 explicitly says the launch task checks the recipe again after Allow for a recipe changed since, while :4467-4483 freezes launch and workspace trust before asking. SPEC.md:4330-4335 requires the card to name the recipe and place, says Allow is creation confirmation, and does not in that subsection require the recipe definition itself to be frozen. Missing premise: whether recipe-selection semantics elsewhere require a definition snapshot rather than the named recipe's current definition. Next source check: complete recipe concurrency/application contracts and start_session_environment implementation. Suggested bucket pending: other absent an established mismatch, potentially highest only if source establishes approval can execute an unapproved command or expose credentials beyond named-recipe authority. Confidence: uninvestigated lead, not a finding. proposed_drop: false pending contract check. possible_cover: none. No execution or reproduction."
+          }
+        },
+        {
+          "line": 4,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "l1",
+            "state": "open",
+            "summary": "Environment approval names a live recipe and freezes the session command",
+            "location": "crates/farhelm-ui/src/approvals.rs:1094",
+            "detail": "Reviewed commit: 190d844e58c96cf197aa838d0b0eea8062f48435. TLDR: resolved the concern that editing a named recipe during an approval wait necessarily changes something the creation card promised to freeze. The card authorizes creation from the named recipe, not a displayed recipe-definition snapshot, and the session launch is frozen separately. Checks/results: approvals.rs:1067-1121 displays recipe, provider/place, new-resource consequence, repository/home, title, complete launch and prompt. agent_requests.rs:4467-4483 builds both the displayed launch and retained CreateReq from the same configured launch before asking; :4498-4513 sends the captured plan fields to the card; :4541-4548 submits that retained request. provisioning/tensorlake_add.rs:357-397 revalidates launch and reads the named recipe's current definition, including size, before registration. SPEC.md:443-465 defines recipes as shared mutable named catalog entries and says 'Edits to size, base and packages affect only hosts created afterwards (base and packages after the next snapshot build); tunnels and credential selections are read when a host connects or is set up.' SPEC.md:4330-4333 requires that 'The card names the recipe and where the environment will be created' and says its Allow is creation confirmation. SPEC_impl.md:6685-6690 explicitly makes that direct-Allow card the creation confirmation and says it covers an agent-supplied wrapper. Suggested bucket: other (no established defect). Confidence: confirmed by source and contract, no execution. proposed_drop: the named-recipe semantics permit using current recipe settings for a newly created environment; no shown recipe-definition snapshot is substituted, and the displayed session command remains captured. possible_cover: none. Could-be-highest: investigated possible unapproved command or credential change, but no route beyond the user's named-recipe authority is established; mutable recipe credentials/settings have the explicit connection-time contract quoted above. Original suspected consequence retained: a recipe edit can affect the new environment after its card is drawn, but that is permitted live configuration rather than a substituted session command. No unresolved source premise remains for this candidate."
+          }
+        },
+        {
+          "line": 7,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "l1",
+            "state": "open",
+            "summary": "Live recipe settings need an independent contract-based drop check",
+            "location": "crates/farhelm-ui/src/approvals.rs:1094",
+            "detail": "Reviewed commit: 190d844e58c96cf197aa838d0b0eea8062f48435. TLDR: a recipe edited while a creation card waits can change the new environment's configuration, including credential selections, after the card is drawn. The session command remains frozen, but that does not mean all configuration or physical authority is frozen. This revision preserves the original consequence and corrects its disposition: because possible credential exposure was considered and the proposed acceptance depends on the specification, retain as finding with proposed_drop for independent review, not an accepted drop. Source: approvals.rs:1094 shows only recipe name; agent_requests.rs:4448-4451 explicitly rechecks changed recipes after Allow; :4467-4483 freezes configured launch and CreateReq; provisioning/tensorlake_add.rs:362-397 reads current recipe definition and size after Allow. Contract supporting proposed_drop ONLY for recipe definition: SPEC.md:462-465 states exactly 'Edits to size, base and packages affect only hosts created afterwards (base and packages after the next snapshot build); tunnels and credential selections are read when a host connects or is set up.' SPEC.md:4330-4332 states exactly 'The card names the recipe and where the environment will be created (Tensorlake, or the container host), says that a Tensorlake sandbox bills while it runs, and otherwise shows what any launch card shows.' General contract limits that acceptance: SPEC_impl.md:9548 'What a card shows is what an approval does.' and :9555-9556 requires target-machine connection stability. This does not refute interface g020/l1: physical container-host retarget is a separate established authority mismatch, retained here as l2 with proposed_drop false. Suggested bucket: potentially highest if the mutable-recipe contract does not authorize credential selection at connection/setup; otherwise no defect under that contract. Confidence: source confirms recipe mutability and fixed launch; acceptance is proposed contract interpretation, not approved by parent. proposed_drop: independent check requested on the exact quoted recipe contract permitting current settings of the same named recipe, while preserving fixed physical host authority; no blanket environment-launch acceptance. possible_cover: none for recipe-definition concern; g020/l1 overlaps only separate l2. Could-be-highest: yes, credential-setting changes are the original suspected consequence, and source checks cannot substitute immutable-command evidence for a credential authority decision. No runtime execution or reproduction."
+          }
+        },
+        {
+          "line": 14,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "l1",
+            "state": "open",
+            "summary": "Live recipe settings need an independent contract-based drop check",
+            "location": "crates/farhelm-ui/src/approvals.rs:1094",
+            "detail": "Reviewed commit: 190d844e58c96cf197aa838d0b0eea8062f48435. TLDR: a recipe edited while a creation card waits can change the new environment's configuration, including credential selections, after the card is drawn. The session command remains frozen, but that does not mean all configuration or physical authority is frozen. This revision preserves the original consequence and corrects its disposition: because possible credential exposure was considered and the proposed acceptance depends on the specification, retain as finding with proposed_drop for independent review, not an accepted drop. Source: approvals.rs:1094 shows only recipe name; agent_requests.rs:4448-4451 explicitly rechecks changed recipes after Allow; :4467-4483 freezes configured launch and CreateReq; provisioning/tensorlake_add.rs:362-397 reads current recipe definition and size after Allow. Contract supporting proposed_drop ONLY for recipe definition: SPEC.md:462-465 states exactly 'Edits to size, base and packages affect only hosts created afterwards (base and packages after the next snapshot build); tunnels and credential selections are read when a host connects or is set up.' SPEC.md:4330-4332 states exactly 'The card names the recipe and where the environment will be created (Tensorlake, or the container host), says that a Tensorlake sandbox bills while it runs, and otherwise shows what any launch card shows.' General contract limits that acceptance: SPEC_impl.md:9548 'What a card shows is what an approval does.' and :9555-9556 requires target-machine connection stability. This does not refute interface g020/l1: physical container-host retarget is a separate established authority mismatch, retained here as l2 with proposed_drop false. Suggested bucket: potentially highest if the mutable-recipe contract does not authorize credential selection at connection/setup; otherwise no defect under that contract. Confidence: source confirms recipe mutability and fixed launch; acceptance is proposed contract interpretation, not approved by parent. proposed_drop: independent check requested on the exact quoted recipe contract permitting current settings of the same named recipe, while preserving fixed physical host authority; no blanket environment-launch acceptance. possible_cover: none for recipe-definition concern; g020/l1 overlaps only separate l2. Could-be-highest: yes, credential-setting changes are the original suspected consequence, and source checks cannot substitute immutable-command evidence for a credential authority decision. No runtime execution or reproduction.\n\nReopened synthesis interaction correction: named retarget counterevidence belongs to l2, not to this recipe-definition concern. Full reviewed SPEC.md:399-409 and tip :405-415 explicitly say approvals follow a logical host entry through destination/identity changes; SPEC_impl.md:3-6 gives SPEC.md precedence over conflicting observable-behavior prose. Therefore this record's earlier statements treating physical host binding as an unconditional general-contract limit are not a settled refutation of logical-entry acceptance. l2 now retains its confirmed execution/credential effect and highest consequence but proposes an independent drop on that product clause. l1 retains its ORIGINAL separate proposed-drop basis: named recipes use current settings under SPEC.md:462-465, with full command frozen. Neither original consequence nor parent-unaccepted proposed-drop status is removed or lowered. No new source premise, finding or open lead is introduced by this cross-record correction; no runtime observation."
+          }
+        }
+      ],
+      "latest": {
+        "line": 14,
+        "event": {
+          "version": 1,
+          "kind": "finding",
+          "id": "l1",
+          "state": "open",
+          "summary": "Live recipe settings need an independent contract-based drop check",
+          "location": "crates/farhelm-ui/src/approvals.rs:1094",
+          "detail": "Reviewed commit: 190d844e58c96cf197aa838d0b0eea8062f48435. TLDR: a recipe edited while a creation card waits can change the new environment's configuration, including credential selections, after the card is drawn. The session command remains frozen, but that does not mean all configuration or physical authority is frozen. This revision preserves the original consequence and corrects its disposition: because possible credential exposure was considered and the proposed acceptance depends on the specification, retain as finding with proposed_drop for independent review, not an accepted drop. Source: approvals.rs:1094 shows only recipe name; agent_requests.rs:4448-4451 explicitly rechecks changed recipes after Allow; :4467-4483 freezes configured launch and CreateReq; provisioning/tensorlake_add.rs:362-397 reads current recipe definition and size after Allow. Contract supporting proposed_drop ONLY for recipe definition: SPEC.md:462-465 states exactly 'Edits to size, base and packages affect only hosts created afterwards (base and packages after the next snapshot build); tunnels and credential selections are read when a host connects or is set up.' SPEC.md:4330-4332 states exactly 'The card names the recipe and where the environment will be created (Tensorlake, or the container host), says that a Tensorlake sandbox bills while it runs, and otherwise shows what any launch card shows.' General contract limits that acceptance: SPEC_impl.md:9548 'What a card shows is what an approval does.' and :9555-9556 requires target-machine connection stability. This does not refute interface g020/l1: physical container-host retarget is a separate established authority mismatch, retained here as l2 with proposed_drop false. Suggested bucket: potentially highest if the mutable-recipe contract does not authorize credential selection at connection/setup; otherwise no defect under that contract. Confidence: source confirms recipe mutability and fixed launch; acceptance is proposed contract interpretation, not approved by parent. proposed_drop: independent check requested on the exact quoted recipe contract permitting current settings of the same named recipe, while preserving fixed physical host authority; no blanket environment-launch acceptance. possible_cover: none for recipe-definition concern; g020/l1 overlaps only separate l2. Could-be-highest: yes, credential-setting changes are the original suspected consequence, and source checks cannot substitute immutable-command evidence for a credential authority decision. No runtime execution or reproduction.\n\nReopened synthesis interaction correction: named retarget counterevidence belongs to l2, not to this recipe-definition concern. Full reviewed SPEC.md:399-409 and tip :405-415 explicitly say approvals follow a logical host entry through destination/identity changes; SPEC_impl.md:3-6 gives SPEC.md precedence over conflicting observable-behavior prose. Therefore this record's earlier statements treating physical host binding as an unconditional general-contract limit are not a settled refutation of logical-entry acceptance. l2 now retains its confirmed execution/credential effect and highest consequence but proposes an independent drop on that product clause. l1 retains its ORIGINAL separate proposed-drop basis: named recipes use current settings under SPEC.md:462-465, with full command frozen. Neither original consequence nor parent-unaccepted proposed-drop status is removed or lowered. No new source premise, finding or open lead is introduced by this cross-record correction; no runtime observation."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g041/findings.jsonl",
+        "id": "l1",
+        "line": 7,
+        "disposition": "under-investigation",
+        "group": "g041-l1",
+        "reason": "Record durably acknowledged; parent source/contract validation, cross-group synthesis, coverage/filter matching and any independent drop check remain pending. This preserves the claim and uncertainty without accepting, dropping or lowering it."
+      },
+      "accepted_parent_decision": null,
+      "returned_claim_checks": [
+        {
+          "batch": "claims-025",
+          "key": "g041/l1",
+          "latest_line": 7,
+          "recommendation": "covered",
+          "bucket": "other",
+          "underlying_key": "agent-environment-card-live-named-recipe-settings",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "Source confirms that editing the same named recipe before Allow can change the new environment's definition and credential selections. The specification expressly reads credential selections at connection/setup and applies size/base/package edits to later-created hosts. The proposed acceptance is limited to the same recipe's settings; it gives no authority to substitute the physical container host.",
+          "checks": [
+            "190d844e58c96cf197aa838d0b0eea8062f48435:crates/farhelm-ui/src/approvals.rs:1093-1119 displays recipe name and place, not a definition snapshot.",
+            "190d844e58c96cf197aa838d0b0eea8062f48435:crates/farhelm-helm/src/agent_requests.rs:4448-4451 explicitly rechecks recipes changed since asking; :4467-4483 builds the displayed and retained session launch together; :4541-4548 passes the retained request with recipe name and place.",
+            "190d844e58c96cf197aa838d0b0eea8062f48435:crates/farhelm-helm/src/provisioning/tensorlake_add.rs:362-397 reads the recipe after approval; :597-606 calls credential setup. provisioning/credential_delivery.rs:347-369 derives bindings from the supplied stored recipe. These checks establish configuration mutability, not a substituted session command.",
+            "Historical SPEC.md:443-470 and :4320-4342 were read. They define a shared named recipe and current connection/setup selections. Historical SPEC_impl.md:9548-9556 retains the separate command and physical-machine approval contract. No runtime reproduction."
+          ],
+          "coverage_checked": [
+            "Current SPEC.md:450-480 repeats mutable named-recipe semantics, particularly :467-471; :4286-4313 requires recipe/place naming and direct creation confirmation. SPEC_impl.md:6193-6199 describes the same direct-Allow path; :9090-9098 preserves physical-machine stability. These are the proposed exact contract cover, subject to independent agreement.",
+            "TODO.md Planned is empty; BUGS.md has no matching item.",
+            "plans/queue searched for recipe edits, credential selections and environment approvals. environment-agent-operations.md:51-64, :119-133 and :153-177 covers the launched feature, but plans/REPORTS.md:28 records it landed. No unlanded plan found whose work freezes named recipe settings for a pending card.",
+            "INDEX.md and matching old-recipe-admission-builds-same-name-replacement.md concern completed deletion/recreation and old build admission, a different trigger and scope. Active TRIAGE_OUTCOMES.md searched; settings-save-races-final-replacement.md at :1756-1790 concerns overwriting settings files, not approval-time recipe authority. Neither covers this claim.",
+            "FILTER.md read in full; no filter applies to the possible credential authority consequence."
+          ],
+          "exact_cover_quotes": [
+            {
+              "source": "SPEC.md:467-469; reviewed 190d844e SPEC.md:462-465",
+              "quote": "Edits to size, base and packages affect only hosts created afterwards (base and packages after the next snapshot build); tunnels and credential selections are read when a host connects or is set up."
+            },
+            {
+              "source": "SPEC.md:4294-4298; reviewed 190d844e SPEC.md:4330-4333",
+              "quote": "The card names the recipe and where the environment will be created (Tensorlake, or the container host)"
+            }
+          ],
+          "missing_premise": "The proposed drop needs independent agreement that the explicit connection/setup recipe-selection contract applies to this pending creation card. If it does not, changed credential selection remains potentially highest. No physical-host substitution is accepted by this basis.",
+          "original_stronger_consequence": "History line 3 considered unapproved execution or credential exposure; line 4 proposed acceptance using current named recipe settings and fixed command; line 7 deliberately restored finding status for independent review because fixed-command evidence does not settle credential authority. A recipe edit can change configuration including credential selections after the card is drawn. Potentially highest if that live-selection contract does not authorize it.",
+          "needs_independent_drop_check": true,
+          "proposed_basis": "Propose narrowly spec-covered same-named-recipe settings, with other only if that acceptance is independently agreed. Until then preserve the potentially-highest credential concern. The general card/machine contract and g041/l2 remain outside the proposed cover."
+        }
+      ],
+      "parent_proposals": [
+        {
+          "artifact": "parent-flagged-judgments-025.json",
+          "key": "g041/l1",
+          "proposal": "claim-checks/claims-025/result.json",
+          "parent_proposal": "same-named-recipe-live-settings-spec-cover-pending-credential-authority-gate",
+          "final_independent_gate": "required-before-possible-highest-drop-or-lowering",
+          "reason": "Parent read full025 and actualSPEC450-480,4282-4316: namedrecipeeditsapplylatercreatedhosts, credential/tunnelselectionsreadatconnection/setup, directAllowcardnamesrecipe/place. SourceafterAllowreadsdefinitionandcredentialselection; commandfixeddoesnotsettlecredentialauthority. Proposednarrowexactlive-named-recipecontractcoveronly if freshchecker agrees it governs pendingcard; otherwise retainpossiblehighestcredentialexposure. Physicalhostsubstitution041l2/020l1notacceptedbyrecipeconfigrule; samename delete/recreatebuildadmissiondifferent. Originalfindingrestorationline7preserved."
+        }
+      ],
+      "collection": {
+        "retain": true,
+        "clearly_refuted_candidate": false,
+        "needs_unfinished_gate": true,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "g041/l1",
+        "destination": "trailing-live-recipe-settings-need-an-independent-contract-based-drop-check.md"
+      }
+    },
+    {
+      "key": "g041/l2",
+      "owner": "g041",
+      "id": "l2",
+      "domain": "gui-agent-approval-admission",
+      "purpose": "gui-agent-approval-admission: crates/farhelm-ui/src/approvals.rs, crates/farhelm-ui/src/modal_isolation.rs; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 5,
+          "event": {
+            "version": 1,
+            "kind": "lead",
+            "id": "l2",
+            "state": "open",
+            "summary": "Validate changed physical container-host authority behind a fixed approval card",
+            "location": "crates/farhelm-ui/src/approvals.rs:1095",
+            "detail": "Reviewed commit: 190d844e58c96cf197aa838d0b0eea8062f48435. TLDR: interface g020/l1, precise findings.jsonl event line 9, reports that a pending container-creation card can still name the old host while Allow creates on its retargeted SSH endpoint, runs the command and installs recipe credentials there. This is distinct from this group's l1 live-recipe decision: neither freezing the command nor accepting mutable recipe configuration establishes physical place authority. Source basis available so far: assigned action_rows captures place_name for the named-host row; prior source review saw agent_requests.rs:4485-4515 capture only place and display name and :4541-4548 pass that numeric place after Allow. Required next checks: complete approval contract around SPEC_impl.md:9548-9556; retarget admission and current-route provider lookup; credential delivery call path cited in g020/l1. Suggested bucket: potentially highest (unapproved physical execution and credential destination), not independently confirmed here yet. Confidence: open investigation, interface report is source evidence to verify, no execution. proposed_drop: false. possible_cover: g020/l1 is the same reported physical-host route and is the interface source, not queue coverage. Original l1 consequence remains recipe configuration mutation and its candidate basis is not yet altered. Missing premise: independently establish retarget permitted during pending card and fresh route used after approval; source checks can settle it."
+          }
+        },
+        {
+          "line": 6,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "l2",
+            "state": "open",
+            "summary": "A fixed container-creation card can authorize a different SSH machine",
+            "location": "crates/farhelm-ui/src/approvals.rs:1095",
+            "detail": "Reviewed commit: 190d844e58c96cf197aa838d0b0eea8062f48435. TLDR: a user can Allow a card naming the original container host after that host's SSH destination changes, and Farhelm creates the container and runs the approved command on the replacement machine instead. Interface g020/l1 line 9 identified this route; source checks here confirm the physical-target mismatch independently. Source: approvals.rs:1093-1104 renders the captured place_name; agent_requests.rs:4485-4515 captures that name and numeric Place, but no endpoint guard; approved():2865-2886 validates only origin after asking. :4519-4528 checks only a clone source, and :4541-4548 submits the numeric place. hosts.rs:1132-1165 permits retarget under its own provisioning/write locks; store.rs:7566-7602 checks only existing Podman references before changing destination; store/podman.rs:215-250 counts existing environment rows and retained recipe resources, not pending approvals. environment/podman.rs:148-184 resolves the current endpoint for commands and checks it against the current probe; :975-1033 permits fresh preparation/build at that current place. A first-use place with no existing environment or retained image/helper references therefore can change while the card waits. A fresh successful probe for the new destination satisfies availability, without binding it back to the card's original destination. Contract: SPEC_impl.md:9548 says 'What a card shows is what an approval does.' :9555-9556 says 'A launch is also refused if the target host’s connection changed while the card waited, since the approval was for the machine the card named.' (source uses ASCII apostrophe). SPEC.md:4330-4333 requires the creation card to name where the environment will be created. The recipe's mutable settings contract does not authorize changing this physical target. Suggested bucket: highest, because established command execution crosses the physical-machine approval boundary. Confidence: confirmed by source and contract; no execution or reproduction. proposed_drop: false. possible_cover: same route as interface g020/l1; parent owns deduplication. Caveats: requires an operator retarget plus a successful fresh Podman probe before Allow, and no existing environment/image/helper reference blocking retarget. This is not an agent gaining the ability to edit SSH destinations. g020 also establishes credential delivery; independent verification of that additional consequence is the next source check. Suggested fix: capture physical place authority with the plan and reject a change under admission coordinated with retarget, or invalidate the old card and ask again."
+          }
+        },
+        {
+          "line": 8,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "l2",
+            "state": "open",
+            "summary": "A fixed container-creation card can authorize execution and credentials on another machine",
+            "location": "crates/farhelm-ui/src/approvals.rs:1095",
+            "detail": "# A container-creation card can follow a retargeted SSH place\n\nReviewed commit: 190d844e58c96cf197aa838d0b0eea8062f48435\n\n## TLDR\n\nAllow on an agent's pending container card can create the container, run its command and install the recipe's credentials on a different physical machine from the one named when the card appeared. Changing that container host's SSH destination and successfully refreshing its Podman check does not invalidate the card.\n\n## Details\n\nInterface g020/l1 event line 9 identified this route; this group independently checked the approval contract, retarget admission, current-route dispatch, fresh probe and credential installation sources. The assigned UI patch at approvals.rs:1093-1104 renders the captured place_name as the container host. agent_requests.rs:4485-4515 captures only numeric place and display name; approved():2865-2886 checks only the requesting origin after approval. Its clone-source check at :4519-4528 does not guard a create's destination, and :4541-4548 passes numeric place to start_session_environment.\n\nhosts.rs:1132-1165 permits SSH retarget under the destination row's locks. store.rs:7566-7602 permits it after store/podman.rs:215-250 checks existing environments and retained recipe resources; pending approvals are not counted. A first-use place with no environment rows or retained images/helpers has no such reference. environment/recipes.rs:259-268 explicitly permits Podman launch without a built artifact. Before Allow the operator can retarget the place and call the ordinary refresh route (hosts.rs:1665-1671); environment/podman_probe.rs:435-475 reads the CURRENT row and stores a success bound to its new BaseRoute. A successful probe on replacement machine B is therefore legitimate fresh availability, not a stale A success.\n\nprovisioning/tensorlake_add.rs:357-397 rechecks current provider availability and registers the new environment only after approval. environment/podman.rs:148-184 resolves CURRENT place route for commands; :975-1033 freshly prepares/builds at that numeric place, comparing to its current probe rather than the route the card named. The retained recipe and session command do not pin the outer SSH machine.\n\nCredential consequence is independently established in shipped source: provisioning/tensorlake_add.rs:597-606 calls delivery.setup for the new row and recipe. provisioning/credential_delivery.rs:347-369 applies recipe bindings; :434-444 resolves the environment's live access route; :575-608 installs the configured Codex auth.json, and :616-652 resolves and installs the selected GitHub token. These secrets go inside the container on B. Runtime success is not claimed; source supplies the complete successful path.\n\nContract: SPEC_impl.md:9548 states exactly 'What a card shows is what an approval does.' :9555-9556 states exactly 'A launch is also refused if the target host's connection changed while the card waited, since the approval was for the machine the card named.' SPEC.md:4330-4332 requires the environment card to name where the environment will be created. SPEC_impl.md:1071-1074 binds answered controls to what was drawn. Mutable settings of the same named recipe, considered separately under l1, do not authorize replacement of the physical container place.\n\nSuggested bucket: highest, because both execution and configured recipe credentials cross the machine boundary the pending approval named. Confidence: confirmed by source and contract analysis; no runtime tests or reproduction. proposed_drop: false. possible_cover: same physical-host route as g020/l1; parent owns deduplication. Could-be-highest: established shipped credential-installation and execution route, not hypothetical functionality. Caveats: requires a concurrent operator retarget and successful fresh Podman probe before Allow, plus no environment/image/helper references blocking retarget; does not require an agent to gain host-edit permission. Original consequence preserved and strengthened by checked credential path. Capture the physical place route/entry with the planned launch and reject mismatch under admission coordinated with destination writes, or invalidate the old card and ask again."
+          }
+        },
+        {
+          "line": 9,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "l2",
+            "state": "open",
+            "summary": "A fixed container-creation card can authorize execution and credentials on another machine",
+            "location": "crates/farhelm-ui/src/approvals.rs:1095",
+            "detail": "# A container-creation card can follow a retargeted SSH place\n\nReviewed commit: 190d844e58c96cf197aa838d0b0eea8062f48435\n\n## TLDR\n\nAllow on an agent's pending container card can create the container, run its command and install the recipe's credentials on a different physical machine from the one named when the card appeared. Changing that container host's SSH destination and successfully refreshing its Podman check does not invalidate the card.\n\n## Details\n\nInterface g020/l1 event line 9 identified this route; this group independently checked the approval contract, retarget admission, current-route dispatch, fresh probe and credential installation sources. The assigned UI patch at approvals.rs:1093-1104 renders the captured place_name as the container host. agent_requests.rs:4485-4515 captures only numeric place and display name; approved():2865-2886 checks only the requesting origin after approval. Its clone-source check at :4519-4528 does not guard a create's destination, and :4541-4548 passes numeric place to start_session_environment.\n\nhosts.rs:1132-1165 permits SSH retarget under the destination row's locks. store.rs:7566-7602 permits it after store/podman.rs:215-250 checks existing environments and retained recipe resources; pending approvals are not counted. A first-use place with no environment rows or retained images/helpers has no such reference. environment/recipes.rs:259-268 explicitly permits Podman launch without a built artifact. Before Allow the operator can retarget the place and call the ordinary refresh route (hosts.rs:1665-1671); environment/podman_probe.rs:435-475 reads the CURRENT row and stores a success bound to its new BaseRoute. A successful probe on replacement machine B is therefore legitimate fresh availability, not a stale A success.\n\nprovisioning/tensorlake_add.rs:357-397 rechecks current provider availability and registers the new environment only after approval. environment/podman.rs:148-184 resolves CURRENT place route for commands; :975-1033 freshly prepares/builds at that numeric place, comparing to its current probe rather than the route the card named. The retained recipe and session command do not pin the outer SSH machine.\n\nCredential consequence is independently established in shipped source: provisioning/tensorlake_add.rs:597-606 calls delivery.setup for the new row and recipe. provisioning/credential_delivery.rs:347-369 applies recipe bindings; :434-444 resolves the environment's live access route; :575-608 installs the configured Codex auth.json, and :616-652 resolves and installs the selected GitHub token. These secrets go inside the container on B. Runtime success is not claimed; source supplies the complete successful path.\n\nContract: SPEC_impl.md:9548 states exactly 'What a card shows is what an approval does.' :9555-9556 states exactly 'A launch is also refused if the target host's connection changed while the card waited, since the approval was for the machine the card named.' SPEC.md:4330-4332 requires the environment card to name where the environment will be created. SPEC_impl.md:1071-1074 binds answered controls to what was drawn. Mutable settings of the same named recipe, considered separately under l1, do not authorize replacement of the physical container place.\n\nSuggested bucket: highest, because both execution and configured recipe credentials cross the machine boundary the pending approval named. Confidence: confirmed by source and contract analysis; no runtime tests or reproduction. proposed_drop: false. possible_cover: same physical-host route as g020/l1; parent owns deduplication. Could-be-highest: established shipped credential-installation and execution route, not hypothetical functionality. Caveats: requires a concurrent operator retarget and successful fresh Podman probe before Allow, plus no environment/image/helper references blocking retarget; does not require an agent to gain host-edit permission. Original consequence preserved and strengthened by checked credential path. Capture the physical place route/entry with the planned launch and reject mismatch under admission coordinated with destination writes, or invalidate the old card and ask again.\n\nDiscovery pass 1 interface synthesis: independently checked agent_requests.rs:907-924 and :4182-4213. An ordinary requester can name a different ordinary container host; resolve_host supplies that separate place and the plan imposes no equality to origin.host. The concrete retarget sequence requires the requesting session to remain on a DIFFERENT ordinary host from the retargeted SSH container place, for example a local requesting session. Retargeting only that place leaves the requester origin fences live; retargeting the origin itself is not the established route. This narrows the stated premise without changing the original physical-target execution/credential consequence, highest bucket, confidence or proposed_drop false. This is an update to a known finding, not a new discovery."
+          }
+        },
+        {
+          "line": 12,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "l2",
+            "state": "open",
+            "summary": "A fixed container-creation card can authorize execution and credentials on another machine",
+            "location": "crates/farhelm-ui/src/approvals.rs:1095",
+            "detail": "# A container-creation card can follow a retargeted SSH place\n\nReviewed commit: 190d844e58c96cf197aa838d0b0eea8062f48435\n\n## TLDR\n\nAllow on an agent's pending container card can create the container, run its command and install the recipe's credentials on a different physical machine from the one named when the card appeared. Changing that container host's SSH destination and successfully refreshing its Podman check does not invalidate the card.\n\n## Details\n\nInterface g020/l1 event line 9 identified this route; this group independently checked the approval contract, retarget admission, current-route dispatch, fresh probe and credential installation sources. The assigned UI patch at approvals.rs:1093-1104 renders the captured place_name as the container host. agent_requests.rs:4485-4515 captures only numeric place and display name; approved():2865-2886 checks only the requesting origin after approval. Its clone-source check at :4519-4528 does not guard a create's destination, and :4541-4548 passes numeric place to start_session_environment.\n\nhosts.rs:1132-1165 permits SSH retarget under the destination row's locks. store.rs:7566-7602 permits it after store/podman.rs:215-250 checks existing environments and retained recipe resources; pending approvals are not counted. A first-use place with no environment rows or retained images/helpers has no such reference. environment/recipes.rs:259-268 explicitly permits Podman launch without a built artifact. Before Allow the operator can retarget the place and call the ordinary refresh route (hosts.rs:1665-1671); environment/podman_probe.rs:435-475 reads the CURRENT row and stores a success bound to its new BaseRoute. A successful probe on replacement machine B is therefore legitimate fresh availability, not a stale A success.\n\nprovisioning/tensorlake_add.rs:357-397 rechecks current provider availability and registers the new environment only after approval. environment/podman.rs:148-184 resolves CURRENT place route for commands; :975-1033 freshly prepares/builds at that numeric place, comparing to its current probe rather than the route the card named. The retained recipe and session command do not pin the outer SSH machine.\n\nCredential consequence is independently established in shipped source: provisioning/tensorlake_add.rs:597-606 calls delivery.setup for the new row and recipe. provisioning/credential_delivery.rs:347-369 applies recipe bindings; :434-444 resolves the environment's live access route; :575-608 installs the configured Codex auth.json, and :616-652 resolves and installs the selected GitHub token. These secrets go inside the container on B. Runtime success is not claimed; source supplies the complete successful path.\n\nContract: SPEC_impl.md:9548 states exactly 'What a card shows is what an approval does.' :9555-9556 states exactly 'A launch is also refused if the target host's connection changed while the card waited, since the approval was for the machine the card named.' SPEC.md:4330-4332 requires the environment card to name where the environment will be created. SPEC_impl.md:1071-1074 binds answered controls to what was drawn. Mutable settings of the same named recipe, considered separately under l1, do not authorize replacement of the physical container place.\n\nSuggested bucket: highest, because both execution and configured recipe credentials cross the machine boundary the pending approval named. Confidence: confirmed by source and contract analysis; no runtime tests or reproduction. proposed_drop: false. possible_cover: same physical-host route as g020/l1; parent owns deduplication. Could-be-highest: established shipped credential-installation and execution route, not hypothetical functionality. Caveats: requires a concurrent operator retarget and successful fresh Podman probe before Allow, plus no environment/image/helper references blocking retarget; does not require an agent to gain host-edit permission. Original consequence preserved and strengthened by checked credential path. Capture the physical place route/entry with the planned launch and reject mismatch under admission coordinated with destination writes, or invalidate the old card and ask again.\n\nDiscovery pass 1 interface synthesis: independently checked agent_requests.rs:907-924 and :4182-4213. An ordinary requester can name a different ordinary container host; resolve_host supplies that separate place and the plan imposes no equality to origin.host. The concrete retarget sequence requires the requesting session to remain on a DIFFERENT ordinary host from the retargeted SSH container place, for example a local requesting session. Retargeting only that place leaves the requester origin fences live; retargeting the origin itself is not the established route. This narrows the stated premise without changing the original physical-target execution/credential consequence, highest bucket, confidence or proposed_drop false. This is an update to a known finding, not a new discovery.\n\nReopened synthesis, normative counterevidence: independently read the complete reviewed SPEC.md:399-409 and pinned-tip :405-415, together with reviewed SPEC_impl.md:9548-9563 and tip :9090-9105. SPEC.md expressly states: \"Approvals, settings changes and confirmed operations therefore follow the entry.\" It lists an approved \"stop, restart, rename, create or clone\" and says it \"may be carried out against the entry's new machine\", with no installation-identity check. Only agent host edit/removal gets its explicit destination exception in that passage. This is physical-host acceptance counterevidence, not merely l1 recipe mutability, so prior assertions that no physical acceptance exists are superseded. The competing SPEC_impl sentence still says a launch refuses target-connection change because the approval named the machine. Source-confirmed retarget/execution/credential route and separate-origin/cold-place/fresh-probe constraints remain unchanged; normative defect status now requires scope/precedence reconciliation, not a claim that source refutes this acceptance. possible_cover additionally includes this exact product logical-entry rule; parent has accepted no drop. Highest consequence retained; proposed_drop false pending remaining contract checks. Next check is documentation scope and any explicit reconciliation of pending environment creation with logical entry versus physical place. No runtime observation."
+          }
+        },
+        {
+          "line": 13,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "l2",
+            "state": "open",
+            "summary": "A fixed container-creation card can authorize execution and credentials on another machine",
+            "location": "crates/farhelm-ui/src/approvals.rs:1095",
+            "detail": "# A container-creation card can follow a retargeted SSH place\n\nReviewed commit: 190d844e58c96cf197aa838d0b0eea8062f48435\n\n## TLDR\n\nAllow on an agent's pending container card can create the container, run its command and install the recipe's credentials on a different physical machine from the one named when the card appeared. Changing that container host's SSH destination and successfully refreshing its Podman check does not invalidate the card.\n\n## Details\n\nInterface g020/l1 event line 9 identified this route; this group independently checked the approval contract, retarget admission, current-route dispatch, fresh probe and credential installation sources. The assigned UI patch at approvals.rs:1093-1104 renders the captured place_name as the container host. agent_requests.rs:4485-4515 captures only numeric place and display name; approved():2865-2886 checks only the requesting origin after approval. Its clone-source check at :4519-4528 does not guard a create's destination, and :4541-4548 passes numeric place to start_session_environment.\n\nhosts.rs:1132-1165 permits SSH retarget under the destination row's locks. store.rs:7566-7602 permits it after store/podman.rs:215-250 checks existing environments and retained recipe resources; pending approvals are not counted. A first-use place with no environment rows or retained images/helpers has no such reference. environment/recipes.rs:259-268 explicitly permits Podman launch without a built artifact. Before Allow the operator can retarget the place and call the ordinary refresh route (hosts.rs:1665-1671); environment/podman_probe.rs:435-475 reads the CURRENT row and stores a success bound to its new BaseRoute. A successful probe on replacement machine B is therefore legitimate fresh availability, not a stale A success.\n\nprovisioning/tensorlake_add.rs:357-397 rechecks current provider availability and registers the new environment only after approval. environment/podman.rs:148-184 resolves CURRENT place route for commands; :975-1033 freshly prepares/builds at that numeric place, comparing to its current probe rather than the route the card named. The retained recipe and session command do not pin the outer SSH machine.\n\nCredential consequence is independently established in shipped source: provisioning/tensorlake_add.rs:597-606 calls delivery.setup for the new row and recipe. provisioning/credential_delivery.rs:347-369 applies recipe bindings; :434-444 resolves the environment's live access route; :575-608 installs the configured Codex auth.json, and :616-652 resolves and installs the selected GitHub token. These secrets go inside the container on B. Runtime success is not claimed; source supplies the complete successful path.\n\nContract: SPEC_impl.md:9548 states exactly 'What a card shows is what an approval does.' :9555-9556 states exactly 'A launch is also refused if the target host's connection changed while the card waited, since the approval was for the machine the card named.' SPEC.md:4330-4332 requires the environment card to name where the environment will be created. SPEC_impl.md:1071-1074 binds answered controls to what was drawn. Mutable settings of the same named recipe, considered separately under l1, do not authorize replacement of the physical container place.\n\nSuggested bucket: highest, because both execution and configured recipe credentials cross the machine boundary the pending approval named. Confidence: confirmed by source and contract analysis; no runtime tests or reproduction. proposed_drop: false. possible_cover: same physical-host route as g020/l1; parent owns deduplication. Could-be-highest: established shipped credential-installation and execution route, not hypothetical functionality. Caveats: requires a concurrent operator retarget and successful fresh Podman probe before Allow, plus no environment/image/helper references blocking retarget; does not require an agent to gain host-edit permission. Original consequence preserved and strengthened by checked credential path. Capture the physical place route/entry with the planned launch and reject mismatch under admission coordinated with destination writes, or invalidate the old card and ask again.\n\nDiscovery pass 1 interface synthesis: independently checked agent_requests.rs:907-924 and :4182-4213. An ordinary requester can name a different ordinary container host; resolve_host supplies that separate place and the plan imposes no equality to origin.host. The concrete retarget sequence requires the requesting session to remain on a DIFFERENT ordinary host from the retargeted SSH container place, for example a local requesting session. Retargeting only that place leaves the requester origin fences live; retargeting the origin itself is not the established route. This narrows the stated premise without changing the original physical-target execution/credential consequence, highest bucket, confidence or proposed_drop false. This is an update to a known finding, not a new discovery.\n\nReopened synthesis, normative counterevidence: independently read the complete reviewed SPEC.md:399-409 and pinned-tip :405-415, together with reviewed SPEC_impl.md:9548-9563 and tip :9090-9105. SPEC.md expressly states: \"Approvals, settings changes and confirmed operations therefore follow the entry.\" It lists an approved \"stop, restart, rename, create or clone\" and says it \"may be carried out against the entry's new machine\", with no installation-identity check. Only agent host edit/removal gets its explicit destination exception in that passage. This is physical-host acceptance counterevidence, not merely l1 recipe mutability, so prior assertions that no physical acceptance exists are superseded. The competing SPEC_impl sentence still says a launch refuses target-connection change because the approval named the machine. Source-confirmed retarget/execution/credential route and separate-origin/cold-place/fresh-probe constraints remain unchanged; normative defect status now requires scope/precedence reconciliation, not a claim that source refutes this acceptance. possible_cover additionally includes this exact product logical-entry rule; parent has accepted no drop. Highest consequence retained; proposed_drop false pending remaining contract checks. Next check is documentation scope and any explicit reconciliation of pending environment creation with logical entry versus physical place. No runtime observation.\n\nReopened synthesis conclusion: the documents include an explicit precedence rule, not only competing prose. Reviewed SPEC_impl.md:3-6 states exactly: \"SPEC.md defines what the product does; when this document and SPEC.md disagree about observable behavior, SPEC.md wins.\" Reviewed SPEC.md:399-409 explicitly makes approvals follow the logical host entry, including creates/clones against its new machine; its stated destination exception covers agent host edit/removal, not environment creation. SPEC.md Concepts defines a Podman place as a registered container host (:48-51), and the environment approval subsection (:4322-4342) requires naming that host but adds no physical-endpoint or install-identity exception. The supported sequence preserves that SAME host row while the operator corrects its destination. On that reading the product clause applies to the container place, and the implementation document sentence promising target-connection refusal is subordinate conflicting documentation. This is not source refutation of the effect: execution and recipe credentials on the replacement physical machine remain the confirmed source consequence, with separate-origin/cold-place/fresh-probe restrictions unchanged.\n\nLatest disposition supersedes earlier blanket confirmed-defect/no-acceptance statements, without erasing them: retain finding l2 and its highest consequence for independent review; proposed_drop is now the exact explicit SPEC.md logical-entry acceptance plus SPEC_impl.md precedence rule quoted above, NOT rarity, caller permission speculation or recipe mutability. possible_cover: reviewed SPEC.md:399-409 and tip :405-415 (the logical-entry retarget acceptance), together with reviewed SPEC_impl.md:3-6; same route as g020/l1. Confidence: confirmed by source for the physical behavior; proposed normative acceptance is supported by explicit document precedence and the ordinary registered-host meaning of place, and remains unaccepted by parent. Suggested bucket if retained as a defect: highest, unchanged. Could-be-highest remains yes because the shipped credential/execution route is established; acceptance, not harm reduction, is the proposed-drop basis. Independent reviewer can reject applicability of the logical-entry rule to environment places, but no accessible source premise is missing and source execution cannot resolve that normative disagreement. The residual decision is whether this product rule is intended to cover the ordinary host entry when used as a container place; explicit scope excludes no such use. No lead remains uninvestigated. No runtime/build/install/reproduction or unrelated discovery performed."
+          }
+        }
+      ],
+      "latest": {
+        "line": 13,
+        "event": {
+          "version": 1,
+          "kind": "finding",
+          "id": "l2",
+          "state": "open",
+          "summary": "A fixed container-creation card can authorize execution and credentials on another machine",
+          "location": "crates/farhelm-ui/src/approvals.rs:1095",
+          "detail": "# A container-creation card can follow a retargeted SSH place\n\nReviewed commit: 190d844e58c96cf197aa838d0b0eea8062f48435\n\n## TLDR\n\nAllow on an agent's pending container card can create the container, run its command and install the recipe's credentials on a different physical machine from the one named when the card appeared. Changing that container host's SSH destination and successfully refreshing its Podman check does not invalidate the card.\n\n## Details\n\nInterface g020/l1 event line 9 identified this route; this group independently checked the approval contract, retarget admission, current-route dispatch, fresh probe and credential installation sources. The assigned UI patch at approvals.rs:1093-1104 renders the captured place_name as the container host. agent_requests.rs:4485-4515 captures only numeric place and display name; approved():2865-2886 checks only the requesting origin after approval. Its clone-source check at :4519-4528 does not guard a create's destination, and :4541-4548 passes numeric place to start_session_environment.\n\nhosts.rs:1132-1165 permits SSH retarget under the destination row's locks. store.rs:7566-7602 permits it after store/podman.rs:215-250 checks existing environments and retained recipe resources; pending approvals are not counted. A first-use place with no environment rows or retained images/helpers has no such reference. environment/recipes.rs:259-268 explicitly permits Podman launch without a built artifact. Before Allow the operator can retarget the place and call the ordinary refresh route (hosts.rs:1665-1671); environment/podman_probe.rs:435-475 reads the CURRENT row and stores a success bound to its new BaseRoute. A successful probe on replacement machine B is therefore legitimate fresh availability, not a stale A success.\n\nprovisioning/tensorlake_add.rs:357-397 rechecks current provider availability and registers the new environment only after approval. environment/podman.rs:148-184 resolves CURRENT place route for commands; :975-1033 freshly prepares/builds at that numeric place, comparing to its current probe rather than the route the card named. The retained recipe and session command do not pin the outer SSH machine.\n\nCredential consequence is independently established in shipped source: provisioning/tensorlake_add.rs:597-606 calls delivery.setup for the new row and recipe. provisioning/credential_delivery.rs:347-369 applies recipe bindings; :434-444 resolves the environment's live access route; :575-608 installs the configured Codex auth.json, and :616-652 resolves and installs the selected GitHub token. These secrets go inside the container on B. Runtime success is not claimed; source supplies the complete successful path.\n\nContract: SPEC_impl.md:9548 states exactly 'What a card shows is what an approval does.' :9555-9556 states exactly 'A launch is also refused if the target host's connection changed while the card waited, since the approval was for the machine the card named.' SPEC.md:4330-4332 requires the environment card to name where the environment will be created. SPEC_impl.md:1071-1074 binds answered controls to what was drawn. Mutable settings of the same named recipe, considered separately under l1, do not authorize replacement of the physical container place.\n\nSuggested bucket: highest, because both execution and configured recipe credentials cross the machine boundary the pending approval named. Confidence: confirmed by source and contract analysis; no runtime tests or reproduction. proposed_drop: false. possible_cover: same physical-host route as g020/l1; parent owns deduplication. Could-be-highest: established shipped credential-installation and execution route, not hypothetical functionality. Caveats: requires a concurrent operator retarget and successful fresh Podman probe before Allow, plus no environment/image/helper references blocking retarget; does not require an agent to gain host-edit permission. Original consequence preserved and strengthened by checked credential path. Capture the physical place route/entry with the planned launch and reject mismatch under admission coordinated with destination writes, or invalidate the old card and ask again.\n\nDiscovery pass 1 interface synthesis: independently checked agent_requests.rs:907-924 and :4182-4213. An ordinary requester can name a different ordinary container host; resolve_host supplies that separate place and the plan imposes no equality to origin.host. The concrete retarget sequence requires the requesting session to remain on a DIFFERENT ordinary host from the retargeted SSH container place, for example a local requesting session. Retargeting only that place leaves the requester origin fences live; retargeting the origin itself is not the established route. This narrows the stated premise without changing the original physical-target execution/credential consequence, highest bucket, confidence or proposed_drop false. This is an update to a known finding, not a new discovery.\n\nReopened synthesis, normative counterevidence: independently read the complete reviewed SPEC.md:399-409 and pinned-tip :405-415, together with reviewed SPEC_impl.md:9548-9563 and tip :9090-9105. SPEC.md expressly states: \"Approvals, settings changes and confirmed operations therefore follow the entry.\" It lists an approved \"stop, restart, rename, create or clone\" and says it \"may be carried out against the entry's new machine\", with no installation-identity check. Only agent host edit/removal gets its explicit destination exception in that passage. This is physical-host acceptance counterevidence, not merely l1 recipe mutability, so prior assertions that no physical acceptance exists are superseded. The competing SPEC_impl sentence still says a launch refuses target-connection change because the approval named the machine. Source-confirmed retarget/execution/credential route and separate-origin/cold-place/fresh-probe constraints remain unchanged; normative defect status now requires scope/precedence reconciliation, not a claim that source refutes this acceptance. possible_cover additionally includes this exact product logical-entry rule; parent has accepted no drop. Highest consequence retained; proposed_drop false pending remaining contract checks. Next check is documentation scope and any explicit reconciliation of pending environment creation with logical entry versus physical place. No runtime observation.\n\nReopened synthesis conclusion: the documents include an explicit precedence rule, not only competing prose. Reviewed SPEC_impl.md:3-6 states exactly: \"SPEC.md defines what the product does; when this document and SPEC.md disagree about observable behavior, SPEC.md wins.\" Reviewed SPEC.md:399-409 explicitly makes approvals follow the logical host entry, including creates/clones against its new machine; its stated destination exception covers agent host edit/removal, not environment creation. SPEC.md Concepts defines a Podman place as a registered container host (:48-51), and the environment approval subsection (:4322-4342) requires naming that host but adds no physical-endpoint or install-identity exception. The supported sequence preserves that SAME host row while the operator corrects its destination. On that reading the product clause applies to the container place, and the implementation document sentence promising target-connection refusal is subordinate conflicting documentation. This is not source refutation of the effect: execution and recipe credentials on the replacement physical machine remain the confirmed source consequence, with separate-origin/cold-place/fresh-probe restrictions unchanged.\n\nLatest disposition supersedes earlier blanket confirmed-defect/no-acceptance statements, without erasing them: retain finding l2 and its highest consequence for independent review; proposed_drop is now the exact explicit SPEC.md logical-entry acceptance plus SPEC_impl.md precedence rule quoted above, NOT rarity, caller permission speculation or recipe mutability. possible_cover: reviewed SPEC.md:399-409 and tip :405-415 (the logical-entry retarget acceptance), together with reviewed SPEC_impl.md:3-6; same route as g020/l1. Confidence: confirmed by source for the physical behavior; proposed normative acceptance is supported by explicit document precedence and the ordinary registered-host meaning of place, and remains unaccepted by parent. Suggested bucket if retained as a defect: highest, unchanged. Could-be-highest remains yes because the shipped credential/execution route is established; acceptance, not harm reduction, is the proposed-drop basis. Independent reviewer can reject applicability of the logical-entry rule to environment places, but no accessible source premise is missing and source execution cannot resolve that normative disagreement. The residual decision is whether this product rule is intended to cover the ordinary host entry when used as a container place; explicit scope excludes no such use. No lead remains uninvestigated. No runtime/build/install/reproduction or unrelated discovery performed."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g041/findings.jsonl",
+        "id": "l2",
+        "line": 9,
+        "disposition": "under-investigation",
+        "group": "g041-l2",
+        "reason": "Record durably acknowledged; parent source/contract validation, cross-group synthesis, coverage/filter matching and any independent drop check remain pending. This preserves the claim and uncertainty without accepting, dropping or lowering it."
+      },
+      "accepted_parent_decision": null,
+      "returned_claim_checks": [
+        {
+          "batch": "claims-025",
+          "key": "g041/l2",
+          "latest_line": 9,
+          "recommendation": "retain-verified",
+          "bucket": "highest",
+          "underlying_key": "agent-environment-approval-place-route-not-pinned",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The card retains the numeric container place and its displayed name without binding its SSH route. A separate requesting host can stay live while an operator retargets an unused destination and successfully refreshes Podman there. Allow then registers and prepares at that current route, runs the retained command there and can deliver configured credentials. The source route crosses the physical-machine boundary the card named.",
+          "checks": [
+            "190d844e58c96cf197aa838d0b0eea8062f48435:crates/farhelm-helm/src/agent_requests.rs:907-924 dispatches explicit environment creates; :4182-4213 resolves the named ordinary container host separately from origin. :4485-4515 captures only name and Place. approved():2865-2886 rechecks origin, :4519-4528 checks clone source only, and :4541-4548 dispatches the numeric place. UI approvals.rs:1093-1104 renders the captured name.",
+            "Same commit: hosts.rs:1132-1165 permits destination edits under its locks; store.rs:7566-7602 calls store/podman.rs:215-250, which refuses existing environment rows and retained recipe image/helper resources but counts no pending approval. environment/recipes.rs:259-268 permits a first Podman launch without a built artifact.",
+            "Same commit: environment/podman_probe.rs:435-475 reads the current row, probes that route and publishes only to that route. environment/podman.rs:148-184 resolves current route for commands; :975-1033 requires fresh availability and prepares at that place. A successful fresh B probe satisfies the path, rather than incorrectly reusing A's probe.",
+            "Same commit: provisioning/tensorlake_add.rs:357-397 rereads availability and registers after approval; :597-606 calls delivery.setup. provisioning/credential_delivery.rs:347-369 applies recipe bindings, :434-444 resolves the live environment access route, :575-608 installs configured Codex auth.json and :616-652 installs the selected GitHub token. This establishes the conditional successful credential route by source, not runtime observation.",
+            "Historical SPEC.md:4330-4333 requires place disclosure; SPEC_impl.md:9548-9556 requires dispatched launch and machine to match the card. A diff from 190d844e through 00de0b6c shows no change to this approval/dispatch path or Podman route logic; subsequent changes in these files concern environment deletion and protocol/test fields."
+          ],
+          "coverage_checked": [
+            "Current SPEC.md:4294-4298 and SPEC_impl.md:9090-9098 preserve the violated approval boundary; they do not accept physical place retargeting. Mutable recipe rules at SPEC.md:467-471 concern settings of the named recipe, not the place route.",
+            "TODO.md Planned is empty. BUGS.md's SSH-transfer hang has different trigger and consequence.",
+            "plans/queue searched for container/environment approvals and retargets. podman-environments.md addresses existing referring environments/resources, and environment-agent-operations.md requires place disclosure. plans/REPORTS.md:21,28 records both landed. No unlanded plan fixing pending-card physical route binding was found.",
+            "INDEX.md, matching queue text and active TRIAGE_OUTCOMES.md searched for physical container place retarget, pending launch card, credentials and route binding. No exact queued item or active decision found. Host history retarget and update-consent items have different operations and consequences. No filter fits: wrong-machine action and credential/trust-boundary harm are explicit exclusions.",
+            "The history names g020/l1 as the same interface route. That record is not a named input in this batch, so no independent alias disposition is inferred; parent can reconcile it with the underlying key."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": "No missing source premise for the stated conditional route. It requires a different still-live ordinary requesting host, an operator retarget, no environment or retained image/helper references blocking it, successful fresh Podman probe on B before Allow, and successful downstream setup. Credentials must be configured for the credential consequence. None was reproduced.",
+          "original_stronger_consequence": "Lines 5-6 raised then established execution on a changed physical SSH machine; lines 8-9 independently added configured Codex/GitHub credential delivery. Line 9 narrows the route to a requester on another ordinary host so origin fences survive. This is not an agent gaining host-edit authority. Preserve all these caveats and the highest consequence.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Retain highest from established conditional wrong-machine execution and credential delivery. Do not use same-named-recipe mutability as coverage. Any parent deduplication with g020/l1 must preserve the independent source checks and origin-separation caveat and would need an independent drop check."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": true,
+        "clearly_refuted_candidate": false,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "highest",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "g041/l2",
+        "destination": "trailing-a-fixed-container-creation-card-can-authorize-execution-and-credentials-on-another-machine.md"
+      }
+    },
+    {
+      "key": "g041/l3",
+      "owner": "g041",
+      "id": "l3",
+      "domain": "gui-agent-approval-admission",
+      "purpose": "gui-agent-approval-admission: crates/farhelm-ui/src/approvals.rs, crates/farhelm-ui/src/modal_isolation.rs; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 10,
+          "event": {
+            "version": 1,
+            "kind": "lead",
+            "id": "l3",
+            "state": "open",
+            "summary": "Check wrapper provenance disclosure on new environment cards",
+            "location": "crates/farhelm-ui/src/approvals.rs:1118",
+            "detail": "Reviewed commit: 190d844e58c96cf197aa838d0b0eea8062f48435. TLDR: investigating whether a new environment's approval omits required identification that a wrapper was supplied by the asking agent. Source: ordinary LaunchWithAgentWrapper rows at approvals.rs:1051-1056 add an 'agent supplied wrapper' block and ApprovalCard's wrapper-kind note; new LaunchEnvironment at :1070-1122 shares launch_rows but does not enter either provenance-specific branch. The command bytes are displayed, so this is not unseen command execution by itself. SPEC.md's environment rule says it 'otherwise shows what any launch card shows'; the earlier wrapper rule might be scoped to hosts asking before YOLO rather than these new environments whose default permits YOLO. Next checks: full wrapper requirement and environmental exemption, plan.agent_wrapper_supplied production/use, and common launch_rows rendering. Suggested bucket pending: other unless a materially misleading approval route is established; could-be-highest not established because full command is visible and user still gives direct Allow. Confidence: open source/contract investigation, not a finding. proposed_drop: false pending check. possible_cover: none in read neighbour records. No execution or reproduction."
+          }
+        },
+        {
+          "line": 11,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "l3",
+            "state": "open",
+            "summary": "Environment wrapper bytes are shown and the separate prefix gate does not apply",
+            "location": "crates/farhelm-ui/src/approvals.rs:1118",
+            "detail": "Reviewed commit: 190d844e58c96cf197aa838d0b0eea8062f48435. TLDR: investigated whether omitting the ordinary card's separate 'agent supplied wrapper' block hides a required authorization decision on new environment cards. The entire wrapped start and resume command is shown; the separate prefix gate is specific to destinations that ask before YOLO, and these new environment hosts start with YOLO allowed. Checks/results: approvals.rs:1051-1056 and :528-531 limit provenance-specific block/note to LaunchWithAgentWrapper, while :1118 calls launch_rows. launch_rows at :1361-1399 retains raw wrapper words in the resume display and displays the complete start via display_command. agent_requests.rs:4108-4110 retains agent_wrapper_supplied; :4256-4266 populates it from resolution and :4477-4483 carries it into the request. SPEC.md:4123-4129 states exactly 'on a host that asks before YOLO launches, it needs an Allow or Deny card even when ordinary agent commands from that host run without asking' and 'A host allowed to start YOLO sessions without asking has no prefix approval gate.' SPEC.md:4340-4342 says the new environment defaults allow YOLO; SPEC_impl.md:6687-6690 says exactly 'the direct-Allow card already covers an agent-supplied wrapper.' Thus 'otherwise shows what any launch card shows' does not require these cards to emulate a separate prefix-gate presentation for a host where that gate does not apply. Suggested bucket: other, no established defect. Confidence: confirmed by source and scoped contract analysis, no runtime observation. proposed_drop: complete command visibility plus the explicit scope of the separate prefix gate refute the suspected missing authorization decision; this is a proposed candidate disposition, not a parent-accepted drop. possible_cover: none in supplied neighbour records. Could-be-highest: no established route to unseen execution or loss of work; all executed wrapper bytes remain in the command display and direct Allow is required. Original concern preserved: the new card does omit the separate agent-provenance label, but that alone does not establish violation of this scoped gate. No missing source premise or open investigation remains."
+          }
+        }
+      ],
+      "latest": {
+        "line": 11,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "l3",
+          "state": "open",
+          "summary": "Environment wrapper bytes are shown and the separate prefix gate does not apply",
+          "location": "crates/farhelm-ui/src/approvals.rs:1118",
+          "detail": "Reviewed commit: 190d844e58c96cf197aa838d0b0eea8062f48435. TLDR: investigated whether omitting the ordinary card's separate 'agent supplied wrapper' block hides a required authorization decision on new environment cards. The entire wrapped start and resume command is shown; the separate prefix gate is specific to destinations that ask before YOLO, and these new environment hosts start with YOLO allowed. Checks/results: approvals.rs:1051-1056 and :528-531 limit provenance-specific block/note to LaunchWithAgentWrapper, while :1118 calls launch_rows. launch_rows at :1361-1399 retains raw wrapper words in the resume display and displays the complete start via display_command. agent_requests.rs:4108-4110 retains agent_wrapper_supplied; :4256-4266 populates it from resolution and :4477-4483 carries it into the request. SPEC.md:4123-4129 states exactly 'on a host that asks before YOLO launches, it needs an Allow or Deny card even when ordinary agent commands from that host run without asking' and 'A host allowed to start YOLO sessions without asking has no prefix approval gate.' SPEC.md:4340-4342 says the new environment defaults allow YOLO; SPEC_impl.md:6687-6690 says exactly 'the direct-Allow card already covers an agent-supplied wrapper.' Thus 'otherwise shows what any launch card shows' does not require these cards to emulate a separate prefix-gate presentation for a host where that gate does not apply. Suggested bucket: other, no established defect. Confidence: confirmed by source and scoped contract analysis, no runtime observation. proposed_drop: complete command visibility plus the explicit scope of the separate prefix gate refute the suspected missing authorization decision; this is a proposed candidate disposition, not a parent-accepted drop. possible_cover: none in supplied neighbour records. Could-be-highest: no established route to unseen execution or loss of work; all executed wrapper bytes remain in the command display and direct Allow is required. Original concern preserved: the new card does omit the separate agent-provenance label, but that alone does not establish violation of this scoped gate. No missing source premise or open investigation remains."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g041/findings.jsonl",
+        "id": "l3",
+        "line": 11,
+        "disposition": "under-investigation",
+        "group": "g041-l3",
+        "reason": "Record durably acknowledged; parent source/contract validation, cross-group synthesis, coverage/filter matching and any independent drop check remain pending. This preserves the claim and uncertainty without accepting, dropping or lowering it."
+      },
+      "accepted_parent_decision": null,
+      "returned_claim_checks": [
+        {
+          "batch": "claims-025",
+          "key": "g041/l3",
+          "latest_line": 11,
+          "recommendation": "covered",
+          "bucket": "other",
+          "underlying_key": "environment-wrapper-direct-allow-without-separate-prefix-gate",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The environment card omits the ordinary separate agent-provenance label, but displays the complete wrapped start and resume commands and always requires direct Allow. The specification scopes the separate prefix gate to hosts that ask before YOLO and expressly says the environment card already covers an agent-supplied wrapper.",
+          "checks": [
+            "190d844e58c96cf197aa838d0b0eea8062f48435:crates/farhelm-ui/src/approvals.rs:1051-1056 adds the separate provenance block only for LaunchWithAgentWrapper; :1070-1122 renders LaunchEnvironment through launch_rows. :1361-1399 preserves raw wrapper words in resume text and uses display_command for the full start.",
+            "Same commit: agent_requests.rs:4467-4483 constructs the displayed and retained launch together and carries agent_wrapper_supplied into the retained CreateReq. The omitted label is real; unseen wrapper bytes or an omitted Allow decision are not established.",
+            "Historical SPEC.md:4123-4129 scopes the labelled prefix card to destinations asking before YOLO; :4340-4342 gives these new environment hosts YOLO-allowed defaults. Historical SPEC_impl.md:6685-6690 expressly says the direct-Allow card covers the agent-supplied wrapper. No runtime or assistive-technology observation."
+          ],
+          "coverage_checked": [
+            "Current SPEC.md:4087-4094 and :4294-4313 preserve the scoped prefix gate and environment defaults. SPEC_impl.md:6193-6199 explicitly accepts the direct-Allow wrapper path. Full matching paragraphs were read.",
+            "TODO.md Planned is empty; BUGS.md has no matching item.",
+            "plans/queue searched for wrappers and environment approval cards. environment-agent-operations.md describes this card, and plans/REPORTS.md:28 records the plan landed. No unlanded plan requiring a separate provenance block found.",
+            "INDEX.md, matching queue text and active TRIAGE_OUTCOMES.md searched. recent-setup-description-omits-wrapper-prefix.md concerns wrapper bytes omitted from saved-setup choices, not a complete-command direct-Allow card. Other wrapper mentions concern remembered choices or guides. No exact queue/ledger cover found.",
+            "FILTER.md read in full; proposed acceptance rests on the product contract, not rarity or a diagnostic filter."
+          ],
+          "exact_cover_quotes": [
+            {
+              "source": "SPEC.md:4091-4092; reviewed 190d844e SPEC.md:4128-4129",
+              "quote": "A host allowed to start YOLO sessions without asking has no prefix approval gate."
+            },
+            {
+              "source": "SPEC_impl.md:6198-6199; reviewed 190d844e SPEC_impl.md:6689-6690",
+              "quote": "the direct-Allow card already covers an agent-supplied wrapper."
+            }
+          ],
+          "missing_premise": null,
+          "original_stronger_consequence": "Line 10 investigated whether omitting the separate agent-supplied-wrapper provenance block hides a required authorization decision. It already noted that full command bytes are shown, so unseen execution was not established. Line 11 proposes a contract-based drop while preserving the actual label omission. There is no established route to unseen execution or loss of work.",
+          "needs_independent_drop_check": true,
+          "proposed_basis": "Propose narrowly spec-covered absence of a separate prefix gate/provenance block on an always-direct-Allow new-environment card whose entire command is shown. Because this is wrapper authorization, include the proposed dismissal in the independent drop check despite the latest other bucket."
+        }
+      ],
+      "parent_proposals": [
+        {
+          "artifact": "parent-flagged-judgments-025.json",
+          "key": "g041/l3",
+          "proposal": "claim-checks/claims-025/result.json",
+          "parent_proposal": "exact-spec-direct-Allow-complete-wrapper-without-separate-prefix-gate",
+          "final_independent_gate": "required-for-wrapper-authorization-drop",
+          "reason": "Parent read full025 plusactualSPEC4080-4100/4282-4316andimpl6188-6202. Separateprefixprovenancelabelomittedbutcompletewrappedstart/resumecommandshownanddirectAllowalwaysrequired; newhostdefaultsYOLOallowedandexplicitimplsaysdirectcardcoversagentwrapper. Proposedabsenceofseparateprefixgate/labelacceptedforthiscompletecommandcardonly. Originalpotentialunseenauthorizationconcernremainsforfreshgate; noproofallcommandrenderingsorassistivetechnologycorrect, notrarelabeldiagnosticfilter."
+        }
+      ],
+      "collection": {
+        "retain": true,
+        "clearly_refuted_candidate": false,
+        "needs_unfinished_gate": true,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "environment-wrapper-direct-allow-without-separate-prefix-gate",
+        "destination": "trailing-environment-wrapper-direct-allow-without-separate-prefix-gate.md"
+      }
+    },
+    {
+      "key": "g041/c3",
+      "owner": "g041",
+      "id": "c3",
+      "domain": "gui-agent-approval-admission",
+      "purpose": "gui-agent-approval-admission: crates/farhelm-ui/src/approvals.rs, crates/farhelm-ui/src/modal_isolation.rs; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 15,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c3",
+            "state": "open",
+            "summary": "Longer environment consequence text stays in the scrollable card body",
+            "location": "crates/farhelm-ui/src/approvals.rs:1103",
+            "detail": "Reviewed commit: 190d844e58c96cf197aa838d0b0eea8062f48435. TLDR: considered whether the new recipe/place/consequence facts can push the approval answers out of reach as they make the card taller. The added facts remain inside the existing scrollable body, with answers as a separate fixed flex sibling; no new clipping route was found. Checks/results: ApprovalCard at approvals.rs:481-512 partitions block text from facts inside approval-card-body, and :543-589 closes that body before rendering approval-card-actions. New environment notes enter action_rows at :1091-1106, not the pinned header/action region. app.css:8985-8998 gives the body flex shrink, min-height:0 and overflow:auto, with fact rows inside; :9170-9178 fixes the answer region as flex:none; :9202-9205 makes the whole region scroll in tiny panes. ProviderUi note text at environment_ui.rs:60-67 is static authored wording. Contract: SPEC.md's approval-region rule, reviewed :4040 onward (same paragraph previously read at 9ff03ce9:3990-4005), requires pinned header/answers with scrolling body and whole-region scrolling when even those controls cannot fit. Suggested bucket: other (no established defect). Confidence: source refutes this specific new-row displacement route; no browser layout was executed and this is not a claim that every engine/viewport has been visually validated. proposed_drop: source layout keeps these new facts in the shrinkable scrolling region and the answers in their separate fixed region. possible_cover: none in supplied neighbour records. Could-be-highest: no established security or loss-of-work route; concern was answer reachability, with commands still represented as their own blocks. No missing source premise or open lead remains for this candidate."
+          }
+        }
+      ],
+      "latest": {
+        "line": 15,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c3",
+          "state": "open",
+          "summary": "Longer environment consequence text stays in the scrollable card body",
+          "location": "crates/farhelm-ui/src/approvals.rs:1103",
+          "detail": "Reviewed commit: 190d844e58c96cf197aa838d0b0eea8062f48435. TLDR: considered whether the new recipe/place/consequence facts can push the approval answers out of reach as they make the card taller. The added facts remain inside the existing scrollable body, with answers as a separate fixed flex sibling; no new clipping route was found. Checks/results: ApprovalCard at approvals.rs:481-512 partitions block text from facts inside approval-card-body, and :543-589 closes that body before rendering approval-card-actions. New environment notes enter action_rows at :1091-1106, not the pinned header/action region. app.css:8985-8998 gives the body flex shrink, min-height:0 and overflow:auto, with fact rows inside; :9170-9178 fixes the answer region as flex:none; :9202-9205 makes the whole region scroll in tiny panes. ProviderUi note text at environment_ui.rs:60-67 is static authored wording. Contract: SPEC.md's approval-region rule, reviewed :4040 onward (same paragraph previously read at 9ff03ce9:3990-4005), requires pinned header/answers with scrolling body and whole-region scrolling when even those controls cannot fit. Suggested bucket: other (no established defect). Confidence: source refutes this specific new-row displacement route; no browser layout was executed and this is not a claim that every engine/viewport has been visually validated. proposed_drop: source layout keeps these new facts in the shrinkable scrolling region and the answers in their separate fixed region. possible_cover: none in supplied neighbour records. Could-be-highest: no established security or loss-of-work route; concern was answer reachability, with commands still represented as their own blocks. No missing source premise or open lead remains for this candidate."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g041/findings.jsonl",
+        "id": "c3",
+        "line": 15,
+        "disposition": "excluded",
+        "group": "environment-approval-facts-existing-scrollable-body",
+        "reason": "Parent read complete discovery event15 and reply. New190d844e recipe/place/consequence facts are inside ApprovalCard's shrinkable overflow:auto body at approvals.rs:481-512,1091-1106, with answers rendered after it at:543-589. Retained app.css:8985-8998,9170-9178,9202-9205 separates fixed actions and supplies whole-region scrolling in tiny panes. This source structure refutes the exact new-facts displacement suspicion; it does not prove every native viewport/engine has been visually validated or dismiss distinct approval geometry/security concerns. No runtime or higher-consequence route was alleged; no rare filter or general UI certification is inferred."
+      },
+      "accepted_parent_decision": {
+        "key": "g041/c3",
+        "line": 15,
+        "disposition": "excluded",
+        "group": "environment-approval-facts-existing-scrollable-body",
+        "bucket": "other",
+        "recording": "refuted-new-facts-answer-displacement",
+        "needs_independent_drop_check": false,
+        "reason": "Parent read complete discovery event15 and reply. New190d844e recipe/place/consequence facts are inside ApprovalCard's shrinkable overflow:auto body at approvals.rs:481-512,1091-1106, with answers rendered after it at:543-589. Retained app.css:8985-8998,9170-9178,9202-9205 separates fixed actions and supplies whole-region scrolling in tiny panes. This source structure refutes the exact new-facts displacement suspicion; it does not prove every native viewport/engine has been visually validated or dismiss distinct approval geometry/security concerns. No runtime or higher-consequence route was alleged; no rare filter or general UI certification is inferred."
+      },
+      "returned_claim_checks": [],
+      "parent_proposals": [],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": false,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "environment-approval-facts-existing-scrollable-body",
+        "destination": null
+      }
+    }
+  ],
+  "replies": [
+    {
+      "turn": 1,
+      "reply": "Initial review complete. All four assigned patches and relevant pinned contracts/callers reviewed.\n\nNo confirmed findings. Logged three rejected candidates (`c1`, `c2`, `l1`); no unresolved leads. Findings log and progress updated. No assigned scope unread, checkout changes, tests, or reproductions."
+    },
+    {
+      "turn": 2,
+      "reply": "All four corrected evidence ranges delivered; coverage repair and synthesis complete.\n\n- `l2`: confirmed highest finding—retargeting a pending container host can redirect execution and recipe credentials. Overlaps `g020/l1`.\n- `l1`: revised to a finding with proposed drop requiring independent contract review; original consequence preserved.\n- Open leads: none. No unread assigned scope or runtime reproduction."
+    },
+    {
+      "turn": 3,
+      "reply": "Discovery pass 1 complete. No new defect found.\n\n- Checked full-range path history, queue identity and expiry handling, card rendering, wrapper disclosure, and changed tests.\n- Clarified `l2`’s distinct-requester-host premise.\n- Investigated `l3` and recorded it as a candidate with a proposed-drop basis.\n- New verified findings: none.\n- New unverified findings: none.\n- Open leads: none.\n\nProgress updated; no runtime execution."
+    },
+    {
+      "turn": 4,
+      "reply": "Revised `l2` with the logical-entry acceptance clause and explicit `SPEC.md` precedence as a proposed-drop basis. Preserved its source-supported execution/credential consequences and highest severity if retained; no drop accepted.\n\nRevised `l1` to correct the related physical-host contract assumption.\n\nUnresolved lead IDs: none. `l2`’s proposed drop awaits independent review."
+    },
+    {
+      "turn": 5,
+      "reply": "Discovery pass 2 complete. No new defect found.\n\nChecked approval controls, request-ID capture, direct-Allow handling, text rendering, layout, and changed test assertions. Recorded `c3` for the layout concern; source analysis refuted that specific route.\n\nNew verified findings: none. New unverified findings: none. Open leads: none. Progress updated; no runtime execution."
+    }
+  ],
+  "progress": "Group g041: gui-agent-approval-admission.\nTurn 1 complete: initial review. Discovery passes: 0 (later discovery/synthesis not performed in this turn).\nCoverage: all four assigned evidence ranges read through the mandated evidence command: 00060-000:1-85, 00062-000:1-41, 00310-000:1-132, 00661-000:1-183. Complete inventory commits field read; excluded coverage metadata not read.\nPinned review revisions: 9ff03ce91f191ea59f3ce16cefbd0b76d7fe599d, 04d85f0c98a9b635709d00b056719a0baa7fd3fc, 190d844e58c96cf197aa838d0b0eea8062f48435.\nContracts/callers checked: keyboard focus and agent host-add presentation; HostModal admission and persistent host form; approval request-ID binding and shared answer guard; retired-container template application refusal; environment launch card's full field rendering, provider-authored consequence and direct-Allow policy; captured launch request versus named mutable recipe settings; relevant recipe and environment contracts.\nInterface assumptions: helm request IDs bind approval answers; card values pass through peer text rendering; provider-specific consequence text comes from ProviderUi; named recipes are mutable configuration, while session launch, prompt, place and source are captured before approval.\nNew verified findings: none. New unverified findings: none. Candidate IDs recorded: c1, c2, l1 (l1 revised from lead to candidate after investigation). Open leads: none.\nCandidate c1 refutes unsolicited modal admission after automatic producers were removed. Candidate c2 refutes hidden runnable old-style isolation; its source and contract disable the retired choice. Candidate l1 records live recipe semantics and frozen launch; could-be-highest consideration retained for independent drop checking.\nChanged tests reviewed with caller's supplied checklist: deterministic row assertions and historical decoding fixture; no environment mutations, polling, process lifetime or live-substrate claims.\nNo runtime tests or reproductions run: source-only assignment. No checkout writes. No omitted or unread assigned scope.\nNext action: return to caller for the separately prompted synthesis turn; independent drop handling belongs to caller.\n\nTurn 2 in progress: corrected-manifest coverage repair, followed by requested synthesis in this continuation. Discovery passes remain 0. Prior findings preserved. Parent audit reports no matching delivery credit for turn 1; all four mandatory packets are treated as missing until delivered directly now. New interface input: g020/l1 concerns physical container-host retarget authority, distinct from live recipe settings. Next: deliver all four packets, inspect precise interface event, then reassess l1 and full approval contract. Unread mandatory scope: 441 lines across four packets. Open leads at entry: none.\n\nTurn 2 complete: corrected-manifest initial coverage repair plus synthesis, as expressly requested in the continuation. Discovery passes: 0.\nAll corrected mandatory ranges delivered in four separate exact evidence-read invocations with stdout directly emitted: 00060-000:1-85; 00062-000:1-41; 00310-000:1-132; 00661-000:1-183. No omitted/unread assigned scope. Bytes and hashes unchanged; prior native-wrapper delivery claims are superseded by this delivery record.\nSynthesis: reviewed full delivered changes against retained pinned source/contracts. c1 and c2 retain their prior source-refuted bases; no new finding from those patches. Environment card captures the request's displayed host name and uses peer rendering, and direct-Allow policy prevents persistent permission substitution. Captured command identity alone is insufficient to establish physical host authority.\nInterface event read: g020/findings.jsonl line 9, l1. Independently checked SPEC_impl.md:9548-9556; agent_requests.rs:2865-2886,4485-4548; host retarget route/store admission; Podman reference guard, lazy recipe source, route-bound refreshed probe and current provider command/preparation; provisioning credential delivery.\nNew verified ID: l2, finding, highest, proposed_drop false; same physical-host authority route as interface g020/l1. Independently confirmed both execution and configured credential delivery after operator retarget + fresh successful probe; no runtime observation claimed.\nRevised ID: l1, now finding with proposed_drop requiring independent contract review, rather than a dropped candidate. Original recipe-mutation consequence preserved, including possible credential-setting effect; mutable recipe acceptance does not apply to l2's physical machine substitution. Parent has accepted no drop.\nNew unverified findings: none. Open leads: none (l2 investigated and converted to finding). Existing c1/c2 preserved, not silently discarded.\nInterface assumptions now explicit: request ID binds card answers; physical place authority must additionally bind the machine named at rendering; a current successful Podman probe only establishes current availability and does not establish continuity with a pending approval. Recipe definition remains a separately proposed contract-based acceptance, with parent deciding the drop.\nChecks: source/contract analysis only. Two initial context git-show lookups for credential_delivery.rs and podman_probe.rs missed their subdirectories; resolved through pinned git ls-tree and read complete relevant ranges at actual provisioning/ and environment/ paths. No missing premise retained from those lookups. No tests, builds, reproductions or checkout writes.\nNext: return this turn's delta and open-lead status. A substantive interface finding was verified; any required later pass is caller-directed, not performed as an additional discovery pass here.\n\nTurn 3 in progress: separate discovery pass 1. Complete prior event history retained; discovery-neighbours read fully in bounded chunks after replacing a clipped combined result. Interfaces synthesized before new search: g001 documents explicit queued-opener focus gap and retired cleanup; g018 records placement documentation defect; g019/g021 have no interface records; g020 records physical-place retarget and pre-card SSH-key prerequisite. These are known context, not new findings for this pass. g020 requester/place clarification requires a distinct ordinary requester so origin remains live; incorporate in l2 without changing consequence, bucket or proposed_drop. Next: check requester premise, then search assigned queue changes, rendering facts and changed tests for distinct defects. No scope expansion or runtime execution.\n\nTurn 3 complete: separate discovery pass 1. Result: no new defect found.\nInterface synthesis completed before search. Known l2 revised to require a different ordinary requester host from the retargeted SSH place, verified at agent_requests.rs:907-924,4182-4213. Original consequence, highest bucket and proposed_drop false preserved. Other original IDs and dispositions preserved; no parent drop/lowering assumed.\nFresh checks: compared all assigned path history over the WHOLE exclusive-base/inclusive-tip range (only the three assigned commits touch these files), compared base explicit-opening queue/arm handling against 9ff03ce9 and tip HostModal, and reviewed current identity capture, successful-read expiration, answer claims and queued-card selection. Reviewed added LaunchEnvironment row construction against ordinary launch rows and the common peer/fixed-word/identity rendering and labels. Checked changed retirement and environment-card tests separately for fixture premise, branch-discriminating assertions, contract/doc wording and process-environment mutation; no distinct test-oracle or documentation defect established.\nConcrete fresh lead l3 investigated: new environment card omits separate wrapper-provenance block/note. Read full relevant wrapper/product rule, environment rule, implementation exemption, plan provenance and common command renderer; session_launch.rs:359-386 confirms display_command preserves raw wrapper prefix while quoting composed suffix. Full command bytes remain visible; separate prefix gate is scoped to hosts asking before YOLO, whereas new environment defaults permit YOLO and direct Allow covers wrapper. Recorded l3 as candidate after investigation, with exact proposed-drop basis. No unverified missing premise retained.\nNew verified finding IDs: none. New unverified-after-investigation finding IDs: none. New considered candidate ID: l3 (lead revised to candidate). Known finding revised: l2 premise clarification only. Open lead IDs: none.\nCoverage remains complete; no unread assigned scope. No runtime tests, reproduction, live-install interaction or checkout writes. Source observations only. No new defect beyond known interface findings; candidate decisions remain proposals for parent review.\nNext: return discovery delta; further pass only when requested.\n\nTurn 4 in progress: reopened later-turn synthesis on named retarget contract counterevidence only. Discovery count remains 1. Complete 11-event findings history reread in bounded chunks. No open source leads at entry. Parent identifies SPEC.md logical-entry retarget acceptance competing with SPEC_impl.md machine-bound approval refusal. Next: read complete reviewed and pinned-current clauses with surrounding context, settle available scope/precedence evidence, revise original l2 without discarding its source route or original consequence. No discovery or runtime work in this turn.\n\nTurn 4 complete: later-turn synthesis only, reopened for named logical-entry counterevidence. Discovery count remains 1.\nComplete findings history read before revisions. Reviewed and pinned-tip full host-entry clauses, full competing approval paragraph with context, document introductions/precedence, environment Concepts and creation-approval subsection; targeted searches found no extra environment-place exception. Current and reviewed SPEC_impl.md:3-6 explicitly give SPEC.md precedence for observable behavior.\nRevised original l2 twice: first retained exact counterevidence immediately, then recorded the reconciled proposed-drop basis. Source route remains confirmed; original execution/credential consequence, separate ordinary requester, first-use place, no retained references, successful refreshed probe, and same numeric row constraints preserved. Highest consequence/bucket if retained unchanged. SPEC.md:399-409 (tip :405-415) explicitly permits approvals including create/clone to follow the logical entry onto its new machine; SPEC_impl.md's conflicting target-connection promise is subordinate by its own introduction. Proposed drop rests on these exact clauses, not recipe mutability, rarity or missing harm. No parent acceptance, withdrawal or lowering applied. Independent reviewer still judges applying the logical-host rule when that ordinary registered entry is a container place; this is a normative disposition question, not an uninvestigated source premise. possible_cover names exact product acceptance, precedence and interface g020/l1.\nRevised original l1 to correct its interaction claim: fixed physical-host authority is no longer asserted as unconditional; its separate live-recipe proposed-drop basis and original consequences remain. c1/c2/l3 unchanged. No distinct changed-test or documentation defect inferred away from production behavior. No new IDs or discovery this turn.\nNew verified IDs: none. New unverified-after-investigation IDs: none. Revised IDs: l2, l1. Unresolved source lead IDs: none; l2 proposed-drop disposition remains for independent parent handling.\nNo unread assigned source. No tests, builds, reproduction, installs, live actions, prohibited coverage searches, nested agents or checkout writes. Next: return only synthesis delta; separate discovery awaits caller/audit.\n\nTurn 5 in progress: discovery pass 2. Updated discovery-neighbours read fully in bounded chunks before source search. Existing history retained; no parent drop/lowering assumed. Interface synthesis: known logical-entry scope question remains retained, g020 new convenience-history finding is outside this group's row/presentation changes; g021 reports separate lifecycle test oracles, not the changed card-row tests. g001's explicit queue focus route is established as predating full range, and its retirement lookup uncertainty concerns source outside this group's removal-display change. Next: fresh assigned rendering/selection interactions and changed-test failure discrimination, without reproductions or scope expansion.\n\nTurn 5 complete: discovery pass 2. No new defect found.\nUpdated 124-line discovery-neighbours file read completely in bounded chunks first, with all interface records synthesized for novelty. No new named pending questions. Prior finding/candidate histories and every proposed-drop basis remain intact; no parent drop or lowering assumed.\nFresh checks: new environment action through ApprovalCard's button conditions and captured request IDs, exhaustive requires_direct_allow decision and distinct protocol tag, CardDetail peer-data/fixed-word/identity paths, provider-specific place/cost vocabulary, row/body/action layout, successful-read absence reconciliation and answer-in-flight retirement. No missing direct-Allow branch or conversion of peer text into authored wording found. Layout source gives the new facts a shrinkable overflow body and keeps actions as a separate fixed sibling; recorded c3 immediately as candidate for that considered answer-reachability concern. No visual execution claimed.\nChanged tests inspected independently of production correctness: historical container decode/reset/omission fixtures and assertions; environment home-vs-repository branches, provider billing/consequence assertions, source identity presence, command/prompt facts, summary and card-kind checks. No distinct fixture-lifetime, process-environment, test-oracle or comment defect established in this assigned set. Read adjacent session_rows contract to confirm title/identity/host roles remain separate. Reused full-range three-commit path attribution from prior pass; fresh integrating-revision-to-tip diff is empty for both assigned files, so no later altered behavior to reconcile.\nNew verified finding IDs: none. New unverified-after-investigation finding IDs: none. New considered candidate: c3, source-refuted specific layout route with no runtime claim. Revised existing finding IDs: none this pass. Open lead IDs: none. Known l2 normative scope/disposition remains for independent handling under its existing record, not a fresh discovery.\nCoverage complete, no unread assigned material. No runtime tests/builds/reproductions, live actions, prohibited coverage searches, delegation or checkout writes. Next: return discovery delta; further work caller-directed.\n"
+}

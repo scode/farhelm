@@ -1,0 +1,3 @@
+[
+  {"id":"g021","turn":8,"offset":19,"state":"complete","verdict":"final-discovery-empty","discovery":{"new_verified":[],"new_unverified":[],"empty":true},"reason":"Parent read complete turn8reply and zeroevent delta; supported620line audit complete,zero gaps/rejections/unfinished/unrecognized. Separate search after new018helper synthesis checked refreshed exact interface records,responder locking/correlation,boundedreads,projectedpolling,provider isolation and assignedcomments. Explicitly no new verified/unverified finding and no openlead. No further relevant input pending; finalempty stopping condition met."}
+]

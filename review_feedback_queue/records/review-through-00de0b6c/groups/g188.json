@@ -1,0 +1,774 @@
+{
+  "group": {
+    "id": "g188",
+    "domain": "retired-xterm-vendor",
+    "purpose": "retired-xterm-vendor: crates/farhelm-ui/assets/vendor/addon-clipboard.js, crates/farhelm-ui/assets/vendor/addon-fit.js, crates/farhelm-ui/assets/vendor/addon-unicode-graphemes.js, crates/farhelm-ui/assets/vendor/xterm.js; phases bundle wrapper method charProperties: MethodDefinition charProperties | bundle wrapper method constructor: MethodDefinition constructor",
+    "interfaces": [
+      "g009",
+      "g010",
+      "g011",
+      "g061",
+      "g062",
+      "g063",
+      "g079",
+      "g080",
+      "g081",
+      "g082",
+      "g083",
+      "g084",
+      "g135",
+      "g136",
+      "g186",
+      "g187",
+      "g189",
+      "g190",
+      "g191",
+      "g192",
+      "g193",
+      "g194",
+      "g195",
+      "g196",
+      "g197"
+    ],
+    "sources": [
+      {
+        "path": "[private-run]/prep/parts/01076-000.patch",
+        "ranges": [
+          [
+            1,
+            9
+          ]
+        ],
+        "original_path": "crates/farhelm-ui/assets/vendor/addon-clipboard.js",
+        "commit": "f560058da19e02716e6f943883a9508b447aff4e",
+        "notes": "patch header; patch character offsets [0,6669)",
+        "lines": 9,
+        "bytes": 6669,
+        "start": 0,
+        "end": 6669,
+        "original": "[private-run]/prep/originals/01076.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/01078-000.patch",
+        "ranges": [
+          [
+            1,
+            9
+          ]
+        ],
+        "original_path": "crates/farhelm-ui/assets/vendor/addon-fit.js",
+        "commit": "f560058da19e02716e6f943883a9508b447aff4e",
+        "notes": "patch header; patch character offsets [0,1788)",
+        "lines": 9,
+        "bytes": 1788,
+        "start": 0,
+        "end": 1788,
+        "original": "[private-run]/prep/originals/01078.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/01080-000.patch",
+        "ranges": [
+          [
+            1,
+            7
+          ]
+        ],
+        "original_path": "crates/farhelm-ui/assets/vendor/addon-unicode-graphemes.js",
+        "commit": "f560058da19e02716e6f943883a9508b447aff4e",
+        "notes": "patch header; patch character offsets [0,16327)",
+        "lines": 7,
+        "bytes": 16327,
+        "start": 0,
+        "end": 16327,
+        "original": "[private-run]/prep/originals/01080.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/01080-001.patch",
+        "ranges": [
+          [
+            1,
+            1
+          ]
+        ],
+        "original_path": "crates/farhelm-ui/assets/vendor/addon-unicode-graphemes.js",
+        "commit": "f560058da19e02716e6f943883a9508b447aff4e",
+        "notes": "bundle wrapper method charProperties: MethodDefinition charProperties; patch character offsets [16327,36294)",
+        "lines": 1,
+        "bytes": 19967,
+        "start": 16327,
+        "end": 36294,
+        "original": "[private-run]/prep/originals/01080.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/01080-002.patch",
+        "ranges": [
+          [
+            1,
+            1
+          ]
+        ],
+        "original_path": "crates/farhelm-ui/assets/vendor/addon-unicode-graphemes.js",
+        "commit": "f560058da19e02716e6f943883a9508b447aff4e",
+        "notes": "bundle wrapper method constructor: MethodDefinition constructor; patch character offsets [36294,56268)",
+        "lines": 1,
+        "bytes": 19974,
+        "start": 36294,
+        "end": 56268,
+        "original": "[private-run]/prep/originals/01080.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/01085-000.patch",
+        "ranges": [
+          [
+            1,
+            7
+          ]
+        ],
+        "original_path": "crates/farhelm-ui/assets/vendor/xterm.js",
+        "commit": "f560058da19e02716e6f943883a9508b447aff4e",
+        "notes": "patch header; patch character offsets [0,490)",
+        "lines": 7,
+        "bytes": 490,
+        "start": 0,
+        "end": 490,
+        "original": "[private-run]/prep/originals/01085.patch"
+      }
+    ],
+    "lines": 34,
+    "bytes": 65215
+  },
+  "records": [
+    {
+      "key": "g188/c1",
+      "owner": "g188",
+      "id": "c1",
+      "domain": "retired-xterm-vendor",
+      "purpose": "retired-xterm-vendor: crates/farhelm-ui/assets/vendor/addon-clipboard.js, crates/farhelm-ui/assets/vendor/addon-fit.js, crates/farhelm-ui/assets/vendor/addon-unicode-graphemes.js, crates/farhelm-ui/assets/vendor/xterm.js; phases bundle wrapper method charProperties: MethodDefinition charProperties | bundle wrapper method constructor: MethodDefinition constructor",
+      "history": [
+        {
+          "line": 1,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c1",
+            "state": "open",
+            "summary": "Deleted terminal bundles leave no executable loader dependency",
+            "location": "crates/farhelm-ui/assets/vendor/xterm.js:1",
+            "detail": "# Deleted terminal bundles leave no executable loader dependency\n\nReviewed commit: f560058da19e02716e6f943883a9508b447aff4e\n\n## TLDR\n\nConsidered whether removing the bundles leaves terminals waiting forever for scripts that no longer ship. Source checks refute that failure route.\n\n## Details\n\nThe assigned deletions remove xterm.js, addon-fit.js, addon-clipboard.js and portions of addon-unicode-graphemes.js. In the same commit, crates/farhelm-ui/src/lib.rs removes their asset declarations; lines 1914–1926 load the grid helpers and terminal.js instead. assets/terminal.js:3203–3229 gates mounting only on the shipped grid/helpers/fonts, and :4303–4350 constructs window.farhelmGridTerminal.create. A pinned git grep across crates, e2e and scripts for the deleted asset paths and add-on global names found only historical explanatory comments and retained ported-code attribution, no executable use.\n\nContract: SPEC_impl.md:1504–1514 states, ‘Every terminal runs in a terminal host’ and ‘the browser draws a grid stream with its own grid client’; :1843–1846 states terminal.js ‘mounts the grid component for every terminal before the socket exists’. This is a source-based conclusion, not an executed mount check.\n\nSuggested bucket: high/material UX if the suspected mount failure existed; no defect established. Confidence: confirmed refutation for the removed script/global dependency. proposed_drop: executable asset declarations, script injection and readiness predicates were migrated together; there is no remaining loader dependency on these deleted bundles. possible_cover: none; coverage sources not consulted. Could-be-highest: no; the considered consequence is an unavailable terminal display, with no established route to loss of work or security impact. Caveat: this checks deletion integration, not every behavior of the grid replacement."
+          }
+        }
+      ],
+      "latest": {
+        "line": 1,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c1",
+          "state": "open",
+          "summary": "Deleted terminal bundles leave no executable loader dependency",
+          "location": "crates/farhelm-ui/assets/vendor/xterm.js:1",
+          "detail": "# Deleted terminal bundles leave no executable loader dependency\n\nReviewed commit: f560058da19e02716e6f943883a9508b447aff4e\n\n## TLDR\n\nConsidered whether removing the bundles leaves terminals waiting forever for scripts that no longer ship. Source checks refute that failure route.\n\n## Details\n\nThe assigned deletions remove xterm.js, addon-fit.js, addon-clipboard.js and portions of addon-unicode-graphemes.js. In the same commit, crates/farhelm-ui/src/lib.rs removes their asset declarations; lines 1914–1926 load the grid helpers and terminal.js instead. assets/terminal.js:3203–3229 gates mounting only on the shipped grid/helpers/fonts, and :4303–4350 constructs window.farhelmGridTerminal.create. A pinned git grep across crates, e2e and scripts for the deleted asset paths and add-on global names found only historical explanatory comments and retained ported-code attribution, no executable use.\n\nContract: SPEC_impl.md:1504–1514 states, ‘Every terminal runs in a terminal host’ and ‘the browser draws a grid stream with its own grid client’; :1843–1846 states terminal.js ‘mounts the grid component for every terminal before the socket exists’. This is a source-based conclusion, not an executed mount check.\n\nSuggested bucket: high/material UX if the suspected mount failure existed; no defect established. Confidence: confirmed refutation for the removed script/global dependency. proposed_drop: executable asset declarations, script injection and readiness predicates were migrated together; there is no remaining loader dependency on these deleted bundles. possible_cover: none; coverage sources not consulted. Could-be-highest: no; the considered consequence is an unavailable terminal display, with no established route to loss of work or security impact. Caveat: this checks deletion integration, not every behavior of the grid replacement."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g188/findings.jsonl",
+        "id": "c1",
+        "line": 1,
+        "disposition": "excluded",
+        "group": "deleted-xterm-assets-retained-loader-dependency",
+        "reason": "Parent explicitly accepted named refuted proposal from claims-118 after inspecting it. The missing-bundle mount hypothesis is source-refuted. The page loads the grid assets and its readiness gate requires those assets, rather than deleted xterm globals. No runtime mount was observed. The active declarations, script injection, readiness gate and grid construction agree. Refutation is limited to the deleted-loader dependency, not general replacement correctness. Checked source/results: [\"At f560058da19e02716e6f943883a9508b447aff4e, crates/farhelm-ui/src/lib.rs:1479-1483,1914-1926 declares and injects all five grid scripts and the shared terminal helpers.\",\"At that revision, assets/terminal.js:3203-3228 gates mounting on the grid/helpers/fonts; :3389-3393 builds and fits the grid, and :4313-4335 supplies the actual grid constructor callbacks.\",\"Pinned git grep across crates, scripts, packaging, .github, Cargo.toml and Dioxus.toml found only two explanatory FitAddon comments for the searched retired paths/globals, with no executable consumer.\"] Current coverage/results: {\"specifications\":\"Current SPEC_impl.md:1692-1726,1838-1886 describes the grid island and its mount contract; SPEC.md Terminal experience supplies the terminal contract. These support the replacement model, rather than accepting an unavailable terminal.\",\"TODO_Planned\":\"TODO.md:25-26 is empty.\",\"plans_queue\":\"Searched retired bundles/globals, mount, stylesheet, fit and width terms. The tmux-removal plans describe the already performed removal or wording cleanup; no unlanded stated work covers a missing grid loader.\",\"BUGS\":\"Read in full; only the unrelated stuck provisioning-output bug is recorded.\",\"queue\":\"Read INDEX.md in full and searched matching phrases. No same missing-bundle trigger/consequence item; g189/c2 is the assigned same-root alias.\",\"active_triage\":\"Searched matching terms; the mount-attempt test decision concerns a test witness, not a retained dependency on deleted scripts.\",\"FILTER\":\"Read in full. No filter used; the specific failure route is source-refuted.\"} Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Hypothetical terminal display waiting forever after bundle removal, suggested high/material UX; no security or work-loss route was claimed.\"; null."
+      },
+      "accepted_parent_decision": {
+        "key": "g188/c1",
+        "line": 1,
+        "disposition": "excluded",
+        "group": "deleted-xterm-assets-retained-loader-dependency",
+        "bucket": "other",
+        "recording": "refuted",
+        "queue_target_candidate": null,
+        "needs_independent_drop_check": false,
+        "reason": "Parent explicitly accepted named refuted proposal from claims-118 after inspecting it. The missing-bundle mount hypothesis is source-refuted. The page loads the grid assets and its readiness gate requires those assets, rather than deleted xterm globals. No runtime mount was observed. The active declarations, script injection, readiness gate and grid construction agree. Refutation is limited to the deleted-loader dependency, not general replacement correctness. Checked source/results: [\"At f560058da19e02716e6f943883a9508b447aff4e, crates/farhelm-ui/src/lib.rs:1479-1483,1914-1926 declares and injects all five grid scripts and the shared terminal helpers.\",\"At that revision, assets/terminal.js:3203-3228 gates mounting on the grid/helpers/fonts; :3389-3393 builds and fits the grid, and :4313-4335 supplies the actual grid constructor callbacks.\",\"Pinned git grep across crates, scripts, packaging, .github, Cargo.toml and Dioxus.toml found only two explanatory FitAddon comments for the searched retired paths/globals, with no executable consumer.\"] Current coverage/results: {\"specifications\":\"Current SPEC_impl.md:1692-1726,1838-1886 describes the grid island and its mount contract; SPEC.md Terminal experience supplies the terminal contract. These support the replacement model, rather than accepting an unavailable terminal.\",\"TODO_Planned\":\"TODO.md:25-26 is empty.\",\"plans_queue\":\"Searched retired bundles/globals, mount, stylesheet, fit and width terms. The tmux-removal plans describe the already performed removal or wording cleanup; no unlanded stated work covers a missing grid loader.\",\"BUGS\":\"Read in full; only the unrelated stuck provisioning-output bug is recorded.\",\"queue\":\"Read INDEX.md in full and searched matching phrases. No same missing-bundle trigger/consequence item; g189/c2 is the assigned same-root alias.\",\"active_triage\":\"Searched matching terms; the mount-attempt test decision concerns a test witness, not a retained dependency on deleted scripts.\",\"FILTER\":\"Read in full. No filter used; the specific failure route is source-refuted.\"} Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Hypothetical terminal display waiting forever after bundle removal, suggested high/material UX; no security or work-loss route was claimed.\"; null."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-118",
+          "key": "g188/c1",
+          "latest_line": 1,
+          "recommendation": "refuted",
+          "bucket": "other",
+          "underlying_key": "deleted-xterm-assets-retained-loader-dependency",
+          "aliases": [
+            "g189/c2"
+          ],
+          "target_queue_file": null,
+          "why": "The missing-bundle mount hypothesis is source-refuted. The page loads the grid assets and its readiness gate requires those assets, rather than deleted xterm globals. No runtime mount was observed.",
+          "checks": [
+            "At f560058da19e02716e6f943883a9508b447aff4e, crates/farhelm-ui/src/lib.rs:1479-1483,1914-1926 declares and injects all five grid scripts and the shared terminal helpers.",
+            "At that revision, assets/terminal.js:3203-3228 gates mounting on the grid/helpers/fonts; :3389-3393 builds and fits the grid, and :4313-4335 supplies the actual grid constructor callbacks.",
+            "Pinned git grep across crates, scripts, packaging, .github, Cargo.toml and Dioxus.toml found only two explanatory FitAddon comments for the searched retired paths/globals, with no executable consumer."
+          ],
+          "coverage_checked": {
+            "specifications": "Current SPEC_impl.md:1692-1726,1838-1886 describes the grid island and its mount contract; SPEC.md Terminal experience supplies the terminal contract. These support the replacement model, rather than accepting an unavailable terminal.",
+            "TODO_Planned": "TODO.md:25-26 is empty.",
+            "plans_queue": "Searched retired bundles/globals, mount, stylesheet, fit and width terms. The tmux-removal plans describe the already performed removal or wording cleanup; no unlanded stated work covers a missing grid loader.",
+            "BUGS": "Read in full; only the unrelated stuck provisioning-output bug is recorded.",
+            "queue": "Read INDEX.md in full and searched matching phrases. No same missing-bundle trigger/consequence item; g189/c2 is the assigned same-root alias.",
+            "active_triage": "Searched matching terms; the mount-attempt test decision concerns a test witness, not a retained dependency on deleted scripts.",
+            "FILTER": "Read in full. No filter used; the specific failure route is source-refuted."
+          },
+          "exact_cover_quotes": [],
+          "missing_premise": null,
+          "original_stronger_consequence": "Hypothetical terminal display waiting forever after bundle removal, suggested high/material UX; no security or work-loss route was claimed.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "The active declarations, script injection, readiness gate and grid construction agree. Refutation is limited to the deleted-loader dependency, not general replacement correctness."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "high",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "deleted-xterm-assets-retained-loader-dependency",
+        "destination": null
+      }
+    },
+    {
+      "key": "g188/c2",
+      "owner": "g188",
+      "id": "c2",
+      "domain": "retired-xterm-vendor",
+      "purpose": "retired-xterm-vendor: crates/farhelm-ui/assets/vendor/addon-clipboard.js, crates/farhelm-ui/assets/vendor/addon-fit.js, crates/farhelm-ui/assets/vendor/addon-unicode-graphemes.js, crates/farhelm-ui/assets/vendor/xterm.js; phases bundle wrapper method charProperties: MethodDefinition charProperties | bundle wrapper method constructor: MethodDefinition constructor",
+      "history": [
+        {
+          "line": 2,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c2",
+            "state": "open",
+            "summary": "Fit add-on removal preserves an independent grid sizing path",
+            "location": "crates/farhelm-ui/assets/vendor/addon-fit.js:1",
+            "detail": "# Fit add-on removal preserves an independent grid sizing path\n\nReviewed commit: f560058da19e02716e6f943883a9508b447aff4e\n\n## TLDR\n\nConsidered whether deleting the fit add-on prevents terminals from fitting their panes. The replacement already measures and reports terminal dimensions without the add-on.\n\n## Details\n\nThe removed addon-fit.js:1 implements fit/proposeDimensions from container dimensions, cell dimensions, padding and a scrollbar reserve. At the reviewed revision, assets/grid-terminal.js:217–246 supplies cellFor/proposeSize, including the 14-pixel reserve and minimum 2 by 1 size; :473–504 performs the measurement and invokes onResize. assets/terminal.js:3389–3394 creates the grid, calls fit and reads size before making the socket; :4319 passes sendResize as its resize callback. This is direct source evidence of an independent replacement, not observed runtime behavior.\n\nContract: SPEC_impl.md:1847–1854 says, ‘The grid's deterministic fit is Farhelm's documented formula’ and ‘they are Farhelm's fit contract now’. The fixed 80-column/24-row proposal reference deliberately differs from continually feeding committed dimensions back into fit; deletion of the upstream fit code does not violate that contract.\n\nSuggested bucket: high/material UX if pane sizing were missing; no defect established. Confidence: confirmed refutation for loss of the fit implementation. proposed_drop: the grid retains the measurement, padding and scrollbar formula and callers use it before attachment; the deleted add-on is no longer involved. possible_cover: none; coverage sources not consulted. Could-be-highest: no; no source route to loss of work or security impact was established. Caveat: this is a removal/contract check, not exhaustive numerical validation of every grid sizing edge case."
+          }
+        },
+        {
+          "line": 7,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c2",
+            "state": "open",
+            "summary": "Grid fit also handles mounting before its socket exists",
+            "location": "crates/farhelm-ui/assets/vendor/addon-fit.js:1",
+            "detail": "# Grid fit also handles mounting before its socket exists\n\nReviewed commit: f560058da19e02716e6f943883a9508b447aff4e\n\n## TLDR\n\nThe deleted fit add-on is replaced by grid sizing. Synthesis also checked whether fitting before socket creation can throw or lose the initial dimensions; the caller explicitly handles that ordering.\n\n## Details\n\nThe original removal concern remains refuted. assets/grid-terminal.js:217–246 supplies cellFor/proposeSize, including the scrollbar reserve and minimum 2 by 1 size; :473–504 measures and invokes onResize. assets/terminal.js:3389–3394 constructs the grid, calls fit and obtains the size before making the socket; :4319 supplies sendResize. SPEC_impl.md:1847–1854 states, ‘The grid's deterministic fit is Farhelm's documented formula’ and ‘they are Farhelm's fit contract now’. The fixed 80-column/24-row proposal reference is intentional.\n\nThe synthesis lifecycle check read terminal.js:3251–3320 and :4555–4571. ws is initialized to null outside the try block before constructing the surface. sendResize is a hoisted function whose first condition returns while ws is absent or not OPEN, before it reads grid.size(). The constructor's early callback therefore cannot dereference a missing socket or the not-yet-assigned grid. The mount reads size after construction for the attach URL; the documented onopen path sends current size again to cover changes between construction and connection. This resolves the cross-batch assumption that fitting remains safe when all terminals now create the grid before any socket.\n\nSuggested bucket: high/material UX if pane sizing or initial mounting failed; no such defect established. Confidence: confirmed source refutation. proposed_drop: replacement measurement and callers remain present, and explicit null/open checks make the pre-socket resize callback safe. possible_cover: none; coverage sources not consulted. Could-be-highest: no; neither this lifecycle concern nor the original missing-fit concern establishes loss of work or security impact. Caveat: source-only analysis; no numerical fit tests or browser execution occurred, and exhaustive sizing edge cases remain outside this removal check."
+          }
+        }
+      ],
+      "latest": {
+        "line": 7,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c2",
+          "state": "open",
+          "summary": "Grid fit also handles mounting before its socket exists",
+          "location": "crates/farhelm-ui/assets/vendor/addon-fit.js:1",
+          "detail": "# Grid fit also handles mounting before its socket exists\n\nReviewed commit: f560058da19e02716e6f943883a9508b447aff4e\n\n## TLDR\n\nThe deleted fit add-on is replaced by grid sizing. Synthesis also checked whether fitting before socket creation can throw or lose the initial dimensions; the caller explicitly handles that ordering.\n\n## Details\n\nThe original removal concern remains refuted. assets/grid-terminal.js:217–246 supplies cellFor/proposeSize, including the scrollbar reserve and minimum 2 by 1 size; :473–504 measures and invokes onResize. assets/terminal.js:3389–3394 constructs the grid, calls fit and obtains the size before making the socket; :4319 supplies sendResize. SPEC_impl.md:1847–1854 states, ‘The grid's deterministic fit is Farhelm's documented formula’ and ‘they are Farhelm's fit contract now’. The fixed 80-column/24-row proposal reference is intentional.\n\nThe synthesis lifecycle check read terminal.js:3251–3320 and :4555–4571. ws is initialized to null outside the try block before constructing the surface. sendResize is a hoisted function whose first condition returns while ws is absent or not OPEN, before it reads grid.size(). The constructor's early callback therefore cannot dereference a missing socket or the not-yet-assigned grid. The mount reads size after construction for the attach URL; the documented onopen path sends current size again to cover changes between construction and connection. This resolves the cross-batch assumption that fitting remains safe when all terminals now create the grid before any socket.\n\nSuggested bucket: high/material UX if pane sizing or initial mounting failed; no such defect established. Confidence: confirmed source refutation. proposed_drop: replacement measurement and callers remain present, and explicit null/open checks make the pre-socket resize callback safe. possible_cover: none; coverage sources not consulted. Could-be-highest: no; neither this lifecycle concern nor the original missing-fit concern establishes loss of work or security impact. Caveat: source-only analysis; no numerical fit tests or browser execution occurred, and exhaustive sizing edge cases remain outside this removal check."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g188/findings.jsonl",
+        "id": "c2",
+        "line": 7,
+        "disposition": "excluded",
+        "group": "deleted-fit-addon-missing-sizing-or-pre-socket-callback",
+        "reason": "Parent explicitly accepted named refuted proposal from claims-118 after inspecting it. Grid measurement survives independently, and the early resize callback returns before touching the absent socket or unassigned grid. Neither the original missing-fit concern nor its lifecycle follow-up is established. Independent measurement plus the socket-before-grid-access guard refutes this removal hypothesis. Numerical and browser-specific sizing behavior remains unexecuted. Checked source/results: [\"At f560058da19e02716e6f943883a9508b447aff4e, assets/grid-terminal.js:222-246 computes cell size and bounded proposals; :473-497 measures pane space, subtracts padding and calls onResize.\",\"assets/terminal.js:3275-3276 initializes grid and ws to null; :3389-3393 creates/fits the surface before opening its socket; :4319 supplies the hoisted sendResize callback; :4560-4565 checks ws/open before grid.size().\",\"Pinned SPEC_impl.md:1847-1867 defines the fixed 80x24 reference and 14-pixel reserve as the current fit contract.\"] Current coverage/results: {\"specifications\":\"Read current SPEC_impl.md The grid client in full and its island context, plus SPEC.md Terminal experience. The fixed fit reference is explicit, but neither specification accepts a missing fit or a mount exception.\",\"TODO_Planned\":\"Empty at TODO.md:25-26.\",\"plans_queue\":\"Searches found retained-fit wording in tmux-removal plans; none states a pending repair of this hypothesized callback or measurement loss.\",\"BUGS\":\"Full file contains only unrelated provisioning hang.\",\"queue\":\"Full INDEX and focused sizing/fit searches found no same trigger and consequence.\",\"active_triage\":\"Focused fit/mount searches found unrelated test-witness material only.\",\"FILTER\":\"No filter applied. Source refutes the assigned failure routes.\"} Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Hypothetical high/material UX from pane sizing or initial mounting failing; no established security or work-loss route.\"; null."
+      },
+      "accepted_parent_decision": {
+        "key": "g188/c2",
+        "line": 7,
+        "disposition": "excluded",
+        "group": "deleted-fit-addon-missing-sizing-or-pre-socket-callback",
+        "bucket": "other",
+        "recording": "refuted",
+        "queue_target_candidate": null,
+        "needs_independent_drop_check": false,
+        "reason": "Parent explicitly accepted named refuted proposal from claims-118 after inspecting it. Grid measurement survives independently, and the early resize callback returns before touching the absent socket or unassigned grid. Neither the original missing-fit concern nor its lifecycle follow-up is established. Independent measurement plus the socket-before-grid-access guard refutes this removal hypothesis. Numerical and browser-specific sizing behavior remains unexecuted. Checked source/results: [\"At f560058da19e02716e6f943883a9508b447aff4e, assets/grid-terminal.js:222-246 computes cell size and bounded proposals; :473-497 measures pane space, subtracts padding and calls onResize.\",\"assets/terminal.js:3275-3276 initializes grid and ws to null; :3389-3393 creates/fits the surface before opening its socket; :4319 supplies the hoisted sendResize callback; :4560-4565 checks ws/open before grid.size().\",\"Pinned SPEC_impl.md:1847-1867 defines the fixed 80x24 reference and 14-pixel reserve as the current fit contract.\"] Current coverage/results: {\"specifications\":\"Read current SPEC_impl.md The grid client in full and its island context, plus SPEC.md Terminal experience. The fixed fit reference is explicit, but neither specification accepts a missing fit or a mount exception.\",\"TODO_Planned\":\"Empty at TODO.md:25-26.\",\"plans_queue\":\"Searches found retained-fit wording in tmux-removal plans; none states a pending repair of this hypothesized callback or measurement loss.\",\"BUGS\":\"Full file contains only unrelated provisioning hang.\",\"queue\":\"Full INDEX and focused sizing/fit searches found no same trigger and consequence.\",\"active_triage\":\"Focused fit/mount searches found unrelated test-witness material only.\",\"FILTER\":\"No filter applied. Source refutes the assigned failure routes.\"} Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Hypothetical high/material UX from pane sizing or initial mounting failing; no established security or work-loss route.\"; null."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-118",
+          "key": "g188/c2",
+          "latest_line": 7,
+          "recommendation": "refuted",
+          "bucket": "other",
+          "underlying_key": "deleted-fit-addon-missing-sizing-or-pre-socket-callback",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "Grid measurement survives independently, and the early resize callback returns before touching the absent socket or unassigned grid. Neither the original missing-fit concern nor its lifecycle follow-up is established.",
+          "checks": [
+            "At f560058da19e02716e6f943883a9508b447aff4e, assets/grid-terminal.js:222-246 computes cell size and bounded proposals; :473-497 measures pane space, subtracts padding and calls onResize.",
+            "assets/terminal.js:3275-3276 initializes grid and ws to null; :3389-3393 creates/fits the surface before opening its socket; :4319 supplies the hoisted sendResize callback; :4560-4565 checks ws/open before grid.size().",
+            "Pinned SPEC_impl.md:1847-1867 defines the fixed 80x24 reference and 14-pixel reserve as the current fit contract."
+          ],
+          "coverage_checked": {
+            "specifications": "Read current SPEC_impl.md The grid client in full and its island context, plus SPEC.md Terminal experience. The fixed fit reference is explicit, but neither specification accepts a missing fit or a mount exception.",
+            "TODO_Planned": "Empty at TODO.md:25-26.",
+            "plans_queue": "Searches found retained-fit wording in tmux-removal plans; none states a pending repair of this hypothesized callback or measurement loss.",
+            "BUGS": "Full file contains only unrelated provisioning hang.",
+            "queue": "Full INDEX and focused sizing/fit searches found no same trigger and consequence.",
+            "active_triage": "Focused fit/mount searches found unrelated test-witness material only.",
+            "FILTER": "No filter applied. Source refutes the assigned failure routes."
+          },
+          "exact_cover_quotes": [],
+          "missing_premise": null,
+          "original_stronger_consequence": "Hypothetical high/material UX from pane sizing or initial mounting failing; no established security or work-loss route.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Independent measurement plus the socket-before-grid-access guard refutes this removal hypothesis. Numerical and browser-specific sizing behavior remains unexecuted."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "high",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "deleted-fit-addon-missing-sizing-or-pre-socket-callback",
+        "destination": null
+      }
+    },
+    {
+      "key": "g188/c3",
+      "owner": "g188",
+      "id": "c3",
+      "domain": "retired-xterm-vendor",
+      "purpose": "retired-xterm-vendor: crates/farhelm-ui/assets/vendor/addon-clipboard.js, crates/farhelm-ui/assets/vendor/addon-fit.js, crates/farhelm-ui/assets/vendor/addon-unicode-graphemes.js, crates/farhelm-ui/assets/vendor/xterm.js; phases bundle wrapper method charProperties: MethodDefinition charProperties | bundle wrapper method constructor: MethodDefinition constructor",
+      "history": [
+        {
+          "line": 3,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c3",
+            "state": "open",
+            "summary": "Clipboard add-on removal retains write delivery and read refusal",
+            "location": "crates/farhelm-ui/assets/vendor/addon-clipboard.js:1",
+            "detail": "# Clipboard add-on removal retains write delivery and read refusal\n\nReviewed commit: f560058da19e02716e6f943883a9508b447aff4e\n\n## TLDR\n\nConsidered whether removing the clipboard add-on loses terminal copying or exposes clipboard contents to terminal programs. The grid has its own write path and the supervisor refuses reads before anything reaches the page.\n\n## Details\n\nThe removed add-on parses OSC 52 and can read through a configured provider. Its removal also removes the need for that browser-side provider's read override: crates/farhelm-terminal-emulator/src/emulator.rs:103 fixes Osc52::OnlyCopy for every new emulator, and :118–125 constructs the terminal with that configuration. effects.rs:173–195 converts ClipboardStore to a write effect but discards ClipboardLoad, and :207–211 emits writes only from live output. The queries.rs:360–362 handler delegates to the copy-only terminal. A pinned search locates the enforcing read guard in vendor/alacritty_terminal/src/term/mod.rs:2210–2211, whose predicate admits OnlyPaste or CopyPaste, neither of which the emulator configures.\n\nThe UI side remains independent of the removed add-on: assets/grid-terminal.js:1975–1983 applies the frame and forwards takeClipboard results; assets/terminal.js:4326–4333 sends system-clipboard writes and completed local selections to enqueueClipboardWrite; :764–773 selects the native bridge or navigator.clipboard.writeText.\n\nContract: SPEC.md:3063–3065 says ‘an OSC 52 READ is never answered with clipboard contents’ and that user paste ‘does not authorize a program to query the clipboard’. SPEC_impl.md:1732–1734 requires the two page write paths to use the shared native-first writer; :1746 says ‘the native route is write-only by construction’. The source paths above preserve these boundaries.\n\nSuggested bucket: highest/security for the considered clipboard disclosure route, high/material UX for missing writes; neither defect established. Confidence: confirmed source refutation for deletion of the browser add-on weakening these boundaries. proposed_drop: the replacement's explicit copy-only emulator configuration and discarded read events refute disclosure, while independent grid write callbacks refute loss of the handler. possible_cover: none; coverage sources not consulted. Could-be-highest: yes, disclosure of clipboard secrets would be security-impacting, but no shipped read route exists in the checked source. This is source analysis only, with no runtime clipboard execution. Caveat: the review checks removal integration, not every clipboard queue or permission-policy edge case."
+          }
+        },
+        {
+          "line": 5,
+          "event": {
+            "version": 1,
+            "kind": "lead",
+            "id": "c3",
+            "state": "open",
+            "summary": "Check whether primary-selection writes survive the replacement notice path",
+            "location": "crates/farhelm-supervisor/src/hosts/terminal.rs:3304",
+            "detail": "# Check whether primary-selection writes survive the replacement notice path\n\nReviewed commit: f560058da19e02716e6f943883a9508b447aff4e\n\n## TLDR\n\nThe initial clipboard security refutation remains supported, but synthesis found a caller assumption needing a separate check: a program's primary-selection write may be filtered before reaching the page, so the terminal could incorrectly say the program copied nothing after its drag.\n\n## Details\n\nPinned git grep found hosts/terminal.rs:3304–3315 documenting and matching only Notice::Clipboard with ClipboardTarget::Clipboard. Earlier checked terminal.js:4326–4330 counts any delivered target to suppress drag guidance. SPEC.md:3074–3075 requires ‘Any completed program clipboard write, including a primary-selection write, suppresses it during the grace window.’ Need inspect the actual subscription and grid-attachment forwarding path, compare the parent revision, and establish whether an alternative primary-notice path exists before deciding whether this is a removal-related defect. Available evidence so far is source search, not observed behavior.\n\nSuggested bucket: other for incorrect drag-copy guidance unless source establishes materially broader impact. Confidence: unverified; the exact missing premise is whether primary-selection writes can reach the attached page independently of this filtered notice subscription, and whether the reviewed change introduces the relevant route. proposed_drop: false pending source checks; the original disclosure/missing-handler concern remains refuted by the initial c3 record and the copy-only emulator. possible_cover: none; coverage sources not consulted. Could-be-highest: no for this new guidance concern; the earlier hypothetical clipboard disclosure remains could-be-highest but refuted. No security or work-loss route is established. Next checks: read notice filtering and forwarding callers at the reviewed and parent revisions, then resolve the contract mismatch or alternative delivery path."
+          }
+        },
+        {
+          "line": 6,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c3",
+            "state": "open",
+            "summary": "Clipboard removal preserves its boundary; primary-notice gap predates the range",
+            "location": "crates/farhelm-supervisor/src/hosts/terminal.rs:3304",
+            "detail": "# Clipboard removal preserves its boundary; primary-notice gap predates the range\n\nReviewed commit: f560058da19e02716e6f943883a9508b447aff4e\n\n## TLDR\n\nThe deleted add-on leaves an independent system-clipboard write path and does not expose clipboard contents to programs. Synthesis found that a program writing only its primary selection can still receive incorrect ‘copied nothing’ drag guidance, but both sides of that mismatch already existed before this review's exclusive base. It is not a defect introduced by the assigned deletion.\n\n## Details\n\nThe original security concern remains refuted: crates/farhelm-terminal-emulator/src/emulator.rs:103 configures Osc52::OnlyCopy, vendor/alacritty_terminal/src/term/mod.rs:2210–2213 returns without processing clipboard reads under that configuration, and effects.rs:173–195 discards ClipboardLoad as well. Source-checked system writes remain wired through effects.rs:207–208, hosts/terminal.rs:3310–3321, service/handlers.rs:1907–1915, service/grid_stream.rs:844–849, assets/grid-terminal.js:1975–1983, and assets/terminal.js:4326–4333 and :764–773. The shared page writer selects the native bridge or navigator.clipboard.writeText. SPEC.md:3063–3065 says ‘an OSC 52 READ is never answered with clipboard contents’ and user paste ‘does not authorize a program to query the clipboard’; SPEC_impl.md:1732–1746 specifies the shared native-first write path. No read route was found.\n\nSynthesis checked the full primary-write caller assumption rather than relying on the UI callback's comment. hosts/terminal.rs:3310–3321 only broadcasts ClipboardTarget::Clipboard; service/grid_stream.rs:844–849 independently filters to that same target. The actual attachment in service/handlers.rs:1907–1915 uses terminal.subscribe_notices(), so there is no alternative primary-notice route in that attachment. Consequently the primary target never reaches terminal.js:4326–4330 to increment its program-copy counter. This can cause false drag-copy guidance when only a primary-selection write follows a program-owned drag. SPEC.md:3074–3075 explicitly requires ‘Any completed program clipboard write, including a primary-selection write, suppresses it during the grace window.’ The initial c3 conclusion covers actual system copying and read refusal; it must not be read as establishing that every primary write reaches the page.\n\nThe provenance check settles scope: at exclusive base 6e423e30068b62c6cfa276c6d720ee35bb70387a, hosts/terminal.rs:3210–3221 already has the identical clipboard-only broadcast predicate, and terminal.js:6012–6016 already counts delivered targets while :6113–6124 bases the grace notice on that count. The reviewed commit's parent has the same service/grid_stream.rs:844–849 filter. The reviewed hosts/terminal.rs diff only removes wire_kind/tab_info methods, leaving notice delivery unchanged. No retired implementation defect was investigated. The replacement's pre-existing omission does not result from deleting these vendor bundles.\n\nSuggested bucket: highest/security for the original hypothetical disclosure (refuted); other for the established primary-only false guidance (outside assigned change/range). Confidence: confirmed source analysis for both the security refutation and the pre-existing filtering mismatch; no execution occurred. proposed_drop: deleted browser add-on removal does not weaken the explicit copy-only emulator boundary or remove the system-write handler, and the independently found primary-guidance omission is unchanged from the exclusive base, outside this assigned removal review. possible_cover: none; no coverage sources consulted. Could-be-highest: yes for hypothetical clipboard-secret disclosure, but its required read path is refuted; no for the primary-guidance consequence, which establishes neither work loss nor security harm. Caveat: this does not claim primary-notice behavior meets the product contract; it records the exact source mismatch and why it is not reported as a new finding here. Resolved lead: no missing readily checkable premise remains."
+          }
+        },
+        {
+          "line": 9,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c3",
+            "state": "open",
+            "summary": "Clipboard add-on removal retains the confidentiality boundary",
+            "location": "crates/farhelm-ui/assets/vendor/addon-clipboard.js:1",
+            "detail": "# Clipboard add-on removal retains the confidentiality boundary\n\nReviewed commit: f560058da19e02716e6f943883a9508b447aff4e.\n\n## TLDR\n\nConsidered whether removing the clipboard add-on exposes clipboard contents to terminal programs or removes actual system-clipboard writing. Source refutes those routes. The separate primary-only false-guidance mismatch from c3's synthesis is preserved under linked c5, with the same consequence and proposed scope-exclusion basis, and is not a confidentiality issue.\n\n## Details\n\nPreserved source basis: emulator.rs:103 in crates/farhelm-terminal-emulator/src fixes Osc52::OnlyCopy; :118–125 supplies that config to Term::new. vendor/alacritty_terminal/src/term/mod.rs:2210–2213 refuses clipboard loads for that config, and effects.rs:173–195 discards ClipboardLoad events. effects.rs:207–208 delivers live ClipboardStore effects. System writes remain wired through hosts/terminal.rs:3310–3321, service/handlers.rs:1907–1915, service/grid_stream.rs:844–849, assets/grid-terminal.js:1975–1983 and assets/terminal.js:4326–4333 and :764–773 to the shared native-first writer. Primary-only notice delivery is not certified by this record.\n\nContract: SPEC.md:3063–3065 says ‘an OSC 52 READ is never answered with clipboard contents’ and paste ‘does not authorize a program to query the clipboard’. SPEC_impl.md:1732–1746 requires the shared native-first write path and states the native route is write-only by construction. The explicit read guard provides the refutation rather than general permission for reading.\n\nSuggested bucket: highest/security for the considered clipboard-secret disclosure route; high/material UX for losing actual system writes. Neither route established. Confidence: confirmed source refutation of those deletion concerns, not runtime observation. proposed_drop: removed browser provider's read override is replaced by the emulator's explicit copy-only configuration and discarded read events; independent grid callbacks retain actual system writing. This remains a proposed drop for independent caller judgment, not an accepted parent drop. possible_cover: none for the original confidentiality route; supplied g186/c2 concerns linked c5's separate guidance mismatch. Could-be-highest: yes, the original hypothetical clipboard disclosure would be security-impacting; its classification and consequence are retained despite source refutation. Material caveats: no execution or reproduction; this does not certify primary-notice delivery, every queue edge case, old-page input compatibility or unrelated documentation/test correctness. Linked c5 retains the false-guidance finding, exact pre-range contracts, full source provenance and pending scope-exclusion proposal. Prior c3 events remain append-only and are not withdrawn."
+          }
+        }
+      ],
+      "latest": {
+        "line": 9,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c3",
+          "state": "open",
+          "summary": "Clipboard add-on removal retains the confidentiality boundary",
+          "location": "crates/farhelm-ui/assets/vendor/addon-clipboard.js:1",
+          "detail": "# Clipboard add-on removal retains the confidentiality boundary\n\nReviewed commit: f560058da19e02716e6f943883a9508b447aff4e.\n\n## TLDR\n\nConsidered whether removing the clipboard add-on exposes clipboard contents to terminal programs or removes actual system-clipboard writing. Source refutes those routes. The separate primary-only false-guidance mismatch from c3's synthesis is preserved under linked c5, with the same consequence and proposed scope-exclusion basis, and is not a confidentiality issue.\n\n## Details\n\nPreserved source basis: emulator.rs:103 in crates/farhelm-terminal-emulator/src fixes Osc52::OnlyCopy; :118–125 supplies that config to Term::new. vendor/alacritty_terminal/src/term/mod.rs:2210–2213 refuses clipboard loads for that config, and effects.rs:173–195 discards ClipboardLoad events. effects.rs:207–208 delivers live ClipboardStore effects. System writes remain wired through hosts/terminal.rs:3310–3321, service/handlers.rs:1907–1915, service/grid_stream.rs:844–849, assets/grid-terminal.js:1975–1983 and assets/terminal.js:4326–4333 and :764–773 to the shared native-first writer. Primary-only notice delivery is not certified by this record.\n\nContract: SPEC.md:3063–3065 says ‘an OSC 52 READ is never answered with clipboard contents’ and paste ‘does not authorize a program to query the clipboard’. SPEC_impl.md:1732–1746 requires the shared native-first write path and states the native route is write-only by construction. The explicit read guard provides the refutation rather than general permission for reading.\n\nSuggested bucket: highest/security for the considered clipboard-secret disclosure route; high/material UX for losing actual system writes. Neither route established. Confidence: confirmed source refutation of those deletion concerns, not runtime observation. proposed_drop: removed browser provider's read override is replaced by the emulator's explicit copy-only configuration and discarded read events; independent grid callbacks retain actual system writing. This remains a proposed drop for independent caller judgment, not an accepted parent drop. possible_cover: none for the original confidentiality route; supplied g186/c2 concerns linked c5's separate guidance mismatch. Could-be-highest: yes, the original hypothetical clipboard disclosure would be security-impacting; its classification and consequence are retained despite source refutation. Material caveats: no execution or reproduction; this does not certify primary-notice delivery, every queue edge case, old-page input compatibility or unrelated documentation/test correctness. Linked c5 retains the false-guidance finding, exact pre-range contracts, full source provenance and pending scope-exclusion proposal. Prior c3 events remain append-only and are not withdrawn."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g188/findings.jsonl",
+        "id": "c3",
+        "line": 9,
+        "disposition": "under-investigation",
+        "group": "g188-c3",
+        "reason": "Record durably acknowledged; parent source/contract validation, cross-group synthesis, coverage/filter matching and any independent drop check remain pending. This preserves the claim and uncertainty without accepting, dropping or lowering it."
+      },
+      "accepted_parent_decision": null,
+      "returned_claim_checks": [
+        {
+          "batch": "claims-118",
+          "key": "g188/c3",
+          "latest_line": 9,
+          "recommendation": "refuted",
+          "bucket": "highest",
+          "underlying_key": "deleted-clipboard-addon-confidentiality-or-system-write-loss",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The proposed confidentiality and wholesale system-write losses are source-refuted. The original possible highest consequence remains in the drop register and needs a fresh independent decision. Earlier history's primary-only guidance mismatch belongs to g188/c5 and is not erased by this result.",
+          "checks": [
+            "At f560058da19e02716e6f943883a9508b447aff4e, crates/farhelm-terminal-emulator/src/emulator.rs:99-125 sets Osc52::OnlyCopy and passes it to Term::new. vendor/alacritty_terminal/src/term/mod.rs:2209-2213 refuses clipboard loads unless OnlyPaste or CopyPaste is configured.",
+            "effects.rs:173-194 separately discards ClipboardLoad; :199-212 emits ClipboardStore notices only from live output, including both clipboard and selection targets at the emulator layer.",
+            "hosts/terminal.rs:3310-3321 broadcasts system-clipboard notices; service/handlers.rs:1907-1915 attaches that subscription; service/grid_stream.rs:844-849 retains clipboard writes. grid-terminal.js:1973-1983 applies frames and invokes onClipboard; terminal.js:4326-4334 sends clipboard and local-selection writes to :764-773's native-first writer.",
+            "This is source analysis, with no executed clipboard operation, permission-policy test, or distribution audit. It does not certify primary-selection notice delivery."
+          ],
+          "coverage_checked": {
+            "specifications": "Read current SPEC.md:3053-3073 and :4983-4989, plus SPEC_impl.md:1728-1769 and the emulator contract. They permit remote clipboard writing but explicitly forbid reads; they do not cover a disclosure bug. Primary-guidance delivery conflicts are separate under c5.",
+            "TODO_Planned": "Empty at TODO.md:25-26.",
+            "plans_queue": "Clipboard searches found the already performed desktop cap/removal work, and retained-attribution cleanup. No unlanded plan covers disclosure through this removed add-on.",
+            "BUGS": "Read in full; unrelated provisioning-output hang only.",
+            "queue": "Full INDEX, focused primary/clipboard searches and clipboard-notice-drain-lacks-per-turn-work-bound.md checked. The existing item concerns an unbounded notice drain, not reads or missing system-write wiring.",
+            "active_triage": "Clipboard matches concern copied removal text/harm premises and unrelated tooling. No same confidentiality or missing-handler decision.",
+            "FILTER": "No filter applied. Any confidentiality consequence would be excluded from the rare-diagnostic filter."
+          },
+          "exact_cover_quotes": [],
+          "missing_premise": "No missing readily checkable premise for this narrow refutation. Runtime behavior and unrelated clipboard edge cases were not assessed.",
+          "original_stronger_consequence": "Disclosure of clipboard secrets to terminal programs, highest/security; separately high/material UX if system-clipboard writing disappeared. Neither route is established. Earlier c3:5-6 also established primary-only false guidance, subsequently preserved as c5 rather than withdrawn.",
+          "needs_independent_drop_check": true,
+          "proposed_basis": "OnlyCopy is enforced before reads can raise a clipboard load, load events are discarded independently, and the active grid keeps the system-write callback chain. This proposes refutation only; it is not the independent drop approval."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": true,
+        "provisional_bucket": "highest",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "deleted-clipboard-addon-confidentiality-or-system-write-loss",
+        "destination": null
+      }
+    },
+    {
+      "key": "g188/c4",
+      "owner": "g188",
+      "id": "c4",
+      "domain": "retired-xterm-vendor",
+      "purpose": "retired-xterm-vendor: crates/farhelm-ui/assets/vendor/addon-clipboard.js, crates/farhelm-ui/assets/vendor/addon-fit.js, crates/farhelm-ui/assets/vendor/addon-unicode-graphemes.js, crates/farhelm-ui/assets/vendor/xterm.js; phases bundle wrapper method charProperties: MethodDefinition charProperties | bundle wrapper method constructor: MethodDefinition constructor",
+      "history": [
+        {
+          "line": 4,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c4",
+            "state": "open",
+            "summary": "Unicode add-on removal does not remove the grid's width authority",
+            "location": "crates/farhelm-ui/assets/vendor/addon-unicode-graphemes.js:1",
+            "detail": "# Unicode add-on removal does not remove the grid's width authority\n\nReviewed commit: f560058da19e02716e6f943883a9508b447aff4e\n\n## TLDR\n\nConsidered whether removing the browser's Unicode provider makes emoji and combining characters move later terminal columns. The replacement receives widths from the supervisor and draws each non-ASCII cell at that declared width; it does not call the removed provider.\n\n## Details\n\nThe assigned addon-unicode-graphemes.js packets include its charProperties delegation, UnicodeService and constructor/helper code, all deleted at this commit. No independent defect in these retired helpers was sought. The replacement source at assets/grid-model.js:1174–1190 treats non-ASCII run text as one cell's content at the transmitted width. assets/grid-terminal.js:759–779 calls layoutRun(shown, run.width), places non-flow text in boxes of cells * cellWidth pixels, and advances the next column by run.width. It does not compute terminal widths with the removed UnicodeService or add-on. Pinned searches for UnicodeGraphemesAddon and the deleted bundle name found no executable consumer remaining.\n\nContract: SPEC_impl.md:1839–1842 says the supervisor interprets the terminal and the browser ‘gets the screen and scrollback as rows of styled runs’ and ‘is not a terminal emulator’. Its complete supervisor-emulator section (:2672–2731) names alacritty_terminal plus Farhelm policy as the interpretation authority and specifies its variation-selector behavior; the old browser provider's Unicode 15 grapheme rules are not the width authority of this stream. This refutation rests on the concrete replacement layout path and contract, not an assumption that every old/new Unicode behavior matches.\n\nSuggested bucket: high/material UX if column layout lost its width authority; no defect established. Confidence: confirmed source refutation for deletion removing the active provider. proposed_drop: the provider belonged to the retired browser emulator, whereas the active renderer uses supervisor-declared widths and retained box layout. possible_cover: none; coverage sources not consulted. Could-be-highest: no; no security or loss-of-work route follows from this considered missing-width-provider concern. Caveat: no browser rendering or Unicode parity execution was performed, and pre-existing emulator width defects unrelated to removal remain outside this assignment."
+          }
+        }
+      ],
+      "latest": {
+        "line": 4,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c4",
+          "state": "open",
+          "summary": "Unicode add-on removal does not remove the grid's width authority",
+          "location": "crates/farhelm-ui/assets/vendor/addon-unicode-graphemes.js:1",
+          "detail": "# Unicode add-on removal does not remove the grid's width authority\n\nReviewed commit: f560058da19e02716e6f943883a9508b447aff4e\n\n## TLDR\n\nConsidered whether removing the browser's Unicode provider makes emoji and combining characters move later terminal columns. The replacement receives widths from the supervisor and draws each non-ASCII cell at that declared width; it does not call the removed provider.\n\n## Details\n\nThe assigned addon-unicode-graphemes.js packets include its charProperties delegation, UnicodeService and constructor/helper code, all deleted at this commit. No independent defect in these retired helpers was sought. The replacement source at assets/grid-model.js:1174–1190 treats non-ASCII run text as one cell's content at the transmitted width. assets/grid-terminal.js:759–779 calls layoutRun(shown, run.width), places non-flow text in boxes of cells * cellWidth pixels, and advances the next column by run.width. It does not compute terminal widths with the removed UnicodeService or add-on. Pinned searches for UnicodeGraphemesAddon and the deleted bundle name found no executable consumer remaining.\n\nContract: SPEC_impl.md:1839–1842 says the supervisor interprets the terminal and the browser ‘gets the screen and scrollback as rows of styled runs’ and ‘is not a terminal emulator’. Its complete supervisor-emulator section (:2672–2731) names alacritty_terminal plus Farhelm policy as the interpretation authority and specifies its variation-selector behavior; the old browser provider's Unicode 15 grapheme rules are not the width authority of this stream. This refutation rests on the concrete replacement layout path and contract, not an assumption that every old/new Unicode behavior matches.\n\nSuggested bucket: high/material UX if column layout lost its width authority; no defect established. Confidence: confirmed source refutation for deletion removing the active provider. proposed_drop: the provider belonged to the retired browser emulator, whereas the active renderer uses supervisor-declared widths and retained box layout. possible_cover: none; coverage sources not consulted. Could-be-highest: no; no security or loss-of-work route follows from this considered missing-width-provider concern. Caveat: no browser rendering or Unicode parity execution was performed, and pre-existing emulator width defects unrelated to removal remain outside this assignment."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g188/findings.jsonl",
+        "id": "c4",
+        "line": 4,
+        "disposition": "excluded",
+        "group": "deleted-unicode-addon-missing-grid-width-authority",
+        "reason": "Parent explicitly accepted named refuted proposal from claims-118 after inspecting it. The active grid uses transmitted run positions and widths, rather than the removed Unicode provider. g189/c5 contains this same width subclaim plus a distinct stylesheet/decorations check; it is partial overlap, not an exact whole-record alias. The concrete width-consuming renderer refutes loss of the active width provider. This does not assert exhaustive Unicode parity or executed rendering correctness. Checked source/results: [\"At f560058da19e02716e6f943883a9508b447aff4e, assets/grid-model.js:1174-1189 boxes non-ASCII cell content at the supplied width; grid-terminal.js:759-779 uses run.col, layoutRun(shown, run.width), cells*cellWidth boxes and run.col+run.width for the next column.\",\"Pinned global/path search found no executable UnicodeGraphemesAddon consumer. SPEC_impl.md:1835-1867 makes the page a renderer, and :2673-2729 assigns interpretation and variation-selector policy to the supervisor.\"] Current coverage/results: {\"specifications\":\"Read current island/grid and emulator sections, plus SPEC.md Terminal experience. Deliberate width/format policies are explicit; that is not blanket acceptance of arbitrary layout bugs.\",\"TODO_Planned\":\"Empty.\",\"plans_queue\":\"Searched Unicode/grapheme/provider/width terms; the tmux cleanup preserves Farhelm's retained behavior, rather than planning to restore a removed width authority.\",\"BUGS\":\"No related known bug in the full file.\",\"queue\":\"Full INDEX and focused phrases contain independent layout and recovery-width issues, not dependency on the deleted provider.\",\"active_triage\":\"No same provider-removal trigger/consequence found.\",\"FILTER\":\"No filter used.\"} Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Hypothetical high/material UX if emoji or combining text displaced later columns after losing the width authority; no security/work-loss route established.\"; null."
+      },
+      "accepted_parent_decision": {
+        "key": "g188/c4",
+        "line": 4,
+        "disposition": "excluded",
+        "group": "deleted-unicode-addon-missing-grid-width-authority",
+        "bucket": "other",
+        "recording": "refuted",
+        "queue_target_candidate": null,
+        "needs_independent_drop_check": false,
+        "reason": "Parent explicitly accepted named refuted proposal from claims-118 after inspecting it. The active grid uses transmitted run positions and widths, rather than the removed Unicode provider. g189/c5 contains this same width subclaim plus a distinct stylesheet/decorations check; it is partial overlap, not an exact whole-record alias. The concrete width-consuming renderer refutes loss of the active width provider. This does not assert exhaustive Unicode parity or executed rendering correctness. Checked source/results: [\"At f560058da19e02716e6f943883a9508b447aff4e, assets/grid-model.js:1174-1189 boxes non-ASCII cell content at the supplied width; grid-terminal.js:759-779 uses run.col, layoutRun(shown, run.width), cells*cellWidth boxes and run.col+run.width for the next column.\",\"Pinned global/path search found no executable UnicodeGraphemesAddon consumer. SPEC_impl.md:1835-1867 makes the page a renderer, and :2673-2729 assigns interpretation and variation-selector policy to the supervisor.\"] Current coverage/results: {\"specifications\":\"Read current island/grid and emulator sections, plus SPEC.md Terminal experience. Deliberate width/format policies are explicit; that is not blanket acceptance of arbitrary layout bugs.\",\"TODO_Planned\":\"Empty.\",\"plans_queue\":\"Searched Unicode/grapheme/provider/width terms; the tmux cleanup preserves Farhelm's retained behavior, rather than planning to restore a removed width authority.\",\"BUGS\":\"No related known bug in the full file.\",\"queue\":\"Full INDEX and focused phrases contain independent layout and recovery-width issues, not dependency on the deleted provider.\",\"active_triage\":\"No same provider-removal trigger/consequence found.\",\"FILTER\":\"No filter used.\"} Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Hypothetical high/material UX if emoji or combining text displaced later columns after losing the width authority; no security/work-loss route established.\"; null."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-118",
+          "key": "g188/c4",
+          "latest_line": 4,
+          "recommendation": "refuted",
+          "bucket": "other",
+          "underlying_key": "deleted-unicode-addon-missing-grid-width-authority",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The active grid uses transmitted run positions and widths, rather than the removed Unicode provider. g189/c5 contains this same width subclaim plus a distinct stylesheet/decorations check; it is partial overlap, not an exact whole-record alias.",
+          "checks": [
+            "At f560058da19e02716e6f943883a9508b447aff4e, assets/grid-model.js:1174-1189 boxes non-ASCII cell content at the supplied width; grid-terminal.js:759-779 uses run.col, layoutRun(shown, run.width), cells*cellWidth boxes and run.col+run.width for the next column.",
+            "Pinned global/path search found no executable UnicodeGraphemesAddon consumer. SPEC_impl.md:1835-1867 makes the page a renderer, and :2673-2729 assigns interpretation and variation-selector policy to the supervisor."
+          ],
+          "coverage_checked": {
+            "specifications": "Read current island/grid and emulator sections, plus SPEC.md Terminal experience. Deliberate width/format policies are explicit; that is not blanket acceptance of arbitrary layout bugs.",
+            "TODO_Planned": "Empty.",
+            "plans_queue": "Searched Unicode/grapheme/provider/width terms; the tmux cleanup preserves Farhelm's retained behavior, rather than planning to restore a removed width authority.",
+            "BUGS": "No related known bug in the full file.",
+            "queue": "Full INDEX and focused phrases contain independent layout and recovery-width issues, not dependency on the deleted provider.",
+            "active_triage": "No same provider-removal trigger/consequence found.",
+            "FILTER": "No filter used."
+          },
+          "exact_cover_quotes": [],
+          "missing_premise": null,
+          "original_stronger_consequence": "Hypothetical high/material UX if emoji or combining text displaced later columns after losing the width authority; no security/work-loss route established.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "The concrete width-consuming renderer refutes loss of the active width provider. This does not assert exhaustive Unicode parity or executed rendering correctness."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "high",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "deleted-unicode-addon-missing-grid-width-authority",
+        "destination": null
+      }
+    },
+    {
+      "key": "g188/c5",
+      "owner": "g188",
+      "id": "c5",
+      "domain": "retired-xterm-vendor",
+      "purpose": "retired-xterm-vendor: crates/farhelm-ui/assets/vendor/addon-clipboard.js, crates/farhelm-ui/assets/vendor/addon-fit.js, crates/farhelm-ui/assets/vendor/addon-unicode-graphemes.js, crates/farhelm-ui/assets/vendor/xterm.js; phases bundle wrapper method charProperties: MethodDefinition charProperties | bundle wrapper method constructor: MethodDefinition constructor",
+      "history": [
+        {
+          "line": 8,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c5",
+            "state": "open",
+            "summary": "Primary-only guidance mismatch and its contract both predate the review range",
+            "location": "crates/farhelm-supervisor/src/service/grid_stream.rs:845",
+            "detail": "# Primary-only guidance mismatch and its contract both predate the review range\n\nReviewed commit: f560058da19e02716e6f943883a9508b447aff4e; exclusive base checked at 6e423e30068b62c6cfa276c6d720ee35bb70387a.\n\n## TLDR\n\nA program that handles a drag by writing only its primary selection can still receive incorrect guidance saying that it copied nothing. Both this source mismatch and the promise it violates already existed before the reviewed range. This record separates that known guidance consequence from c3's original, refuted clipboard-confidentiality concern; it is not new discovery.\n\n## Details\n\nPreserved synthesis source: at the reviewed commit, hosts/terminal.rs:3310–3321 filters notices to ClipboardTarget::Clipboard; service/grid_stream.rs:844–849 independently does the same. service/handlers.rs:1907–1915 supplies terminal.subscribe_notices() to the actual grid attachment. The primary write therefore cannot reach terminal.js:4326–4330 to increment gridOsc52Writes, and :4426–4431 admits the false guidance after the grace window. Current SPEC.md:3074–3075 requires ‘Any completed program clipboard write, including a primary-selection write, suppresses it during the grace window.’ This is a real source/contract mismatch, not refuted by correct system clipboard writing or read refusal.\n\nThe caller's g186/c2:7 question is now settled at the whole-range boundary, not only the immediate parent. At exclusive base, hosts/terminal.rs:3210–3221 already has the identical clipboard-only broadcast, terminal.js:6012–6016 already counts only delivered callbacks, and :6113–6124 has the same guidance condition. Exclusive-base SPEC.md:3055–3057 explicitly says: ‘Both kinds of terminal show it; any completed program clipboard write, including a primary-selection write, suppresses it during the grace window.’ Exclusive-base SPEC_impl.md:1833–1835 already says the grid counts completed callbacks ‘for either target, including primary writes that it does not copy to the system clipboard’. Thus an in-range new primary-write requirement does not explain this mismatch. The reviewed commit's parent has the same service/grid_stream.rs:844–849 filter, and its terminal.js grid counter is unchanged by the reviewed deletion. The raw old-terminal counter formerly handled this separately; deleting that retired path does not newly introduce the live grid's omission.\n\nSuggested bucket: other for misleading selection guidance. Confidence: confirmed source/contract mismatch and confirmed pre-range provenance; no execution. proposed_drop: proposed scope exclusion only, because both behavior and requirement predate the entire reviewed range and are not introduced by the assigned vendor deletion; no parent drop has been accepted, and the mismatch remains recorded for independent judgment. possible_cover: caller-supplied g186/c2 is the same known guidance mismatch, preserved for consolidation without treating an alias as discovery. Could-be-highest: no for this primary-guidance consequence; c3 retains the distinct original hypothetical confidentiality concern and its highest/security classification. No lowering of that original concern is intended. No tests, reproduction or live-install action. Material caveat: the pre-existing mismatch remains a product-contract defect, and its source provenance does not refute separate in-range documentation or test claims; no such new assigned vendor-packet claim has been identified. Linked history: earlier c3 synthesis events retain the original record, this c5 owns guidance going forward."
+          }
+        }
+      ],
+      "latest": {
+        "line": 8,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c5",
+          "state": "open",
+          "summary": "Primary-only guidance mismatch and its contract both predate the review range",
+          "location": "crates/farhelm-supervisor/src/service/grid_stream.rs:845",
+          "detail": "# Primary-only guidance mismatch and its contract both predate the review range\n\nReviewed commit: f560058da19e02716e6f943883a9508b447aff4e; exclusive base checked at 6e423e30068b62c6cfa276c6d720ee35bb70387a.\n\n## TLDR\n\nA program that handles a drag by writing only its primary selection can still receive incorrect guidance saying that it copied nothing. Both this source mismatch and the promise it violates already existed before the reviewed range. This record separates that known guidance consequence from c3's original, refuted clipboard-confidentiality concern; it is not new discovery.\n\n## Details\n\nPreserved synthesis source: at the reviewed commit, hosts/terminal.rs:3310–3321 filters notices to ClipboardTarget::Clipboard; service/grid_stream.rs:844–849 independently does the same. service/handlers.rs:1907–1915 supplies terminal.subscribe_notices() to the actual grid attachment. The primary write therefore cannot reach terminal.js:4326–4330 to increment gridOsc52Writes, and :4426–4431 admits the false guidance after the grace window. Current SPEC.md:3074–3075 requires ‘Any completed program clipboard write, including a primary-selection write, suppresses it during the grace window.’ This is a real source/contract mismatch, not refuted by correct system clipboard writing or read refusal.\n\nThe caller's g186/c2:7 question is now settled at the whole-range boundary, not only the immediate parent. At exclusive base, hosts/terminal.rs:3210–3221 already has the identical clipboard-only broadcast, terminal.js:6012–6016 already counts only delivered callbacks, and :6113–6124 has the same guidance condition. Exclusive-base SPEC.md:3055–3057 explicitly says: ‘Both kinds of terminal show it; any completed program clipboard write, including a primary-selection write, suppresses it during the grace window.’ Exclusive-base SPEC_impl.md:1833–1835 already says the grid counts completed callbacks ‘for either target, including primary writes that it does not copy to the system clipboard’. Thus an in-range new primary-write requirement does not explain this mismatch. The reviewed commit's parent has the same service/grid_stream.rs:844–849 filter, and its terminal.js grid counter is unchanged by the reviewed deletion. The raw old-terminal counter formerly handled this separately; deleting that retired path does not newly introduce the live grid's omission.\n\nSuggested bucket: other for misleading selection guidance. Confidence: confirmed source/contract mismatch and confirmed pre-range provenance; no execution. proposed_drop: proposed scope exclusion only, because both behavior and requirement predate the entire reviewed range and are not introduced by the assigned vendor deletion; no parent drop has been accepted, and the mismatch remains recorded for independent judgment. possible_cover: caller-supplied g186/c2 is the same known guidance mismatch, preserved for consolidation without treating an alias as discovery. Could-be-highest: no for this primary-guidance consequence; c3 retains the distinct original hypothetical confidentiality concern and its highest/security classification. No lowering of that original concern is intended. No tests, reproduction or live-install action. Material caveat: the pre-existing mismatch remains a product-contract defect, and its source provenance does not refute separate in-range documentation or test claims; no such new assigned vendor-packet claim has been identified. Linked history: earlier c3 synthesis events retain the original record, this c5 owns guidance going forward."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g188/findings.jsonl",
+        "id": "c5",
+        "line": 8,
+        "disposition": "excluded",
+        "group": "primary-selection-notice-filter-causes-false-drag-guidance",
+        "reason": "Parent explicitly accepted named out-of-range proposal from claims-118 after inspecting it. The primary-only false-guidance mechanism and its violated promise already exist at the exclusive base. This is a real source/contract mismatch, not a confidentiality defect or a route introduced by deleting vendor bundles. The reported cross-batch g186/c2 alias is preserved for parent reconciliation; its history was not assigned here. Range exclusion only: both active-grid behavior and the violated primary-write requirement are already present at the exclusive base. If scope is widened to pre-existing bugs, retain the mismatch and contract conflict. Checked source/results: [\"At f560058da19e02716e6f943883a9508b447aff4e, hosts/terminal.rs:3310-3321 and service/grid_stream.rs:844-849 discard primary-selection notices; handlers.rs:1907-1915 uses that subscription. terminal.js:4326-4330 can count only delivered callbacks; :4417-4437 therefore admits guidance when a drag produces only a primary write.\",\"At exclusive base 6e423e30068b62c6cfa276c6d720ee35bb70387a, hosts/terminal.rs:3210-3221 already filters to ClipboardTarget::Clipboard. terminal.js:6012-6016 and :6107-6124 already implement the same delivered-callback counter and grace condition.\",\"Exclusive-base SPEC.md:3041-3061 explicitly requires primary writes to suppress guidance; SPEC_impl.md:1830-1845 describes the same either-target counter. This is not a requirement first added within the range.\",\"Current SPEC_impl.md:2067-2070 also expressly says primary writes are not sent to subscribers. This delivery rationale conflicts with SPEC.md:3067-3068 and SPEC_impl.md:1747-1753's suppression promise; it is not exact acceptance of the misleading notice. No runtime was observed.\"] Current coverage/results: {\"specifications\":\"Read full matching clipboard/guidance paragraphs and runtime-notice paragraph. They conflict as noted; recommend retention if the parent rejects the range-exclusion basis. Do not silently treat the delivery paragraph as full behavior coverage.\",\"TODO_Planned\":\"Empty.\",\"plans_queue\":\"Focused primary/clipboard/drag searches found no pending repair of primary-notice delivery. General tmux wording/removal work does not remove this cause.\",\"BUGS\":\"No same root in the full file.\",\"queue\":\"Full INDEX plus focused searches and three matching files checked: clipboard-notice-drain-lacks-per-turn-work-bound.md is a work-bound defect; drag-copy-guidance-gap-stays-stale-after-text-size-change.md is positioning; detached-grid-retains-program-drag-guidance.md is detach lifecycle. None matches primary-only suppression.\",\"active_triage\":\"Primary-selection/guidance searches found no active same-trigger decision.\",\"FILTER\":\"No full filter match established: a program's ordinary primary-selection response is not shown to be a rare trigger.\"} Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Incorrect guidance after a program-owned drag that completed a primary-selection write; other priority. This was split from c3's earlier history without withdrawing or lowering c3's distinct hypothetical clipboard-secret disclosure.\"; \"No missing source premise for the primary-only mechanism or pre-range provenance. A separate in-range documentation/test claim would need its own assigned source basis; this result does not refute one.\"."
+      },
+      "accepted_parent_decision": {
+        "key": "g188/c5",
+        "line": 8,
+        "disposition": "excluded",
+        "group": "primary-selection-notice-filter-causes-false-drag-guidance",
+        "bucket": "other",
+        "recording": "out-of-range",
+        "queue_target_candidate": null,
+        "needs_independent_drop_check": false,
+        "reason": "Parent explicitly accepted named out-of-range proposal from claims-118 after inspecting it. The primary-only false-guidance mechanism and its violated promise already exist at the exclusive base. This is a real source/contract mismatch, not a confidentiality defect or a route introduced by deleting vendor bundles. The reported cross-batch g186/c2 alias is preserved for parent reconciliation; its history was not assigned here. Range exclusion only: both active-grid behavior and the violated primary-write requirement are already present at the exclusive base. If scope is widened to pre-existing bugs, retain the mismatch and contract conflict. Checked source/results: [\"At f560058da19e02716e6f943883a9508b447aff4e, hosts/terminal.rs:3310-3321 and service/grid_stream.rs:844-849 discard primary-selection notices; handlers.rs:1907-1915 uses that subscription. terminal.js:4326-4330 can count only delivered callbacks; :4417-4437 therefore admits guidance when a drag produces only a primary write.\",\"At exclusive base 6e423e30068b62c6cfa276c6d720ee35bb70387a, hosts/terminal.rs:3210-3221 already filters to ClipboardTarget::Clipboard. terminal.js:6012-6016 and :6107-6124 already implement the same delivered-callback counter and grace condition.\",\"Exclusive-base SPEC.md:3041-3061 explicitly requires primary writes to suppress guidance; SPEC_impl.md:1830-1845 describes the same either-target counter. This is not a requirement first added within the range.\",\"Current SPEC_impl.md:2067-2070 also expressly says primary writes are not sent to subscribers. This delivery rationale conflicts with SPEC.md:3067-3068 and SPEC_impl.md:1747-1753's suppression promise; it is not exact acceptance of the misleading notice. No runtime was observed.\"] Current coverage/results: {\"specifications\":\"Read full matching clipboard/guidance paragraphs and runtime-notice paragraph. They conflict as noted; recommend retention if the parent rejects the range-exclusion basis. Do not silently treat the delivery paragraph as full behavior coverage.\",\"TODO_Planned\":\"Empty.\",\"plans_queue\":\"Focused primary/clipboard/drag searches found no pending repair of primary-notice delivery. General tmux wording/removal work does not remove this cause.\",\"BUGS\":\"No same root in the full file.\",\"queue\":\"Full INDEX plus focused searches and three matching files checked: clipboard-notice-drain-lacks-per-turn-work-bound.md is a work-bound defect; drag-copy-guidance-gap-stays-stale-after-text-size-change.md is positioning; detached-grid-retains-program-drag-guidance.md is detach lifecycle. None matches primary-only suppression.\",\"active_triage\":\"Primary-selection/guidance searches found no active same-trigger decision.\",\"FILTER\":\"No full filter match established: a program's ordinary primary-selection response is not shown to be a rare trigger.\"} Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Incorrect guidance after a program-owned drag that completed a primary-selection write; other priority. This was split from c3's earlier history without withdrawing or lowering c3's distinct hypothetical clipboard-secret disclosure.\"; \"No missing source premise for the primary-only mechanism or pre-range provenance. A separate in-range documentation/test claim would need its own assigned source basis; this result does not refute one.\"."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-118",
+          "key": "g188/c5",
+          "latest_line": 8,
+          "recommendation": "out-of-range",
+          "bucket": "other",
+          "underlying_key": "primary-selection-notice-filter-causes-false-drag-guidance",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The primary-only false-guidance mechanism and its violated promise already exist at the exclusive base. This is a real source/contract mismatch, not a confidentiality defect or a route introduced by deleting vendor bundles. The reported cross-batch g186/c2 alias is preserved for parent reconciliation; its history was not assigned here.",
+          "checks": [
+            "At f560058da19e02716e6f943883a9508b447aff4e, hosts/terminal.rs:3310-3321 and service/grid_stream.rs:844-849 discard primary-selection notices; handlers.rs:1907-1915 uses that subscription. terminal.js:4326-4330 can count only delivered callbacks; :4417-4437 therefore admits guidance when a drag produces only a primary write.",
+            "At exclusive base 6e423e30068b62c6cfa276c6d720ee35bb70387a, hosts/terminal.rs:3210-3221 already filters to ClipboardTarget::Clipboard. terminal.js:6012-6016 and :6107-6124 already implement the same delivered-callback counter and grace condition.",
+            "Exclusive-base SPEC.md:3041-3061 explicitly requires primary writes to suppress guidance; SPEC_impl.md:1830-1845 describes the same either-target counter. This is not a requirement first added within the range.",
+            "Current SPEC_impl.md:2067-2070 also expressly says primary writes are not sent to subscribers. This delivery rationale conflicts with SPEC.md:3067-3068 and SPEC_impl.md:1747-1753's suppression promise; it is not exact acceptance of the misleading notice. No runtime was observed."
+          ],
+          "coverage_checked": {
+            "specifications": "Read full matching clipboard/guidance paragraphs and runtime-notice paragraph. They conflict as noted; recommend retention if the parent rejects the range-exclusion basis. Do not silently treat the delivery paragraph as full behavior coverage.",
+            "TODO_Planned": "Empty.",
+            "plans_queue": "Focused primary/clipboard/drag searches found no pending repair of primary-notice delivery. General tmux wording/removal work does not remove this cause.",
+            "BUGS": "No same root in the full file.",
+            "queue": "Full INDEX plus focused searches and three matching files checked: clipboard-notice-drain-lacks-per-turn-work-bound.md is a work-bound defect; drag-copy-guidance-gap-stays-stale-after-text-size-change.md is positioning; detached-grid-retains-program-drag-guidance.md is detach lifecycle. None matches primary-only suppression.",
+            "active_triage": "Primary-selection/guidance searches found no active same-trigger decision.",
+            "FILTER": "No full filter match established: a program's ordinary primary-selection response is not shown to be a rare trigger."
+          },
+          "exact_cover_quotes": [],
+          "missing_premise": "No missing source premise for the primary-only mechanism or pre-range provenance. A separate in-range documentation/test claim would need its own assigned source basis; this result does not refute one.",
+          "original_stronger_consequence": "Incorrect guidance after a program-owned drag that completed a primary-selection write; other priority. This was split from c3's earlier history without withdrawing or lowering c3's distinct hypothetical clipboard-secret disclosure.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Range exclusion only: both active-grid behavior and the violated primary-write requirement are already present at the exclusive base. If scope is widened to pre-existing bugs, retain the mismatch and contract conflict.",
+          "new_interface_evidence": "For the parent/original g186 primary-guidance reviewer: recording-time SPEC_impl.md:2067-2070 explicitly says primary writes are not sent because a viewer does nothing with them. This conflicts with that same document's :1747-1753 either-target guidance counter and SPEC.md:3067-3068. It reinforces the documented inconsistency, but does not establish a new in-range executable defect or excuse the false guidance."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": false,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "primary-selection-notice-filter-causes-false-drag-guidance",
+        "destination": null
+      }
+    },
+    {
+      "key": "g188/c6",
+      "owner": "g188",
+      "id": "c6",
+      "domain": "retired-xterm-vendor",
+      "purpose": "retired-xterm-vendor: crates/farhelm-ui/assets/vendor/addon-clipboard.js, crates/farhelm-ui/assets/vendor/addon-fit.js, crates/farhelm-ui/assets/vendor/addon-unicode-graphemes.js, crates/farhelm-ui/assets/vendor/xterm.js; phases bundle wrapper method charProperties: MethodDefinition charProperties | bundle wrapper method constructor: MethodDefinition constructor",
+      "history": [
+        {
+          "line": 10,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c6",
+            "state": "open",
+            "summary": "Removing bundle notices does not orphan retained ported-code notices",
+            "location": "crates/farhelm-ui/assets/vendor/xterm.js:1",
+            "detail": "# Removing bundle notices does not orphan retained ported-code notices\n\nReviewed commit: f560058da19e02716e6f943883a9508b447aff4e. Discovery pass 1.\n\n## TLDR\n\nChecked whether deleting xterm and fit bundles and their companion notices also deletes the only shipped attribution for code retained in the replacement renderer. Source shows that the replacement has an independent notice asset that remains declared. No omission found.\n\n## Details\n\nThe reviewed THIRD_PARTY_NOTICES.md diff deletes the section for whole npm bundles but retains ‘Code ported from xterm.js’, explicitly pointing to assets/grid-ported-code-LICENSES.txt. That file's reviewed content retains complete xterm, fit, web-links and Visual Studio Code notices. Its content lists the retained code and does not depend on deleted files for the notice text. crates/farhelm-ui/src/lib.rs:1484–1495 keeps GRID_PORTED_CODE_LICENSES with #[used] and asset!(\"/assets/grid-ported-code-LICENSES.txt\", AssetOptions::builder().with_hash_suffix(false)). Its declaration is independent of the removed vendor asset constants. This refutes the specific source hypothesis that the assigned bundle deletion removes the sole declaration or text of notices for the retained ports; it does not claim an executed distribution audit.\n\nSource-declared contract: retained THIRD_PARTY_NOTICES.md states ‘The complete notices are in crates/farhelm-ui/assets/grid-ported-code-LICENSES.txt’ and that it ‘ships in the app’; the actual declaration and file remain present at the reviewed commit.\n\nSuggested bucket: other for a hypothetical missing attribution artifact; no source defect established. Confidence: confirmed source refutation of removal orphaning these retained notices. proposed_drop: independent complete notice file and retained asset declaration refute the considered removal consequence. possible_cover: none; no prohibited coverage sources searched, and supplied interface findings contain no notice-removal finding. Could-be-highest: no established security or user-work-loss consequence. Material caveats: no legal conclusion, no build, and no runtime/distribution inspection. This is a rejected candidate, not a new verified or unverified finding."
+          }
+        }
+      ],
+      "latest": {
+        "line": 10,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c6",
+          "state": "open",
+          "summary": "Removing bundle notices does not orphan retained ported-code notices",
+          "location": "crates/farhelm-ui/assets/vendor/xterm.js:1",
+          "detail": "# Removing bundle notices does not orphan retained ported-code notices\n\nReviewed commit: f560058da19e02716e6f943883a9508b447aff4e. Discovery pass 1.\n\n## TLDR\n\nChecked whether deleting xterm and fit bundles and their companion notices also deletes the only shipped attribution for code retained in the replacement renderer. Source shows that the replacement has an independent notice asset that remains declared. No omission found.\n\n## Details\n\nThe reviewed THIRD_PARTY_NOTICES.md diff deletes the section for whole npm bundles but retains ‘Code ported from xterm.js’, explicitly pointing to assets/grid-ported-code-LICENSES.txt. That file's reviewed content retains complete xterm, fit, web-links and Visual Studio Code notices. Its content lists the retained code and does not depend on deleted files for the notice text. crates/farhelm-ui/src/lib.rs:1484–1495 keeps GRID_PORTED_CODE_LICENSES with #[used] and asset!(\"/assets/grid-ported-code-LICENSES.txt\", AssetOptions::builder().with_hash_suffix(false)). Its declaration is independent of the removed vendor asset constants. This refutes the specific source hypothesis that the assigned bundle deletion removes the sole declaration or text of notices for the retained ports; it does not claim an executed distribution audit.\n\nSource-declared contract: retained THIRD_PARTY_NOTICES.md states ‘The complete notices are in crates/farhelm-ui/assets/grid-ported-code-LICENSES.txt’ and that it ‘ships in the app’; the actual declaration and file remain present at the reviewed commit.\n\nSuggested bucket: other for a hypothetical missing attribution artifact; no source defect established. Confidence: confirmed source refutation of removal orphaning these retained notices. proposed_drop: independent complete notice file and retained asset declaration refute the considered removal consequence. possible_cover: none; no prohibited coverage sources searched, and supplied interface findings contain no notice-removal finding. Could-be-highest: no established security or user-work-loss consequence. Material caveats: no legal conclusion, no build, and no runtime/distribution inspection. This is a rejected candidate, not a new verified or unverified finding."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g188/findings.jsonl",
+        "id": "c6",
+        "line": 10,
+        "disposition": "excluded",
+        "group": "deleted-bundle-notices-orphan-retained-ports",
+        "reason": "Parent explicitly accepted named refuted proposal from claims-118 after inspecting it. Removing whole-bundle notices does not remove the independent notice file or its asset declaration for retained ports. This is a source packaging check, not a legal conclusion or executed release audit. Both independent notice content and retained asset declaration survive the deletion. Distribution execution was outside this consultation. Checked source/results: [\"At f560058da19e02716e6f943883a9508b447aff4e, THIRD_PARTY_NOTICES.md:19-45 lists retained ports and the independent grid-ported-code-LICENSES.txt asset.\",\"That asset:1-145 contains the retained-code inventory and full xterm, fit, web-links and Visual Studio Code notices. crates/farhelm-ui/src/lib.rs:1484-1495 retains GRID_PORTED_CODE_LICENSES with #[used] and a nonhashed asset declaration.\"] Current coverage/results: {\"specifications\":\"Current SPEC_impl.md:1692-1700 preserves attribution beside ported code and points to THIRD_PARTY_NOTICES.md. SPEC.md has no acceptance of missing attribution.\",\"TODO_Planned\":\"Empty.\",\"plans_queue\":\"tmux-drop-from-docs.md:33-48 explicitly preserves ported-code attribution and the notice file; it is a preservation constraint, not a repair covering an actual missing artifact.\",\"BUGS\":\"No related known bug.\",\"queue\":\"Full INDEX and ported-code/deleted-bundle phrase searches found no same-root attribution item.\",\"active_triage\":\"No matching attribution or notice-removal decision.\",\"FILTER\":\"No filter applied.\"} Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Hypothetical missing attribution artifact, other priority; no established security or user-work-loss consequence.\"; null."
+      },
+      "accepted_parent_decision": {
+        "key": "g188/c6",
+        "line": 10,
+        "disposition": "excluded",
+        "group": "deleted-bundle-notices-orphan-retained-ports",
+        "bucket": "other",
+        "recording": "refuted",
+        "queue_target_candidate": null,
+        "needs_independent_drop_check": false,
+        "reason": "Parent explicitly accepted named refuted proposal from claims-118 after inspecting it. Removing whole-bundle notices does not remove the independent notice file or its asset declaration for retained ports. This is a source packaging check, not a legal conclusion or executed release audit. Both independent notice content and retained asset declaration survive the deletion. Distribution execution was outside this consultation. Checked source/results: [\"At f560058da19e02716e6f943883a9508b447aff4e, THIRD_PARTY_NOTICES.md:19-45 lists retained ports and the independent grid-ported-code-LICENSES.txt asset.\",\"That asset:1-145 contains the retained-code inventory and full xterm, fit, web-links and Visual Studio Code notices. crates/farhelm-ui/src/lib.rs:1484-1495 retains GRID_PORTED_CODE_LICENSES with #[used] and a nonhashed asset declaration.\"] Current coverage/results: {\"specifications\":\"Current SPEC_impl.md:1692-1700 preserves attribution beside ported code and points to THIRD_PARTY_NOTICES.md. SPEC.md has no acceptance of missing attribution.\",\"TODO_Planned\":\"Empty.\",\"plans_queue\":\"tmux-drop-from-docs.md:33-48 explicitly preserves ported-code attribution and the notice file; it is a preservation constraint, not a repair covering an actual missing artifact.\",\"BUGS\":\"No related known bug.\",\"queue\":\"Full INDEX and ported-code/deleted-bundle phrase searches found no same-root attribution item.\",\"active_triage\":\"No matching attribution or notice-removal decision.\",\"FILTER\":\"No filter applied.\"} Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Hypothetical missing attribution artifact, other priority; no established security or user-work-loss consequence.\"; null."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-118",
+          "key": "g188/c6",
+          "latest_line": 10,
+          "recommendation": "refuted",
+          "bucket": "other",
+          "underlying_key": "deleted-bundle-notices-orphan-retained-ports",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "Removing whole-bundle notices does not remove the independent notice file or its asset declaration for retained ports. This is a source packaging check, not a legal conclusion or executed release audit.",
+          "checks": [
+            "At f560058da19e02716e6f943883a9508b447aff4e, THIRD_PARTY_NOTICES.md:19-45 lists retained ports and the independent grid-ported-code-LICENSES.txt asset.",
+            "That asset:1-145 contains the retained-code inventory and full xterm, fit, web-links and Visual Studio Code notices. crates/farhelm-ui/src/lib.rs:1484-1495 retains GRID_PORTED_CODE_LICENSES with #[used] and a nonhashed asset declaration."
+          ],
+          "coverage_checked": {
+            "specifications": "Current SPEC_impl.md:1692-1700 preserves attribution beside ported code and points to THIRD_PARTY_NOTICES.md. SPEC.md has no acceptance of missing attribution.",
+            "TODO_Planned": "Empty.",
+            "plans_queue": "tmux-drop-from-docs.md:33-48 explicitly preserves ported-code attribution and the notice file; it is a preservation constraint, not a repair covering an actual missing artifact.",
+            "BUGS": "No related known bug.",
+            "queue": "Full INDEX and ported-code/deleted-bundle phrase searches found no same-root attribution item.",
+            "active_triage": "No matching attribution or notice-removal decision.",
+            "FILTER": "No filter applied."
+          },
+          "exact_cover_quotes": [],
+          "missing_premise": null,
+          "original_stronger_consequence": "Hypothetical missing attribution artifact, other priority; no established security or user-work-loss consequence.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Both independent notice content and retained asset declaration survive the deletion. Distribution execution was outside this consultation."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "deleted-bundle-notices-orphan-retained-ports",
+        "destination": null
+      }
+    }
+  ],
+  "replies": [
+    {
+      "turn": 1,
+      "reply": "Initial review complete: all six assigned packets and the complete commit list read. No confirmed findings or unresolved leads. Four discarded candidates recorded in findings.jsonl; progress.md updated. Source-only review; no tests or reproductions run."
+    },
+    {
+      "turn": 2,
+      "reply": "Revised c2 with the safe pre-socket sizing lifecycle. Resolved c3’s primary-notice lead: the guidance mismatch predates the review range; recorded the source evidence and scope decision.\n\nNo new reportable findings. Unresolved lead IDs: none."
+    },
+    {
+      "turn": 3,
+      "reply": "Checked full-range contract timing, retained notice assets and deleted-bundle references. Revised c3, split known guidance into c5, and recorded rejected candidate c6.\n\nNew verified findings: none. New unverified findings: none. Open leads: none. Nothing new reportable found. Discovery count: 1."
+    }
+  ],
+  "progress": "g188: initialized, awaiting initial source review.\n# g188 initial review\n\nTurn type/count: initial / 1. Discovery-pass count: 0.\nState: findings log verified present; mandatory patch packets unread. Complete inventory commits field read.\nScope: retired xterm vendor deletion at f560058da19e02716e6f943883a9508b447aff4e, assigned packets only, with replacement/caller contracts as context.\nInterface assumptions: terminal replacement must account for clipboard, sizing and grapheme behavior; verify against pinned contracts before conclusions.\nNext action: read all six assigned evidence packets, then inspect governing specification sections and replacement callers.\nNew verified/unverified IDs: none. Open leads: none. No runtime execution requested.\n\n## Initial-turn boundary\n\nTurn type/count: initial / 1. Discovery-pass count: 0 (later discovery not started).\nState: assigned initial source review complete. All six evidence packets delivered in full (34 lines, 65,215 source bytes); no unread assigned scope. Complete commits field read without excluded coverage metadata.\nContracts read: pinned SPEC.md Terminal experience; pinned SPEC_impl.md Terminal widget: the grid island, The grid client, The supervisor's terminal emulator, and Answers bind to what was drawn. Root End sentinel present; priority buckets and feedback-file format read.\nInterface results: all mount readiness dependencies and injected scripts use the retained grid; grid sizing supplies the socket dimensions and resize callback; clipboard writes use grid callbacks and the shared writer, with reads refused by the copy-only supervisor emulator; non-ASCII rendering uses transmitted cell widths rather than the retired browser Unicode provider.\nNew verified finding IDs: none. New unverified finding IDs: none. Candidate IDs appended: c1 (loader dependencies), c2 (fit replacement), c3 (clipboard security/write replacement), c4 (Unicode width authority). Open leads: none.\nRecording note: the first c1 append was rejected because state \"closed\" is unsupported. Corrected it to \"open\" and recorded successfully before continuing source review. Candidate kind/detail carries the discard decision; no event was truncated or removed.\nValidation: source/contract analysis only; no tests, builds or reproductions run. No checkout files changed.\nNext action: await caller's later synthesis/discovery prompt. Do not treat this initial turn as the later protocol.\n\n## Synthesis-turn boundary\n\nTurn type/count: synthesis / 2. Discovery-pass count: 0.\nState: cross-batch source and contract synthesis complete. No unread assigned scope or unresolved lead IDs.\nRevisions: c2 adds the initial-fit/socket lifecycle check; c3 was temporarily a lead, then resolved to a candidate after tracing clipboard notice delivery and its provenance. No new verified or unverified finding IDs.\nc2 checks/results: terminal.js:3275–3276 initializes grid/ws before constructing the surface; :4560–4565 returns on a missing/non-open socket before accessing grid.size(); :3422–3427 includes the measured dimensions in the socket URL; :4594–4605 actually calls sendResize from onopen. Initial fitting therefore does not depend on a socket or an already-published grid. grid-terminal.js:2080–2085 nulls onResize when a takeover snapshot freezes the component.\nc3 checks/results: hosts/terminal.rs:3310–3321 and service/grid_stream.rs:844–849 both filter notices to the system clipboard. service/handlers.rs:1907–1915 uses that subscription. Primary-only writes cannot reach the page's drag-copy count through the shipped attachment. The exact false-guidance consequence and SPEC.md requirement are retained in c3. The identical filtering and page counter existed at exclusive base 6e423e30068b62c6cfa276c6d720ee35bb70387a (hosts/terminal.rs:3210–3221; terminal.js:6012–6016 and :6113–6124); this is outside the assigned deletion and predates the range. Clipboard-read refusal and actual system-write delivery remain supported.\nOther interaction results: c1's shipped script/readiness set and c4's transmitted-width renderer are independent of the removed browser emulator. No new interaction invalidates those initial conclusions.\nEvidence: source analysis only, no tests/builds/reproductions. No checkout mutations. Coverage sources remain unread.\nNext action: await caller's next synthesis/discovery instruction; report only this turn's delta.\n\n## Discovery-turn boundary\n\nTurn type/count: discovery / 3. Discovery-pass count: 1.\nState: separate discovery pass complete after interface synthesis. No unread assigned packets or interface-context chunks; discovery-neighbours.json read through line 246/end in two bounded chunks.\nInterface reconciliation: checked exclusive-base SPEC.md:3055–3057 and SPEC_impl.md:1833–1835 as requested by g186/c2:7. Both already promise counting primary writes, alongside the previously checked pre-base filters/counter. Revised c3 to retain only its original confidentiality/system-write concerns and original highest/security hypothesis. Created linked c5 for the already-known guidance mismatch with its exact source consequence, pre-base contract and pending scope-exclusion proposal. No parent drop or lowering is claimed. Supplied g186/c2 is a known alias, not discovery.\nOther supplied interface context: g010's Shift+Enter documentation claim, g083/g135/g136's changed failed-mount fixture claim, and g082/g083/g196's stale-page JSON-input route are distinct from this group's assigned vendor packets. Their supplied conclusions were not generalized away by the retired-bundle refutations. In particular, c1 checks loader dependencies of the pinned page, not safety of legacy pages; c3 checks clipboard reads, not legacy JSON input. No broader source investigation of their owned material was undertaken.\nNew discovery checks: git log over the entire exclusive-base..pinned-tip range for all four assigned vendor paths returns only f560058da19e02716e6f943883a9508b447aff4e. Expanded pinned dependency search across UI assets/src, scripts, packaging and .github found explanatory/attribution references, no live deleted-bundle use. Read the retained ported-code notice and its diff plus lib.rs:1484–1495; deleting bundle-specific notices does not remove the independent notice text/asset for retained xterm/fit ports. Rejected candidate c6 records this check and source refutation immediately.\nNew verified finding IDs: none. New unverified-after-investigation IDs: none. New candidate IDs: c5 (split known interface concern), c6 (new rejected notice-retention check). Revised original ID: c3. Remaining lead IDs: none.\nDiscovery result: no new reportable or unresolved issue found. No runtime tests, builds, reproductions, checkout edits, prohibited coverage reads or live-install actions.\nNext action: return this turn's delta; await any further caller instruction. Findings log remains the complete append-only record.\n"
+}

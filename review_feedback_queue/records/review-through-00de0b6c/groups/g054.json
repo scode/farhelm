@@ -1,0 +1,318 @@
+{
+  "group": {
+    "id": "g054",
+    "domain": "wire-protocol",
+    "purpose": "wire-protocol: crates/farhelm-proto/src/lib.rs; phases complete small per-commit changes",
+    "interfaces": [
+      "g018",
+      "g019",
+      "g020",
+      "g021",
+      "g052",
+      "g053",
+      "g074",
+      "g075",
+      "g076",
+      "g079",
+      "g080",
+      "g081",
+      "g082",
+      "g083",
+      "g084",
+      "g085",
+      "g086",
+      "g087",
+      "g122",
+      "g123",
+      "g124",
+      "g125",
+      "g126"
+    ],
+    "sources": [
+      {
+        "path": "[private-run]/prep/parts/01528-000.patch",
+        "ranges": [
+          [
+            1,
+            159
+          ]
+        ],
+        "original_path": "crates/farhelm-proto/src/lib.rs",
+        "commit": "08399d092d20815ced6619c26df2391944ae2b4a",
+        "notes": "patch header; patch character offsets [0,9920)",
+        "lines": 159,
+        "bytes": 9946,
+        "start": 0,
+        "end": 9920,
+        "original": "[private-run]/prep/originals/01528.patch"
+      }
+    ],
+    "lines": 159,
+    "bytes": 9946
+  },
+  "records": [
+    {
+      "key": "g054/c1",
+      "owner": "g054",
+      "id": "c1",
+      "domain": "wire-protocol",
+      "purpose": "wire-protocol: crates/farhelm-proto/src/lib.rs; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 1,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c1",
+            "state": "open",
+            "summary": "Interrupted documentation still calls boot-id change its only detector",
+            "location": "crates/farhelm-proto/src/lib.rs:854",
+            "detail": "Reviewed commit: 08399d092d20815ced6619c26df2391944ae2b4a. TLDR: internal protocol documentation describes interruption through a changed boot id even though the same variant also represents startup retirement of old terminals. Details: lib.rs:847-859 explicitly describes both reboot and old-server retirement, then calls the changed stored boot id the one detector. The assigned patch changes only the first paragraph; its patch context shows that the one-detector sentence is unchanged, and the old first paragraph already named an update ending an old terminal. This is a pre-existing explanatory inconsistency, not a defect introduced by removing tmux-era descriptions. SPEC_impl.md at this revision, Ending the old private tmux server, states that reload converts launching/running/stopping old-kind agents to interrupted via Transition::TerminalEnded beside reboot conversion. Suggested bucket: other (internal documentation accuracy). Confidence: confirmed from source and patch; no execution. proposed_drop: outside assigned change, because the contradictory explanation and the second route both predate this patch. possible_cover: none; excluded coverage sources not searched. Could-be-highest: false; this wording gives no operational instruction or security/data-loss guidance. No runtime or wire representation change is claimed."
+          }
+        },
+        {
+          "line": 2,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c1",
+            "state": "open",
+            "summary": "Interrupted documentation still calls boot-id change its only detector",
+            "location": "crates/farhelm-proto/src/lib.rs:855",
+            "detail": "Reviewed commit: 08399d092d20815ced6619c26df2391944ae2b4a. TLDR: internal protocol documentation describes interruption through a changed boot id even though the same variant also represents startup retirement of old terminals. Details: lib.rs:849-859 explicitly describes both reboot and old-server retirement, then calls the changed stored boot id the one detector. The assigned patch changes only the first paragraph; its patch context shows that the one-detector sentence is unchanged, and the old first paragraph already named an update ending an old terminal. This is a pre-existing explanatory inconsistency, not a defect introduced by removing tmux-era descriptions. SPEC_impl.md at this revision, Ending the old private tmux server, states that reload converts launching/running/stopping old-kind agents to interrupted via Transition::TerminalEnded beside reboot conversion. Suggested bucket: other (internal documentation accuracy). Confidence: confirmed from source, patch, and parent lib.rs:846-870; no execution. proposed_drop: outside assigned change, because the contradictory explanation and the second route both predate this patch. possible_cover: none; excluded coverage sources not searched. Could-be-highest: false; this wording gives no operational instruction or security/data-loss guidance. No runtime or wire representation change is claimed."
+          }
+        },
+        {
+          "line": 3,
+          "event": {
+            "version": 1,
+            "kind": "lead",
+            "id": "c1",
+            "state": "open",
+            "summary": "Verify interruption documentation attribution across the pinned range",
+            "location": "crates/farhelm-proto/src/lib.rs:855",
+            "detail": "Reviewed commit: 08399d092d20815ced6619c26df2391944ae2b4a; review range excludes 6e423e30068b62c6cfa276c6d720ee35bb70387a and includes 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db. TLDR: internal protocol documentation calls a changed boot id the sole interruption detector despite also representing old-terminal retirement. The earlier candidate established only that both wordings predate the final comment-edit commit, which does not settle whether an earlier contract change in the pinned range introduced the inconsistency. Suggested bucket: other; confidence: unverified attribution pending range history checks, with the wording inconsistency confirmed by source. proposed_drop: suspended; the earlier pre-existing basis is not yet established against the range boundary. possible_cover: none; excluded sources not searched. Could-be-highest: false; the consequence is misleading internal explanation, with no operational instruction or security/data-loss route. Exact missing premise: whether both old-terminal retirement and this wording existed before the exclusive base. Next checks: base protocol docs, per-range diffs/history of the interruption wording and TerminalEnded/startup-retirement contract. No runtime execution or reproduction."
+          }
+        },
+        {
+          "line": 4,
+          "event": {
+            "version": 1,
+            "kind": "lead",
+            "id": "c1",
+            "state": "open",
+            "summary": "Interruption documentation inconsistency may originate inside the review range",
+            "location": "crates/farhelm-proto/src/lib.rs:855",
+            "detail": "Reviewed commit: 08399d092d20815ced6619c26df2391944ae2b4a. TLDR: internal documentation says interruption is detected only through a changed boot id even though startup retirement now also produces it. The exclusive base 6e423e30068b62c6cfa276c6d720ee35bb70387a, lib.rs:842-852, mentions reboot only and has the same one-detector sentence. Thus the previous proposed drop established only that the final cleanup inherited the inconsistency, not that it predates this review range. Range history identifies dbfc69751215dbf15e1d31d5bed73c3754c4ebc4 as the startup-retirement change; its patch and exact contract still need examination before final attribution. Suggested bucket: other; confidence: confirmed base wording, pending attribution. proposed_drop: false; prior outside-range rationale is not established and must not be used. possible_cover: none. Could-be-highest: false; unchanged consequence is misleading internal explanation, with no operational instruction or established security/data-loss route. Checks: base source has no old-terminal update clause; the range contains a change titled end old terminals at startup; base SPEC_impl search has no Ending the old private tmux server or TerminalEnded match. No runtime execution or reproduction."
+          }
+        },
+        {
+          "line": 5,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "c1",
+            "state": "open",
+            "summary": "Interruption documentation still claims boot-id change is its only detector",
+            "location": "crates/farhelm-proto/src/lib.rs:855",
+            "detail": "Reviewed commit: 08399d092d20815ced6619c26df2391944ae2b4a; introduced by dbfc69751215dbf15e1d31d5bed73c3754c4ebc4 within the pinned range. TLDR: a developer reading the shared protocol contract is told an interrupted session proves a reboot detector ran, although an ordinary update can produce the same status without a reboot. This is misleading internal documentation, with no observed runtime malfunction. Details: at reviewed lib.rs:849-859, the first paragraph correctly includes startup retirement of an old terminal, but lines 855-857 still define Interrupted as 'asked, via the one reboot detector this system has (a changed stored boot id)'. The exclusive base 6e423e30068b62c6cfa276c6d720ee35bb70387a lib.rs:842-852 described only reboot. The full-range -G history identifies dbfc69751215dbf15e1d31d5bed73c3754c4ebc4 as adding the update-ended-terminal route while retaining that definition; its lib.rs patch shows both claims together. Its SPEC_impl.md:2978-2980 says: 'The reload then takes every old-kind row as having no terminal, in any state, without looking its recorded pane id up: one whose agent was launching, running or being stopped is converted to interrupted (`Transition::TerminalEnded`, beside the reboot conversion) unless its launch sentinel makes it an error'. This is a second attribution path, not evidence of a changed boot id. At the assigned cleanup commit, the parent paragraph already has the contradiction, but that is insufficient grounds to drop a range-review finding. Suggested fix: describe interruption as a durable lost-track outcome established by reboot or retirement of an old terminal, without claiming all instances come from a boot-id change. Suggested bucket: other. Confidence: confirmed by source, introducing patch and exact specification contract; no execution. proposed_drop: false; the original proposed drop (pre-existing outside scope) is retracted because the contract change is inside the reviewed range. possible_cover: none; parent owns queue coverage and excluded sources were not read. Could-be-highest: false; the consequence remains inaccurate internal documentation, with no operational instruction or established security/data-loss route. Caveat: the executable retirement behavior is specified and accepted; this finding concerns the explanation only and must not be rendered as a runtime correctness failure."
+          }
+        },
+        {
+          "line": 6,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "c1",
+            "state": "open",
+            "summary": "Interruption documentation still claims boot-id change is its only detector",
+            "location": "crates/farhelm-proto/src/lib.rs:855",
+            "detail": "Reviewed commit: 08399d092d20815ced6619c26df2391944ae2b4a; introduced by dbfc69751215dbf15e1d31d5bed73c3754c4ebc4 within the pinned range. TLDR: a developer reading the shared protocol contract is told an interrupted session proves a reboot detector ran, although an ordinary update can produce the same status without a reboot. This is misleading internal documentation, with no observed runtime malfunction. Details: at reviewed lib.rs:849-859, the first paragraph correctly includes startup retirement of an old terminal, but lines 855-857 still define Interrupted as 'asked, via the one reboot detector this system has (a changed stored boot id)'. The exclusive base 6e423e30068b62c6cfa276c6d720ee35bb70387a lib.rs:842-852 described only reboot. The full-range -G history identifies dbfc69751215dbf15e1d31d5bed73c3754c4ebc4 as adding the update-ended-terminal route while retaining that definition; its lib.rs patch shows both claims together. Its SPEC_impl.md:2978-2980 says: 'The reload then takes every old-kind row as having no terminal, in any state, without looking its recorded pane id up: one whose agent was launching, running or being stopped is converted to interrupted (`Transition::TerminalEnded`, beside the reboot conversion) unless its launch sentinel makes it an error'. This is a second attribution path, not evidence of a changed boot id. At the assigned cleanup commit, the parent paragraph already has the contradiction, but that is insufficient grounds to drop a range-review finding. Additional source check: at dbfc69751215dbf15e1d31d5bed73c3754c4ebc4 service/core.rs:7097-7114, an old-kind row with a launching, running, or stop-requested outcome unconditionally queues Transition::TerminalEnded after the no-sentinel case; that branch does not require a changed boot id. The complete new startup-retirement contract was read at SPEC_impl.md:2954-3004. Suggested fix: describe interruption as a durable lost-track outcome established by reboot or retirement of an old terminal, without claiming all instances come from a boot-id change. Suggested bucket: other. Confidence: confirmed by source, introducing patch and exact specification contract; no execution. proposed_drop: false; the original proposed drop (pre-existing outside scope) is retracted because the contract change is inside the reviewed range. possible_cover: none; parent owns queue coverage and excluded sources were not read. Could-be-highest: false; the consequence remains inaccurate internal documentation, with no operational instruction or established security/data-loss route. Caveat: the executable retirement behavior is specified and accepted; this finding concerns the explanation only and must not be rendered as a runtime correctness failure."
+          }
+        }
+      ],
+      "latest": {
+        "line": 6,
+        "event": {
+          "version": 1,
+          "kind": "finding",
+          "id": "c1",
+          "state": "open",
+          "summary": "Interruption documentation still claims boot-id change is its only detector",
+          "location": "crates/farhelm-proto/src/lib.rs:855",
+          "detail": "Reviewed commit: 08399d092d20815ced6619c26df2391944ae2b4a; introduced by dbfc69751215dbf15e1d31d5bed73c3754c4ebc4 within the pinned range. TLDR: a developer reading the shared protocol contract is told an interrupted session proves a reboot detector ran, although an ordinary update can produce the same status without a reboot. This is misleading internal documentation, with no observed runtime malfunction. Details: at reviewed lib.rs:849-859, the first paragraph correctly includes startup retirement of an old terminal, but lines 855-857 still define Interrupted as 'asked, via the one reboot detector this system has (a changed stored boot id)'. The exclusive base 6e423e30068b62c6cfa276c6d720ee35bb70387a lib.rs:842-852 described only reboot. The full-range -G history identifies dbfc69751215dbf15e1d31d5bed73c3754c4ebc4 as adding the update-ended-terminal route while retaining that definition; its lib.rs patch shows both claims together. Its SPEC_impl.md:2978-2980 says: 'The reload then takes every old-kind row as having no terminal, in any state, without looking its recorded pane id up: one whose agent was launching, running or being stopped is converted to interrupted (`Transition::TerminalEnded`, beside the reboot conversion) unless its launch sentinel makes it an error'. This is a second attribution path, not evidence of a changed boot id. At the assigned cleanup commit, the parent paragraph already has the contradiction, but that is insufficient grounds to drop a range-review finding. Additional source check: at dbfc69751215dbf15e1d31d5bed73c3754c4ebc4 service/core.rs:7097-7114, an old-kind row with a launching, running, or stop-requested outcome unconditionally queues Transition::TerminalEnded after the no-sentinel case; that branch does not require a changed boot id. The complete new startup-retirement contract was read at SPEC_impl.md:2954-3004. Suggested fix: describe interruption as a durable lost-track outcome established by reboot or retirement of an old terminal, without claiming all instances come from a boot-id change. Suggested bucket: other. Confidence: confirmed by source, introducing patch and exact specification contract; no execution. proposed_drop: false; the original proposed drop (pre-existing outside scope) is retracted because the contract change is inside the reviewed range. possible_cover: none; parent owns queue coverage and excluded sources were not read. Could-be-highest: false; the consequence remains inaccurate internal documentation, with no operational instruction or established security/data-loss route. Caveat: the executable retirement behavior is specified and accepted; this finding concerns the explanation only and must not be rendered as a runtime correctness failure."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g054/findings.jsonl",
+        "id": "c1",
+        "line": 6,
+        "disposition": "verified",
+        "group": "interrupted-doc-defines-only-reboot-attribution-after-retirement",
+        "reason": "Parent explicitly accepted named retain-verified proposal from claims-034 after inspecting it. The protocol docstring explains Interrupted in terms of a changed boot ID after the same docstring adds startup retirement as a second route. The new route entered within the pinned range. Retain the documentation inconsistency; do not turn it into a claim that retirement behavior is incorrect. Retain as other for documentation accuracy. The earlier outside-range rationale is refuted; pre-existing at the final cleanup commit is not pre-existing at the range base. Checked source/results: [\"08399d092d20815ced6619c26df2391944ae2b4a:proto/lib.rs:849-859 includes private-server retirement, then says Interrupted means asked via the reboot detector/changed stored boot ID. Current lib.rs:855 retains that wording.\",\"6e423e30068b62c6cfa276c6d720ee35bb70387a:proto/lib.rs:842-852 describes only reboot. dbfc69751215dbf15e1d31d5bed73c3754c4ebc4's proto/lib.rs patch adds update-ended terminals while leaving the reboot-only explanatory clause.\",\"dbfc69751215dbf15e1d31d5bed73c3754c4ebc4:service/core.rs:7097-7114 queues Transition::TerminalEnded for old-kind Launching/Running/StopRequested without a boot-ID-change condition. Current SPEC_impl.md:2799-2803 explicitly describes this second conversion. No runtime malfunction or reproduction.\"] Current coverage/results: [\"SPEC.md:2665-2668 and :2998-3011, SPEC_impl.md Ending the old private tmux server accept retirement as an interruption route. That accepted executable behavior does not cover a contradictory explanation in protocol source.\",\"SPEC_impl.md Runtime state:4111-4136 retains a boot-ID explanation, but does not explicitly authorize the protocol docstring's implication that all interruptions take that route. It supplies context, not exact acceptance.\",\"TODO.md Planned is empty. BUGS.md, active TRIAGE_OUTCOMES.md, plans/queue and the full INDEX.md contain no exact boot-ID-only Interrupted docstring item. plans/REPORTS.md:32 records the broad tmux documentation cleanup landed; it is not an unlanded plan to fix this residual wording.\",\"No FILTER.md boundary fits an ordinary source-contract explanation error. It is not an emitted rare diagnostic.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Misleading internal explanation only; no operational instruction, observed runtime defect, or established security/data-loss route. The initial outside-assigned-patch drop was expressly withdrawn after range-history checks showed dbfc introduced the second route inside the range.\"; null."
+      },
+      "accepted_parent_decision": {
+        "key": "g054/c1",
+        "line": 6,
+        "disposition": "verified",
+        "group": "interrupted-doc-defines-only-reboot-attribution-after-retirement",
+        "bucket": "other",
+        "recording": "retain-verified",
+        "queue_target_candidate": null,
+        "needs_independent_drop_check": false,
+        "reason": "Parent explicitly accepted named retain-verified proposal from claims-034 after inspecting it. The protocol docstring explains Interrupted in terms of a changed boot ID after the same docstring adds startup retirement as a second route. The new route entered within the pinned range. Retain the documentation inconsistency; do not turn it into a claim that retirement behavior is incorrect. Retain as other for documentation accuracy. The earlier outside-range rationale is refuted; pre-existing at the final cleanup commit is not pre-existing at the range base. Checked source/results: [\"08399d092d20815ced6619c26df2391944ae2b4a:proto/lib.rs:849-859 includes private-server retirement, then says Interrupted means asked via the reboot detector/changed stored boot ID. Current lib.rs:855 retains that wording.\",\"6e423e30068b62c6cfa276c6d720ee35bb70387a:proto/lib.rs:842-852 describes only reboot. dbfc69751215dbf15e1d31d5bed73c3754c4ebc4's proto/lib.rs patch adds update-ended terminals while leaving the reboot-only explanatory clause.\",\"dbfc69751215dbf15e1d31d5bed73c3754c4ebc4:service/core.rs:7097-7114 queues Transition::TerminalEnded for old-kind Launching/Running/StopRequested without a boot-ID-change condition. Current SPEC_impl.md:2799-2803 explicitly describes this second conversion. No runtime malfunction or reproduction.\"] Current coverage/results: [\"SPEC.md:2665-2668 and :2998-3011, SPEC_impl.md Ending the old private tmux server accept retirement as an interruption route. That accepted executable behavior does not cover a contradictory explanation in protocol source.\",\"SPEC_impl.md Runtime state:4111-4136 retains a boot-ID explanation, but does not explicitly authorize the protocol docstring's implication that all interruptions take that route. It supplies context, not exact acceptance.\",\"TODO.md Planned is empty. BUGS.md, active TRIAGE_OUTCOMES.md, plans/queue and the full INDEX.md contain no exact boot-ID-only Interrupted docstring item. plans/REPORTS.md:32 records the broad tmux documentation cleanup landed; it is not an unlanded plan to fix this residual wording.\",\"No FILTER.md boundary fits an ordinary source-contract explanation error. It is not an emitted rare diagnostic.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Misleading internal explanation only; no operational instruction, observed runtime defect, or established security/data-loss route. The initial outside-assigned-patch drop was expressly withdrawn after range-history checks showed dbfc introduced the second route inside the range.\"; null."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-034",
+          "key": "g054/c1",
+          "latest_line": 6,
+          "recommendation": "retain-verified",
+          "bucket": "other",
+          "underlying_key": "interrupted-doc-defines-only-reboot-attribution-after-retirement",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The protocol docstring explains Interrupted in terms of a changed boot ID after the same docstring adds startup retirement as a second route. The new route entered within the pinned range. Retain the documentation inconsistency; do not turn it into a claim that retirement behavior is incorrect.",
+          "checks": [
+            "08399d092d20815ced6619c26df2391944ae2b4a:proto/lib.rs:849-859 includes private-server retirement, then says Interrupted means asked via the reboot detector/changed stored boot ID. Current lib.rs:855 retains that wording.",
+            "6e423e30068b62c6cfa276c6d720ee35bb70387a:proto/lib.rs:842-852 describes only reboot. dbfc69751215dbf15e1d31d5bed73c3754c4ebc4's proto/lib.rs patch adds update-ended terminals while leaving the reboot-only explanatory clause.",
+            "dbfc69751215dbf15e1d31d5bed73c3754c4ebc4:service/core.rs:7097-7114 queues Transition::TerminalEnded for old-kind Launching/Running/StopRequested without a boot-ID-change condition. Current SPEC_impl.md:2799-2803 explicitly describes this second conversion. No runtime malfunction or reproduction."
+          ],
+          "coverage_checked": [
+            "SPEC.md:2665-2668 and :2998-3011, SPEC_impl.md Ending the old private tmux server accept retirement as an interruption route. That accepted executable behavior does not cover a contradictory explanation in protocol source.",
+            "SPEC_impl.md Runtime state:4111-4136 retains a boot-ID explanation, but does not explicitly authorize the protocol docstring's implication that all interruptions take that route. It supplies context, not exact acceptance.",
+            "TODO.md Planned is empty. BUGS.md, active TRIAGE_OUTCOMES.md, plans/queue and the full INDEX.md contain no exact boot-ID-only Interrupted docstring item. plans/REPORTS.md:32 records the broad tmux documentation cleanup landed; it is not an unlanded plan to fix this residual wording.",
+            "No FILTER.md boundary fits an ordinary source-contract explanation error. It is not an emitted rare diagnostic."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": null,
+          "original_stronger_consequence": "Misleading internal explanation only; no operational instruction, observed runtime defect, or established security/data-loss route. The initial outside-assigned-patch drop was expressly withdrawn after range-history checks showed dbfc introduced the second route inside the range.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Retain as other for documentation accuracy. The earlier outside-range rationale is refuted; pre-existing at the final cleanup commit is not pre-existing at the range base."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": true,
+        "clearly_refuted_candidate": false,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Source-confirmed by an existing parent decision; not runtime reproduced",
+        "deduplication_key": "interrupted-doc-defines-only-reboot-attribution-after-retirement",
+        "destination": "trailing-interrupted-doc-defines-only-reboot-attribution-after-retirement.md"
+      }
+    },
+    {
+      "key": "g054/c2",
+      "owner": "g054",
+      "id": "c2",
+      "domain": "wire-protocol",
+      "purpose": "wire-protocol: crates/farhelm-proto/src/lib.rs; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 7,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c2",
+            "state": "open",
+            "summary": "Cached activity does not contradict fresh host-backed status projection",
+            "location": "crates/farhelm-proto/src/lib.rs:1076",
+            "detail": "Reviewed commit: 08399d092d20815ced6619c26df2391944ae2b4a. TLDR: considered whether the revised status documentation incorrectly promises fresh status while the system retains a cached classification across supervisor restart. No additional documentation defect is established by that cache. Source refutation: service/status.rs:141-252 derives liveness from HostEvidence and combines it with the durable outcome; an observable live terminal selects live_status rather than blindly replaying a stored wire status. status.rs:255-310 reads the current entry's activity cell and returns Unknown for startup_provisional unless Waiting is recognized. Its exact contract states: 'A reloaded terminal has no such fresh launch evidence, so it reports Unknown while the helm retains the preceding cached status.' Thus the supervisor's fresh wire projection and the helm's retained display answer are separate. The documentation at proto/lib.rs:757-763 already says list/rename use fresh terminal liveness plus cached classification, rather than promising fresh screen sampling per reply. Durable LastOutcome::Running is explicitly distinguished from wire status in status.rs:184-189. Suggested bucket: other if there were a wording defect. Confidence: confirmed source distinction; no execution. proposed_drop: source-refuted concern, based on the exact separation quoted above; no claim that all caches are absent or that every unchanged sentence in this old doc is perfect. possible_cover: none. Could-be-highest: false; this considered concern is internal status-contract wording with no established security or loss-of-work route. Material caveat: the earlier broad last_activity search was clipped and supplies no negative evidence; the bounded classification source supplies the conclusion. No new runtime failure or independent defect is claimed."
+          }
+        }
+      ],
+      "latest": {
+        "line": 7,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c2",
+          "state": "open",
+          "summary": "Cached activity does not contradict fresh host-backed status projection",
+          "location": "crates/farhelm-proto/src/lib.rs:1076",
+          "detail": "Reviewed commit: 08399d092d20815ced6619c26df2391944ae2b4a. TLDR: considered whether the revised status documentation incorrectly promises fresh status while the system retains a cached classification across supervisor restart. No additional documentation defect is established by that cache. Source refutation: service/status.rs:141-252 derives liveness from HostEvidence and combines it with the durable outcome; an observable live terminal selects live_status rather than blindly replaying a stored wire status. status.rs:255-310 reads the current entry's activity cell and returns Unknown for startup_provisional unless Waiting is recognized. Its exact contract states: 'A reloaded terminal has no such fresh launch evidence, so it reports Unknown while the helm retains the preceding cached status.' Thus the supervisor's fresh wire projection and the helm's retained display answer are separate. The documentation at proto/lib.rs:757-763 already says list/rename use fresh terminal liveness plus cached classification, rather than promising fresh screen sampling per reply. Durable LastOutcome::Running is explicitly distinguished from wire status in status.rs:184-189. Suggested bucket: other if there were a wording defect. Confidence: confirmed source distinction; no execution. proposed_drop: source-refuted concern, based on the exact separation quoted above; no claim that all caches are absent or that every unchanged sentence in this old doc is perfect. possible_cover: none. Could-be-highest: false; this considered concern is internal status-contract wording with no established security or loss-of-work route. Material caveat: the earlier broad last_activity search was clipped and supplies no negative evidence; the bounded classification source supplies the conclusion. No new runtime failure or independent defect is claimed."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g054/findings.jsonl",
+        "id": "c2",
+        "line": 7,
+        "disposition": "excluded",
+        "group": "status-doc-fresh-liveness-confused-with-cached-classification",
+        "reason": "Parent explicitly accepted named refuted proposal from claims-034 after inspecting it. Fresh terminal liveness and cached activity classification are different inputs. The protocol wording explicitly describes both, and the supervisor's provisional status lets the helm retain its previous classification. The considered cache contradiction is refuted. Refute only the claim that cached classification contradicts fresh host-backed liveness projection. Do not infer that all caches are absent or that every neighboring sentence is correct. Checked source/results: [\"08399d092d20815ced6619c26df2391944ae2b4a:proto/lib.rs:757-763 says list/rename ask current terminal liveness and read cached classification; it does not promise fresh screen sampling on each reply.\",\"At that revision service/status.rs:140-252 uses terminal evidence plus the durable outcome, selects live_status for a living terminal, and distinguishes durable LastOutcome::Running from wire classification.\",\"service/status.rs:255-310 returns the current activity reading, with startup_provisional yielding Unknown except recognized Waiting. Its docstring explicitly says a reloaded terminal reports Unknown while the helm retains the preceding cached status. No runtime execution.\"] Current coverage/results: [\"SPEC.md:2676-2680 and SPEC_impl.md Status heuristics:4162-4186 explicitly require cached status through the fresh-screen-evidence gap, consistent with the inspected code.\",\"TODO.md Planned is empty. BUGS.md, active TRIAGE_OUTCOMES.md, plans/queue and the full INDEX.md searches found no exact fresh-liveness/cached-classification documentation concern. Other restart-status issues have different consequences and are not aliases.\",\"FILTER.md need not apply: the specific concern is source-refuted and the cache is explicitly specified.\"] Exact cited cover: [\"SPEC.md:2676-2677: 'After a supervisor restart, a live terminal keeps its last cached status while the supervisor gathers new screen evidence.'\",\"SPEC_impl.md:4177-4182: 'The helm retains the prior status from its per-host cache for an `unknown` reply, if it has one, and replaces the rest of the row as usual.'\"] Original stronger consequence and missing premise remain preserved: \"Possible internal status-contract wording inconsistency; other. No established security or user-work-loss consequence. The original clipped broad search supplies no negative evidence and is not relied on here.\"; \"No promise of newly sampled activity classification on every reply was established.\"."
+      },
+      "accepted_parent_decision": {
+        "key": "g054/c2",
+        "line": 7,
+        "disposition": "excluded",
+        "group": "status-doc-fresh-liveness-confused-with-cached-classification",
+        "bucket": "other",
+        "recording": "refuted",
+        "queue_target_candidate": null,
+        "needs_independent_drop_check": false,
+        "reason": "Parent explicitly accepted named refuted proposal from claims-034 after inspecting it. Fresh terminal liveness and cached activity classification are different inputs. The protocol wording explicitly describes both, and the supervisor's provisional status lets the helm retain its previous classification. The considered cache contradiction is refuted. Refute only the claim that cached classification contradicts fresh host-backed liveness projection. Do not infer that all caches are absent or that every neighboring sentence is correct. Checked source/results: [\"08399d092d20815ced6619c26df2391944ae2b4a:proto/lib.rs:757-763 says list/rename ask current terminal liveness and read cached classification; it does not promise fresh screen sampling on each reply.\",\"At that revision service/status.rs:140-252 uses terminal evidence plus the durable outcome, selects live_status for a living terminal, and distinguishes durable LastOutcome::Running from wire classification.\",\"service/status.rs:255-310 returns the current activity reading, with startup_provisional yielding Unknown except recognized Waiting. Its docstring explicitly says a reloaded terminal reports Unknown while the helm retains the preceding cached status. No runtime execution.\"] Current coverage/results: [\"SPEC.md:2676-2680 and SPEC_impl.md Status heuristics:4162-4186 explicitly require cached status through the fresh-screen-evidence gap, consistent with the inspected code.\",\"TODO.md Planned is empty. BUGS.md, active TRIAGE_OUTCOMES.md, plans/queue and the full INDEX.md searches found no exact fresh-liveness/cached-classification documentation concern. Other restart-status issues have different consequences and are not aliases.\",\"FILTER.md need not apply: the specific concern is source-refuted and the cache is explicitly specified.\"] Exact cited cover: [\"SPEC.md:2676-2677: 'After a supervisor restart, a live terminal keeps its last cached status while the supervisor gathers new screen evidence.'\",\"SPEC_impl.md:4177-4182: 'The helm retains the prior status from its per-host cache for an `unknown` reply, if it has one, and replaces the rest of the row as usual.'\"] Original stronger consequence and missing premise remain preserved: \"Possible internal status-contract wording inconsistency; other. No established security or user-work-loss consequence. The original clipped broad search supplies no negative evidence and is not relied on here.\"; \"No promise of newly sampled activity classification on every reply was established.\"."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-034",
+          "key": "g054/c2",
+          "latest_line": 7,
+          "recommendation": "refuted",
+          "bucket": "other",
+          "underlying_key": "status-doc-fresh-liveness-confused-with-cached-classification",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "Fresh terminal liveness and cached activity classification are different inputs. The protocol wording explicitly describes both, and the supervisor's provisional status lets the helm retain its previous classification. The considered cache contradiction is refuted.",
+          "checks": [
+            "08399d092d20815ced6619c26df2391944ae2b4a:proto/lib.rs:757-763 says list/rename ask current terminal liveness and read cached classification; it does not promise fresh screen sampling on each reply.",
+            "At that revision service/status.rs:140-252 uses terminal evidence plus the durable outcome, selects live_status for a living terminal, and distinguishes durable LastOutcome::Running from wire classification.",
+            "service/status.rs:255-310 returns the current activity reading, with startup_provisional yielding Unknown except recognized Waiting. Its docstring explicitly says a reloaded terminal reports Unknown while the helm retains the preceding cached status. No runtime execution."
+          ],
+          "coverage_checked": [
+            "SPEC.md:2676-2680 and SPEC_impl.md Status heuristics:4162-4186 explicitly require cached status through the fresh-screen-evidence gap, consistent with the inspected code.",
+            "TODO.md Planned is empty. BUGS.md, active TRIAGE_OUTCOMES.md, plans/queue and the full INDEX.md searches found no exact fresh-liveness/cached-classification documentation concern. Other restart-status issues have different consequences and are not aliases.",
+            "FILTER.md need not apply: the specific concern is source-refuted and the cache is explicitly specified."
+          ],
+          "exact_cover_quotes": [
+            "SPEC.md:2676-2677: 'After a supervisor restart, a live terminal keeps its last cached status while the supervisor gathers new screen evidence.'",
+            "SPEC_impl.md:4177-4182: 'The helm retains the prior status from its per-host cache for an `unknown` reply, if it has one, and replaces the rest of the row as usual.'"
+          ],
+          "missing_premise": "No promise of newly sampled activity classification on every reply was established.",
+          "original_stronger_consequence": "Possible internal status-contract wording inconsistency; other. No established security or user-work-loss consequence. The original clipped broad search supplies no negative evidence and is not relied on here.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Refute only the claim that cached classification contradicts fresh host-backed liveness projection. Do not infer that all caches are absent or that every neighboring sentence is correct."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "status-doc-fresh-liveness-confused-with-cached-classification",
+        "destination": null
+      }
+    }
+  ],
+  "replies": [
+    {
+      "turn": 1,
+      "reply": "Initial pass complete. All 159 assigned patch lines and the complete commits field were read.\n\nNo reportable findings. Candidate `c1` records a pre-existing documentation inconsistency set aside. No open leads or unread assigned scope.\n\nFindings and progress logs are updated. Conclusions are source-based; no tests or reproductions were run."
+    },
+    {
+      "turn": 2,
+      "reply": "Delivered all 159 mandatory lines through the canonical evidence reader in one direct stdout result. No assigned ranges remain unread.\n\nRevised `c1` to a confirmed `other` documentation finding: the inconsistency originated within the pinned range at `dbfc697…`. The earlier drop rationale is retracted.\n\nRequested synthesis completed. No additional findings or open leads. Logs updated; no runtime execution."
+    },
+    {
+      "turn": 3,
+      "reply": "Discovery pass 1 complete. Nothing new reportable found.\n\n- Checked status projection, prompt receipts, terminal lifecycle, and selector decoding.\n- New verified findings: none.\n- New unverified findings: none.\n- Recorded `c2` as a source-refuted candidate.\n- Open leads: none.\n\nProgress and findings logs updated. No runtime execution."
+    }
+  ],
+  "progress": "# g054 progress\n\nInitial review completed, turn 1. Discovery-pass count: 0; this was the assigned initial pass, not a synthesis or later discovery turn. New verified findings: none. New unverified findings: none. Candidate c1 records an unchanged interruption-documentation inconsistency set aside as pre-existing. Open leads: none.\n\nThe complete inventory commits field was read; excluded metadata and coverage sources were not read. The assigned evidence packet, prep/parts/01528-000.patch:1-159, was delivered through the evidence reader. No assigned material remains unread. The patch changes comments only; no wire fields, discriminators, serialization attributes, test assertions, or executable code changed in this assignment.\n\nInterface conclusions at 08399d092d20815ced6619c26df2391944ae2b4a: agent and tab selectors resolve to HostTerminal values; old-kind rows do not resolve to a tmux terminal. Host liveness and exit records support the status wording. Prompt delivery succeeds only when both paste and submit receive Written. The pinned specification explicitly describes all served terminals as hosts, startup retirement of old tmux terminals, host-backed final screens, stop leaving the agent host, and delete/tab-close ending their hosts. No GUI handler is changed in this group.\n\nSource context read at the reviewed revision:\n- crates/farhelm-proto/src/lib.rs:1-130, 730-885, 1040-1105, 1620-1695, 2330-2380, 3338-3485, 3635-3775, 7615-7665; exact numbered interruption wording at 844-863.\n- Parent revision, crates/farhelm-proto/src/lib.rs:846-870, confirming c1 predates the patch.\n- crates/farhelm-supervisor/src/service/terminals.rs:1-340, including selector resolution and the missing-terminal refusal.\n- crates/farhelm-supervisor/src/service/core.rs:2170-2235, 6785-6840, 11845-12015, covering confirmed prompt writes, old-terminal interruption, and prompt admission.\n- crates/farhelm-supervisor/src/hosts/terminal.rs:814-897, covering running/dead/gone evidence and exit code versus signal.\n\nComplete governing specification sections read at that revision: SPEC.md Lifecycle operations (1888-2130), Status (2651-2854), Terminal experience (2855-3170), and Durability and resume (3436-3753). SPEC_impl.md Terminal host contract, runtime/lifecycle bullets and Launch failure classification (1888-2668), and Ending the old private tmux server (2780-2824). Targeted heading/keyword searches were used to find these sections; clipped broad search output was not used as complete section evidence. The full assigned patch was read independently of those searches.\n\nNo execution, builds, tests, or reproductions were performed; conclusions are source-based. No checkout files were changed. The first attempt to append c1 used an unsupported closed state and was rejected without recording; it was immediately corrected to the supported open state and recorded successfully. Candidate disposition is stated in its detail.\n\nNext action: return to the caller for the later synthesis turn. No further pass was performed in this turn.\n\nCoverage repair continuation, turn 2: corrected brief fully reread. Existing findings retained. Parent audit reports the earlier packet was not recognized; coverage certification is pending direct stdout delivery through the canonical manifest. Next: deliver 1-159, check c1 against the entire pinned range, then perform explicitly requested later-turn synthesis in this continuation. Discovery-pass count remains 0.\n\nCoverage repair initial phase completed in turn 2: the canonical evidence command delivered the sole source's entire inclusive 1-159 packet as direct stdout in its own shell result, with PERSISTENT_REVIEW_READ_V1 and PERSISTENT_REVIEW_END_V1 markers and unchanged SHA-256 235f56ae2da3ff5b59f47f9db6c8915358ee87b58c6cc693d7f86a83fa7d4882. No mandatory scope remains unread. This replaces the earlier claim of certified delivery; parent audit decides whether this result matches its parser.\n\nc1 attribution correction: the base protocol documentation, at 6e423e30068b62c6cfa276c6d720ee35bb70387a:842-852, described only reboot. Per-file range history and focused -G history identify dbfc69751215dbf15e1d31d5bed73c3754c4ebc4 as adding update-induced interruption while retaining the one-reboot-detector definition. Read that commit's full protocol patch, its new startup-retirement contract at SPEC_impl.md:2954-3004 (delivered context 2944-3008), and service/core.rs:7091-7122. The no-sentinel old-kind branch queues TerminalEnded for launching/running/stopping rows without requiring boot-id change. c1 is revised from candidate through an attribution lead to a confirmed other-bucket documentation finding. The earlier proposed drop is retracted; all original events remain. No open lead remains.\n\nEntering the explicitly requested later-turn synthesis phase in this same continuation. Initial repair and attribution checks are complete. Discovery-pass count remains 0. Next: reconcile the durable record against the assigned comments and report delta and actual delivery status.\n\nTurn 2 boundary: coverage repair initial phase and explicitly requested synthesis both completed. Synthesis reconciled all assigned comment changes against the prior source/contract checks and the corrected c1 attribution. At pinned tip 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db lib.rs:849-860, c1's conflicting definition remains unchanged. No additional finding or candidate emerged. New verified IDs this continuation: c1 (revised to finding); new unverified IDs: none; open leads: none. Discovery-pass count: 0. No mandatory unread scope. No runtime execution, reproductions, checkout changes, coverage-source searches, or helper agents.\n\nCurrent interface assumptions remain as in turn 1: this group's assigned patch changes comments only; host-only selector resolution, host exit records, confirmed prompt writes, and specified terminal lifecycle behavior support the cleanup. c1's range-level contract change comes from the earlier startup-retirement commit, not the assigned final cleanup alone. Parent should retain this exact attribution when matching related groups.\n\nNext action: return delta and actual packet delivery status to the caller. Because c1 was substantively reclassified through new range evidence, any required subsequent discovery pass remains a later turn; no separate discovery pass was performed here.\n\nTurn 3: separate discovery pass 1 begins. Complete six-event local history reread; no event removed or lowered. discovery-neighbours.json:1-314 read in seven bounded chunks before source search. No named pending question was supplied. Interface synthesis: supplied deliberate-retirement, old-page compatibility, viewer-lifetime, and final-frame-comment records do not introduce a new issue in this group's sole comment-cleanup patch. They provide novelty boundaries, not proof that all comments are correct. In particular, distinguish retirement consequences (g053/f1 and g125/c1), changed production/test contracts, and retained-frame versus copied-frame semantics (g125/c3). No additional local finding is inferred from those records alone.\n\nNext: re-examine the assigned comments beyond c1, focusing on status evidence, terminal selector identity, prompt receipt semantics, final-screen lifecycle and unknown-selector decode contracts at the pinned revision. Existing source/contract reads remain in context. Findings log exists; open leads: none. No new ID yet. Mandatory delivery remains complete; no runtime execution or reproduction planned.\n\nTurn 3 boundary: discovery pass 1 completed beyond known findings. New verified findings: none. New unverified-after-investigation findings: none. New candidate: c2, source-refuted cached-status versus fresh-projection concern; recorded immediately when set aside. Remaining open leads: none. Nothing new reportable was found. Existing c1 consequence, attribution, open state and proposed_drop:false are unchanged.\n\nUseful source checks at 08399d092d20815ced6619c26df2391944ae2b4a: proto/lib.rs:685-745,1068-1108,1640-1690 checked changed status and selector comments in their type contracts; service/status.rs:1-340 showed host-backed liveness, durable-outcome precedence, startup-provisional Unknown and separate cached-display behavior. This refuted the considered cache contradiction, without claiming runtime execution. The broad last_activity search was clipped and was not used as negative evidence. proto/lib.rs:2350-2368,3352-3372,3415-3438,3648-3664,3734-3760,7626-7665 rechecked prompt, Stop, Delete, tab close and unknown-selector test documentation. core.rs:2170-2235 confirms paste and submit must both receive Written. session_hosts.rs:1-160 distinguishes host lifetime from program cleanup and specifies Delete's explicit host ending. host_tabs.rs:906-1095 confirms tab-tree reap, detach, host ending, survivor sweep and success only after confirmed cleanup. handlers.rs:1124-1162 confirms Stop leaves the agent host/attachment and closes tabs. proto/io.rs:244-266 confirms the unknown-selector test passes through serde_json::from_slice without a selector fallback. These are supporting source reads for the assigned documentation, not independent reviews of those modules.\n\nAll 314 lines of supplied neighbour context were read before this search; there were no named pending questions. No covered/filtered sources were searched. No new effect was inferred from unrelated neighbour findings, no retired implementation was searched for independent bugs, and no runtime tests, reproductions, live-install operations or checkout edits were performed. Mandatory source delivery remains complete with no unread assigned scope. No supplementary report file was created. Next action: return discovery delta to the caller; further work only on its next instruction.\n"
+}

@@ -1,0 +1,577 @@
+{
+  "group": {
+    "id": "g163",
+    "domain": "retired-supervisor-tmux",
+    "purpose": "retired-supervisor-tmux: crates/farhelm-supervisor/src/tmux.rs; phases -    pub async fn kill_window(&self, session: &str, pane: &str) -> anyhow::Result<()> {",
+    "interfaces": [
+      "g001",
+      "g007",
+      "g008",
+      "g009",
+      "g071",
+      "g072",
+      "g073",
+      "g097",
+      "g098",
+      "g099",
+      "g100",
+      "g101",
+      "g102",
+      "g103",
+      "g104",
+      "g105",
+      "g106",
+      "g107",
+      "g108",
+      "g109",
+      "g110",
+      "g111",
+      "g112",
+      "g113",
+      "g114",
+      "g115",
+      "g116",
+      "g117",
+      "g118",
+      "g119",
+      "g120",
+      "g121",
+      "g127",
+      "g128",
+      "g129",
+      "g130",
+      "g131",
+      "g132",
+      "g133",
+      "g134",
+      "g144",
+      "g145",
+      "g146",
+      "g149",
+      "g150",
+      "g151",
+      "g152",
+      "g153",
+      "g154",
+      "g155",
+      "g156",
+      "g157",
+      "g158",
+      "g159",
+      "g160",
+      "g161",
+      "g162",
+      "g164",
+      "g165",
+      "g166",
+      "g169",
+      "g173"
+    ],
+    "sources": [
+      {
+        "path": "[private-run]/prep/parts/00951-003.patch",
+        "ranges": [
+          [
+            1,
+            1208
+          ]
+        ],
+        "original_path": "crates/farhelm-supervisor/src/tmux.rs",
+        "commit": "1ed482dde220452e424973faf38a5e1318986333",
+        "notes": "-    pub async fn kill_window(&self, session: &str, pane: &str) -> anyhow::Result<()> {; patch character offsets [176235,235389)",
+        "lines": 1208,
+        "bytes": 59260,
+        "start": 176235,
+        "end": 235389,
+        "original": "[private-run]/prep/originals/00951.patch"
+      }
+    ],
+    "lines": 1208,
+    "bytes": 59260
+  },
+  "records": [
+    {
+      "key": "g163/c1",
+      "owner": "g163",
+      "id": "c1",
+      "domain": "retired-supervisor-tmux",
+      "purpose": "retired-supervisor-tmux: crates/farhelm-supervisor/src/tmux.rs; phases -    pub async fn kill_window(&self, session: &str, pane: &str) -> anyhow::Result<()> {",
+      "history": [
+        {
+          "line": 1,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c1",
+            "state": "open",
+            "summary": "Legacy tmux scrollback is intentionally discarded on update",
+            "location": "crates/farhelm-supervisor/src/tmux.rs (deleted capture_pane_history)",
+            "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333\n\nTLDR: Updating ends old terminals and their scrollback; restarting an old session begins with an empty terminal.\n\nDetails: Assigned patch lines 303–488 remove capture_pane_history, which previously copied tmux history on Restart. Could-be-highest: yes, if destroying retained terminal output were an unintended loss of user-owned work. Suggested bucket: highest consequence considered, proposed drop for explicit specification acceptance. Confidence: confirmed specification acceptance; source-only review, no execution. SPEC.md at this revision, Terminal experience, lines 3004–3016, explicitly says: 'This release ends them: the first time a host’s supervisor of this release starts, it ends that tmux server' (apostrophe normalized here), and 'After an update to this release, Restart, Clone and Replace start such a session in a new, empty terminal.' SPEC_impl.md, Terminal substrate: private tmux server, lines 2882–2889, states that the running supervisor runs no tmux and its driver is gone. The proposed consequence is the requested retirement, rather than evidence of an accidental regression. proposed_drop: explicit product acceptance, exact decisive text: 'After an update to this release, Restart, Clone and Replace start such a session in a new, empty terminal.' possible_cover: none; no coverage sources read. Caveat: replacement host-to-host Restart still owes its separate scrollback contract; that interface remains to be checked."
+          }
+        },
+        {
+          "line": 3,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c1",
+            "state": "open",
+            "summary": "Legacy tmux scrollback is intentionally discarded on update",
+            "location": "crates/farhelm-supervisor/src/tmux.rs:4314 (parent revision; deleted)",
+            "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333\n\nTLDR: Updating ends old terminals and their scrollback; restarting an old session begins with an empty terminal.\n\nDetails: Assigned patch lines 303–488 remove capture_pane_history, previously at tmux.rs:4314 in the parent revision, which copied tmux history on Restart. Could-be-highest: yes, if destroying retained terminal output were unintended loss of user-owned work. Suggested bucket: highest consequence considered, proposed drop for explicit specification acceptance. Confidence: confirmed specification acceptance and source contract analysis; no execution. Exact decisive text at SPEC.md:3016: 'After an update to this release, Restart, Clone and Replace start such a session in a new, empty terminal.' SPEC_impl.md:2882–2889 states that old terminals end at startup and the running supervisor runs no tmux. core.rs:6142–6183 runs old-terminal retirement before reload; core.rs:6675–6679 never adopts a tmux pane. The replacement at core.rs:13000–13028 always calls relaunch_into_host. Host-to-host history preservation remains at core/host_restart.rs:418–457, which waits for final output then calls old.history_seed(MAX_SNAPSHOT); relaunch_into_host passes the seed into spawn_agent_in_host at lines 237–255. proposed_drop: explicit product acceptance of old-terminal loss, with the exact decisive text quoted above. possible_cover: none; no coverage sources read. Caveat: the charter requires independent checking of this could-be-highest proposed drop; source review does not establish behavior by execution."
+          }
+        },
+        {
+          "line": 6,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "c1",
+            "state": "open",
+            "summary": "Retiring legacy tmux terminals destroys their retained output",
+            "location": "crates/farhelm-supervisor/src/tmux.rs:4314 (parent revision; deleted)",
+            "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333\n\nTLDR: Updating ends old tmux terminals, their processes and retained screen/scrollback. Restart of such a session begins with an empty terminal.\n\nDetails: Revision of c1 from candidate to finding as required for specification-accepted potentially-highest consequences. Original consequence preserved: removal of capture_pane_history eliminates the old tmux-to-host Restart history-copy path and the retirement destroys old retained terminal output. Suggested bucket: highest, loss of potentially user-owned terminal output/processes; could-be-highest: yes. Confidence: confirmed by source and explicit contract, not execution. proposed_drop: proposed only, not accepted by parent; SPEC.md:3004–3016 explicitly authorizes ending old tmux terminals and says exactly, 'After an update to this release, Restart, Clone and Replace start such a session in a new, empty terminal.' It separately says, 'A session whose agent or tabs already run in terminal hosts keeps them.' SPEC_impl.md:2880–2926 specifies startup retirement and legacy-row conversion. The accepted boundary covers the designated old tmux server and its attributed legacy work only; it does not authorize wrong-target kills, loss of host-terminal output, or stopping surviving host tabs. Prior source checks: core.rs:6142–6183 performs retirement before reload; core.rs:6675–6679 never reconstructs legacy panes; core.rs:13000–13028 calls host relaunch; host_restart.rs:418–457 retains host history seeding and :237–255 passes the seed to the replacement. These checks supported the narrow retirement acceptance but did not alone prove the complete replacement lifecycle or absence of wrong-target actions. Those interfaces are being rechecked in this synthesis turn. possible_cover: none. Caveats: no execution or reproduction; independent drop check remains required. Prior records remain append-only, and no parent drop approval is inferred."
+          }
+        },
+        {
+          "line": 8,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "c1",
+            "state": "open",
+            "summary": "Retiring legacy tmux terminals destroys their retained output",
+            "location": "crates/farhelm-supervisor/src/tmux.rs:4314 (parent revision; deleted)",
+            "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333\n\nTLDR: Updating ends old tmux terminals, their processes and retained screen/scrollback. Restart of such a session starts with an empty terminal. The assigned removal does not itself establish loss of a surviving terminal host's history or processes.\n\nDetails: Original consequence retained: removing capture_pane_history removes tmux-to-host history transfer, while startup retirement destroys the legacy server's retained output and ends old work. Revised attribution: git diff --numstat of service/core/old_terminals.rs between this commit and its parent is empty; the parent already invokes OldTerminals::end_private_server at core.rs:6433–6438, calls tmux.no_server_after_startup, and returns None for legacy row lookup at :6965–6969. Therefore the deletion removes a path already unreachable through normal reload, rather than independently introducing the retirement. Suggested bucket: highest consequence considered, loss of potentially user-owned output/processes; could-be-highest: yes. Confidence: source-confirmed retirement consequence and narrow contract acceptance; no execution. proposed_drop: proposed only, parent has accepted no drop. Exact acceptance at SPEC.md:3006–3010: 'This release ends them: the first time a host's supervisor of this release starts, it ends that tmux server, and with it everything that still ran in an old terminal, without needing a tmux program.' SPEC.md:3016 says, 'After an update to this release, Restart, Clone and Replace start such a session in a new, empty terminal.' Exact exclusion at :3013: 'A session whose agent or tabs already run in terminal hosts keeps them.' SPEC.md:1938–1952 separately requires retained host scrollback, a blank new screen, rollback of a confirmed-ended failed replacement, and keeping tabs running.\n\nReplacement lifecycle checks/results: core.rs:12381–12483 pins the old child and sweeps AgentOnly; :12486–12493 reads the old host seed before opening a generation. host_restart.rs:418–490 waits for settled final output, asks history_seed(MAX_SNAPSHOT), preserves old size, logs missing history and refuses cancellation during supervisor stop. Its :237–255 passes the blob to the spawned replacement; :294–388 publishes before ending only the captured replacing host. :740–782 confirms failed replacement cleanup and sweeps AgentOnly before definitive rollback. core.rs:12798–12975 skips restoration after publication, restores prior terminal only on definitive failure, leaves ambiguous replacement terminal-less, and retains shared tab cells. host_handover.rs:645–861 filters agent rows by Host kind, adopts by session and generation, and excludes Tab roles from earlier-agent cleanup. :875–980 checks session/agent/generation for earlier-host fallback and refuses an unreadable newer record; :992–1053 supersedes only an earlier Agent host of a confirmed later Host row naming another socket, never a current host or tab. These are source refutations of specific highest routes: confusing surviving tabs with the retired agent, deleting a current host as superseded, choosing older readable history over an unreadable newer record, or rolling back a successfully published replacement to its old terminal.\n\nStartup retirement boundary: old_terminals.rs:290–349 sweeps converted legacy agents with AgentOnly and old tabs by Tab id, never WholeSession. :363–408 excludes recorded host tabs from scope-derived old tabs. The private-server shutdown is pinned to its peer/start identity and socket command line (previously checked :176–279); the retirement allowance does not authorize a wrong-target action. No such route from the assigned removal was established. Source-refuted wrong-target close routes remain separately recorded in c2. Exact accepted host residuals are separate from tmux retirement: SPEC.md:1942–1945 allows terminal-less ambiguous failed replacement and starts empty when old history cannot be copied; SPEC_impl.md:2417–2419 says an ambiguously failed restart can leave the old host/history alive while the next Restart starts empty. These residuals are preserved as caveats, not generalized permission to discard surviving host work. possible_cover: none. Independent checking of all proposed drops remains required; no runtime behavior was observed and no reproduction was written."
+          }
+        }
+      ],
+      "latest": {
+        "line": 8,
+        "event": {
+          "version": 1,
+          "kind": "finding",
+          "id": "c1",
+          "state": "open",
+          "summary": "Retiring legacy tmux terminals destroys their retained output",
+          "location": "crates/farhelm-supervisor/src/tmux.rs:4314 (parent revision; deleted)",
+          "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333\n\nTLDR: Updating ends old tmux terminals, their processes and retained screen/scrollback. Restart of such a session starts with an empty terminal. The assigned removal does not itself establish loss of a surviving terminal host's history or processes.\n\nDetails: Original consequence retained: removing capture_pane_history removes tmux-to-host history transfer, while startup retirement destroys the legacy server's retained output and ends old work. Revised attribution: git diff --numstat of service/core/old_terminals.rs between this commit and its parent is empty; the parent already invokes OldTerminals::end_private_server at core.rs:6433–6438, calls tmux.no_server_after_startup, and returns None for legacy row lookup at :6965–6969. Therefore the deletion removes a path already unreachable through normal reload, rather than independently introducing the retirement. Suggested bucket: highest consequence considered, loss of potentially user-owned output/processes; could-be-highest: yes. Confidence: source-confirmed retirement consequence and narrow contract acceptance; no execution. proposed_drop: proposed only, parent has accepted no drop. Exact acceptance at SPEC.md:3006–3010: 'This release ends them: the first time a host's supervisor of this release starts, it ends that tmux server, and with it everything that still ran in an old terminal, without needing a tmux program.' SPEC.md:3016 says, 'After an update to this release, Restart, Clone and Replace start such a session in a new, empty terminal.' Exact exclusion at :3013: 'A session whose agent or tabs already run in terminal hosts keeps them.' SPEC.md:1938–1952 separately requires retained host scrollback, a blank new screen, rollback of a confirmed-ended failed replacement, and keeping tabs running.\n\nReplacement lifecycle checks/results: core.rs:12381–12483 pins the old child and sweeps AgentOnly; :12486–12493 reads the old host seed before opening a generation. host_restart.rs:418–490 waits for settled final output, asks history_seed(MAX_SNAPSHOT), preserves old size, logs missing history and refuses cancellation during supervisor stop. Its :237–255 passes the blob to the spawned replacement; :294–388 publishes before ending only the captured replacing host. :740–782 confirms failed replacement cleanup and sweeps AgentOnly before definitive rollback. core.rs:12798–12975 skips restoration after publication, restores prior terminal only on definitive failure, leaves ambiguous replacement terminal-less, and retains shared tab cells. host_handover.rs:645–861 filters agent rows by Host kind, adopts by session and generation, and excludes Tab roles from earlier-agent cleanup. :875–980 checks session/agent/generation for earlier-host fallback and refuses an unreadable newer record; :992–1053 supersedes only an earlier Agent host of a confirmed later Host row naming another socket, never a current host or tab. These are source refutations of specific highest routes: confusing surviving tabs with the retired agent, deleting a current host as superseded, choosing older readable history over an unreadable newer record, or rolling back a successfully published replacement to its old terminal.\n\nStartup retirement boundary: old_terminals.rs:290–349 sweeps converted legacy agents with AgentOnly and old tabs by Tab id, never WholeSession. :363–408 excludes recorded host tabs from scope-derived old tabs. The private-server shutdown is pinned to its peer/start identity and socket command line (previously checked :176–279); the retirement allowance does not authorize a wrong-target action. No such route from the assigned removal was established. Source-refuted wrong-target close routes remain separately recorded in c2. Exact accepted host residuals are separate from tmux retirement: SPEC.md:1942–1945 allows terminal-less ambiguous failed replacement and starts empty when old history cannot be copied; SPEC_impl.md:2417–2419 says an ambiguously failed restart can leave the old host/history alive while the next Restart starts empty. These residuals are preserved as caveats, not generalized permission to discard surviving host work. possible_cover: none. Independent checking of all proposed drops remains required; no runtime behavior was observed and no reproduction was written."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g163/findings.jsonl",
+        "id": "c1",
+        "line": 8,
+        "disposition": "under-investigation",
+        "group": "g163-c1",
+        "reason": "Record durably acknowledged; parent source/contract validation, cross-group synthesis, coverage/filter matching and any independent drop check remain pending. This preserves the claim and uncertainty without accepting, dropping or lowering it."
+      },
+      "accepted_parent_decision": null,
+      "returned_claim_checks": [
+        {
+          "batch": "claims-103",
+          "key": "g163/c1",
+          "latest_line": 8,
+          "recommendation": "covered",
+          "bucket": "highest",
+          "underlying_key": "intentional-legacy-tmux-retirement-work-history-loss",
+          "aliases": [
+            "g164/f1"
+          ],
+          "target_queue_file": null,
+          "why": "Ending designated legacy terminals, their processes, screen and scrollback, followed by empty Restart/Clone/Replace is explicitly accepted. The acceptance excludes surviving terminal hosts and wrong-target termination. The strongest consequence remains highest pending the independent coverage check.",
+          "checks": [
+            "1ed482dde220452e424973faf38a5e1318986333:SPEC.md:3003-3016 expressly states the full legacy-process/history loss and survival of existing hosts.",
+            "Same revision: core.rs:6142-6183 ends the old server before reload; :6675-6679 treats legacy terminal rows as absent. core/old_terminals.rs:290-349 sweeps AgentOnly and individual Tab targets; :363-408 excludes scope-derived tabs with host launch records. These paths are under crates/farhelm-supervisor/src/service/.",
+            "Same revision: core/host_restart.rs:418-457 reads the old host history seed after bounded settling. This is separate from the removed tmux capture path. No runtime execution verified the broader replacement lifecycle.",
+            "old_terminals.rs has an empty assigned-commit diff; the retirement is nevertheless introduced in range by dbfc69751215dbf15e1d31d5bed73c3754c4ebc4, so predating this deletion does not remove it from range."
+          ],
+          "coverage_checked": [
+            "Both current specs searched and the old-terminal sections read: SPEC.md:2997-3010 and SPEC_impl.md:2780-2820 retain the designated-server retirement and empty-terminal acceptance.",
+            "TODO Planned is empty. Its later phase-3 removal idea is outside Planned and is not used as cover. plans/queue tmux-end-old-terminals is historical implementation context, not an unlanded fix basis.",
+            "Full INDEX.md, BUGS.md and active TRIAGE_OUTCOMES.md searched for legacy work/scrollback destruction; no additional exact queue decision found. FILTER.md is not needed; ordinary upgrade-plus-rare-condition filtering would not describe this unconditional transition."
+          ],
+          "exact_cover_quotes": [
+            "SPEC.md:2999-3001: A supervisor that finds that tmux server when it starts ends it, and with it everything that still ran in an old terminal, without needing a tmux program.",
+            "SPEC.md:3002-3003: its terminal's last screen, which lived in the server, is gone; old tabs are closed.",
+            "SPEC.md:3007-3010: A session whose agent or tabs already run in terminal hosts keeps them. ... Restart, Clone and Replace start such a session in a new, empty terminal."
+          ],
+          "missing_premise": null,
+          "original_stronger_consequence": "Startup ends all work in the designated legacy tmux terminals and destroys their last screen/scrollback; subsequent Restart cannot recover that history. No waiver for host-terminal history or wrong-target kills is inferred.",
+          "needs_independent_drop_check": true,
+          "proposed_basis": "Exact product acceptance of legacy-only destruction. Same root as g164/f1; preserve both provenance histories when consolidating."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": true,
+        "clearly_refuted_candidate": false,
+        "needs_unfinished_gate": true,
+        "provisional_bucket": "highest",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "intentional-legacy-tmux-retirement-work-history-loss",
+        "destination": "trailing-intentional-legacy-tmux-retirement-work-history-loss.md"
+      }
+    },
+    {
+      "key": "g163/c2",
+      "owner": "g163",
+      "id": "c2",
+      "domain": "retired-supervisor-tmux",
+      "purpose": "retired-supervisor-tmux: crates/farhelm-supervisor/src/tmux.rs; phases -    pub async fn kill_window(&self, session: &str, pane: &str) -> anyhow::Result<()> {",
+      "history": [
+        {
+          "line": 2,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c2",
+            "state": "open",
+            "summary": "Removing tmux pane identity checks does not remove tab-close identity checks",
+            "location": "crates/farhelm-supervisor/src/tmux.rs (deleted kill_window)",
+            "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333\n\nTLDR: Considered whether stale tab cleanup could stop another tab or an agent after the tmux identity guard was removed. The replacement retains an identity guard.\n\nDetails: Assigned patch lines 1–52 remove kill_window, including its same-command pane/session identity check against tmux target fallback. Could-be-highest: yes; stopping another live terminal would lose user-owned processes. Suggested bucket: highest consequence considered, proposed drop because the suspected route is refuted by the replacement. Confidence: confirmed source refutation, no execution. At the reviewed commit, service/core.rs:6675–6679 never reconstructs a tmux terminal from a legacy row. service/core/host_tabs.rs:915–927 re-resolves the tab in this session’s tab cell, filters by equality with the captured HostTerminal, and rejects the session’s agent runtime. Lines 964–969 recheck automatic-close eligibility under the lifecycle claim, and lines 1052–1062 end the adopted process or selected host rather than a tmux current-window fallback. SPEC_impl.md, Tabs in hosts, states: 'the session’s cell holds only hosts whose tag names one of its tabs (the open wrote it, a reload checked it), and the agent’s own runtime is refused' (typographic apostrophes normalized in this quotation). proposed_drop: replacement host identity and lifecycle checks refute the stale tmux-target route; exact code predicates are find_host_tab(...).filter(|tab| tab.host == host) and Some(agent) if *agent == tab.host. possible_cover: none. Caveat: this is a check of deletion’s implications, not a comprehensive independent review of host process identity mechanisms."
+          }
+        },
+        {
+          "line": 4,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c2",
+            "state": "open",
+            "summary": "Removing tmux pane identity checks does not remove tab-close identity checks",
+            "location": "crates/farhelm-supervisor/src/tmux.rs:3959 (parent revision; deleted)",
+            "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333\n\nTLDR: Considered whether stale tab cleanup could stop another tab or an agent after the tmux identity guard was removed. The replacement retains an identity guard.\n\nDetails: Assigned patch lines 1–52 remove kill_window, including its same-command pane/session identity check against tmux target fallback. Could-be-highest: yes; stopping another live terminal would lose user-owned processes. Suggested bucket: highest consequence considered, proposed drop because the suspected route is refuted by the replacement. Confidence: confirmed source refutation, no execution. At the reviewed commit, service/core.rs:6675–6679 never reconstructs a tmux terminal from a legacy row. service/core/host_tabs.rs:915–927 re-resolves the tab in this session's tab cell, filters by equality with the captured HostTerminal, and rejects the session's agent runtime. Lines 964–969 recheck automatic-close eligibility under the lifecycle claim, and lines 1052–1062 end the adopted process or selected host rather than a tmux current-window fallback. Exact SPEC_impl.md, Tabs in hosts, text: 'the session’s cell holds only hosts whose tag names one of its tabs' is superseded by this exact ASCII-source quotation: 'the session's cell holds only hosts whose tag names one of its tabs (the open wrote it, a reload checked it), and the agent's own runtime is refused'. proposed_drop: replacement host identity and lifecycle checks refute the stale tmux-target route; exact code predicates are find_host_tab(...).filter(|tab| tab.host == host) and Some(agent) if *agent == tab.host. possible_cover: none. Caveat: this checks deletion's implications, not all host process identity mechanisms; the charter requires an independent check of could-be-highest proposed drops."
+          }
+        },
+        {
+          "line": 5,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c2",
+            "state": "open",
+            "summary": "Removing tmux pane identity checks does not remove tab-close identity checks",
+            "location": "crates/farhelm-supervisor/src/tmux.rs:3959 (parent revision; deleted)",
+            "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333\n\nTLDR: Considered whether stale tab cleanup could stop another tab or an agent after the tmux identity guard was removed. The replacement retains an identity guard.\n\nDetails: Assigned patch lines 1–52 remove kill_window, including its same-command pane/session identity check against tmux target fallback. Could-be-highest: yes; stopping another live terminal would lose user-owned processes. Suggested bucket: highest consequence considered, proposed drop because the suspected route is refuted by the replacement. Confidence: confirmed source refutation, no execution. core.rs:6675–6679 never reconstructs a tmux terminal from a legacy row. core/host_tabs.rs:915–927 re-resolves the tab in this session's tab cell, filters by equality with the captured HostTerminal, and rejects the session's agent runtime. HostTerminal equality is Arc::ptr_eq at hosts/terminal.rs:1467–1469, rather than socket-name equality. host_tabs.rs:964–969 rechecks automatic-close eligibility under the lifecycle claim; lines 1052–1062 end the adopted process or selected host rather than a tmux current-window fallback. Exact SPEC_impl.md, Tabs in hosts, text: 'the session's cell holds only hosts whose tag names one of its tabs (the open wrote it, a reload checked it), and the agent's own runtime is refused'. proposed_drop: replacement runtime identity and lifecycle checks refute the stale tmux-target route; code predicates are find_host_tab(...).filter(|tab| tab.host == host) and Some(agent) if *agent == tab.host. possible_cover: none. Caveat: this checks deletion's implications, not all host process identity mechanisms; the charter requires an independent check of could-be-highest proposed drops."
+          }
+        },
+        {
+          "line": 7,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c2",
+            "state": "open",
+            "summary": "Stale tab cleanup route is refuted by replacement lifecycle identity checks",
+            "location": "crates/farhelm-supervisor/src/tmux.rs:3959 (parent revision; deleted)",
+            "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333\n\nTLDR: Original suspected consequence preserved: deleting tmux's guarded kill could let stale tab cleanup stop another tab or an agent and lose its processes. The replacement's normal shipped close path does not use tmux target fallback and retains separate terminal identity checks.\n\nDetails: Could-be-highest: yes, wrong-terminal termination would lose user-owned processes. Suggested bucket: highest consequence considered; confidence: source-refuted for the identified stale/fallback routes, no execution. proposed_drop: proposed source refutation only; parent has accepted no drop. Checks/results: core.rs:14005–14058 moves the session lifecycle claim onto the supervisor-owned close task, resolves TerminalId::Tab(tab_id), and dispatches only that runtime. terminals.rs:225–248 resolves from the session's tab cell and returns NotFound without agent fallback. host_tabs.rs:915–927 requires the same tab id and HostTerminal as resolved, refuses the agent runtime; hosts/terminal.rs:1467–1469 defines equality by Arc::ptr_eq. host_tabs.rs:964–969 rechecks automatic-reap eligibility before mutation, :982–1012 roots the initial sweep only at the pinned live child and uses marker-only cleanup after host shutdown; core.rs:14120–14178 derives this tab's scope and SweepTarget::Tab(tab_id), with failed cleanup refused. host_tabs.rs:1052–1062 checks the adopted process when the socket alone was judged gone. host_launch.rs:682–719 first shuts down the held runtime, then aborts it and signals its pinned adopted process; :727–745 uses terminate_verified, without reconnecting to a replacement socket when an adopted process exists. Its no-adopted-process fallback (:753–800) shuts down a readable host only when its tag names this session; unreadable connections need a peer to signal. Socket cleanup (:812–814) takes host_scan and uses re-verifying removal. Exact contract, SPEC_impl.md:2332–2338: 'Closing a tab: the session's cell holds only hosts whose tag names one of its tabs (the open wrote it, a reload checked it), and the agent's own runtime is refused'; also 'the sweep roots at the child only while it runs'. This refutes (1) tmux falling back from a vanished pane to a current window, (2) re-resolving a different runtime after asynchronous work, (3) recycled child pid becoming a sweep root, and (4) reconnecting to and killing a new socket occupant when an adopted process exists. No highest route is dropped on retirement acceptance: these are separate source checks. possible_cover: none. Caveats: the no-adopted-process fallback validates session identity rather than role/generation; no shipped collision/replacement route from this deletion has been established, and this record does not claim that arbitrary corrupted state or an externally replaced socket is fully protected. Broader process-sweep correctness is outside this assigned deletion. Independent check remains pending."
+          }
+        },
+        {
+          "line": 9,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c2",
+            "state": "open",
+            "summary": "Stale tab cleanup route is refuted by replacement lifecycle identity checks",
+            "location": "crates/farhelm-supervisor/src/tmux.rs:3959 (parent revision; deleted)",
+            "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333\n\nTLDR: Original suspected consequence preserved: deleting tmux's guarded kill could let stale tab cleanup stop another tab or an agent and lose its processes. The replacement's normal shipped close path retains separate terminal identity checks.\n\nDetails: Could-be-highest: yes, wrong-terminal termination would lose user-owned processes. Suggested bucket: highest consequence considered. Confidence: source-refuted for the identified routes, not observed in execution. proposed_drop: proposed source refutation only; parent has accepted no drop. Open creates a fresh UUID tab id and HostRole::Tab tag for the session at host_tabs.rs:403–447, then publishes that runtime into its tab cell at :523–537. Startup discovery checks names_tab before adoption at :1403–1421; names_tab explicitly compares session id, Tab role and tab id at :1476–1479. A wrong tag yields an unavailable placeholder (:1423–1433), which ordinary close refuses (:932–942), rather than treating it as the requested tab.\n\nClose checks/results: core.rs:14005–14058 moves the lifecycle claim into the supervisor-owned task and resolves TerminalId::Tab(tab_id). terminals.rs:225–248 resolves from this session's tab cell with no agent fallback. host_tabs.rs:915–927 requires the same tab id and runtime, and rejects the agent runtime; equality is Arc::ptr_eq at hosts/terminal.rs:1467–1469. Automatic reap renews eligibility before mutation at host_tabs.rs:964–969. core.rs:14120–14178 obtains the pinned live child identity or fails, derives this tab's scope, and uses SweepTarget::Tab(tab_id). hosts/terminal.rs:2571–2583 checks the root pid against the probe and retains its start identity; :737–751 refuses unreadable child state instead of assuming no root. After host shutdown, host_tabs.rs:1004–1012 uses marker-only cleanup, and :1013–1037 retains the record/tab and retry state on unconfirmed host end. The socket-gone case checks the adopted process at :1052–1062. host_launch.rs:682–719 shuts down the held runtime, then aborts and signals its adopted process without reconnecting when one is known; :727–745 uses terminate_verified. The no-adopted-process fallback (:753–800) shuts down a readable host only when its tag names this session and needs a peer to signal an unreadable one. Re-verifying socket removal is serialized by host_scan at :812–814.\n\nExact SPEC_impl.md:2332–2338 contract: 'Closing a tab: the session's cell holds only hosts whose tag names one of its tabs (the open wrote it, a reload checked it), and the agent's own runtime is refused'; 'the sweep roots at the child only while it runs'. Source-refuted highest routes retained for independent check: (1) a vanished tmux pane falling back to its current window; (2) an async close substituting a newly resolved runtime; (3) a reused child pid becoming the sweep root; (4) reconnecting to a replacement socket occupant when an adopted process exists; (5) startup mistaking an Agent-role or different-session/tab host for the requested tab. These are separate source checks, not consequences waived by tmux retirement. possible_cover: none. Caveats: fallback with no adopted process validates session identity rather than role/generation; no shipped collision/replacement route from this deletion was established, and arbitrary corrupted state or external socket replacement is not proven safe. Broader sweep correctness remains outside this assigned deletion. Independent drop check pending; no parent approval inferred."
+          }
+        }
+      ],
+      "latest": {
+        "line": 9,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c2",
+          "state": "open",
+          "summary": "Stale tab cleanup route is refuted by replacement lifecycle identity checks",
+          "location": "crates/farhelm-supervisor/src/tmux.rs:3959 (parent revision; deleted)",
+          "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333\n\nTLDR: Original suspected consequence preserved: deleting tmux's guarded kill could let stale tab cleanup stop another tab or an agent and lose its processes. The replacement's normal shipped close path retains separate terminal identity checks.\n\nDetails: Could-be-highest: yes, wrong-terminal termination would lose user-owned processes. Suggested bucket: highest consequence considered. Confidence: source-refuted for the identified routes, not observed in execution. proposed_drop: proposed source refutation only; parent has accepted no drop. Open creates a fresh UUID tab id and HostRole::Tab tag for the session at host_tabs.rs:403–447, then publishes that runtime into its tab cell at :523–537. Startup discovery checks names_tab before adoption at :1403–1421; names_tab explicitly compares session id, Tab role and tab id at :1476–1479. A wrong tag yields an unavailable placeholder (:1423–1433), which ordinary close refuses (:932–942), rather than treating it as the requested tab.\n\nClose checks/results: core.rs:14005–14058 moves the lifecycle claim into the supervisor-owned task and resolves TerminalId::Tab(tab_id). terminals.rs:225–248 resolves from this session's tab cell with no agent fallback. host_tabs.rs:915–927 requires the same tab id and runtime, and rejects the agent runtime; equality is Arc::ptr_eq at hosts/terminal.rs:1467–1469. Automatic reap renews eligibility before mutation at host_tabs.rs:964–969. core.rs:14120–14178 obtains the pinned live child identity or fails, derives this tab's scope, and uses SweepTarget::Tab(tab_id). hosts/terminal.rs:2571–2583 checks the root pid against the probe and retains its start identity; :737–751 refuses unreadable child state instead of assuming no root. After host shutdown, host_tabs.rs:1004–1012 uses marker-only cleanup, and :1013–1037 retains the record/tab and retry state on unconfirmed host end. The socket-gone case checks the adopted process at :1052–1062. host_launch.rs:682–719 shuts down the held runtime, then aborts and signals its adopted process without reconnecting when one is known; :727–745 uses terminate_verified. The no-adopted-process fallback (:753–800) shuts down a readable host only when its tag names this session and needs a peer to signal an unreadable one. Re-verifying socket removal is serialized by host_scan at :812–814.\n\nExact SPEC_impl.md:2332–2338 contract: 'Closing a tab: the session's cell holds only hosts whose tag names one of its tabs (the open wrote it, a reload checked it), and the agent's own runtime is refused'; 'the sweep roots at the child only while it runs'. Source-refuted highest routes retained for independent check: (1) a vanished tmux pane falling back to its current window; (2) an async close substituting a newly resolved runtime; (3) a reused child pid becoming the sweep root; (4) reconnecting to a replacement socket occupant when an adopted process exists; (5) startup mistaking an Agent-role or different-session/tab host for the requested tab. These are separate source checks, not consequences waived by tmux retirement. possible_cover: none. Caveats: fallback with no adopted process validates session identity rather than role/generation; no shipped collision/replacement route from this deletion was established, and arbitrary corrupted state or external socket replacement is not proven safe. Broader sweep correctness remains outside this assigned deletion. Independent drop check pending; no parent approval inferred."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g163/findings.jsonl",
+        "id": "c2",
+        "line": 9,
+        "disposition": "under-investigation",
+        "group": "g163-c2",
+        "reason": "Record durably acknowledged; parent source/contract validation, cross-group synthesis, coverage/filter matching and any independent drop check remain pending. This preserves the claim and uncertainty without accepting, dropping or lowering it."
+      },
+      "accepted_parent_decision": null,
+      "returned_claim_checks": [
+        {
+          "batch": "claims-103",
+          "key": "g163/c2",
+          "latest_line": 9,
+          "recommendation": "refuted",
+          "bucket": "other",
+          "underlying_key": "removed-tmux-pane-fallback-wrong-tab-close",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The named tmux vanished-pane fallback route disappears with the runtime driver. Host close checks the captured tab's runtime identity, rejects the agent runtime and validates recovered tags. These checks refute this removal-induced wrong-target route without proving all host cleanup correct.",
+          "checks": [
+            "1ed482dde220452e424973faf38a5e1318986333:crates/farhelm-supervisor/src/service/core/host_tabs.rs:915-942 requires the same tab id and HostTerminal and refuses agent/unavailable substitution; hosts/terminal.rs:1467-1469 defines equality as Arc::ptr_eq.",
+            "Same revision: host_tabs.rs:964-969 rechecks reap eligibility; :982-1012 uses the captured host and marker-only post-shutdown cleanup; :1013-1037 preserves unconfirmed tabs; :1052-1062 confirms an adopted process for Gone runtimes.",
+            "Same revision: host_tabs.rs:1403-1433 accepts only names_tab at startup; :1476-1479 compares session id, Tab role and tab id. host_launch.rs:682-745 uses the held runtime then its adopted process. The no-adopted fallback's weaker session-only tag check remains a caveat, not a proven wrong-target producer."
+          ],
+          "coverage_checked": [
+            "Both specs searched; current SPEC_impl.md:2255-2268 describes captured tab ownership and the special Gone adopted-process check. No legacy retirement acceptance is used to waive wrong-target actions.",
+            "TODO Planned is empty. plans/queue, BUGS.md, full INDEX.md and active TRIAGE_OUTCOMES.md searched for stale pane fallback and wrong-tab close; no exact coverage found. Existing foreground-child-loss and foreign-host test-oracle items describe distinct roots.",
+            "FILTER.md excludes wrong-target actions and loss of processes, so no filter basis is proposed."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": "No shipped route from the deleted tmux guard to a different captured host runtime was established. Arbitrarily corrupted state or external socket replacement is not certified safe.",
+          "original_stronger_consequence": "Stale cleanup could stop another tab or the agent and lose its processes. The five source-refuted routes in the latest record remain part of the proposed independent check.",
+          "needs_independent_drop_check": true,
+          "proposed_basis": "Narrow source refutation of vanished-pane fallback, runtime substitution and wrong-tag recovery. Does not refute the separate Gone Delete confirmation concern in g163/l1."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": true,
+        "provisional_bucket": "highest",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "removed-tmux-pane-fallback-wrong-tab-close",
+        "destination": null
+      }
+    },
+    {
+      "key": "g163/l1",
+      "owner": "g163",
+      "id": "l1",
+      "domain": "retired-supervisor-tmux",
+      "purpose": "retired-supervisor-tmux: crates/farhelm-supervisor/src/tmux.rs; phases -    pub async fn kill_window(&self, session: &str, pane: &str) -> anyhow::Result<()> {",
+      "history": [
+        {
+          "line": 10,
+          "event": {
+            "version": 1,
+            "kind": "lead",
+            "id": "l1",
+            "state": "open",
+            "summary": "Reconcile Delete host-end confirmation counterexample with tab-close identity checks",
+            "location": "crates/farhelm-supervisor/src/service/session_hosts.rs:733",
+            "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. TLDR: Parent-provided g166/c5 counterexample says Delete may forget a gone-reading tab whose child already exited while its adopted host process survives. Source basis supplied: session_hosts.rs:245–260 retains Gone nonplaceholder tabs, sweep_roots:510–521 checks the child, end:733–740 calls end_launch_host, and host_launch.rs:694–696 accepts Gone without checking the adopted host process, unlike host_tabs.rs:1052–1062. Suggested bucket: other for unconfirmed cleanup if established; could-be-highest remains possible if a surviving process causes security or work loss, but no such route is supplied. Confidence: uninvestigated cross-group lead, not a new finding. proposed_drop: false. possible_cover: g166/c5; parent owns it. Missing premises to investigate: actual in-range source chain, supported producer of Gone while adopted host remains alive, and whether this contradicts any claim in c1/c2. c2 refutes specified wrong-target tab-close routes, not all Delete completion. No blanket Delete confirmation may be inferred from it. No execution/reproduction. Additional received interface finding g097/l4 concerns old snapshot PID-to-owner attribution and is a distinct known wrong-target route, not authorized by c1 retirement acceptance; no duplicate finding is claimed here."
+          }
+        },
+        {
+          "line": 11,
+          "event": {
+            "version": 1,
+            "kind": "lead",
+            "id": "l1",
+            "state": "open",
+            "summary": "Delete Gone-host confirmation bypass needs a real host's Gone producer",
+            "location": "crates/farhelm-supervisor/src/service/session_hosts.rs:738",
+            "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. TLDR: The supplied g166/c5 Delete chain is confirmed conditionally: a nonplaceholder Gone tab is retained at session_hosts.rs:245–260; sweep_roots:510–521 checks only its child; end:733–740 invokes end_launch_host, whose :694–696 accepts Gone. The close-only wrapper host_tabs.rs:1052–1062 instead confirms the adopted process. Original potential consequence: successful Delete may forget a live host process; no established security/user-work-loss route, suggested bucket other for conditional cleanup omission, could-be-highest only if additional harmful survival is established. Confidence: unresolved producer after useful source checks, no execution. New limiting evidence: hosts/client.rs:639–646 applies confirm_with_process to connection failures; :1220–1239 turns Gone into Unavailable when find_socket_process finds a live matching host and also turns Gone into Unavailable when the whole search errors. Therefore missing socket plus connection end alone is insufficient for an ordinary readable command-line-named host. The retained close test host_terminals.rs:3688–3780 uses the test runner as the adopted stand-in (its command line names no socket), so it establishes a synthetic state, not that real-host premise. Remaining accessible check: runtime's reconnect path and per-row process-search omissions. Whole-range attribution checked partially: both SessionHosts tab dispatch and end_launch_host Gone-success branch already exist at exclusive base 6e423e30068b62c6cfa276c6d720ee35bb70387a; this refutes attribution as introduced by the assigned deletion, without refuting the conditional contract hole or erasing the in-range documentation obligation. proposed_drop: false; no parent disposition accepted. possible_cover: g166/c5, known cross-group concern. c2's captured-tab identity refutations concern wrong-target termination and do not imply all-host Delete confirmation."
+          }
+        },
+        {
+          "line": 12,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "l1",
+            "state": "open",
+            "summary": "Known Delete confirmation bypass is separate from guarded tab-close identity",
+            "location": "crates/farhelm-supervisor/src/service/session_hosts.rs:738",
+            "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. TLDR: Reconciled the parent-supplied g166/c5: Delete can accept a held tab runtime's Gone state without the adopted-process check used by explicit/automatic tab close. The original conditional orphan-host consequence is preserved; it is a known interface issue, not a new discovery from this assigned deletion. Suggested bucket: other for unconfirmed host cleanup; could-be-highest only if surviving work/credential harm is additionally established. No such higher consequence is established here. Confidence: source-confirmed conditional dispatch/contract discrepancy; a real-host producer is unverified after investigation, not runtime-observed. proposed_drop: no drop of g166/c5, c1 or c2 is proposed or accepted. This local reconciliation lead is closed to a candidate because the parent already owns the known issue through g166/c5; its useful limiting evidence is retained below. possible_cover: exact supplied g166/c5 record.\n\nSource checks: session_hosts.rs:245–260 keeps nonplaceholder Gone runtimes and omits their records from independent settlement; :510–521 pins the child only, which may already be reaped; :733–740 calls end_launch_host, and :771–791 treats Ok as confirmed. host_launch.rs:694–696 returns Ok on shutdown Err(Gone). The distinct close wrapper at host_tabs.rs:1052–1062 checks the adopted host process in that case. SPEC_impl.md:2458–2461 requires that 'a host not confirmed ended, within its budget or at all, keeps the session and its records for a retry, so Delete never reports a session gone while one of its hosts may still run.' Thus c2's source-refuted wrong-target tab-close routes do not prove all-host Delete confirmation. No accepted legacy retirement clause waives this separate obligation.\n\nProducer limitation investigated: actual runtime reconnect at hosts/terminal.rs:4128–4142 gets Gone through HostConnection::connect_with. hosts/client.rs:639–646 always applies confirm_with_process; :1220–1239 converts Gone into Unavailable if a matching live host process is found or the overall process search errors. Consequently merely unlinking the socket and ending a connection does not establish Gone for an ordinary readable, correctly named live terminal host. The retained close regression at host_terminals.rs:3688–3780 uses this test runner as a non-host-command-line stand-in; it proves the synthetic state and close safeguard, not that ordinary-host premise. However hosts/process.rs:220–247 ignores unreadable process rows and missing argv, and procs.rs:348–356,1126–1134,1723 onward shows per-process read failures/truncation return None. Therefore a real live host omitted by one such per-row/argv observation can still yield Gone; a total walk failure/timeout cannot. The exact missing premise for a real orphan occurrence is a missing/unusable socket and ended owning connection together with a live adopted host omitted from that process search (or no matching command line), followed by Delete after its child ended. Source establishes the conditional branches but does not establish that an installed host actually met the observation-failure premise. A retained failure trace or platform process-read evidence covering a real host would settle occurrence; none was requested or collected. No readily accessible source check supplied a guaranteed ordinary producer.\n\nFull-range attribution: exclusive base 6e423e30068b62c6cfa276c6d720ee35bb70387a already dispatches held tabs through end_launch_host at session_hosts.rs:746–753 and accepts Gone there at host_launch.rs:684–686. The complete base-to-tip relevant diff changes terminal wrappers/comments, not those bypass branches; no in-range introduction of this runtime chain was identified. This is stronger than merely predating the assigned commit, but it does not excuse an in-range newly false documentation claim; that attribution belongs to g166/parent. Prior wrong-target process-loss consequence and exact source refutations in c2 remain intact. Received g097/l4's separate startup PID-to-owner misattribution and g007/c4/g128/l1's later hidden-work consent routes are known interface issues and are not refuted by accurate pane/host tags on the ordinary close path. No tests, reproductions or live-state actions."
+          }
+        }
+      ],
+      "latest": {
+        "line": 12,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "l1",
+          "state": "open",
+          "summary": "Known Delete confirmation bypass is separate from guarded tab-close identity",
+          "location": "crates/farhelm-supervisor/src/service/session_hosts.rs:738",
+          "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. TLDR: Reconciled the parent-supplied g166/c5: Delete can accept a held tab runtime's Gone state without the adopted-process check used by explicit/automatic tab close. The original conditional orphan-host consequence is preserved; it is a known interface issue, not a new discovery from this assigned deletion. Suggested bucket: other for unconfirmed host cleanup; could-be-highest only if surviving work/credential harm is additionally established. No such higher consequence is established here. Confidence: source-confirmed conditional dispatch/contract discrepancy; a real-host producer is unverified after investigation, not runtime-observed. proposed_drop: no drop of g166/c5, c1 or c2 is proposed or accepted. This local reconciliation lead is closed to a candidate because the parent already owns the known issue through g166/c5; its useful limiting evidence is retained below. possible_cover: exact supplied g166/c5 record.\n\nSource checks: session_hosts.rs:245–260 keeps nonplaceholder Gone runtimes and omits their records from independent settlement; :510–521 pins the child only, which may already be reaped; :733–740 calls end_launch_host, and :771–791 treats Ok as confirmed. host_launch.rs:694–696 returns Ok on shutdown Err(Gone). The distinct close wrapper at host_tabs.rs:1052–1062 checks the adopted host process in that case. SPEC_impl.md:2458–2461 requires that 'a host not confirmed ended, within its budget or at all, keeps the session and its records for a retry, so Delete never reports a session gone while one of its hosts may still run.' Thus c2's source-refuted wrong-target tab-close routes do not prove all-host Delete confirmation. No accepted legacy retirement clause waives this separate obligation.\n\nProducer limitation investigated: actual runtime reconnect at hosts/terminal.rs:4128–4142 gets Gone through HostConnection::connect_with. hosts/client.rs:639–646 always applies confirm_with_process; :1220–1239 converts Gone into Unavailable if a matching live host process is found or the overall process search errors. Consequently merely unlinking the socket and ending a connection does not establish Gone for an ordinary readable, correctly named live terminal host. The retained close regression at host_terminals.rs:3688–3780 uses this test runner as a non-host-command-line stand-in; it proves the synthetic state and close safeguard, not that ordinary-host premise. However hosts/process.rs:220–247 ignores unreadable process rows and missing argv, and procs.rs:348–356,1126–1134,1723 onward shows per-process read failures/truncation return None. Therefore a real live host omitted by one such per-row/argv observation can still yield Gone; a total walk failure/timeout cannot. The exact missing premise for a real orphan occurrence is a missing/unusable socket and ended owning connection together with a live adopted host omitted from that process search (or no matching command line), followed by Delete after its child ended. Source establishes the conditional branches but does not establish that an installed host actually met the observation-failure premise. A retained failure trace or platform process-read evidence covering a real host would settle occurrence; none was requested or collected. No readily accessible source check supplied a guaranteed ordinary producer.\n\nFull-range attribution: exclusive base 6e423e30068b62c6cfa276c6d720ee35bb70387a already dispatches held tabs through end_launch_host at session_hosts.rs:746–753 and accepts Gone there at host_launch.rs:684–686. The complete base-to-tip relevant diff changes terminal wrappers/comments, not those bypass branches; no in-range introduction of this runtime chain was identified. This is stronger than merely predating the assigned commit, but it does not excuse an in-range newly false documentation claim; that attribution belongs to g166/parent. Prior wrong-target process-loss consequence and exact source refutations in c2 remain intact. Received g097/l4's separate startup PID-to-owner misattribution and g007/c4/g128/l1's later hidden-work consent routes are known interface issues and are not refuted by accurate pane/host tags on the ordinary close path. No tests, reproductions or live-state actions."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g163/findings.jsonl",
+        "id": "l1",
+        "line": 12,
+        "disposition": "under-investigation",
+        "group": "g163-l1",
+        "reason": "Record durably acknowledged; parent source/contract validation, cross-group synthesis, coverage/filter matching and any independent drop check remain pending. This preserves the claim and uncertainty without accepting, dropping or lowering it."
+      },
+      "accepted_parent_decision": null,
+      "returned_claim_checks": [
+        {
+          "batch": "claims-103",
+          "key": "g163/l1",
+          "latest_line": 12,
+          "recommendation": "needs-parent",
+          "bucket": "other",
+          "underlying_key": "delete-held-gone-host-skips-adopted-process-confirmation",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The conditional Delete bypass is source-supported and distinct from guarded tab-close identity. Its runtime branches predate the entire range. The input attributes a potentially in-range false documentation promise to parent-owned g166/c5, which is not supplied here; that record must carry the evidence rather than this consultation inventing its attribution or dropping it.",
+          "checks": [
+            "1ed482dde220452e424973faf38a5e1318986333:crates/farhelm-supervisor/src/service/session_hosts.rs:245-260 retains nonplaceholder tabs and excludes their records from settlement; :510-521 checks the child only; :733-740 dispatches held tabs to end_launch_host; :771-791 treats Ok as confirmation.",
+            "Same revision: core/host_launch.rs:694-696 returns Ok on Gone without the adopted-process check used by core/host_tabs.rs:1052-1062.",
+            "Same revision: hosts/client.rs:1220-1239 converts Gone to Unavailable when process search finds a host or the whole walk errors. hosts/process.rs:220-247 skips unreadable/missing-argv rows, leaving a conditional process-observation omission premise.",
+            "Exclusive base 6e423e30068b62c6cfa276c6d720ee35bb70387a already has the same Gone success branch at host_launch.rs:684-686 and held-tab dispatch at session_hosts.rs:746-753. Complete base-to-tip diff changes wrappers/comments but not these bypass branches."
+          ],
+          "coverage_checked": [
+            "Both specs searched. Current SPEC_impl.md:2360-2385 promises adopted-process confirmation and no successful Delete while a host may run; it does not accept this bypass.",
+            "TODO Planned is empty. plans/queue, BUGS.md, full INDEX.md and active TRIAGE_OUTCOMES.md searched for Gone Delete/adopted-host confirmation; no exact existing coverage found.",
+            "review_feedback_queue/gone-retry-forgets-pinned-foreground-child.md read in full: it concerns losing the child's identity across retry, whereas this claim preserves the adopted host identity but bypasses checking it. It is not exact coverage or a same-root alias.",
+            "No FILTER.md rule clearly covers successful Delete leaving an unconfirmed host. No filter or definitive runtime refutation is proposed."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": "A real live host must have a missing/unusable socket and ended owning connection, be omitted from process search, have an ended child, and then reach Delete. Occurrence is unverified. In-range attribution of the documentation defect must be checked in the parent-owned record.",
+          "original_stronger_consequence": "Successful Delete may forget a live host process. Possible subsequent security or user-work harm was considered but not established; no reduction of such a proven consequence occurred.",
+          "needs_independent_drop_check": true,
+          "proposed_basis": "Preserve this as evidence for the supplied known g166/c5 concern. The runtime implementation is pre-range, but that alone cannot dismiss an in-range newly false specification/comment claim.",
+          "new_interface_evidence": "For g166/c5: the base already contains both bypass branches. A real Gone producer needs more than socket removal: confirm_with_process suppresses Gone for a readable live host, while per-row/argv omissions can still escape that check. This limits occurrence confidence without refuting the conditional contract hole."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": true,
+        "clearly_refuted_candidate": false,
+        "needs_unfinished_gate": true,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "delete-held-gone-host-skips-adopted-process-confirmation",
+        "destination": "trailing-delete-held-gone-host-skips-adopted-process-confirmation.md"
+      }
+    },
+    {
+      "key": "g163/c3",
+      "owner": "g163",
+      "id": "c3",
+      "domain": "retired-supervisor-tmux",
+      "purpose": "retired-supervisor-tmux: crates/farhelm-supervisor/src/tmux.rs; phases -    pub async fn kill_window(&self, session: &str, pane: &str) -> anyhow::Result<()> {",
+      "history": [
+        {
+          "line": 13,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c3",
+            "state": "open",
+            "summary": "Removing tmux resize clamping does not newly break host resize handling",
+            "location": "crates/farhelm-supervisor/src/tmux.rs:4115 (parent resize_window; deleted)",
+            "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. TLDR: Considered whether deleting the tmux resize helper's dimension clamping newly lets an invalid viewer size fail the connection or other sessions. The surviving host path still logs the refusal locally and already used the same size validation before the entire reviewed range. Suggested bucket: other if established; could-be-highest: no security or user-work-loss route. Confidence: source refutation of this removal consequence; no execution. proposed_drop: exact source equivalence and failure handling, not a policy waiver. Assigned patch lines 151–180 delete resize_window, which clamped tmux dimensions and bounded its exchange. Current handlers.rs:2028–2074 checks the route session and attachment channel/connection under the attachments lock, then :2075–2083 invokes the selected HostTerminal resize and only warns on error. hosts/terminal.rs:2344–2353 rejects invalid size synchronously and coalesces valid requests through a watch channel, so the removed tmux subprocess wait is not inherited by another global-lock operation. At exclusive base 6e423e30068b62c6cfa276c6d720ee35bb70387a, service/terminals.rs:271–284 already dispatches Terminal::Host directly to host.resize(Size { cols, rows }); only Terminal::Tmux uses the deleted clamping helper. The immediate parent handlers.rs:2438–2452 likewise only logs resize failure. Therefore no invalid-size connection failure or host-clamping regression from these assigned lines is established. possible_cover: none in supplied neighbour records; this is a non-reporting decision, not a novel defect. Caveat: invalid host sizes are refused, rather than clamped; this comparison does not claim that every viewport geometry is accepted or validate unrelated browser sizing behavior."
+          }
+        },
+        {
+          "line": 14,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c3",
+            "state": "open",
+            "summary": "Removing tmux resize clamping does not newly break host resize handling",
+            "location": "crates/farhelm-supervisor/src/tmux.rs:4113 (parent resize_window; deleted)",
+            "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. TLDR: Considered whether deleting the tmux resize helper's dimension clamping newly lets an invalid viewer size fail the connection or other sessions. The surviving host path still logs the refusal locally and already used the same size validation before the entire reviewed range. Suggested bucket: other if established; could-be-highest: no security or user-work-loss route. Confidence: source refutation of this removal consequence; no execution. proposed_drop: exact source equivalence and failure handling, not a policy waiver. Assigned patch lines 151–180 delete resize_window, which clamped tmux dimensions and bounded its exchange. Current handlers.rs:2028–2074 checks the route session and attachment channel/connection under the attachments lock, then :2075–2083 invokes the selected HostTerminal resize and only warns on error. hosts/terminal.rs:2344–2353 rejects invalid size synchronously and coalesces valid requests through a watch channel, so the removed tmux subprocess wait is not inherited by another global-lock operation. At exclusive base 6e423e30068b62c6cfa276c6d720ee35bb70387a, service/terminals.rs:271–284 already dispatches Terminal::Host directly to host.resize(Size { cols, rows }); only Terminal::Tmux uses the deleted clamping helper. The immediate parent handlers.rs:2438–2452 likewise only logs resize failure. Therefore no invalid-size connection failure or host-clamping regression from these assigned lines is established. possible_cover: none in supplied neighbour records; this is a non-reporting decision, not a novel defect. Caveat: invalid host sizes are refused, rather than clamped; this comparison does not claim that every viewport geometry is accepted or validate unrelated browser sizing behavior."
+          }
+        }
+      ],
+      "latest": {
+        "line": 14,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c3",
+          "state": "open",
+          "summary": "Removing tmux resize clamping does not newly break host resize handling",
+          "location": "crates/farhelm-supervisor/src/tmux.rs:4113 (parent resize_window; deleted)",
+          "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. TLDR: Considered whether deleting the tmux resize helper's dimension clamping newly lets an invalid viewer size fail the connection or other sessions. The surviving host path still logs the refusal locally and already used the same size validation before the entire reviewed range. Suggested bucket: other if established; could-be-highest: no security or user-work-loss route. Confidence: source refutation of this removal consequence; no execution. proposed_drop: exact source equivalence and failure handling, not a policy waiver. Assigned patch lines 151–180 delete resize_window, which clamped tmux dimensions and bounded its exchange. Current handlers.rs:2028–2074 checks the route session and attachment channel/connection under the attachments lock, then :2075–2083 invokes the selected HostTerminal resize and only warns on error. hosts/terminal.rs:2344–2353 rejects invalid size synchronously and coalesces valid requests through a watch channel, so the removed tmux subprocess wait is not inherited by another global-lock operation. At exclusive base 6e423e30068b62c6cfa276c6d720ee35bb70387a, service/terminals.rs:271–284 already dispatches Terminal::Host directly to host.resize(Size { cols, rows }); only Terminal::Tmux uses the deleted clamping helper. The immediate parent handlers.rs:2438–2452 likewise only logs resize failure. Therefore no invalid-size connection failure or host-clamping regression from these assigned lines is established. possible_cover: none in supplied neighbour records; this is a non-reporting decision, not a novel defect. Caveat: invalid host sizes are refused, rather than clamped; this comparison does not claim that every viewport geometry is accepted or validate unrelated browser sizing behavior."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g163/findings.jsonl",
+        "id": "c3",
+        "line": 14,
+        "disposition": "excluded",
+        "group": "removed-tmux-resize-clamping-regression",
+        "reason": "Parent explicitly accepted named refuted proposal from claims-103 after inspecting it. Host resize already bypassed tmux clamping before the full range, and the retained handler logs local refusal without ending the shared connection. The claimed new connection/global-session failure from this deletion is refuted. Pre-range direct-host dispatch plus retained local error handling; does not claim every viewport geometry is accepted. Checked source/results: [\"1ed482dde220452e424973faf38a5e1318986333:crates/farhelm-supervisor/src/service/handlers.rs:2028-2083 validates route/attachment ownership and only warns on resize failure.\",\"Same revision: hosts/terminal.rs:2344-2353 validates synchronously and coalesces valid requests through watch, so no removed tmux subprocess wait remains under the attachment lock.\",\"Exclusive base 6e423e30068b62c6cfa276c6d720ee35bb70387a:service/terminals.rs:271-284 already dispatches Host resize directly; only Tmux used the clamping helper.\"] Current coverage/results: [\"Both specs searched for invalid dimensions, clamping and resize. Full-fidelity and resize promises do not establish a new regression from these deleted tmux lines.\",\"TODO Planned is empty. plans/queue, BUGS.md, full INDEX.md and active TRIAGE_OUTCOMES.md searched for the same resize refusal/connection impact; no exact coverage found. initial-oversized-grid-cannot-attach.md is a distinct attach-time grid bound, not this later resize route.\",\"No filter is required; this is a source refutation, not a rarity dismissal.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Invalid viewer dimensions could fail the connection or affect other sessions after tmux resize clamping disappeared; no security or user-work-loss route was claimed.\"; \"No changed Host validation or failure propagation causing the asserted new connection failure was found.\"."
+      },
+      "accepted_parent_decision": {
+        "key": "g163/c3",
+        "line": 14,
+        "disposition": "excluded",
+        "group": "removed-tmux-resize-clamping-regression",
+        "bucket": "other",
+        "recording": "refuted",
+        "queue_target_candidate": null,
+        "needs_independent_drop_check": false,
+        "reason": "Parent explicitly accepted named refuted proposal from claims-103 after inspecting it. Host resize already bypassed tmux clamping before the full range, and the retained handler logs local refusal without ending the shared connection. The claimed new connection/global-session failure from this deletion is refuted. Pre-range direct-host dispatch plus retained local error handling; does not claim every viewport geometry is accepted. Checked source/results: [\"1ed482dde220452e424973faf38a5e1318986333:crates/farhelm-supervisor/src/service/handlers.rs:2028-2083 validates route/attachment ownership and only warns on resize failure.\",\"Same revision: hosts/terminal.rs:2344-2353 validates synchronously and coalesces valid requests through watch, so no removed tmux subprocess wait remains under the attachment lock.\",\"Exclusive base 6e423e30068b62c6cfa276c6d720ee35bb70387a:service/terminals.rs:271-284 already dispatches Host resize directly; only Tmux used the clamping helper.\"] Current coverage/results: [\"Both specs searched for invalid dimensions, clamping and resize. Full-fidelity and resize promises do not establish a new regression from these deleted tmux lines.\",\"TODO Planned is empty. plans/queue, BUGS.md, full INDEX.md and active TRIAGE_OUTCOMES.md searched for the same resize refusal/connection impact; no exact coverage found. initial-oversized-grid-cannot-attach.md is a distinct attach-time grid bound, not this later resize route.\",\"No filter is required; this is a source refutation, not a rarity dismissal.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Invalid viewer dimensions could fail the connection or affect other sessions after tmux resize clamping disappeared; no security or user-work-loss route was claimed.\"; \"No changed Host validation or failure propagation causing the asserted new connection failure was found.\"."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-103",
+          "key": "g163/c3",
+          "latest_line": 14,
+          "recommendation": "refuted",
+          "bucket": "other",
+          "underlying_key": "removed-tmux-resize-clamping-regression",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "Host resize already bypassed tmux clamping before the full range, and the retained handler logs local refusal without ending the shared connection. The claimed new connection/global-session failure from this deletion is refuted.",
+          "checks": [
+            "1ed482dde220452e424973faf38a5e1318986333:crates/farhelm-supervisor/src/service/handlers.rs:2028-2083 validates route/attachment ownership and only warns on resize failure.",
+            "Same revision: hosts/terminal.rs:2344-2353 validates synchronously and coalesces valid requests through watch, so no removed tmux subprocess wait remains under the attachment lock.",
+            "Exclusive base 6e423e30068b62c6cfa276c6d720ee35bb70387a:service/terminals.rs:271-284 already dispatches Host resize directly; only Tmux used the clamping helper."
+          ],
+          "coverage_checked": [
+            "Both specs searched for invalid dimensions, clamping and resize. Full-fidelity and resize promises do not establish a new regression from these deleted tmux lines.",
+            "TODO Planned is empty. plans/queue, BUGS.md, full INDEX.md and active TRIAGE_OUTCOMES.md searched for the same resize refusal/connection impact; no exact coverage found. initial-oversized-grid-cannot-attach.md is a distinct attach-time grid bound, not this later resize route.",
+            "No filter is required; this is a source refutation, not a rarity dismissal."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": "No changed Host validation or failure propagation causing the asserted new connection failure was found.",
+          "original_stronger_consequence": "Invalid viewer dimensions could fail the connection or affect other sessions after tmux resize clamping disappeared; no security or user-work-loss route was claimed.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Pre-range direct-host dispatch plus retained local error handling; does not claim every viewport geometry is accepted."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "removed-tmux-resize-clamping-regression",
+        "destination": null
+      }
+    }
+  ],
+  "replies": [
+    {
+      "turn": 1,
+      "reply": "Initial review complete: all 1,208 assigned patch lines and the complete commits field read.\n\nNo reportable findings or unresolved leads. Recorded candidates `c1` and `c2` with proposed-drop evidence for independent review. Findings log and progress updated. Source-only analysis; no tests or reproductions run."
+    },
+    {
+      "turn": 2,
+      "reply": "Coverage repaired: all 1–1208 lines delivered in seven separate direct-stdout evidence packets. Synthesis completed.\n\n- `c1` converted to a finding with `proposed_drop`; retirement acceptance is explicitly limited to legacy terminals.\n- `c2` revised with lifecycle checks and source-refuted wrong-target routes.\n- No new defects or unresolved lead IDs.\n\nLogs updated. Both proposed drops remain pending independent review. No execution or reproductions."
+    },
+    {
+      "turn": 3,
+      "reply": "Discovery pass 1 complete. Checked resize handling, paste gating/delivery, screen/title capture, and duplicate-host lookup.\n\n- New verified findings: none.\n- New unverified findings: none.\n- Records added: `l1` reconciles known `g166/c5`; `c3` records a source-refuted resize concern.\n- Open leads: none.\n\nNothing new found. Logs updated; no tests or reproductions run."
+    }
+  ],
+  "progress": "Group g163: retired-supervisor-tmux.\nTurn type/count: initial / 1. Discovery-pass count: 0; no later-turn synthesis or discovery performed.\nState: assigned initial source review complete at 1ed482dde220452e424973faf38a5e1318986333.\nCoverage: all assigned mandatory patch lines 1–1208 delivered through evidence read in seven packets; complete inventory commits field read, excluded metadata not read. No unread assigned patch scope.\nContracts: pinned SPEC_impl private-tmux section read in full (2880–2991); Terminal host introduction/client/discovery context (1963–2090), Tabs in hosts and Restarting a host agent (2311–2422), Answers bind to what was drawn (1071–1099); pinned SPEC lifecycle Restart and terminal-retirement product paragraphs read. No GUI handler in assigned scope.\nInterfaces checked: startup retires private server before reload; legacy rows never create live terminals; Restart always calls host relaunch, retaining host history seed; tab close checks captured runtime by pointer identity, rejects agent runtime, rechecks automatic eligibility, and ends selected host; tab refusal reads final host screen; status sampler uses caught-up host screen/title and session status uses host liveness; prompt delivery requires caught-up host modes and bracketed paste.\nDurable records: c1 (explicitly accepted old-terminal/scrollback loss) and c2 (stale cleanup concern refuted by runtime identity). Both could-be-highest proposed drops require parent independent check. No verified finding, no unverified finding, no open lead.\nEvidence: source/contract analysis only. No tests, builds, reproductions, process changes, or checkout changes.\nNext action: return to caller for later synthesis turn. No later-turn protocol performed in this turn.\n\nTurn 2: missing-packet coverage repair followed by synthesis, per explicit parent override. Discovery-pass count 0.\nState: brief reread fully; existing c1/c2 retained. Repair all assigned lines 1–1208 with direct stdout evidence packets. Then check complete replacement lifecycle and exact acceptance boundaries. No source changes or runtime work authorized.\n\nTurn 2 completed: coverage repair plus synthesis (explicit parent override). Discovery-pass count remains 0.\nCoverage repair: seven separate evidence read shell calls delivered stdout directly for 1–200, 201–400, 401–600, 601–800, 801–1000, 1001–1200 and 1201–1208. No unread assigned range. This supersedes the initial progress claim of supported evidence delivery; initial packets were wrapped in the shell-result object and parent did not accept them.\nSynthesis checks: exact SPEC retirement exclusion for existing host terminals; source in parent already retired old server and returned no tmux terminal, with old_terminals.rs unchanged by reviewed commit. Checked host restart seed/stop/claim/spawn/publication/end-old, failed-spawn definitive/ambiguous recovery, orderly-stop tab handoff, startup earlier-host recovery and superseded role filters. Checked new tab tag and publication, startup tag validation, close dispatch/lifecycle, pointer identity, pinned child sweep, host shutdown fallback, and record retention.\nRecords changed: c1 converted to finding with proposed_drop, then revised with narrow acceptance boundary, parent attribution, and complete replacement-lifecycle source evidence. c2 revised with tab lifecycle and explicit source-refuted highest routes. No new IDs, no new verified or unverified defects. No unresolved lead IDs.\nInterface assumptions/caveats: accepted legacy retirement does not authorize wrong-target actions or loss of surviving host terminals. No-adopted-process shutdown fallback checks session tag, not full role/generation; no shipped wrong-target route from this deletion established. Both proposed drops remain pending parent independent check.\nEvidence is source/contract analysis only; no runtime tests, builds or reproductions, no checkout changes or live-install interaction.\nNext action: return delta and coverage status to parent; no discovery pass performed.\n\nTurn 3: discovery pass 1, after required cross-interface synthesis. Reading discovery-neighbours in bounded chunks; first 1–160 attempt clipped, reread 1–65 complete. l1 records named g166/c5 counterexample before investigation. c1/c2 retained; no blanket Delete assurance inferred.\nInterface synthesis completed before new search. discovery-neighbours.json fully read through line 905 in bounded chunks; clipped initial packet reread. l1 closed to candidate with source-confirmed conditional Delete bypass, existing g166/c5 ownership, base-to-tip attribution, and process-search limitation on the missing real-host producer. No own novel finding claimed. Proceeding with separate discovery over assigned capture/input/resize/status deletion implications.\n\nTurn 3 complete: separate discovery pass 1 after cross-interface synthesis. Result: no new verified defect and no new unverified-after-investigation finding. New local records l1 (known g166/c5 reconciliation; lead closed to candidate) and c3 (source-refuted invalid-size resize concern). No open lead IDs.\nNew-search scope/checks: removed resize clamp/deadline versus retained handler attachment ownership and synchronous host validation/coalescing; exact host dispatch checked at exclusive base, parent and reviewed revision. Removed capture/tail/title/paste queries versus HostTerminal visible-screen view, title/modes, caught_up prompt precondition, input-sequence acknowledgements and bounded delivery timeout. Removed duplicate pane-list safety versus registry agent ambiguity errors and flagged duplicate tabs. No separate new source-supported failure emerged from these interfaces.\nKnown-interface limiting result: missing socket plus ended connection is not alone a real live-host Gone producer because connect_with always runs confirm_with_process, which upgrades a found process or whole-walk error to Unavailable. A per-row/argv omission is still permitted; source does not establish its occurrence for a real adopted host. l1 preserves exact missing premise, base-to-tip attribution, conditional bypass and g166 ownership; no accepted drop or lowering is inferred.\nCoverage: discovery-neighbours.json read completely through line 905 in bounded chunks, with the initially clipped 1–160 read replaced by complete 1–65, 66–130, 131–200 packets. Assigned mandatory source evidence remains complete from turn 2. No unread assigned source.\nInterface assumptions: c1 retirement acceptance remains narrow; c2 refutes the specified tab-close wrong-target routes only. Known startup PID attribution, hidden-work consent, diagnostic/history-promotion, resource-bound, test-oracle and Delete-confirmation issues are not dismissed by that source refutation.\nNo runtime tests, builds, reproductions, checkout changes, live-install actions or prohibited coverage searches. Next: return discovery delta to parent.\n"
+}

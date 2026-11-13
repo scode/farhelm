@@ -1,0 +1,111 @@
+[
+  {
+    "key": "g021/f4",
+    "latest_line": 10,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "test/sealed-deletion-reconnect-observation",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The initial suspected false pass is source-refuted. The destruction attempt withdraws the original healthy raw state before recording its failure. A subsequent healthy raw state therefore requires a new connection after that withdrawal, even if it becomes healthy before the explicit retry nudge. The latest record already withdraws the original claim on this basis.",
+    "checks": [
+      "At reviewed commit 222bf6253bcd168db04bcbb1df20180c88306998, agent_requests.rs:18050-18081 waits for a failed destruction before retry_now/await_refreshed, then checks the displayed failure and absent routable client.",
+      "At that commit, hosts.rs:1513-1544 awaits hold_connection(Deleting { failure: None }) before provider.destroy, and releases the hold on error. manager.rs:1655-1680 synchronously replaces raw state, takes its client, and advances incarnation; :1698-1713 leaves the held state published on release. sessions/sandbox.rs:296-304 records the failure only after that removal path returns.",
+      "rest_harness.rs:923-934 and manager.rs:2252-2265 accept a currently healthy raw state; manager.rs:3096-3126 only nudges a live actor. Those facts do not restore the pre-destruction healthy state. manager.rs:2610-2620 preserves an existing Failed seal record on relisting, and :2711-2718 excludes it from automatic finishing.",
+      "The full 222bf625..00de0b6c agent_requests.rs diff only removes unrelated terminal fixture fields. No runtime execution or reproduction was performed."
+    ],
+    "coverage_checked": [
+      "Current SPEC.md Sandbox sessions (1446 onward) requires visible deletion failure and Retry; current SPEC_impl.md Environment Delete and the seal (6106-6168) explicitly preserves failure through connection changes. This supports the intended test contract rather than covering a test defect.",
+      "TODO.md Planned (25-26) is empty. Searches of plans/queue for seal, reconnect, await_refreshed and the test name found the original environment-agent-operations design, not a pending correction of this oracle. plans/REPORTS.md:28 marks that plan landed in #3334 through #3364.",
+      "BUGS.md was read in full; its sole SSH-output-holder bug is unrelated. Searches of current INDEX.md and queue files, and active TRIAGE_OUTCOMES.md, found no matching reconnect-oracle claim. The archive was not read.",
+      "FILTER.md was read in full; no filter is needed for this source refutation. No exact same-root alias among the four named records or matching existing queue items was found."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": "None for the source refutation. No observed test execution is asserted.",
+    "original_stronger_consequence": "The cleanup-failure test could pass without exercising preservation of the failure and unroutability through reconnection, because await_refreshed might accept the old refresh. History lines 7 and 10 withdraw that suspicion after checking the destruction hold.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Propose dismissal only of the stale pre-destruction-refresh allegation. This is a test-evidence claim with no established or originally alleged security or user-work-loss route; the destruction hold supplies the missing connection transition. This consultation does not authorize a parent drop."
+  },
+  {
+    "key": "g021/f5",
+    "latest_line": 14,
+    "recommendation": "retain-verified",
+    "bucket": "other",
+    "underlying_key": "test/nonfinal-environment-delete-cache-survivor-oracle",
+    "aliases": [],
+    "target_queue_file": "review_feedback_queue/nonfinal-delete-test-omits-surviving-cache.md",
+    "why": "The new test declares selected-session forgetting but only checks that the deleted session is absent. Clearing the whole host's session cache while retaining the host row and supervisor reply satisfies every post-action assertion. This is a bounded test-oracle defect, not evidence of current production cache loss.",
+    "checks": [
+      "At 222bf6253bcd168db04bcbb1df20180c88306998, agent_requests.rs:17755-17775 promises to forget only the selected session and supplies helper plus starter. :17790-17817 checks success, fake remaining=1, the selected request, host registration, and !cached.contains(helper). It never checks starter remains.",
+      "agent_requests.rs:17746-17752 reads list_hosts, so registered() cannot establish surviving cached sessions. The fake responder's Deleted(1) at :17616-17620 is independent of the helm cache. store.rs:9531-9578 returns a host-scoped query result that may be empty. An empty result satisfies the only cache assertion.",
+      "Current production forgetting is narrower: reviewed store.rs:9485-9489 deletes by both host_id and session_id. That correct implementation does not establish this test's oracle. owned_environment at :14448-14463 awaits a completed refresh, but no post-action assertion observes the surviving session.",
+      "The reviewed commit adds the entire user_environment_delete test module (diff hunk starting at old line 17551). The complete later agent_requests.rs diff through 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db removes unrelated terminal fixture fields only. No mutation test or runtime reproduction was performed."
+    ],
+    "coverage_checked": [
+      "Current SPEC.md Sandbox sessions:1525-1540 requires only the chosen session to be removed when others remain. Current SPEC_impl.md:6145 says Deleted runs ordinary local forgetting; reviewed SPEC_impl.md:6636-6637 says the same. These rules contradict the competing wrong cleanup mechanism; they do not accept an incomplete test oracle.",
+      "TODO.md Planned is empty. plans/queue/environment-agent-operations.md:450-603 contains the original seal design and non-final Delete acceptance tests, but plans/REPORTS.md:28 marks that plan landed; it does not schedule strengthening this specific cache-survivor assertion. Other plan matches concerned unrelated cache or deletion work.",
+      "BUGS.md has no such accepted bug. Full-text searches of INDEX.md, queue files and active TRIAGE_OUTCOMES.md for the test name, non-final Delete, cached sessions and deletion/cache combinations found no exact trigger/consequence/scope coverage. Generic test-oracle and unrelated deletion-fixture items are different roots. The archive was not read.",
+      "No FILTER.md boundary accepts a weak regression oracle. In particular, this is not a transient display, retriable product failure or imprecise diagnostic. No exact alias or useful extension to an existing queue item was found."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": "No missing premise for the stated local oracle weakness. Whether another test catches a whole-host cache-clearing mutation was not investigated and is not claimed. No shipped cache-loss behavior is alleged.",
+    "original_stronger_consequence": "The test can pass if deleting helper also forgets starter and every other cached session on the host. The history consistently limits this to a false-passing test; it never establishes production loss of user work.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Retain as other: source establishes an assertion that cannot distinguish selected-session forgetting from clearing the host's session-cache slice. There is no exact current cover and no matching filter."
+  },
+  {
+    "key": "g021/f6",
+    "latest_line": 15,
+    "recommendation": "retain-verified",
+    "bucket": "other",
+    "underlying_key": "comment/sealed-host-delete-hold-vs-seal-record",
+    "aliases": [],
+    "target_queue_file": "review_feedback_queue/sealed-delete-comment-misstates-hold-invariant.md",
+    "why": "The test comment says releasing the failed host would reconnect and lose Retry, while this implementation deliberately releases the connection hold and preserves the deletion failure in a separate seal record. Its causal explanation misstates the lifecycle invariant. The executable assertion remains compatible with the intended release and reconnect.",
+    "checks": [
+      "At 222bf6253bcd168db04bcbb1df20180c88306998, agent_requests.rs:18083-18085 says the host-level Delete's failure must not release the host because reconnecting would lose deletion Retry. The preceding :18068-18081 explicitly exercises reconnect while checking failure preservation and absent routing.",
+      "Reviewed hosts.rs:1537-1544 calls release_hold(host, true) when provider destruction fails. sessions/sandbox.rs:274-277 expressly documents release/reconnect with the failure retained in the manager seal record. manager.rs:2639-2679 stores Failed and projects it to Deleting; :2610-2620 preserves the record on another sealed listing.",
+      "Reviewed SPEC_impl.md:6643-6646 requires failure and no client whatever the connection does, explicitly including held, released, reconnected and retired. The test's :18091-18097 assertion only requires Deleting with a failure; it does not assert the connection hold remains.",
+      "The comment is added by 222bf625 and remains through pinned tip 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db; the full later path diff changes unrelated fixture fields only. No runtime malfunction or reproduction is asserted."
+    ],
+    "coverage_checked": [
+      "Current SPEC.md Sandbox sessions requires the visible failure and Retry; current SPEC_impl.md Environment Delete and the seal:6148-6167 preserves them across connection changes. It does not accept the comment's claim that reconnect itself loses Retry.",
+      "TODO.md Planned is empty. The original environment-agent-operations plan's seal design at :450-603 is marked landed by plans/REPORTS.md:28 and contains no pending correction of this comment. Searches of other queue plans found no matching documentation correction.",
+      "BUGS.md has no matching accepted defect. INDEX.md, queue files and active TRIAGE_OUTCOMES.md searches for seal, hold, reconnect, this test name and deletion Retry found no exact coverage. The archive was not read.",
+      "FILTER.md does not cover a persistent wrong explanation in a source comment. The supplied history's g027/l4 reference concerns updating the failure recorded by production whole-host Delete, not this incorrect reason for retaining a hold; it is not an alias of this comment defect. That external record was not opened because it is outside this named batch."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": "None for the source/comment discrepancy. Any later maintenance mistake caused by following the comment is speculative; no security, user-work loss or current runtime defect is established by this record.",
+    "original_stronger_consequence": "The misleading explanation could direct future maintenance toward retaining a connection hold that the intended lifecycle releases. Both history entries limit the claim to documentation correctness and preserve that the current executable assertion is compatible with reconnect.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Retain as other, separately from production failure-recording defects. Source comments in the newly added test are in range, and production correctness does not refute their incorrect explanation."
+  },
+  {
+    "key": "g021/f7",
+    "latest_line": 18,
+    "recommendation": "retain-verified",
+    "bucket": "other",
+    "underlying_key": "test/seal-responder-heartbeat-control-decode",
+    "aliases": [],
+    "target_queue_file": "review_feedback_queue/seal-responder-decodes-heartbeat-as-json.md",
+    "why": "A valid environment heartbeat reaches the new responder's unconditional JSON decoder and panics on its empty body. The defect is established conditionally on the responder still being live when a heartbeat arrives. No observed test flake, timeout, production heartbeat fault or failure frequency is claimed.",
+    "checks": [
+      "At 222bf6253bcd168db04bcbb1df20180c88306998, agent_requests.rs:17606-17611 feeds every frame to parse_control(...).expect(\"decode request\"). The normal Deleted, Sealed and NotFound replies at :17616-17638 leave the loop live; Hangs deliberately exits.",
+      "Reviewed proto/io.rs:166-170 returns each decoded frame, and :249-250 parses its body as JSON without checking kind. proto/lib.rs:598-604 preserves an empty Data body and :658-691 accepts its encoded frame. Thus an empty heartbeat body is valid framing but invalid JSON for this expect.",
+      "Reviewed manager.rs:4484-4489 enables heartbeat for environment host kinds. client.rs:1836 sets 30 seconds and :1953-1969 emits Frame::data(0, Vec::new()) on the independent writer timer. rest_harness.rs:614-657 only intercepts SetBrowserForwarding and ListSessions and forwards this Data frame intact.",
+      "Reviewed owned_environment at agent_requests.rs:14383-14463 plants Tensorlake/Podman rows and awaits connection and refresh after the responder is started; callers retain it through asynchronous router/store work. No responder-level lifetime bound excludes the first heartbeat. This establishes the valid-input panic route, not that any particular test actually remained live that long.",
+      "The entire spawn_seal_responder helper is introduced by 222bf625. The complete later agent_requests.rs diff through 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db only removes unrelated terminal fixture fields. No runtime tests, probes, builds or reproductions were performed."
+    ],
+    "coverage_checked": [
+      "Current SPEC.md:362-363 requires the ordinary environment heartbeat. Current SPEC_impl.md One route for transport and provisioning:5999-6001 and environment connection contract:6768-6775 require an empty channel-zero Data no-op every 30 seconds, independent of cache/database completion. These do not accept fixture rejection of that input.",
+      "TODO.md Planned is empty. Searches across plans/queue for the helper name, heartbeat/control/Data decoding and environment deletion found no unlanded correction. Watchdog heartbeat instructions in plans concern maintainer monitors, not framed fixture input; the original environment-agent-operations plan is marked landed at plans/REPORTS.md:28.",
+      "BUGS.md's SSH-output-holder bug is unrelated. Searches of INDEX.md, queue files and active TRIAGE_OUTCOMES.md found no matching heartbeat decoder or scripted environment responder issue. The only queue heartbeat match concerns tunnel-helper stdout lifetime, not this input. The archive was not read.",
+      "FILTER.md's rare/self-correcting rule does not fully match: this claim concerns a fixture task panic on normal transport input, and no evidence establishes the whole consequence as a safely retriable operation or an imprecise diagnostic. Rarity or a quick normal run alone does not filter it. No exact alias or useful extension to a current queue item was found."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": "Observed slow-test occurrence, detached-task panic incidence, and the exact later assertion/request affected remain unmeasured. They are unnecessary for the narrower source-proven valid-input panic; they would be required to claim a measured flake or a particular test failure.",
+    "original_stronger_consequence": "If the scripted supervisor remains connected until a heartbeat arrives, it can disappear as a supposedly healthy test peer for a reason unrelated to deletion. The history preserves the thirty-second lifetime condition, quick-run caveat, deliberately closed/reconnected cases, and that the detached panic's later visible effect depends on timing. It never alleges production heartbeat failure or an observed flake.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Retain the source-proven fixture protocol defect as other, with the live-responder condition and unobserved failure incidence explicit. It is distinct from an already-ended peer's disconnect timing and from older helpers with similar decoding."
+  }
+]

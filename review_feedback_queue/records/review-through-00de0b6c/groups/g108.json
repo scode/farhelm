@@ -1,0 +1,1049 @@
+{
+  "group": {
+    "id": "g108",
+    "domain": "supervisor-core-integration",
+    "purpose": "supervisor-core-integration: crates/farhelm-supervisor/src/service/core.rs; phases -    async fn the_delete_guard_sees_a_lone_tab_after_the_agent_window_is_gone() {",
+    "interfaces": [
+      "g005",
+      "g006",
+      "g097",
+      "g098",
+      "g099",
+      "g100",
+      "g101",
+      "g102",
+      "g103",
+      "g104",
+      "g105",
+      "g106",
+      "g107",
+      "g109",
+      "g110",
+      "g111",
+      "g112",
+      "g113",
+      "g114",
+      "g115",
+      "g116",
+      "g117",
+      "g118",
+      "g119",
+      "g120",
+      "g121",
+      "g122",
+      "g123",
+      "g124",
+      "g125",
+      "g126",
+      "g127",
+      "g128",
+      "g129",
+      "g130",
+      "g131",
+      "g132",
+      "g133",
+      "g134",
+      "g149",
+      "g150",
+      "g159",
+      "g160",
+      "g161",
+      "g162",
+      "g163",
+      "g164",
+      "g165",
+      "g166",
+      "g167",
+      "g168",
+      "g169",
+      "g170",
+      "g171",
+      "g172",
+      "g173"
+    ],
+    "sources": [
+      {
+        "path": "[private-run]/prep/parts/00766-003.patch",
+        "ranges": [
+          [
+            1,
+            1331
+          ]
+        ],
+        "original_path": "crates/farhelm-supervisor/src/service/core.rs",
+        "commit": "647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513",
+        "notes": "-    async fn the_delete_guard_sees_a_lone_tab_after_the_agent_window_is_gone() {; patch character offsets [176548,234255)",
+        "lines": 1331,
+        "bytes": 57751,
+        "start": 176548,
+        "end": 234255,
+        "original": "[private-run]/prep/originals/00766.patch"
+      }
+    ],
+    "lines": 1331,
+    "bytes": 57751
+  },
+  "records": [
+    {
+      "key": "g108/c1",
+      "owner": "g108",
+      "id": "c1",
+      "domain": "supervisor-core-integration",
+      "purpose": "supervisor-core-integration: crates/farhelm-supervisor/src/service/core.rs; phases -    async fn the_delete_guard_sees_a_lone_tab_after_the_agent_window_is_gone() {",
+      "history": [
+        {
+          "line": 1,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c1",
+            "state": "open",
+            "summary": "host conversion preserves the provenance-ordering test's observation boundary",
+            "location": "crates/farhelm-supervisor/src/service/core.rs:26428",
+            "detail": "Reviewed commit: 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513. TLDR: considered whether converting the OMP ordering fixture from fake tmux to a fake terminal host could let a provenance publication race pass unnoticed; source refutes that concern. Details: core.rs:26428–26676 starts an executable fake host which publishes entered-start, waits for release-start and writes consumed-release only after observing the release. The observer reads the row before publishing that release, asserts both provenance values, and the post-join consumed-release assertion rejects a timeout-cap exit. core/host_launch.rs:454–468 calls prepare_launch before start_host at 538, and core.rs:15712–15743 publishes the OMP provenance from prepare_launch. The converted test still observes a real start boundary with initially empty row provenance, and cancellation/panic cleanup retains its bounded release protocol. Contract: SPEC_impl.md:2322–2324 says a host launch shares the spec/hooks/login shell/command preparation; the fixture covers this production preparation path. Suggested bucket: other (test-quality concern refuted). Confidence: confirmed by source analysis only; no execution. proposed_drop: source refutation, not a specification-accepted bug. possible_cover: none searched. Could-be-highest: no established security or loss-of-work route; the considered consequence was a test failing to detect an ordering regression, not an established production race. Caveat: does not claim the fixture runs on any particular platform or prove runtime timing."
+          }
+        }
+      ],
+      "latest": {
+        "line": 1,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c1",
+          "state": "open",
+          "summary": "host conversion preserves the provenance-ordering test's observation boundary",
+          "location": "crates/farhelm-supervisor/src/service/core.rs:26428",
+          "detail": "Reviewed commit: 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513. TLDR: considered whether converting the OMP ordering fixture from fake tmux to a fake terminal host could let a provenance publication race pass unnoticed; source refutes that concern. Details: core.rs:26428–26676 starts an executable fake host which publishes entered-start, waits for release-start and writes consumed-release only after observing the release. The observer reads the row before publishing that release, asserts both provenance values, and the post-join consumed-release assertion rejects a timeout-cap exit. core/host_launch.rs:454–468 calls prepare_launch before start_host at 538, and core.rs:15712–15743 publishes the OMP provenance from prepare_launch. The converted test still observes a real start boundary with initially empty row provenance, and cancellation/panic cleanup retains its bounded release protocol. Contract: SPEC_impl.md:2322–2324 says a host launch shares the spec/hooks/login shell/command preparation; the fixture covers this production preparation path. Suggested bucket: other (test-quality concern refuted). Confidence: confirmed by source analysis only; no execution. proposed_drop: source refutation, not a specification-accepted bug. possible_cover: none searched. Could-be-highest: no established security or loss-of-work route; the considered consequence was a test failing to detect an ordering regression, not an established production race. Caveat: does not claim the fixture runs on any particular platform or prove runtime timing."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g108/findings.jsonl",
+        "id": "c1",
+        "line": 1,
+        "disposition": "excluded",
+        "group": "host-provenance-ordering-test-observation-boundary",
+        "reason": "Parent explicitly accepted named refuted proposal from claims-069 after inspecting it. The converted fake host still holds the start open until after the durable-row observation. Its separate consumed-release witness rejects an iteration-cap exit that would invalidate the ordering premise. Source refutation of a weakened ordering oracle, preserving its platform and timing limitations. Checked source/results: [\"647f0227:core.rs:26428-26676 seeds empty provenance, starts a fake host that publishes entered-start, reads both provenance fields before releasing it, and requires consumed-release after joining. Only the released branch creates that witness.\",\"Same revision:core/host_launch.rs:454-468 prepares the launch before start_host at :538; core.rs:15712-15743 publishes provenance in that preparation. The test targets the real preparation-to-start ordering, not merely a post-failure value.\",\"The source includes cancellation/panic release handling and finite cap behavior. No fixture execution or claim about platform success or measured timing is made.\"] Current coverage/results: [\"Reviewed SPEC_impl.md:2322-2324 states host launch shares spec/hook/shell/command preparation. Current SPEC_impl.md launch-provenance text at :4459-4461 retains pre-spawn ordering; SPEC.md conversation ownership searches do not contradict it.\",\"TODO.md Planned empty; searches of plans/queue, BUGS.md, INDEX.md, queue files and active TRIAGE_OUTCOMES.md found no exact OMP held-start ordering-oracle item. Other provenance records have different triggers and consequences.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"The test might pass despite provenance publication moving after terminal start. No current production race or user-work-loss route was claimed.\"; null."
+      },
+      "accepted_parent_decision": {
+        "key": "g108/c1",
+        "line": 1,
+        "disposition": "excluded",
+        "group": "host-provenance-ordering-test-observation-boundary",
+        "bucket": "other",
+        "recording": "refuted",
+        "queue_target_candidate": null,
+        "needs_independent_drop_check": false,
+        "reason": "Parent explicitly accepted named refuted proposal from claims-069 after inspecting it. The converted fake host still holds the start open until after the durable-row observation. Its separate consumed-release witness rejects an iteration-cap exit that would invalidate the ordering premise. Source refutation of a weakened ordering oracle, preserving its platform and timing limitations. Checked source/results: [\"647f0227:core.rs:26428-26676 seeds empty provenance, starts a fake host that publishes entered-start, reads both provenance fields before releasing it, and requires consumed-release after joining. Only the released branch creates that witness.\",\"Same revision:core/host_launch.rs:454-468 prepares the launch before start_host at :538; core.rs:15712-15743 publishes provenance in that preparation. The test targets the real preparation-to-start ordering, not merely a post-failure value.\",\"The source includes cancellation/panic release handling and finite cap behavior. No fixture execution or claim about platform success or measured timing is made.\"] Current coverage/results: [\"Reviewed SPEC_impl.md:2322-2324 states host launch shares spec/hook/shell/command preparation. Current SPEC_impl.md launch-provenance text at :4459-4461 retains pre-spawn ordering; SPEC.md conversation ownership searches do not contradict it.\",\"TODO.md Planned empty; searches of plans/queue, BUGS.md, INDEX.md, queue files and active TRIAGE_OUTCOMES.md found no exact OMP held-start ordering-oracle item. Other provenance records have different triggers and consequences.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"The test might pass despite provenance publication moving after terminal start. No current production race or user-work-loss route was claimed.\"; null."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-069",
+          "key": "g108/c1",
+          "latest_line": 1,
+          "recommendation": "refuted",
+          "bucket": "other",
+          "underlying_key": "host-provenance-ordering-test-observation-boundary",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The converted fake host still holds the start open until after the durable-row observation. Its separate consumed-release witness rejects an iteration-cap exit that would invalidate the ordering premise.",
+          "checks": [
+            "647f0227:core.rs:26428-26676 seeds empty provenance, starts a fake host that publishes entered-start, reads both provenance fields before releasing it, and requires consumed-release after joining. Only the released branch creates that witness.",
+            "Same revision:core/host_launch.rs:454-468 prepares the launch before start_host at :538; core.rs:15712-15743 publishes provenance in that preparation. The test targets the real preparation-to-start ordering, not merely a post-failure value.",
+            "The source includes cancellation/panic release handling and finite cap behavior. No fixture execution or claim about platform success or measured timing is made."
+          ],
+          "coverage_checked": [
+            "Reviewed SPEC_impl.md:2322-2324 states host launch shares spec/hook/shell/command preparation. Current SPEC_impl.md launch-provenance text at :4459-4461 retains pre-spawn ordering; SPEC.md conversation ownership searches do not contradict it.",
+            "TODO.md Planned empty; searches of plans/queue, BUGS.md, INDEX.md, queue files and active TRIAGE_OUTCOMES.md found no exact OMP held-start ordering-oracle item. Other provenance records have different triggers and consequences."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": null,
+          "original_stronger_consequence": "The test might pass despite provenance publication moving after terminal start. No current production race or user-work-loss route was claimed.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Source refutation of a weakened ordering oracle, preserving its platform and timing limitations."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "host-provenance-ordering-test-observation-boundary",
+        "destination": null
+      }
+    },
+    {
+      "key": "g108/c2",
+      "owner": "g108",
+      "id": "c2",
+      "domain": "supervisor-core-integration",
+      "purpose": "supervisor-core-integration: crates/farhelm-supervisor/src/service/core.rs; phases -    async fn the_delete_guard_sees_a_lone_tab_after_the_agent_window_is_gone() {",
+      "history": [
+        {
+          "line": 2,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c2",
+            "state": "open",
+            "summary": "removed tmux guard tests do not establish a destructive regression",
+            "location": "crates/farhelm-supervisor/src/service/core.rs (removed lone-tab and forged-agent-tab tests)",
+            "detail": "Reviewed commit: 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513. TLDR: considered whether removal of the lone-tab delete/Stop and forged-tab tests permits deleting a running tab without consent or closing an agent as a tab. These remain important contracts for old terminals, but source inspection does not establish that behavior regressed. Details: assigned patch lines 1–97 removes the lone-tab Delete guard test and 182–343 removes lone-tab Stop/forged-tab integration cases. At the reviewed revision core.rs:13964–14095 still uses pane_states_with_markers unconditionally for guarded Delete, including a terminal-less session, and counts host tabs too; core.rs:14214–14239 reads authoritative tmux tab markers for Stop even when the agent is absent. terminals.rs:607–645 excludes the whole recorded agent window before admitting tab claims; core.rs:15043–15066 repeats that recorded-window check immediately before destructive close. A pure regression test remains at terminals.rs:3897 (recorded_agent_pane_excludes_a_forged_tab_in_its_whole_window), and ticker.rs:3889 retains dead-tab forged-marker coverage. Contract: SPEC.md:2063–2067 requires refusal when a destructive confirmation did not authorize a live agent/tab. SPEC_impl.md:2997–3000 makes the durable pane record authoritative over mutable markers. Suggested bucket: other for the established loss of selected integration-test coverage; no established production violation. Confidence: source-confirmed guard retention, with no execution. proposed_drop: source refutation of a destructive regression; test removal alone does not show these safety checks stopped working. possible_cover: none searched. Could-be-highest: yes if deleting unconfirmed live tabs or killing the agent via a forged tab were shown; those original consequences are preserved here, but the corresponding shipped failure route is not established and the retained guards directly oppose it. Caveat: the deleted end-to-end fixture coverage is narrower now; this record does not claim equivalent real-tmux coverage survives for every removed scenario."
+          }
+        },
+        {
+          "line": 8,
+          "event": {
+            "version": 1,
+            "kind": "lead",
+            "id": "c2",
+            "state": "open",
+            "summary": "deleted lone-tab and forged-tab tests need behavioral coverage adjudication",
+            "location": "crates/farhelm-supervisor/src/service/core.rs (deleted lone-tab and forged-tab tests)",
+            "detail": "Reviewed commit: 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513. TLDR: the retained production checks refute an established destructive behavior change, but do not settle whether this deletion removes the meaningful regression oracle for guarding a surviving tab after its agent terminal disappears, or for explicit close refusing a forged tab on the agent window. This revises c2's earlier proposed drop: the coverage question remains open for source investigation. Source basis: assigned patch lines 1–97 and 182–343; retained core.rs:13964–14095, :14214–14239, :15043–15066 and terminals.rs:607–645. Contract: SPEC.md:2063–2067 protects live work beyond the answered confirmation; old tmux terminals remain served at this intermediate revision. Checks next: inspect actual retained synthetic/live test oracles, callers and later changes through 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db; distinguish old-tmux-specific selection from the still-required agent-ended/tab-survives lifecycle boundary. Parent reports g107/c4 separately considers the same lone-tab guard deletion; possible_cover: g107/c4 (provided by parent, not independently read), so preserve this record for coordination rather than silently duplicate/drop it. Suggested bucket: other for test-quality coverage loss; confidence: unresolved coverage lead, no execution. proposed_drop: false pending source coverage checks. Could-be-highest: the original concerns remain unauthorized deletion of live tabs or killing an agent through forged tab identity; no production failure route is established, so the presently assessable consequence is regression coverage, not actual loss of work."
+          }
+        },
+        {
+          "line": 15,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "c2",
+            "state": "open",
+            "summary": "lone surviving old tab loses its guard and Stop regression oracles",
+            "location": "crates/farhelm-supervisor/src/service/core.rs (deleted lone-tab guard and Stop tests)",
+            "detail": "# retain the lone-tab lifecycle oracle while old terminals are still served\n\nReviewed commit: 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513\n\n## TLDR\nThis intermediate commit still serves old tmux terminals, but deletes the tests proving that a surviving shell tab is found and protected after the agent's window/terminal has disappeared. General host-tab tests exercise the consent rule without the legacy discovery boundary that originally hid such tabs. No actual destructive regression is established; the issue is removing that meaningful regression oracle while the behavior is still required.\n\n## Details\nAssigned patch lines 1–97 deletes the_delete_guard_sees_a_lone_tab_after_the_agent_window_is_gone, and lines around 182–247 delete stop_closes_a_lone_tmux_tab_without_an_agent_terminal (original core.rs:23929 onward). The deleted fixtures made a real old agent and tab, removed the agent pane, established that the tab alone kept its tmux session alive, and then checked authoritative listing, NothingAlive refusal, AgentEnded/Unconditional allowance, the terminal-less entry case, and Stop closing the actual surviving tab. These are distinct from a merely stopped agent whose final-screen terminal remains.\nThe surrounding interface makes this boundary material: tmux.rs:4859–4947 conditionally omits the separate marker query, and :4953–4972 defines the unconditional-marker variant specifically for a surviving lone tab. still_alive_for_delete and tmux_tabs_for_stop must choose the authoritative inventory, including without an agent terminal. Current core.rs:13964–14095 and :14214–14239 do choose it correctly; that is source refutation of an actual destructive bug, not replacement test evidence. In tmux.rs tests, searches for pane_states_with_markers/pane_states calls find no corresponding successful lone-tab guard/Stop fixture. control-codec/pure tab-selection tests can check decoded fixed inputs but not this caller/query/terminal-loss interaction.\nMeaningful retained general coverage was checked: e2e/session_lifecycle.rs:3646 onward stops a host agent, then opens a host tab and verifies NothingAlive refusal and later deletion; :3710 onward verifies AgentEnded allows closing tabs. core/tests/host_terminals.rs:333–381 makes a terminal-less entry with a host tab that becomes unreadable and checks uncertainty refusal. These protect the generic consent contract but cannot catch the old tmux marker-query selection regression. terminals.rs:3897–3946 does meaningfully cover forged-marker exclusion from a recorded agent window; ticker.rs:3889 onward also retains an automatic-reap case. Thus the strongest remaining c2 coverage issue is the deleted lone-tab inventory/lifecycle boundary; no separate new forged-marker finding is asserted.\nAt reviewed revision SPEC_impl.md:2954–2981 expressly still adopts/serves old terminals and SPEC.md:2063–2067 forbids deleting live work beyond the confirmation. Later dbfc69751215dbf15e1d31d5bed73c3754c4ebc4 ends old terminals at startup and 1ed482dde220452e424973faf38a5e1318986333 removes the driver; pinned tip SPEC_impl.md:1888–1909 says every served terminal is a host and old terminals are ended at startup. Therefore this particular legacy discovery oracle is obsolete at tip, but was not obsolete at the reviewed intermediate commit; review charter includes such intermediate changes. The replacement should have kept a driver-built/adopted old-session fixture until old terminals stopped being served, or recorded this as an explicit transitional test coverage loss.\nSuggested bucket: other (regression coverage). Confidence: confirmed source comparison only; no runtime test or reproduction. proposed_drop: false; previous proposed drop based only on retained correct guards is superseded. possible_cover: g107/c4, which the parent reports separately considers this exact deleted lone-tab guard test; coordinate/deduplicate with that record, do not silently dismiss the concern. Could-be-highest: preserve the original possible consequences of an unconfirmed Delete killing a live tab and Stop falsely leaving its work alive; no shipped failure route has been established here, so the finding remains test quality rather than actual security/loss of work. Caveats: this is an intermediate-only legacy-test gap; no broad absence of host-tab consent coverage is claimed. Pure forged-marker coverage remains and was actually read. Parent has accepted no drop; keep the strongest original concern for independent adjudication."
+          }
+        }
+      ],
+      "latest": {
+        "line": 15,
+        "event": {
+          "version": 1,
+          "kind": "finding",
+          "id": "c2",
+          "state": "open",
+          "summary": "lone surviving old tab loses its guard and Stop regression oracles",
+          "location": "crates/farhelm-supervisor/src/service/core.rs (deleted lone-tab guard and Stop tests)",
+          "detail": "# retain the lone-tab lifecycle oracle while old terminals are still served\n\nReviewed commit: 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513\n\n## TLDR\nThis intermediate commit still serves old tmux terminals, but deletes the tests proving that a surviving shell tab is found and protected after the agent's window/terminal has disappeared. General host-tab tests exercise the consent rule without the legacy discovery boundary that originally hid such tabs. No actual destructive regression is established; the issue is removing that meaningful regression oracle while the behavior is still required.\n\n## Details\nAssigned patch lines 1–97 deletes the_delete_guard_sees_a_lone_tab_after_the_agent_window_is_gone, and lines around 182–247 delete stop_closes_a_lone_tmux_tab_without_an_agent_terminal (original core.rs:23929 onward). The deleted fixtures made a real old agent and tab, removed the agent pane, established that the tab alone kept its tmux session alive, and then checked authoritative listing, NothingAlive refusal, AgentEnded/Unconditional allowance, the terminal-less entry case, and Stop closing the actual surviving tab. These are distinct from a merely stopped agent whose final-screen terminal remains.\nThe surrounding interface makes this boundary material: tmux.rs:4859–4947 conditionally omits the separate marker query, and :4953–4972 defines the unconditional-marker variant specifically for a surviving lone tab. still_alive_for_delete and tmux_tabs_for_stop must choose the authoritative inventory, including without an agent terminal. Current core.rs:13964–14095 and :14214–14239 do choose it correctly; that is source refutation of an actual destructive bug, not replacement test evidence. In tmux.rs tests, searches for pane_states_with_markers/pane_states calls find no corresponding successful lone-tab guard/Stop fixture. control-codec/pure tab-selection tests can check decoded fixed inputs but not this caller/query/terminal-loss interaction.\nMeaningful retained general coverage was checked: e2e/session_lifecycle.rs:3646 onward stops a host agent, then opens a host tab and verifies NothingAlive refusal and later deletion; :3710 onward verifies AgentEnded allows closing tabs. core/tests/host_terminals.rs:333–381 makes a terminal-less entry with a host tab that becomes unreadable and checks uncertainty refusal. These protect the generic consent contract but cannot catch the old tmux marker-query selection regression. terminals.rs:3897–3946 does meaningfully cover forged-marker exclusion from a recorded agent window; ticker.rs:3889 onward also retains an automatic-reap case. Thus the strongest remaining c2 coverage issue is the deleted lone-tab inventory/lifecycle boundary; no separate new forged-marker finding is asserted.\nAt reviewed revision SPEC_impl.md:2954–2981 expressly still adopts/serves old terminals and SPEC.md:2063–2067 forbids deleting live work beyond the confirmation. Later dbfc69751215dbf15e1d31d5bed73c3754c4ebc4 ends old terminals at startup and 1ed482dde220452e424973faf38a5e1318986333 removes the driver; pinned tip SPEC_impl.md:1888–1909 says every served terminal is a host and old terminals are ended at startup. Therefore this particular legacy discovery oracle is obsolete at tip, but was not obsolete at the reviewed intermediate commit; review charter includes such intermediate changes. The replacement should have kept a driver-built/adopted old-session fixture until old terminals stopped being served, or recorded this as an explicit transitional test coverage loss.\nSuggested bucket: other (regression coverage). Confidence: confirmed source comparison only; no runtime test or reproduction. proposed_drop: false; previous proposed drop based only on retained correct guards is superseded. possible_cover: g107/c4, which the parent reports separately considers this exact deleted lone-tab guard test; coordinate/deduplicate with that record, do not silently dismiss the concern. Could-be-highest: preserve the original possible consequences of an unconfirmed Delete killing a live tab and Stop falsely leaving its work alive; no shipped failure route has been established here, so the finding remains test quality rather than actual security/loss of work. Caveats: this is an intermediate-only legacy-test gap; no broad absence of host-tab consent coverage is claimed. Pure forged-marker coverage remains and was actually read. Parent has accepted no drop; keep the strongest original concern for independent adjudication."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g108/findings.jsonl",
+        "id": "c2",
+        "line": 15,
+        "disposition": "under-investigation",
+        "group": "g108-c2",
+        "reason": "Record durably acknowledged; parent source/contract validation, cross-group synthesis, coverage/filter matching and any independent drop check remain pending. This preserves the claim and uncertainty without accepting, dropping or lowering it."
+      },
+      "accepted_parent_decision": null,
+      "returned_claim_checks": [
+        {
+          "batch": "claims-070",
+          "key": "g108/c2",
+          "latest_line": 15,
+          "recommendation": "retain-verified",
+          "bucket": "other",
+          "underlying_key": "test-oracle/legacy-lone-tab-delete-and-stop-discovery",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The intermediate revision deletes a meaningful lone-surviving-tab discovery oracle while still serving adopted tmux terminals. Correct retained guards refute an established production regression, not the test-coverage finding. The mechanism is obsolete at the reviewed tip; preserve that historical limitation. The earlier proposed destructive-regression drop was superseded in the record.",
+          "checks": [
+            "647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513^:crates/farhelm-supervisor/src/service/core.rs:23162-23269 establishes the absent-agent/lone-tab premise, listing, NothingAlive refusal, AgentEnded/Unconditional allowance and terminal-less entry. The assigned commit deletes that test and stop_closes_a_lone_tmux_tab_without_an_agent_terminal (parent :23927 onward).",
+            "647f0227:core.rs:13964-14095 and :14214-14239 retain unconditional pane_states_with_markers for guarded Delete and Stop. tmux.rs:4953-4972 explains the one-window exception; retained production code is protective.",
+            "647f0227:crates/farhelm/tests/e2e/session_lifecycle.rs:3646-3755 exercises a stopped host agent plus a host tab; core/tests/host_terminals.rs:333-381 exercises terminal-less host-tab uncertainty. Neither supplies the deleted old marker-query/lone-window premise.",
+            "647f0227:SPEC_impl.md:2954-2981 still requires adoption/service of old terminals. Current SPEC_impl.md:1897-1909 and :2780-2823 describe ending them instead. No runtime observation or reproduction was made."
+          ],
+          "coverage_checked": [
+            "SPEC.md Lifecycle operations (:2027-2074) preserves consent limits; SPEC_impl.md Terminal host and Ending the old private tmux server were searched/read for the exact lifecycle. Neither accepts removing this oracle while old terminals remain served.",
+            "TODO.md Planned (:25-26) is empty. BUGS.md contains only the unrelated SSH output-holder provisioning hang. No exact coverage.",
+            "plans/queue searched for lone-tab, tab preservation, tmux and failed-start claims. tmux-end-old-terminals.md:70-160 permits deleting obsolete tmux subjects but requires surviving subjects to run on hosts and coherent intermediate PRs; it does not expressly accept this intermediate discovery gap. Later retirement removes its future subject, not its historical occurrence.",
+            "INDEX.md and active TRIAGE_OUTCOMES.md searched for this trigger/consequence. tab-survival-missing-live-exchange.md was read and concerns successor recovery after supervisor handoff, not lone old-tab inventory. No exact existing queue/ledger coverage. No archive read.",
+            "FILTER.md: no filter covers a regression-test oracle deletion merely because its exercised product case concerns an upgrade."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": "No missing premise for the bounded deleted-oracle comparison. No shipped destructive failure is established. Parent-reported g107/c4 may alias the Delete portion, but it is outside this batch and was not independently read; do not infer deduplication here.",
+          "original_stronger_consequence": "Unconfirmed Delete killing a live tab, forged tab identity killing the agent, or Stop leaving live tab work behind. No such production route was established; forged-marker production/pure-test protection survives and the latest record narrows to the lone-tab oracle.",
+          "needs_independent_drop_check": true,
+          "proposed_basis": "Retain the historical test-quality finding, with current obsolescence stated. Independent judgment is still needed for the earlier destructive-route refutation/consequence narrowing; this consultation does not authorize it."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": true,
+        "clearly_refuted_candidate": false,
+        "needs_unfinished_gate": true,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "test-oracle/legacy-lone-tab-delete-and-stop-discovery",
+        "destination": "trailing-lone-surviving-old-tab-loses-its-guard-and-stop-regression-oracles.md"
+      }
+    },
+    {
+      "key": "g108/l1",
+      "owner": "g108",
+      "id": "l1",
+      "domain": "supervisor-core-integration",
+      "purpose": "supervisor-core-integration: crates/farhelm-supervisor/src/service/core.rs; phases -    async fn the_delete_guard_sees_a_lone_tab_after_the_agent_window_is_gone() {",
+      "history": [
+        {
+          "line": 3,
+          "event": {
+            "version": 1,
+            "kind": "lead",
+            "id": "l1",
+            "state": "open",
+            "summary": "failed-spec test may pass because the default host program cannot run",
+            "location": "crates/farhelm-supervisor/src/service/core.rs:28545",
+            "detail": "Reviewed commit: 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513. TLDR: the failed-launch-spec publication test was left asserting only an Error, empty session maps/store and no tmux panes after new launches became hosts. It may now pass even if host creation were attempted before the spec write, because it uses the nonexistent dummy_exe with default seams. Source: core.rs:28544–28635 (create_session_never_launches_tmux_after_a_failed_spec_publish), dummy_exe at 18815–18817. The asserted tmux-empty condition no longer observes the terminal kind the create attempts. Suggested bucket: other (test regression; no demonstrated production bug). Confidence: unresolved lead, source only; no execution. Missing premise/check next: resolve Supervisor::host_program's default choice and the failure cleanup to determine whether the same assertions can be satisfied by a host-spawn failure rather than EACCES. Need inspect any alternative spec-before-start coverage before judging materiality. proposed_drop: false pending source checks. possible_cover: none searched. Could-be-highest: no established route; this is a test's false pass risk, not evidence of a live credential/data-loss defect. Caveat: source currently calls prepare_launch before host start; the concern is loss of regression detection, not current production ordering."
+          }
+        },
+        {
+          "line": 4,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "l1",
+            "state": "open",
+            "summary": "failed-spec regression test no longer detects an attempted terminal start",
+            "location": "crates/farhelm-supervisor/src/service/core.rs:28545",
+            "detail": "# failed-spec test observes the retired terminal kind\n\nReviewed commit: 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513\n\n## TLDR\nThe test intended to prevent launching an agent when its launch instructions cannot be saved now also passes on a failed attempt to start the terminal. The migration leaves its main safety assertion watching tmux, although Farhelm now creates terminal hosts. This weakens regression coverage; it is not evidence that the production ordering is currently wrong.\n\n## Details\nThe assigned patch's hunk at old core.rs:31075/new :28538 updates the preparation helper's name but leaves create_session_never_launches_tmux_after_a_failed_spec_publish (:28545–28631) using new_with_exe(dummy_exe()) with default seams. It freezes launch/ at mode 0500, submits a create, accepts any ControlMsg::Error, asserts empty in-memory and durable session state, and asserts sup.tmux.pane_states() is empty. New creates exclusively take spawn_agent_in_host (:11749–11797), so no tmux pane can be created regardless of whether a host start was incorrectly attempted. Moreover host_launch.rs:371–378 deliberately selects /nonexistent/farhelm-unit-tests-have-no-host-program for a unit test without host_program. A misplaced/bypassed spec-write guard can therefore reach a host-start attempt and fail for the missing executable; the definitive no-host failure follows the FailedStart::Terminal cleanup (:11873–11946), which can produce the same Error and empty rows/maps that this test accepts. It never asserts the EACCES/spec-publication diagnostic or observes a host start attempt.\nThe source's current prepare_launch call still precedes start_host (host_launch.rs:454–468, :537–544); this finding concerns the test's ability to protect that boundary after the default-terminal migration. Use an observable host-program seam that would record/allow an attempted start and assert it was never invoked, and require the spec-write failure as the actual refusal. Keep the filesystem-permission fixture if desired. The adjacent converted provenance-ordering test (:26428–26676) and confirmed-absent cleanup test (:31451 onward) witness successful spec publication, not the negative EACCES/no-start boundary.\nContract: the test's own docstring (:28534–28543) promises a real EACCES and no chance for the launch shim to observe a partial spec; the supplied test-authoring checklist requires an observable distinguishing the competing mechanisms and says a shared error alone does not establish cause. SPEC_impl.md:2045–2055 and :2322–2341 describes the host preparation/start boundary. Suggested bucket: other (test quality; no current user-facing failure demonstrated). Confidence: confirmed by source and control-flow analysis only; no execution or reproduction. proposed_drop: false. possible_cover: none known; no queue/coverage metadata searched. Could-be-highest: no established highest route; a hypothetical ordering regression could affect launched work, but the established consequence here is weakened regression detection, and production ordering is presently correct. Caveat: other tests can catch some related mutations, especially wholly missing spec writes, so this is specifically the failed-publication/no-start assertion becoming ineffective, not a claim that the entire launch pipeline is untested."
+          }
+        },
+        {
+          "line": 11,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "l1",
+            "state": "open",
+            "summary": "failed-spec negative oracle is partly repaired later; original revision remains affected",
+            "location": "crates/farhelm-supervisor/src/service/core.rs:28545",
+            "detail": "Reviewed commit: 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513; later-tip check at 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db. TLDR: preserve the original finding that the failed-spec test accepts the wrong cause and watches tmux after creates moved to hosts. The pinned tip partly repairs it: core.rs:26089 now uses host_supervisor, and :26147–26153 checks the hosts directory instead of tmux. The missing-host-program premise therefore applies to the reviewed intermediate commit, not the tip. Details: original core.rs:28545–28631 uses default seams and accepts any Error plus empty store/map/tmux; host_launch.rs:371–378 chooses a deliberately nonexistent unit-test host program. Original definitive failed-host cleanup can satisfy those assertions. At tip the host seam can start a real terminal, but the test still accepts any Error and checks only final directory emptiness; whether a failed host attempt can be cleaned up to the same state needs its exact launch-record/cleanup path checked before claiming the negative no-start oracle is fully repaired. Checks made: read complete tip test and host_program selector; history identifies later tmux driver removal and documentation cleanup, exact mutation mapping still pending. Contract: supplied checklist requires an observable distinguishing mechanisms; original test docstring promises genuine EACCES/no terminal start. Suggested bucket: other, test quality only. Confidence: source-confirmed at original revision; tip residual under investigation, not claimed observed. proposed_drop: false. possible_cover: none known. Could-be-highest: no established route; no production ordering bug or actual lost work shown. No runtime execution/reproduction. Caveat: update original statement 'no usable host program' to be revision-specific; do not present it as a tip fact."
+          }
+        },
+        {
+          "line": 12,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "l1",
+            "state": "open",
+            "summary": "failed-spec test accepts an attempted host start as never started",
+            "location": "crates/farhelm-supervisor/src/service/core.rs:28545",
+            "detail": "# failed-spec test does not distinguish no start from a failed start\n\nReviewed commit: 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513\n\n## TLDR\nThe test intended to prove that a failed launch-instruction write prevents any terminal start accepts an error from an attempted terminal start too. Later changes fix its terminal fixture and rename its assertion, but the negative oracle still observes only final cleanup state. This is a regression-test weakness, not an established production ordering error.\n\n## Details\nAt the reviewed revision, core.rs:28545–28631 uses new_with_exe(dummy_exe()) with default seams, freezes launch/ to 0500 and accepts any ControlMsg::Error plus empty map/store/tmux. host_launch.rs:371–378 selects the deliberately nonexistent unit-test host program; an attempted start can therefore fail for ENOENT, and definitive FailedStart::Terminal cleanup (:11873–11946) can yield the same empty state. The test does not check EACCES or the launch-spec-publication diagnostic, and the tmux-empty check no longer watches creates.\nLater commit 1ed482dde220452e424973faf38a5e1318986333 changes this test to host_supervisor and an empty-hosts-directory assertion. At pinned tip 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db it is core.rs:26089–26164, create_session_never_starts_a_terminal_after_a_failed_spec_publish. Thus the nonexistent-host-program premise is historical only. The replacement still accepts any Error and checks only final directory emptiness. The alternative failure path is concrete in tip source: host_launch.rs:537–565 starts the real first stage before writing artifacts.host(); the same unwritable launch/ then prevents this .host write if the earlier JSON-spec write were incorrectly skipped or deferred. StartingHost is dropped without finish; hosts/spawn.rs:280–291, :347–360 and :403–424 establish that it kills the first stage and never sends the child spec, so it binds no host socket. FailedStart::Terminal (tip core.rs:11436 onward) can sweep/clean this confirmed-absent attempt and remove its session row. All the test's negative final-state assertions can then hold despite a first-stage attempt having occurred and despite failure being the host-record write rather than the promised launch-spec write. This is source-derived counterfactual control-flow analysis, not an executed mutation or reproduction. A host's first-stage attempt is not proof that its child or full terminal host ever ran; do not conflate them.\nUse an observable host-program/start seam to assert it was never invoked, and require the specific spec-publication failure as the refusal. Final hosts-directory emptiness alone proves no retained socket, not no attempted start. The converted provenance and confirmed-absent-cleanup tests witness positive publication and do not isolate this negative failure boundary.\nContract: the test docstring promises 'a genuine EACCES' and pins publication before any terminal start; the supplied test-authoring checklist requires an observable distinguishing competing mechanisms rather than a shared Error. Current production prepare_launch still precedes start_host at original and tip; no production ordering violation is claimed. Suggested bucket: other (test quality). Confidence: confirmed by source/contract analysis only. proposed_drop: false. possible_cover: none known; no forbidden coverage sources read. Could-be-highest: no established route; preserved concern is regression detection around launching work, not actual lost work. Caveats: a suite-wide mutation deleting all spec writes may fail other tests; the issue here is this test's failed-publication/no-start oracle. Readability failure in tip's read_dir().map_or(true, ...) also cannot establish emptiness, but no separate runtime defect is asserted. Exact diagnostics, alternate cleanup state, later seam repair and tip persistence have been checked; no remaining premise is open for l1."
+          }
+        }
+      ],
+      "latest": {
+        "line": 12,
+        "event": {
+          "version": 1,
+          "kind": "finding",
+          "id": "l1",
+          "state": "open",
+          "summary": "failed-spec test accepts an attempted host start as never started",
+          "location": "crates/farhelm-supervisor/src/service/core.rs:28545",
+          "detail": "# failed-spec test does not distinguish no start from a failed start\n\nReviewed commit: 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513\n\n## TLDR\nThe test intended to prove that a failed launch-instruction write prevents any terminal start accepts an error from an attempted terminal start too. Later changes fix its terminal fixture and rename its assertion, but the negative oracle still observes only final cleanup state. This is a regression-test weakness, not an established production ordering error.\n\n## Details\nAt the reviewed revision, core.rs:28545–28631 uses new_with_exe(dummy_exe()) with default seams, freezes launch/ to 0500 and accepts any ControlMsg::Error plus empty map/store/tmux. host_launch.rs:371–378 selects the deliberately nonexistent unit-test host program; an attempted start can therefore fail for ENOENT, and definitive FailedStart::Terminal cleanup (:11873–11946) can yield the same empty state. The test does not check EACCES or the launch-spec-publication diagnostic, and the tmux-empty check no longer watches creates.\nLater commit 1ed482dde220452e424973faf38a5e1318986333 changes this test to host_supervisor and an empty-hosts-directory assertion. At pinned tip 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db it is core.rs:26089–26164, create_session_never_starts_a_terminal_after_a_failed_spec_publish. Thus the nonexistent-host-program premise is historical only. The replacement still accepts any Error and checks only final directory emptiness. The alternative failure path is concrete in tip source: host_launch.rs:537–565 starts the real first stage before writing artifacts.host(); the same unwritable launch/ then prevents this .host write if the earlier JSON-spec write were incorrectly skipped or deferred. StartingHost is dropped without finish; hosts/spawn.rs:280–291, :347–360 and :403–424 establish that it kills the first stage and never sends the child spec, so it binds no host socket. FailedStart::Terminal (tip core.rs:11436 onward) can sweep/clean this confirmed-absent attempt and remove its session row. All the test's negative final-state assertions can then hold despite a first-stage attempt having occurred and despite failure being the host-record write rather than the promised launch-spec write. This is source-derived counterfactual control-flow analysis, not an executed mutation or reproduction. A host's first-stage attempt is not proof that its child or full terminal host ever ran; do not conflate them.\nUse an observable host-program/start seam to assert it was never invoked, and require the specific spec-publication failure as the refusal. Final hosts-directory emptiness alone proves no retained socket, not no attempted start. The converted provenance and confirmed-absent-cleanup tests witness positive publication and do not isolate this negative failure boundary.\nContract: the test docstring promises 'a genuine EACCES' and pins publication before any terminal start; the supplied test-authoring checklist requires an observable distinguishing competing mechanisms rather than a shared Error. Current production prepare_launch still precedes start_host at original and tip; no production ordering violation is claimed. Suggested bucket: other (test quality). Confidence: confirmed by source/contract analysis only. proposed_drop: false. possible_cover: none known; no forbidden coverage sources read. Could-be-highest: no established route; preserved concern is regression detection around launching work, not actual lost work. Caveats: a suite-wide mutation deleting all spec writes may fail other tests; the issue here is this test's failed-publication/no-start oracle. Readability failure in tip's read_dir().map_or(true, ...) also cannot establish emptiness, but no separate runtime defect is asserted. Exact diagnostics, alternate cleanup state, later seam repair and tip persistence have been checked; no remaining premise is open for l1."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g108/findings.jsonl",
+        "id": "l1",
+        "line": 12,
+        "disposition": "verified",
+        "group": "test-oracle/failed-launch-spec-publication-does-not-observe-start-attempt",
+        "reason": "Parent explicitly accepted named retain-verified proposal from claims-070 after inspecting it. The negative test accepts any Error and observes final cleanup rather than attempted first-stage execution. At its original revision it also watches tmux although creates use hosts. Later fixture repair removes that historical mismatch but leaves the distinguishing no-attempt observation absent. Retain as a source-confirmed test-quality defect. Preserve the later partial repair and separate historical nonexistent-program premise from the tip's still-missing attempt witness. Checked source/results: [\"647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513:crates/farhelm-supervisor/src/service/core.rs:28534-28631 promises genuine EACCES/no start, uses new_with_exe(dummy_exe()), accepts any ControlMsg::Error, then checks empty sessions/store/tmux.\",\"647f0227:service/core/host_launch.rs:371-378 selects /nonexistent/farhelm-unit-tests-have-no-host-program without an explicit seam. core.rs:11873-11961 can sweep/clean a definitive failed start and remove the row, or retain it if cleanup is uncertain. Thus ENOENT can supply the accepted alternative cause under the hypothesized ordering regression.\",\"00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db:core.rs:26079-26164 now uses host_supervisor but still accepts any Error and only checks final hosts-directory emptiness (including read errors through map_or(true)). host_launch.rs:537-565 starts the first stage before writing the companion .host record; that later write can fail in the same unwritable launch directory if the earlier spec write is skipped/deferred.\",\"647f0227:hosts/spawn.rs:280-300,347-360,403-475 owns the first stage with kill_on_drop and sends the child spec only through finish. A failed record write can kill an attempted first stage without ever starting the full host/child or retaining a socket. This is source-derived counterfactual analysis, not an executed mutation. Production host_launch.rs:454-468 still prepares the spec first.\"] Current coverage/results: [\"Both specifications searched for spec-publication/start boundaries. SPEC_impl.md:2200-2233 distinguishes first-stage identity recording, spec delivery, confirmed absence and uncertain retention; it does not accept this weak test oracle. SPEC.md:1375-1392 requires intended-create/retry identity, not this test implementation.\",\"TODO.md Planned is empty; BUGS.md has no related entry. plans/queue searched for failed-spec/spec-publication/provenance/uncertain-create terms; no stated unlanded work specifically adds this no-attempt witness.\",\"INDEX.md and active TRIAGE_OUTCOMES.md searched for publication, provenance and held-start witnesses. held-start-test-lacks-prelaunch-fencing-witness.md was read; it concerns settling an earlier Restart first stage before a later launch, a different fixture and ordering. No exact coverage or useful extension to that item. No archive read.\",\"FILTER.md has no boundary covering this deterministic regression-test sensitivity defect.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Weakened regression detection around launching work; no production ordering violation, security issue or actual work-loss route was asserted or demonstrated.\"; \"None for the bounded oracle weakness. The counterfactual establishes an attempted first stage, not execution of the agent/full terminal host. A suite-wide mutation deleting all spec writes may fail other tests; this finding is this test's negative boundary.\"."
+      },
+      "accepted_parent_decision": {
+        "key": "g108/l1",
+        "line": 12,
+        "disposition": "verified",
+        "group": "test-oracle/failed-launch-spec-publication-does-not-observe-start-attempt",
+        "bucket": "other",
+        "recording": "retain-verified",
+        "queue_target_candidate": null,
+        "needs_independent_drop_check": false,
+        "reason": "Parent explicitly accepted named retain-verified proposal from claims-070 after inspecting it. The negative test accepts any Error and observes final cleanup rather than attempted first-stage execution. At its original revision it also watches tmux although creates use hosts. Later fixture repair removes that historical mismatch but leaves the distinguishing no-attempt observation absent. Retain as a source-confirmed test-quality defect. Preserve the later partial repair and separate historical nonexistent-program premise from the tip's still-missing attempt witness. Checked source/results: [\"647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513:crates/farhelm-supervisor/src/service/core.rs:28534-28631 promises genuine EACCES/no start, uses new_with_exe(dummy_exe()), accepts any ControlMsg::Error, then checks empty sessions/store/tmux.\",\"647f0227:service/core/host_launch.rs:371-378 selects /nonexistent/farhelm-unit-tests-have-no-host-program without an explicit seam. core.rs:11873-11961 can sweep/clean a definitive failed start and remove the row, or retain it if cleanup is uncertain. Thus ENOENT can supply the accepted alternative cause under the hypothesized ordering regression.\",\"00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db:core.rs:26079-26164 now uses host_supervisor but still accepts any Error and only checks final hosts-directory emptiness (including read errors through map_or(true)). host_launch.rs:537-565 starts the first stage before writing the companion .host record; that later write can fail in the same unwritable launch directory if the earlier spec write is skipped/deferred.\",\"647f0227:hosts/spawn.rs:280-300,347-360,403-475 owns the first stage with kill_on_drop and sends the child spec only through finish. A failed record write can kill an attempted first stage without ever starting the full host/child or retaining a socket. This is source-derived counterfactual analysis, not an executed mutation. Production host_launch.rs:454-468 still prepares the spec first.\"] Current coverage/results: [\"Both specifications searched for spec-publication/start boundaries. SPEC_impl.md:2200-2233 distinguishes first-stage identity recording, spec delivery, confirmed absence and uncertain retention; it does not accept this weak test oracle. SPEC.md:1375-1392 requires intended-create/retry identity, not this test implementation.\",\"TODO.md Planned is empty; BUGS.md has no related entry. plans/queue searched for failed-spec/spec-publication/provenance/uncertain-create terms; no stated unlanded work specifically adds this no-attempt witness.\",\"INDEX.md and active TRIAGE_OUTCOMES.md searched for publication, provenance and held-start witnesses. held-start-test-lacks-prelaunch-fencing-witness.md was read; it concerns settling an earlier Restart first stage before a later launch, a different fixture and ordering. No exact coverage or useful extension to that item. No archive read.\",\"FILTER.md has no boundary covering this deterministic regression-test sensitivity defect.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Weakened regression detection around launching work; no production ordering violation, security issue or actual work-loss route was asserted or demonstrated.\"; \"None for the bounded oracle weakness. The counterfactual establishes an attempted first stage, not execution of the agent/full terminal host. A suite-wide mutation deleting all spec writes may fail other tests; this finding is this test's negative boundary.\"."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-070",
+          "key": "g108/l1",
+          "latest_line": 12,
+          "recommendation": "retain-verified",
+          "bucket": "other",
+          "underlying_key": "test-oracle/failed-launch-spec-publication-does-not-observe-start-attempt",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The negative test accepts any Error and observes final cleanup rather than attempted first-stage execution. At its original revision it also watches tmux although creates use hosts. Later fixture repair removes that historical mismatch but leaves the distinguishing no-attempt observation absent.",
+          "checks": [
+            "647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513:crates/farhelm-supervisor/src/service/core.rs:28534-28631 promises genuine EACCES/no start, uses new_with_exe(dummy_exe()), accepts any ControlMsg::Error, then checks empty sessions/store/tmux.",
+            "647f0227:service/core/host_launch.rs:371-378 selects /nonexistent/farhelm-unit-tests-have-no-host-program without an explicit seam. core.rs:11873-11961 can sweep/clean a definitive failed start and remove the row, or retain it if cleanup is uncertain. Thus ENOENT can supply the accepted alternative cause under the hypothesized ordering regression.",
+            "00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db:core.rs:26079-26164 now uses host_supervisor but still accepts any Error and only checks final hosts-directory emptiness (including read errors through map_or(true)). host_launch.rs:537-565 starts the first stage before writing the companion .host record; that later write can fail in the same unwritable launch directory if the earlier spec write is skipped/deferred.",
+            "647f0227:hosts/spawn.rs:280-300,347-360,403-475 owns the first stage with kill_on_drop and sends the child spec only through finish. A failed record write can kill an attempted first stage without ever starting the full host/child or retaining a socket. This is source-derived counterfactual analysis, not an executed mutation. Production host_launch.rs:454-468 still prepares the spec first."
+          ],
+          "coverage_checked": [
+            "Both specifications searched for spec-publication/start boundaries. SPEC_impl.md:2200-2233 distinguishes first-stage identity recording, spec delivery, confirmed absence and uncertain retention; it does not accept this weak test oracle. SPEC.md:1375-1392 requires intended-create/retry identity, not this test implementation.",
+            "TODO.md Planned is empty; BUGS.md has no related entry. plans/queue searched for failed-spec/spec-publication/provenance/uncertain-create terms; no stated unlanded work specifically adds this no-attempt witness.",
+            "INDEX.md and active TRIAGE_OUTCOMES.md searched for publication, provenance and held-start witnesses. held-start-test-lacks-prelaunch-fencing-witness.md was read; it concerns settling an earlier Restart first stage before a later launch, a different fixture and ordering. No exact coverage or useful extension to that item. No archive read.",
+            "FILTER.md has no boundary covering this deterministic regression-test sensitivity defect."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": "None for the bounded oracle weakness. The counterfactual establishes an attempted first stage, not execution of the agent/full terminal host. A suite-wide mutation deleting all spec writes may fail other tests; this finding is this test's negative boundary.",
+          "original_stronger_consequence": "Weakened regression detection around launching work; no production ordering violation, security issue or actual work-loss route was asserted or demonstrated.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Retain as a source-confirmed test-quality defect. Preserve the later partial repair and separate historical nonexistent-program premise from the tip's still-missing attempt witness."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": true,
+        "clearly_refuted_candidate": false,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Source-confirmed by an existing parent decision; not runtime reproduced",
+        "deduplication_key": "test-oracle/failed-launch-spec-publication-does-not-observe-start-attempt",
+        "destination": "trailing-failed-spec-test-accepts-an-attempted-host-start-as-never-started.md"
+      }
+    },
+    {
+      "key": "g108/c3",
+      "owner": "g108",
+      "id": "c3",
+      "domain": "supervisor-core-integration",
+      "purpose": "supervisor-core-integration: crates/farhelm-supervisor/src/service/core.rs; phases -    async fn the_delete_guard_sees_a_lone_tab_after_the_agent_window_is_gone() {",
+      "history": [
+        {
+          "line": 5,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c3",
+            "state": "open",
+            "summary": "deleted tmux replacement tests exercise a removed relaunch mechanism",
+            "location": "crates/farhelm-supervisor/src/service/core.rs (removed restart and replacement-failure tests)",
+            "detail": "Reviewed commit: 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513. TLDR: considered whether deleting tmux agent-window replacement/reuse tests could hide Restart killing surviving shell tabs. Their exact tmux replacement mechanism is removed, and the replacement contract preserves tabs through shared session cells while addressing the old agent only by its recorded pane. Details: assigned patch lines 110–181, 344–413 and 421–685 remove restart_replaces_only_the_dead_agent_window, restart_reuses_live_agent_and_preserves_tabs, forged_agent_marker_cannot_authorize_old_tab_cleanup and replacement_failures_preserve_tabs_and_clean_temporary_windows. core.rs:13265–13355 holds the original session cells/tab runtimes across Restart and dispatches relaunch_into_terminal; host_restart.rs:603–623 removes only Replacing::TmuxWindow(old) via kill_window(&old.tmux_name, &old.pane), not a window rediscovered from a mutable agent marker. Production no longer creates or marks a replacement tmux window, so BeforeCreation/BeforeMarking/BeforeConfirmation failures in the deleted tmux replacement mechanism no longer have that subject. SPEC_impl.md:2494–2564 ('Moving an old session into a host') instead requires a host launch and preservation of the old tmux tabs; SPEC.md:1960–1961 says: 'Restart touches the agent terminal only: the session’s open terminal tabs keep running in their own terminals, old ones included, until they are closed.' The new path source retains that division; no destructive regression was found through these removals. Suggested bucket: other for potential coverage risk, with no established production violation. Confidence: source-confirmed, no execution. proposed_drop: source refutation of the old replacement-failure route (retired mechanism), not acceptance of a bug by specification. possible_cover: none searched. Could-be-highest: yes if a restarted session killed a surviving user tab through a forged marker; that original consequence remains relevant, but the recorded-pane-only replacement cleanup gives no established shipped route. Caveat: not a claim of equivalent real-tmux integration coverage for migration, which this patch reduces."
+          }
+        },
+        {
+          "line": 9,
+          "event": {
+            "version": 1,
+            "kind": "lead",
+            "id": "c3",
+            "state": "open",
+            "summary": "retired tmux replacement mechanism does not by itself settle tab-preservation coverage",
+            "location": "crates/farhelm-supervisor/src/service/core.rs (deleted restart and replacement-failure tests)",
+            "detail": "Reviewed commit: 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513. TLDR: removing creation/marking fault tests for replacement tmux windows may be justified by that mechanism's retirement, but Restart must still preserve surviving tabs on success and failure. Retained correct cleanup source alone does not prove a meaningful oracle remains for that behavior. This revises c3's earlier proposed drop pending actual test/caller analysis. Source basis: assigned patch lines 110–181, 344–413, 421–685; core.rs:13265–13355 and host_restart.rs:603–623 retain shared tabs and recorded-pane-only old-window cleanup. Contract: SPEC.md:1960–1961 preserves open terminal tabs across Restart; SPEC_impl.md:2494–2564 requires that during migration too. Checks next: map deleted test premises to retained host/migration tests, checking a stable live shell/process identity rather than a nonempty list, and inspect later changes through the pinned tip. Suggested bucket: other for coverage gap if established. Confidence: unresolved coverage lead; no execution. proposed_drop: false pending source checks. possible_cover: none known; parent reports g103/f1 establishes an unmarked-shell cleanup test gap despite correct production roots, which is a relevant review principle, not assumed coverage of this issue. Could-be-highest: preserve original possible tab work loss from incorrect Restart cleanup/forged markers, but no current destructive production route is established. Missing premise: whether any retained meaningful test distinguishes preserved existing tab work from merely recreated/nonempty tabs."
+          }
+        },
+        {
+          "line": 14,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "c3",
+            "state": "open",
+            "summary": "failed Restart loses the live-tab preservation regression oracle",
+            "location": "crates/farhelm-supervisor/src/service/core.rs (deleted replacement_failures_preserve_tabs_and_clean_temporary_windows)",
+            "detail": "# carry failed-Restart tab preservation into the host fixture\n\nReviewed commit: 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513\n\n## TLDR\nRestart must leave an existing shell tab and its work alone even when the replacement fails. This patch deletes the test that proved the tab's original shell survived failure. Retained tests separately check tab preservation after success and agent-terminal rollback after failure; those do not establish that the failed Restart preserves the tab.\n\n## Details\nAssigned patch lines 545–685 delete replacement_failures_preserve_tabs_and_clean_temporary_windows (old core.rs:24593 onward). It opened a real tab, captured its pane/window and live shell pid, forced replacement failures, and asserted the same live shell/window and retained tab after each failure. The BeforeCreation/BeforeMarking/BeforeConfirmation tmux fault stages and absence-of-temporary-window assertions belong to a retired mechanism and need not return. The ordinary failure contract (the pre-existing tab's shell/work stays alive and usable) remains SPEC.md:1960–1961, including host replacements.\nActual retained oracles: e2e/host_relaunches.rs:287–366, a_restart_of_a_host_agent_keeps_its_host_tabs, checks the same socket, host process, child pid/start identity, launch record and before/after echo, but only after successful Restart. terminal_tabs.rs:1070–1170 likewise checks a surviving attached tab and daemon after successful Restart. host_relaunches.rs:595–674 and :697–740 meaningfully exercise refused and unusable replacement hosts and validate old agent host/row/history restoration, but create no tab. Its failure-with-orderly-stop helper (:375–464) opens a tab, but intentionally closes its runtime during supervisor shutdown and checks the host pid, not the tab shell identity/liveness or post-failure usability. core/tests/host_terminals.rs:4246–4352 tests failed agent-runtime restoration after shutdown and has no tab. Searches of restart failure fixtures in host_relaunches, restart_under_concurrency, restart_with_resume and service tests found no ordinary failed-Restart fixture carrying the removed live-shell preservation oracle.\nTip check: 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db's host_relaunches.rs retains the same three open_tab sites (success test and orderly-stop helper), and the refused/unusable replacement tests remain tab-less. The old tmux reuse/replacement mechanism itself is obsolete at tip; the failure tab-preservation contract is not. Extend a real host replacement-failure fixture to open a tab, pin its child pid/start identity, trigger the failure, require the same running child/record, and exchange a fresh marker afterward.\nCurrent core.rs:13265–13355 and host_restart.rs:603–623 correctly retain shared tabs and target only the recorded old agent pane. That refutes an established destructive production regression but cannot settle this test-quality gap; c3's earlier proposed drop on that basis is superseded. Suggested bucket: other (lost regression coverage). Confidence: source-confirmed test/oracle comparison only; no execution/reproduction. proposed_drop: false. possible_cover: none established; parent-reported g103/f1 concerns unmarked-shell cleanup, distinct from preserving a tab across failed Restart. Could-be-highest: preserve original possibility of Restart killing surviving shell work, including through forged old-window identity, but no such shipped failure route is established; the verified issue is test coverage. Caveats: the host failure path predates this deletion, so do not claim this commit introduced a production bug there; it removes a behavioral regression oracle instead of carrying it into the supported mechanism. Pure forged-marker and recorded-pane guards address identity, not this failed-Restart liveness oracle. Successful Restart coverage is meaningful and is not missing."
+          }
+        }
+      ],
+      "latest": {
+        "line": 14,
+        "event": {
+          "version": 1,
+          "kind": "finding",
+          "id": "c3",
+          "state": "open",
+          "summary": "failed Restart loses the live-tab preservation regression oracle",
+          "location": "crates/farhelm-supervisor/src/service/core.rs (deleted replacement_failures_preserve_tabs_and_clean_temporary_windows)",
+          "detail": "# carry failed-Restart tab preservation into the host fixture\n\nReviewed commit: 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513\n\n## TLDR\nRestart must leave an existing shell tab and its work alone even when the replacement fails. This patch deletes the test that proved the tab's original shell survived failure. Retained tests separately check tab preservation after success and agent-terminal rollback after failure; those do not establish that the failed Restart preserves the tab.\n\n## Details\nAssigned patch lines 545–685 delete replacement_failures_preserve_tabs_and_clean_temporary_windows (old core.rs:24593 onward). It opened a real tab, captured its pane/window and live shell pid, forced replacement failures, and asserted the same live shell/window and retained tab after each failure. The BeforeCreation/BeforeMarking/BeforeConfirmation tmux fault stages and absence-of-temporary-window assertions belong to a retired mechanism and need not return. The ordinary failure contract (the pre-existing tab's shell/work stays alive and usable) remains SPEC.md:1960–1961, including host replacements.\nActual retained oracles: e2e/host_relaunches.rs:287–366, a_restart_of_a_host_agent_keeps_its_host_tabs, checks the same socket, host process, child pid/start identity, launch record and before/after echo, but only after successful Restart. terminal_tabs.rs:1070–1170 likewise checks a surviving attached tab and daemon after successful Restart. host_relaunches.rs:595–674 and :697–740 meaningfully exercise refused and unusable replacement hosts and validate old agent host/row/history restoration, but create no tab. Its failure-with-orderly-stop helper (:375–464) opens a tab, but intentionally closes its runtime during supervisor shutdown and checks the host pid, not the tab shell identity/liveness or post-failure usability. core/tests/host_terminals.rs:4246–4352 tests failed agent-runtime restoration after shutdown and has no tab. Searches of restart failure fixtures in host_relaunches, restart_under_concurrency, restart_with_resume and service tests found no ordinary failed-Restart fixture carrying the removed live-shell preservation oracle.\nTip check: 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db's host_relaunches.rs retains the same three open_tab sites (success test and orderly-stop helper), and the refused/unusable replacement tests remain tab-less. The old tmux reuse/replacement mechanism itself is obsolete at tip; the failure tab-preservation contract is not. Extend a real host replacement-failure fixture to open a tab, pin its child pid/start identity, trigger the failure, require the same running child/record, and exchange a fresh marker afterward.\nCurrent core.rs:13265–13355 and host_restart.rs:603–623 correctly retain shared tabs and target only the recorded old agent pane. That refutes an established destructive production regression but cannot settle this test-quality gap; c3's earlier proposed drop on that basis is superseded. Suggested bucket: other (lost regression coverage). Confidence: source-confirmed test/oracle comparison only; no execution/reproduction. proposed_drop: false. possible_cover: none established; parent-reported g103/f1 concerns unmarked-shell cleanup, distinct from preserving a tab across failed Restart. Could-be-highest: preserve original possibility of Restart killing surviving shell work, including through forged old-window identity, but no such shipped failure route is established; the verified issue is test coverage. Caveats: the host failure path predates this deletion, so do not claim this commit introduced a production bug there; it removes a behavioral regression oracle instead of carrying it into the supported mechanism. Pure forged-marker and recorded-pane guards address identity, not this failed-Restart liveness oracle. Successful Restart coverage is meaningful and is not missing."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g108/findings.jsonl",
+        "id": "c3",
+        "line": 14,
+        "disposition": "under-investigation",
+        "group": "g108-c3",
+        "reason": "Record durably acknowledged; parent source/contract validation, cross-group synthesis, coverage/filter matching and any independent drop check remain pending. This preserves the claim and uncertainty without accepting, dropping or lowering it."
+      },
+      "accepted_parent_decision": null,
+      "returned_claim_checks": [
+        {
+          "batch": "claims-070",
+          "key": "g108/c3",
+          "latest_line": 14,
+          "recommendation": "retain-verified",
+          "bucket": "other",
+          "underlying_key": "test-oracle/failed-agent-restart-preserves-existing-tab-shell",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The deleted failure test checked the same live tab shell after failure. The named retained host success test is meaningful, while the named ordinary host replacement-failure tests create no tab. Correct production tab preservation does not replace that removed failure oracle. Earlier production-route dismissal is superseded.",
+          "checks": [
+            "647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513^:crates/farhelm-supervisor/src/service/core.rs:24574-24725 captures tab pane/window/PID, forces replacement failures and requires the same live shell/window afterward. The assigned commit deletes it; retired tmux fault stages/temporary-window assertions need not return.",
+            "647f0227:crates/farhelm/tests/e2e/host_relaunches.rs:287-366 pins tab socket, host PID, child PID/start identity, launch record and before/after exchange on successful Restart.",
+            "647f0227:host_relaunches.rs:595-742 checks refused/unusable host replacement and old-agent restoration without creating a tab. :375-464 opens a tab during orderly supervisor stop, deliberately closes its runtime and checks host PID, not an ordinary failed Restart's surviving shell or fresh exchange.",
+            "00de0b6c:host_relaunches.rs still has open_tab only at :303 and :397; the named failure fixtures remain at :595 and :697. No runtime tests or reproductions were run."
+          ],
+          "coverage_checked": [
+            "SPEC.md Lifecycle operations (:1930-1962) explicitly leaves tabs running across Restart; SPEC_impl.md Restarting a host agent (:2271 onward) keeps tab runtimes in shared cells and spares tab-marked processes. These establish the surviving contract, not acceptance of missing regression coverage.",
+            "TODO.md Planned empty; BUGS.md unrelated. plans/queue searched for failed-Restart/tab-preservation/oracle terms. tmux-end-old-terminals.md:129-134 requires surviving subjects on hosts; it does not explicitly waive failed-Restart tab preservation.",
+            "INDEX.md and active TRIAGE_OUTCOMES.md searched. tab-survival-missing-live-exchange.md concerns supervisor-handoff survival; restart-unwind-omits-tree-sweep-failure.md concerns inaccurate specification of ambiguous agent cleanup. Both read in full; neither covers this failed-Restart tab oracle. No archive read.",
+            "FILTER.md does not cover deterministic test-coverage loss."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": "No missing premise for the deleted oracle versus the named retained fixtures. No current destructive production route is established. This is not a claim that successful Restart tab coverage is absent or that the deletion introduced a host production bug.",
+          "original_stronger_consequence": "Restart killing surviving tab shell work, including a forged old-window cleanup route. Retained recorded-pane guards oppose that production route; the established finding is lost failure-path regression coverage.",
+          "needs_independent_drop_check": true,
+          "proposed_basis": "Retain the test-quality finding; independently adjudicate earlier production-route refutation and narrowing from possible loss of tab work."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": true,
+        "clearly_refuted_candidate": false,
+        "needs_unfinished_gate": true,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "test-oracle/failed-agent-restart-preserves-existing-tab-shell",
+        "destination": "trailing-failed-restart-loses-the-live-tab-preservation-regression-oracle.md"
+      }
+    },
+    {
+      "key": "g108/c4",
+      "owner": "g108",
+      "id": "c4",
+      "domain": "supervisor-core-integration",
+      "purpose": "supervisor-core-integration: crates/farhelm-supervisor/src/service/core.rs; phases -    async fn the_delete_guard_sees_a_lone_tab_after_the_agent_window_is_gone() {",
+      "history": [
+        {
+          "line": 6,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c4",
+            "state": "open",
+            "summary": "retry-artifact test still identifies its intended refusal despite stale tmux emptiness assertion",
+            "location": "crates/farhelm-supervisor/src/service/core.rs:31731",
+            "detail": "Reviewed commit: 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513. TLDR: considered extending l1 to the converted retry-artifact test, which likewise ends by asserting that tmux has no panes. That assertion is stale for host launches, but this test separately requires the actual artifact-removal refusal, so the missing-host executable cannot substitute for its intended cause. Details: the patch changes a_relaunch_refuses_to_start_over_artifacts_it_cannot_remove's row to TerminalKind::Host at core.rs:31762; the complete test (:31731–31840) plants a real spec, makes launch/ non-writable, and requires the error to contain 'not relaunching', the reservation to stay Pending, and the removed in-memory entry to be republished. A definitive host-spawn failure would instead take ordinary failed-start cleanup and settlement (:11873–11946), rather than supplying that diagnostic and pending retry state. Source supports the intended prelaunch refusal; the final tmux-empty assertion does not contribute useful evidence, but its redundancy alone is not a second substantive test failure. Contract: supplied test-authoring checklist says a shared error alone need not establish cause; this test checks the specific refusal plus recovery state. Suggested bucket: other. Confidence: confirmed by source, no execution. proposed_drop: source refutation of an l1-equivalent false-pass route. possible_cover: none searched. Could-be-highest: no established route; the considered issue was a test-quality regression. Caveat: this does not repair the obsolete tmux assertion and does not claim platform-independent permission behavior."
+          }
+        }
+      ],
+      "latest": {
+        "line": 6,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c4",
+          "state": "open",
+          "summary": "retry-artifact test still identifies its intended refusal despite stale tmux emptiness assertion",
+          "location": "crates/farhelm-supervisor/src/service/core.rs:31731",
+          "detail": "Reviewed commit: 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513. TLDR: considered extending l1 to the converted retry-artifact test, which likewise ends by asserting that tmux has no panes. That assertion is stale for host launches, but this test separately requires the actual artifact-removal refusal, so the missing-host executable cannot substitute for its intended cause. Details: the patch changes a_relaunch_refuses_to_start_over_artifacts_it_cannot_remove's row to TerminalKind::Host at core.rs:31762; the complete test (:31731–31840) plants a real spec, makes launch/ non-writable, and requires the error to contain 'not relaunching', the reservation to stay Pending, and the removed in-memory entry to be republished. A definitive host-spawn failure would instead take ordinary failed-start cleanup and settlement (:11873–11946), rather than supplying that diagnostic and pending retry state. Source supports the intended prelaunch refusal; the final tmux-empty assertion does not contribute useful evidence, but its redundancy alone is not a second substantive test failure. Contract: supplied test-authoring checklist says a shared error alone need not establish cause; this test checks the specific refusal plus recovery state. Suggested bucket: other. Confidence: confirmed by source, no execution. proposed_drop: source refutation of an l1-equivalent false-pass route. possible_cover: none searched. Could-be-highest: no established route; the considered issue was a test-quality regression. Caveat: this does not repair the obsolete tmux assertion and does not claim platform-independent permission behavior."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g108/findings.jsonl",
+        "id": "c4",
+        "line": 6,
+        "disposition": "excluded",
+        "group": "candidate/retry-artifact-refusal-wrong-error-cause",
+        "reason": "Parent explicitly accepted named refuted proposal from claims-070 after inspecting it. The proposed l1-equivalent false-pass route is contradicted by this test's specific artifact-removal diagnostic and pending/republication assertions. Its final tmux-empty assertion is stale and redundant, but that alone does not establish the claimed lost refusal oracle. Do not record a second failed-spec oracle finding from the stale tmux assertion: the retained specific cause/state assertions distinguish the proposed competing mechanism. Checked source/results: [\"647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513:crates/farhelm-supervisor/src/service/core.rs:31720-31840 plants an existing spec, freezes launch/, retries a Host row, then requires 'not relaunching', ReservationOutcome::Pending and sessions.contains_key('stranded').\",\"647f0227:core.rs:11873-11961 distinguishes definitive failed-host cleanup from uncertain retention. Merely reaching the nonexistent default host program does not supply this earlier artifact-removal refusal plus its pending recovery state. The stale tmux-empty assertion is not the distinguishing evidence. Source only; no permission/runtime experiment.\"] Current coverage/results: [\"Both specs searched for artifact cleanup, failed publication and retry retention. SPEC_impl.md:2200-2233 requires retained uncertain ownership and replay; nothing accepts bypassing artifact refusal, but source already supplies the checked refusal.\",\"TODO.md Planned empty; BUGS.md unrelated; plans/queue searched for failed-spec/retry-artifact/publication terms with no exact item. INDEX.md and active TRIAGE_OUTCOMES.md searched for this test/refusal trigger; no exact queue/ledger item. No archive read.\",\"FILTER.md not used: recommendation is a bounded source refutation, not a rarity/diagnostic dismissal.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Only a suspected regression-test false pass analogous to l1; no production security or user-work-loss consequence was alleged.\"; \"The candidate would need a competing terminal-start error that also yields the test's specific 'not relaunching' artifact refusal, Pending reservation and republished entry. None is established. This does not claim platform-independent chmod behavior or repair the redundant assertion.\"."
+      },
+      "accepted_parent_decision": {
+        "key": "g108/c4",
+        "line": 6,
+        "disposition": "excluded",
+        "group": "candidate/retry-artifact-refusal-wrong-error-cause",
+        "bucket": "other",
+        "recording": "refuted",
+        "queue_target_candidate": null,
+        "needs_independent_drop_check": false,
+        "reason": "Parent explicitly accepted named refuted proposal from claims-070 after inspecting it. The proposed l1-equivalent false-pass route is contradicted by this test's specific artifact-removal diagnostic and pending/republication assertions. Its final tmux-empty assertion is stale and redundant, but that alone does not establish the claimed lost refusal oracle. Do not record a second failed-spec oracle finding from the stale tmux assertion: the retained specific cause/state assertions distinguish the proposed competing mechanism. Checked source/results: [\"647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513:crates/farhelm-supervisor/src/service/core.rs:31720-31840 plants an existing spec, freezes launch/, retries a Host row, then requires 'not relaunching', ReservationOutcome::Pending and sessions.contains_key('stranded').\",\"647f0227:core.rs:11873-11961 distinguishes definitive failed-host cleanup from uncertain retention. Merely reaching the nonexistent default host program does not supply this earlier artifact-removal refusal plus its pending recovery state. The stale tmux-empty assertion is not the distinguishing evidence. Source only; no permission/runtime experiment.\"] Current coverage/results: [\"Both specs searched for artifact cleanup, failed publication and retry retention. SPEC_impl.md:2200-2233 requires retained uncertain ownership and replay; nothing accepts bypassing artifact refusal, but source already supplies the checked refusal.\",\"TODO.md Planned empty; BUGS.md unrelated; plans/queue searched for failed-spec/retry-artifact/publication terms with no exact item. INDEX.md and active TRIAGE_OUTCOMES.md searched for this test/refusal trigger; no exact queue/ledger item. No archive read.\",\"FILTER.md not used: recommendation is a bounded source refutation, not a rarity/diagnostic dismissal.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Only a suspected regression-test false pass analogous to l1; no production security or user-work-loss consequence was alleged.\"; \"The candidate would need a competing terminal-start error that also yields the test's specific 'not relaunching' artifact refusal, Pending reservation and republished entry. None is established. This does not claim platform-independent chmod behavior or repair the redundant assertion.\"."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-070",
+          "key": "g108/c4",
+          "latest_line": 6,
+          "recommendation": "refuted",
+          "bucket": "other",
+          "underlying_key": "candidate/retry-artifact-refusal-wrong-error-cause",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The proposed l1-equivalent false-pass route is contradicted by this test's specific artifact-removal diagnostic and pending/republication assertions. Its final tmux-empty assertion is stale and redundant, but that alone does not establish the claimed lost refusal oracle.",
+          "checks": [
+            "647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513:crates/farhelm-supervisor/src/service/core.rs:31720-31840 plants an existing spec, freezes launch/, retries a Host row, then requires 'not relaunching', ReservationOutcome::Pending and sessions.contains_key('stranded').",
+            "647f0227:core.rs:11873-11961 distinguishes definitive failed-host cleanup from uncertain retention. Merely reaching the nonexistent default host program does not supply this earlier artifact-removal refusal plus its pending recovery state. The stale tmux-empty assertion is not the distinguishing evidence. Source only; no permission/runtime experiment."
+          ],
+          "coverage_checked": [
+            "Both specs searched for artifact cleanup, failed publication and retry retention. SPEC_impl.md:2200-2233 requires retained uncertain ownership and replay; nothing accepts bypassing artifact refusal, but source already supplies the checked refusal.",
+            "TODO.md Planned empty; BUGS.md unrelated; plans/queue searched for failed-spec/retry-artifact/publication terms with no exact item. INDEX.md and active TRIAGE_OUTCOMES.md searched for this test/refusal trigger; no exact queue/ledger item. No archive read.",
+            "FILTER.md not used: recommendation is a bounded source refutation, not a rarity/diagnostic dismissal."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": "The candidate would need a competing terminal-start error that also yields the test's specific 'not relaunching' artifact refusal, Pending reservation and republished entry. None is established. This does not claim platform-independent chmod behavior or repair the redundant assertion.",
+          "original_stronger_consequence": "Only a suspected regression-test false pass analogous to l1; no production security or user-work-loss consequence was alleged.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Do not record a second failed-spec oracle finding from the stale tmux assertion: the retained specific cause/state assertions distinguish the proposed competing mechanism."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "candidate/retry-artifact-refusal-wrong-error-cause",
+        "destination": null
+      }
+    },
+    {
+      "key": "g108/c5",
+      "owner": "g108",
+      "id": "c5",
+      "domain": "supervisor-core-integration",
+      "purpose": "supervisor-core-integration: crates/farhelm-supervisor/src/service/core.rs; phases -    async fn the_delete_guard_sees_a_lone_tab_after_the_agent_window_is_gone() {",
+      "history": [
+        {
+          "line": 7,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c5",
+            "state": "open",
+            "summary": "removed ambiguous-tmux-create test has no remaining tmux-create subject",
+            "location": "crates/farhelm-supervisor/src/service/core.rs (deleted an_ambiguous_tmux_failure_keeps_the_launching_record)",
+            "detail": "Reviewed commit: 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513. TLDR: considered whether removing the ambiguous-create test could let a failed create discard the only handle to a running agent. The old tmux-create error/probe path is removed, and the host failure path still retains the launching row, map entry and unresolved reservation when it cannot confirm cleanup. Details: assigned patch lines 980–1103 deletes an_ambiguous_tmux_failure_keeps_the_launching_record, whose fixture made both tmux new-session and has-session fail via a loop at the private socket. New create dispatches only spawn_agent_in_host at core.rs:11749–11797. HostLeft::MayRemain is resolved through end_launch_host; failure supplies Some(kept) at :11803–11818, and :11936–11961 publishes a retained launching entry without abandon_launching_record or a Failed settlement. Host launch records are written before stdin spec delivery (host_launch.rs:537–558), keeping a socket/first-stage identity for later Delete and retry. Thus the removed test's old error mode is no longer a producer, and source retains the cross-kind contract rather than proving an orphaning regression. Contract: SPEC_impl.md:2335–2342 requires failed host starts to be ended and only retains the launching row when that cannot be confirmed; SPEC.md:1371–1377 requires one session per intended create and retained retry identity. Suggested bucket: other (coverage concern with no established production violation). Confidence: confirmed source analysis only, no execution. proposed_drop: source refutation of an orphaning route caused by this deletion; not specification acceptance of an observed bug. possible_cover: none searched. Could-be-highest: yes if a possibly running launch lost its only session/cleanup record; that consequence is preserved here but no such shipped route was established. Caveat: source retention is not a claim that an equivalent ambiguous-host-create integration test exists or ran."
+          }
+        },
+        {
+          "line": 10,
+          "event": {
+            "version": 1,
+            "kind": "lead",
+            "id": "c5",
+            "state": "open",
+            "summary": "ambiguous-host-create retention needs a meaningful replacement oracle",
+            "location": "crates/farhelm-supervisor/src/service/core.rs (deleted an_ambiguous_tmux_failure_keeps_the_launching_record)",
+            "detail": "Reviewed commit: 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513. TLDR: the tmux creation/probe fixture is retired, but a create whose host cannot be confirmed ended must still retain its durable row, published cleanup handle and pending retry identity. Correct current failure code does not settle whether deleting the test leaves this cross-terminal behavior untested. This revises c5's earlier proposed drop pending source inspection of replacement tests and later changes. Source basis: assigned patch lines 980–1103; core.rs:11803–11818 and :11936–11961 retain an uncertain host launch. Contract: SPEC_impl.md:2335–2342 requires retention when ending the host cannot be confirmed; SPEC.md:1371–1377 defines retained retry identity. Checks next: inspect tests that actually drive a create into HostLeft::MayRemain plus failed cleanup and assert row/map/reservation state, and inspect later changes through 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db. Suggested bucket: other for a test-quality gap if established. Confidence: unresolved coverage lead; no execution. proposed_drop: false pending source checks. possible_cover: none known. Could-be-highest: preserve original possible orphaning of user work when a possibly live launch loses its cleanup record, but no shipped production failure route is established. Missing premise: whether a retained test truly exercises uncertain create cleanup rather than only failed Restart/Delete or confirmed-absent create cleanup."
+          }
+        },
+        {
+          "line": 13,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "c5",
+            "state": "open",
+            "summary": "deleted ambiguous-create test loses published-handle and pending-intent oracles",
+            "location": "crates/farhelm-supervisor/src/service/core.rs (deleted an_ambiguous_tmux_failure_keeps_the_launching_record)",
+            "detail": "# retain an uncertain create's visible handle and retry identity in the host test\n\nReviewed commit: 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513\n\n## TLDR\nThe migration removes a test proving that an uncertain failed create remains visible and keeps its retry unresolved. The retained host equivalent proves only that a database row survives. It could pass if the session disappeared from the running supervisor or its retry were wrongly finalized. Correct current production code does not replace those removed regression oracles.\n\n## Details\nAssigned patch lines 980–1103 remove an_ambiguous_tmux_failure_keeps_the_launching_record (old core.rs:33988 onward). Besides retaining one Launching row, that test explicitly asserted sessions.contains_key(row.id), ReservationOutcome::Pending for its key, and ordinary_create_was_refused == false. Those checked three distinct consequences: durable ownership, immediate reachability of Stop/Delete/listing, and a retry that still reconciles instead of replaying a final refusal.\nThe actual host replacement is e2e/host_creates.rs:1254–1299, an_unusable_host_that_cannot_be_ended_keeps_the_launching_record. Its never-answering listener has a command line the verified signal rejects, so it meaningfully reaches failed cleanup. It asserts the 'may still be running at'/'launching record' diagnostic, one durable host Launching row, and that the listener remains alive. But it calls client.create_session, whose client.rs:3214–3224 explicitly passes None as intent key; it neither lists/resolves the retained session from the running supervisor nor checks a reservation. A wrong Failed settlement for keyed uncertain failure would be invisible, and a missing publish_retained_launch would not change this test's inspected database row or listener. The separate keyed interruption test (host_creates.rs:886–973) deliberately exits via a DuringLaunch simulated crash, before the FailedStart::Terminal cleanup branch, and asserts Created only after a successful retry; it does not cover failed-cleanup publication/settlement. Targeted searches of host tests for the uncertain diagnostic/HostLeft::MayRemain/HostSpawnFailure::Host found no second uncertain-create fixture that supplies these missing assertions.\nAt tip 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db the same retained host test is :1169–1213 and remains unkeyed with only durable-row/listener checks. The retired tmux symlink-loop/new-session mechanism need not return; extend the existing host fixture with a key and assert its retained session is listed/reachable, reservation remains Pending, and ordinary-create refusal classification does not finalize it.\nContract: SPEC.md:1371–1377 requires one intended create and retained retry identity; SPEC_impl.md:2335–2342 retains uncertain hosts through launching records. Production core.rs:11803–11818 and :11936–11961 correctly keeps the row and publishes it without Failed settlement; no actual orphaned process or incorrect final settlement is established. Suggested bucket: other (lost regression coverage). Confidence: confirmed source analysis; no execution/reproduction. proposed_drop: false; earlier proposed drop based on current correct production code is superseded. possible_cover: none known; parent-supplied g103/f1 concerns unmarked-shell cleanup, a different behavior. Could-be-highest: preserve the original concern that discarding the visible/cleanup handle or finalizing an uncertain intent can hide/orphan running user work, but no such current production route is established, so this finding's established impact remains test quality. Caveat: host path coverage was already narrower in these assertions before this deletion; the regression here is removing the only inspected cross-terminal test oracle instead of carrying its required behavior into the retained host fixture."
+          }
+        }
+      ],
+      "latest": {
+        "line": 13,
+        "event": {
+          "version": 1,
+          "kind": "finding",
+          "id": "c5",
+          "state": "open",
+          "summary": "deleted ambiguous-create test loses published-handle and pending-intent oracles",
+          "location": "crates/farhelm-supervisor/src/service/core.rs (deleted an_ambiguous_tmux_failure_keeps_the_launching_record)",
+          "detail": "# retain an uncertain create's visible handle and retry identity in the host test\n\nReviewed commit: 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513\n\n## TLDR\nThe migration removes a test proving that an uncertain failed create remains visible and keeps its retry unresolved. The retained host equivalent proves only that a database row survives. It could pass if the session disappeared from the running supervisor or its retry were wrongly finalized. Correct current production code does not replace those removed regression oracles.\n\n## Details\nAssigned patch lines 980–1103 remove an_ambiguous_tmux_failure_keeps_the_launching_record (old core.rs:33988 onward). Besides retaining one Launching row, that test explicitly asserted sessions.contains_key(row.id), ReservationOutcome::Pending for its key, and ordinary_create_was_refused == false. Those checked three distinct consequences: durable ownership, immediate reachability of Stop/Delete/listing, and a retry that still reconciles instead of replaying a final refusal.\nThe actual host replacement is e2e/host_creates.rs:1254–1299, an_unusable_host_that_cannot_be_ended_keeps_the_launching_record. Its never-answering listener has a command line the verified signal rejects, so it meaningfully reaches failed cleanup. It asserts the 'may still be running at'/'launching record' diagnostic, one durable host Launching row, and that the listener remains alive. But it calls client.create_session, whose client.rs:3214–3224 explicitly passes None as intent key; it neither lists/resolves the retained session from the running supervisor nor checks a reservation. A wrong Failed settlement for keyed uncertain failure would be invisible, and a missing publish_retained_launch would not change this test's inspected database row or listener. The separate keyed interruption test (host_creates.rs:886–973) deliberately exits via a DuringLaunch simulated crash, before the FailedStart::Terminal cleanup branch, and asserts Created only after a successful retry; it does not cover failed-cleanup publication/settlement. Targeted searches of host tests for the uncertain diagnostic/HostLeft::MayRemain/HostSpawnFailure::Host found no second uncertain-create fixture that supplies these missing assertions.\nAt tip 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db the same retained host test is :1169–1213 and remains unkeyed with only durable-row/listener checks. The retired tmux symlink-loop/new-session mechanism need not return; extend the existing host fixture with a key and assert its retained session is listed/reachable, reservation remains Pending, and ordinary-create refusal classification does not finalize it.\nContract: SPEC.md:1371–1377 requires one intended create and retained retry identity; SPEC_impl.md:2335–2342 retains uncertain hosts through launching records. Production core.rs:11803–11818 and :11936–11961 correctly keeps the row and publishes it without Failed settlement; no actual orphaned process or incorrect final settlement is established. Suggested bucket: other (lost regression coverage). Confidence: confirmed source analysis; no execution/reproduction. proposed_drop: false; earlier proposed drop based on current correct production code is superseded. possible_cover: none known; parent-supplied g103/f1 concerns unmarked-shell cleanup, a different behavior. Could-be-highest: preserve the original concern that discarding the visible/cleanup handle or finalizing an uncertain intent can hide/orphan running user work, but no such current production route is established, so this finding's established impact remains test quality. Caveat: host path coverage was already narrower in these assertions before this deletion; the regression here is removing the only inspected cross-terminal test oracle instead of carrying its required behavior into the retained host fixture."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g108/findings.jsonl",
+        "id": "c5",
+        "line": 13,
+        "disposition": "under-investigation",
+        "group": "g108-c5",
+        "reason": "Record durably acknowledged; parent source/contract validation, cross-group synthesis, coverage/filter matching and any independent drop check remain pending. This preserves the claim and uncertainty without accepting, dropping or lowering it."
+      },
+      "accepted_parent_decision": null,
+      "returned_claim_checks": [
+        {
+          "batch": "claims-070",
+          "key": "g108/c5",
+          "latest_line": 13,
+          "recommendation": "retain-verified",
+          "bucket": "other",
+          "underlying_key": "test-oracle/uncertain-create-published-handle-and-pending-intent",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The removed keyed ambiguous-create test checks both immediate publication and unresolved retry identity. Its retained host counterpart drives genuine failed cleanup but is unkeyed and checks only the durable row and surviving listener. Current correct production retention does not establish those missing oracles. Earlier proposed orphaning-route dismissal is superseded.",
+          "checks": [
+            "647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513^:crates/farhelm-supervisor/src/service/core.rs:33988-34091 checks Launching row, in-memory reachability, ReservationOutcome::Pending and ordinary_create_was_refused == false after ambiguous failure. The assigned commit deletes it.",
+            "647f0227:crates/farhelm/tests/e2e/host_creates.rs:1254-1299 checks the uncertain-host diagnostic, one durable Launching Host row and surviving listener, but neither current listing nor reservation outcome.",
+            "647f0227:crates/farhelm-helm/src/client.rs:3214-3224 passes None from create_session to create_session_with_key. This corrects the abbreviated client.rs reference in the original record; it is not farhelm-supervisor/src/client.rs.",
+            "00de0b6c:host_creates.rs:1169-1213 remains unkeyed with the same durable-row/listener assertions. 647f0227:core.rs:11936-11961 correctly publishes retained uncertain starts without abandoning the row or finalizing Failed. No runtime reproduction was made."
+          ],
+          "coverage_checked": [
+            "SPEC.md:1375-1392 defines retained create/retry identity. SPEC_impl.md:2200-2233 says uncertain cleanup keeps a launching record and describes publication/retry. These require the behavior; they do not waive its lost oracle.",
+            "TODO.md Planned empty; BUGS.md unrelated. plans/queue searched for uncertain/ambiguous create, published handle and pending intent; no stated unlanded plan specifically supplies these missing keyed failed-cleanup assertions.",
+            "INDEX.md and active TRIAGE_OUTCOMES.md searched. retained-refusal-can-clear-restart-delete-protection.md and its active discard entry were read: they concern generation-less retained-refusal settlement during concurrent Restart, not uncertain create publication/Pending assertions. No exact queue/ledger coverage. No archive read.",
+            "FILTER.md does not cover the test-oracle removal; this is not a reported runtime upgrade edge case."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": "No missing premise for the bounded removed-oracle comparison. No current orphaned process, missing publication or incorrectly finalized reservation is established. Host tests were already narrower before this deletion; the change removes the inspected cross-terminal assertions instead of porting them.",
+          "original_stronger_consequence": "A possibly live launch could lose its visible cleanup handle or have its uncertain retry finalized, hiding/orphaning user work. The retained production source currently protects that route; established impact is test quality.",
+          "needs_independent_drop_check": true,
+          "proposed_basis": "Retain the missing publication/Pending test oracles. Earlier production-route refutation and consequence narrowing still need independent judgment."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": true,
+        "clearly_refuted_candidate": false,
+        "needs_unfinished_gate": true,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "test-oracle/uncertain-create-published-handle-and-pending-intent",
+        "destination": "trailing-deleted-ambiguous-create-test-loses-published-handle-and-pending-intent-oracles.md"
+      }
+    },
+    {
+      "key": "g108/l2",
+      "owner": "g108",
+      "id": "l2",
+      "domain": "supervisor-core-integration",
+      "purpose": "supervisor-core-integration: crates/farhelm-supervisor/src/service/core.rs; phases -    async fn the_delete_guard_sees_a_lone_tab_after_the_agent_window_is_gone() {",
+      "history": [
+        {
+          "line": 16,
+          "event": {
+            "version": 1,
+            "kind": "lead",
+            "id": "l2",
+            "state": "open",
+            "summary": "tmux retry refusal may conflate a planned checkout with absence of its directory",
+            "location": "crates/farhelm-supervisor/src/service/core.rs:38457",
+            "detail": "Reviewed commit: 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513. TLDR: the added retry-refusal test establishes a Planned checkout with no directory, but the associated refusal helper branches on Planned alone. Need determine whether an older interrupted attempt can have already made a directory while its durable plan still says Planned, and whether rollback checks actual allocation before discarding ownership evidence. Source basis: added a_retried_fresh_checkout_interrupted_in_tmux_is_refused_before_its_mkdir at core.rs:38457 onward; previously read refuse_retried_tmux_launch at :15866–15927 takes rollback for Planned and retain_create_refusal otherwise. Contract: SPEC.md:1768 onward retains a visible error session/plan when interrupted after mkdir before identity capture, leaving the unestablished directory untouched for inspection. The current source may already exclude this combination during retry reconciliation or inside rollback_pre_mkdir_create; that premise is not yet settled. Checks next: trace fresh retry validation/recovery before launch_reserved, allocator state transitions and rollback_pre_mkdir_create; compare introduction across the complete pinned range and later tip if relevant. Suggested bucket: provisional high for lost checkout ownership/visibility if the route exists; could-be-highest: not established (no deletion or user-work-loss route shown). Confidence: concrete unresolved source lead, no execution. proposed_drop: false pending source checks. possible_cover: no corresponding route in the supplied neighbour records; their spare-cleanup/legacy-retirement concerns have different triggers. Original suspected consequence: a managed directory an older create made becomes orphaned after refusal removes its session/plan. Exact missing premise: whether any shipped keyed retry reaches this helper with state Planned and an already-created directory, rather than an earlier recovery step retaining/refusing it. No runtime test or reproduction requested or performed."
+          }
+        },
+        {
+          "line": 17,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "l2",
+            "state": "open",
+            "summary": "occupied Planned checkout is retained before tmux-retry rollback can run",
+            "location": "crates/farhelm-supervisor/src/service/core.rs:38457",
+            "detail": "Reviewed commit: 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513. TLDR: the added tmux-retry test's no-directory Planned premise is meaningful. The suspected orphaned-checkout route is source-refuted: a Planned checkout whose directory already exists is refused and retained by validation before the new tmux-retry refusal helper is reached. Details: working_copies.rs:1433–1450 confirms the first premise was real: mkdir can succeed while post-mkdir failure leaves durable allocation state Planned. However core.rs:10022–10082 explicitly treats a Planned occupied target (symlink_metadata, including symlinks and lookup errors) as RetainedCreateRefusal, without adopting or removing it. At :9158 every Reserved::Retry passes validate_retry; :9161–9192 routes that refusal through retain_create_refusal and returns before :9204 calls launch_session. The new helper at :15866–15927 is reached only inside launch_reserved, after that gate. Thus an existing ambiguous directory cannot be the pre-existing allocation silently removed by the new rollback route. store.rs:3595–3630 does only transactional row/member/plan removal, not filesystem deletion; the safety premise is deliberately established by its caller. The existing an_ambiguous_planned_checkout_never_adopts_a_foreign_directory test (:40011 onward) separately plants an occupied Planned path and requires the diagnostic/retained evidence, so the source refutation is backed by a meaningful retained oracle, not production correctness alone. Contract: SPEC.md:1756–1773 retains allocated or identity-ambiguous checkouts; that is enforced before the new test's branch. Suggested bucket: other for this considered review candidate, not a verified bug. Confidence: confirmed by source/caller analysis only; no execution. proposed_drop: exact source refutation—the previously missing caller-order premise is now established, not a specification exception. possible_cover: none needed; no coverage sources searched. Could-be-highest: no established loss-of-work route; original suspected orphaning/visibility loss is preserved here but refuted for the shipped keyed retry. Caveats: a new foreign directory appearing after the absence check is not an allocation by this attempt and rollback leaves it untouched; this record does not generalize to live concurrent older supervisors, which state-directory ownership excludes. No readily checkable premise remains open. Attribution need not be assigned to another commit because the suspected behavior is absent at the reviewed revision; the discovery concerned this assigned newly added test/refusal interface rather than a claim based only on predating the commit."
+          }
+        }
+      ],
+      "latest": {
+        "line": 17,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "l2",
+          "state": "open",
+          "summary": "occupied Planned checkout is retained before tmux-retry rollback can run",
+          "location": "crates/farhelm-supervisor/src/service/core.rs:38457",
+          "detail": "Reviewed commit: 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513. TLDR: the added tmux-retry test's no-directory Planned premise is meaningful. The suspected orphaned-checkout route is source-refuted: a Planned checkout whose directory already exists is refused and retained by validation before the new tmux-retry refusal helper is reached. Details: working_copies.rs:1433–1450 confirms the first premise was real: mkdir can succeed while post-mkdir failure leaves durable allocation state Planned. However core.rs:10022–10082 explicitly treats a Planned occupied target (symlink_metadata, including symlinks and lookup errors) as RetainedCreateRefusal, without adopting or removing it. At :9158 every Reserved::Retry passes validate_retry; :9161–9192 routes that refusal through retain_create_refusal and returns before :9204 calls launch_session. The new helper at :15866–15927 is reached only inside launch_reserved, after that gate. Thus an existing ambiguous directory cannot be the pre-existing allocation silently removed by the new rollback route. store.rs:3595–3630 does only transactional row/member/plan removal, not filesystem deletion; the safety premise is deliberately established by its caller. The existing an_ambiguous_planned_checkout_never_adopts_a_foreign_directory test (:40011 onward) separately plants an occupied Planned path and requires the diagnostic/retained evidence, so the source refutation is backed by a meaningful retained oracle, not production correctness alone. Contract: SPEC.md:1756–1773 retains allocated or identity-ambiguous checkouts; that is enforced before the new test's branch. Suggested bucket: other for this considered review candidate, not a verified bug. Confidence: confirmed by source/caller analysis only; no execution. proposed_drop: exact source refutation—the previously missing caller-order premise is now established, not a specification exception. possible_cover: none needed; no coverage sources searched. Could-be-highest: no established loss-of-work route; original suspected orphaning/visibility loss is preserved here but refuted for the shipped keyed retry. Caveats: a new foreign directory appearing after the absence check is not an allocation by this attempt and rollback leaves it untouched; this record does not generalize to live concurrent older supervisors, which state-directory ownership excludes. No readily checkable premise remains open. Attribution need not be assigned to another commit because the suspected behavior is absent at the reviewed revision; the discovery concerned this assigned newly added test/refusal interface rather than a claim based only on predating the commit."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g108/findings.jsonl",
+        "id": "l2",
+        "line": 17,
+        "disposition": "under-investigation",
+        "group": "g108-l2",
+        "reason": "Record durably acknowledged; parent source/contract validation, cross-group synthesis, coverage/filter matching and any independent drop check remain pending. This preserves the claim and uncertainty without accepting, dropping or lowering it."
+      },
+      "accepted_parent_decision": null,
+      "returned_claim_checks": [
+        {
+          "batch": "claims-070",
+          "key": "g108/l2",
+          "latest_line": 17,
+          "recommendation": "refuted",
+          "bucket": "other",
+          "underlying_key": "candidate/legacy-keyed-retry-rolls-back-occupied-planned-checkout",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The missing caller-order premise is resolved: every keyed retry validates its Planned target before launch_reserved can reach the legacy-terminal refusal. An occupied or unreadable Planned target returns the retained refusal rather than entering pre-mkdir rollback. Preserve the earlier suspected orphaning consequence and the fact that post-mkdir Planned state itself is possible.",
+          "checks": [
+            "647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513:crates/farhelm-supervisor/src/service/core.rs:9158-9204 routes Reserved::Retry through validate_retry and handles RetainedCreateRefusal with retain_create_refusal/early return before launch_session.",
+            "647f0227:core.rs:10022-10082 inspects the Planned path with symlink_metadata, retains any occupied target including symlinks, and retains lookup errors. It does not adopt or remove the directory.",
+            "647f0227:core.rs:15855-15927 sends only the later legacy retry into abandon_fresh_pre_mkdir for a still-Planned origin; the earlier validation gate defeats the stated already-existing-directory route. No runtime test, mkdir experiment or VCS mutation was made."
+          ],
+          "coverage_checked": [
+            "SPEC.md:1761-1781 requires retention after allocation and after mkdir before identity capture; SPEC_impl.md:2180-2185 describes old keyed-create refusal. The source enforces the relevant safety boundary before the new refusal.",
+            "TODO.md Planned empty; BUGS.md unrelated. plans/queue searched for Planned occupied checkout, retry rollback and tmux retry; tmux-end-old-terminals.md describes retirement, not acceptance of orphaned allocations.",
+            "INDEX.md and active TRIAGE_OUTCOMES.md searched for Planned/ambiguous create/retained refusal. The existing retained-refusal-can-clear-restart-delete-protection.md discard concerns a different concurrent-generation premise and is not used to drop this candidate. No archive read.",
+            "FILTER.md not used; the proposed basis is caller-order source refutation."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": "No remaining premise for the stated pre-existing occupied Planned target. A foreign directory appearing after the absence check is not an allocation by this attempt and the rollback does not delete it; no broader concurrent-older-supervisor claim is adjudicated.",
+          "original_stronger_consequence": "A managed directory an older create already made becomes orphaned when the retry removes its session/plan. The original lead suggested high visibility/ownership loss and explicitly did not establish deletion or loss of user work.",
+          "needs_independent_drop_check": true,
+          "proposed_basis": "Propose source refutation of the named occupied-Planned rollback route. Mark for independent review conservatively because retiring the only ownership evidence could involve user-owned work, even though the original record did not establish work loss."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": true,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "candidate/legacy-keyed-retry-rolls-back-occupied-planned-checkout",
+        "destination": null
+      }
+    },
+    {
+      "key": "g108/c6",
+      "owner": "g108",
+      "id": "c6",
+      "domain": "supervisor-core-integration",
+      "purpose": "supervisor-core-integration: crates/farhelm-supervisor/src/service/core.rs; phases -    async fn the_delete_guard_sees_a_lone_tab_after_the_agent_window_is_gone() {",
+      "history": [
+        {
+          "line": 18,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c6",
+            "state": "open",
+            "summary": "cwd-fill historical comment does not introduce a new pending-implementation contract",
+            "location": "crates/farhelm-supervisor/src/service/core.rs:29882",
+            "detail": "Reviewed commit: 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513; attribution compared to exclusive range base 6e423e30068b62c6cfa276c6d720ee35bb70387a. TLDR: considered whether the changed test docstring newly tells maintainers that working-directory placeholder filling is still unimplemented. The patch renames spawn_agent to prepare_launch in an explicitly commit-relative historical paragraph; its 'does not wire up the fill in this commit (that lands in the next commit of the stack)' text already exists verbatim in the range base at core.rs:32339–32343. No new pending-implementation claim is introduced by the helper rename. Details: current prepare_launch does perform fill_cwd (:15556–15563), while this test's actual contract remains that validate_create returns the literal placeholder unchanged (:29881–29924). The test only calls validation, never the spawn, so its assertions do not claim filling is absent at runtime. This is a source-based attribution/scope rejection of a possible new documentation finding, not an inference that production correctness cures bad documentation. Suggested bucket: other if a broader old-documentation cleanup were requested; no new assigned defect established. Confidence: confirmed source comparison, no execution. proposed_drop: the concrete commit-relative claim predates the entire pinned range, and this assigned hunk changes only the helper's valid name; any old stale historical wording would be independent prior debt rather than a new changed behavior. possible_cover: none; neighbour documentation findings concern other comments/contracts, not this existing historical paragraph. Could-be-highest: no established or suspected security/user-work route. Caveat: revising this historical paragraph into a timeless description would improve clarity, but that maintenance preference alone is not reported as a new issue in this pass."
+          }
+        }
+      ],
+      "latest": {
+        "line": 18,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c6",
+          "state": "open",
+          "summary": "cwd-fill historical comment does not introduce a new pending-implementation contract",
+          "location": "crates/farhelm-supervisor/src/service/core.rs:29882",
+          "detail": "Reviewed commit: 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513; attribution compared to exclusive range base 6e423e30068b62c6cfa276c6d720ee35bb70387a. TLDR: considered whether the changed test docstring newly tells maintainers that working-directory placeholder filling is still unimplemented. The patch renames spawn_agent to prepare_launch in an explicitly commit-relative historical paragraph; its 'does not wire up the fill in this commit (that lands in the next commit of the stack)' text already exists verbatim in the range base at core.rs:32339–32343. No new pending-implementation claim is introduced by the helper rename. Details: current prepare_launch does perform fill_cwd (:15556–15563), while this test's actual contract remains that validate_create returns the literal placeholder unchanged (:29881–29924). The test only calls validation, never the spawn, so its assertions do not claim filling is absent at runtime. This is a source-based attribution/scope rejection of a possible new documentation finding, not an inference that production correctness cures bad documentation. Suggested bucket: other if a broader old-documentation cleanup were requested; no new assigned defect established. Confidence: confirmed source comparison, no execution. proposed_drop: the concrete commit-relative claim predates the entire pinned range, and this assigned hunk changes only the helper's valid name; any old stale historical wording would be independent prior debt rather than a new changed behavior. possible_cover: none; neighbour documentation findings concern other comments/contracts, not this existing historical paragraph. Could-be-highest: no established or suspected security/user-work route. Caveat: revising this historical paragraph into a timeless description would improve clarity, but that maintenance preference alone is not reported as a new issue in this pass."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g108/findings.jsonl",
+        "id": "c6",
+        "line": 18,
+        "disposition": "excluded",
+        "group": "historical-prose/cwd-fill-next-commit-claim",
+        "reason": "Parent explicitly accepted named out-of-range proposal from claims-070 after inspecting it. The commit-relative 'not wired up in this commit' prose already exists at the exclusive range base. The assigned patch updates the helper's name; the validation test still correctly requires the literal placeholder to remain unchanged. This does not establish a newly introduced pending-implementation claim. Exclude only the named new-documentation-defect attribution: the substantive disputed sentence predates the entire review range. Checked source/results: [\"6e423e30068b62c6cfa276c6d720ee35bb70387a:crates/farhelm-supervisor/src/service/core.rs:32333-32365 already says spawn_agent does not wire up fill in this commit and that it lands in the next stack commit.\",\"647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513:core.rs:29879-29924 retains the same historical statement with prepare_launch substituted. The test invokes validate_create only and asserts the literal CWD_PLACEHOLDER in resolved.argv. Source comparison only.\"] Current coverage/results: [\"Both specs searched for cwd-placeholder filling/validation. SPEC.md:3725-3727 requires whole-argument cwd filling on every launch/restart; SPEC_impl.md:8563-8568 puts filling at spawn. Those clauses agree with the distinction between validation and launch. No exact cover is needed for the range attribution rejection.\",\"TODO.md Planned empty; BUGS.md unrelated. plans/queue searched for cwd/placeholder/fill and comment cleanup; tmux-drop-from-docs.md:67-104 is a tmux/xterm rationale sweep, not specific coverage of this older stack-relative sentence.\",\"INDEX.md and active TRIAGE_OUTCOMES.md searched for cwd-fill/placeholder/pending implementation; no matching existing queue item or decision. No archive read.\",\"FILTER.md not used: this is a range attribution conclusion, not a filtered documentation finding.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Maintainers could misread the old historical paragraph as saying cwd fill is still unimplemented. No security or user-work-loss concern was asserted.\"; \"A claim that the reviewed range introduced this stale historical sentence is contradicted by the base. Timeless rewording could improve clarity but is older debt, not a newly established defect here.\"."
+      },
+      "accepted_parent_decision": {
+        "key": "g108/c6",
+        "line": 18,
+        "disposition": "excluded",
+        "group": "historical-prose/cwd-fill-next-commit-claim",
+        "bucket": "other",
+        "recording": "out-of-range",
+        "queue_target_candidate": null,
+        "needs_independent_drop_check": false,
+        "reason": "Parent explicitly accepted named out-of-range proposal from claims-070 after inspecting it. The commit-relative 'not wired up in this commit' prose already exists at the exclusive range base. The assigned patch updates the helper's name; the validation test still correctly requires the literal placeholder to remain unchanged. This does not establish a newly introduced pending-implementation claim. Exclude only the named new-documentation-defect attribution: the substantive disputed sentence predates the entire review range. Checked source/results: [\"6e423e30068b62c6cfa276c6d720ee35bb70387a:crates/farhelm-supervisor/src/service/core.rs:32333-32365 already says spawn_agent does not wire up fill in this commit and that it lands in the next stack commit.\",\"647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513:core.rs:29879-29924 retains the same historical statement with prepare_launch substituted. The test invokes validate_create only and asserts the literal CWD_PLACEHOLDER in resolved.argv. Source comparison only.\"] Current coverage/results: [\"Both specs searched for cwd-placeholder filling/validation. SPEC.md:3725-3727 requires whole-argument cwd filling on every launch/restart; SPEC_impl.md:8563-8568 puts filling at spawn. Those clauses agree with the distinction between validation and launch. No exact cover is needed for the range attribution rejection.\",\"TODO.md Planned empty; BUGS.md unrelated. plans/queue searched for cwd/placeholder/fill and comment cleanup; tmux-drop-from-docs.md:67-104 is a tmux/xterm rationale sweep, not specific coverage of this older stack-relative sentence.\",\"INDEX.md and active TRIAGE_OUTCOMES.md searched for cwd-fill/placeholder/pending implementation; no matching existing queue item or decision. No archive read.\",\"FILTER.md not used: this is a range attribution conclusion, not a filtered documentation finding.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Maintainers could misread the old historical paragraph as saying cwd fill is still unimplemented. No security or user-work-loss concern was asserted.\"; \"A claim that the reviewed range introduced this stale historical sentence is contradicted by the base. Timeless rewording could improve clarity but is older debt, not a newly established defect here.\"."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-070",
+          "key": "g108/c6",
+          "latest_line": 18,
+          "recommendation": "out-of-range",
+          "bucket": "other",
+          "underlying_key": "historical-prose/cwd-fill-next-commit-claim",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The commit-relative 'not wired up in this commit' prose already exists at the exclusive range base. The assigned patch updates the helper's name; the validation test still correctly requires the literal placeholder to remain unchanged. This does not establish a newly introduced pending-implementation claim.",
+          "checks": [
+            "6e423e30068b62c6cfa276c6d720ee35bb70387a:crates/farhelm-supervisor/src/service/core.rs:32333-32365 already says spawn_agent does not wire up fill in this commit and that it lands in the next stack commit.",
+            "647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513:core.rs:29879-29924 retains the same historical statement with prepare_launch substituted. The test invokes validate_create only and asserts the literal CWD_PLACEHOLDER in resolved.argv. Source comparison only."
+          ],
+          "coverage_checked": [
+            "Both specs searched for cwd-placeholder filling/validation. SPEC.md:3725-3727 requires whole-argument cwd filling on every launch/restart; SPEC_impl.md:8563-8568 puts filling at spawn. Those clauses agree with the distinction between validation and launch. No exact cover is needed for the range attribution rejection.",
+            "TODO.md Planned empty; BUGS.md unrelated. plans/queue searched for cwd/placeholder/fill and comment cleanup; tmux-drop-from-docs.md:67-104 is a tmux/xterm rationale sweep, not specific coverage of this older stack-relative sentence.",
+            "INDEX.md and active TRIAGE_OUTCOMES.md searched for cwd-fill/placeholder/pending implementation; no matching existing queue item or decision. No archive read.",
+            "FILTER.md not used: this is a range attribution conclusion, not a filtered documentation finding."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": "A claim that the reviewed range introduced this stale historical sentence is contradicted by the base. Timeless rewording could improve clarity but is older debt, not a newly established defect here.",
+          "original_stronger_consequence": "Maintainers could misread the old historical paragraph as saying cwd fill is still unimplemented. No security or user-work-loss concern was asserted.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Exclude only the named new-documentation-defect attribution: the substantive disputed sentence predates the entire review range."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": false,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "historical-prose/cwd-fill-next-commit-claim",
+        "destination": null
+      }
+    },
+    {
+      "key": "g108/l3",
+      "owner": "g108",
+      "id": "l3",
+      "domain": "supervisor-core-integration",
+      "purpose": "supervisor-core-integration: crates/farhelm-supervisor/src/service/core.rs; phases -    async fn the_delete_guard_sees_a_lone_tab_after_the_agent_window_is_gone() {",
+      "history": [
+        {
+          "line": 19,
+          "event": {
+            "version": 1,
+            "kind": "lead",
+            "id": "l3",
+            "state": "open",
+            "summary": "held-start guard's cancellation explanation may retain tmux-only child-lifetime assumptions",
+            "location": "crates/farhelm-supervisor/src/service/core.rs:26335",
+            "detail": "Reviewed commit: 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513. TLDR: after the provenance fixture moves from a fake tmux command to a fake host first stage, ReleaseHeldStart's documentation still says cancellation without an acknowledgement leaves the fake to end at its iteration cap. Need check whether the host start's kill_on_drop ownership now ends that process instead, which would make the changed lifecycle explanation inaccurate even though the guard itself only writes a file. Source basis: assigned patch lines around 691–726 rewrite this guard's reason around spawn_agent_in_host, retaining fallback/cancellation claims; the host StartingHost uses kill_on_drop in previously inspected source. Check next: read the full guard/cancellation wording at this revision, then exact ownership of the first stage across spawn_agent_in_host -> StartingHost::finish, its deadline and drops; compare range base/parent and later tip. Suggested bucket: other for documentation correctness if the apparent contradiction is literal, no runtime failure alleged. Confidence: concrete source lead, no execution. proposed_drop: false pending exact scope/ownership checks. possible_cover: none among supplied interface records, which discuss different fixture ownership and exit-barrier defects. Could-be-highest: no established or suspected security/user-work route. Exact missing premise: whether cancellation of this test's joined future necessarily drops the kill-on-drop Child rather than detaching a holder that leaves the fake waiting; and whether the comment describes only the release guard's own conservative fallback or incorrectly guarantees the whole nested process lifetime."
+          }
+        },
+        {
+          "line": 20,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "l3",
+            "state": "open",
+            "summary": "held-start documentation retains the retired uncancelled-tmux child lifetime",
+            "location": "crates/farhelm-supervisor/src/service/core.rs:26335",
+            "detail": "# describe the fake host's cancellation owner accurately\n\nReviewed commit: 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513\n\n## TLDR\nThe converted provenance test tells maintainers that cancelling its held start leaves the fake program alive until a release file or its iteration cap ends it. The host-start path now owns a kill-on-drop child and a bounded start timeout. This misstates the fixture's cancellation/cleanup contract; no runtime test failure or leaked process is established.\n\n## Details\nThe assigned patch converts the fake tmux start into a fake terminal-host first stage and rewrites ReleaseHeldStart's explanation around spawn_agent_in_host. At core.rs:26335–26345 it still says the iteration cap is the fallback when the release cannot land/be acknowledged, and 'so a cancelled hold ends at the cap'; the Drop docstring at :26363–26373 likewise says the cap is what ends the shell on cancellation. The guard itself indeed only writes the release file, but the test's process owner does more than that.\nThe actual test directly joins spawn_agent_in_host with its observer (core.rs:26534 onward), with no detached task retaining the start future. spawn_agent_in_host directly awaits starting.finish() at core/host_launch.rs:573–575. hosts/spawn.rs:347–360 creates the first-stage Child with kill_on_drop(true); StartingHost holds that Child (:292–300), and finish moves it into a local first (:403–414), then directly awaits its wait under timeout (:419–451). Dropping the test's joined future therefore drops that Child and requests its kill. A start deadline likewise explicitly calls first.start_kill and reaps (:461 onward). The shell cap is still a conservative additional bound, and the release/ack protocol still supports the passing and caught-panic observation ordering; it is not the whole-start cancellation owner described by the changed comment. A kill request is not synchronous proof of process exit, so this finding does not claim the fake is always already reaped when Drop returns.\nAttribution: the patch changes the ordering test from its explicit old sup.spawn_agent/fake-tmux future to sup.spawn_agent_in_host/fake-host, not merely a default terminal switch. The removed introductory explanation itself described the old run_bytes/Command::output path without kill_on_drop, explaining why that old fake needed an independent release/cap. Its new replacement drops that qualifier but carries the old cap-only cancellation conclusion into a path with different ownership. This is introduced inaccurate lifecycle prose, not an independent defect sought in retired tmux code.\nLater check: at pinned tip 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db core.rs:24247–24256 and :24273–24281 retain the same cancellation/cap assertions, and the host spawn's kill-on-drop ownership remains. Correct the prose to distinguish the release guard's file protocol, the joined host-start future's kill-on-drop/deadline ownership, and the shell's final self-bound. Retain the ack protocol's known observation-ordering rationale rather than removing it on the basis of this documentation finding.\nContract: root documentation rules require accurate lifecycle dependencies and test-harness assumptions, and the supplied checklist requires clear owned-process lifetimes. The source's own StartingHost contract (:280–291) explicitly says dropping it kills the first stage. Suggested bucket: other (documentation correctness). Confidence: confirmed source ownership and prose comparison; no execution/reproduction. proposed_drop: false. possible_cover: none among supplied neighbour records; g114/g115 concern a different runtime fixture and owner-exit oracle. Could-be-highest: no established or suspected security/loss-of-work route. Caveats: this does not refute c1's meaningful provenance observation boundary and does not add another failed-spec oracle finding; it only corrects the changed guard documentation's process-lifetime model. Cancellation is defense in depth here and is not directly exercised by this test, as the comment itself states. No missing source premise remains for this bounded documentation finding."
+          }
+        },
+        {
+          "line": 21,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "l3",
+            "state": "open",
+            "summary": "held-start documentation retains the retired uncancelled-tmux child lifetime",
+            "location": "crates/farhelm-supervisor/src/service/core.rs:26335",
+            "detail": "# describe the fake host's cancellation owner accurately\n\nReviewed commit: 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513\n\n## TLDR\nThe converted provenance test tells maintainers that cancelling its held start leaves the fake program alive until a release file or its iteration cap ends it. The host-start path now owns a kill-on-drop child and a bounded start timeout. This misstates the fixture's cancellation/cleanup contract; no runtime test failure or leaked process is established.\n\n## Details\nThe assigned patch converts the fake tmux start into a fake terminal-host first stage and rewrites ReleaseHeldStart's explanation around spawn_agent_in_host. At core.rs:26335–26345 it still says the iteration cap is the fallback when the release cannot land/be acknowledged, and 'so a cancelled hold ends at the cap'; the Drop docstring at :26363–26373 likewise says the cap is what ends the shell on cancellation. The guard itself indeed only writes the release file, but the test's process owner does more than that.\nThe actual test directly joins spawn_agent_in_host with its observer (core.rs:26534 onward), with no detached task retaining the start future. spawn_agent_in_host directly awaits starting.finish() at core/host_launch.rs:573–575. hosts/spawn.rs:347–360 creates the first-stage Child with kill_on_drop(true); StartingHost holds that Child (:292–300), and finish moves it into a local first (:403–414), then directly awaits its wait under timeout (:419–451). Dropping the test's joined future therefore drops that Child and requests its kill. A start deadline likewise explicitly calls first.start_kill and reaps (:461 onward). The shell cap is still a conservative additional bound, and the release/ack protocol still supports the passing and caught-panic observation ordering; it is not the whole-start cancellation owner described by the changed comment. A kill request is not synchronous proof of process exit, so this finding does not claim the fake is always already reaped when Drop returns.\nAttribution: the patch changes the ordering test from its explicit old sup.spawn_agent/fake-tmux future to sup.spawn_agent_in_host/fake-host, not merely a default terminal switch. The removed introductory explanation itself described the old run_bytes/Command::output path without kill_on_drop, explaining why that old fake needed an independent release/cap. Its new replacement drops that qualifier but carries the old cap-only cancellation conclusion into a path with different ownership. This is introduced inaccurate lifecycle prose, not an independent defect sought in retired tmux code.\nLater check: at pinned tip 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db core.rs:24247–24256 and :24273–24281 retain the same cancellation/cap assertions, and the host spawn's kill-on-drop ownership remains. Correct the prose to distinguish the release guard's file protocol, the joined host-start future's kill-on-drop/deadline ownership, and the shell's final self-bound. Retain the ack protocol's known observation-ordering rationale rather than removing it on the basis of this documentation finding.\nContract: root documentation rules require accurate lifecycle dependencies and test-harness assumptions, and the supplied checklist requires clear owned-process lifetimes. The source's own StartingHost contract (:280–291) explicitly says dropping it kills the first stage. Suggested bucket: other (documentation correctness). Confidence: confirmed source ownership and prose comparison; no execution/reproduction. proposed_drop: false. possible_cover: none among supplied neighbour records; g114/g115 concern a different runtime fixture and owner-exit oracle. Could-be-highest: no established or suspected security/loss-of-work route. Caveats: this does not refute c1's meaningful provenance observation boundary and does not add another failed-spec oracle finding; it only corrects the changed guard documentation's process-lifetime model. Cancellation is defense in depth here and is not directly exercised by this test, as the comment itself states. No missing source premise remains for this bounded documentation finding.\n\nAdditional attribution check completed during discovery: at the exclusive range base the same ordering test explicitly invokes the tmux path (core.rs:29169); at the immediate parent, tmux.rs:3627–3629 passes None as its create-command deadline to run_bytes_asking. The actual None branch at :3001 uses command.output() without setting kill_on_drop, while only the separate Some(deadline) branch sets it at :3005. Thus the old lifetime premise was applicable before the assigned explicit fixture conversion, not merely inherited inaccurate prose predating the whole range. No remaining attribution premise is open."
+          }
+        }
+      ],
+      "latest": {
+        "line": 21,
+        "event": {
+          "version": 1,
+          "kind": "finding",
+          "id": "l3",
+          "state": "open",
+          "summary": "held-start documentation retains the retired uncancelled-tmux child lifetime",
+          "location": "crates/farhelm-supervisor/src/service/core.rs:26335",
+          "detail": "# describe the fake host's cancellation owner accurately\n\nReviewed commit: 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513\n\n## TLDR\nThe converted provenance test tells maintainers that cancelling its held start leaves the fake program alive until a release file or its iteration cap ends it. The host-start path now owns a kill-on-drop child and a bounded start timeout. This misstates the fixture's cancellation/cleanup contract; no runtime test failure or leaked process is established.\n\n## Details\nThe assigned patch converts the fake tmux start into a fake terminal-host first stage and rewrites ReleaseHeldStart's explanation around spawn_agent_in_host. At core.rs:26335–26345 it still says the iteration cap is the fallback when the release cannot land/be acknowledged, and 'so a cancelled hold ends at the cap'; the Drop docstring at :26363–26373 likewise says the cap is what ends the shell on cancellation. The guard itself indeed only writes the release file, but the test's process owner does more than that.\nThe actual test directly joins spawn_agent_in_host with its observer (core.rs:26534 onward), with no detached task retaining the start future. spawn_agent_in_host directly awaits starting.finish() at core/host_launch.rs:573–575. hosts/spawn.rs:347–360 creates the first-stage Child with kill_on_drop(true); StartingHost holds that Child (:292–300), and finish moves it into a local first (:403–414), then directly awaits its wait under timeout (:419–451). Dropping the test's joined future therefore drops that Child and requests its kill. A start deadline likewise explicitly calls first.start_kill and reaps (:461 onward). The shell cap is still a conservative additional bound, and the release/ack protocol still supports the passing and caught-panic observation ordering; it is not the whole-start cancellation owner described by the changed comment. A kill request is not synchronous proof of process exit, so this finding does not claim the fake is always already reaped when Drop returns.\nAttribution: the patch changes the ordering test from its explicit old sup.spawn_agent/fake-tmux future to sup.spawn_agent_in_host/fake-host, not merely a default terminal switch. The removed introductory explanation itself described the old run_bytes/Command::output path without kill_on_drop, explaining why that old fake needed an independent release/cap. Its new replacement drops that qualifier but carries the old cap-only cancellation conclusion into a path with different ownership. This is introduced inaccurate lifecycle prose, not an independent defect sought in retired tmux code.\nLater check: at pinned tip 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db core.rs:24247–24256 and :24273–24281 retain the same cancellation/cap assertions, and the host spawn's kill-on-drop ownership remains. Correct the prose to distinguish the release guard's file protocol, the joined host-start future's kill-on-drop/deadline ownership, and the shell's final self-bound. Retain the ack protocol's known observation-ordering rationale rather than removing it on the basis of this documentation finding.\nContract: root documentation rules require accurate lifecycle dependencies and test-harness assumptions, and the supplied checklist requires clear owned-process lifetimes. The source's own StartingHost contract (:280–291) explicitly says dropping it kills the first stage. Suggested bucket: other (documentation correctness). Confidence: confirmed source ownership and prose comparison; no execution/reproduction. proposed_drop: false. possible_cover: none among supplied neighbour records; g114/g115 concern a different runtime fixture and owner-exit oracle. Could-be-highest: no established or suspected security/loss-of-work route. Caveats: this does not refute c1's meaningful provenance observation boundary and does not add another failed-spec oracle finding; it only corrects the changed guard documentation's process-lifetime model. Cancellation is defense in depth here and is not directly exercised by this test, as the comment itself states. No missing source premise remains for this bounded documentation finding.\n\nAdditional attribution check completed during discovery: at the exclusive range base the same ordering test explicitly invokes the tmux path (core.rs:29169); at the immediate parent, tmux.rs:3627–3629 passes None as its create-command deadline to run_bytes_asking. The actual None branch at :3001 uses command.output() without setting kill_on_drop, while only the separate Some(deadline) branch sets it at :3005. Thus the old lifetime premise was applicable before the assigned explicit fixture conversion, not merely inherited inaccurate prose predating the whole range. No remaining attribution premise is open."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g108/findings.jsonl",
+        "id": "l3",
+        "line": 21,
+        "disposition": "verified",
+        "group": "comment-contract/held-host-start-cancellation-ownership",
+        "reason": "Parent explicitly accepted named retain-verified proposal from claims-070 after inspecting it. The converted fixture's explanation carries a cap-only cancellation conclusion into a directly owned kill-on-drop host first stage. The guard itself only writes a release file; the enclosing start future additionally owns child termination and a deadline. Keep the release/ack observation-ordering rationale and distinguish a kill request from synchronous reaping. Retain as introduced lifecycle-documentation inaccuracy; keep the shell cap as an additional bound and preserve release/ack ordering context. Checked source/results: [\"647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513:crates/farhelm-supervisor/src/service/core.rs:26335-26373 says a cancelled hold ends at the cap and the cap ends the shell when release is missed. :26534 onward directly joins spawn_agent_in_host with its observer, without a detached future holding the child.\",\"647f0227:service/core/host_launch.rs:573-575 directly awaits starting.finish(). hosts/spawn.rs:280-300 documents drop-kills-first-stage ownership; :347-360 sets kill_on_drop(true); :403-475 keeps the child locally under the start timeout and requests kill/reap after timeout. Cancellation drops that owner.\",\"647f0227^:tmux.rs:2990-3015 uses command.output() without kill_on_drop in the None-deadline branch, and :3627-3629 selects None for create. The base core.rs:29160 onward explicitly exercises the fake tmux fixture, so the old lifetime explanation was applicable before conversion.\",\"00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db:core.rs:24247-24281 retains the same cap/cancellation assertions. Source contract comparison only; no cancellation or process-leak experiment.\"] Current coverage/results: [\"Both specs searched for host first-stage cancellation, kill-on-drop and publication ownership. SPEC_impl.md:2200-2233 distinguishes owned first stage/spec delivery/retry; no accepted rule makes this cap-only prose accurate.\",\"TODO.md Planned empty; BUGS.md unrelated. plans/queue searched for held-start/cancellation/cap and comment conversion. tmux-drop-from-docs.md:67-104 broadly rewrites tmux/xterm rationales and audits remnants, but this already rewritten host comment has no tmux text and no stated fix for its cancellation owner. Retain rather than infer that broad sweep covers it.\",\"INDEX.md and active TRIAGE_OUTCOMES.md searched. held-start-test-lacks-prelaunch-fencing-witness.md was read in full: it concerns Restart prelaunch fencing at a different fixture, not this release guard's process-lifetime prose. No exact queue/ledger cover or useful extension. No archive read.\",\"FILTER.md does not cover persistent inaccurate test-harness lifecycle documentation.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Inaccurate maintainer process-lifetime model only. No suspected security issue or loss of user-owned work.\"; \"None for the bounded ownership/prose mismatch. kill_on_drop requests termination; it does not prove the shell has synchronously exited or been reaped when Drop returns. Cancellation is not exercised by this test, and no runtime leak or failed provenance oracle is alleged.\"."
+      },
+      "accepted_parent_decision": {
+        "key": "g108/l3",
+        "line": 21,
+        "disposition": "verified",
+        "group": "comment-contract/held-host-start-cancellation-ownership",
+        "bucket": "other",
+        "recording": "retain-verified",
+        "queue_target_candidate": null,
+        "needs_independent_drop_check": false,
+        "reason": "Parent explicitly accepted named retain-verified proposal from claims-070 after inspecting it. The converted fixture's explanation carries a cap-only cancellation conclusion into a directly owned kill-on-drop host first stage. The guard itself only writes a release file; the enclosing start future additionally owns child termination and a deadline. Keep the release/ack observation-ordering rationale and distinguish a kill request from synchronous reaping. Retain as introduced lifecycle-documentation inaccuracy; keep the shell cap as an additional bound and preserve release/ack ordering context. Checked source/results: [\"647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513:crates/farhelm-supervisor/src/service/core.rs:26335-26373 says a cancelled hold ends at the cap and the cap ends the shell when release is missed. :26534 onward directly joins spawn_agent_in_host with its observer, without a detached future holding the child.\",\"647f0227:service/core/host_launch.rs:573-575 directly awaits starting.finish(). hosts/spawn.rs:280-300 documents drop-kills-first-stage ownership; :347-360 sets kill_on_drop(true); :403-475 keeps the child locally under the start timeout and requests kill/reap after timeout. Cancellation drops that owner.\",\"647f0227^:tmux.rs:2990-3015 uses command.output() without kill_on_drop in the None-deadline branch, and :3627-3629 selects None for create. The base core.rs:29160 onward explicitly exercises the fake tmux fixture, so the old lifetime explanation was applicable before conversion.\",\"00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db:core.rs:24247-24281 retains the same cap/cancellation assertions. Source contract comparison only; no cancellation or process-leak experiment.\"] Current coverage/results: [\"Both specs searched for host first-stage cancellation, kill-on-drop and publication ownership. SPEC_impl.md:2200-2233 distinguishes owned first stage/spec delivery/retry; no accepted rule makes this cap-only prose accurate.\",\"TODO.md Planned empty; BUGS.md unrelated. plans/queue searched for held-start/cancellation/cap and comment conversion. tmux-drop-from-docs.md:67-104 broadly rewrites tmux/xterm rationales and audits remnants, but this already rewritten host comment has no tmux text and no stated fix for its cancellation owner. Retain rather than infer that broad sweep covers it.\",\"INDEX.md and active TRIAGE_OUTCOMES.md searched. held-start-test-lacks-prelaunch-fencing-witness.md was read in full: it concerns Restart prelaunch fencing at a different fixture, not this release guard's process-lifetime prose. No exact queue/ledger cover or useful extension. No archive read.\",\"FILTER.md does not cover persistent inaccurate test-harness lifecycle documentation.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Inaccurate maintainer process-lifetime model only. No suspected security issue or loss of user-owned work.\"; \"None for the bounded ownership/prose mismatch. kill_on_drop requests termination; it does not prove the shell has synchronously exited or been reaped when Drop returns. Cancellation is not exercised by this test, and no runtime leak or failed provenance oracle is alleged.\"."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-070",
+          "key": "g108/l3",
+          "latest_line": 21,
+          "recommendation": "retain-verified",
+          "bucket": "other",
+          "underlying_key": "comment-contract/held-host-start-cancellation-ownership",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The converted fixture's explanation carries a cap-only cancellation conclusion into a directly owned kill-on-drop host first stage. The guard itself only writes a release file; the enclosing start future additionally owns child termination and a deadline. Keep the release/ack observation-ordering rationale and distinguish a kill request from synchronous reaping.",
+          "checks": [
+            "647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513:crates/farhelm-supervisor/src/service/core.rs:26335-26373 says a cancelled hold ends at the cap and the cap ends the shell when release is missed. :26534 onward directly joins spawn_agent_in_host with its observer, without a detached future holding the child.",
+            "647f0227:service/core/host_launch.rs:573-575 directly awaits starting.finish(). hosts/spawn.rs:280-300 documents drop-kills-first-stage ownership; :347-360 sets kill_on_drop(true); :403-475 keeps the child locally under the start timeout and requests kill/reap after timeout. Cancellation drops that owner.",
+            "647f0227^:tmux.rs:2990-3015 uses command.output() without kill_on_drop in the None-deadline branch, and :3627-3629 selects None for create. The base core.rs:29160 onward explicitly exercises the fake tmux fixture, so the old lifetime explanation was applicable before conversion.",
+            "00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db:core.rs:24247-24281 retains the same cap/cancellation assertions. Source contract comparison only; no cancellation or process-leak experiment."
+          ],
+          "coverage_checked": [
+            "Both specs searched for host first-stage cancellation, kill-on-drop and publication ownership. SPEC_impl.md:2200-2233 distinguishes owned first stage/spec delivery/retry; no accepted rule makes this cap-only prose accurate.",
+            "TODO.md Planned empty; BUGS.md unrelated. plans/queue searched for held-start/cancellation/cap and comment conversion. tmux-drop-from-docs.md:67-104 broadly rewrites tmux/xterm rationales and audits remnants, but this already rewritten host comment has no tmux text and no stated fix for its cancellation owner. Retain rather than infer that broad sweep covers it.",
+            "INDEX.md and active TRIAGE_OUTCOMES.md searched. held-start-test-lacks-prelaunch-fencing-witness.md was read in full: it concerns Restart prelaunch fencing at a different fixture, not this release guard's process-lifetime prose. No exact queue/ledger cover or useful extension. No archive read.",
+            "FILTER.md does not cover persistent inaccurate test-harness lifecycle documentation."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": "None for the bounded ownership/prose mismatch. kill_on_drop requests termination; it does not prove the shell has synchronously exited or been reaped when Drop returns. Cancellation is not exercised by this test, and no runtime leak or failed provenance oracle is alleged.",
+          "original_stronger_consequence": "Inaccurate maintainer process-lifetime model only. No suspected security issue or loss of user-owned work.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Retain as introduced lifecycle-documentation inaccuracy; keep the shell cap as an additional bound and preserve release/ack ordering context."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": true,
+        "clearly_refuted_candidate": false,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Source-confirmed by an existing parent decision; not runtime reproduced",
+        "deduplication_key": "comment-contract/held-host-start-cancellation-ownership",
+        "destination": "trailing-held-start-documentation-retains-the-retired-uncancelled-tmux-child-lifetime.md"
+      }
+    }
+  ],
+  "replies": [
+    {
+      "turn": 1,
+      "reply": "Initial review complete: all 1,331 assigned patch lines reviewed.\n\nLogged `l1`: the failed-spec test can accept a host-start failure while its terminal assertion still checks tmux. Source confirms a test-quality gap, not a production ordering bug.\n\nFive rejected candidates recorded; no unresolved leads. No tests or reproductions run. Findings and progress logs updated."
+    },
+    {
+      "turn": 2,
+      "reply": "- Revised `l1`: later commits repair its fixture, but the final-state check still cannot prove no start was attempted.\n- Promoted `c2`, `c3`, `c5` to test-coverage findings. `c2` is intermediate-only and overlaps parent-reported `g107/c4`; `c3` and `c5` persist through the pinned tip.\n- Recorded source checks and updated progress. No execution performed.\n\nUnresolved lead IDs: none."
+    },
+    {
+      "turn": 3,
+      "reply": "New finding: `l3`—the converted fixture’s cancellation documentation still describes the old tmux lifetime. Source and attribution checks confirm the mismatch through the pinned tip.\n\nAlso checked checkout retry validation, title/session fixtures and startup propagation. Resolved `l2` to a source-refuted candidate; recorded `c6` as pre-range wording.\n\nNew verified IDs: `l3`. New unverified IDs: none. Open leads: none. Discovery count: 1. No execution performed."
+    },
+    {
+      "turn": 4,
+      "reply": "Discovery pass 2 found nothing new.\n\nChecked the refreshed interface snapshot, provenance synchronization, retry title publication, directory witness, and constructor seam propagation.\n\nNew verified IDs: none. New unverified IDs: none. Open leads: none.\n\nProgress updated. No runtime execution performed."
+    }
+  ],
+  "progress": "Group: g108 — supervisor-core-integration\nState: second separate discovery pass complete (turn type discovery; turn count 4; discovery-pass count 2). This pass found nothing new; no open leads. Awaiting caller-directed further work or adjudication.\nScope: reviewed commit 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513, core.rs assigned part 00766-003.patch lines 1–1331. All assigned patch lines delivered via seven evidence packets (1–200, 201–400, 401–600, 601–800, 801–1000, 1001–1200, 1201–1331); no unread assigned material.\nRead complete inventory commits field only; excluded coverage metadata and queue coverage sources were not consulted.\nContracts consulted at the reviewed revision: SPEC_impl.md Terminal host (2015–2953), Terminal substrate (2954–3307), Answers bind to what was drawn (1071 onward), launch artifacts paragraph (5451 onward); SPEC.md lifecycle/confirmation/containment contracts (1915–2135), keyed-create identity (1371–1377), and managed-checkout retained ownership/retry (1756 onward). Review priority buckets and feedback format read. Root AGENTS.md End sentinel was present.\nInterface assumptions: new creates/tabs/restarts use hosts, but an adopted pre-existing tmux server and its old tabs remain in scope at this intermediate revision. The old window-replacement mechanism is retired; migration cleanup addresses the recorded old pane. Host program selection in unit tests without an explicit seam is deliberately a nonexistent path. Findings assess this revision, not the range endpoint or later removal of old terminals.\nDiscovery-pass count: 2 (turn 2 was synthesis; turns 3 and 4 were separate discovery passes).\nTurn 1 verified finding: l1. Turn 2 revised l1 and promoted original candidate IDs c2, c3 and c5 to source-confirmed test-quality findings after inspecting actual replacement test oracles. New unverified finding IDs: none. Open lead IDs: none. Candidates c1 and c4 remain as originally recorded; no parent drop has been accepted.\nSynthesis l1: exact original failure alternative uses default seams' nonexistent host program; later 1ed482dde220452e424973faf38a5e1318986333 repairs that seam and watches hosts instead of tmux. At pinned tip the test still accepts any Error and final empty hosts directory. Exact alternate path checked: a bypassed/deferred JSON-spec write can reach start_host, then fail writing the .host launch record in the same mode-0500 directory; StartingHost drop kills the first stage before stdin spec delivery, no socket binds, and definitive cleanup deletes the row. Therefore no attempted-start oracle or spec-specific EACCES diagnostic is present even after the later partial repair. Current production ordering remains correct; first-stage invocation is not equated with a running host child.\nSynthesis c2: retained generic host consent tests and pure forged-marker tests are meaningful, but do not replace the deleted real lone-old-tab query/caller/terminal-loss boundary. Retain this as an intermediate-only coverage finding: old terminals are still served at reviewed commit; dbfc69751215dbf15e1d31d5bed73c3754c4ebc4 later retires them and 1ed482dde220452e424973faf38a5e1318986333 removes the driver. Parent-supplied possible_cover g107/c4 considers the same deleted lone-tab guard; parent coordinates deduplication. Original unauthorized-tab-deletion concerns preserved, no actual destructive production route established.\nSynthesis c3: read real successful-Restart tab preservation (same shell/start identity and post-Restart echo) in host_relaunches.rs and terminal_tabs.rs. Refused/unusable replacement fixtures have no tab; failed Restart plus orderly supervisor shutdown checks a surviving host/runtime closure, not the same live tab shell and post-failure usability. The removed tmux creation/marking fault mechanism is obsolete, but ordinary failed-Restart tab preservation still lacks the removed oracle in the inspected supported-host fixtures. This persists through pinned tip. Parent-supplied g103/f1 is a distinct unmarked-shell cleanup gap, not assumed duplicate coverage.\nSynthesis c5: actual uncertain-host-create fixture meaningfully keeps a database row/listener but calls the unkeyed client wrapper, and checks neither published map/listing handle nor Pending reservation. Client wrapper source explicitly passes None; keyed simulated-crash test takes another branch. The missing old assertions remain absent in this fixture at tip. Checked listing::list_all snapshots only sessions/restarting_rows, and abandon_launching_record docs/implementation confirms map publication is required for immediate lifecycle reachability. Correct production retention/settlement does not substitute for these test oracles.\nChecks/results: source/contract analysis only, at reviewed commit and later changes through 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db. Read exact changed test fixtures, real host start/drop/cleanup, retained tab and ambiguous-create tests, client key forwarding, and listing caller assumptions. No runtime tests, builds, mutations or reproductions were run or written. No checkout files changed. No unread assigned material; initial seven-packet delivery remains complete.\nTurn 3 interface/novelty synthesis: read discovery-neighbours.json in full, bounded ranges 1–80, 81–140, 141–200, 201–260, 261–320, 321–380, 381–440, 441–500, 501–560, 561–620, 621–680, 681–726. No named pending questions were supplied. Neighbour g107/g107-c4 matches the known lone-tab oracle; other interface findings concern separate retirement, cleanup, ownership and documentation responsibilities. No known issue was counted as a new discovery, no parent drop/lowering accepted, and no forbidden coverage sources were read.\nTurn 3 new verified finding IDs: l3 (other, changed ReleaseHeldStart cancellation documentation retains the retired uncancelled-tmux child-lifetime model despite host first-stage kill_on_drop/deadline ownership). It persists through pinned tip. Source check includes actual joined future ownership and StartingHost::finish local Child lifetime, not an assumed process exit; kill-on-drop is a request and no synchronous reap is claimed. Whole-range attribution checked: base test still explicitly used tmux, and parent create_session passes None deadline to the old runner, whose None branch uses output without kill_on_drop. This conversion introduces the documentation mismatch. It is distinct from c1's still-meaningful provenance ordering oracle and from neighbour fixture exit-barrier issues.\nTurn 3 new unverified-after-investigation finding IDs: none. Remaining lead IDs: none.\nTurn 3 investigated candidate IDs: l2 began as a concrete checkout-ownership lead and was resolved to candidate after source/caller checks. Planned can indeed coexist with an already-created directory, but validate_retry detects occupied Planned paths and returns RetainedCreateRefusal; the caller retains/publishes before launch_session/new tmux refusal can run. Read actual allocator/transaction plus existing ambiguous-Planned oracle. c6 rejects treating the commit-relative cwd-fill paragraph as a new pending-implementation contract: the exact historical wording exists before the exclusive range base; this hunk only renames its valid helper and still tests validation's literal-placeholder boundary. Both candidates immediately recorded with original concerns and exact source bases.\nTurn 3 other discovery checks/results: revisited converted title/takeover and session-hiding fixtures, startup hook/instruction/boot-file propagation, and aborted-restart boot-finality fixture. They retain the respective expected premise/assertions; no additional concrete issue arose. No runtime tests, builds, reproductions, live-install actions or checkout writes performed. All assigned material remains read; no unread scope.\nTurn 4 interface synthesis/novelty: read the refreshed discovery-neighbours.json in full (snapshot at 2026-11-13T16:53:35.323Z, 950 lines, 273775 bytes), in bounded packets 1–80, 81–120, 121–180, then contiguous 60-line packets through 841–900 and 901–950. New neighbouring findings/leads concern their own assigned docstrings, cleanup and fixtures. Existing overlap with the lone-tab coverage record remains known, and no received finding was recounted as our discovery. No named pending cross-group questions were supplied. Retained an exact private copy as discovery-neighbours.last-read.json for future byte/delta comparison; this is context only, not mandatory source credit or excluded coverage metadata.\nTurn 4 discovery checks/results: inspected the converted provenance test's entered/release/consumed marker order, joined observer and spec/stdin interaction, host first-stage timeout/ownership, and the generation-fenced provenance recorder. Checked retry-title fixture's stale-input versus durable-row/map/reply assertions, the repointed-directory test's completed newline-terminated pwd witness and canonical launch cwd, the real-host/seam selection, and startup wait/hook/instruction/boot-file field forwarding after selector removal. These source checks found no additional failure route, unfulfilled test oracle or new contract discrepancy in the assigned changes. No production correctness claim is used to dismiss a distinct known test/documentation issue.\nTurn 4 new verified finding IDs: none. New unverified-after-investigation IDs: none. New candidate IDs: none. Remaining lead IDs: none. Explicit result: nothing new found. Prior finding/candidate histories and proposed-drop bases remain unchanged; no parent drop or lowering accepted. No empty/activity-only finding event was invented.\nTurn 4 evidence limits: source and caller analysis only at the assigned revision; no runtime tests, builds, reproductions or live-install actions; no checkout changes, prohibited coverage sources or scope expansion. All assigned source remains read with no omissions.\nNext action: parent-directed synthesis/adjudication or further discovery, with original IDs and consequences preserved. Do not fold another pass into this discovery turn. Re-read brief and governing instructions after compaction. Parent owns queue coverage and any independent drop adjudication.\n"
+}

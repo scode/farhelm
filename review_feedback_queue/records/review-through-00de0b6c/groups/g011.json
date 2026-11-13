@@ -1,0 +1,504 @@
+{
+  "group": {
+    "id": "g011",
+    "domain": "product-contracts",
+    "purpose": "product-contracts: SPEC_impl.md; phases ### The grid client",
+    "interfaces": [
+      "g001",
+      "g003",
+      "g004",
+      "g005",
+      "g006",
+      "g007",
+      "g008",
+      "g009",
+      "g010",
+      "g012",
+      "g014",
+      "g015",
+      "g016",
+      "g017",
+      "g020",
+      "g026",
+      "g027",
+      "g030",
+      "g032",
+      "g033",
+      "g035",
+      "g036",
+      "g037",
+      "g038",
+      "g040",
+      "g044",
+      "g045",
+      "g049",
+      "g053",
+      "g070",
+      "g074",
+      "g075",
+      "g076",
+      "g079",
+      "g080",
+      "g081",
+      "g082",
+      "g083",
+      "g087",
+      "g088",
+      "g089",
+      "g091",
+      "g092",
+      "g093",
+      "g098",
+      "g099",
+      "g101",
+      "g104",
+      "g117",
+      "g122",
+      "g129",
+      "g135",
+      "g136",
+      "g138",
+      "g141",
+      "g142",
+      "g144",
+      "g146",
+      "g152",
+      "g153",
+      "g157",
+      "g178",
+      "g179",
+      "g180",
+      "g181",
+      "g185",
+      "g186",
+      "g188",
+      "g189",
+      "g190",
+      "g191",
+      "g192",
+      "g193",
+      "g194",
+      "g195",
+      "g196",
+      "g197",
+      "g198"
+    ],
+    "sources": [
+      {
+        "path": "[private-run]/prep/parts/01018-001.patch",
+        "ranges": [
+          [
+            1,
+            480
+          ]
+        ],
+        "original_path": "SPEC_impl.md",
+        "commit": "f560058da19e02716e6f943883a9508b447aff4e",
+        "notes": "### The grid client; patch character offsets [58698,110073)",
+        "lines": 480,
+        "bytes": 51393,
+        "start": 58698,
+        "end": 110073,
+        "original": "[private-run]/prep/originals/01018.patch"
+      }
+    ],
+    "lines": 480,
+    "bytes": 51393
+  },
+  "records": [
+    {
+      "key": "g011/c1",
+      "owner": "g011",
+      "id": "c1",
+      "domain": "product-contracts",
+      "purpose": "product-contracts: SPEC_impl.md; phases ### The grid client",
+      "history": [
+        {
+          "line": 1,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c1",
+            "state": "open",
+            "summary": "Old pages misdraw reattachments after the protocol-77 update, explicitly accepted",
+            "location": "SPEC_impl.md:3023",
+            "detail": "# Old pages misdraw reattachments after the protocol-77 update\n\nReviewed commit: f560058da19e02716e6f943883a9508b447aff4e\n\n## TLDR\n\nA browser page left open across this update can briefly reconnect with its old renderer, show grid messages as terminal output, and lose the attachment when the user types. Reloading restores the terminal. This behavior is explicitly accepted by the changed specification, so this is a proposed drop rather than a reported defect.\n\n## Details\n\nSource basis: assigned patch lines 227-238, SPEC_impl.md at the reviewed revision, Grid streams. Exact acceptance: \"A page loaded from the previous helm and left open across the update must be reloaded; nothing keeps it working.\" It then states \"any reconnect from it, automatic in that window or manual, misdraws the terminal\" and \"what is typed into it ends the attachment as malformed input.\" Exact decision: \"Keeping the stream notice for such pages was considered and not done: a reload is the whole remedy.\"\n\nContract: protocol skew refuses incompatible helm/supervisor pairs, but this page/helm compatibility is intentionally not preserved. Suggested bucket: high/material UX if it were not accepted. Confidence: confirmed as a specification decision; no runtime behavior observed. proposed_drop: explicit quoted specification acceptance. possible_cover: none searched. Could-be-highest: no established security or loss-of-work route; malformed input is specified to end the attachment rather than reach the program. No claim that this preserves unsent typing or existing selection."
+          }
+        },
+        {
+          "line": 3,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c1",
+            "state": "open",
+            "summary": "Old pages fail reattachments after the protocol-77 update, explicitly accepted",
+            "location": "SPEC_impl.md:3021",
+            "detail": "# Old pages fail reattachments after the protocol-77 update\n\nReviewed commit: f560058da19e02716e6f943883a9508b447aff4e\n\n## TLDR\n\nA browser page left open across this update can briefly reconnect with its old renderer, show grid messages as terminal output, and lose the attachment when the user types. Reloading restores the terminal. The changed specification explicitly accepts breaking old pages, so this is a proposed drop rather than a reported defect.\n\n## Details\n\nRevision of c1 after source validation; original consequence retained. Source basis: assigned patch lines 227-238, SPEC_impl.md:3021-3027, Grid streams. Exact acceptance: \"A page loaded from the previous helm and left open across the update must be reloaded; nothing keeps it working.\" It then states \"any reconnect from it, automatic in that window or manual, misdraws the terminal\" and \"what is typed into it ends the attachment as malformed input.\" Exact decision: \"Keeping the stream notice for such pages was considered and not done: a reload is the whole remedy.\"\n\nChecks actually made: the preceding revision's terminal.js:4651-4667 builds xterm for unknown kind; :5719-5725 treats unannounced data as bytes; :5886-5924 treats a missing notice as bytes and refuses that if a direct grid already exists. The reviewed revision's terminal.rs:750-800 forwards binary input as grid messages and ignores old pause/resume controls; service/grid_stream.rs:1064-1079 decodes GridInput before producing any program bytes. Protocol source lib.rs:255 sets version 77, and io.rs:585-653 accepts only exact protocol matches, preventing old supervisor byte streams from entering a new helm. The page/helm transition is separate from that peer handshake.\n\nMaterial caveat: the specification's word \"any\" overstates the misdraw path. An old page retaining a known host kind builds its grid directly and refuses missing stream notice instead; the misdraw requires the kind to be unknown, as the paragraph's explanation describes after the new listing. Both paths break attachment and have the same prescribed reload remedy; no additional material consequence from that wording difference was established. No runtime behavior was observed.\n\nContract: old-page compatibility across this update is intentionally not preserved. Suggested bucket: high/material UX if it were not accepted. Confidence: confirmed from source and the explicit specification decision. proposed_drop: explicit quoted specification acceptance; the known-kind caveat does not establish a separate user-facing defect. possible_cover: none searched. Could-be-highest: no established security or loss-of-work route; input is decoded before delivery and malformed bytes fail the attachment. No claim that this preserves unsent typing or existing selection."
+          }
+        },
+        {
+          "line": 5,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c1",
+            "state": "open",
+            "summary": "Old pages fail reattachments after the protocol-77 update, explicitly accepted",
+            "location": "SPEC_impl.md:3021",
+            "detail": "# Old pages fail reattachments after the protocol-77 update\n\nReviewed commit: f560058da19e02716e6f943883a9508b447aff4e\n\n## TLDR\n\nA browser page left open across this update can briefly reconnect with its old renderer, show grid messages as terminal output, and lose the attachment when the user types. Reloading restores the terminal. The changed specification explicitly accepts breaking old pages, so this is a proposed drop rather than a reported defect.\n\n## Details\n\nSynthesis revision of c1; original consequence retained. Source basis: assigned patch lines 227-238, SPEC_impl.md:3021-3027. Exact acceptance: \"A page loaded from the previous helm and left open across the update must be reloaded; nothing keeps it working.\" It then states \"any reconnect from it, automatic in that window or manual, misdraws the terminal\" and \"what is typed into it ends the attachment as malformed input.\" Exact decision: \"Keeping the stream notice for such pages was considered and not done: a reload is the whole remedy.\"\n\nInitial source validation: at the preceding revision, terminal.js:4651-4667 builds xterm for unknown kind; :5719-5725 treats unannounced data as bytes; :5886-5924 refuses that byte interpretation if a direct grid already exists. At the reviewed revision, terminal.rs:750-800 forwards binary input as grid messages and ignores old pause/resume controls; service/grid_stream.rs:1064-1079 decodes GridInput before producing any program bytes. farhelm-proto/src/lib.rs:255 sets protocol 77; io.rs:585-653 requires exact protocol matches, keeping old supervisor byte streams out of a new helm. The browser/helm edge is separate.\n\nSynthesis resolved the caller/lifecycle premises: the preceding page's session_view.rs:1870-1917 computes reconnect_policy from skew::helm_is_current reactively and passes it to farhelmTerm.sync. Its reconnect.rs:209-225 sets auto to capable and removes heartbeat when false. The preceding terminal.js:1518-1587 re-reads that policy at decision time, plus the upload-observed mismatch latch, while leaving manual controls available. Thus a build mismatch can revoke already-mounted terminals' automatic attempts; it does not promise manual compatibility. The reviewed supervisor's service/connection.rs:511-566 handles send_input failure by removing the matching attachment under its ownership lock, stopping its forwarder/input and notifying detach. This corroborates failure before malformed raw input reaches the program, rather than silent partial delivery. Queue flow-control checks in helm client.rs:838-903 and :4111-4135 retain the documented output and input bounds; old page pause/resume cannot override the helm-owned pause state.\n\nMaterial caveat: \"any\" overstates the misdraw path. An old page retaining a known host kind mounts a grid and refuses the missing stream notice; misdraw requires unknown kind, as the paragraph explains after the new listing. Both paths break attachment and have the prescribed reload remedy. No separate material consequence from that wording difference was established. The mismatch mechanism compares the shipped build stamp; this source review did not simulate an update or establish behavior for arbitrary identically versioned development bundles.\n\nSuggested bucket: high/material UX if not accepted. Confidence: confirmed from source and the explicit specification decision; no execution observed. proposed_drop: explicit quoted acceptance; known-kind wording caveat does not establish a separate user-facing defect. possible_cover: none searched. Could-be-highest: no established security or loss-of-work route; malformed bytes fail decoding before delivery and tear down the attachment. No claim that this preserves unsent typing or selection. No runtime tests or reproductions were performed."
+          }
+        },
+        {
+          "line": 6,
+          "event": {
+            "version": 1,
+            "kind": "lead",
+            "id": "c1",
+            "state": "open",
+            "summary": "Check valid-JSON old-page paste reinterpretation beyond the accepted malformed-input failure",
+            "location": "SPEC_impl.md:3021",
+            "detail": "# Check valid-JSON old-page paste reinterpretation\n\nReviewed commit: f560058da19e02716e6f943883a9508b447aff4e\n\n## TLDR\n\nThe parent supplied a distinct route beyond the ordinary old-page misdraw/detach already considered: a paste that is valid grid-input JSON may be accepted as structured input, changing the pasted text into program control characters. This could execute unintended commands rather than merely end an attachment. The route needs direct source validation in this group.\n\n## Details\n\nRevision of original c1 to lead, preserving its original consequence and proposed-drop basis without accepting that drop. Original established concern: an old browser page reconnecting across protocol 77 can misdraw grid output or refuse the missing stream notice; malformed raw input ends its attachment. Exact prior proposed_drop basis in SPEC_impl.md:3021-3027: \"A page loaded from the previous helm and left open across the update must be reloaded; nothing keeps it working.\" The paragraph specifies \"what is typed into it ends the attachment as malformed input\" and \"Keeping the stream notice for such pages was considered and not done: a reload is the whole remedy.\" No parent drop has been accepted.\n\nNew parent-supplied cross-group input: g196/l1:10 reports that a fresh unknown-kind old page mounts xterm with bracketed paste initially off, its paste path can emit a whole literal-JSON onData frame, and the current GridInput::Text decoder unescapes data and sends controls without bracketed-paste protection. That would not be refuted by a decoder rejecting malformed input. g196 is checking global build-skew mount/paste interlocks. These are supplied source claims, not yet validated here and not execution evidence.\n\nSuggested bucket: potentially highest/security or loss of work if a shipped user paste is transformed into commands by an unbracketed carriage return; established previous misdraw/detach remains high/material UX if unaccepted. Could-be-highest: yes, the newly supplied valid-message route needs investigation. Confidence: uninvestigated lead, not a completed finding. proposed_drop: earlier exact reload acceptance remains recorded for ordinary misdraw/malformed detach only; whether it accepts successful command reinterpretation must be independently assessed. possible_cover: g196/l1 supplied by parent, not a coverage search. Next checks: read supplied latest neighbour record, trace the preceding page's paste/frame production and build-skew guards, current message decode/encoder, and pinned contracts; establish the literal-JSON-to-control route and its limits without runtime reproduction."
+          }
+        },
+        {
+          "line": 7,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "c1",
+            "state": "open",
+            "summary": "An old page can turn a literal JSON paste into unbracketed terminal commands",
+            "location": "SPEC_impl.md:3021",
+            "detail": "# An old page can turn a literal JSON paste into terminal commands\n\nReviewed commit: f560058da19e02716e6f943883a9508b447aff4e\n\n## TLDR\n\nA page left open through the grid-only update can interpret a pasted JSON document as a terminal-input instruction. Instead of inserting that document literally, it sends the document's data field to the program; JSON escapes for carriage return become real unbracketed Enter input. In a shell tab this can run commands the user intended only to paste as document text.\n\n## Details\n\nDiscovery-turn revision of original c1 from lead to finding, preserving its original old-page misdrawing, missing-notice refusal and ordinary malformed-input detachment consequences and prior proposed-drop basis. The new successful-input route supersedes c1's earlier broad no-highest conclusion. No parent drop or lowering has been accepted.\n\nSource validated directly this turn: the preceding page's terminal.js:2650-2675 dispatches text clipboard content through insert; :2232-2235 sanitizes only through term-bytes.js:55-56 (removes literal ESC/end markers, not JSON backslash escapes). Its installed callback at :4628-4634 calls term.paste. The preceding vendor/xterm.js:1 paste routine converts literal CRLF/LF, adds markers only when its own decPrivateModes.bracketedPasteMode is true, and calls triggerDataEvent once with the whole prepared text. Its default modes set bracketedPasteMode:false. Parent terminal.js:4191-4196 sends that onData result through sendData at :4157-4158 as one UTF-8 WebSocket binary message. The reviewed helm's terminal.rs:762-773 forwards that message unchanged as one grid input frame. farhelm-proto/src/grid.rs:1565-1566 uses serde's internally tagged t field, :1610-1612 defines Text { data }, :1650-1655 parses JSON, and :1686-1693 validates Text length without rejecting decoded control characters. grid_input.rs:175 encodes Text.data as its raw bytes, outside paste wrapping regardless of the real program's bracketed-paste mode. service/grid_stream.rs:1064-1090 decodes, encodes and queues that accepted message. Thus a small one-line pasted JSON Text document can be reinterpreted into actual control-bearing program input. The earlier malformed-input check does not refute a valid input document.\n\nCaller prerequisites: earlier direct checks established unknown-kind mounting and missing-notice byte interpretation at parent terminal.js:4651-4667,5719-5725,5886-5924. Parent-supplied latest g088/l2 separately confirms missing agent_terminal/tab.kind defaults, a live ordinary session's terminal admission, fresh mount despite build skew, and no modal/input veto from BuildSkewNotice. Parent-supplied g196/l1 and g082/c2 identify this same full paste route, not an independent new discovery. My prior direct reconnect checks confirm automatic retries stop once mismatch is observed but manual attachment remains; that gate does not reject raw binary paste on an already open socket. New hello protocol 77 excludes older supervisors, not the old browser page.\n\nContract: SPEC_impl.md:3021-3027 explicitly describes old pages misdrawing and says \"what is typed into it ends the attachment as malformed input.\" Successful interpretation of document contents as control input is a distinct consequence. The product's deliberate user-paste delivery does not make JSON decoding part of the user's intended literal paste. Suggested fix direction: preserve compatible page negotiation or reject incompatible browser input before routing, so raw legacy bytes cannot masquerade as grid messages. No implementation change is requested or made by this review.\n\nSuggested bucket: highest/security or loss of work, for an established conditional route from literal paste to unbracketed commands; no particular destructive command or loss was observed. Could-be-highest: yes. Confidence: likely, naming runtime trigger conditions: a fresh unknown-kind legacy xterm surface remains attached until a small valid-Text-JSON paste, with no misparsed output having enabled that surface's initially-off bracketed-paste mode. The source shows the necessary code paths and defaults; occurrence and frequency were not executed. No readily checkable source premise remains missing for this conditional route.\n\nproposed_drop: false for successful input reinterpretation. Preserve the exact prior proposed drop for ordinary display/malformed-input failure: \"A page loaded from the previous helm and left open across the update must be reloaded; nothing keeps it working\" and \"Keeping the stream notice for such pages was considered and not done: a reload is the whole remedy.\" Whether that general reload acceptance also accepts successful command reinterpretation requires independent judgment; it cannot be treated as a source refutation. possible_cover: parent-supplied g196/l1, g082/c2, g083/c5 and g088/l2 for consolidation; no coverage-source search. Caveats: known-host direct-grid old mounts instead refuse missing notice; ordinary keystrokes generally fail decoding; an old renderer with bracketed paste already enabled would not send this particular valid-JSON raw frame. All evidence is source and contract analysis. No runtime test, reproduction, build or live-install action was performed."
+          }
+        },
+        {
+          "line": 9,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "c1",
+            "state": "open",
+            "summary": "An old page can turn a literal JSON paste into unbracketed terminal commands",
+            "location": "SPEC_impl.md:3021",
+            "detail": "# An old page can turn a literal JSON paste into terminal commands\n\nReviewed commit: f560058da19e02716e6f943883a9508b447aff4e\n\n## TLDR\n\nA page left open through the grid-only update can interpret a pasted JSON document as a terminal-input instruction. Instead of inserting that document literally, it sends the document's data field to the program; JSON escapes for carriage return become real unbracketed Enter input. In a shell tab this can run commands the user intended only to paste as document text.\n\n## Details\n\nDiscovery-turn revision of original c1 from lead to finding, preserving its original old-page misdrawing, missing-notice refusal and ordinary malformed-input detachment consequences and prior proposed-drop basis. The new successful-input route supersedes c1's earlier broad no-highest conclusion. No parent drop or lowering has been accepted.\n\nSource validated directly this turn: the preceding page's terminal.js:2650-2675 dispatches text clipboard content through insert; :2232-2235 sanitizes only through term-bytes.js:55-56 (removes literal ESC/end markers, not JSON backslash escapes). Its installed callback at :4628-4634 calls term.paste. The preceding vendor/xterm.js:1 paste routine converts literal CRLF/LF, adds markers only when its own decPrivateModes.bracketedPasteMode is true, and calls triggerDataEvent once with the whole prepared text. Its default modes set bracketedPasteMode:false. Parent terminal.js:4191-4196 sends that onData result through sendData at :4157-4158 as one UTF-8 WebSocket binary message. The reviewed helm's terminal.rs:762-773 forwards that message unchanged as one grid input frame. farhelm-proto/src/grid.rs:1565-1566 uses serde's internally tagged t field, :1610-1612 defines Text { data }, :1650-1655 parses JSON, and :1686-1693 validates Text length without rejecting decoded control characters. grid_input.rs:175 encodes Text.data as its raw bytes, outside paste wrapping regardless of the real program's bracketed-paste mode. service/grid_stream.rs:1064-1090 decodes, encodes and queues that accepted message. Thus a small one-line pasted JSON Text document can be reinterpreted into actual control-bearing program input. The earlier malformed-input check does not refute a valid input document.\n\nCaller prerequisites: earlier direct checks established unknown-kind mounting and missing-notice byte interpretation at parent terminal.js:4651-4667,5719-5725,5886-5924. Parent-supplied latest g088/l2 separately confirms missing agent_terminal/tab.kind defaults, a live ordinary session's terminal admission, fresh mount despite build skew, and no modal/input veto from BuildSkewNotice. Parent-supplied g196/l1 and g082/c2 identify this same full paste route, not an independent new discovery. My prior direct reconnect checks confirm automatic retries stop once mismatch is observed but manual attachment remains; that gate does not reject raw binary paste on an already open socket. New hello protocol 77 excludes older supervisors, not the old browser page.\n\nContract: SPEC_impl.md:3021-3027 explicitly describes old pages misdrawing and says \"what is typed into it ends the attachment as malformed input.\" Successful interpretation of document contents as control input is a distinct consequence. The product's deliberate user-paste delivery does not make JSON decoding part of the user's intended literal paste. Suggested fix direction: preserve compatible page negotiation or reject incompatible browser input before routing, so raw legacy bytes cannot masquerade as grid messages. No implementation change is requested or made by this review.\n\nSuggested bucket: highest/security or loss of work, for an established conditional route from literal paste to unbracketed commands; no particular destructive command or loss was observed. Could-be-highest: yes. Confidence: likely, naming runtime trigger conditions: a fresh unknown-kind legacy xterm surface remains attached until a small valid-Text-JSON paste, with no misparsed output having enabled that surface's initially-off bracketed-paste mode. The source shows the necessary code paths and defaults; occurrence and frequency were not executed. No readily checkable source premise remains missing for this conditional route.\n\nproposed_drop: false for successful input reinterpretation. Preserve the exact prior proposed drop for ordinary display/malformed-input failure: \"A page loaded from the previous helm and left open across the update must be reloaded; nothing keeps it working\" and \"Keeping the stream notice for such pages was considered and not done: a reload is the whole remedy.\" Whether that general reload acceptance also accepts successful command reinterpretation requires independent judgment; it cannot be treated as a source refutation. possible_cover: parent-supplied g196/l1, g082/c2, g083/c5 and g088/l2 for consolidation; no coverage-source search. Caveats: known-host direct-grid old mounts instead refuse missing notice; ordinary keystrokes generally fail decoding; an old renderer with bracketed paste already enabled would not send this particular valid-JSON raw frame. All evidence is source and contract analysis. No runtime test, reproduction, build or live-install action was performed.\n\nWhole-range attribution and persistence checks: the exclusive base 6e423e30068b62c6cfa276c6d720ee35bb70387a already has mandatory first stream notices (helm terminal.rs:790-806) and the page asks grid=1 then adopts the grid on its grid notice (terminal.js:4725-4733,5654-5656,5944-5951). The f560058 diff removes stream_notice_first and the notice-first branch, while changing inbound binary handling to unconditional grid input. Thus the old-page raw/structured ambiguity is attributable to this in-range removal, rather than merely predating an assigned commit. The source history from f560058 through inclusive 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db for the relevant transport, page, encoder and grid protocol paths contains only the later comment closeout commits 08399d092d20815ced6619c26df2391944ae2b4a and 4b489b4f2eeade14f119b186ecb16eeaaf027021. These history checks are source attribution, not runtime evidence. An initially broad context diff query was clipped; its omitted output was not claimed as reviewed, and the relevant notice-first production source and compact deletion matches were read separately."
+          }
+        },
+        {
+          "line": 11,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "c1",
+            "state": "open",
+            "summary": "An old page can turn a literal JSON paste into unbracketed terminal commands",
+            "location": "SPEC_impl.md:3021",
+            "detail": "# An old page can turn a literal JSON paste into terminal commands\n\nReviewed commit: f560058da19e02716e6f943883a9508b447aff4e\n\n## TLDR\n\nA page left open through the grid-only update can interpret a pasted JSON document as a terminal-input instruction. Instead of inserting that document literally, it sends the document's data field to the program; JSON escapes for carriage return become real unbracketed Enter input. In a shell tab this can run commands the user intended only to paste as document text.\n\n## Details\n\nDiscovery-turn revision of original c1 from lead to finding, preserving its original old-page misdrawing, missing-notice refusal and ordinary malformed-input detachment consequences and prior proposed-drop basis. The new successful-input route supersedes c1's earlier broad no-highest conclusion. No parent drop or lowering has been accepted.\n\nSource validated directly this turn: the preceding page's terminal.js:2650-2675 dispatches text clipboard content through insert; :2232-2235 sanitizes only through term-bytes.js:55-56 (removes literal ESC/end markers, not JSON backslash escapes). Its installed callback at :4628-4634 calls term.paste. The preceding vendor/xterm.js:1 paste routine converts literal CRLF/LF, adds markers only when its own decPrivateModes.bracketedPasteMode is true, and calls triggerDataEvent once with the whole prepared text. Its default modes set bracketedPasteMode:false. Parent terminal.js:4191-4196 sends that onData result through sendData at :4157-4158 as one UTF-8 WebSocket binary message. The reviewed helm's terminal.rs:762-773 forwards that message unchanged as one grid input frame. farhelm-proto/src/grid.rs:1565-1566 uses serde's internally tagged t field, :1610-1612 defines Text { data }, :1650-1655 parses JSON, and :1686-1693 validates Text length without rejecting decoded control characters. grid_input.rs:175 encodes Text.data as its raw bytes, outside paste wrapping regardless of the real program's bracketed-paste mode. service/grid_stream.rs:1064-1090 decodes, encodes and queues that accepted message. Thus a small one-line pasted JSON Text document can be reinterpreted into actual control-bearing program input. The earlier malformed-input check does not refute a valid input document.\n\nCaller prerequisites: earlier direct checks established unknown-kind mounting and missing-notice byte interpretation at parent terminal.js:4651-4667,5719-5725,5886-5924. Parent-supplied latest g088/l2 separately confirms missing agent_terminal/tab.kind defaults, a live ordinary session's terminal admission, fresh mount despite build skew, and no modal/input veto from BuildSkewNotice. Parent-supplied g196/l1 and g082/c2 identify this same full paste route, not an independent new discovery. My prior direct reconnect checks confirm automatic retries stop once mismatch is observed but manual attachment remains; that gate does not reject raw binary paste on an already open socket. New hello protocol 77 excludes older supervisors, not the old browser page.\n\nContract: SPEC_impl.md:3021-3027 explicitly describes old pages misdrawing and says \"what is typed into it ends the attachment as malformed input.\" Successful interpretation of document contents as control input is a distinct consequence. The product's deliberate user-paste delivery does not make JSON decoding part of the user's intended literal paste. Suggested fix direction: preserve compatible page negotiation or reject incompatible browser input before routing, so raw legacy bytes cannot masquerade as grid messages. No implementation change is requested or made by this review.\n\nSuggested bucket: highest/security or loss of work, for an established conditional route from literal paste to unbracketed commands; no particular destructive command or loss was observed. Could-be-highest: yes. Confidence: likely, naming runtime trigger conditions: a fresh unknown-kind legacy xterm surface remains attached until a small valid-Text-JSON paste, with no misparsed output having enabled that surface's initially-off bracketed-paste mode. The source shows the necessary code paths and defaults; occurrence and frequency were not executed. No readily checkable source premise remains missing for this conditional route.\n\nproposed_drop: false for successful input reinterpretation. Preserve the exact prior proposed drop for ordinary display/malformed-input failure: \"A page loaded from the previous helm and left open across the update must be reloaded; nothing keeps it working\" and \"Keeping the stream notice for such pages was considered and not done: a reload is the whole remedy.\" Whether that general reload acceptance also accepts successful command reinterpretation requires independent judgment; it cannot be treated as a source refutation. possible_cover: parent-supplied g196/l1, g082/c2, g083/c5 and g088/l2 for consolidation; no coverage-source search. Caveats: known-host direct-grid old mounts instead refuse missing notice; ordinary keystrokes generally fail decoding; an old renderer with bracketed paste already enabled would not send this particular valid-JSON raw frame. All evidence is source and contract analysis. No runtime test, reproduction, build or live-install action was performed.\n\nWhole-range attribution and persistence checks: the exclusive base 6e423e30068b62c6cfa276c6d720ee35bb70387a already has mandatory first stream notices (helm terminal.rs:790-806) and the page asks grid=1 then adopts the grid on its grid notice (terminal.js:4725-4733,5654-5656,5944-5951). The f560058 diff removes stream_notice_first and the notice-first branch, while changing inbound binary handling to unconditional grid input. Thus the old-page raw/structured ambiguity is attributable to this in-range removal, rather than merely predating an assigned commit. The source history from f560058 through inclusive 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db for the relevant transport, page, encoder and grid protocol paths contains only the later comment closeout commits 08399d092d20815ced6619c26df2391944ae2b4a and 4b489b4f2eeade14f119b186ecb16eeaaf027021. These history checks are source attribution, not runtime evidence. An initially broad context diff query was clipped; its omitted output was not claimed as reviewed, and the relevant notice-first production source and compact deletion matches were read separately.\n\nPersistence follow-up: read the complete compact diff for those five production paths from f560058 to the inclusive pinned tip. It contains documentation/comment edits in grid.rs, grid_input.rs and service/grid_stream.rs only, with no behavioral repair to the established route; terminal.js and helm terminal.rs are unchanged in that subrange."
+          }
+        }
+      ],
+      "latest": {
+        "line": 11,
+        "event": {
+          "version": 1,
+          "kind": "finding",
+          "id": "c1",
+          "state": "open",
+          "summary": "An old page can turn a literal JSON paste into unbracketed terminal commands",
+          "location": "SPEC_impl.md:3021",
+          "detail": "# An old page can turn a literal JSON paste into terminal commands\n\nReviewed commit: f560058da19e02716e6f943883a9508b447aff4e\n\n## TLDR\n\nA page left open through the grid-only update can interpret a pasted JSON document as a terminal-input instruction. Instead of inserting that document literally, it sends the document's data field to the program; JSON escapes for carriage return become real unbracketed Enter input. In a shell tab this can run commands the user intended only to paste as document text.\n\n## Details\n\nDiscovery-turn revision of original c1 from lead to finding, preserving its original old-page misdrawing, missing-notice refusal and ordinary malformed-input detachment consequences and prior proposed-drop basis. The new successful-input route supersedes c1's earlier broad no-highest conclusion. No parent drop or lowering has been accepted.\n\nSource validated directly this turn: the preceding page's terminal.js:2650-2675 dispatches text clipboard content through insert; :2232-2235 sanitizes only through term-bytes.js:55-56 (removes literal ESC/end markers, not JSON backslash escapes). Its installed callback at :4628-4634 calls term.paste. The preceding vendor/xterm.js:1 paste routine converts literal CRLF/LF, adds markers only when its own decPrivateModes.bracketedPasteMode is true, and calls triggerDataEvent once with the whole prepared text. Its default modes set bracketedPasteMode:false. Parent terminal.js:4191-4196 sends that onData result through sendData at :4157-4158 as one UTF-8 WebSocket binary message. The reviewed helm's terminal.rs:762-773 forwards that message unchanged as one grid input frame. farhelm-proto/src/grid.rs:1565-1566 uses serde's internally tagged t field, :1610-1612 defines Text { data }, :1650-1655 parses JSON, and :1686-1693 validates Text length without rejecting decoded control characters. grid_input.rs:175 encodes Text.data as its raw bytes, outside paste wrapping regardless of the real program's bracketed-paste mode. service/grid_stream.rs:1064-1090 decodes, encodes and queues that accepted message. Thus a small one-line pasted JSON Text document can be reinterpreted into actual control-bearing program input. The earlier malformed-input check does not refute a valid input document.\n\nCaller prerequisites: earlier direct checks established unknown-kind mounting and missing-notice byte interpretation at parent terminal.js:4651-4667,5719-5725,5886-5924. Parent-supplied latest g088/l2 separately confirms missing agent_terminal/tab.kind defaults, a live ordinary session's terminal admission, fresh mount despite build skew, and no modal/input veto from BuildSkewNotice. Parent-supplied g196/l1 and g082/c2 identify this same full paste route, not an independent new discovery. My prior direct reconnect checks confirm automatic retries stop once mismatch is observed but manual attachment remains; that gate does not reject raw binary paste on an already open socket. New hello protocol 77 excludes older supervisors, not the old browser page.\n\nContract: SPEC_impl.md:3021-3027 explicitly describes old pages misdrawing and says \"what is typed into it ends the attachment as malformed input.\" Successful interpretation of document contents as control input is a distinct consequence. The product's deliberate user-paste delivery does not make JSON decoding part of the user's intended literal paste. Suggested fix direction: preserve compatible page negotiation or reject incompatible browser input before routing, so raw legacy bytes cannot masquerade as grid messages. No implementation change is requested or made by this review.\n\nSuggested bucket: highest/security or loss of work, for an established conditional route from literal paste to unbracketed commands; no particular destructive command or loss was observed. Could-be-highest: yes. Confidence: likely, naming runtime trigger conditions: a fresh unknown-kind legacy xterm surface remains attached until a small valid-Text-JSON paste, with no misparsed output having enabled that surface's initially-off bracketed-paste mode. The source shows the necessary code paths and defaults; occurrence and frequency were not executed. No readily checkable source premise remains missing for this conditional route.\n\nproposed_drop: false for successful input reinterpretation. Preserve the exact prior proposed drop for ordinary display/malformed-input failure: \"A page loaded from the previous helm and left open across the update must be reloaded; nothing keeps it working\" and \"Keeping the stream notice for such pages was considered and not done: a reload is the whole remedy.\" Whether that general reload acceptance also accepts successful command reinterpretation requires independent judgment; it cannot be treated as a source refutation. possible_cover: parent-supplied g196/l1, g082/c2, g083/c5 and g088/l2 for consolidation; no coverage-source search. Caveats: known-host direct-grid old mounts instead refuse missing notice; ordinary keystrokes generally fail decoding; an old renderer with bracketed paste already enabled would not send this particular valid-JSON raw frame. All evidence is source and contract analysis. No runtime test, reproduction, build or live-install action was performed.\n\nWhole-range attribution and persistence checks: the exclusive base 6e423e30068b62c6cfa276c6d720ee35bb70387a already has mandatory first stream notices (helm terminal.rs:790-806) and the page asks grid=1 then adopts the grid on its grid notice (terminal.js:4725-4733,5654-5656,5944-5951). The f560058 diff removes stream_notice_first and the notice-first branch, while changing inbound binary handling to unconditional grid input. Thus the old-page raw/structured ambiguity is attributable to this in-range removal, rather than merely predating an assigned commit. The source history from f560058 through inclusive 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db for the relevant transport, page, encoder and grid protocol paths contains only the later comment closeout commits 08399d092d20815ced6619c26df2391944ae2b4a and 4b489b4f2eeade14f119b186ecb16eeaaf027021. These history checks are source attribution, not runtime evidence. An initially broad context diff query was clipped; its omitted output was not claimed as reviewed, and the relevant notice-first production source and compact deletion matches were read separately.\n\nPersistence follow-up: read the complete compact diff for those five production paths from f560058 to the inclusive pinned tip. It contains documentation/comment edits in grid.rs, grid_input.rs and service/grid_stream.rs only, with no behavioral repair to the established route; terminal.js and helm terminal.rs are unchanged in that subrange."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g011/findings.jsonl",
+        "id": "c1",
+        "line": 11,
+        "disposition": "under-investigation",
+        "group": "g011-c1",
+        "reason": "Record durably acknowledged; parent source/contract validation, cross-group synthesis, coverage/filter matching and any independent drop check remain pending. This preserves the claim and uncertainty without accepting, dropping or lowering it."
+      },
+      "accepted_parent_decision": null,
+      "returned_claim_checks": [
+        {
+          "batch": "claims-005",
+          "key": "g011/c1",
+          "latest_line": 11,
+          "recommendation": "retain-verified",
+          "bucket": "highest",
+          "underlying_key": "legacy-browser-binary-input-reinterpreted-as-grid-json",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "Source establishes a conditional route from a literal JSON paste in a fresh legacy xterm surface to decoded unbracketed control input. Ordinary malformed-input detach and display breakage are accepted, but the specification does not explicitly accept successful command reinterpretation. Preserve the stronger consequence and the prior proposed drop separately.",
+          "checks": [
+            "1ed482dde220452e424973faf38a5e1318986333:crates/farhelm-ui/assets/terminal.js:4650-4665 builds xterm for an unknown kind; 5718-5724 and 5905-5924 treat a missing notice as bytes unless a grid was mounted directly. 3568-3624 has asset/font/DOM gates and no build-skew mount veto. src/skew.rs:31-35 explicitly states no blocking/refusal to render. src/session_view.rs:1861-1917 limits mismatch handling to unattended reconnect policy.",
+            "At 1ed482d, terminal.js:2649-2675 sends a text clipboard paste through insert; 2232-2235 and term-bytes.js:55-56 remove literal ESC, not JSON escapes. terminal.js:4628-4634 calls term.paste. The vendored xterm.js:1 paste function emits one triggerDataEvent and brackets only when bracketedPasteMode is true; its default is false. terminal.js:4158-4159,4191-4195 sends that whole event as one UTF-8 binary message.",
+            "f560058da19e02716e6f943883a9508b447aff4e:helm terminal.rs:762-773 forwards each binary message as grid input. proto grid.rs:1565-1566,1610,1650-1655 parses tagged JSON; 1686-1693 limits Text length without refusing decoded CR. supervisor grid_input.rs:175 returns Text bytes directly; service/grid_stream.rs:1064-1090 queues those bytes outside paste collection. No runtime reproduction or destructive command was performed.",
+            "The f560058 helm terminal.rs diff removes stream notices and changes binary input to unconditional grid forwarding. From f560058 to 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db, terminal.js and helm terminal.rs are unchanged; the complete grid.rs/grid_input.rs/grid_stream.rs diff contains comments/documentation only. The checked route persists at the inclusive tip."
+          ],
+          "coverage_checked": [
+            "Current SPEC_impl.md:2940-2955 explicitly accepts old-page reload, display misinterpretation and malformed-input detachment. Its statement that typing ends the attachment does not describe valid JSON being accepted and transformed into controls. SPEC.md searches of terminal input, paste, protocol/skew and upgrade requirements found no explicit acceptance of successful literal-paste reinterpretation.",
+            "TODO.md Planned is empty. Searches of plans/queue for old pages, JSON paste, stream notice and reload found the tmux removal plan, whose removal work has already landed (plans/REPORTS.md:29-32); no unlanded plan states a repair for this ambiguity.",
+            "BUGS.md has no match. Targeted INDEX.md and active TRIAGE_OUTCOMES.md searches for old/legacy page, paste, JSON, stream notice and skew found no exact queued trigger/consequence. Legacy static-server rebinding and auth-skew remount bookkeeping concern different roots.",
+            "FILTER.md's older-upgrade-plus-rare-condition filter excludes security/trust-boundary consequences. Successful transformation into unbracketed commands is also outside the diagnostic/self-correcting filters. Rarity alone is not a basis to omit this route."
+          ],
+          "exact_cover_quotes": [
+            "SPEC_impl.md:2950: from the previous helm and left open across the update must be reloaded; nothing keeps it working.",
+            "SPEC_impl.md:2954-2955: what is typed into it ends the attachment as malformed input. Keeping the stream notice for such pages was considered and not done: a reload is the whole remedy."
+          ],
+          "missing_premise": "Occurrence and frequency were not executed. The established route is conditional on a fresh unknown-kind legacy xterm surface remaining attached until a small valid Text JSON paste, while its initially-off bracketed-paste mode has not been enabled by misinterpreted output. Known-kind direct-grid mounts instead refuse the missing notice; ordinary typing generally fails JSON decoding. The old client listings' absent optional kinds and mount gates support the conditional path; no claim that every stale mount is affected.",
+          "original_stronger_consequence": "Lines 1,3,5 proposed dropping ordinary old-page misdraw/refusal/malformed detach as accepted and stated no highest route. Line 6 introduced the valid-message concern; lines 7,9,11 supersede that broad no-highest conclusion with literal JSON becoming real unbracketed Enter/control input capable of running unintended shell commands. No particular data loss or attack was observed. No parent drop was accepted.",
+          "needs_independent_drop_check": true,
+          "proposed_basis": "Retain the successful-input reinterpretation as highest from its conditional command-execution route. If the parent proposes to apply the general reload acceptance, an upgrade filter, a duplicate disposition, or any consequence lowering, send that exact proposal and the preserved history to an independent drop check. Aliases mentioned in the supplied history belong to other batches and were not independently compared here."
+        }
+      ],
+      "parent_proposals": [
+        {
+          "artifact": "parent-flagged-judgments-005.json",
+          "key": "g011/c1",
+          "proposal": "claim-checks/claims-005/result.json",
+          "parent_proposal": "retain-highest-canonical-legacy-json-input",
+          "final_independent_gate": "include-prior-broad-reload-drop-and-any-alias",
+          "reason": "Parentreadfull005. Sourceestablishesoldloadedpagefreshunknownkindxtermcanmount/attachthroughmanualskewdespitemissingnotice, offbracketedpasteonebinaryevent literalvalidTextJSON acceptednewgriddecoder, decodedCRqueuedasTextoutsiderealpaste. Thisis successfulreinterpretation/controlinput, notacceptedmisdraw/malformedinputdetachorreload-onlydisplaybreakage. Retainhighestconditionalunintendedcommandroute, noexecutedpayload/harm/frequency/allstalesurfacesclaim. Knownkindgridmissnoticefailsseparate. Reconcile017l1/196l1andothersaliases preservingallsource/producerpremises; earlygenericreloadacceptanceonlypartialdisplay/refusalscope. Securityboundaryexcludesupgrade-rare filter. Freshcheckanyproposeddrop/lowering, don'ttreatgeneraloldpageunsupportedasacceptinginputtransform."
+        }
+      ],
+      "collection": {
+        "retain": true,
+        "clearly_refuted_candidate": false,
+        "needs_unfinished_gate": true,
+        "provisional_bucket": "highest",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "legacy-browser-binary-input-reinterpreted-as-grid-json",
+        "destination": "trailing-legacy-browser-binary-input-reinterpreted-as-grid-json.md"
+      }
+    },
+    {
+      "key": "g011/c2",
+      "owner": "g011",
+      "id": "c2",
+      "domain": "product-contracts",
+      "purpose": "product-contracts: SPEC_impl.md; phases ### The grid client",
+      "history": [
+        {
+          "line": 2,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c2",
+            "state": "open",
+            "summary": "Removing the xterm OSC scheme filter retains the page allowlist",
+            "location": "SPEC_impl.md:3656",
+            "detail": "# Removing the xterm OSC scheme filter retains the page allowlist\n\nReviewed commit: f560058da19e02716e6f943883a9508b447aff4e\n\n## TLDR\n\nConsidered whether removing the old renderer's OSC hyperlink filter would let terminal output open arbitrary local URL handlers. The replacement keeps an explicit http/https/file boundary before activation; no bypass was established.\n\n## Details\n\nThe changed SPEC_impl.md Session-host file reads paragraph (lines 3656-3658) says the grid passes all OSC 8 targets to the page and assigns the boundary to oscTarget. SPEC.md Terminal experience requires: \"OSC hyperlink schemes are explicitly limited to http, https and file; every other scheme is ignored.\"\n\nSource checks at the reviewed commit: crates/farhelm-ui/assets/terminal-files.js:128-148 oscTarget accepts parsed http/https, then only a validated absolute file URI with no control characters, query or fragment. crates/farhelm-ui/assets/terminal.js:1025-1064 oscLink dispatches only target.kind web/file; its remaining branch installs inert hover and activate callbacks. createGridLinks:1105-1112 wraps every OSC row link with oscLink before returning the provider result. Thus removing the xterm-specific allowNonHttpProtocols discussion does not remove the page boundary. Printed links retain their separate existing web activation checks.\n\nSuggested bucket: highest/security if arbitrary local scheme execution were reachable; that route is refuted here. Could-be-highest: yes, this was a security-boundary candidate, but source has no shipped activation path for other schemes. Confidence: confirmed by source, not execution. proposed_drop: source refutation through the explicit allowlist and inert fallback above. possible_cover: none searched. Caveat: this check covers the removed renderer boundary and its replacement, not unrelated URL parser behavior or the entire link subsystem."
+          }
+        },
+        {
+          "line": 4,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c2",
+            "state": "open",
+            "summary": "Removing the xterm OSC scheme filter retains the page allowlist",
+            "location": "SPEC_impl.md:3656",
+            "detail": "# Removing the xterm OSC scheme filter retains the page allowlist\n\nReviewed commit: f560058da19e02716e6f943883a9508b447aff4e\n\n## TLDR\n\nConsidered whether removing the old renderer's OSC hyperlink filter would let terminal output open arbitrary local URL handlers. The replacement keeps an explicit http/https/file boundary before activation; no bypass was established.\n\n## Details\n\nSynthesis revision of c2; the original suspected security consequence is retained. The changed SPEC_impl.md:3656-3658 assigns the scheme boundary to oscTarget. SPEC.md Terminal experience requires: \"OSC hyperlink schemes are explicitly limited to http, https and file; every other scheme is ignored.\"\n\nInitial source checks: terminal-files.js:128-148 accepts parsed http/https, then only a validated absolute file URI with no control characters, query or fragment. terminal.js:1025-1064 oscLink dispatches only target.kind web/file and installs inert handlers otherwise; createGridLinks:1105-1112 wraps every OSC row link with oscLink before returning it.\n\nSynthesis checked the caller and overlapping-provider assumptions. crates/farhelm-ui/assets/grid-buffer.js:378-417 classifies every tagged run as kind osc, and refuses to create a printed URL across any OSC-tagged cells. terminal.js's provider order is OSC, printed web, printed file; an inert OSC target therefore does not fall through to a second provider for the same covered cells. terminal-links.js:153-158 allows validated OSC web activation to skip the printed-text predicate, but that call is reachable from oscLink only after oscTarget classified the target as web. Printed text instead passes isPlainWebUrl (:108-119), requiring an explicit http(s) prefix, no whitespace/control characters, and an absolute parsed http(s) URL with a host. openTerminalUrl (:69-75) performs no additional validation, so the adapter gate is load-bearing; the inspected call chain supplies it. The tunnel route (:128-158) retains its stricter predicate and cannot widen the accepted schemes.\n\nSuggested bucket: highest/security if arbitrary local scheme execution were reachable; that route is refuted here. Could-be-highest: yes, this was a security-boundary candidate. Confidence: confirmed by source, not execution. proposed_drop: source refutation through the allowlist, inert fallback, provider precedence, and guarded opener caller above. possible_cover: none searched. Caveat: scoped to removal of the renderer boundary and its replacement; no claim of exhaustive URL-parser or link-subsystem review. No runtime tests or reproductions were performed."
+          }
+        }
+      ],
+      "latest": {
+        "line": 4,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c2",
+          "state": "open",
+          "summary": "Removing the xterm OSC scheme filter retains the page allowlist",
+          "location": "SPEC_impl.md:3656",
+          "detail": "# Removing the xterm OSC scheme filter retains the page allowlist\n\nReviewed commit: f560058da19e02716e6f943883a9508b447aff4e\n\n## TLDR\n\nConsidered whether removing the old renderer's OSC hyperlink filter would let terminal output open arbitrary local URL handlers. The replacement keeps an explicit http/https/file boundary before activation; no bypass was established.\n\n## Details\n\nSynthesis revision of c2; the original suspected security consequence is retained. The changed SPEC_impl.md:3656-3658 assigns the scheme boundary to oscTarget. SPEC.md Terminal experience requires: \"OSC hyperlink schemes are explicitly limited to http, https and file; every other scheme is ignored.\"\n\nInitial source checks: terminal-files.js:128-148 accepts parsed http/https, then only a validated absolute file URI with no control characters, query or fragment. terminal.js:1025-1064 oscLink dispatches only target.kind web/file and installs inert handlers otherwise; createGridLinks:1105-1112 wraps every OSC row link with oscLink before returning it.\n\nSynthesis checked the caller and overlapping-provider assumptions. crates/farhelm-ui/assets/grid-buffer.js:378-417 classifies every tagged run as kind osc, and refuses to create a printed URL across any OSC-tagged cells. terminal.js's provider order is OSC, printed web, printed file; an inert OSC target therefore does not fall through to a second provider for the same covered cells. terminal-links.js:153-158 allows validated OSC web activation to skip the printed-text predicate, but that call is reachable from oscLink only after oscTarget classified the target as web. Printed text instead passes isPlainWebUrl (:108-119), requiring an explicit http(s) prefix, no whitespace/control characters, and an absolute parsed http(s) URL with a host. openTerminalUrl (:69-75) performs no additional validation, so the adapter gate is load-bearing; the inspected call chain supplies it. The tunnel route (:128-158) retains its stricter predicate and cannot widen the accepted schemes.\n\nSuggested bucket: highest/security if arbitrary local scheme execution were reachable; that route is refuted here. Could-be-highest: yes, this was a security-boundary candidate. Confidence: confirmed by source, not execution. proposed_drop: source refutation through the allowlist, inert fallback, provider precedence, and guarded opener caller above. possible_cover: none searched. Caveat: scoped to removal of the renderer boundary and its replacement; no claim of exhaustive URL-parser or link-subsystem review. No runtime tests or reproductions were performed."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g011/findings.jsonl",
+        "id": "c2",
+        "line": 4,
+        "disposition": "under-investigation",
+        "group": "g011-c2",
+        "reason": "Record durably acknowledged; parent source/contract validation, cross-group synthesis, coverage/filter matching and any independent drop check remain pending. This preserves the claim and uncertainty without accepting, dropping or lowering it."
+      },
+      "accepted_parent_decision": null,
+      "returned_claim_checks": [
+        {
+          "batch": "claims-005",
+          "key": "g011/c2",
+          "latest_line": 4,
+          "recommendation": "refuted",
+          "bucket": "other",
+          "underlying_key": "grid-osc-scheme-allowlist-after-xterm-removal",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The replacement adapter retains an explicit scheme gate before activation; removing xterm's gate does not establish arbitrary local-handler execution. This is a narrow source refutation, not an exhaustive link-security verdict.",
+          "checks": [
+            "f560058da19e02716e6f943883a9508b447aff4e:terminal-files.js:123-148 classifies parsed HTTP/HTTPS or validated absolute file targets and returns null for other schemes.",
+            "At f560058, terminal.js:1029-1059 calls oscTarget before activation and supplies inert callbacks otherwise; 1108-1115 maps every OSC result through this adapter before printed web/file providers. grid-buffer.js:378-417 gives tagged cells OSC links and forbids printed URL recognition over those cells.",
+            "The f560058-to-00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db path diff has no changes to terminal.js, terminal-files.js or grid-buffer.js. No execution."
+          ],
+          "coverage_checked": [
+            "SPEC.md:3168-3169 limits OSC schemes to http, https and file. SPEC_impl.md:3656-3658 at f560058 explicitly assigns the replacement gate to oscTarget; current targeted searches retain that boundary.",
+            "TODO.md Planned is empty; plans/queue scheme/OSC searches found no unlanded plan covering arbitrary-handler activation. Completed tmux-removal plans are not future coverage. BUGS.md has no match. INDEX.md and active TRIAGE_OUTCOMES.md searches found no exact removal/allowlist item.",
+            "No FILTER.md rule needed or proposed: refutation rests on the gated activation path."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": null,
+          "original_stronger_consequence": "Removing the old renderer filter might allow terminal output to open arbitrary local URL handlers, a highest/security consequence if reachable. Both history entries keep that consequence and propose only its source refutation. No shipped activation route outside the allowlist was established.",
+          "needs_independent_drop_check": true,
+          "proposed_basis": "Propose narrow refutation of the removed-boundary candidate, subject to an independent security drop check. Preserve the explicit caveat that unrelated parser and link-subsystem defects were not assessed."
+        }
+      ],
+      "parent_proposals": [
+        {
+          "artifact": "parent-flagged-judgments-005.json",
+          "key": "g011/c2",
+          "proposal": "claim-checks/claims-005/result.json",
+          "parent_proposal": "source-refuted-retained-osc-scheme-gate",
+          "final_independent_gate": "required-before-security-drop",
+          "reason": "Full005oscTargetclassifiesonlyHTTP/HTTPS/validatedabsolutefile,inertcallbackotherwise;everyOSCresultgoesthroughadapter,andtaggedcellsblockprintedURLfallback. Refutesdeletedxtermgate→arbitrarylocalhandlerexecutionroute, not allparser/linksecurity. No absentcoveragefilter; freshcheckactualactivationhandoffandfallback. Preservepotentialhighestarbitraryschemeharmandnobroadallowlistbypasscertification."
+        }
+      ],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": true,
+        "provisional_bucket": "highest",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "grid-osc-scheme-allowlist-after-xterm-removal",
+        "destination": null
+      }
+    },
+    {
+      "key": "g011/c3",
+      "owner": "g011",
+      "id": "c3",
+      "domain": "product-contracts",
+      "purpose": "product-contracts: SPEC_impl.md; phases ### The grid client",
+      "history": [
+        {
+          "line": 8,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c3",
+            "state": "open",
+            "summary": "Lazy history validation promise is limited to retained rows",
+            "location": "SPEC_impl.md:1868",
+            "detail": "# Lazy history validation promise is limited to retained rows\n\nReviewed commit: f560058da19e02716e6f943883a9508b447aff4e\n\n## TLDR\n\nChecked whether the implementation specification falsely promises that every received history row is fully validated when queued history can be trimmed before decoding. Its promise explicitly concerns retained rows, matching the source; no separate documentation defect was established.\n\n## Details\n\nAssigned SPEC_impl.md The grid client says: \"The existing sliced drain then validates each retained row in full before storing it; malformed content fails there even if nobody scrolls to it.\" This does not say evicted, unread rows must be semantically decoded. At the reviewed source, grid-model.js:331-370 checks each history-row envelope and copies the bounded row region; applyHistory (:875-913) queues the indexed message and calls trimQueue before a possible drain. The adjacent trimQueue contract explicitly drops unread rows that cannot remain under history_cap. drainHistory (:965-1008) calls walkBinaryRow for a row before copying its body, referenced links and identity token into the retained history. historyLine (:1095-1102) decodes only an already retained and validated row and caches no decoded tree. The source therefore supports the specification's retained-row qualifier and lazy-reader contract. This check was about the assigned documentation's replacement-model claim, not an independent runtime fuzz review.\n\nSuggested bucket: other/documentation correctness if contradicted; no defect established. Could-be-highest: no established or suspected security/loss-of-work route from discarded unread rows in this check. Confidence: confirmed by source and exact contract wording, not execution. proposed_drop: source refutation and the exact retained-row qualifier quoted above. possible_cover: none; neighbour records were read as supplied interface context, not coverage sources. Caveat: this does not certify every malformed wire category or all history queue resource bounds. No runtime tests or reproductions were performed."
+          }
+        },
+        {
+          "line": 10,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c3",
+            "state": "open",
+            "summary": "Lazy history validation promise is limited to retained rows",
+            "location": "SPEC_impl.md:1869",
+            "detail": "# Lazy history validation promise is limited to retained rows\n\nReviewed commit: f560058da19e02716e6f943883a9508b447aff4e\n\n## TLDR\n\nChecked whether the implementation specification falsely promises that every received history row is fully validated when queued history can be trimmed before decoding. Its promise explicitly concerns retained rows, matching the source; no separate documentation defect was established.\n\n## Details\n\nAssigned SPEC_impl.md The grid client says: \"The existing sliced drain then validates each retained row in full before storing it; malformed content fails there even if nobody scrolls to it.\" This does not say evicted, unread rows must be semantically decoded. At the reviewed source, grid-model.js:331-370 checks each history-row envelope and copies the bounded row region; applyHistory (:875-913) queues the indexed message and calls trimQueue before a possible drain. The adjacent trimQueue contract explicitly drops unread rows that cannot remain under history_cap. drainHistory (:965-1008) calls walkBinaryRow for a row before copying its body, referenced links and identity token into the retained history. historyLine (:1095-1102) decodes only an already retained and validated row and caches no decoded tree. The source therefore supports the specification's retained-row qualifier and lazy-reader contract. This check was about the assigned documentation's replacement-model claim, not an independent runtime fuzz review.\n\nSuggested bucket: other/documentation correctness if contradicted; no defect established. Could-be-highest: no established or suspected security/loss-of-work route from discarded unread rows in this check. Confidence: confirmed by source and exact contract wording, not execution. proposed_drop: source refutation and the exact retained-row qualifier quoted above. possible_cover: none; neighbour records were read as supplied interface context, not coverage sources. Caveat: this does not certify every malformed wire category or all history queue resource bounds. No runtime tests or reproductions were performed.\n\nDiscovery validation completed: numbered contract lines 1869-1875 confirm the retained-row qualifier; the full trimQueue body at grid-model.js:930-955 advances only the first kept entry offset and omits fully discarded entries, while drainHistory validates before storage. This settles the considered premise without broadening it into an independent runtime defect."
+          }
+        }
+      ],
+      "latest": {
+        "line": 10,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c3",
+          "state": "open",
+          "summary": "Lazy history validation promise is limited to retained rows",
+          "location": "SPEC_impl.md:1869",
+          "detail": "# Lazy history validation promise is limited to retained rows\n\nReviewed commit: f560058da19e02716e6f943883a9508b447aff4e\n\n## TLDR\n\nChecked whether the implementation specification falsely promises that every received history row is fully validated when queued history can be trimmed before decoding. Its promise explicitly concerns retained rows, matching the source; no separate documentation defect was established.\n\n## Details\n\nAssigned SPEC_impl.md The grid client says: \"The existing sliced drain then validates each retained row in full before storing it; malformed content fails there even if nobody scrolls to it.\" This does not say evicted, unread rows must be semantically decoded. At the reviewed source, grid-model.js:331-370 checks each history-row envelope and copies the bounded row region; applyHistory (:875-913) queues the indexed message and calls trimQueue before a possible drain. The adjacent trimQueue contract explicitly drops unread rows that cannot remain under history_cap. drainHistory (:965-1008) calls walkBinaryRow for a row before copying its body, referenced links and identity token into the retained history. historyLine (:1095-1102) decodes only an already retained and validated row and caches no decoded tree. The source therefore supports the specification's retained-row qualifier and lazy-reader contract. This check was about the assigned documentation's replacement-model claim, not an independent runtime fuzz review.\n\nSuggested bucket: other/documentation correctness if contradicted; no defect established. Could-be-highest: no established or suspected security/loss-of-work route from discarded unread rows in this check. Confidence: confirmed by source and exact contract wording, not execution. proposed_drop: source refutation and the exact retained-row qualifier quoted above. possible_cover: none; neighbour records were read as supplied interface context, not coverage sources. Caveat: this does not certify every malformed wire category or all history queue resource bounds. No runtime tests or reproductions were performed.\n\nDiscovery validation completed: numbered contract lines 1869-1875 confirm the retained-row qualifier; the full trimQueue body at grid-model.js:930-955 advances only the first kept entry offset and omits fully discarded entries, while drainHistory validates before storage. This settles the considered premise without broadening it into an independent runtime defect."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g011/findings.jsonl",
+        "id": "c3",
+        "line": 10,
+        "disposition": "excluded",
+        "group": "lazy-history-retained-row-validation-contract",
+        "reason": "Parent explicitly accepted named refuted proposal from claims-005 after inspecting it. The promise is explicitly limited to retained rows. Dropping unread rows before semantic validation does not contradict it. Propose refutation of this exact documentation candidate by the retained-row qualifier and validate-before-storage path. Checked source/results: [\"f560058da19e02716e6f943883a9508b447aff4e:SPEC_impl.md:1869-1875 says retained rows are validated before storage and promises no decoded-history cache.\",\"At f560058, grid-model.js:876-905 queues rows and trims before drain; 916-955 explicitly discards unread excess rows, preserving only the retained suffix. 971-1008 calls walkBinaryRow before pushing each retained body/token. 1090-1101 reads an applied row afresh. The f560058-to-inclusive-tip path diff has no grid-model.js change.\",\"This checks the claimed retained-row contract only, not all malformed-frame categories or resource bounds. Source-only.\"] Current coverage/results: [\"Current SPEC_impl.md:1869-1875 retains the same retained-row qualifier. SPEC.md Terminal experience's retained scrollback delivery requirements do not require semantic parsing of discarded unread rows.\",\"TODO.md Planned is empty. plans/queue retained-row/lazy-history searches found no unlanded matching work. BUGS.md has no match. INDEX.md and active TRIAGE_OUTCOMES.md history/validation searches found history numbering and history-fixture issues, not this qualifier.\",\"No FILTER.md rule needed or proposed; the alleged contradiction is source-refuted.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"A possibly false promise that every received row was fully validated. Both history entries limit the concern to documentation accuracy; neither asserted security or user-work loss. Discarded unread rows are not claimed to receive full semantic validation.\"; null."
+      },
+      "accepted_parent_decision": {
+        "key": "g011/c3",
+        "line": 10,
+        "disposition": "excluded",
+        "group": "lazy-history-retained-row-validation-contract",
+        "bucket": "other",
+        "recording": "refuted",
+        "queue_target_candidate": null,
+        "needs_independent_drop_check": false,
+        "reason": "Parent explicitly accepted named refuted proposal from claims-005 after inspecting it. The promise is explicitly limited to retained rows. Dropping unread rows before semantic validation does not contradict it. Propose refutation of this exact documentation candidate by the retained-row qualifier and validate-before-storage path. Checked source/results: [\"f560058da19e02716e6f943883a9508b447aff4e:SPEC_impl.md:1869-1875 says retained rows are validated before storage and promises no decoded-history cache.\",\"At f560058, grid-model.js:876-905 queues rows and trims before drain; 916-955 explicitly discards unread excess rows, preserving only the retained suffix. 971-1008 calls walkBinaryRow before pushing each retained body/token. 1090-1101 reads an applied row afresh. The f560058-to-inclusive-tip path diff has no grid-model.js change.\",\"This checks the claimed retained-row contract only, not all malformed-frame categories or resource bounds. Source-only.\"] Current coverage/results: [\"Current SPEC_impl.md:1869-1875 retains the same retained-row qualifier. SPEC.md Terminal experience's retained scrollback delivery requirements do not require semantic parsing of discarded unread rows.\",\"TODO.md Planned is empty. plans/queue retained-row/lazy-history searches found no unlanded matching work. BUGS.md has no match. INDEX.md and active TRIAGE_OUTCOMES.md history/validation searches found history numbering and history-fixture issues, not this qualifier.\",\"No FILTER.md rule needed or proposed; the alleged contradiction is source-refuted.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"A possibly false promise that every received row was fully validated. Both history entries limit the concern to documentation accuracy; neither asserted security or user-work loss. Discarded unread rows are not claimed to receive full semantic validation.\"; null."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-005",
+          "key": "g011/c3",
+          "latest_line": 10,
+          "recommendation": "refuted",
+          "bucket": "other",
+          "underlying_key": "lazy-history-retained-row-validation-contract",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The promise is explicitly limited to retained rows. Dropping unread rows before semantic validation does not contradict it.",
+          "checks": [
+            "f560058da19e02716e6f943883a9508b447aff4e:SPEC_impl.md:1869-1875 says retained rows are validated before storage and promises no decoded-history cache.",
+            "At f560058, grid-model.js:876-905 queues rows and trims before drain; 916-955 explicitly discards unread excess rows, preserving only the retained suffix. 971-1008 calls walkBinaryRow before pushing each retained body/token. 1090-1101 reads an applied row afresh. The f560058-to-inclusive-tip path diff has no grid-model.js change.",
+            "This checks the claimed retained-row contract only, not all malformed-frame categories or resource bounds. Source-only."
+          ],
+          "coverage_checked": [
+            "Current SPEC_impl.md:1869-1875 retains the same retained-row qualifier. SPEC.md Terminal experience's retained scrollback delivery requirements do not require semantic parsing of discarded unread rows.",
+            "TODO.md Planned is empty. plans/queue retained-row/lazy-history searches found no unlanded matching work. BUGS.md has no match. INDEX.md and active TRIAGE_OUTCOMES.md history/validation searches found history numbering and history-fixture issues, not this qualifier.",
+            "No FILTER.md rule needed or proposed; the alleged contradiction is source-refuted."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": null,
+          "original_stronger_consequence": "A possibly false promise that every received row was fully validated. Both history entries limit the concern to documentation accuracy; neither asserted security or user-work loss. Discarded unread rows are not claimed to receive full semantic validation.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Propose refutation of this exact documentation candidate by the retained-row qualifier and validate-before-storage path."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "lazy-history-retained-row-validation-contract",
+        "destination": null
+      }
+    }
+  ],
+  "replies": [
+    {
+      "turn": 1,
+      "reply": "Initial review blocked: the manifest requires lines 1–481, but the snapshot contains 480 lines. Both mandatory evidence reads failed; no patch coverage is claimed.\n\nRead the brief fully and the complete `commits` field only. `findings.jsonl` remains empty; `progress.md` records the blocker and unread scope. The manifest needs correction to 1–480 before review can continue."
+    },
+    {
+      "turn": 2,
+      "reply": "Initial pass complete. All 480 mandatory lines delivered; no unread assigned scope.\n\nRecorded two candidates, `c1` and `c2`, with source checks and drop bases. No reported findings or open leads. Updated `progress.md`. No tests or reproductions run."
+    },
+    {
+      "turn": 3,
+      "reply": "Revised `c1` with reconnect-policy and malformed-input teardown checks. Revised `c2` with provider-precedence and opener-validation checks. Both drop bases remain supported.\n\nNo new findings. Unresolved lead IDs: none. Synthesis status recorded in `progress.md`."
+    },
+    {
+      "turn": 4,
+      "reply": "Discovery pass complete.\n\n- Checked paste framing/decoding, whole-range attribution, history validation, fitting, stream bounds, and composition handling.\n- Revised `c1` to a likely source-supported finding matching the supplied interface issue.\n- Added refuted candidate `c3`.\n- New independent verified/unverified finding IDs: none.\n- Open leads: none.\n\nNo independently new reportable issue found. No runtime execution performed."
+    }
+  ],
+  "progress": "# g011 progress\n\nState: assigned initial source-review pass complete after manifest coverage repair.\nScope: f560058da19e02716e6f943883a9508b447aff4e, SPEC_impl.md assigned patch lines 1-480.\nTurn type/count: initial review continuation, turn 2 (turn 1 stopped at the invalid manifest).\nDiscovery-pass count: 0. No synthesis or later discovery protocol performed.\nNew verified findings: none. New unverified findings: none. Candidates appended: c1, c2; c1 revised with source checks and a known-kind caveat. Open leads: none.\n\n## Coverage\n\nCorrected brief read in full. Existing findings log was verified present and preserved before source review. All mandatory patch lines delivered through four successful evidence packets: 1-120, 121-240, 241-360, 361-480. Each packet was returned in its own tool call with complete markers. The earlier failed reads certify nothing. No source snapshot or manifest was modified by this reviewer.\n\nRead the complete inventory commits field during turn 1; excluded metadata was not inspected. Root AGENTS End sentinel is present in injected instructions. Read Priority buckets and What goes in a feedback file. Pinned contract context includes SPEC.md Terminal experience and the complete Upgrade compatibility and client scale section; SPEC_impl.md Terminal widget including The grid client, Grid streams, Session-host file reads, Testing, Host identity appearance, and the GUI answer-binding subsection. Relevant complete paragraphs for host grid streams and input diagnostic behavior were read at the pinned revision.\n\n## Checks and results\n\nSource-only checks at the reviewed revision confirmed the direct grid mount precedes socket creation, deterministic fitting uses the fixed 80x24 reference and unchanged-input guard, protocol 77 removes stream-kind fields and refuses unequal hello versions, SessionInfo remains tolerant of removed JSON fields, and the helm's queue and frame bounds match the changed text. The inbound route ignores old pause/resume controls while grid flow control remains helm-owned. Hook-diagnostic paste handling checks a completed unbracketed paste for submitted lines and never counts a bracketed paste. The host-frame stylesheet retains terminal background and the inset 4px shadow. The static fit test contains independent formula checks across sizes and pixel ratios; this was source inspection only.\n\nLink checks followed createGridLinks to oscTarget, file hover admission, deferred leave/rehover, and grid row identity checks. File transfer activation uses the retained disclosed canonical path and hover-time opening offer; freeze retains links, and disposal cancels owned work. c2 records why removal of the renderer-specific scheme gate leaves the page gate intact. c1 records the explicitly accepted old-page transition, with source checks against the preceding renderer and the new decoder: an unknown kind can misdraw, whereas a still-known host kind instead refuses the missing stream notice. Both require reload.\n\nNo runtime tests, builds, reproductions, helper agents, queue-coverage searches, or checkout modifications were performed. Findings utility reports 0 active findings, 2 candidates, and 0 open leads.\n\n## Interfaces and next action\n\nInterface assumption: this group owns contract changes in its assigned patch only. Cross-group implementation coverage, independent candidate dispositions, and queue coverage belong to the parent. c2 is a potentially highest security candidate refuted by source; it does not rely on specification acceptance. c1 has no established highest route and is explicitly accepted by the specification. All details and caveats are durable in findings.jsonl.\n\nUnread assigned material: none. Mandatory evidence delivery is complete, subject to the parent's transcript audit. Next action: return this initial-pass delta and await the parent's later-turn instruction.\n\nSynthesis turn 3 started: revisit batch interactions, candidates c1/c2, and readily checkable caller premises. Discovery-pass count remains 0; no open leads at entry.\n\n## Synthesis completion (current state)\n\nState: later-turn synthesis complete, turn 3. Initial delivery was audited by the parent. Discovery-pass count: 0. No new findings or leads. Revised original IDs c1 and c2 with additional source checks; no events were removed. Open unresolved lead IDs: none. Unread assigned scope: none.\n\nc1 now records the preceding page's reactive Rust-to-JS reconnect-policy path, manual-control exception, and the new supervisor connection's removal and detach behavior on malformed input. It also distinguishes the shipped build-stamp premise from identically versioned development bundles; no runtime update was attempted. The same explicit specification acceptance and known-kind caveat remain. Output/input queue checks agree with the contract and old pause/resume messages cannot override helm-owned flow control.\n\nc2 now records the complete provider/opener interaction: tagged OSC cells are not reclassified as printed web URLs; the OSC adapter validates before invoking the shared opener with validated=true; printed text and tunnel paths retain stricter web predicates. Unsupported OSC schemes remain inert. The potentially highest consequence is refuted through source, not accepted away by a specification exception.\n\nCross-batch lifecycle checks followed reconnect's kept screen through unmount, freeze, restoration and disposal. Freeze retires the held pointer gesture, disables program input/resize, and keeps link/selection capability; actual disposal invokes the link teardown callback. File links remain bound to their own component's captured session spec rather than a new mounted terminal's state. This matches the changed grid-only ownership text; no new substantive issue was established.\n\nAll conclusions in this turn are source/contract analysis. No execution, reproductions, checkout edits, helper agents, or coverage-source searches. Parent continues to own independent candidate dispositions and cross-group coverage. Next action: return only synthesis delta and unresolved lead IDs, then await further instruction.\n\nDiscovery turn 4 started. Discovery pass count: 1. First synthesize neighbour records and pending g196/l1 valid-JSON old-page input question; then search assigned contract patch beyond prior candidates. No runtime execution authorized.\n\n## Discovery completion (current state)\n\nState: separate discovery pass complete, turn 4. Discovery-pass count: 1. Required initial delivery and later synthesis were already audited. All 1,034 lines of discovery-neighbours.json were read in bounded chunks before the new source search (1-120, 121-240, 241-360, 361-480, 481-600, 601-720, 721-840, 841-960, 961-1034). This was interface/novelty context, not mandatory source credit or queue coverage.\n\nInterface synthesis first: reopened original c1 as a lead immediately on the supplied g196 valid-JSON input route, then directly checked the old page's text-paste insertion, sanitizer, xterm default mode/whole-message dispatch, onData WebSocket encoding, new tagged JSON decoder, Text encoding and queue path. Revised c1 to a likely source-supported highest finding, preserving its original ordinary misdraw/detach consequence and exact earlier proposed-drop bases without accepting any drop. It matches the supplied g196/l1, g082/c2, g083/c5 and g088/l2 context; it is not an independently new discovery. The trigger remains conditional on a fresh unknown-kind legacy surface and a valid small Text-shaped JSON paste before other invalid input, with its bracketed-paste mode still off. No runtime occurrence or command execution was observed. Parent owns deduplication and acceptance-scope judgment.\n\nWhole-range attribution checks: base already emits a stream notice before replay and the page adopts the grid on that notice. The assigned f560058 removal deletes that negotiation and makes binary input unconditionally structured. Relevant notice-first source and narrow deletion excerpts were read; an earlier overly broad context diff was clipped and omitted text was not claimed reviewed. The complete compact production-path diff from f560058 through pinned tip contains only comments/documentation, establishing no later repair in those paths.\n\nSeparate new search beyond the supplied route: checked the retained-row validation and history ownership wording against binary envelope indexing, applyHistory, full trimQueue, drainHistory and historyLine/historyIdentity; fixed-reference fitting against cellFor/proposeSize/fit; sender catch-up ordering, history-byte budget estimate and reset pacing against constants and implementation; and the IME omission against composition handlers. The possible history-validation wording mismatch was refuted by the exact retained-row qualifier and recorded immediately as new candidate c3, with source references and no highest consequence. c3 was revised to the exact SPEC_impl.md:1869 location after numbered confirmation. No independent reportable defect was found in this search.\n\nDelta IDs: revised existing c1 (lead -> finding, likely with named trigger conditions); appended/revised candidate c3. New independently verified finding IDs: none. New unverified-after-investigation finding IDs: none. Remaining open lead IDs: none. Unread assigned source scope: none. c2 remains unchanged this turn.\n\nNo runtime tests, builds, reproductions, live-install actions, helper agents, checkout writes or prohibited coverage-source searches. Next action: return the discovery delta, checks and explicit empty independent-discovery result; await parent instruction.\n"
+}

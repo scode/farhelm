@@ -1,0 +1,221 @@
+[
+  {
+    "key": "g189/l1",
+    "latest_line": 17,
+    "recommendation": "retain-verified",
+    "bucket": "other",
+    "underlying_key": "terminal-grid-lacks-sgr53-overline-after-old-route-retirement",
+    "aliases": ["g190/c3"],
+    "target_queue_file": null,
+    "why": "The whole range removes a served live-output path that could draw SGR53 overlines, while the only remaining emulator drops SGR53/55 and the grid cannot represent the decoration. The initial assigned-commit-only proposed drop was withdrawn and remains valid only as attribution to f560 itself: its parent already retired old terminals and its grid-style change is commentary. This does not refute the whole-range capability loss.",
+    "checks": [
+      "At base 6e423e30068b62c6cfa276c6d720ee35bb70387a, assets/terminal.js:4673-4698 chooses xterm for old/unknown terminals; :5355-5370 sends live bytes to term.write. The vendor/xterm.js:1 SGR handler sets/clears bg bit 1073741824 for 53/55, isOverline reads it, and the row renderer emits xterm-overline; vendor/xterm.css:185-194 draws it.",
+      "At that base, supervisor/src/tmux.rs:2943-2950 describes live percent-output as byte-clean, bypassing the stored grid; tmux/query_strip.rs:35-123 removes only the listed queries, leaving SGR53/55; service/connection.rs:1789-1802 forwards OutputEvent::Bytes. This establishes the conditional live route without claiming capture-pane replay fidelity.",
+      "In-range dbfc69751215dbf15e1d31d5bed73c3754c4ebc4, service/core.rs:6426-6440 ends the old server rather than adopting it, and its reload patch maps TerminalKind::Tmux to None. f560058da19e02716e6f943883a9508b447aff4e then removes the vendor renderer.",
+      "At tip 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db, vendor/vte/src/ansi.rs:1898-1983 has no SGR53/55 arm and ignores unknown attributes; assets/grid-style.js:43-57,170-217 has underline/strike only. Tip SPEC.md:2855-2861 retains the fidelity promise. No runtime tests or reproductions were performed."
+    ],
+    "coverage_checked": [
+      "Current SPEC.md Terminal experience, including fidelity, old-terminal retirement and clipboard/link rules: retirement accepts ending old processes/screens, not missing overline in subsequent terminal-host runs.",
+      "Current SPEC_impl.md Terminal widget/The grid client and The supervisor's terminal emulator: searched overline/decorations and read relevant sections; accepted query/format-code limitations do not name SGR53 overline omission.",
+      "TODO.md Planned: empty. BUGS.md: only the unrelated SSH-helper provisioning hang. No exact coverage.",
+      "Searched plans/queue for overline, styling, xterm retirement and retained behavior; read tmux-end-old-terminals goal/acceptance/settled decisions and tmux-drop-from-docs goal/acceptance. They remove old terminals and preserve stated grid behavior but do not promise an overline repair or explicitly accept this omitted decoration; generic docs cleanup is not coverage.",
+      "Read INDEX.md in full and searched matching queue text: no overline item. Cursor-color, underline/style fixture and other formatting entries have different causes. Active TRIAGE_OUTCOMES.md search found no overline decision; archive not read.",
+      "FILTER.md: no full match. This decoration is consistently absent for the affected output, not a rare self-correcting display glitch; no additional rare condition beyond old-path retirement was established."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": "No missing source premise for the conditional capability loss. Runtime rendering, usage frequency, particular agent use of SGR53 and old replay fidelity were not established. Terminal hosts already lacked this attribute at the base; the range removes the remaining capable route rather than introducing the parser omission.",
+    "original_stronger_consequence": "Missing overline text decoration only; no security or loss-of-user-work consequence was claimed. Earlier pre-existing/no-surviving-route dismissal was reopened for whole-range attribution and expressly withdrawn as a whole-range drop.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Retain one source-verified other-priority formatting gap and consolidate the exact g190/c3 alias. The accepted retirement of old sessions does not by itself settle the fidelity of programs subsequently run in terminal hosts."
+  },
+  {
+    "key": "g189/c6",
+    "latest_line": 15,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "vendor-removal-missing-contextmenu-middlepaste-positioning-hypothesis",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The narrow missing-editable-target hypothesis is source-refuted: the retained grid overlays its input beneath the pointer and wires both contextmenu and Linux middle-button auxclick to it. This does not certify native browser event ordering or all paste behavior.",
+    "checks": [
+      "Tip 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db assets/grid-terminal.js:1593-1616 implements the 20px overlay, selection and focus, with restoration; :1844-1858 calls it for contextmenu and Linux auxclick button1.",
+      "Same revision :1545-1560 reads text/plain from a paste event, sanitizes it and calls paste. The deleted clipboard responsibility has a reachable retained owner; no execution was performed."
+    ],
+    "coverage_checked": [
+      "SPEC.md Terminal experience clipboard/paste rules and SPEC_impl.md The grid client were read; no specification-only exemption is needed.",
+      "TODO.md Planned empty; BUGS.md unrelated. Searches of unlanded plans/queue found retirement/retained-port requirements, not an accepted missing-paste-target defect.",
+      "INDEX.md and matching queue searches found no exact missing contextmenu/middle-paste owner item. Primary row middle-button dragging and selection-copy issues concern other gestures. Active TRIAGE_OUTCOMES.md has no matching decision. FILTER.md not used."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": "None for rejecting the narrow claim that removal leaves no input positioning/paste entry point. Native primary-selection delivery and engine-specific ordering remain untested.",
+    "original_stronger_consequence": "Loss of context-menu or Linux middle-button paste availability. No unintended-input, security or user-work-loss route was established; the separate stale-page JSON input concern is not refuted.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Source refutation of the named missing-owner hypothesis only; no claim of complete clipboard parity."
+  },
+  {
+    "key": "g189/c7",
+    "latest_line": 18,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "vendor-removal-missing-focus-reporting-hypothesis",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The replacement handles both input focus transitions and the already-focused mode-enable boundary. Removing the old browser core does not remove those named responsibilities.",
+    "checks": [
+      "Tip 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db assets/grid-terminal.js:1572-1585 wires focus/blur and sends focusReport while enabled; :1974-1981 compares the prior mode and sends the current focused value when reporting first becomes enabled.",
+      "Same revision supervisor/src/grid_input.rs:824-833 emits CSI I/O only while modes.focus_reporting is set. Source-only check, with no observed browser focus delivery."
+    ],
+    "coverage_checked": [
+      "SPEC.md Terminal experience fidelity/input contract and SPEC_impl.md The grid client assign typed focus messages to the grid/supervisor path. No acceptance of missing reports was used.",
+      "TODO.md Planned empty; BUGS.md unrelated; plans/queue focus results concern GUI focus movement, not terminal mode1004 reporting. INDEX.md/matching queue and active TRIAGE_OUTCOMES.md searches found no exact missing-report issue. FILTER.md not used."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": "None for rejecting loss of these handlers. Generic focus delivery, transport/coalescing and all browser lifecycle behavior were not audited.",
+    "original_stronger_consequence": "Missing terminal focus-state reports, especially when reporting is enabled after input already has focus. No security or user-work-loss route was claimed.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Source refutation limited to the named deleted responsibility."
+  },
+  {
+    "key": "g189/l2",
+    "latest_line": 20,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "grid-paste-json-envelope-budget-hypothesis",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The suspected envelope overflow is arithmetically refuted. The splitter reserves 64 encoded bytes, while the longer paste wrapper with last:false costs 36 ASCII bytes, leaving 28 bytes of margin.",
+    "checks": [
+      "Tip 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db assets/grid-input.js:390-405 reserves 64 and counts JSON escapes; :449-472 splits by both encoded-message and decoded-part caps, preserving CRLF units; :485-488 rejects oversize encoded input.",
+      "The literal empty-data wrapper {\"t\":\"paste\",\"data\":\"\",\"last\":false} is 36 ASCII bytes by inspection. last:true is shorter. Each unit is at most two characters, so none exceeds the available budget by itself.",
+      "Same revision proto/src/grid.rs:1694-1701 enforces the corresponding decoded paste-part bound. No input construction, runtime reproduction or test was run; attribution need not be pursued after the prerequisite overflow is refuted."
+    ],
+    "coverage_checked": [
+      "SPEC.md Terminal experience and SPEC_impl.md The grid client establish paste transport ownership; no exception permitting dropped paste chunks was used.",
+      "TODO.md Planned empty, BUGS.md unrelated. Searches of plans/queue, INDEX.md/matching queue and active TRIAGE_OUTCOMES.md found no exact envelope-accounting item; paste receipts, cancellation, stale-page JSON and Shift+Enter are different mechanisms. FILTER.md not used."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": "None for this rejected overflow route. This does not establish correctness of every other paste boundary.",
+    "original_stronger_consequence": "A chunk might exceed MAX_INPUT_MESSAGE and be dropped, losing part of a user paste; originally other or high for paste availability, with no established security or loss-of-user-work route. The lead was closed as a source-refuted candidate after checking the reservation.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Source arithmetic refutes the named overflow prerequisite, without dismissing separate paste defects."
+  },
+  {
+    "key": "g190/c1",
+    "latest_line": 5,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "vendor-removal-missing-held-link-target-binding-hypothesis",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The replacement binds activation to the press-time link object and captured row evidence, and its caller closes over the discovered URI/path. This source-refutes the named deletion concern that a redraw changes a held click's destination. Because the original proposed consequence involved security, this remains a proposal for the parent's independent drop check.",
+    "checks": [
+      "Tip 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db assets/grid-terminal.js:1280-1321 captures row identities and rejects changed covered rows; :1346-1381 fences asynchronous lookup by token/row/pointer evidence; :1407-1420 records hover evidence.",
+      "Same revision :1683-1695 requires the release to retain the identical press-time object, current hover evidence and range coverage before activate. assets/terminal.js:940-1117 captures found.uri, target.path or path in each activation closure, rather than selecting a destination from new live output; web opening also checks current disclosure and the admitted click.",
+      "No runtime observation or downstream file/tunnel-service audit was performed. Existing false-cancellation/hover-loss defects do not establish wrong-target opening."
+    ],
+    "coverage_checked": [
+      "SPEC.md Terminal experience link/drag/disclosure rules and SPEC_impl.md The grid client were read. They require safe binding; no exception was used as cover.",
+      "TODO.md Planned empty; BUGS.md unrelated; plans/queue retirement/retained-link behavior does not accept wrong-target clicks.",
+      "INDEX.md read in full. container-redraw-discards-hover.md and neighbor-status-redraw-cancels-stable-url-click.md read in full: they concern rejected/lost clicks and retry behavior, not a different destination being opened. Active TRIAGE_OUTCOMES.md search found no exact disposition. FILTER.md not used; a security consequence would be outside ordinary glitch filters."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": "No missing source premise for the narrow retained-owner checks. This is not proof that every downstream file/tunnel operation is safe or that no separate link defect exists.",
+    "original_stronger_consequence": "A redraw could redirect a pending click to a different URL/file, potentially authorizing unintended file opening/security effects; reviewer suggested highest if established. Both history events propose source refutation, preserving that stronger hypothetical consequence and downstream caveat.",
+    "needs_independent_drop_check": true,
+    "proposed_basis": "Propose rejection only of the missing held-click protection caused by vendor deletion. Submit the original security consequence, these source checks and this narrow basis to a fresh independent drop checker."
+  },
+  {
+    "key": "g190/c2",
+    "latest_line": 6,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "vendor-removal-missing-font-metric-lifecycle-hypothesis",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The retained grid owns font measurement, cache invalidation, refit/redraw, pixel-ratio watching and disposal, and the caller waits for both bundled weights before mounting. No missing-lifecycle regression follows from removing the old services.",
+    "checks": [
+      "Tip 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db assets/grid-terminal.js:420-506 measures characters and cells, clears advance/reference caches in remeasure, redraws and fits; :609-614 coalesces painting; :1940-1958 rearms the ratio watcher; :2010-2024 changes text size through remeasure; :2110-2139 disposes timers/watchers.",
+      "Same revision assets/terminal.js:431-460 loads both font weights and sets fontSettled only after both return faces; :3201-3224 gates mount on it; :4313-4318 supplies the bundled family; :4606-4636 refits for window/pane changes. This is a source lifecycle check, not validation of every glyph/font combination."
+    ],
+    "coverage_checked": [
+      "Current SPEC_impl.md Terminal widget and The grid client: both bundled weights before mount, supervisor-committed drawing size, deterministic fit and once-per-animation-frame painting. SPEC.md Terminal experience text-size/fidelity contract was read.",
+      "TODO.md Planned empty; BUGS.md unrelated. plans/queue retirement/docs goals preserve fit and attribution, not missing metrics. INDEX.md/matching searches found font-readiness test defects, not a missing production owner; those test-oracle findings remain distinct. Active TRIAGE_OUTCOMES.md has a held-font-test decision, which is not production coverage. FILTER.md not used."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": "None for the narrow missing-owner hypothesis. Rendering every glyph, font/zoom combination and browser engine remains unobserved.",
+    "original_stronger_consequence": "Misaligned or stale terminal text after zoom/display changes, high/material UX if established. No security or loss-of-user-work consequence was claimed. Later synthesis added the font-ready caller premise rather than lowering an established harmful route.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Source refutation of loss of the deleted services' ownership/invalidation responsibilities; do not use this to reject independent test coverage defects."
+  },
+  {
+    "key": "g190/c3",
+    "latest_line": 10,
+    "recommendation": "duplicate",
+    "bucket": "other",
+    "underlying_key": "terminal-grid-lacks-sgr53-overline-after-old-route-retirement",
+    "aliases": ["g189/l1"],
+    "target_queue_file": null,
+    "why": "This is the exact same SGR53 live-output capability loss as g189/l1: same retired capable route, missing parser/grid representation and consequence. Retain its evidence in the canonical record rather than dropping the substance. Original assigned-commit-only proposed drops at lines 3/7 were reopened at line 8 and superseded by the whole-range finding.",
+    "checks": [
+      "Checked the same explicit base live xterm/query-strip/forwarding sources, dbfc69751215dbf15e1d31d5bed73c3754c4ebc4 retirement implementation and tip vte/grid-style sources listed for g189/l1. They establish the conditional live formatting route and loss of its remaining served implementation.",
+      "The local f560 attribution remains narrow: old terminals already retired in its parent; parser/style absence predates that deletion. It does not put the whole-range route outside review. No execution was performed."
+    ],
+    "coverage_checked": [
+      "SPEC.md Terminal experience fidelity and old-terminal retirement, SPEC_impl.md grid/emulator sections: no explicit acceptance of overline omission.",
+      "TODO.md Planned empty; BUGS.md unrelated. plans/queue retirement/docs acceptance/settled decisions do not repair or explicitly accept missing SGR53 styling. INDEX.md/matching queue and active TRIAGE_OUTCOMES.md searches found no exact existing overline record. FILTER.md has no full match for a consistent missing decoration. Canonical g189/l1 in this named batch is exact duplicate coverage by consolidation, not an existing queue-file cover."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": "Runtime behavior, replay fidelity, a particular agent's use of SGR53 and material frequency were not established. None is needed for the conditional source capability loss retained under g189/l1.",
+    "original_stronger_consequence": "Overline formatting only, other priority; no established security or loss-of-user-work route. Preserve the original proposed-drop history as assigned-commit attribution, and its later withdrawal as a whole-range basis.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Consolidate into g189/l1 with both histories and sources. Do not treat the initial proposed drop as the current disposition."
+  },
+  {
+    "key": "g190/c4",
+    "latest_line": 4,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "vendor-removal-missing-selection-scroll-sync-owners-hypothesis",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The grid retains selection and scroll anchoring, and the emulator/runtime independently drive synchronized-output deadlines. The narrow missing-owner deletion concern is refuted; this does not assert that every selection lifecycle is correct.",
+    "checks": [
+      "Tip 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db assets/grid-terminal.js:510-599 anchors history by absolute lines and excludes it on alternate screen; :928-947 clears/trims selections on damage; :1035-1110 owns selection endpoints/text; :1664-1681 routes completed selection through the copy policy.",
+      "Same revision emulator/src/emulator.rs:151-207 feeds/flushes buffered updates and exposes sync_deadline. supervisor/src/hosts/terminal.rs:3081-3102 selects on its own deadline; :3145-3157 flushes and publishes even without new output. The retired browser timeout therefore has a retained supervisor owner.",
+      "No runtime execution, full stream-recovery audit or clipboard-service audit was performed."
+    ],
+    "coverage_checked": [
+      "SPEC.md Terminal experience local-selection/copy rules read; SPEC_impl.md The supervisor's terminal emulator explicitly assigns the runtime the 150ms safety deadline and its independent wake.",
+      "TODO.md Planned empty; BUGS.md unrelated; plans/queue retains selection defaults but supplies no new missing-owner finding. INDEX.md/matching queue search and invalidated-selection-drag-keeps-old-anchors.md full read show an existing distinct lifecycle bug: gesture anchors can survive clearSelection. The presence of replacement selection ownership does not refute that queued defect or provide an extension to it. Active TRIAGE_OUTCOMES.md search found no exact missing-owner decision. FILTER.md not used."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": "None for rejecting absence of replacement owners. Correctness of all selection/reset, clipboard and stream-recovery paths is outside this narrow claim.",
+    "original_stronger_consequence": "Loss of selection or a redraw held permanently after removal of old viewport/selection/render services, high/material UX if established. No security or user-work-loss route was claimed; clipboard contents alone do not establish loss of user-owned work under the queue rules.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Source refutation of missing ownership only; preserve independent selection/copy test and behavior findings."
+  },
+  {
+    "key": "g190/c5",
+    "latest_line": 11,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "vendor-removal-missing-retained-port-notice-hypothesis",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The removed unmodified vendor bundle's notice is separate from the retained ports' notice. The latter remains in the notice index and the asset declarations, so the named removal concern is source-refuted.",
+    "checks": [
+      "f560058da19e02716e6f943883a9508b447aff4e THIRD_PARTY_NOTICES.md patch removes xterm.js and its add-ons but retains Code ported from xterm.js and the standalone grid-ported-code-LICENSES.txt reference; the license-file patch changes introductory wording, not the retained notice body.",
+      "Tip 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db ui/src/lib.rs:1465-1482 retains #[used] GRID_PORTED_CODE_LICENSES at a stable unhashed asset path and explains that release Farhelm embeds this same bundle for the Rust ports. No release archive was built or inspected."
+    ],
+    "coverage_checked": [
+      "SPEC_impl.md Terminal widget explicitly requires attribution beside the ports and in THIRD_PARTY_NOTICES.md. SPEC.md Terminal experience supplies no contrary exception.",
+      "TODO.md Planned empty; BUGS.md unrelated. plans/queue/tmux-end-old-terminals.md acceptance criterion 4 and tmux-drop-from-docs.md What stays explicitly preserve the retained ports' notices. This agrees with the checked source; no omission is accepted.",
+      "INDEX.md/matching queue and active TRIAGE_OUTCOMES.md searches found no exact retained-port-notice omission. FILTER.md not used."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": "None for rejecting deletion of the retained declaration/notice. A produced-bundle audit was not performed; source declarations alone do not certify every packaging artifact. This is not a legal opinion.",
+    "original_stronger_consequence": "Retained xterm/VS Code ports might lose their bundled license notices. Other priority, with no established security or user-work-loss consequence; the record was a discovery candidate proposing source refutation, not a verified omission.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Source/packaging-declaration refutation limited to the actual removal patch; do not claim an executed release-artifact audit."
+  }
+]

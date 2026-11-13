@@ -1,0 +1,1068 @@
+{
+  "group": {
+    "id": "g055",
+    "domain": "environment-execution-routing",
+    "purpose": "environment-execution-routing: crates/farhelm-helm/src/access.rs, crates/farhelm-helm/src/provisioning/backend.rs, crates/farhelm-helm/src/ssh.rs, crates/farhelm-helm/src/tensorlake/shell.rs, crates/farhelm-helm/src/tensorlake/ssh.rs; phases complete small per-commit changes",
+    "interfaces": [
+      "g005",
+      "g012",
+      "g018",
+      "g019",
+      "g020",
+      "g021",
+      "g022",
+      "g023",
+      "g024",
+      "g025",
+      "g026",
+      "g027",
+      "g028",
+      "g029",
+      "g043",
+      "g044",
+      "g045",
+      "g046",
+      "g047",
+      "g048",
+      "g049",
+      "g050",
+      "g056",
+      "g057",
+      "g064",
+      "g065",
+      "g066",
+      "g067",
+      "g068",
+      "g069",
+      "g070",
+      "g085",
+      "g086",
+      "g087",
+      "g003"
+    ],
+    "sources": [
+      {
+        "path": "[private-run]/prep/parts/00103-000.patch",
+        "ranges": [
+          [
+            1,
+            437
+          ]
+        ],
+        "original_path": "crates/farhelm-helm/src/access.rs",
+        "commit": "1038bb1f4549f6896fa6e064fecf540f4548b4da",
+        "notes": "patch header; patch character offsets [0,16312)",
+        "lines": 437,
+        "bytes": 16312,
+        "start": 0,
+        "end": 16312,
+        "original": "[private-run]/prep/originals/00103.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/00108-000.patch",
+        "ranges": [
+          [
+            1,
+            314
+          ]
+        ],
+        "original_path": "crates/farhelm-helm/src/provisioning/backend.rs",
+        "commit": "1038bb1f4549f6896fa6e064fecf540f4548b4da",
+        "notes": "patch header; patch character offsets [0,13391)",
+        "lines": 314,
+        "bytes": 13391,
+        "start": 0,
+        "end": 13391,
+        "original": "[private-run]/prep/originals/00108.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/00117-000.patch",
+        "ranges": [
+          [
+            1,
+            179
+          ]
+        ],
+        "original_path": "crates/farhelm-helm/src/ssh.rs",
+        "commit": "1038bb1f4549f6896fa6e064fecf540f4548b4da",
+        "notes": "patch header; patch character offsets [0,8007)",
+        "lines": 179,
+        "bytes": 8013,
+        "start": 0,
+        "end": 8007,
+        "original": "[private-run]/prep/originals/00117.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/00118-000.patch",
+        "ranges": [
+          [
+            1,
+            38
+          ]
+        ],
+        "original_path": "crates/farhelm-helm/src/tensorlake/shell.rs",
+        "commit": "1038bb1f4549f6896fa6e064fecf540f4548b4da",
+        "notes": "patch header; patch character offsets [0,1725)",
+        "lines": 38,
+        "bytes": 1725,
+        "start": 0,
+        "end": 1725,
+        "original": "[private-run]/prep/originals/00118.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/00119-000.patch",
+        "ranges": [
+          [
+            1,
+            21
+          ]
+        ],
+        "original_path": "crates/farhelm-helm/src/tensorlake/ssh.rs",
+        "commit": "1038bb1f4549f6896fa6e064fecf540f4548b4da",
+        "notes": "patch header; patch character offsets [0,1005)",
+        "lines": 21,
+        "bytes": 1005,
+        "start": 0,
+        "end": 1005,
+        "original": "[private-run]/prep/originals/00119.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/00145-000.patch",
+        "ranges": [
+          [
+            1,
+            210
+          ]
+        ],
+        "original_path": "crates/farhelm-helm/src/access.rs",
+        "commit": "04ffdbb35773cef36e73eb798c005ddbeb9a9de6",
+        "notes": "patch header; patch character offsets [0,8000)",
+        "lines": 210,
+        "bytes": 8000,
+        "start": 0,
+        "end": 8000,
+        "original": "[private-run]/prep/originals/00145.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/00174-000.patch",
+        "ranges": [
+          [
+            1,
+            315
+          ]
+        ],
+        "original_path": "crates/farhelm-helm/src/access.rs",
+        "commit": "56659839785691f76da3af5d8f51b511cff4ba8b",
+        "notes": "patch header; patch character offsets [0,13029)",
+        "lines": 315,
+        "bytes": 13029,
+        "start": 0,
+        "end": 13029,
+        "original": "[private-run]/prep/originals/00174.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/01231-000.patch",
+        "ranges": [
+          [
+            1,
+            20
+          ]
+        ],
+        "original_path": "crates/farhelm-helm/src/provisioning/backend.rs",
+        "commit": "17a3fe858c5511a24b7403af15dd41c93bf69fd7",
+        "notes": "patch header; patch character offsets [0,1129)",
+        "lines": 20,
+        "bytes": 1131,
+        "start": 0,
+        "end": 1129,
+        "original": "[private-run]/prep/originals/01231.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/01523-000.patch",
+        "ranges": [
+          [
+            1,
+            15
+          ]
+        ],
+        "original_path": "crates/farhelm-helm/src/access.rs",
+        "commit": "08399d092d20815ced6619c26df2391944ae2b4a",
+        "notes": "patch header; patch character offsets [0,857)",
+        "lines": 15,
+        "bytes": 857,
+        "start": 0,
+        "end": 857,
+        "original": "[private-run]/prep/originals/01523.patch"
+      }
+    ],
+    "lines": 1549,
+    "bytes": 63463
+  },
+  "records": [
+    {
+      "key": "g055/l1",
+      "owner": "g055",
+      "id": "l1",
+      "domain": "environment-execution-routing",
+      "purpose": "environment-execution-routing: crates/farhelm-helm/src/access.rs, crates/farhelm-helm/src/provisioning/backend.rs, crates/farhelm-helm/src/ssh.rs, crates/farhelm-helm/src/tensorlake/shell.rs, crates/farhelm-helm/src/tensorlake/ssh.rs; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 1,
+          "event": {
+            "version": 1,
+            "kind": "lead",
+            "id": "l1",
+            "state": "open",
+            "summary": "Unconditional environment stdin flag may bypass old-helper skew handling",
+            "location": "crates/farhelm-helm/src/ssh.rs:453",
+            "detail": "Reviewed commit: 1038bb1f4549f6896fa6e064fecf540f4548b4da. TLDR: An existing Tensorlake environment with an older helper may fail before reporting the normal repairable version mismatch. Source basis: ssh.rs removes the help negotiation and access.rs stdio_argv always adds --stdin-idle-limit-secs for Tensorlake. The deleted test explicitly covered helpers that reject this flag. Suggested bucket: high if normal repair is bypassed; could-be-highest: no established security or loss-of-work route. Confidence: unresolved lead. proposed_drop: false. possible_cover: none; no coverage sources read. Next checks: pinned SPEC/SPEC_impl lifetime and skew contracts, transport exit classification and helper repair caller. No execution or reproduction performed."
+          }
+        },
+        {
+          "line": 2,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "l1",
+            "state": "open",
+            "summary": "Unconditional environment stdin flag is explicitly supported",
+            "location": "crates/farhelm-helm/src/ssh.rs:453",
+            "detail": "Reviewed commit: 1038bb1f4549f6896fa6e064fecf540f4548b4da. TLDR considered: An existing Tensorlake environment with an older helper might fail before the repairable version mismatch. Source basis: ssh.rs replaces help negotiation with common stdio_argv, which always adds --stdin-idle-limit-secs 120 for environments. Source checks: pinned SPEC_impl.md, One route for transport and provisioning, lines 6478-6480: 'All environment stdio routes pass `--stdin-idle-limit-secs 120` unconditionally and emit the existing 30-second heartbeat. The supported environment helper has that option.' Tensorlake hosts, lines 7127-7130: 'The remote `internal stdio` proxy has no input deadline by default. Every environment route passes `--stdin-idle-limit-secs 120` unconditionally, using the common host-access decision. The option shipped in the same release as Tensorlake host support, and new Podman environments carry a prepared helper. Ordinary SSH argv retains its default without an input deadline.' These settle the missing compatibility premise: a supported Tensorlake helper is not from the hypothetical unsupported generation. Suggested bucket if premise existed: high; could-be-highest: no, no security or loss-of-work route established. Confidence: confirmed specification acceptance; no execution. proposed_drop: exact specification acceptance quoted above. possible_cover: none; no coverage sources read. Original consequence preserved; this record closes l1 without reporting it as a defect."
+          }
+        }
+      ],
+      "latest": {
+        "line": 2,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "l1",
+          "state": "open",
+          "summary": "Unconditional environment stdin flag is explicitly supported",
+          "location": "crates/farhelm-helm/src/ssh.rs:453",
+          "detail": "Reviewed commit: 1038bb1f4549f6896fa6e064fecf540f4548b4da. TLDR considered: An existing Tensorlake environment with an older helper might fail before the repairable version mismatch. Source basis: ssh.rs replaces help negotiation with common stdio_argv, which always adds --stdin-idle-limit-secs 120 for environments. Source checks: pinned SPEC_impl.md, One route for transport and provisioning, lines 6478-6480: 'All environment stdio routes pass `--stdin-idle-limit-secs 120` unconditionally and emit the existing 30-second heartbeat. The supported environment helper has that option.' Tensorlake hosts, lines 7127-7130: 'The remote `internal stdio` proxy has no input deadline by default. Every environment route passes `--stdin-idle-limit-secs 120` unconditionally, using the common host-access decision. The option shipped in the same release as Tensorlake host support, and new Podman environments carry a prepared helper. Ordinary SSH argv retains its default without an input deadline.' These settle the missing compatibility premise: a supported Tensorlake helper is not from the hypothetical unsupported generation. Suggested bucket if premise existed: high; could-be-highest: no, no security or loss-of-work route established. Confidence: confirmed specification acceptance; no execution. proposed_drop: exact specification acceptance quoted above. possible_cover: none; no coverage sources read. Original consequence preserved; this record closes l1 without reporting it as a defect."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g055/findings.jsonl",
+        "id": "l1",
+        "line": 2,
+        "disposition": "excluded",
+        "group": "environment-unconditional-stdin-option-compatibility",
+        "reason": "Parent explicitly accepted named covered proposal from claims-035 after inspecting it. The alleged unsupported-helper generation is expressly excluded by the environment-helper contract. This is specification acceptance, not runtime proof about deployed helpers. Exact supported-helper specification acceptance; preserve the historical compatibility concern and its withdrawal. Checked source/results: [\"1038bb1f4549f6896fa6e064fecf540f4548b4da transport.rs:190-201 uses HostAccess::stdio_argv; 56659839785691f76da3af5d8f51b511cff4ba8b access.rs:30-47,234-247 appends 120 for Tensorlake and Podman only.\",\"1038bb1 SPEC_impl.md:6478-6481 and 7127-7139 explicitly replace help negotiation and state that the option shipped with Tensorlake host support. No execution performed.\"] Current coverage/results: {\"SPEC.md\":\"Searched environment, compatibility and helper behavior; no narrower unsupported-helper promise found.\",\"SPEC_impl.md\":\"Current One route for transport and provisioning:5999-6003 and Tensorlake hosts:6763 onward preserve unconditional environment invocation and supported-helper premise.\",\"TODO.md Planned\":\"Empty bucket at recording-time main.\",\"plans/queue\":\"INDEX.md has no unlanded plans; residual plan files are historical, not current coverage.\",\"BUGS.md\":\"Only escaped local SSH-helper transfer hang; different trigger and consequence.\",\"queue INDEX and files\":\"Searched helper/idle/probe/route terms; no exact open item. tunnel-helper-exit-may-block-flushing-stdout.md concerns exit flushing after a deadline, not option compatibility.\",\"TRIAGE_OUTCOMES.md\":\"Searched relevant environment/helper/route terms; no exact active decision.\",\"FILTER.md\":\"No filter needed; upgrade rarity is not the basis.\"} Exact cited cover: [\"SPEC_impl.md:5999-6000: All environment stdio routes pass `--stdin-idle-limit-secs 120` unconditionally and emit the existing 30-second heartbeat. The supported environment helper has that option.\",\"1038bb1 SPEC_impl.md:7128-7129: The option shipped in the same release as Tensorlake host support, and new Podman environments carry a prepared helper.\"] Original stronger consequence and missing premise remain preserved: \"An older environment helper could reject the flag before repairable version-skew handling and prevent connection; conditionally high UX impact, with no established security or user-work-loss route. The later record withdrew the defect on explicit specification acceptance.\"; \"No supported Tensorlake helper lacking this option was established; deployment incidence was not tested.\"."
+      },
+      "accepted_parent_decision": {
+        "key": "g055/l1",
+        "line": 2,
+        "disposition": "excluded",
+        "group": "environment-unconditional-stdin-option-compatibility",
+        "bucket": "other",
+        "recording": "covered",
+        "queue_target_candidate": null,
+        "needs_independent_drop_check": false,
+        "reason": "Parent explicitly accepted named covered proposal from claims-035 after inspecting it. The alleged unsupported-helper generation is expressly excluded by the environment-helper contract. This is specification acceptance, not runtime proof about deployed helpers. Exact supported-helper specification acceptance; preserve the historical compatibility concern and its withdrawal. Checked source/results: [\"1038bb1f4549f6896fa6e064fecf540f4548b4da transport.rs:190-201 uses HostAccess::stdio_argv; 56659839785691f76da3af5d8f51b511cff4ba8b access.rs:30-47,234-247 appends 120 for Tensorlake and Podman only.\",\"1038bb1 SPEC_impl.md:6478-6481 and 7127-7139 explicitly replace help negotiation and state that the option shipped with Tensorlake host support. No execution performed.\"] Current coverage/results: {\"SPEC.md\":\"Searched environment, compatibility and helper behavior; no narrower unsupported-helper promise found.\",\"SPEC_impl.md\":\"Current One route for transport and provisioning:5999-6003 and Tensorlake hosts:6763 onward preserve unconditional environment invocation and supported-helper premise.\",\"TODO.md Planned\":\"Empty bucket at recording-time main.\",\"plans/queue\":\"INDEX.md has no unlanded plans; residual plan files are historical, not current coverage.\",\"BUGS.md\":\"Only escaped local SSH-helper transfer hang; different trigger and consequence.\",\"queue INDEX and files\":\"Searched helper/idle/probe/route terms; no exact open item. tunnel-helper-exit-may-block-flushing-stdout.md concerns exit flushing after a deadline, not option compatibility.\",\"TRIAGE_OUTCOMES.md\":\"Searched relevant environment/helper/route terms; no exact active decision.\",\"FILTER.md\":\"No filter needed; upgrade rarity is not the basis.\"} Exact cited cover: [\"SPEC_impl.md:5999-6000: All environment stdio routes pass `--stdin-idle-limit-secs 120` unconditionally and emit the existing 30-second heartbeat. The supported environment helper has that option.\",\"1038bb1 SPEC_impl.md:7128-7129: The option shipped in the same release as Tensorlake host support, and new Podman environments carry a prepared helper.\"] Original stronger consequence and missing premise remain preserved: \"An older environment helper could reject the flag before repairable version-skew handling and prevent connection; conditionally high UX impact, with no established security or user-work-loss route. The later record withdrew the defect on explicit specification acceptance.\"; \"No supported Tensorlake helper lacking this option was established; deployment incidence was not tested.\"."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-035",
+          "key": "g055/l1",
+          "latest_line": 2,
+          "recommendation": "covered",
+          "bucket": "other",
+          "underlying_key": "environment-unconditional-stdin-option-compatibility",
+          "aliases": [
+            "g056/c2"
+          ],
+          "target_queue_file": null,
+          "why": "The alleged unsupported-helper generation is expressly excluded by the environment-helper contract. This is specification acceptance, not runtime proof about deployed helpers.",
+          "checks": [
+            "1038bb1f4549f6896fa6e064fecf540f4548b4da transport.rs:190-201 uses HostAccess::stdio_argv; 56659839785691f76da3af5d8f51b511cff4ba8b access.rs:30-47,234-247 appends 120 for Tensorlake and Podman only.",
+            "1038bb1 SPEC_impl.md:6478-6481 and 7127-7139 explicitly replace help negotiation and state that the option shipped with Tensorlake host support. No execution performed."
+          ],
+          "coverage_checked": {
+            "SPEC.md": "Searched environment, compatibility and helper behavior; no narrower unsupported-helper promise found.",
+            "SPEC_impl.md": "Current One route for transport and provisioning:5999-6003 and Tensorlake hosts:6763 onward preserve unconditional environment invocation and supported-helper premise.",
+            "TODO.md Planned": "Empty bucket at recording-time main.",
+            "plans/queue": "INDEX.md has no unlanded plans; residual plan files are historical, not current coverage.",
+            "BUGS.md": "Only escaped local SSH-helper transfer hang; different trigger and consequence.",
+            "queue INDEX and files": "Searched helper/idle/probe/route terms; no exact open item. tunnel-helper-exit-may-block-flushing-stdout.md concerns exit flushing after a deadline, not option compatibility.",
+            "TRIAGE_OUTCOMES.md": "Searched relevant environment/helper/route terms; no exact active decision.",
+            "FILTER.md": "No filter needed; upgrade rarity is not the basis."
+          },
+          "exact_cover_quotes": [
+            "SPEC_impl.md:5999-6000: All environment stdio routes pass `--stdin-idle-limit-secs 120` unconditionally and emit the existing 30-second heartbeat. The supported environment helper has that option.",
+            "1038bb1 SPEC_impl.md:7128-7129: The option shipped in the same release as Tensorlake host support, and new Podman environments carry a prepared helper."
+          ],
+          "missing_premise": "No supported Tensorlake helper lacking this option was established; deployment incidence was not tested.",
+          "original_stronger_consequence": "An older environment helper could reject the flag before repairable version-skew handling and prevent connection; conditionally high UX impact, with no established security or user-work-loss route. The later record withdrew the defect on explicit specification acceptance.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Exact supported-helper specification acceptance; preserve the historical compatibility concern and its withdrawal."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": false,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "high",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "environment-unconditional-stdin-option-compatibility",
+        "destination": null
+      }
+    },
+    {
+      "key": "g055/c2",
+      "owner": "g055",
+      "id": "c2",
+      "domain": "environment-execution-routing",
+      "purpose": "environment-execution-routing: crates/farhelm-helm/src/access.rs, crates/farhelm-helm/src/provisioning/backend.rs, crates/farhelm-helm/src/ssh.rs, crates/farhelm-helm/src/tensorlake/shell.rs, crates/farhelm-helm/src/tensorlake/ssh.rs; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 3,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c2",
+            "state": "open",
+            "summary": "Nested provisioning intentionally uses the place supervisor master",
+            "location": "crates/farhelm-helm/src/access.rs:238",
+            "detail": "Reviewed commits: 1038bb1f4549f6896fa6e064fecf540f4548b4da, 04ffdbb35773cef36e73eb798c005ddbeb9a9de6, 56659839785691f76da3af5d8f51b511cff4ba8b. TLDR considered: provisioning or builder commands inside a container can fail once the container host's shared SSH connection has no free sessions, even when the caller asks for OneShot or Provisioning. Source: RemoteRoute::command PodmanExec branch forces SharedConnection::Supervisor; BaseRoute::command also uses Supervisor. Pinned SPEC_impl.md One route for transport and provisioning explicitly says: 'Exec channels ride the place host's supervisor master, preserving logins that need interactive second factor.' It further says: 'After a full master refuses a channel, OpenSSH can open another noninteractive login. Hosts that require interactive approval for each login therefore allow about ten concurrent container connections, with actual capacity depending on their configuration and other channels.' The preceding section requires release never to close the place's masters for a nested environment; transport.rs:249-256 implements that early return. Source checks: common SSH base retains ControlMaster=auto and BatchMode=yes; nested branch prepends LogLevel=ERROR so a mux refusal is observable. Suggested bucket if not accepted: high/material UX. Could-be-highest: no, no security or loss-of-work route established. Confidence: confirmed explicit specification acceptance. proposed_drop: specification accepts shared-session capacity and the forced supervisor master as quoted. possible_cover: none; no queue/coverage sources read. Source-only, no runtime behavior claimed."
+          }
+        }
+      ],
+      "latest": {
+        "line": 3,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c2",
+          "state": "open",
+          "summary": "Nested provisioning intentionally uses the place supervisor master",
+          "location": "crates/farhelm-helm/src/access.rs:238",
+          "detail": "Reviewed commits: 1038bb1f4549f6896fa6e064fecf540f4548b4da, 04ffdbb35773cef36e73eb798c005ddbeb9a9de6, 56659839785691f76da3af5d8f51b511cff4ba8b. TLDR considered: provisioning or builder commands inside a container can fail once the container host's shared SSH connection has no free sessions, even when the caller asks for OneShot or Provisioning. Source: RemoteRoute::command PodmanExec branch forces SharedConnection::Supervisor; BaseRoute::command also uses Supervisor. Pinned SPEC_impl.md One route for transport and provisioning explicitly says: 'Exec channels ride the place host's supervisor master, preserving logins that need interactive second factor.' It further says: 'After a full master refuses a channel, OpenSSH can open another noninteractive login. Hosts that require interactive approval for each login therefore allow about ten concurrent container connections, with actual capacity depending on their configuration and other channels.' The preceding section requires release never to close the place's masters for a nested environment; transport.rs:249-256 implements that early return. Source checks: common SSH base retains ControlMaster=auto and BatchMode=yes; nested branch prepends LogLevel=ERROR so a mux refusal is observable. Suggested bucket if not accepted: high/material UX. Could-be-highest: no, no security or loss-of-work route established. Confidence: confirmed explicit specification acceptance. proposed_drop: specification accepts shared-session capacity and the forced supervisor master as quoted. possible_cover: none; no queue/coverage sources read. Source-only, no runtime behavior claimed."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g055/findings.jsonl",
+        "id": "c2",
+        "line": 3,
+        "disposition": "excluded",
+        "group": "nested-environment-supervisor-master-capacity",
+        "reason": "Parent explicitly accepted named covered proposal from claims-035 after inspecting it. Nested provisioning borrowing the place supervisor master and its finite channel capacity are expressly accepted. The separate promised session-limit diagnosis remains enforceable and is the subject of g056/f1. Exact specification acceptance of nested sharing and capacity; do not use it to cover missing failure diagnosis. Checked source/results: [\"56659839785691f76da3af5d8f51b511cff4ba8b access.rs:64-94 and 302-327 force Supervisor sharing for base and nested exec, retain ordinary fallback and expose mux refusals.\",\"1038bb1f4549f6896fa6e064fecf540f4548b4da transport.rs:249-264 returns for PodmanExec rather than closing the place masters.\",\"1038bb1 SPEC_impl.md:6481-6487 explicitly states borrowing, capacity, fallback and diagnostic contracts; current SPEC_impl.md:6002-6008 retains them. No runtime observation.\"] Current coverage/results: {\"SPEC.md\":\"Container sessions says remote connections use the container host SSH connection; no contrary separate-master promise found.\",\"SPEC_impl.md\":\"Exact acceptance in One route for transport and provisioning; ordinary two-master transport policy remains general context, with this explicit nested exception.\",\"TODO.md Planned\":\"Empty.\",\"plans/queue\":\"No unlanded index entries.\",\"BUGS.md\":\"Transfer-pipe hang is different.\",\"queue INDEX and files\":\"No shared-master capacity item found by targeted master/session-limit/container searches.\",\"TRIAGE_OUTCOMES.md\":\"No matching active decision found.\",\"FILTER.md\":\"No filter applied; accepted design is the basis.\"} Exact cited cover: [\"SPEC_impl.md:6003-6004: Exec channels ride the place host's supervisor master, preserving logins that need interactive second factor.\",\"SPEC_impl.md:6005-6007: After a full master refuses a channel, OpenSSH can open another noninteractive login. Hosts that require interactive approval for each login therefore allow about ten concurrent container connections, with actual capacity depending on their configuration and other channels.\"] Original stronger consequence and missing premise remain preserved: \"Provisioning or builder operations can fail at shared-session capacity even when the caller requests OneShot or Provisioning; conditionally high material UX, but no established lost-work or security route. This record already proposed specification acceptance.\"; null."
+      },
+      "accepted_parent_decision": {
+        "key": "g055/c2",
+        "line": 3,
+        "disposition": "excluded",
+        "group": "nested-environment-supervisor-master-capacity",
+        "bucket": "other",
+        "recording": "covered",
+        "queue_target_candidate": null,
+        "needs_independent_drop_check": false,
+        "reason": "Parent explicitly accepted named covered proposal from claims-035 after inspecting it. Nested provisioning borrowing the place supervisor master and its finite channel capacity are expressly accepted. The separate promised session-limit diagnosis remains enforceable and is the subject of g056/f1. Exact specification acceptance of nested sharing and capacity; do not use it to cover missing failure diagnosis. Checked source/results: [\"56659839785691f76da3af5d8f51b511cff4ba8b access.rs:64-94 and 302-327 force Supervisor sharing for base and nested exec, retain ordinary fallback and expose mux refusals.\",\"1038bb1f4549f6896fa6e064fecf540f4548b4da transport.rs:249-264 returns for PodmanExec rather than closing the place masters.\",\"1038bb1 SPEC_impl.md:6481-6487 explicitly states borrowing, capacity, fallback and diagnostic contracts; current SPEC_impl.md:6002-6008 retains them. No runtime observation.\"] Current coverage/results: {\"SPEC.md\":\"Container sessions says remote connections use the container host SSH connection; no contrary separate-master promise found.\",\"SPEC_impl.md\":\"Exact acceptance in One route for transport and provisioning; ordinary two-master transport policy remains general context, with this explicit nested exception.\",\"TODO.md Planned\":\"Empty.\",\"plans/queue\":\"No unlanded index entries.\",\"BUGS.md\":\"Transfer-pipe hang is different.\",\"queue INDEX and files\":\"No shared-master capacity item found by targeted master/session-limit/container searches.\",\"TRIAGE_OUTCOMES.md\":\"No matching active decision found.\",\"FILTER.md\":\"No filter applied; accepted design is the basis.\"} Exact cited cover: [\"SPEC_impl.md:6003-6004: Exec channels ride the place host's supervisor master, preserving logins that need interactive second factor.\",\"SPEC_impl.md:6005-6007: After a full master refuses a channel, OpenSSH can open another noninteractive login. Hosts that require interactive approval for each login therefore allow about ten concurrent container connections, with actual capacity depending on their configuration and other channels.\"] Original stronger consequence and missing premise remain preserved: \"Provisioning or builder operations can fail at shared-session capacity even when the caller requests OneShot or Provisioning; conditionally high material UX, but no established lost-work or security route. This record already proposed specification acceptance.\"; null."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-035",
+          "key": "g055/c2",
+          "latest_line": 3,
+          "recommendation": "covered",
+          "bucket": "other",
+          "underlying_key": "nested-environment-supervisor-master-capacity",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "Nested provisioning borrowing the place supervisor master and its finite channel capacity are expressly accepted. The separate promised session-limit diagnosis remains enforceable and is the subject of g056/f1.",
+          "checks": [
+            "56659839785691f76da3af5d8f51b511cff4ba8b access.rs:64-94 and 302-327 force Supervisor sharing for base and nested exec, retain ordinary fallback and expose mux refusals.",
+            "1038bb1f4549f6896fa6e064fecf540f4548b4da transport.rs:249-264 returns for PodmanExec rather than closing the place masters.",
+            "1038bb1 SPEC_impl.md:6481-6487 explicitly states borrowing, capacity, fallback and diagnostic contracts; current SPEC_impl.md:6002-6008 retains them. No runtime observation."
+          ],
+          "coverage_checked": {
+            "SPEC.md": "Container sessions says remote connections use the container host SSH connection; no contrary separate-master promise found.",
+            "SPEC_impl.md": "Exact acceptance in One route for transport and provisioning; ordinary two-master transport policy remains general context, with this explicit nested exception.",
+            "TODO.md Planned": "Empty.",
+            "plans/queue": "No unlanded index entries.",
+            "BUGS.md": "Transfer-pipe hang is different.",
+            "queue INDEX and files": "No shared-master capacity item found by targeted master/session-limit/container searches.",
+            "TRIAGE_OUTCOMES.md": "No matching active decision found.",
+            "FILTER.md": "No filter applied; accepted design is the basis."
+          },
+          "exact_cover_quotes": [
+            "SPEC_impl.md:6003-6004: Exec channels ride the place host's supervisor master, preserving logins that need interactive second factor.",
+            "SPEC_impl.md:6005-6007: After a full master refuses a channel, OpenSSH can open another noninteractive login. Hosts that require interactive approval for each login therefore allow about ten concurrent container connections, with actual capacity depending on their configuration and other channels."
+          ],
+          "missing_premise": null,
+          "original_stronger_consequence": "Provisioning or builder operations can fail at shared-session capacity even when the caller requests OneShot or Provisioning; conditionally high material UX, but no established lost-work or security route. This record already proposed specification acceptance.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Exact specification acceptance of nested sharing and capacity; do not use it to cover missing failure diagnosis."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": false,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "nested-environment-supervisor-master-capacity",
+        "destination": null
+      }
+    },
+    {
+      "key": "g055/c3",
+      "owner": "g055",
+      "id": "c3",
+      "domain": "environment-execution-routing",
+      "purpose": "environment-execution-routing: crates/farhelm-helm/src/access.rs, crates/farhelm-helm/src/provisioning/backend.rs, crates/farhelm-helm/src/ssh.rs, crates/farhelm-helm/src/tensorlake/shell.rs, crates/farhelm-helm/src/tensorlake/ssh.rs; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 4,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c3",
+            "state": "open",
+            "summary": "Common lowering preserves literal arguments at both shell boundaries",
+            "location": "crates/farhelm-helm/src/access.rs:123",
+            "detail": "Reviewed commits: 1038bb1f4549f6896fa6e064fecf540f4548b4da and 56659839785691f76da3af5d8f51b511cff4ba8b. TLDR considered: hostile container/user/home/program spellings might become shell commands when remote Podman adds another shell layer. Source analysis refutes this: RemoteCommand::Argv constructs the inner 'exec ' command with quote_argv; each word uses ssh::shell_quote. Script payloads remain the one sh -c argument. Local Podman gets literal argv. SSH calls ssh_command_args which applies quote_argv to the entire remote argv once, after ssh_base_args/ssh_oneshot_args place -- before destination. The later CLEAN_PLACE_EXEC wrapper carries the actual Podman command as positional arguments and executes exec \"$@\"; it does not evaluate those arguments. Assigned tests check hostile quote/$/semicolon values through reconstructed outer argv and inner exec words. Contract: SPEC_impl.md One route for transport and provisioning: 'The constructor builds argv layers with quoting once per parsing shell.' Remaining source check before final synthesis: inspect shell_quote definition to confirm its single-word escaping implementation; no execution requested. Suggested bucket for the hypothetical injection: highest/security; could-be-highest: yes, but this source path does not establish injection. Confidence: strong source refutation pending final primitive check. proposed_drop: source refutation above. possible_cover: none; no coverage sources read. No runtime behavior claimed."
+          }
+        },
+        {
+          "line": 5,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c3",
+            "state": "open",
+            "summary": "Common lowering preserves literal arguments at both shell boundaries",
+            "location": "crates/farhelm-helm/src/access.rs:123",
+            "detail": "Reviewed commits: 1038bb1f4549f6896fa6e064fecf540f4548b4da and 56659839785691f76da3af5d8f51b511cff4ba8b. TLDR considered: hostile container/user/home/program spellings could execute shell commands if the new route dropped quoting at either layer. Source refutation: RemoteCommand::Argv uses quote_argv for the inner exec; SSH then uses quote_argv for each word of the outer remote argv. Script payloads remain the one argument of sh -c. Local Podman gets literal argv. ssh_base_args and ssh_oneshot_args put -- before destination. At the pinned initial revision, ssh.rs:474 reexports farhelm_proto::text::shell_quote, whose implementation in crates/farhelm-proto/src/text.rs:106-108 always surrounds each word with single quotes and replaces embedded single quotes with the POSIX close/escape/reopen form. CLEAN_PLACE_EXEC later passes the executable and argv as positional arguments and uses exec \"$@\", never eval. Assigned tests cover hostile quotes/$/semicolons in both layers. Contract: SPEC_impl.md One route for transport and provisioning: 'The constructor builds argv layers with quoting once per parsing shell.' Suggested bucket for hypothetical command injection: highest/security; could-be-highest: yes, but source refutes this route. Confidence: confirmed source refutation after primitive inspection. proposed_drop: source refutation above; not a specification exception allowing injection. possible_cover: none; no coverage sources read. No execution performed or behavior observed. This completes the primitive check noted in the earlier c3 event."
+          }
+        },
+        {
+          "line": 6,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c3",
+            "state": "open",
+            "summary": "Common lowering preserves literal arguments at both shell boundaries",
+            "location": "crates/farhelm-helm/src/access.rs:123",
+            "detail": "Reviewed commits: 1038bb1f4549f6896fa6e064fecf540f4548b4da and 56659839785691f76da3af5d8f51b511cff4ba8b. TLDR considered: hostile container/user/home/program spellings could execute shell commands if the new route dropped quoting at either layer. Source refutation: RemoteCommand::Argv uses quote_argv for the inner exec; SSH then uses quote_argv for each word of the outer remote argv. Script payloads remain the one argument of sh -c. Local Podman gets literal argv. ssh_base_args and ssh_oneshot_args put -- before destination. At the pinned initial revision, ssh.rs:474 reexports farhelm_proto::text::shell_quote, whose implementation in crates/farhelm-proto/src/text.rs:97-99 always surrounds each word with single quotes and replaces embedded single quotes with the POSIX close/escape/reopen form. CLEAN_PLACE_EXEC later passes the executable and argv as positional arguments and uses exec \"$@\", never eval. Assigned tests cover hostile quotes/$/semicolons in both layers. Contract: SPEC_impl.md One route for transport and provisioning: 'The constructor builds argv layers with quoting once per parsing shell.' Suggested bucket for hypothetical command injection: highest/security; could-be-highest: yes, but source refutes this route. Confidence: confirmed source refutation after primitive inspection. proposed_drop: source refutation above; not a specification exception allowing injection. possible_cover: none; no coverage sources read. No execution performed or behavior observed. This completes the primitive check noted in the earlier c3 event."
+          }
+        },
+        {
+          "line": 10,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c3",
+            "state": "open",
+            "summary": "Shell escaping and option termination are independently enforced at the inspected boundaries",
+            "location": "crates/farhelm-helm/src/access.rs:193",
+            "detail": "# Shell escaping and option termination are independently enforced at the inspected boundaries\n\nReviewed commits: 1038bb1f4549f6896fa6e064fecf540f4548b4da and 56659839785691f76da3af5d8f51b511cff4ba8b.\n\n## TLDR\n\nThe extraction preserves literal arguments through the local/remote shell layers. That does not itself stop an executable from interpreting a literal argument as an option; option boundaries were checked separately for the immediate consumers. The original hypothetical consequence remains command execution on the container host (highest/security), but these inspected routes do not establish it.\n\n## Details\n\nShell boundary: RemoteCommand::Argv uses quote_argv for the inner exec, then ssh_command_args quotes each word of the entire remote invocation. Script payloads remain one sh -c argument. At the initial revision ssh.rs:474 reexports farhelm_proto::text::shell_quote; text.rs:97-99 always uses single quotes and the POSIX embedded-quote encoding. The later CLEAN_PLACE_EXEC executes positional argv via exec \"$@\", without eval. These facts refute shell metacharacter/word-splitting injection only, not every possible option interpretation.\n\nSeparate option boundaries: ssh_base_args/ssh_oneshot_args place -- before destination. At 56659839785691f76da3af5d8f51b511cff4ba8b access.rs:193-231 container_argv places the login user and home in the required values of --user and --workdir, prefixes environment entries with fixed HOME=/USER=/LOGNAME=/XDG_RUNTIME_DIR= strings, and places -- before the container operand. The Podman executable is an absolute observed path (203-205); the registered container operand is a validated canonical 64-hex ID (store/podman.rs:203-210). Script arguments are after the container/command boundary. This is independent of shell quoting.\n\nCaller interface g060/c4 line 6 was checked directly: environment/podman/build.rs:59-73 invokes getent passwd -- with the shell-quoted literal requested user. pull_base at 808-832 includes -- before the literal reference in both podman pull and image inspect. Those field consumers are outside this group's route lowering; their explicit terminators support their own narrow option-safety conclusion. No inference is made from shell escaping alone about other image consumers or arbitrary caller-provided argv.\n\nContract: SPEC_impl.md One route for transport and provisioning: 'The constructor builds argv layers with quoting once per parsing shell.' The implementation also retains the option terminators described above. Suggested bucket for hypothetical command injection: highest/security. Could-be-highest: yes; original consequence preserved. Confidence: confirmed source refutation for the inspected shell layers and separately named immediate option boundaries; no runtime observation. proposed_drop: narrow source refutation above, pending parent's independent check; not a blanket certification of all option consumers. possible_cover: g060/c4 as supplied by caller, specific image/account consumers only. No execution/reproduction performed. This revision supersedes any overly broad reading of the earlier c3 wording."
+          }
+        }
+      ],
+      "latest": {
+        "line": 10,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c3",
+          "state": "open",
+          "summary": "Shell escaping and option termination are independently enforced at the inspected boundaries",
+          "location": "crates/farhelm-helm/src/access.rs:193",
+          "detail": "# Shell escaping and option termination are independently enforced at the inspected boundaries\n\nReviewed commits: 1038bb1f4549f6896fa6e064fecf540f4548b4da and 56659839785691f76da3af5d8f51b511cff4ba8b.\n\n## TLDR\n\nThe extraction preserves literal arguments through the local/remote shell layers. That does not itself stop an executable from interpreting a literal argument as an option; option boundaries were checked separately for the immediate consumers. The original hypothetical consequence remains command execution on the container host (highest/security), but these inspected routes do not establish it.\n\n## Details\n\nShell boundary: RemoteCommand::Argv uses quote_argv for the inner exec, then ssh_command_args quotes each word of the entire remote invocation. Script payloads remain one sh -c argument. At the initial revision ssh.rs:474 reexports farhelm_proto::text::shell_quote; text.rs:97-99 always uses single quotes and the POSIX embedded-quote encoding. The later CLEAN_PLACE_EXEC executes positional argv via exec \"$@\", without eval. These facts refute shell metacharacter/word-splitting injection only, not every possible option interpretation.\n\nSeparate option boundaries: ssh_base_args/ssh_oneshot_args place -- before destination. At 56659839785691f76da3af5d8f51b511cff4ba8b access.rs:193-231 container_argv places the login user and home in the required values of --user and --workdir, prefixes environment entries with fixed HOME=/USER=/LOGNAME=/XDG_RUNTIME_DIR= strings, and places -- before the container operand. The Podman executable is an absolute observed path (203-205); the registered container operand is a validated canonical 64-hex ID (store/podman.rs:203-210). Script arguments are after the container/command boundary. This is independent of shell quoting.\n\nCaller interface g060/c4 line 6 was checked directly: environment/podman/build.rs:59-73 invokes getent passwd -- with the shell-quoted literal requested user. pull_base at 808-832 includes -- before the literal reference in both podman pull and image inspect. Those field consumers are outside this group's route lowering; their explicit terminators support their own narrow option-safety conclusion. No inference is made from shell escaping alone about other image consumers or arbitrary caller-provided argv.\n\nContract: SPEC_impl.md One route for transport and provisioning: 'The constructor builds argv layers with quoting once per parsing shell.' The implementation also retains the option terminators described above. Suggested bucket for hypothetical command injection: highest/security. Could-be-highest: yes; original consequence preserved. Confidence: confirmed source refutation for the inspected shell layers and separately named immediate option boundaries; no runtime observation. proposed_drop: narrow source refutation above, pending parent's independent check; not a blanket certification of all option consumers. possible_cover: g060/c4 as supplied by caller, specific image/account consumers only. No execution/reproduction performed. This revision supersedes any overly broad reading of the earlier c3 wording."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g055/findings.jsonl",
+        "id": "c3",
+        "line": 10,
+        "disposition": "under-investigation",
+        "group": "g055-c3",
+        "reason": "Record durably acknowledged; parent source/contract validation, cross-group synthesis, coverage/filter matching and any independent drop check remain pending. This preserves the claim and uncertainty without accepting, dropping or lowering it."
+      },
+      "accepted_parent_decision": null,
+      "returned_claim_checks": [
+        {
+          "batch": "claims-035",
+          "key": "g055/c3",
+          "latest_line": 10,
+          "recommendation": "refuted",
+          "bucket": "other",
+          "underlying_key": "common-container-route-shell-and-option-boundaries",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The inspected lowering preserves literal words at both parsing shells. Immediate executable option boundaries were checked separately; this is a narrow refutation, not certification of arbitrary callers.",
+          "checks": [
+            "56659839785691f76da3af5d8f51b511cff4ba8b access.rs:145-160,193-231,294-327,343-374 quotes inner argv and outer SSH argv; CLEAN_PLACE_EXEC:16 invokes positional arguments through exec \"$@\" without eval.",
+            "5665983 farhelm-proto/src/text.rs:97-99 surrounds each word in single quotes and closes/escapes/reopens embedded quotes. ssh.rs:293-297 and :325-334 put -- before destination in both shared and non-sharing prefixes.",
+            "5665983 access.rs:203-205 requires an absolute Podman executable, :214-227 supplies user/home as option values and terminates before the container; store/podman.rs:202-209 validates canonical 64-hex container IDs.",
+            "5665983 environment/podman/build.rs:59-73 uses getent passwd -- with a quoted account; :808-832 terminates options before pull/image-inspect references. These are only the explicitly named caller boundaries.",
+            "SPEC_impl.md Helm transport and One route for transport and provisioning require pre-destination SSH termination and quoting once per shell. No execution performed."
+          ],
+          "coverage_checked": {
+            "SPEC.md": "Security and container sections do not authorize injection.",
+            "SPEC_impl.md": "Quoting and option-termination contracts support the source refutation, not an exception accepting injection.",
+            "TODO.md Planned": "Empty.",
+            "plans/queue": "No unlanded entries.",
+            "BUGS.md": "No matching injection acceptance.",
+            "queue INDEX and files": "Targeted shell_quote/quote_argv/Podman route searches found no exact existing item.",
+            "TRIAGE_OUTCOMES.md": "No matching active decision found.",
+            "FILTER.md": "Security is outside applicable generic filters; no filter applied."
+          },
+          "exact_cover_quotes": [],
+          "missing_premise": "No interpolation or option-injection hole was established in these boundaries; arbitrary caller argv and other image consumers remain outside this refutation.",
+          "original_stronger_consequence": "Hostile container/user/home/program text might execute commands on the container host: highest/security. Earlier broad wording is superseded by the explicit separation of shell escaping from immediate option interpretation.",
+          "needs_independent_drop_check": true,
+          "proposed_basis": "Narrow source refutation of the named shell and option consumers, for the parent's fresh independent security drop check."
+        }
+      ],
+      "parent_proposals": [
+        {
+          "artifact": "parent-flagged-judgments-035.json",
+          "key": "g055/c3",
+          "proposal": "claim-checks/claims-035/result.json",
+          "parent_proposal": "source-refuted-named-shell-and-executable-option-injection-boundaries",
+          "final_independent_gate": "required-before-highest-security-drop",
+          "reason": "Parent read full035. Inner argv and outer SSH argv are separately quoted, clean shell uses positional exec without eval, and SSH terminates options before destination. Absolute Podman executable, validated canonical container ID and separate option values constrain exec; named getent/pull/image-inspect callers use their own option terminators. This separates shell escaping from option parsing. Refute only these actual boundaries, not arbitrary future argv/image consumers; preserve host command-execution hypothesis for the fresh gate."
+        }
+      ],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": true,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "common-container-route-shell-and-option-boundaries",
+        "destination": null
+      }
+    },
+    {
+      "key": "g055/c4",
+      "owner": "g055",
+      "id": "c4",
+      "domain": "environment-execution-routing",
+      "purpose": "environment-execution-routing: crates/farhelm-helm/src/access.rs, crates/farhelm-helm/src/provisioning/backend.rs, crates/farhelm-helm/src/ssh.rs, crates/farhelm-helm/src/tensorlake/shell.rs, crates/farhelm-helm/src/tensorlake/ssh.rs; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 7,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c4",
+            "state": "open",
+            "summary": "Container route refresh does not establish a shipped retarget race",
+            "location": "crates/farhelm-helm/src/access.rs:397",
+            "detail": "Reviewed commits: 04ffdbb35773cef36e73eb798c005ddbeb9a9de6 and 56659839785691f76da3af5d8f51b511cff4ba8b. TLDR considered: a container binding read followed by a separately refreshed place route might act on an endpoint different from its resource's original host, potentially affecting access or credential delivery. Source checks: the first resolver joins binding and place from one list_hosts snapshot; the later resolver passes binding.place_host to PodmanPlaces::runtime, which rereads that current row and accepts cached executable observations only when their BaseRoute equals the current route. store.rs:7539-7540 calls podman::refuse_referenced_place inside the update-destination transaction before changing an SSH host; Tensorlake and Podman destinations are immutable. SPEC.md Container sessions explicitly says: 'A container host cannot be removed or retargeted while any environment row references it, including stopped environments and cleanup leftovers, or while recipe state records images or helpers there.' The raw SQL endpoint update in the assigned test deliberately bypasses that production guard to test cache freshness. No shipped endpoint-switch sequence was established. Suggested bucket for established hypothetical wrong-host credential delivery would be highest/security; could-be-highest: yes, but the required retarget route is absent. Confidence: source-refuted for shipped endpoint-edit flow. proposed_drop: source guards and exact specification contract above; not permission to deliver to the wrong machine. possible_cover: none; no coverage sources read. No execution performed or runtime behavior claimed."
+          }
+        },
+        {
+          "line": 8,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c4",
+            "state": "open",
+            "summary": "Registered-container retarget guard does not cover pending first-container approval",
+            "location": "crates/farhelm-helm/src/access.rs:397",
+            "detail": "Reviewed commits: 04ffdbb35773cef36e73eb798c005ddbeb9a9de6 and 56659839785691f76da3af5d8f51b511cff4ba8b. TLDR originally considered: container route refresh could choose a different endpoint and potentially deliver credentials to the wrong machine. The prior c4 source refutation applies only after a durable environment reference exists. Parent-provided interface evidence g020/l1 latestline9 identifies a pending first-container agent card whose place can still be retargeted before any environment row, image or helper blocks the edit; g043/l1 latestline5 protects lookup for an already registered credential target. The registered-row route guard does not refute the earlier pending-card issue. Suggested original consequence: highest/security for established wrong-host credential delivery; could-be-highest: yes. Confidence: registered-row protection source-confirmed, earlier capture boundary now under synthesis investigation. proposed_drop: no blanket drop; prior source-based drop is narrowed to registered-container retargeting only. possible_cover: parent-provided g020/l1 and g043/l1; no coverage search performed. Next checks: inspect these exact interface records and pinned pending-card/create registration callers to identify where target authority and durable reference begin. No execution or reproduction performed."
+          }
+        },
+        {
+          "line": 9,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c4",
+            "state": "open",
+            "summary": "Place retarget protection starts at registration and cannot validate an earlier approval",
+            "location": "crates/farhelm-helm/src/access.rs:397",
+            "detail": "# Place retarget protection starts at registration and cannot validate an earlier approval\n\nReviewed commits: 04ffdbb35773cef36e73eb798c005ddbeb9a9de6, 56659839785691f76da3af5d8f51b511cff4ba8b; caller interaction checked at 190d844e58c96cf197aa838d0b0eea8062f48435.\n\n## TLDR\n\nThe common route lookup protects a registered container from an ordinary host retarget, but cannot prove that its container host is the machine an earlier approval named. A pending first-container card can therefore be approved after its host was retargeted and deliver execution and recipe credentials to the changed machine, as g020/l1 records. The prior c4 blanket source refutation was too broad.\n\n## Details\n\nAt 56659839785691f76da3af5d8f51b511cff4ba8b, store/podman.rs:355-398 registers pending ownership in register_container's SQLite transaction. It checks the place's current kind/provider and inserts place_host, but stores no expected place destination/entry/route from an earlier card. The transaction's commit is the durable environment-reference boundary. refuse_referenced_place at 215-253 rejects retarget/removal once that row exists (including unresolved/stopped rows), or recipe state has cleanup resources. Pending approvals are outside both queries. access.rs:397-432 then joins the registered binding and resolves PodmanPlaces::runtime for its place; environment/podman.rs:148-167 similarly resolves current route and compares a subsequent row read to that current observation. Those comparisons protect the operation from using mismatched probe data; they do not compare against pre-approval authority.\n\nAt 190d844e58c96cf197aa838d0b0eea8062f48435, agent_requests.rs:4485-4515 reads a place display name and waits for approval while retaining only numeric Place and that display name. After approval it passes that Place to start_session_environment at 4541-4550. provisioning/tensorlake_add.rs:346-400 checks CURRENT provider availability and then calls ProviderHandle::register_session; environment/mod.rs:134-138 forwards only the numeric host to register_pending_session_container. There is no expected BaseRoute/destination parameter anywhere in this handoff. Thus retarget-before-registration is admitted against the new endpoint; registration only prevents later retargeting. Source review independently confirms the phase boundary in caller-provided g020/l1 line 9. Caller-provided g043/l1 line 5 remains compatible: its credential path starts from an already registered environment row, for which the durable reference exists and host IDs are not reused.\n\nContract: SPEC.md Container sessions: 'A container host cannot be removed or retargeted while any environment row references it, including stopped environments and cleanup leftovers, or while recipe state records images or helpers there.' This establishes post-reference protection only. The pending-card issue remains governed by the separately cited approval contract in g020/l1; no specification acceptance authorizes that misdelivery.\n\nSuggested bucket: highest/security for the established pending-card wrong-machine credential/execution consequence retained from g020/l1. Could-be-highest: yes. Confidence: source-confirmed phase boundary and absence of expected-route capture; credential delivery consequence is supported by the parent-provided g020 source trace, rather than newly executed here. proposed_drop: only the separate hypothesis that an already-registered container's current-endpoint lookup can follow an ordinary operator retarget is source-refuted; DO NOT drop the pre-registration pending-card finding. possible_cover: g020/l1 (pending-card finding), g043/l1 (registered credential-route refutation), exactly the interface records supplied by caller. No independent new defect claimed for a resolver receiving an already-valid route. No execution/reproduction performed. A repair of g020 needs expected place authority carried through approval and checked atomically with registration, or equivalent invalidation; making this resolver stale would not repair an earlier approval."
+          }
+        },
+        {
+          "line": 11,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c4",
+            "state": "open",
+            "summary": "Place retarget protection starts at registration and cannot validate an earlier approval",
+            "location": "crates/farhelm-helm/src/access.rs:397",
+            "detail": "# Place retarget protection starts at registration and cannot validate an earlier approval\n\nReviewed commits: 04ffdbb35773cef36e73eb798c005ddbeb9a9de6, 56659839785691f76da3af5d8f51b511cff4ba8b; caller interaction checked at 190d844e58c96cf197aa838d0b0eea8062f48435.\n\n## TLDR\n\nThe common route lookup protects a registered container from an ordinary host retarget, but cannot prove that its container host is the machine an earlier approval named. A pending first-container card can therefore be approved after its host was retargeted and deliver execution and recipe credentials to the changed machine, as g020/l1 records. The prior c4 blanket source refutation was too broad.\n\n## Details\n\nAt 56659839785691f76da3af5d8f51b511cff4ba8b, store/podman.rs:355-398 registers pending ownership in register_container's SQLite transaction. It checks the place's current kind/provider and inserts place_host, but stores no expected place destination/entry/route from an earlier card. The transaction's commit is the durable environment-reference boundary. refuse_referenced_place at 215-253 rejects retarget/removal once that row exists (including unresolved/stopped rows), or recipe state has cleanup resources. Pending approvals are outside both queries. access.rs:397-432 then joins the registered binding and resolves PodmanPlaces::runtime for its place; environment/podman.rs:148-167 similarly resolves current route and compares a subsequent row read to that current observation. Those comparisons protect the operation from using mismatched probe data; they do not compare against pre-approval authority.\n\nAt 190d844e58c96cf197aa838d0b0eea8062f48435, agent_requests.rs:4485-4515 reads a place display name and waits for approval while retaining only numeric Place and that display name. After approval it passes that Place to start_session_environment at 4541-4550. provisioning/tensorlake_add.rs:346-400 checks CURRENT provider availability and then calls ProviderHandle::register_session; environment/mod.rs:134-138 forwards only the numeric host to register_pending_session_container. There is no expected BaseRoute/destination parameter anywhere in this handoff. Thus retarget-before-registration is admitted against the new endpoint; registration only prevents later retargeting. Source review independently confirms the phase boundary in caller-provided g020/l1 line 9. Caller-provided g043/l1 line 5 remains compatible: its credential path starts from an already registered environment row, for which the durable reference exists and host IDs are not reused.\n\nContract: SPEC.md Container sessions: 'A container host cannot be removed or retargeted while any environment row references it, including stopped environments and cleanup leftovers, or while recipe state records images or helpers there.' This establishes post-reference protection only. The pending-card issue remains governed by the separately cited approval contract in g020/l1; no specification acceptance authorizes that misdelivery.\n\nSuggested bucket: highest/security for the established pending-card wrong-machine credential/execution consequence retained from g020/l1. Could-be-highest: yes. Confidence: source-confirmed phase boundary and absence of expected-route capture; credential delivery consequence is supported by the parent-provided g020 source trace, rather than newly executed here. proposed_drop: only the separate hypothesis that an already-registered container's current-endpoint lookup can follow an ordinary operator retarget is source-refuted; DO NOT drop the pre-registration pending-card finding. possible_cover: g020/l1 (pending-card finding), g043/l1 (registered credential-route refutation), exactly the interface records supplied by caller. No independent new defect claimed for a resolver receiving an already-valid route. No execution/reproduction performed. A repair of g020 needs expected place authority carried through approval and checked atomically with registration, or equivalent invalidation; making this resolver stale would not repair an earlier approval.\n\nAdditional synthesis source check at 190d844e58c96cf197aa838d0b0eea8062f48435: provisioning/tensorlake_add.rs:597-605 calls delivery.setup after install admission; credential_delivery.rs:347-364 derives bindings from that recipe and calls apply; at 590-608 it installs configured Codex auth.json bytes through the selected target and at 631-651 it installs the recipe GitHub token through that target. Thus the configured-credential consequence in g020/l1 is independently supported by source here as well (conditional on a configured credential and successful delivery); no runtime observation is claimed. SPEC_impl.md:9548-9556 explicitly says: What a card shows is what an approval does, and: A launch is also refused if the target host's connection changed while the card waited, since the approval was for the machine the card named. This resolves the readily checkable credential/approval premises; no uncertainty remains about the phase gap. No new independent defect ID is added."
+          }
+        },
+        {
+          "line": 17,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c4",
+            "state": "open",
+            "summary": "Place-binding consequence is established but competing approval contracts need reconciliation",
+            "location": "crates/farhelm-helm/src/access.rs:397",
+            "detail": "Reviewed commits: 04ffdbb35773cef36e73eb798c005ddbeb9a9de6, 56659839785691f76da3af5d8f51b511cff4ba8b; pending-card interaction at 190d844e58c96cf197aa838d0b0eea8062f48435. TLDR preserved: a first-container approval can wait across a place retarget and then execute/copy configured recipe credentials at the changed endpoint. The registered-resource source refutation remains narrow: a durable environment row blocks subsequent operator retarget, but begins only after the earlier card is answered. Original suggested highest/security consequence and could-be-highest=true remain; no parent lowering/drop accepted. New caller-supplied counterevidence: reviewed SPEC.md:399-409 says approvals follow the logical host entry and an in-flight approved create/clone may act on its new machine without installation-identity revalidation; reviewed SPEC_impl.md:9548-9556 separately promises card-machine binding and target-connection-change refusal. Therefore the earlier c4 statement that no specification acceptance authorizes this mechanism is not currently supportable. Confidence: mechanism remains source-confirmed; normative applicability/precedence is under explicit synthesis check. proposed_drop: prior registered-resource retarget hypothesis remains source-refuted only; broad pending-card drop remains unaccepted, with the new logical-entry acceptance as a competing proposed basis to check against the more specific card rule and governing precedence. possible_cover: g020/l1 retains the underlying pending-card finding; focused claims-010/035 and parent exact contract checks supplied this counterevidence. Next checks are only the named reviewed/current contract sections, their precedence clause and operation scope. No runtime/build/reproduction, new discovery or prohibited coverage search."
+          }
+        },
+        {
+          "line": 18,
+          "event": {
+            "version": 1,
+            "kind": "lead",
+            "id": "c4",
+            "state": "open",
+            "summary": "Registered-route refutation stands; pending-place approval has competing contract authority",
+            "location": "crates/farhelm-helm/src/access.rs:397",
+            "detail": "# Registered-route refutation stands; pending-place approval has competing contract authority\n\nReviewed assigned commits: 04ffdbb35773cef36e73eb798c005ddbeb9a9de6 and 56659839785691f76da3af5d8f51b511cff4ba8b. Pending-card interface and contracts checked at 190d844e58c96cf197aa838d0b0eea8062f48435, with the corresponding current working-tree clauses checked as directed.\n\n## TLDR\n\nThe established first-container mechanism and original conditional highest/security consequence remain: after an operator retargets an unreferenced container place while an agent card waits, Allow can create/execute and deliver configured recipe credentials at the changed physical endpoint. The post-registration retarget fence does not cover that earlier interval. However, the product specification explicitly permits approvals to follow a logical host entry to its new machine, while the implementation specification separately promises card-machine binding. My earlier statement that no specification acceptance authorizes this mechanism is retracted. No parent drop or lowering is accepted; g020/l1 continues to own the underlying issue.\n\n## Details\n\nSource conclusions retained without broadening: store/podman.rs:355-398 at 5665983 registers the environment and its place_host in one transaction, starting the durable reference that blocks subsequent retarget/removal via refuse_referenced_place at :215-253. Pending cards are not such references. access.rs:397-432 and environment/podman.rs:148-167 resolve current route/probe facts. At 190d844e agent_requests.rs:4485-4515 retains numeric Place and display name across approval, then :4541-4550 starts registration. provisioning/tensorlake_add.rs:346-400 validates current availability and registers after Allow. Its :597-605 calls credential setup; credential_delivery.rs:590-608 and :631-651 install configured Codex auth/GitHub token through that resulting environment route. Thus the pre-registration endpoint/credential mechanism remains source-confirmed; ordinary retarget of an ALREADY registered container place remains source-refuted. These are separate phases.\n\nCompeting acceptance text, read directly at reviewed SPEC.md:399-409: 'a host entry is one logical host from the user's point of view'; 'Approvals, settings changes and confirmed operations therefore follow the entry.' It then says an operation still in flight when the destination changes, including 'an approved stop, restart, rename, create or clone', 'may be carried out against the entry's new machine, and Farhelm adds no check of the installation identity to prevent that.' The exception is explicitly narrower for agent host edits/removals because their cards show the destination. Current SPEC.md:405-414 retains the same rule. This is concrete possible acceptance of changed-machine effects; it is not the unrelated recipe-definition mutability argument previously rejected.\n\nCompeting card-machine text, read directly at reviewed SPEC_impl.md:9548-9556: 'What a card shows is what an approval does.' It then states: 'A launch is also refused if the target host's connection changed while the card waited, since the approval was for the machine the card named.' Current SPEC_impl.md:9090-9098 retains it. Reviewed SPEC.md Agents and environments :4322-4341 makes the new card name the container host by its display name, requires its own Allow/Deny, and says Allow is creation confirmation; it states no explicit physical-place/retarget exception. Reviewed SPEC_impl.md:6506-6509 represents recipe/place separately from installed-host identity. Neither passage explicitly settles whether the logical-host acceptance applies to a pending physical-place approval before any environment host exists.\n\nPrecedence itself is readily checkable and settled: reviewed and current SPEC_impl.md:3-6 says 'SPEC.md defines what the product does; when this document and SPEC.md disagree about observable behavior, SPEC.md wins.' Thus if these clauses cover the same operation/phase, the product acceptance controls and the absolute implementation card-machine promise needs reconciliation. The remaining uncertainty is applicability, not failure to find a precedence rule: whether the generic logical-entry acceptance covers this new pre-Allow container-PLACE card as well as already-approved operations on an existing target host, or whether the new environment card is intended to bind a physical place under its card-machine clause. Source establishes the effect but cannot adjudicate that product-intent scope. No executable check/reproduction would settle a normative conflict. The evidence needed is explicit contract clarification choosing that scope (and reconciling the other clause); no user question or unrelated search is being launched here.\n\nSuggested original consequence/bucket preserved: highest/security if the changed physical endpoint is outside the pending approval's authority, with configured secret delivery and execution source-confirmed. Could-be-highest: yes. No downgrade based on rarity or source correctness. Confidence: confirmed mechanism and exact competing contract text; authorization status unresolved after the specified source/precedence/scope checks. proposed_drop: the narrow already-registered-resource retarget hypothesis remains source-refuted. For the distinct pending-card consequence, reviewed SPEC.md:399-409 is now a genuine competing specification-acceptance proposed-drop basis requiring independent adjudication; it is not accepted by this reviewer or the parent, and the original higher consequence is retained. Earlier claims of no acceptance or unconditional need for physical-route pinning are superseded only on this normative point. possible_cover: g020/l1 owns the underlying pending-card finding; g043/l1 concerns the registered credential route; focused claims-010/035 and parent exact contract checks supplied the counterevidence. No new independent defect ID, documentation finding, coverage search, runtime test/build/reproduction, install or live action. c4 remains reopened only for this contract-applicability question; all readily checkable source premises are resolved."
+          }
+        },
+        {
+          "line": 19,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c4",
+            "state": "open",
+            "summary": "Alias: container-place retarget authority is unverified after investigation",
+            "location": "crates/farhelm-helm/src/access.rs:397",
+            "detail": "# Registered-route refutation stands; pending-place approval has competing contract authority\n\nReviewed assigned commits: 04ffdbb35773cef36e73eb798c005ddbeb9a9de6 and 56659839785691f76da3af5d8f51b511cff4ba8b. Pending-card interface and contracts checked at 190d844e58c96cf197aa838d0b0eea8062f48435, with the corresponding current working-tree clauses checked as directed.\n\n## TLDR\n\nThe established first-container mechanism and original conditional highest/security consequence remain: after an operator retargets an unreferenced container place while an agent card waits, Allow can create/execute and deliver configured recipe credentials at the changed physical endpoint. The post-registration retarget fence does not cover that earlier interval. However, the product specification explicitly permits approvals to follow a logical host entry to its new machine, while the implementation specification separately promises card-machine binding. My earlier statement that no specification acceptance authorizes this mechanism is retracted. No parent drop or lowering is accepted; g020/l1 continues to own the underlying issue.\n\n## Details\n\nSource conclusions retained without broadening: store/podman.rs:355-398 at 5665983 registers the environment and its place_host in one transaction, starting the durable reference that blocks subsequent retarget/removal via refuse_referenced_place at :215-253. Pending cards are not such references. access.rs:397-432 and environment/podman.rs:148-167 resolve current route/probe facts. At 190d844e agent_requests.rs:4485-4515 retains numeric Place and display name across approval, then :4541-4550 starts registration. provisioning/tensorlake_add.rs:346-400 validates current availability and registers after Allow. Its :597-605 calls credential setup; credential_delivery.rs:590-608 and :631-651 install configured Codex auth/GitHub token through that resulting environment route. Thus the pre-registration endpoint/credential mechanism remains source-confirmed; ordinary retarget of an ALREADY registered container place remains source-refuted. These are separate phases.\n\nCompeting acceptance text, read directly at reviewed SPEC.md:399-409: 'a host entry is one logical host from the user's point of view'; 'Approvals, settings changes and confirmed operations therefore follow the entry.' It then says an operation still in flight when the destination changes, including 'an approved stop, restart, rename, create or clone', 'may be carried out against the entry's new machine, and Farhelm adds no check of the installation identity to prevent that.' The exception is explicitly narrower for agent host edits/removals because their cards show the destination. Current SPEC.md:405-414 retains the same rule. This is concrete possible acceptance of changed-machine effects; it is not the unrelated recipe-definition mutability argument previously rejected.\n\nCompeting card-machine text, read directly at reviewed SPEC_impl.md:9548-9556: 'What a card shows is what an approval does.' It then states: 'A launch is also refused if the target host's connection changed while the card waited, since the approval was for the machine the card named.' Current SPEC_impl.md:9090-9098 retains it. Reviewed SPEC.md Agents and environments :4322-4341 makes the new card name the container host by its display name, requires its own Allow/Deny, and says Allow is creation confirmation; it states no explicit physical-place/retarget exception. Reviewed SPEC_impl.md:6506-6509 represents recipe/place separately from installed-host identity. Neither passage explicitly settles whether the logical-host acceptance applies to a pending physical-place approval before any environment host exists.\n\nPrecedence itself is readily checkable and settled: reviewed and current SPEC_impl.md:3-6 says 'SPEC.md defines what the product does; when this document and SPEC.md disagree about observable behavior, SPEC.md wins.' Thus if these clauses cover the same operation/phase, the product acceptance controls and the absolute implementation card-machine promise needs reconciliation. The remaining uncertainty is applicability, not failure to find a precedence rule: whether the generic logical-entry acceptance covers this new pre-Allow container-PLACE card as well as already-approved operations on an existing target host, or whether the new environment card is intended to bind a physical place under its card-machine clause. Source establishes the effect but cannot adjudicate that product-intent scope. No executable check/reproduction would settle a normative conflict. The evidence needed is explicit contract clarification choosing that scope (and reconciling the other clause); no user question or unrelated search is being launched here.\n\nSuggested original consequence/bucket preserved: highest/security if the changed physical endpoint is outside the pending approval's authority, with configured secret delivery and execution source-confirmed. Could-be-highest: yes. No downgrade based on rarity or source correctness. Confidence: confirmed mechanism and exact competing contract text; authorization status unresolved after the specified source/precedence/scope checks. proposed_drop: the narrow already-registered-resource retarget hypothesis remains source-refuted. For the distinct pending-card consequence, reviewed SPEC.md:399-409 is now a genuine competing specification-acceptance proposed-drop basis requiring independent adjudication; it is not accepted by this reviewer or the parent, and the original higher consequence is retained. Earlier claims of no acceptance or unconditional need for physical-route pinning are superseded only on this normative point. possible_cover: g020/l1 owns the underlying pending-card finding; g043/l1 concerns the registered credential route; focused claims-010/035 and parent exact contract checks supplied the counterevidence. No new independent defect ID, documentation finding, coverage search, runtime test/build/reproduction, install or live action. c4 remains reopened only for this contract-applicability question; all readily checkable source premises are resolved.\n\nClosure/synthesis disposition: UNVERIFIED AFTER INVESTIGATION, specifically labelled alias/candidate of original owner g020/l1, not an open source lead. The complete source investigation is finished. Actual checks/results are the reviewed/current logical-entry and card-machine clauses, explicit SPEC.md-over-SPEC_impl.md precedence, the new environment-card display-name/Allow scope and recipe/place-versus-installed-identity scope, together with the source-confirmed pre-registration route/credential handoff and post-registration transactional reference fence detailed above. These establish the execution/credential mechanism and registration phase boundary, while failing to state whether the logical-entry acceptance covers a pre-Allow container-place card. That exact authoritative scope decision remains unavailable; an explicit clarification that includes or excludes this pending-place case, reconciling the competing card-machine promise, would settle the normative question. Execution cannot establish unstated product intent and is neither requested nor needed. The earlier c4 lead disposition is superseded as a completed investigation; no readily checkable source premise remains outstanding. Caller reports g020/l1 event21 now retains this same uncertainty under its finding, g041/l2 proposes explicit logical-entry acceptance, and g052/c3 retains the uncertainty as an alias. Those are caller-supplied interface facts, not new log reads or coverage determinations. Original conditional highest/security harm, could-be-highest=true, registered-resource source refutation and competing proposed-drop bases all remain above, without an accepted parent drop/lowering. This candidate does not assume ownership of g020/l1 or claim a new independent defect. No further source check, runtime/test/build/reproduction, discovery, source edit or prohibited coverage search was performed in this closure turn."
+          }
+        }
+      ],
+      "latest": {
+        "line": 19,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c4",
+          "state": "open",
+          "summary": "Alias: container-place retarget authority is unverified after investigation",
+          "location": "crates/farhelm-helm/src/access.rs:397",
+          "detail": "# Registered-route refutation stands; pending-place approval has competing contract authority\n\nReviewed assigned commits: 04ffdbb35773cef36e73eb798c005ddbeb9a9de6 and 56659839785691f76da3af5d8f51b511cff4ba8b. Pending-card interface and contracts checked at 190d844e58c96cf197aa838d0b0eea8062f48435, with the corresponding current working-tree clauses checked as directed.\n\n## TLDR\n\nThe established first-container mechanism and original conditional highest/security consequence remain: after an operator retargets an unreferenced container place while an agent card waits, Allow can create/execute and deliver configured recipe credentials at the changed physical endpoint. The post-registration retarget fence does not cover that earlier interval. However, the product specification explicitly permits approvals to follow a logical host entry to its new machine, while the implementation specification separately promises card-machine binding. My earlier statement that no specification acceptance authorizes this mechanism is retracted. No parent drop or lowering is accepted; g020/l1 continues to own the underlying issue.\n\n## Details\n\nSource conclusions retained without broadening: store/podman.rs:355-398 at 5665983 registers the environment and its place_host in one transaction, starting the durable reference that blocks subsequent retarget/removal via refuse_referenced_place at :215-253. Pending cards are not such references. access.rs:397-432 and environment/podman.rs:148-167 resolve current route/probe facts. At 190d844e agent_requests.rs:4485-4515 retains numeric Place and display name across approval, then :4541-4550 starts registration. provisioning/tensorlake_add.rs:346-400 validates current availability and registers after Allow. Its :597-605 calls credential setup; credential_delivery.rs:590-608 and :631-651 install configured Codex auth/GitHub token through that resulting environment route. Thus the pre-registration endpoint/credential mechanism remains source-confirmed; ordinary retarget of an ALREADY registered container place remains source-refuted. These are separate phases.\n\nCompeting acceptance text, read directly at reviewed SPEC.md:399-409: 'a host entry is one logical host from the user's point of view'; 'Approvals, settings changes and confirmed operations therefore follow the entry.' It then says an operation still in flight when the destination changes, including 'an approved stop, restart, rename, create or clone', 'may be carried out against the entry's new machine, and Farhelm adds no check of the installation identity to prevent that.' The exception is explicitly narrower for agent host edits/removals because their cards show the destination. Current SPEC.md:405-414 retains the same rule. This is concrete possible acceptance of changed-machine effects; it is not the unrelated recipe-definition mutability argument previously rejected.\n\nCompeting card-machine text, read directly at reviewed SPEC_impl.md:9548-9556: 'What a card shows is what an approval does.' It then states: 'A launch is also refused if the target host's connection changed while the card waited, since the approval was for the machine the card named.' Current SPEC_impl.md:9090-9098 retains it. Reviewed SPEC.md Agents and environments :4322-4341 makes the new card name the container host by its display name, requires its own Allow/Deny, and says Allow is creation confirmation; it states no explicit physical-place/retarget exception. Reviewed SPEC_impl.md:6506-6509 represents recipe/place separately from installed-host identity. Neither passage explicitly settles whether the logical-host acceptance applies to a pending physical-place approval before any environment host exists.\n\nPrecedence itself is readily checkable and settled: reviewed and current SPEC_impl.md:3-6 says 'SPEC.md defines what the product does; when this document and SPEC.md disagree about observable behavior, SPEC.md wins.' Thus if these clauses cover the same operation/phase, the product acceptance controls and the absolute implementation card-machine promise needs reconciliation. The remaining uncertainty is applicability, not failure to find a precedence rule: whether the generic logical-entry acceptance covers this new pre-Allow container-PLACE card as well as already-approved operations on an existing target host, or whether the new environment card is intended to bind a physical place under its card-machine clause. Source establishes the effect but cannot adjudicate that product-intent scope. No executable check/reproduction would settle a normative conflict. The evidence needed is explicit contract clarification choosing that scope (and reconciling the other clause); no user question or unrelated search is being launched here.\n\nSuggested original consequence/bucket preserved: highest/security if the changed physical endpoint is outside the pending approval's authority, with configured secret delivery and execution source-confirmed. Could-be-highest: yes. No downgrade based on rarity or source correctness. Confidence: confirmed mechanism and exact competing contract text; authorization status unresolved after the specified source/precedence/scope checks. proposed_drop: the narrow already-registered-resource retarget hypothesis remains source-refuted. For the distinct pending-card consequence, reviewed SPEC.md:399-409 is now a genuine competing specification-acceptance proposed-drop basis requiring independent adjudication; it is not accepted by this reviewer or the parent, and the original higher consequence is retained. Earlier claims of no acceptance or unconditional need for physical-route pinning are superseded only on this normative point. possible_cover: g020/l1 owns the underlying pending-card finding; g043/l1 concerns the registered credential route; focused claims-010/035 and parent exact contract checks supplied the counterevidence. No new independent defect ID, documentation finding, coverage search, runtime test/build/reproduction, install or live action. c4 remains reopened only for this contract-applicability question; all readily checkable source premises are resolved.\n\nClosure/synthesis disposition: UNVERIFIED AFTER INVESTIGATION, specifically labelled alias/candidate of original owner g020/l1, not an open source lead. The complete source investigation is finished. Actual checks/results are the reviewed/current logical-entry and card-machine clauses, explicit SPEC.md-over-SPEC_impl.md precedence, the new environment-card display-name/Allow scope and recipe/place-versus-installed-identity scope, together with the source-confirmed pre-registration route/credential handoff and post-registration transactional reference fence detailed above. These establish the execution/credential mechanism and registration phase boundary, while failing to state whether the logical-entry acceptance covers a pre-Allow container-place card. That exact authoritative scope decision remains unavailable; an explicit clarification that includes or excludes this pending-place case, reconciling the competing card-machine promise, would settle the normative question. Execution cannot establish unstated product intent and is neither requested nor needed. The earlier c4 lead disposition is superseded as a completed investigation; no readily checkable source premise remains outstanding. Caller reports g020/l1 event21 now retains this same uncertainty under its finding, g041/l2 proposes explicit logical-entry acceptance, and g052/c3 retains the uncertainty as an alias. Those are caller-supplied interface facts, not new log reads or coverage determinations. Original conditional highest/security harm, could-be-highest=true, registered-resource source refutation and competing proposed-drop bases all remain above, without an accepted parent drop/lowering. This candidate does not assume ownership of g020/l1 or claim a new independent defect. No further source check, runtime/test/build/reproduction, discovery, source edit or prohibited coverage search was performed in this closure turn."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g055/findings.jsonl",
+        "id": "c4",
+        "line": 11,
+        "disposition": "under-investigation",
+        "group": "g055-c4",
+        "reason": "Record durably acknowledged; parent source/contract validation, cross-group synthesis, coverage/filter matching and any independent drop check remain pending. This preserves the claim and uncertainty without accepting, dropping or lowering it."
+      },
+      "accepted_parent_decision": null,
+      "returned_claim_checks": [
+        {
+          "batch": "claims-035",
+          "key": "g055/c4",
+          "latest_line": 11,
+          "recommendation": "retain-verified",
+          "bucket": "highest",
+          "underlying_key": "pending-environment-launch-place-authority-before-registration",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "Registration blocks later retargeting but does not bind a waiting first-container approval to its earlier place route. Source establishes the phase gap and conditional credential delivery. Coverage is ambiguous because the product specification also expressly accepts same-entry retargets; retain and surface that conflict.",
+          "checks": [
+            "56659839785691f76da3af5d8f51b511cff4ba8b store/podman.rs:215-250 guards existing environment and recipe references only; :355-394 registers the current place by numeric ID without an expected destination.",
+            "190d844e58c96cf197aa838d0b0eea8062f48435 agent_requests.rs:4485-4515 freezes only Place and place_name across approval; :4516-4528 checks source ownership, then :4541-4549 passes Place to start_session_environment without expected place authority.",
+            "190d844 provisioning/tensorlake_add.rs:346-398 rechecks current availability and registers; :597-605 invokes recipe credential setup. provisioning/credential_delivery.rs:347-364 selects recipe bindings; :590-608 and :631-651 install configured Codex login and GitHub token at that selected target.",
+            "5665983 access.rs:397-427 resolves a registered binding's current place route; this does not repair earlier approval authority. No execution or actual credential disclosure was observed."
+          ],
+          "coverage_checked": {
+            "SPEC.md": "Container sessions:4869-4872 guards referenced places only. Topology:405-414 expressly allows approvals/creates/clones in flight to follow the same logical entry after destination change, with an explicit narrower exception only for agent host edits/removals. This may cover the retained claim and must be reconciled with the implementation-spec approval rule.",
+            "SPEC_impl.md": "Permission prompts for agent actions:9090-9100 says what a card shows is what approval does and refuses changed target connections. That is the contrary contract relied on by this finding.",
+            "TODO.md Planned": "Empty.",
+            "plans/queue": "INDEX has no unlanded entries; retained environment-agent-operations plan file is not pending coverage.",
+            "BUGS.md": "No matching acceptance.",
+            "queue INDEX and files": "update-preplanning-retarget-consent-ambiguity.md is related consent/specification context, but concerns individual GUI Update planning before its target freeze, not an agent's already waiting environment-launch approval or recipe credentials; not an exact alias.",
+            "TRIAGE_OUTCOMES.md": "No matching pending-environment approval decision found in active ledger.",
+            "FILTER.md": "Wrong-target execution/credential delivery falls outside rare recoverable and diagnostic filters."
+          },
+          "exact_cover_quotes": [
+            "Possible but ambiguous coverage, SPEC.md:407-411: Approvals, settings changes and confirmed operations therefore follow the entry. One still in flight when the destination changes or a new identity is adopted (an approved stop, restart, rename, create or clone, an \"Always allow\" answer, a change to the setting for running `farhelm` commands without asking, a confirmed uninstall) may be carried out against the entry's new machine, and Farhelm adds no check of the installation identity to prevent that.",
+            "Conflicting contract, SPEC_impl.md:9097-9098: A launch is also refused if the target host's connection changed while the card waited, since the approval was for the machine the card named."
+          ],
+          "missing_premise": "No source premise remains for the conditional route, assuming the first-place has no existing resource references, a permitted retarget occurs while approval waits, and the new place permits preparation. Credential disclosure additionally requires configured credentials and successful delivery. Whether this is accepted same-logical-entry behavior is unresolved by the conflicting specifications.",
+          "original_stronger_consequence": "Wrong-host execution and recipe credentials, highest/security. The initial blanket refutation was explicitly withdrawn: registered-container retargeting is prevented, but pending pre-registration approvals are not. Parent-supplied g020/l1 was identified as the same pending-card root and g043/l1 as the distinct registered-route refutation; those external histories were not scanned here.",
+          "needs_independent_drop_check": true,
+          "proposed_basis": "Retain the source-established phase gap and security consequence while naming the exact specification ambiguity. Any acceptance-based drop or lowering, and the separately refuted registered-container hypothesis, require the parent's independent drop check.",
+          "new_interface_evidence": "The latest source trace is valid, but current SPEC.md:405-414 and the same text at 190d844 SPEC.md:399-409 expressly permit approved create/clone work to follow a retargeted logical entry. Send this exact coverage ambiguity to the owner of g020/l1; SPEC_impl.md:9097-9098 says the opposite about target connection changes. No new defect is claimed."
+        }
+      ],
+      "parent_proposals": [
+        {
+          "artifact": "parent-flagged-judgments-035.json",
+          "key": "g055/c4",
+          "proposal": "claim-checks/claims-035/result.json",
+          "parent_proposal": "same-pending-place-root-with-spec-precedence-question-preserved",
+          "final_independent_gate": "required-before-any-highest-drop-or-lowering",
+          "reason": "Full035 agrees actual pre-registration card freezes symbolic place/name, registration later uses current route and recipe credential setup can copy configured secrets. Existing-row retarget fence is not earlier approval authority. Same020l1/041l2/052c3 root, no new independent defect. Product SPEC explicitly permits in-flight create/clone approvals following the logical entry; implementation prompt paragraph instead says shown physical machine/connection stays fixed. Parent010 proposes product rule precedence but final fresh gate must decide its scope for an environment's container place and narrow host-edit/removal exception. If disagreement/ambiguity, retain highest. Exact ambiguity was already sent to original owner; do not reopen for a repeated premise."
+        }
+      ],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": true,
+        "provisional_bucket": "highest",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "g055/c4",
+        "destination": null
+      }
+    },
+    {
+      "key": "g055/l5",
+      "owner": "g055",
+      "id": "l5",
+      "domain": "environment-execution-routing",
+      "purpose": "environment-execution-routing: crates/farhelm-helm/src/access.rs, crates/farhelm-helm/src/provisioning/backend.rs, crates/farhelm-helm/src/ssh.rs, crates/farhelm-helm/src/tensorlake/shell.rs, crates/farhelm-helm/src/tensorlake/ssh.rs; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 12,
+          "event": {
+            "version": 1,
+            "kind": "lead",
+            "id": "l5",
+            "state": "open",
+            "summary": "Provisioning stdio probes bypass the environment helper idle-limit constructor",
+            "location": "crates/farhelm-helm/src/provisioning/backend.rs:1577",
+            "detail": "# Provisioning stdio probes bypass the environment helper idle-limit constructor\n\nReviewed commit: 1038bb1f4549f6896fa6e064fecf540f4548b4da; integrated Podman route to check at 56659839785691f76da3af5d8f51b511cff4ba8b.\n\n## TLDR\n\nA provisioning probe starts farhelm internal stdio through a hand-built script without the environment helper's input-silence flag. If that helper survives loss of its client/helm, it may outlive the intended two-minute bound. This is a concrete constructor-bypass lead, not a confirmed leak.\n\n## Details\n\nSource basis: backend.rs:1543-1572 probe_script emits exec resolved internal stdio plus optional state directory. spawn_probe at 1577-1615 wraps that script through remote_command, which only adds REMOTE_RUNTIME_PREFIX and route.command. access.rs HostAccess::stdio_argv adds --stdin-idle-limit-secs 120, but this probe does not use it. SPEC_impl.md One route for transport and provisioning says all environment stdio routes pass that flag unconditionally; it also identifies client loss leaving Podman exec helpers alive as the reason. Need distinguish the intended steady-state heartbeat route from bounded discovery/provisioning and check whether short probe shutdown always supplies clean EOF, even on failure. Suggested bucket: unresolved; possible extra idle/billing/process lifetime if established, with no established security or user-work-loss route. Could-be-highest: no established route. Confidence: open source lead. proposed_drop: false. possible_cover: none known in supplied neighbour records; no prohibited coverage search. Next checks: probe termination and EOF ownership at original/integrated revisions; full helper watchdog semantics and governing contract scope; compare whole pinned range for attribution. No runtime tests or reproduction performed."
+          }
+        },
+        {
+          "line": 13,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "l5",
+            "state": "open",
+            "summary": "Environment provisioning probes omit the required stdin deadline",
+            "location": "crates/farhelm-helm/src/provisioning/backend.rs:1618",
+            "detail": "# Environment provisioning probes omit the required stdin deadline\n\nReviewed assigned extraction commit: 1038bb1f4549f6896fa6e064fecf540f4548b4da. Integrated production Podman revision: 56659839785691f76da3af5d8f51b511cff4ba8b. Full-range attribution checked from 6e423e30068b62c6cfa276c6d720ee35bb70387a through 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db.\n\n## TLDR\n\nFarhelm's setup/update probe starts an environment's stdio helper without the promised two-minute input-silence limit. Its normal fifteen-second probe timeout belongs to the helm; it supplies no remote deadline if that machine stops executing while the gateway/client still holds the helper's stdin open. The confirmed defect is the missing environment invocation contract, not an observed leaked process or measured billing incident.\n\n## Details\n\nAt 1038bb1, backend.rs:1558-1572 probe_script emits exec resolved internal stdio with only an optional --state-dir. spawn_probe at 1577-1615 passes that script to remote_command, which only prepends REMOTE_RUNTIME_PREFIX and wraps the selected route. It does not use HostAccess::stdio_argv, the new common constructor that adds --stdin-idle-limit-secs 120 for environments. At integrated 5665983 the same hand-built command remains in probe_script (1594-1625) and spawn_probe (1627-1664). Podman exec therefore receives the same unlimited helper as SSH. Production reachability: service.rs:2992-3009 converts resolve_host_access into a remote ProbeTarget for admitted container rows; its update path uses probe_target_for_row and backend.probe (1369-1372 and 1715-1721). This is not an unreachable direct test construction.\n\nThe helper has no default watchdog: main.rs:2761 accepts an optional budget and :2822-2824 makes None wait forever. Its documented source premise is that a gateway may retain its TCP peer after a sleeping helm stops sending (2746-2751). A successful short probe normally drops its FrameWriter after handshake and calls stop_probe; backend.rs:2410-2423 explicitly closes stdin and :2287-2289 terminates/reaps the local process group. Those paths explain why ordinary success need not leak, but are local-helm work, not a remote expiry guarantee while the helm is asleep/unavailable. Clean EOF also disables the watchdog by design, so no claim is made about a probe that already delivered clean EOF. The missing-flag defect does not require asserting that killing every supported Podman client necessarily leaves a live helper.\n\nExact contract at 1038bb1 and 5665983, SPEC_impl.md One route for transport and provisioning (6478-6481): 'All environment stdio routes pass `--stdin-idle-limit-secs 120` unconditionally and emit the existing 30-second heartbeat. The supported environment helper has that option. Killing a Podman exec client does not reliably end its in-container process, so the helper's own stdin watchdog supplies the bound.' The method's route is explicitly shared by provisioning; this probe is another invocation of internal stdio but bypasses that policy. A fifteen-second probe needs no steady heartbeat to stay below a 120-second deadline, so adding the environment-only option does not require turning discovery into a steady-state connection. Ordinary SSH probes must retain compatibility without this flag.\n\nAttribution caveat: the unlimited Tensorlake provisioning probe already exists at the exclusive range base (backend.rs:1566-1582). Its then-contract SPEC_impl.md:6942-6946 explicitly limited opt-in to 'Only Tensorlake's steady-state SSH command'. Thus 1038 is not alleged to newly break existing Tensorlake probe behavior. In-range c8bc155cc36723c8c53870944d07ce8ec61ef9ed replaces that narrow contract with all environment routes, 1038 adds the common policy but leaves this bypass, and 566 ships the newly supported Podman probe through it. This record reports the new route/contract mismatch and preserves that historical boundary rather than misattributing the old Tensorlake omission.\n\nSuggested bucket: other for the confirmed environment helper invocation/expiry guarantee mismatch. Could-be-highest: no established security or loss-of-work consequence. Confidence: confirmed by pinned source and contract; conditional remote orphan duration/billing was not reproduced or established beyond the documented retained-stdin premise. proposed_drop: false. possible_cover: none in the supplied neighbour records; no prohibited coverage search. No runtime tests, builds or reproductions performed. Fix direction: carry the route's environment idle-limit policy into probe_script/spawn_probe while retaining positive-absence markers, resolved-binary reporting and the ordinary SSH legacy invocation."
+          }
+        },
+        {
+          "line": 14,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "l5",
+            "state": "open",
+            "summary": "Environment provisioning probes omit the required stdin deadline",
+            "location": "crates/farhelm-helm/src/provisioning/backend.rs:1618",
+            "detail": "# Environment provisioning probes omit the required stdin deadline\n\nReviewed assigned extraction commit: 1038bb1f4549f6896fa6e064fecf540f4548b4da. Integrated production Podman revision: 56659839785691f76da3af5d8f51b511cff4ba8b. Full-range attribution checked from 6e423e30068b62c6cfa276c6d720ee35bb70387a through 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db.\n\n## TLDR\n\nFarhelm's setup/update probe starts an environment's stdio helper without the promised two-minute input-silence limit. Its normal fifteen-second probe timeout belongs to the helm; it supplies no remote deadline if that machine stops executing while the gateway/client still holds the helper's stdin open. The confirmed defect is the missing environment invocation contract, not an observed leaked process or measured billing incident.\n\n## Details\n\nAt 1038bb1, backend.rs:1558-1572 probe_script emits exec resolved internal stdio with only an optional --state-dir. spawn_probe at 1577-1615 passes that script to remote_command, which only prepends REMOTE_RUNTIME_PREFIX and wraps the selected route. It does not use HostAccess::stdio_argv, the new common constructor that adds --stdin-idle-limit-secs 120 for environments. At integrated 5665983 the same hand-built command remains in probe_script (1606-1622) and spawn_probe (1626-1664). Podman exec therefore receives the same unlimited helper as SSH. Production reachability: service.rs:2992-3009 converts resolve_host_access into a remote ProbeTarget for admitted container rows; its update path uses probe_target_for_row and backend.probe (plan_update_owned at 1343-1373; 1715-1721 belongs instead to uninstall_plan and is not claimed as a Podman route). This is not an unreachable direct test construction.\n\nThe helper has no default watchdog: main.rs:2761 accepts an optional budget and :2822-2824 makes None wait forever. Its documented source premise is that a gateway may retain its TCP peer after a sleeping helm stops sending (2746-2751). A successful short probe normally drops its FrameWriter after handshake and calls stop_probe; backend.rs:2410-2423 explicitly closes stdin and :2287-2289 terminates/reaps the local process group. Those paths explain why ordinary success need not leak, but are local-helm work, not a remote expiry guarantee while the helm is asleep/unavailable. Clean EOF also disables the watchdog by design, so no claim is made about a probe that already delivered clean EOF. The missing-flag defect does not require asserting that killing every supported Podman client necessarily leaves a live helper.\n\nExact contract at 1038bb1 and 5665983, SPEC_impl.md One route for transport and provisioning (6478-6481): 'All environment stdio routes pass `--stdin-idle-limit-secs 120` unconditionally and emit the existing 30-second heartbeat. The supported environment helper has that option. Killing a Podman exec client does not reliably end its in-container process, so the helper's own stdin watchdog supplies the bound.' The method's route is explicitly shared by provisioning; this probe is another invocation of internal stdio but bypasses that policy. A fifteen-second probe needs no steady heartbeat to stay below a 120-second deadline, so adding the environment-only option does not require turning discovery into a steady-state connection. Ordinary SSH probes must retain compatibility without this flag.\n\nAttribution caveat: the unlimited Tensorlake provisioning probe already exists at the exclusive range base (backend.rs:1566-1582). Its then-contract SPEC_impl.md:6942-6946 explicitly limited opt-in to 'Only Tensorlake's steady-state SSH command'. Thus 1038 is not alleged to newly break existing Tensorlake probe behavior. In-range c8bc155cc36723c8c53870944d07ce8ec61ef9ed replaces that narrow contract with all environment routes, 1038 adds the common policy but leaves this bypass, and 566 ships the newly supported Podman probe through it. This record reports the new route/contract mismatch and preserves that historical boundary rather than misattributing the old Tensorlake omission.\n\nSuggested bucket: other for the confirmed environment helper invocation/expiry guarantee mismatch. Could-be-highest: no established security or loss-of-work consequence. Confidence: confirmed by pinned source and contract; conditional remote orphan duration/billing was not reproduced or established beyond the documented retained-stdin premise. proposed_drop: false. possible_cover: none in the supplied neighbour records; no prohibited coverage search. No runtime tests, builds or reproductions performed. Fix direction: carry the route's environment idle-limit policy into probe_script/spawn_probe while retaining positive-absence markers, resolved-binary reporting and the ordinary SSH legacy invocation.\n\nFinal source checks: integrated backend.rs:1618 is the exact missing-flag command and access.rs:35-37 is the environment-only option constructor it bypasses. At endpoint 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db the same unlimited probe remains at backend.rs:1602-1618 (command line 1614). The exact c8bc155cc36723c8c53870944d07ce8ec61ef9ed specification diff both adds the all-environment-route rule and replaces the earlier steady-state-only exception; this attribution is from the whole range, not merely the parent of 1038. plan_update_owned is a run_owned task, which handles dropped request cancellation while the helm is executing but cannot keep its local timers/cleanup executing when its machine sleeps. Admitted environments pass its initial-coordinate guard; Podman uninstall is separately refused and is not needed for reachability. The no-watchdog invocation and new Podman Update route are source-confirmed; actual orphaning/billing incidence and external client behavior remain explicitly unobserved. No uninvestigated lead remains for the reported contract mismatch."
+          }
+        }
+      ],
+      "latest": {
+        "line": 14,
+        "event": {
+          "version": 1,
+          "kind": "finding",
+          "id": "l5",
+          "state": "open",
+          "summary": "Environment provisioning probes omit the required stdin deadline",
+          "location": "crates/farhelm-helm/src/provisioning/backend.rs:1618",
+          "detail": "# Environment provisioning probes omit the required stdin deadline\n\nReviewed assigned extraction commit: 1038bb1f4549f6896fa6e064fecf540f4548b4da. Integrated production Podman revision: 56659839785691f76da3af5d8f51b511cff4ba8b. Full-range attribution checked from 6e423e30068b62c6cfa276c6d720ee35bb70387a through 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db.\n\n## TLDR\n\nFarhelm's setup/update probe starts an environment's stdio helper without the promised two-minute input-silence limit. Its normal fifteen-second probe timeout belongs to the helm; it supplies no remote deadline if that machine stops executing while the gateway/client still holds the helper's stdin open. The confirmed defect is the missing environment invocation contract, not an observed leaked process or measured billing incident.\n\n## Details\n\nAt 1038bb1, backend.rs:1558-1572 probe_script emits exec resolved internal stdio with only an optional --state-dir. spawn_probe at 1577-1615 passes that script to remote_command, which only prepends REMOTE_RUNTIME_PREFIX and wraps the selected route. It does not use HostAccess::stdio_argv, the new common constructor that adds --stdin-idle-limit-secs 120 for environments. At integrated 5665983 the same hand-built command remains in probe_script (1606-1622) and spawn_probe (1626-1664). Podman exec therefore receives the same unlimited helper as SSH. Production reachability: service.rs:2992-3009 converts resolve_host_access into a remote ProbeTarget for admitted container rows; its update path uses probe_target_for_row and backend.probe (plan_update_owned at 1343-1373; 1715-1721 belongs instead to uninstall_plan and is not claimed as a Podman route). This is not an unreachable direct test construction.\n\nThe helper has no default watchdog: main.rs:2761 accepts an optional budget and :2822-2824 makes None wait forever. Its documented source premise is that a gateway may retain its TCP peer after a sleeping helm stops sending (2746-2751). A successful short probe normally drops its FrameWriter after handshake and calls stop_probe; backend.rs:2410-2423 explicitly closes stdin and :2287-2289 terminates/reaps the local process group. Those paths explain why ordinary success need not leak, but are local-helm work, not a remote expiry guarantee while the helm is asleep/unavailable. Clean EOF also disables the watchdog by design, so no claim is made about a probe that already delivered clean EOF. The missing-flag defect does not require asserting that killing every supported Podman client necessarily leaves a live helper.\n\nExact contract at 1038bb1 and 5665983, SPEC_impl.md One route for transport and provisioning (6478-6481): 'All environment stdio routes pass `--stdin-idle-limit-secs 120` unconditionally and emit the existing 30-second heartbeat. The supported environment helper has that option. Killing a Podman exec client does not reliably end its in-container process, so the helper's own stdin watchdog supplies the bound.' The method's route is explicitly shared by provisioning; this probe is another invocation of internal stdio but bypasses that policy. A fifteen-second probe needs no steady heartbeat to stay below a 120-second deadline, so adding the environment-only option does not require turning discovery into a steady-state connection. Ordinary SSH probes must retain compatibility without this flag.\n\nAttribution caveat: the unlimited Tensorlake provisioning probe already exists at the exclusive range base (backend.rs:1566-1582). Its then-contract SPEC_impl.md:6942-6946 explicitly limited opt-in to 'Only Tensorlake's steady-state SSH command'. Thus 1038 is not alleged to newly break existing Tensorlake probe behavior. In-range c8bc155cc36723c8c53870944d07ce8ec61ef9ed replaces that narrow contract with all environment routes, 1038 adds the common policy but leaves this bypass, and 566 ships the newly supported Podman probe through it. This record reports the new route/contract mismatch and preserves that historical boundary rather than misattributing the old Tensorlake omission.\n\nSuggested bucket: other for the confirmed environment helper invocation/expiry guarantee mismatch. Could-be-highest: no established security or loss-of-work consequence. Confidence: confirmed by pinned source and contract; conditional remote orphan duration/billing was not reproduced or established beyond the documented retained-stdin premise. proposed_drop: false. possible_cover: none in the supplied neighbour records; no prohibited coverage search. No runtime tests, builds or reproductions performed. Fix direction: carry the route's environment idle-limit policy into probe_script/spawn_probe while retaining positive-absence markers, resolved-binary reporting and the ordinary SSH legacy invocation.\n\nFinal source checks: integrated backend.rs:1618 is the exact missing-flag command and access.rs:35-37 is the environment-only option constructor it bypasses. At endpoint 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db the same unlimited probe remains at backend.rs:1602-1618 (command line 1614). The exact c8bc155cc36723c8c53870944d07ce8ec61ef9ed specification diff both adds the all-environment-route rule and replaces the earlier steady-state-only exception; this attribution is from the whole range, not merely the parent of 1038. plan_update_owned is a run_owned task, which handles dropped request cancellation while the helm is executing but cannot keep its local timers/cleanup executing when its machine sleeps. Admitted environments pass its initial-coordinate guard; Podman uninstall is separately refused and is not needed for reachability. The no-watchdog invocation and new Podman Update route are source-confirmed; actual orphaning/billing incidence and external client behavior remain explicitly unobserved. No uninvestigated lead remains for the reported contract mismatch."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g055/findings.jsonl",
+        "id": "l5",
+        "line": 14,
+        "disposition": "verified",
+        "group": "environment-provisioning-probe-omits-stdin-watchdog",
+        "reason": "Parent explicitly accepted named retain-verified proposal from claims-035 after inspecting it. The admitted environment Update probe bypasses the environment stdin policy and invokes an unlimited helper. The contract mismatch is established; actual orphan duration or billing remains conditional and unobserved. Record a verified invocation-contract defect in other, with conditional lifetime/billing consequences and full-range attribution caveat intact. Checked source/results: [\"56659839785691f76da3af5d8f51b511cff4ba8b backend.rs:1606-1622 emits internal stdio with optional state only; :1626-1664 wraps it through route.command without HostAccess::stdio_argv. access.rs:30-47 is the environment-only flag constructor it bypasses.\",\"5665983 service.rs:1343-1373 admits installed environments and calls probe_target_for_row/backend.probe; :2992-3009 converts their resolved access to Remote ProbeTarget. This proves production Update reachability, not the separately refused Podman uninstall path.\",\"5665983 farhelm/src/main.rs:2746-2751 documents a sleeping helm with retained gateway stdin; :2761,2821-2827 supplies no watchdog without a passed limit and disables it after clean EOF.\",\"Exclusive base SPEC_impl.md:6942-6946 limited the policy to Tensorlake steady-state transport. The c8bc155cc36723c8c53870944d07ce8ec61ef9ed SPEC_impl diff adds all environment routes and removes that exception. 566 ships the Podman Update path. Thus the new contract/route mismatch is in range even though old Tensorlake probes were unlimited.\",\"Endpoint 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db backend.rs:1602-1618 still omits the option. Ordinary successful cleanup/clean EOF is not alleged to leak; no runtime test performed.\"] Current coverage/results: {\"SPEC.md\":\"Container sessions promises ordinary updates in containers; no exemption for provisioning helper expiry found.\",\"SPEC_impl.md\":\"Current One route for transport and provisioning:5999-6003 requires the flag for all environment stdio routes; Tensorlake hosts preserves the no-default-watchdog/clean-EOF distinction. No short-probe exemption found.\",\"TODO.md Planned\":\"Empty.\",\"plans/queue\":\"No unlanded index entries.\",\"BUGS.md\":\"Accepted local escaped-helper transfer hang is different from a missing remote input-silence watchdog.\",\"queue INDEX and files\":\"probe-timeout-discards-parsed-remote-path.md concerns lost parser metadata at cleanup, and tunnel-helper-exit-may-block-flushing-stdout.md concerns blocking exit after the watchdog fires. Neither removes this missing flag or covers it exactly.\",\"TRIAGE_OUTCOMES.md\":\"No exact environment-probe expiry decision found.\",\"FILTER.md\":\"No filter fully matches: potential retained process lifetime is not merely a rare display/diagnostic or safe retry.\"} Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Initial lead suggested a helper outliving two minutes and possible extra process lifetime/billing. The latest record confines its verified consequence to the missing invocation/expiry contract, retaining the conditional remote-orphan premise and normal-cleanup caveat. No highest consequence was asserted.\"; \"Actual orphaning/billing incidence and external client's retained-stdin behavior were not reproduced. Local cleanup cannot run while the helm machine sleeps; clean EOF already delivered is outside the claim. No security or user-owned-work loss is established.\"."
+      },
+      "accepted_parent_decision": {
+        "key": "g055/l5",
+        "line": 14,
+        "disposition": "verified",
+        "group": "environment-provisioning-probe-omits-stdin-watchdog",
+        "bucket": "other",
+        "recording": "retain-verified",
+        "queue_target_candidate": null,
+        "needs_independent_drop_check": false,
+        "reason": "Parent explicitly accepted named retain-verified proposal from claims-035 after inspecting it. The admitted environment Update probe bypasses the environment stdin policy and invokes an unlimited helper. The contract mismatch is established; actual orphan duration or billing remains conditional and unobserved. Record a verified invocation-contract defect in other, with conditional lifetime/billing consequences and full-range attribution caveat intact. Checked source/results: [\"56659839785691f76da3af5d8f51b511cff4ba8b backend.rs:1606-1622 emits internal stdio with optional state only; :1626-1664 wraps it through route.command without HostAccess::stdio_argv. access.rs:30-47 is the environment-only flag constructor it bypasses.\",\"5665983 service.rs:1343-1373 admits installed environments and calls probe_target_for_row/backend.probe; :2992-3009 converts their resolved access to Remote ProbeTarget. This proves production Update reachability, not the separately refused Podman uninstall path.\",\"5665983 farhelm/src/main.rs:2746-2751 documents a sleeping helm with retained gateway stdin; :2761,2821-2827 supplies no watchdog without a passed limit and disables it after clean EOF.\",\"Exclusive base SPEC_impl.md:6942-6946 limited the policy to Tensorlake steady-state transport. The c8bc155cc36723c8c53870944d07ce8ec61ef9ed SPEC_impl diff adds all environment routes and removes that exception. 566 ships the Podman Update path. Thus the new contract/route mismatch is in range even though old Tensorlake probes were unlimited.\",\"Endpoint 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db backend.rs:1602-1618 still omits the option. Ordinary successful cleanup/clean EOF is not alleged to leak; no runtime test performed.\"] Current coverage/results: {\"SPEC.md\":\"Container sessions promises ordinary updates in containers; no exemption for provisioning helper expiry found.\",\"SPEC_impl.md\":\"Current One route for transport and provisioning:5999-6003 requires the flag for all environment stdio routes; Tensorlake hosts preserves the no-default-watchdog/clean-EOF distinction. No short-probe exemption found.\",\"TODO.md Planned\":\"Empty.\",\"plans/queue\":\"No unlanded index entries.\",\"BUGS.md\":\"Accepted local escaped-helper transfer hang is different from a missing remote input-silence watchdog.\",\"queue INDEX and files\":\"probe-timeout-discards-parsed-remote-path.md concerns lost parser metadata at cleanup, and tunnel-helper-exit-may-block-flushing-stdout.md concerns blocking exit after the watchdog fires. Neither removes this missing flag or covers it exactly.\",\"TRIAGE_OUTCOMES.md\":\"No exact environment-probe expiry decision found.\",\"FILTER.md\":\"No filter fully matches: potential retained process lifetime is not merely a rare display/diagnostic or safe retry.\"} Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Initial lead suggested a helper outliving two minutes and possible extra process lifetime/billing. The latest record confines its verified consequence to the missing invocation/expiry contract, retaining the conditional remote-orphan premise and normal-cleanup caveat. No highest consequence was asserted.\"; \"Actual orphaning/billing incidence and external client's retained-stdin behavior were not reproduced. Local cleanup cannot run while the helm machine sleeps; clean EOF already delivered is outside the claim. No security or user-owned-work loss is established.\"."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-035",
+          "key": "g055/l5",
+          "latest_line": 14,
+          "recommendation": "retain-verified",
+          "bucket": "other",
+          "underlying_key": "environment-provisioning-probe-omits-stdin-watchdog",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The admitted environment Update probe bypasses the environment stdin policy and invokes an unlimited helper. The contract mismatch is established; actual orphan duration or billing remains conditional and unobserved.",
+          "checks": [
+            "56659839785691f76da3af5d8f51b511cff4ba8b backend.rs:1606-1622 emits internal stdio with optional state only; :1626-1664 wraps it through route.command without HostAccess::stdio_argv. access.rs:30-47 is the environment-only flag constructor it bypasses.",
+            "5665983 service.rs:1343-1373 admits installed environments and calls probe_target_for_row/backend.probe; :2992-3009 converts their resolved access to Remote ProbeTarget. This proves production Update reachability, not the separately refused Podman uninstall path.",
+            "5665983 farhelm/src/main.rs:2746-2751 documents a sleeping helm with retained gateway stdin; :2761,2821-2827 supplies no watchdog without a passed limit and disables it after clean EOF.",
+            "Exclusive base SPEC_impl.md:6942-6946 limited the policy to Tensorlake steady-state transport. The c8bc155cc36723c8c53870944d07ce8ec61ef9ed SPEC_impl diff adds all environment routes and removes that exception. 566 ships the Podman Update path. Thus the new contract/route mismatch is in range even though old Tensorlake probes were unlimited.",
+            "Endpoint 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db backend.rs:1602-1618 still omits the option. Ordinary successful cleanup/clean EOF is not alleged to leak; no runtime test performed."
+          ],
+          "coverage_checked": {
+            "SPEC.md": "Container sessions promises ordinary updates in containers; no exemption for provisioning helper expiry found.",
+            "SPEC_impl.md": "Current One route for transport and provisioning:5999-6003 requires the flag for all environment stdio routes; Tensorlake hosts preserves the no-default-watchdog/clean-EOF distinction. No short-probe exemption found.",
+            "TODO.md Planned": "Empty.",
+            "plans/queue": "No unlanded index entries.",
+            "BUGS.md": "Accepted local escaped-helper transfer hang is different from a missing remote input-silence watchdog.",
+            "queue INDEX and files": "probe-timeout-discards-parsed-remote-path.md concerns lost parser metadata at cleanup, and tunnel-helper-exit-may-block-flushing-stdout.md concerns blocking exit after the watchdog fires. Neither removes this missing flag or covers it exactly.",
+            "TRIAGE_OUTCOMES.md": "No exact environment-probe expiry decision found.",
+            "FILTER.md": "No filter fully matches: potential retained process lifetime is not merely a rare display/diagnostic or safe retry."
+          },
+          "exact_cover_quotes": [],
+          "missing_premise": "Actual orphaning/billing incidence and external client's retained-stdin behavior were not reproduced. Local cleanup cannot run while the helm machine sleeps; clean EOF already delivered is outside the claim. No security or user-owned-work loss is established.",
+          "original_stronger_consequence": "Initial lead suggested a helper outliving two minutes and possible extra process lifetime/billing. The latest record confines its verified consequence to the missing invocation/expiry contract, retaining the conditional remote-orphan premise and normal-cleanup caveat. No highest consequence was asserted.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Record a verified invocation-contract defect in other, with conditional lifetime/billing consequences and full-range attribution caveat intact."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": true,
+        "clearly_refuted_candidate": false,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Source-confirmed by an existing parent decision; not runtime reproduced",
+        "deduplication_key": "environment-provisioning-probe-omits-stdin-watchdog",
+        "destination": "trailing-environment-provisioning-probe-omits-stdin-watchdog.md"
+      }
+    },
+    {
+      "key": "g055/c6",
+      "owner": "g055",
+      "id": "c6",
+      "domain": "environment-execution-routing",
+      "purpose": "environment-execution-routing: crates/farhelm-helm/src/access.rs, crates/farhelm-helm/src/provisioning/backend.rs, crates/farhelm-helm/src/ssh.rs, crates/farhelm-helm/src/tensorlake/shell.rs, crates/farhelm-helm/src/tensorlake/ssh.rs; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 15,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c6",
+            "state": "open",
+            "summary": "Route-resolution test covers destination changes rather than all probe metadata freshness",
+            "location": "crates/farhelm-helm/src/access.rs:476",
+            "detail": "# Route-resolution test covers destination changes rather than all probe metadata freshness\n\nReviewed commit: 56659839785691f76da3af5d8f51b511cff4ba8b.\n\n## TLDR\n\nConsidered whether the changed route-resolution test falsely certifies per-endpoint executable freshness, because its fake returns /usr/bin/podman for both endpoints. Its actual stated test and observable are narrower: it checks that access joins the current place destination, and it does distinguish that competing mechanism. No new test-oracle defect is reported from this limitation.\n\n## Details\n\naccess.rs:453-470 introduces ProbeCommands, which ignores the route and returns a fixed executable. container_access_joins_the_current_place_destination at 476-533 performs a raw destination update and then compares the complete route against before.example and after.example. A resolver retaining the old BaseRoute fails this assertion; a hypothetical implementation retaining only an old executable observation with the new BaseRoute is not distinguished because the fixture path is identical. The test name and its own explanatory comment specifically target joining the current place destination and accidental caching of that destination, not complete probe-cache validation. The separate helper comment says a current endpoint must establish its own observation but does not claim this test proves every aspect of that production invariant. This disposition rests on the test's own narrow oracle/claim match, not on production correctness as a substitute for a missing test assertion. No demand for exhaustive coverage is inferred.\n\nSuggested bucket if overstated freshness coverage were actually claimed: other/test assurance. Could-be-highest: no established security or user-work-loss route; this is a considered fixture sensitivity limitation only. Confidence: confirmed source reading and comparison of intended competing mechanisms, no execution. proposed_drop: narrow test scope and distinguishing before/after destination assertion above. possible_cover: none; no prohibited coverage search. No reproduction performed. No unresolved premise remains for this considered candidate."
+          }
+        }
+      ],
+      "latest": {
+        "line": 15,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c6",
+          "state": "open",
+          "summary": "Route-resolution test covers destination changes rather than all probe metadata freshness",
+          "location": "crates/farhelm-helm/src/access.rs:476",
+          "detail": "# Route-resolution test covers destination changes rather than all probe metadata freshness\n\nReviewed commit: 56659839785691f76da3af5d8f51b511cff4ba8b.\n\n## TLDR\n\nConsidered whether the changed route-resolution test falsely certifies per-endpoint executable freshness, because its fake returns /usr/bin/podman for both endpoints. Its actual stated test and observable are narrower: it checks that access joins the current place destination, and it does distinguish that competing mechanism. No new test-oracle defect is reported from this limitation.\n\n## Details\n\naccess.rs:453-470 introduces ProbeCommands, which ignores the route and returns a fixed executable. container_access_joins_the_current_place_destination at 476-533 performs a raw destination update and then compares the complete route against before.example and after.example. A resolver retaining the old BaseRoute fails this assertion; a hypothetical implementation retaining only an old executable observation with the new BaseRoute is not distinguished because the fixture path is identical. The test name and its own explanatory comment specifically target joining the current place destination and accidental caching of that destination, not complete probe-cache validation. The separate helper comment says a current endpoint must establish its own observation but does not claim this test proves every aspect of that production invariant. This disposition rests on the test's own narrow oracle/claim match, not on production correctness as a substitute for a missing test assertion. No demand for exhaustive coverage is inferred.\n\nSuggested bucket if overstated freshness coverage were actually claimed: other/test assurance. Could-be-highest: no established security or user-work-loss route; this is a considered fixture sensitivity limitation only. Confidence: confirmed source reading and comparison of intended competing mechanisms, no execution. proposed_drop: narrow test scope and distinguishing before/after destination assertion above. possible_cover: none; no prohibited coverage search. No reproduction performed. No unresolved premise remains for this considered candidate."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g055/findings.jsonl",
+        "id": "c6",
+        "line": 15,
+        "disposition": "excluded",
+        "group": "container-destination-test-narrow-oracle",
+        "reason": "Parent explicitly accepted named refuted proposal from claims-035 after inspecting it. The test claims and distinguishes current destination resolution. Its fixed executable cannot prove every metadata freshness invariant, but it does not claim to do so. The stated oracle distinguishes its intended competing mechanism; lack of exhaustive assertions alone is not a defect. Checked source/results: [\"56659839785691f76da3af5d8f51b511cff4ba8b access.rs:454-470 fixes /usr/bin/podman in the probe fake; :473-477 names and explains the current-place-destination oracle.\",\"access.rs:504-532 compares complete routes before.example and after.example around a raw destination update. Caching the old destination fails that oracle; caching only executable metadata would not, which is a limitation rather than this test's stated claim. No test execution.\"] Current coverage/results: {\"SPEC.md\":\"Container host probe/route requirements do not state that each individual regression must certify all probe metadata.\",\"SPEC_impl.md\":\"Current-route contract read; not used as a substitute for examining the test's oracle.\",\"TODO.md Planned\":\"Empty.\",\"plans/queue\":\"No unlanded entries.\",\"BUGS.md\":\"No test-oracle coverage.\",\"queue INDEX and files\":\"No exact destination-resolution test item in targeted searches; container-template-replacement-test-reuses-old-config.md concerns another oracle.\",\"TRIAGE_OUTCOMES.md\":\"No matching active decision.\",\"FILTER.md\":\"No filter applied; narrow source refutation.\"} Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Possible false test assurance about all executable freshness, other/test assurance; no established security or user-work-loss route. The candidate was set aside based on the test's own scope, not production correctness.\"; \"No overstated per-endpoint executable-freshness claim was identified in this test.\"."
+      },
+      "accepted_parent_decision": {
+        "key": "g055/c6",
+        "line": 15,
+        "disposition": "excluded",
+        "group": "container-destination-test-narrow-oracle",
+        "bucket": "other",
+        "recording": "refuted",
+        "queue_target_candidate": null,
+        "needs_independent_drop_check": false,
+        "reason": "Parent explicitly accepted named refuted proposal from claims-035 after inspecting it. The test claims and distinguishes current destination resolution. Its fixed executable cannot prove every metadata freshness invariant, but it does not claim to do so. The stated oracle distinguishes its intended competing mechanism; lack of exhaustive assertions alone is not a defect. Checked source/results: [\"56659839785691f76da3af5d8f51b511cff4ba8b access.rs:454-470 fixes /usr/bin/podman in the probe fake; :473-477 names and explains the current-place-destination oracle.\",\"access.rs:504-532 compares complete routes before.example and after.example around a raw destination update. Caching the old destination fails that oracle; caching only executable metadata would not, which is a limitation rather than this test's stated claim. No test execution.\"] Current coverage/results: {\"SPEC.md\":\"Container host probe/route requirements do not state that each individual regression must certify all probe metadata.\",\"SPEC_impl.md\":\"Current-route contract read; not used as a substitute for examining the test's oracle.\",\"TODO.md Planned\":\"Empty.\",\"plans/queue\":\"No unlanded entries.\",\"BUGS.md\":\"No test-oracle coverage.\",\"queue INDEX and files\":\"No exact destination-resolution test item in targeted searches; container-template-replacement-test-reuses-old-config.md concerns another oracle.\",\"TRIAGE_OUTCOMES.md\":\"No matching active decision.\",\"FILTER.md\":\"No filter applied; narrow source refutation.\"} Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Possible false test assurance about all executable freshness, other/test assurance; no established security or user-work-loss route. The candidate was set aside based on the test's own scope, not production correctness.\"; \"No overstated per-endpoint executable-freshness claim was identified in this test.\"."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-035",
+          "key": "g055/c6",
+          "latest_line": 15,
+          "recommendation": "refuted",
+          "bucket": "other",
+          "underlying_key": "container-destination-test-narrow-oracle",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The test claims and distinguishes current destination resolution. Its fixed executable cannot prove every metadata freshness invariant, but it does not claim to do so.",
+          "checks": [
+            "56659839785691f76da3af5d8f51b511cff4ba8b access.rs:454-470 fixes /usr/bin/podman in the probe fake; :473-477 names and explains the current-place-destination oracle.",
+            "access.rs:504-532 compares complete routes before.example and after.example around a raw destination update. Caching the old destination fails that oracle; caching only executable metadata would not, which is a limitation rather than this test's stated claim. No test execution."
+          ],
+          "coverage_checked": {
+            "SPEC.md": "Container host probe/route requirements do not state that each individual regression must certify all probe metadata.",
+            "SPEC_impl.md": "Current-route contract read; not used as a substitute for examining the test's oracle.",
+            "TODO.md Planned": "Empty.",
+            "plans/queue": "No unlanded entries.",
+            "BUGS.md": "No test-oracle coverage.",
+            "queue INDEX and files": "No exact destination-resolution test item in targeted searches; container-template-replacement-test-reuses-old-config.md concerns another oracle.",
+            "TRIAGE_OUTCOMES.md": "No matching active decision.",
+            "FILTER.md": "No filter applied; narrow source refutation."
+          },
+          "exact_cover_quotes": [],
+          "missing_premise": "No overstated per-endpoint executable-freshness claim was identified in this test.",
+          "original_stronger_consequence": "Possible false test assurance about all executable freshness, other/test assurance; no established security or user-work-loss route. The candidate was set aside based on the test's own scope, not production correctness.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "The stated oracle distinguishes its intended competing mechanism; lack of exhaustive assertions alone is not a defect."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "container-destination-test-narrow-oracle",
+        "destination": null
+      }
+    },
+    {
+      "key": "g055/c7",
+      "owner": "g055",
+      "id": "c7",
+      "domain": "environment-execution-routing",
+      "purpose": "environment-execution-routing: crates/farhelm-helm/src/access.rs, crates/farhelm-helm/src/provisioning/backend.rs, crates/farhelm-helm/src/ssh.rs, crates/farhelm-helm/src/tensorlake/shell.rs, crates/farhelm-helm/src/tensorlake/ssh.rs; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 16,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c7",
+            "state": "open",
+            "summary": "Skipping the private Podman path in JSON does not erase the retained execution route",
+            "location": "crates/farhelm-helm/src/access.rs:120",
+            "detail": "# Skipping the private Podman path in JSON does not erase the retained execution route\n\nReviewed commit: 56659839785691f76da3af5d8f51b511cff4ba8b.\n\n## TLDR\n\nConsidered whether omitting the private Podman executable from serialized confirmation plans could let execution silently substitute a different program. The plan retained by the helm still contains the original full route; serialization is not the authority used to reconstruct it. No new defect is established by the omitted JSON field.\n\n## Details\n\naccess.rs:110-126 derives Serialize for RemoteRoute and skips only the private podman PathBuf. It does not derive Deserialize or reconstruct a route from client plan JSON. ProvisioningTarget and ProvisioningPlan retain typed RemoteRoute values and derive PartialEq/Eq (provisioning/plan.rs:55-60 and 545-551). ProcessCommand::command at access.rs:173-185 uses its retained program/args, rather than a public JSON description. Provisioning revalidate at service.rs:2216-2350 consumes PendingPlan and its typed retained original_target/target; the Add installed-target branch explicitly clones pending.plan.target. The interface therefore does not establish the suspected serialization-to-executable substitution. The omission matches the field contract, 'Current private probe input, never a persisted binding or public plan field.' No claim is made that generic shell quoting alone supplies executable authority, or that all future users of these types would be safe.\n\nSuggested bucket for this considered serialization correctness concern: other absent a concrete unsafe target route. Could-be-highest: no established security or user-work-loss route; the considered missing-authority premise is refuted by retained typed state. Confidence: confirmed source refutation for this serializer boundary, no execution. proposed_drop: source refutation above; parent disposition not assumed. possible_cover: none; no prohibited coverage source read. No runtime test or reproduction performed. No open premise remains for this narrow concern."
+          }
+        }
+      ],
+      "latest": {
+        "line": 16,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c7",
+          "state": "open",
+          "summary": "Skipping the private Podman path in JSON does not erase the retained execution route",
+          "location": "crates/farhelm-helm/src/access.rs:120",
+          "detail": "# Skipping the private Podman path in JSON does not erase the retained execution route\n\nReviewed commit: 56659839785691f76da3af5d8f51b511cff4ba8b.\n\n## TLDR\n\nConsidered whether omitting the private Podman executable from serialized confirmation plans could let execution silently substitute a different program. The plan retained by the helm still contains the original full route; serialization is not the authority used to reconstruct it. No new defect is established by the omitted JSON field.\n\n## Details\n\naccess.rs:110-126 derives Serialize for RemoteRoute and skips only the private podman PathBuf. It does not derive Deserialize or reconstruct a route from client plan JSON. ProvisioningTarget and ProvisioningPlan retain typed RemoteRoute values and derive PartialEq/Eq (provisioning/plan.rs:55-60 and 545-551). ProcessCommand::command at access.rs:173-185 uses its retained program/args, rather than a public JSON description. Provisioning revalidate at service.rs:2216-2350 consumes PendingPlan and its typed retained original_target/target; the Add installed-target branch explicitly clones pending.plan.target. The interface therefore does not establish the suspected serialization-to-executable substitution. The omission matches the field contract, 'Current private probe input, never a persisted binding or public plan field.' No claim is made that generic shell quoting alone supplies executable authority, or that all future users of these types would be safe.\n\nSuggested bucket for this considered serialization correctness concern: other absent a concrete unsafe target route. Could-be-highest: no established security or user-work-loss route; the considered missing-authority premise is refuted by retained typed state. Confidence: confirmed source refutation for this serializer boundary, no execution. proposed_drop: source refutation above; parent disposition not assumed. possible_cover: none; no prohibited coverage source read. No runtime test or reproduction performed. No open premise remains for this narrow concern."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g055/findings.jsonl",
+        "id": "c7",
+        "line": 16,
+        "disposition": "under-investigation",
+        "group": "g055-c7",
+        "reason": "Record durably acknowledged; parent source/contract validation, cross-group synthesis, coverage/filter matching and any independent drop check remain pending. This preserves the claim and uncertainty without accepting, dropping or lowering it."
+      },
+      "accepted_parent_decision": null,
+      "returned_claim_checks": [
+        {
+          "batch": "claims-035",
+          "key": "g055/c7",
+          "latest_line": 16,
+          "recommendation": "refuted",
+          "bucket": "other",
+          "underlying_key": "private-podman-plan-json-not-execution-authority",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "Execution retains the typed route, including the private executable; it does not deserialize the public confirmation JSON to reconstruct authority.",
+          "checks": [
+            "56659839785691f76da3af5d8f51b511cff4ba8b access.rs:110-126 derives Serialize only and skips private podman; :173-185 executes retained program/args.",
+            "5665983 provisioning/plan.rs:53-74 and :544-551 retain typed RemoteRoute and equality in target/plan. service.rs:2216-2355 takes PendingPlan by reference and revalidates original/retained targets; :2231-2234 clones pending.plan.target rather than consuming public JSON. No execution performed."
+          ],
+          "coverage_checked": {
+            "SPEC.md": "No permission to substitute an executable found or needed.",
+            "SPEC_impl.md": "Shared route/confirmation shape contract agrees with retaining private execution facts; not an acceptance of substitution.",
+            "TODO.md Planned": "Empty.",
+            "plans/queue": "No unlanded entries.",
+            "BUGS.md": "No matching acceptance.",
+            "queue INDEX and files": "No exact public-plan/private-Podman-authority item found by targeted searches.",
+            "TRIAGE_OUTCOMES.md": "No exact active decision found.",
+            "FILTER.md": "No filter applied."
+          },
+          "exact_cover_quotes": [],
+          "missing_premise": "No JSON-to-route reconstruction or concrete unsafe executable substitution is established. Future arbitrary consumers of these types remain outside this check.",
+          "original_stronger_consequence": "Omitting the private executable from confirmation JSON might permit silent program substitution. Reviewer suggested other absent a concrete unsafe target route; this authority question could nevertheless implicate security if that missing route existed.",
+          "needs_independent_drop_check": true,
+          "proposed_basis": "Narrow source refutation of serialized confirmation JSON as execution authority; send any security-sensitive dismissal to the parent's independent check."
+        }
+      ],
+      "parent_proposals": [
+        {
+          "artifact": "parent-flagged-judgments-035.json",
+          "key": "g055/c7",
+          "proposal": "claim-checks/claims-035/result.json",
+          "parent_proposal": "source-refuted-public-plan-JSON-reconstruction-as-execution-authority",
+          "final_independent_gate": "required-before-possible-security-drop",
+          "reason": "Full035 typed RemoteRoute/private executable remains in retained PendingPlan and equality/revalidation; public JSON is Serialize-only and skips private executable. Execution clones retained target, not deserialized confirmation JSON. Refute only alleged reconstruction/program substitution through this actual consumer, not all future consumers or arbitrary executable trust. Original possible silent executable authority concern preserved for the fresh gate despite no concrete harmful target route."
+        }
+      ],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": true,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "private-podman-plan-json-not-execution-authority",
+        "destination": null
+      }
+    }
+  ],
+  "replies": [
+    {
+      "turn": 1,
+      "reply": "Initial pass complete: all nine assigned patches reviewed, covering 1,549 lines.\n\nNo confirmed defects or unresolved leads. Recorded candidates `l1`, `c2`, `c3`, and `c4` with source-based dispositions in `findings.jsonl`; updated `progress.md`.\n\nSource-only review. No tests, reproductions, or checkout changes."
+    },
+    {
+      "turn": 2,
+      "reply": "- Revised `c4`: retarget protection begins at registration and does not validate an earlier pending approval. Source checks corroborate `g020/l1`, including configured credential delivery; the highest/security consequence remains explicit.\n- Revised `c3`: separated shell escaping from independently checked option boundaries.\n- No new independent findings. Unresolved lead IDs: none. Updated the durable log and progress."
+    },
+    {
+      "turn": 3,
+      "reply": "New discovery: **yes**.\n\n- Verified `l5`: environment provisioning probes omit the required stdin deadline. Checked callers, EOF/cleanup behavior, specification history, and endpoint persistence.\n- Candidate `c6`: recorded the route test’s narrow oracle; no defect established.\n- New unverified findings: none.\n- Open leads: none.\n\nReconciled both supplied proxy findings without duplicating them. Updated the durable log and discovery progress. No runtime execution."
+    },
+    {
+      "turn": 4,
+      "reply": "Discovery pass 2 found **no new defect**.\n\n- Checked retained routes/serialization, process ownership, builder authentication, remote filesystem conversions, and test/doc contracts.\n- Recorded candidate disposition `c7`.\n- New verified IDs: none.\n- New unverified IDs: none.\n- Open leads: none.\n\nUpdated progress. No runtime execution."
+    },
+    {
+      "turn": 5,
+      "reply": "Revised `c4`: retracted “no specification acceptance.” Recorded the competing logical-entry acceptance and card-machine promise, while preserving the registration boundary and conditional highest/security consequence.\n\nPrecedence is explicit: `SPEC.md` wins. Its applicability to a pending container-place card remains unresolved.\n\nUnresolved lead IDs: `c4` only. No new findings."
+    },
+    {
+      "turn": 6,
+      "reply": "Closed `c4` as an alias/candidate of `g020/l1`, labelled **“unverified after investigation.”** Preserved all evidence, conditional highest harm, phase distinctions, and proposed-drop bases.\n\nOpen lead IDs: none. No new findings."
+    },
+    {
+      "turn": 7,
+      "reply": "Discovery pass 3 found **nothing new**.\n\nChecked registry-to-route validation, executable/login representation, environment scrubbing, upload handoffs, process ownership, and later comment patches.\n\n- New verified IDs: none.\n- New unverified IDs: none.\n- Open leads: none.\n\nUpdated progress. No runtime execution."
+    }
+  ],
+  "progress": "Group g055: environment execution routing.\nTurn: discovery (7), complete. Discovery passes: 3.\nCoverage: initial mandatory delivery and synthesis remain caller-audited; no unread assigned material. Read the complete refreshed discovery-neighbours.json first (2026-11-13T19:52:33.728Z, 298121 bytes) in eighteen bounded packets through EOF. The one-record packet at line74 is 18627 bytes; all packets fit 24000 bytes and none clipped. Named pending questions: none. Refreshed neighbour records were context/novelty only; none adopted as a new discovery.\nUseful checks this pass: compared foundation store-to-route conversion, ordinary-base eligibility, missing-binding/destination/canonical-ID error boundaries and current login/executable representation; inspected child-local environment removal and container argv explicit HOME/USER/LOGNAME/runtime-directory inputs; checked Tensorlake route identity/path resolution remains non-creating; traced backend remote mode repair/removal and upload-source/remote-put handoff for destination authority, unchanged verification, stdin ownership, process groups and transfer capture; checked the two later assigned tmux/scrubbing comment patches at their recorded revisions against previously established contracts. No independent substantive source lead emerged.\nResults: nothing new found. New verified finding IDs: none. New unverified-after-investigation IDs: none. New candidate IDs: none. Open source lead IDs: none. Findings log required no new event this turn; all earlier dispositions, original consequences, proposed-drop bases and owners preserved. c4 remains a completed investigated-uncertainty alias of g020/l1 and was not reopened or counted as an open source lead.\nNo parent drop/lowering accepted. No tests/builds/reproductions/runtime checks/live-install actions, nested agents, source edits or prohibited coverage-source searches. Only this private progress artifact was updated; no separate final report file created.\nNext: return this pass's checks, empty new-ID/open-lead sets and explicit empty discovery result to caller. This turn performed one separate post-audit discovery pass only.\n"
+}

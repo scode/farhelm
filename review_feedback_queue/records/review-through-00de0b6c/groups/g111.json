@@ -1,0 +1,774 @@
+{
+  "group": {
+    "id": "g111",
+    "domain": "supervisor-core-integration",
+    "purpose": "supervisor-core-integration: crates/farhelm-supervisor/src/service/core.rs; phases @@ -4927,41 +4728,12 @@ pub struct Supervisor {",
+    "interfaces": [
+      "g001",
+      "g007",
+      "g008",
+      "g009",
+      "g096",
+      "g097",
+      "g098",
+      "g099",
+      "g100",
+      "g101",
+      "g102",
+      "g103",
+      "g104",
+      "g105",
+      "g106",
+      "g107",
+      "g108",
+      "g109",
+      "g110",
+      "g112",
+      "g113",
+      "g114",
+      "g115",
+      "g116",
+      "g117",
+      "g118",
+      "g119",
+      "g120",
+      "g121",
+      "g122",
+      "g123",
+      "g124",
+      "g125",
+      "g126",
+      "g127",
+      "g128",
+      "g129",
+      "g130",
+      "g131",
+      "g132",
+      "g133",
+      "g134",
+      "g149",
+      "g150",
+      "g159",
+      "g160",
+      "g161",
+      "g162",
+      "g163",
+      "g164",
+      "g165",
+      "g166",
+      "g167",
+      "g168",
+      "g169",
+      "g170",
+      "g171",
+      "g172",
+      "g173"
+    ],
+    "sources": [
+      {
+        "path": "[private-run]/prep/parts/00923-001.patch",
+        "ranges": [
+          [
+            1,
+            999
+          ]
+        ],
+        "original_path": "crates/farhelm-supervisor/src/service/core.rs",
+        "commit": "1ed482dde220452e424973faf38a5e1318986333",
+        "notes": "@@ -4927,41 +4728,12 @@ pub struct Supervisor {; patch character offsets [59510,119086)",
+        "lines": 999,
+        "bytes": 59672,
+        "start": 59510,
+        "end": 119086,
+        "original": "[private-run]/prep/originals/00923.patch"
+      }
+    ],
+    "lines": 999,
+    "bytes": 59672
+  },
+  "records": [
+    {
+      "key": "g111/l1",
+      "owner": "g111",
+      "id": "l1",
+      "domain": "supervisor-core-integration",
+      "purpose": "supervisor-core-integration: crates/farhelm-supervisor/src/service/core.rs; phases @@ -4927,41 +4728,12 @@ pub struct Supervisor {",
+      "history": [
+        {
+          "line": 1,
+          "event": {
+            "version": 1,
+            "kind": "lead",
+            "id": "l1",
+            "state": "open",
+            "summary": "Check old-terminal shutdown proof before treating tmux clone claims as abandoned",
+            "location": "crates/farhelm-supervisor/src/service/core.rs:7838",
+            "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. TLDR: startup could discard protection for a working clone checkout if an old terminal can remain alive after migration shutdown. Source basis: assigned patch 00923-001.patch lines 650–670 changes the old-kind branch of spare_claims_at_startup to TerminalKind::Tmux => false because startup ended old terminals; lines 297–314 call OldTerminals::end_private_server without a Result propagation. This is an investigation lead, not a finding. Need to check end_private_server failure contract, reload conversion and clone sweep ownership rules before concluding anything. Suggested bucket: potentially highest (user-owned working checkout loss) only if a surviving old terminal and destructive sweep route are established; otherwise other/unresolved. Confidence: unverified, investigation pending. Could-be-highest: yes. proposed_drop: false. possible_cover: none; coverage sources not searched. No execution or reproduction performed. Exact missing premise: whether failed old-terminal teardown can still reach this unconditional abandoned classification and whether the sweep can remove a live checkout."
+          }
+        },
+        {
+          "line": 2,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "l1",
+            "state": "open",
+            "summary": "Failed old-terminal teardown leaves an unprotected spare claim; proposed drop under explicit migration policy",
+            "location": "crates/farhelm-supervisor/src/service/core.rs:7843",
+            "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. TLDR: if migration cannot end an old terminal or its clone process, startup can remove the private spare it is still updating, so that already-ended launch cannot continue successfully. Original suspected consequence was loss of a working checkout; the available source does not establish that consequence. Details: core.rs:7822–7866 unconditionally classifies a stored tmux terminal as not live; core.rs:8065–8070 passes that snapshot to repo_cache::sweep. spare_checkouts.rs:542–556 removes generated claim directories unless the snapshot protects the session/generation. old_terminals.rs:162–168 and :176–200 deliberately return after teardown failures; module docs :67–78 confirm failures do not stop startup. A spare take has no cache lock (SPEC_impl.md:3983–3986), so the cache sweep lock does not exclude an ongoing take. Source establishes a route to deleting the old launch's private claimed spare if old-process teardown fails, not execution-observed behavior. Could-be-highest: the initial working-checkout-loss hypothesis was considered, but source and contracts restrict the removal to private spare content; actual allocated checkout content is moved out before post-clone commands and the agent run (SPEC_impl.md:4009–4020). No route to deleting the allocated checkout or ordinary user work is established. Suggested bucket: other under the migration's explicit treatment of these sessions as ended; at most high if continuing an unsuccessfully stopped old clone is supposed to be supported. Confidence: confirmed source route, proposed policy drop. proposed_drop: SPEC.md, Terminal experience, lines 3014–3018 (pinned revision): 'A failure to end the server or to stop what ran there is logged and never stops the supervisor from starting; those sessions are treated as ended all the same, accepting that a Restart could then start a second agent beside one still running.' SPEC.md, Managed checkouts, lines 1753–1755: 'Nothing under `.farhelm-spares` that Farhelm did not put there is protected: a spare or building folder there that was removed and recreated, or otherwise replaced, is out of band, and Farhelm may adopt it and delete it'. Independent check should confirm that the explicit old-session-ended policy also permits cleanup of a surviving old clone claim; the general live-claim retention text at SPEC_impl.md:3965–3969 is broader and could otherwise suggest preserving it. possible_cover: none; prohibited coverage sources not searched. Checks made: pinned old-terminal shutdown contract, exact spare liveness branch, startup sweep caller, confined private-name deletion, and complete owned-checkout contracts. No runtime tests or reproductions. Material caveat: this is a teardown-failure residual during the intentional old-terminal migration, not normal terminal-host recovery."
+          }
+        },
+        {
+          "line": 6,
+          "event": {
+            "version": 1,
+            "kind": "lead",
+            "id": "l1",
+            "state": "open",
+            "summary": "Reopened policy check: live legitimate spare claims are not covered by the replacement exception",
+            "location": "crates/farhelm-supervisor/src/service/core.rs:7843",
+            "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. TLDR: startup can expose a still-running old launch's private spare claim to removal after failed migration teardown; whether this violates the specific live-claim-retention promise remains unresolved. Original suspected consequence: deleting user-owned work in an allocated checkout. Prior narrowing: source establishes private claimed-spare removal but no allocated-checkout deletion route. This synthesis corrects the proposed-drop rationale: SPEC.md:1753–1755 only puts content Farhelm did not put there, or replaced/out-of-band folders, outside protection. It does not itself authorize deleting a legitimate still-running claim. SPEC.md:1748–1752 and SPEC_impl.md:3965–3969 specifically retain live clone claims and uncertain liveness; SPEC.md:3014–3016 and SPEC_impl.md:2922–2927 treat old sessions as ended even when migration teardown fails. Need determine whether the latter is an exception to the former, and establish source confinement of deletion versus moving content into the allocated checkout. Parent reports g109/g112 support accepted surviving-old-agent fallback, not spare cleanup specifically; no parent drop was accepted. Suggested bucket: other or high for interrupted clone preparation under the established route; highest only if allocated/user-owned work loss is established. Could-be-highest: original work-loss hypothesis is preserved and will be checked through actual move/identity ordering. Confidence: confirmed source route to unprotected legitimate claim, policy interpretation unverified after prior investigation. proposed_drop: withdrawn pending reconciliation; the replacement exception is not a sufficient basis. possible_cover: none; no coverage sources searched. Next checks: actual take's opened handles, destination validation, no-replace move ordering, confined remover, preparation/agent phase ordering, and independent attachment/retry call chains. No runtime execution or reproductions."
+          }
+        },
+        {
+          "line": 8,
+          "event": {
+            "version": 1,
+            "kind": "lead",
+            "id": "l1",
+            "state": "open",
+            "summary": "Opened removal handles may follow claimed subdirectories into the allocated checkout",
+            "location": "crates/farhelm-supervisor/src/service/core.rs:7843",
+            "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. New synthesis evidence invalidates a blanket confinement claim: spare_checkouts.rs:611–618 parks and verifies the claim root, then checkout_trash.rs:320–349 retains opened child-directory handles on a traversal stack. Concurrent spare_take.rs:156–174 moves entries from its already-open candidate.directory into its already-open allocated destination. A remover that opened a child before its rename can keep traversing that same child after the take moves it into the allocated checkout; the final name/identity check at checkout_trash.rs:374–380 runs after recursive child deletion. This is an unresolved source interleaving, not an executed bug. The initial suspected consequence of deleting user-owned allocated-checkout work must therefore remain live until phase/caller analysis settles it. Existing confirmed consequence remains removal of a legitimate still-running old clone's claim after failed migration teardown. Missing premise: does the take's final unlink of the original claim name (spare_take.rs:176–181) always fail after cleanup parks it, thereby preventing hook/agent work before any affected traversal completes; and can shipped callers allow another session to use the allocated checkout during this interval? Suggested bucket: potentially highest if a route to deleting actual user work is established, otherwise other/high for failed preparation or damaged partial clone. Could-be-highest: yes. Confidence: source-supported interleaving lead; not yet a finding of work loss. proposed_drop: false pending those checks; old-session-ended exception does not by itself settle deletion outside disposable claim contents, and the out-of-band replacement rule is inapplicable to a legitimate claim. possible_cover: none. Checks actually made: take's destination handles, identity checks and fd-relative moves; namespace parking; remover's retained descriptors and late final-name check; preparation runs hook only after take succeeds (launch.rs:1904–1945). Next: resolve final-unlink and allocated-checkout borrower premises before concluding confinement. No runtime tests or reproductions."
+          }
+        },
+        {
+          "line": 10,
+          "event": {
+            "version": 1,
+            "kind": "lead",
+            "id": "l1",
+            "state": "open",
+            "summary": "Allocated-checkout work-loss route depends on retained borrowers and predecessor liveness behavior",
+            "location": "crates/farhelm-supervisor/src/service/core.rs:7843",
+            "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. New checks: spare_take.rs:176–181 attempts to remove the claim's original name after moving entries; if startup has parked it under trash, that unlink fails and :181 returns Err before merge, hook or the origin agent. launch.rs:1904–1913 therefore aborts that origin's preparation. This refutes loss of work authored by the origin's own later hook/agent through this interleaving. It does not yet prove confinement to disposable contents: remove_opened_tree_with retains opened children across their move into the destination (:320–349) and validates the final name only after recursive deletion (:374–380). A separate existing host-backed session is permitted to use incomplete allocated contents: core.rs:12202–12217 restricts Ready only for the origin and explicitly permits borrowers; store.rs:3389–3393 admits existing-directory sessions with ancestor memberships rather than preparation. Such a session can survive the update and write moved content while the remover still holds that directory. Original possible work-loss consequence remains potentially highest through this borrower route, while isolated origin preparation damage is narrower. Before concluding a regression, need compare the predecessor's tmux driver after no_server_after_startup: its pane snapshot may already have treated old claims as absent, or may have returned uncertainty protecting every claim. Also verify the relevant older shim used the same handle/move ordering. Suggested bucket: potentially highest if that source route is reachable and attributable; no lowering for rarity. Confidence: source-supported lead; policy exception still ambiguous. proposed_drop: false pending predecessor and historical-shim checks. possible_cover: none. No execution, tests or reproductions."
+          }
+        },
+        {
+          "line": 11,
+          "event": {
+            "version": 1,
+            "kind": "lead",
+            "id": "l1",
+            "state": "open",
+            "summary": "Legacy-claim risk predates the assigned driver-removal patch; blanket confinement remains unproved",
+            "location": "crates/farhelm-supervisor/src/service/core.rs:7843",
+            "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333; predecessor checked: dbfc69751215dbf15e1d31d5bed73c3754c4ebc4. New attribution result: this assigned patch did not newly stop protecting old claims. Its parent core.rs:6433–6438 calls the migration and then no_server_after_startup unconditionally. Parent tmux.rs:3041–3042 sets presence absent; :2534–2542 emits the synthetic NoServer failure without running tmux; :2983 forwards that refusal; :4907–4923 interprets it as an empty pane map. Parent core.rs:8173–8188 then treats both empty-address and recorded-address tmux rows as absent. The new TerminalKind::Tmux => false is equivalent for this scenario. Thus the original proposed regression at :7843 is refuted by predecessor source, independently of the disputed migration policy. However, the broader migration risk cannot be dismissed as confined solely to disposable claim content: the retained-directory traversal/move interaction recorded earlier still applies. Historical shim check: diff from spare-take introduction 1d2ff45e4e5a2de2a6ff9bcc1aac9a9eba647199 to the reviewed revision changes Git flags, ancestry checking and launch-file enum handling, not claim handles, destination identities, .git-first fd-relative moves or final unlink ordering, so an older tmux shim can have that shape. Origin hook/agent continuation remains refuted by the renamed-claim unlink failure, but other retained host sessions may use incomplete contents (core.rs:12202–12217; store.rs:3389–3393), and host-backed tabs are explicitly spared by the migration (old_terminals.rs:399–401). Need final classification of the retained-handle route and policy ambiguity; no new runtime evidence. Original suspected work-loss consequence preserved: a borrowed allocated directory could receive new work after entries move while cleanup still traverses an already-open child. Suggested bucket: potentially highest if this route is established; the isolated clone-failure consequence is narrower. Could-be-highest: yes. Confidence: confirmed source equivalence for the assigned change, source-supported broader lead. proposed_drop: from this assigned patch only, on predecessor equivalence; not a policy acceptance or refutation of the broader migration risk. possible_cover: parent reports g109/g112 review the old-agent fallback, but not spare sweep specifically; no independent coverage search. No tests or reproductions."
+          }
+        },
+        {
+          "line": 12,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "l1",
+            "state": "open",
+            "summary": "Migration can let spare cleanup follow moved directories into a retained checkout",
+            "location": "crates/farhelm-supervisor/src/service/core.rs:7843",
+            "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. Attribution: the same behavior already exists in its immediate predecessor dbfc69751215dbf15e1d31d5bed73c3754c4ebc4 (the old-terminal migration); the assigned driver-removal patch preserves it. TLDR: after migration fails to stop an old checkout preparation, startup can remove its still-live spare claim. Cleanup can keep traversing a directory after the old shim moves it into the allocated checkout, so work written there by another surviving session can be deleted. This restores the original possible work-loss consequence on a narrower, source-established route; it is not a claim that the allocated checkout root itself is recursively selected by pathname.  Details and exact ordering: (1) core.rs:7843 marks every old-kind row not live regardless of teardown success, and :8065–8070 sends that snapshot to repo_cache::sweep. repo_cache.rs:120–138 takes only the repository cache lock; spare_take.rs:38–40 explicitly takes no such lock, so it does not exclude an ongoing take. Migration agent sweep failures/timeouts are logged and startup continues (old_terminals.rs:306–318, :351–356). (2) A take validates the allocated directory's dev/inode and canonical path, opens the checkout root O_DIRECTORY|O_NOFOLLOW, then opens the allocated destination and private namespace as separate confined handles (spare_take.rs:295–329, :351–370). Before moving, :142–153 rechecks destination identity and emptiness, enumerates the source and preflights entries; :148–151 orders .git first. The move at :156–174 renames each child from the retained claim directory fd into the retained allocated destination fd, without overwriting. The allocation directory is not replaced. (3) In parallel, spare_checkouts.rs:611–618 opens/verifies the legitimate claim, parks its root under a private trash name, opens/verifies that root and calls remove_opened_tree. checkout_trash.rs:320–349 traverses child directories through retained opened handles. If it opens a child before the take moves that child into the destination, the handle continues to name the moved child. Recursive deletion proceeds through it; the source-name identity check at :374–380 is only after that child's contents were traversed. It can then report that the old source name vanished, but already-deleted content is not restored. No claim-root identity check prevents this movement of descendants out from under an active traversal. (4) Parking the claim makes the take's final unlink of its original claim name fail (spare_take.rs:176–181). That returns an error, so the origin's own merge, configured post-clone command and agent do not run (launch.rs:1904–1913, :1922–1945); this refutes work loss from that origin's later agent/hook. It does not protect an independent existing host-backed session in the allocated directory. Such a borrower is a shipped supported route: an existing-directory create attaches ancestor membership without inheriting preparation (store.rs:3389–3393), and core.rs:12202–12217 explicitly permits borrowers to use incomplete contents while restricting Ready only for the origin. That host-backed session survives migration. It can write new files or Git work into an already-moved child while cleanup still traverses that child, and those writes are ordinary user-owned checkout work, not replacements under .farhelm-spares. A host-backed tab is another possible surviving writer; old_terminals.rs:399–401 skips its launch record during old-tab cleanup. The finding does not require admitting a new client during startup: the borrower can already be running before the update.  Historical/attribution checks: spare_take introduction 1d2ff45e4e5a2de2a6ff9bcc1aac9a9eba647199 predates terminal hosts. Its diff to the reviewed revision changes Git flags, ancestry checking and launch-file enum handling, not the relevant opened handles, .git-first moves or unlink ordering, establishing an older tmux shim with this shape. The predecessor core.rs:6433–6438 already runs migration then unconditionally sets no_server_after_startup. Predecessor tmux.rs:3041–3042 sets presence absent; :2534–2542 and :2983 synthesize NoServer, and :4907–4923 returns an empty pane map. Predecessor core.rs:8173–8188 therefore already omitted protection for old claims. Do not attribute a new regression solely to the assigned :7843 simplification; forward this migration-specific route to the parent for cross-group ownership.  Contract and policy: SPEC.md, Managed checkouts, :1748–1752 says 'Startup removes leftover building and claimed directories except claims still in a live launch’s clone stage' (straight-apostrophe spelling in the pinned source); SPEC_impl.md:3965–3969 retains a still-live NotStarted/clone claim and says failed or uncertain liveness observations retain possible claims. SPEC.md, Terminal experience, :3014–3016 says 'A failure to end the server or to stop what ran there is logged and never stops the supervisor from starting; those sessions are treated as ended all the same, accepting that a Restart could then start a second agent beside one still running.' The isolated legitimate-claim cleanup remains a policy ambiguity: that broad migration-ended rule does not expressly say whether it overrides the specific live-claim retention rule. Source/contracts alone cannot settle that authorial intent; maintainer clarification of that override would settle it. It is not sufficient to cite SPEC.md:1753–1755's replaced/out-of-band-spare rule: this is a legitimate live claim, and borrower writes after movement are outside the private spare namespace. Nor does permission to leave an old process running or start another expressly accept deleting work of a retained host-backed borrower. Parent's g109/g112 reports concern the surviving-old-agent fallback, not this traversal route.  Suggested bucket: highest for the established opened-handle/borrower work-loss route; other/high only for isolated preparation failure when no other session writes moved contents. Could-be-highest: yes; original work-loss hypothesis was narrowed, initially lowered, then restored for this distinct borrower route. Confidence: source-supported concurrency route, not observed execution; the exact scheduling requires cleanup to open a child before movement and a retained writer to act before that traversal ends. Rarity does not lower the consequence. proposed_drop: false for the migration issue; no parent policy drop accepted. The claim that this assigned patch newly introduces it is refuted by predecessor equivalence, which is an attribution correction, not a refutation of the route. possible_cover: parent reports g109/g112 cover accepted old-agent fallback but not spare sweep; no queued findings or excluded metadata searched. No runtime tests, builds or reproductions performed. A fix would preserve uncertain legacy claim protection until cleanup is known safe, or establish exclusion/ownership that prevents a remover following a concurrently moved subtree; the existing namespace and destination identity checks alone do not provide that exclusion."
+          }
+        },
+        {
+          "line": 13,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "l1",
+            "state": "open",
+            "summary": "Migration can let spare cleanup follow moved directories into a retained checkout",
+            "location": "crates/farhelm-supervisor/src/service/core.rs:7843",
+            "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. Attribution: the same behavior already exists in its immediate predecessor dbfc69751215dbf15e1d31d5bed73c3754c4ebc4 (the old-terminal migration); the assigned driver-removal patch preserves it. TLDR: after migration fails to stop an old checkout preparation, startup can remove its still-live spare claim. Cleanup can keep traversing a directory after the old shim moves it into the allocated checkout, so work written there by another surviving session can be deleted. This restores the original possible work-loss consequence on a narrower, source-established route; it is not a claim that the allocated checkout root itself is recursively selected by pathname.  Details and exact ordering: (1) core.rs:7843 marks every old-kind row not live regardless of teardown success, and :8065–8070 sends that snapshot to repo_cache::sweep. repo_cache.rs:120–138 takes only the repository cache lock; spare_take.rs:38–40 explicitly takes no such lock, so it does not exclude an ongoing take. Migration agent sweep failures/timeouts are logged and startup continues (old_terminals.rs:306–318, :351–356). (2) A take validates the allocated directory's dev/inode and canonical path, opens the checkout root O_DIRECTORY|O_NOFOLLOW, then opens the allocated destination and private namespace as separate confined handles (spare_take.rs:295–329, :351–370). Before moving, :142–153 rechecks destination identity and emptiness, enumerates the source and preflights entries; :148–151 orders .git first. The move at :156–174 renames each child from the retained claim directory fd into the retained allocated destination fd, without overwriting. The allocation directory is not replaced. (3) In parallel, spare_checkouts.rs:611–618 opens/verifies the legitimate claim, parks its root under a private trash name, opens/verifies that root and calls remove_opened_tree. checkout_trash.rs:320–349 traverses child directories through retained opened handles. If it opens a child before the take moves that child into the destination, the handle continues to name the moved child. Recursive deletion proceeds through it; the source-name identity check at :374–380 is only after that child's contents were traversed. It can then report that the old source name vanished, but already-deleted content is not restored. No claim-root identity check prevents this movement of descendants out from under an active traversal. (4) Parking the claim makes the take's final unlink of its original claim name fail (spare_take.rs:176–181). That returns an error, so the origin's own merge, configured post-clone command and agent do not run (launch.rs:1904–1913, :1922–1945); this refutes work loss from that origin's later agent/hook. It does not protect an independent existing host-backed session in the allocated directory. Such a borrower is a shipped supported route: an existing-directory create attaches ancestor membership without inheriting preparation (store.rs:3389–3393), and core.rs:12202–12217 explicitly permits borrowers to use incomplete contents while restricting Ready only for the origin. That host-backed session survives migration. It can write new files or Git work into an already-moved child while cleanup still traverses that child, and those writes are ordinary user-owned checkout work, not replacements under .farhelm-spares. A host-backed tab is another possible surviving writer; old_terminals.rs:399–401 skips its launch record during old-tab cleanup. The finding does not require admitting a new client during startup: the borrower can already be running before the update.  Historical/attribution checks: spare_take introduction 1d2ff45e4e5a2de2a6ff9bcc1aac9a9eba647199 predates terminal hosts. Its diff to the reviewed revision changes Git flags, ancestry checking and launch-file enum handling, not the relevant opened handles, .git-first moves or unlink ordering, establishing an older tmux shim with this shape. The predecessor core.rs:6433–6438 already runs migration then unconditionally sets no_server_after_startup. Predecessor tmux.rs:3041–3042 sets presence absent; :2534–2542 and :2983 synthesize NoServer, and :4907–4923 returns an empty pane map. Predecessor core.rs:8173–8188 therefore already omitted protection for old claims. Do not attribute a new regression solely to the assigned :7843 simplification; forward this migration-specific route to the parent for cross-group ownership.  Contract and policy: SPEC.md, Managed checkouts, :1748–1752 says 'Startup removes leftover building and claimed directories except claims still in a live launch's clone stage' (straight-apostrophe spelling in the pinned source); SPEC_impl.md:3965–3969 retains a still-live NotStarted/clone claim and says failed or uncertain liveness observations retain possible claims. SPEC.md, Terminal experience, :3014–3016 says 'A failure to end the server or to stop what ran there is logged and never stops the supervisor from starting; those sessions are treated as ended all the same, accepting that a Restart could then start a second agent beside one still running.' The isolated legitimate-claim cleanup remains a policy ambiguity: that broad migration-ended rule does not expressly say whether it overrides the specific live-claim retention rule. Source/contracts alone cannot settle that authorial intent; maintainer clarification of that override would settle it. It is not sufficient to cite SPEC.md:1753–1755's replaced/out-of-band-spare rule: this is a legitimate live claim, and borrower writes after movement are outside the private spare namespace. Nor does permission to leave an old process running or start another expressly accept deleting work of a retained host-backed borrower. Parent's g109/g112 reports concern the surviving-old-agent fallback, not this traversal route.  Suggested bucket: highest for the established opened-handle/borrower work-loss route; other/high only for isolated preparation failure when no other session writes moved contents. Could-be-highest: yes; original work-loss hypothesis was narrowed, initially lowered, then restored for this distinct borrower route. Confidence: source-supported concurrency route, not observed execution; the exact scheduling requires cleanup to open a child before movement and a retained writer to act before that traversal ends. Rarity does not lower the consequence. proposed_drop: false for the migration issue; no parent policy drop accepted. The claim that this assigned patch newly introduces it is refuted by predecessor equivalence, which is an attribution correction, not a refutation of the route. possible_cover: parent reports g109/g112 cover accepted old-agent fallback but not spare sweep; no queued findings or excluded metadata searched. No runtime tests, builds or reproductions performed. A fix would preserve uncertain legacy claim protection until cleanup is known safe, or establish exclusion/ownership that prevents a remover following a concurrently moved subtree; the existing namespace and destination identity checks alone do not provide that exclusion."
+          }
+        }
+      ],
+      "latest": {
+        "line": 13,
+        "event": {
+          "version": 1,
+          "kind": "finding",
+          "id": "l1",
+          "state": "open",
+          "summary": "Migration can let spare cleanup follow moved directories into a retained checkout",
+          "location": "crates/farhelm-supervisor/src/service/core.rs:7843",
+          "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. Attribution: the same behavior already exists in its immediate predecessor dbfc69751215dbf15e1d31d5bed73c3754c4ebc4 (the old-terminal migration); the assigned driver-removal patch preserves it. TLDR: after migration fails to stop an old checkout preparation, startup can remove its still-live spare claim. Cleanup can keep traversing a directory after the old shim moves it into the allocated checkout, so work written there by another surviving session can be deleted. This restores the original possible work-loss consequence on a narrower, source-established route; it is not a claim that the allocated checkout root itself is recursively selected by pathname.  Details and exact ordering: (1) core.rs:7843 marks every old-kind row not live regardless of teardown success, and :8065–8070 sends that snapshot to repo_cache::sweep. repo_cache.rs:120–138 takes only the repository cache lock; spare_take.rs:38–40 explicitly takes no such lock, so it does not exclude an ongoing take. Migration agent sweep failures/timeouts are logged and startup continues (old_terminals.rs:306–318, :351–356). (2) A take validates the allocated directory's dev/inode and canonical path, opens the checkout root O_DIRECTORY|O_NOFOLLOW, then opens the allocated destination and private namespace as separate confined handles (spare_take.rs:295–329, :351–370). Before moving, :142–153 rechecks destination identity and emptiness, enumerates the source and preflights entries; :148–151 orders .git first. The move at :156–174 renames each child from the retained claim directory fd into the retained allocated destination fd, without overwriting. The allocation directory is not replaced. (3) In parallel, spare_checkouts.rs:611–618 opens/verifies the legitimate claim, parks its root under a private trash name, opens/verifies that root and calls remove_opened_tree. checkout_trash.rs:320–349 traverses child directories through retained opened handles. If it opens a child before the take moves that child into the destination, the handle continues to name the moved child. Recursive deletion proceeds through it; the source-name identity check at :374–380 is only after that child's contents were traversed. It can then report that the old source name vanished, but already-deleted content is not restored. No claim-root identity check prevents this movement of descendants out from under an active traversal. (4) Parking the claim makes the take's final unlink of its original claim name fail (spare_take.rs:176–181). That returns an error, so the origin's own merge, configured post-clone command and agent do not run (launch.rs:1904–1913, :1922–1945); this refutes work loss from that origin's later agent/hook. It does not protect an independent existing host-backed session in the allocated directory. Such a borrower is a shipped supported route: an existing-directory create attaches ancestor membership without inheriting preparation (store.rs:3389–3393), and core.rs:12202–12217 explicitly permits borrowers to use incomplete contents while restricting Ready only for the origin. That host-backed session survives migration. It can write new files or Git work into an already-moved child while cleanup still traverses that child, and those writes are ordinary user-owned checkout work, not replacements under .farhelm-spares. A host-backed tab is another possible surviving writer; old_terminals.rs:399–401 skips its launch record during old-tab cleanup. The finding does not require admitting a new client during startup: the borrower can already be running before the update.  Historical/attribution checks: spare_take introduction 1d2ff45e4e5a2de2a6ff9bcc1aac9a9eba647199 predates terminal hosts. Its diff to the reviewed revision changes Git flags, ancestry checking and launch-file enum handling, not the relevant opened handles, .git-first moves or unlink ordering, establishing an older tmux shim with this shape. The predecessor core.rs:6433–6438 already runs migration then unconditionally sets no_server_after_startup. Predecessor tmux.rs:3041–3042 sets presence absent; :2534–2542 and :2983 synthesize NoServer, and :4907–4923 returns an empty pane map. Predecessor core.rs:8173–8188 therefore already omitted protection for old claims. Do not attribute a new regression solely to the assigned :7843 simplification; forward this migration-specific route to the parent for cross-group ownership.  Contract and policy: SPEC.md, Managed checkouts, :1748–1752 says 'Startup removes leftover building and claimed directories except claims still in a live launch's clone stage' (straight-apostrophe spelling in the pinned source); SPEC_impl.md:3965–3969 retains a still-live NotStarted/clone claim and says failed or uncertain liveness observations retain possible claims. SPEC.md, Terminal experience, :3014–3016 says 'A failure to end the server or to stop what ran there is logged and never stops the supervisor from starting; those sessions are treated as ended all the same, accepting that a Restart could then start a second agent beside one still running.' The isolated legitimate-claim cleanup remains a policy ambiguity: that broad migration-ended rule does not expressly say whether it overrides the specific live-claim retention rule. Source/contracts alone cannot settle that authorial intent; maintainer clarification of that override would settle it. It is not sufficient to cite SPEC.md:1753–1755's replaced/out-of-band-spare rule: this is a legitimate live claim, and borrower writes after movement are outside the private spare namespace. Nor does permission to leave an old process running or start another expressly accept deleting work of a retained host-backed borrower. Parent's g109/g112 reports concern the surviving-old-agent fallback, not this traversal route.  Suggested bucket: highest for the established opened-handle/borrower work-loss route; other/high only for isolated preparation failure when no other session writes moved contents. Could-be-highest: yes; original work-loss hypothesis was narrowed, initially lowered, then restored for this distinct borrower route. Confidence: source-supported concurrency route, not observed execution; the exact scheduling requires cleanup to open a child before movement and a retained writer to act before that traversal ends. Rarity does not lower the consequence. proposed_drop: false for the migration issue; no parent policy drop accepted. The claim that this assigned patch newly introduces it is refuted by predecessor equivalence, which is an attribution correction, not a refutation of the route. possible_cover: parent reports g109/g112 cover accepted old-agent fallback but not spare sweep; no queued findings or excluded metadata searched. No runtime tests, builds or reproductions performed. A fix would preserve uncertain legacy claim protection until cleanup is known safe, or establish exclusion/ownership that prevents a remover following a concurrently moved subtree; the existing namespace and destination identity checks alone do not provide that exclusion."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g111/findings.jsonl",
+        "id": "l1",
+        "line": 13,
+        "disposition": "under-investigation",
+        "group": "g111-l1",
+        "reason": "Record durably acknowledged; parent source/contract validation, cross-group synthesis, coverage/filter matching and any independent drop check remain pending. This preserves the claim and uncertainty without accepting, dropping or lowering it."
+      },
+      "accepted_parent_decision": null,
+      "returned_claim_checks": [
+        {
+          "batch": "claims-072",
+          "key": "g111/l1",
+          "latest_line": 13,
+          "recommendation": "filtered",
+          "bucket": "highest",
+          "underlying_key": "old-terminal-migration-unprotected-spare-retained-subtree-removal",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The conditional borrower-work-loss route is supported by source and is in range through dbfc6975, rather than newly introduced by 1ed482d. The current older-release-plus-rare-condition filter appears to cover the whole named migration route, including its work-loss consequence. This is a proposed filter disposition requiring an independent drop check, not an accepted dismissal.",
+          "checks": [
+            "At 1ed482dde220452e424973faf38a5e1318986333, core.rs:7822-7866 omits old-kind rows from protected claims and :8065-8070 passes the sample to the cache sweep. old_terminals.rs:162-200 returns normally after connection/identity failures; :306-318 logs a failed agent sweep and continues.",
+            "spare_checkouts.rs:542-556 removes unprotected generated claims; :611-618 parks and verifies the root before opened-handle traversal. checkout_trash.rs:320-349 retains child directory descriptors, and :374-380 checks the original child name only after traversing contents. That check does not prevent deleting contents through a descriptor after the child has moved.",
+            "spare_take.rs:38-40 explicitly takes no cache lock; :142-174 checks and preflights the destination then moves entries through retained descriptors. Its :176-181 final original-name unlink fails after parking, preventing its own later merge/hook/agent. This narrows but does not refute the retained-borrower route.",
+            "store.rs:3389-3393 permits existing-directory membership; core.rs:12202-12217 explicitly distinguishes borrowers using incomplete contents from the origin's Ready requirement. An already running host-backed borrower is therefore a source-supported writer outside the private spare namespace.",
+            "git log over 6e423e3..00de0b6 includes dbfc69751215dbf15e1d31d5bed73c3754c4ebc4. That predecessor's core.rs:6426-6438 already runs migration then unconditionally marks the tmux driver absent. No new regression is attributed solely to the driver simplification.",
+            "No runtime execution, occurrence or reproduction is established. The route needs failed migration termination, an in-flight older take, cleanup opening a child before its move, and a retained writer acting while traversal can still delete it."
+          ],
+          "coverage_checked": [
+            "Current SPEC.md managed-checkout paragraphs at 1748-1755 and SPEC_impl.md:3807-3814 retain live/uncertain clone claims. The out-of-band replacement acceptance does not describe this legitimate claim or borrower writes after movement.",
+            "Current SPEC.md:2998-3011 and SPEC_impl.md:2780-2823 accept retirement failures and possible later duplicate Restart. They do not explicitly accept cleanup following moved descendants into a retained borrower's work. Isolated claim cleanup remains an interpretation conflict; the broader Restart exception is not exact coverage for this route.",
+            "TODO.md Planned is empty. BUGS.md has no matching claim. Searches of active TRIAGE_OUTCOMES.md and INDEX.md found no matching traversal/legacy-claim decision or item. spare-ancestry-fallback-skips-destination-recheck.md was read: it concerns replacement of an empty allocation during ancestry refusal, a different root and trigger.",
+            "Matching plans include the tmux removal series, all marked landed in plans/REPORTS.md:29-32; their presence in plans/queue does not make them unlanded cover. Searches of other queue plans found no stated fix for this removal/movement interaction.",
+            "FILTER.md, Upgrades from older releases combined with another rare condition, matches the necessary old live preparation plus failed retirement and narrow traversal/write ordering. The named consequence is work loss within affected sessions, expressly included by this filter; no bricked installation, Farhelm database corruption, failed update path or independent security consequence is established."
+          ],
+          "exact_cover_quotes": [
+            "FILTER.md: 'The trigger needs something carried across an upgrade from an older Farhelm release: state an older release wrote, a session or agent that kept running through the upgrade, or a hook or report an older release installed.'",
+            "FILTER.md: 'The trigger also needs another rare condition on top of that: a narrow timing window, a crash or fault at a specific point, or an unusual sequence of user or agent actions.'",
+            "FILTER.md: 'Unlike the filters above, this one also covers losing user-owned work within the affected sessions, such as resuming the wrong conversation.'"
+          ],
+          "missing_premise": "No missing shipped-code premise was found for the conditional borrower route. Runtime occurrence/frequency is unobserved. Independent adjudication is required before filtering this highest-consequence claim; if it considers moved-subtree deletion a separate security/trust-boundary consequence, the filter must not apply.",
+          "original_stronger_consequence": "Initial hypothesis: deleting user-owned work in an allocated checkout. The initial blanket confinement/lowering and replacement-rule policy drop were withdrawn. The origin's own later hook/agent loss is refuted by final-unlink failure, but the latest record restores highest through an independent retained borrower writing a moved subtree. Attribution to 1ed482d alone was withdrawn; dbfc6975 introduces the relevant migration within the whole range.",
+          "needs_independent_drop_check": true,
+          "proposed_basis": "Apply the exact current older-release-plus-rare-condition filter only after the independent drop consultation agrees. Preserve the source route, highest consequence, prior withdrawals and migration attribution in that register. Do not use the general retirement acceptance or replaced-spare acceptance as substitute coverage."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": true,
+        "clearly_refuted_candidate": false,
+        "needs_unfinished_gate": true,
+        "provisional_bucket": "highest",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "old-terminal-migration-unprotected-spare-retained-subtree-removal",
+        "destination": "trailing-old-terminal-migration-unprotected-spare-retained-subtree-removal.md"
+      }
+    },
+    {
+      "key": "g111/c1",
+      "owner": "g111",
+      "id": "c1",
+      "domain": "supervisor-core-integration",
+      "purpose": "supervisor-core-integration: crates/farhelm-supervisor/src/service/core.rs; phases @@ -4927,41 +4728,12 @@ pub struct Supervisor {",
+      "history": [
+        {
+          "line": 3,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c1",
+            "state": "open",
+            "summary": "Direct host probing preserves the launch-hold settlement check",
+            "location": "crates/farhelm-supervisor/src/service/core.rs:7798",
+            "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. TLDR considered: shutdown might release the installed version before a starting session protects it. Details and refutation: core.rs:7743–7746 replaces the async abstraction with direct HostTerminal::probe, and :7798–7806 still requires the held mark to equal the live child's pid, returns false on unavailable/process-read errors, and settles only dead/gone children otherwise. At parent revision 1ed482dde220452e424973faf38a5e1318986333^, service/terminals.rs:154–158 already delegates its Host arm directly to host.probe; hosts/terminal.rs:821–838 maps the same live child to Owned { pid: Some(pid), dead: false } and the same absent/reaped child to dead. At the reviewed revision hosts/terminal.rs:818–831 expresses those same cases as Running(pid), Dead, Gone or Err. No host subprocess timeout was lost: the removed budget was for the deleted tmux query. Suggested bucket if the premise held: highest for lost session process/work, but no changed unsafe route is established. Could-be-highest: yes, considered and refuted by source equivalence rather than rarity. Confidence: confirmed source refutation. proposed_drop: source-equivalent host probe and unchanged pid/mark matching; no spec-only exception needed. possible_cover: none. No runtime tests or reproductions performed."
+          }
+        }
+      ],
+      "latest": {
+        "line": 3,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c1",
+          "state": "open",
+          "summary": "Direct host probing preserves the launch-hold settlement check",
+          "location": "crates/farhelm-supervisor/src/service/core.rs:7798",
+          "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. TLDR considered: shutdown might release the installed version before a starting session protects it. Details and refutation: core.rs:7743–7746 replaces the async abstraction with direct HostTerminal::probe, and :7798–7806 still requires the held mark to equal the live child's pid, returns false on unavailable/process-read errors, and settles only dead/gone children otherwise. At parent revision 1ed482dde220452e424973faf38a5e1318986333^, service/terminals.rs:154–158 already delegates its Host arm directly to host.probe; hosts/terminal.rs:821–838 maps the same live child to Owned { pid: Some(pid), dead: false } and the same absent/reaped child to dead. At the reviewed revision hosts/terminal.rs:818–831 expresses those same cases as Running(pid), Dead, Gone or Err. No host subprocess timeout was lost: the removed budget was for the deleted tmux query. Suggested bucket if the premise held: highest for lost session process/work, but no changed unsafe route is established. Could-be-highest: yes, considered and refuted by source equivalence rather than rarity. Confidence: confirmed source refutation. proposed_drop: source-equivalent host probe and unchanged pid/mark matching; no spec-only exception needed. possible_cover: none. No runtime tests or reproductions performed."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g111/findings.jsonl",
+        "id": "c1",
+        "line": 3,
+        "disposition": "under-investigation",
+        "group": "g111-c1",
+        "reason": "Record durably acknowledged; parent source/contract validation, cross-group synthesis, coverage/filter matching and any independent drop check remain pending. This preserves the claim and uncertainty without accepting, dropping or lowering it."
+      },
+      "accepted_parent_decision": null,
+      "returned_claim_checks": [
+        {
+          "batch": "claims-072",
+          "key": "g111/c1",
+          "latest_line": 3,
+          "recommendation": "refuted",
+          "bucket": "other",
+          "underlying_key": "host-launch-hold-direct-probe-equivalence",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The removed async terminal abstraction already delegated host probing directly to the same runtime. The held-mark/PID gate remains; no newly unsafe release of a starting launch's version is shown.",
+          "checks": [
+            "At 1ed482d^ service/terminals.rs:154-158 delegates Terminal::Host to host.probe(). At 1ed482d hosts/terminal.rs:818-831 returns Running only for a pinned live child and errors for unavailable/process-read failures.",
+            "At 1ed482d core.rs:7798-7806 requires the held mark to equal Running(pid), returns false on errors and settles only dead/gone otherwise. :7735-7787 retains queue/start-count synchronization and bounded waiting.",
+            "No runtime observation or reproduction was made."
+          ],
+          "coverage_checked": [
+            "Searched both specifications for launch holds, shutdown and current-child settlement; no acceptance is needed for the source-equivalence conclusion.",
+            "TODO Planned empty; BUGS, active ledger, queue index and unlanded-plan searches found no exact issue. Read recovered-agent-retains-stale-launch-hold-handle.md: it concerns an already captured ended handle after recovery, not whether this direct probe preserves the old host branch. It is not exact cover or a new extension here."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": "The proposed regression requires a changed host probe/settlement behavior; the checked source does not supply one.",
+          "original_stronger_consequence": "Shutdown could release the installed version before a starting session protects it, potentially losing its session process/work. That considered highest consequence is source-refuted on this change, rather than lowered for rarity.",
+          "needs_independent_drop_check": true,
+          "proposed_basis": "Independent drop check for the original potentially highest consequence: direct host-probe equivalence plus unchanged mark/PID matching. Do not extend this to the distinct stale-captured-handle queue finding."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": true,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "host-launch-hold-direct-probe-equivalence",
+        "destination": null
+      }
+    },
+    {
+      "key": "g111/c2",
+      "owner": "g111",
+      "id": "c2",
+      "domain": "supervisor-core-integration",
+      "purpose": "supervisor-core-integration: crates/farhelm-supervisor/src/service/core.rs; phases @@ -4927,41 +4728,12 @@ pub struct Supervisor {",
+      "history": [
+        {
+          "line": 4,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c2",
+            "state": "open",
+            "summary": "The new attachment-closed flag retains the shutdown admission boundary",
+            "location": "crates/farhelm-supervisor/src/service/core.rs:4736",
+            "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. TLDR considered: a viewer might attach after shutdown drained viewers, leaving a new stream outside that drain. Details and refutation: the assigned change initializes attachments_closed=false at core.rs:6207 and documents its separate ownership from the host-checkpoint stopping flag. service/teardown.rs:1237–1253 acquires attachments, sets attachments_closed with SeqCst and drains under that same lock, while service/handlers.rs:1739–1750 checks is_stopping under attachments before installing any output task. service/terminals.rs:486–494 reads that exact atomic. Therefore an attach before the boundary is drained, and an attach after it is refused; the host-checkpoint flag does not need to share the lock or admission role. core.rs:16097–16119 runs the two shutdown jobs concurrently and then the hold wait/last host close, consistent with SPEC_impl.md, Across supervisor restarts, lines 2480–2498. Suggested bucket if broken: high for inconsistent viewer shutdown. Could-be-highest: no established security or loss-of-work route in this concern. Confidence: confirmed source refutation. proposed_drop: shared-lock ordering proves the boundary; no speculative timing issue retained. possible_cover: none. Runtime tests and reproductions were not run."
+          }
+        },
+        {
+          "line": 7,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c2",
+            "state": "open",
+            "summary": "Attachment admission and installation remain inside the shutdown drain lock",
+            "location": "crates/farhelm-supervisor/src/service/core.rs:4736",
+            "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. TLDR considered: a new viewer stream could escape shutdown's drain. Synthesis result: independently rechecked the entire interval, not just the flag read. handlers.rs:1739 acquires attachments and :1743 checks is_stopping. The same guard survives displaced/incumbent removal (:1847–1859), joining old output tasks (:1861–1885), reply and new stream construction (:1928–1955), and insertion (:1956–1967); only :1968 releases it. teardown.rs:1237–1253 takes that same mutex, writes attachments_closed=true and drains before releasing it. Thus an admitted attach either installs before the drain and is included, or checks the flag after the drain boundary and refuses. Holding the mutex through waits cannot create an install-after-drain interleaving. core.rs:6207 initializes the flag once; terminals.rs:490–494 reads it. The separate sessions/stopping boundary for host checkpoint publication is intentionally independent (core.rs:16097–16119; SPEC_impl.md:2480–2498). A drain that exhausts its overall budget while waiting for the mutex reports failure and the supervisor exits anyway; the code does not claim that case is a successful drain. Original suspected consequence and suggested bucket if broken: high, inconsistent viewer shutdown, with no established security or work-loss route. Could-be-highest: no. Confidence: confirmed source refutation. proposed_drop: lock ownership through installation and the same lock's flag-write-plus-drain prove the ordering; no specification exception needed. possible_cover: none. No execution or reproductions. This revises c2 with the checked full caller interval; its conclusion is unchanged."
+          }
+        }
+      ],
+      "latest": {
+        "line": 7,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c2",
+          "state": "open",
+          "summary": "Attachment admission and installation remain inside the shutdown drain lock",
+          "location": "crates/farhelm-supervisor/src/service/core.rs:4736",
+          "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. TLDR considered: a new viewer stream could escape shutdown's drain. Synthesis result: independently rechecked the entire interval, not just the flag read. handlers.rs:1739 acquires attachments and :1743 checks is_stopping. The same guard survives displaced/incumbent removal (:1847–1859), joining old output tasks (:1861–1885), reply and new stream construction (:1928–1955), and insertion (:1956–1967); only :1968 releases it. teardown.rs:1237–1253 takes that same mutex, writes attachments_closed=true and drains before releasing it. Thus an admitted attach either installs before the drain and is included, or checks the flag after the drain boundary and refuses. Holding the mutex through waits cannot create an install-after-drain interleaving. core.rs:6207 initializes the flag once; terminals.rs:490–494 reads it. The separate sessions/stopping boundary for host checkpoint publication is intentionally independent (core.rs:16097–16119; SPEC_impl.md:2480–2498). A drain that exhausts its overall budget while waiting for the mutex reports failure and the supervisor exits anyway; the code does not claim that case is a successful drain. Original suspected consequence and suggested bucket if broken: high, inconsistent viewer shutdown, with no established security or work-loss route. Could-be-highest: no. Confidence: confirmed source refutation. proposed_drop: lock ownership through installation and the same lock's flag-write-plus-drain prove the ordering; no specification exception needed. possible_cover: none. No execution or reproductions. This revises c2 with the checked full caller interval; its conclusion is unchanged."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g111/findings.jsonl",
+        "id": "c2",
+        "line": 7,
+        "disposition": "excluded",
+        "group": "shutdown-attachment-drain-admission-lock",
+        "reason": "Parent explicitly accepted named refuted proposal from claims-072 after inspecting it. Attachment admission and installation share the same mutex as the closed flag and drain, so a successful drain cannot be followed by an admitted stream that escaped it. Source refutation restricted to install-after-successful-drain ordering. A timed-out drain remains a reported failure. Checked source/results: [\"At 1ed482d handlers.rs:1739-1750 takes the attachments lock and checks stopping. :1928-1967 constructs and inserts the new attachment under the same guard; :1968 releases it.\",\"teardown.rs:1237-1253 takes that mutex, sets attachments_closed and drains before joining. Its timeout includes lock acquisition and reports failure, not a successful empty drain, if the budget expires.\",\"No runtime execution or reproduction.\"] Current coverage/results: [\"Searched SPEC.md/SPEC_impl.md for attachment shutdown and supervisor restart contracts; no contrary acceptance or uncovered changed contract was found.\",\"TODO Planned empty. Searches of BUGS, INDEX, active ledger and plans found no exact post-drain-install finding or planned repair. General attachment and nonblocking-action entries do not match this lock ordering. No filter is needed.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"High if established: a new viewer stream escapes shutdown's drain and gives inconsistent viewer shutdown. No security or user-work-loss route was claimed or established.\"; \"An installation outside the drain mutex or admission check outside it is required for the alleged race; both are inside it.\"."
+      },
+      "accepted_parent_decision": {
+        "key": "g111/c2",
+        "line": 7,
+        "disposition": "excluded",
+        "group": "shutdown-attachment-drain-admission-lock",
+        "bucket": "other",
+        "recording": "refuted",
+        "queue_target_candidate": null,
+        "needs_independent_drop_check": false,
+        "reason": "Parent explicitly accepted named refuted proposal from claims-072 after inspecting it. Attachment admission and installation share the same mutex as the closed flag and drain, so a successful drain cannot be followed by an admitted stream that escaped it. Source refutation restricted to install-after-successful-drain ordering. A timed-out drain remains a reported failure. Checked source/results: [\"At 1ed482d handlers.rs:1739-1750 takes the attachments lock and checks stopping. :1928-1967 constructs and inserts the new attachment under the same guard; :1968 releases it.\",\"teardown.rs:1237-1253 takes that mutex, sets attachments_closed and drains before joining. Its timeout includes lock acquisition and reports failure, not a successful empty drain, if the budget expires.\",\"No runtime execution or reproduction.\"] Current coverage/results: [\"Searched SPEC.md/SPEC_impl.md for attachment shutdown and supervisor restart contracts; no contrary acceptance or uncovered changed contract was found.\",\"TODO Planned empty. Searches of BUGS, INDEX, active ledger and plans found no exact post-drain-install finding or planned repair. General attachment and nonblocking-action entries do not match this lock ordering. No filter is needed.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"High if established: a new viewer stream escapes shutdown's drain and gives inconsistent viewer shutdown. No security or user-work-loss route was claimed or established.\"; \"An installation outside the drain mutex or admission check outside it is required for the alleged race; both are inside it.\"."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-072",
+          "key": "g111/c2",
+          "latest_line": 7,
+          "recommendation": "refuted",
+          "bucket": "other",
+          "underlying_key": "shutdown-attachment-drain-admission-lock",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "Attachment admission and installation share the same mutex as the closed flag and drain, so a successful drain cannot be followed by an admitted stream that escaped it.",
+          "checks": [
+            "At 1ed482d handlers.rs:1739-1750 takes the attachments lock and checks stopping. :1928-1967 constructs and inserts the new attachment under the same guard; :1968 releases it.",
+            "teardown.rs:1237-1253 takes that mutex, sets attachments_closed and drains before joining. Its timeout includes lock acquisition and reports failure, not a successful empty drain, if the budget expires.",
+            "No runtime execution or reproduction."
+          ],
+          "coverage_checked": [
+            "Searched SPEC.md/SPEC_impl.md for attachment shutdown and supervisor restart contracts; no contrary acceptance or uncovered changed contract was found.",
+            "TODO Planned empty. Searches of BUGS, INDEX, active ledger and plans found no exact post-drain-install finding or planned repair. General attachment and nonblocking-action entries do not match this lock ordering. No filter is needed."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": "An installation outside the drain mutex or admission check outside it is required for the alleged race; both are inside it.",
+          "original_stronger_consequence": "High if established: a new viewer stream escapes shutdown's drain and gives inconsistent viewer shutdown. No security or user-work-loss route was claimed or established.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Source refutation restricted to install-after-successful-drain ordering. A timed-out drain remains a reported failure."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "shutdown-attachment-drain-admission-lock",
+        "destination": null
+      }
+    },
+    {
+      "key": "g111/c3",
+      "owner": "g111",
+      "id": "c3",
+      "domain": "supervisor-core-integration",
+      "purpose": "supervisor-core-integration: crates/farhelm-supervisor/src/service/core.rs; phases @@ -4927,41 +4728,12 @@ pub struct Supervisor {",
+      "history": [
+        {
+          "line": 5,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c3",
+            "state": "open",
+            "summary": "An absent old-kind reservation cannot silently relaunch into a terminal host",
+            "location": "crates/farhelm-supervisor/src/service/core.rs:10123",
+            "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. TLDR considered: removing the old-terminal existence query could let retry start a duplicate agent after migration. Details and source refutation: reserved_launch_evidence at core.rs:10051–10127 still returns Present for a recorded terminal address, conversation report, nonzero generation, launch scope, or sentinel; only an old-kind row with none of that evidence reaches the new Absent arm at :10123. resolve_reservation at :9943–9962 routes Absent to retry takeover, but launch_reserved preserves the taken-over terminal kind and at :10823–10837 refuses a Tmux row before checkout allocation or a terminal start. The host-kind/no-row path still calls host_launch_evidence. SPEC_impl.md, Creating agents in hosts, lines 2254–2261 explicitly requires keeping the old kind through takeover and refusing rather than guessing a host launch. Suggested bucket if the duplicate premise held: highest, since two agents could act concurrently on the user's working directory. Could-be-highest: yes, considered and refuted by the shipped refusal path. Confidence: confirmed source refutation, no runtime observation. proposed_drop: explicit source guard prevents the hypothesized duplicate launch; this conclusion does not rely on successful old-terminal teardown. possible_cover: none. Material caveat: the old-terminal migration's separate accepted failure residual is recorded under l1; this record addresses only the removed reservation probe's retry route. No runtime tests or reproductions performed."
+          }
+        },
+        {
+          "line": 9,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c3",
+            "state": "open",
+            "summary": "Retry takeover rechecks terminal kind and refusal retains allocated checkout ownership",
+            "location": "crates/farhelm-supervisor/src/service/core.rs:10123",
+            "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. TLDR considered: an old launch classified absent could restart beside an agent that migration failed to end, or lose its allocated checkout on refusal. Synthesis source checks: core.rs:10663–10670 reads the stored terminal kind and :10713–10745 carries it into takeover. store.rs:4187–4199 rechecks reservation state/identity in a transaction; :4303–4309 refuses takeover if terminal kind, generation, address, conversation report or allowed outcome no longer matches. Only Acquired continues; Resolved and Launched return at core.rs:10819–10820. The local kind is then checked at :10828 before any allocation/start, and the old kind invokes refuse_retried_tmux_launch. That helper at :14716–14736 deletes/settles only the no-fresh-plan record; :14738–14756 rolls back a positively Planned checkout but retains records for Allocated, absent or unreadable allocation state as a visible refusal. Thus the removed old-terminal existence query neither silently converts a retry to host nor discards ownership of an already allocated checkout. SPEC_impl.md:2254–2261 requires the same preserve-kind/refuse behavior. Original consequence and bucket if established: highest for a duplicate agent working on the same directory; it remains source-refuted by the guard and transactional kind check. Could-be-highest: yes, considered and refuted. Confidence: confirmed source refutation. proposed_drop: same-kind takeover plus pre-allocation old-kind refusal; no specification-only cleanup exception needed. possible_cover: none. No execution or reproductions. This extends c3's source validation; the old-migration/spare-remover issue remains distinct under l1."
+          }
+        }
+      ],
+      "latest": {
+        "line": 9,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c3",
+          "state": "open",
+          "summary": "Retry takeover rechecks terminal kind and refusal retains allocated checkout ownership",
+          "location": "crates/farhelm-supervisor/src/service/core.rs:10123",
+          "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. TLDR considered: an old launch classified absent could restart beside an agent that migration failed to end, or lose its allocated checkout on refusal. Synthesis source checks: core.rs:10663–10670 reads the stored terminal kind and :10713–10745 carries it into takeover. store.rs:4187–4199 rechecks reservation state/identity in a transaction; :4303–4309 refuses takeover if terminal kind, generation, address, conversation report or allowed outcome no longer matches. Only Acquired continues; Resolved and Launched return at core.rs:10819–10820. The local kind is then checked at :10828 before any allocation/start, and the old kind invokes refuse_retried_tmux_launch. That helper at :14716–14736 deletes/settles only the no-fresh-plan record; :14738–14756 rolls back a positively Planned checkout but retains records for Allocated, absent or unreadable allocation state as a visible refusal. Thus the removed old-terminal existence query neither silently converts a retry to host nor discards ownership of an already allocated checkout. SPEC_impl.md:2254–2261 requires the same preserve-kind/refuse behavior. Original consequence and bucket if established: highest for a duplicate agent working on the same directory; it remains source-refuted by the guard and transactional kind check. Could-be-highest: yes, considered and refuted. Confidence: confirmed source refutation. proposed_drop: same-kind takeover plus pre-allocation old-kind refusal; no specification-only cleanup exception needed. possible_cover: none. No execution or reproductions. This extends c3's source validation; the old-migration/spare-remover issue remains distinct under l1."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g111/findings.jsonl",
+        "id": "c3",
+        "line": 9,
+        "disposition": "under-investigation",
+        "group": "g111-c3",
+        "reason": "Record durably acknowledged; parent source/contract validation, cross-group synthesis, coverage/filter matching and any independent drop check remain pending. This preserves the claim and uncertainty without accepting, dropping or lowering it."
+      },
+      "accepted_parent_decision": null,
+      "returned_claim_checks": [
+        {
+          "batch": "claims-072",
+          "key": "g111/c3",
+          "latest_line": 9,
+          "recommendation": "refuted",
+          "bucket": "other",
+          "underlying_key": "old-terminal-retry-takeover-preserves-kind-and-refuses",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "A retried old-kind reservation is refused before allocation or terminal start; refusal preserves an allocation that may already exist. The removed existence query does not establish a duplicate host launch or lost allocation ownership.",
+          "checks": [
+            "At 1ed482d store.rs:4303-4309 returns Launched if the stored kind, address, generation or other settlement evidence changed. core.rs:10819-10820 returns for resolved/launched takeover outcomes.",
+            "core.rs:10823-10837 explicitly refuses TerminalKind::Tmux before allocation/start. :14716-14736 settles the no-fresh-plan record, while :14738-14756 rolls back only positively Planned allocation state and retains Allocated/unknown state for inspection and deletion.",
+            "No runtime execution or reproduction."
+          ],
+          "coverage_checked": [
+            "SPEC_impl.md's creating-agent-host takeover contract requires preserving old kind and refusal rather than guessing a host launch; the checked implementation follows that boundary.",
+            "TODO Planned empty. BUGS, queue/index, active-ledger and plan searches found no exact retry-kind conversion/allocated-refusal finding. The migration/spare route under g111/l1 and generic duplicate-Restart policy under g112/c1 are distinct. No filter is needed."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": "Successful host start after old-kind takeover, or deletion of Allocated ownership on refusal, is required for the suspected harm and is prevented by the checked guards.",
+          "original_stronger_consequence": "Highest if established: a retry starts a duplicate agent in the user's working directory, or refusal discards an already allocated checkout's ownership. Both are source-refuted for this route.",
+          "needs_independent_drop_check": true,
+          "proposed_basis": "Independent drop check for the considered highest route, based on transactional kind revalidation, pre-allocation old-kind refusal and allocation-state-specific retention. This does not dismiss the separate migration residual."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": true,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "old-terminal-retry-takeover-preserves-kind-and-refuses",
+        "destination": null
+      }
+    },
+    {
+      "key": "g111/c4",
+      "owner": "g111",
+      "id": "c4",
+      "domain": "supervisor-core-integration",
+      "purpose": "supervisor-core-integration: crates/farhelm-supervisor/src/service/core.rs; phases @@ -4927,41 +4728,12 @@ pub struct Supervisor {",
+      "history": [
+        {
+          "line": 14,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c4",
+            "state": "open",
+            "summary": "Removing launch-excerpt fences does not remove host error provenance",
+            "location": "crates/farhelm-supervisor/src/service/core.rs:10409",
+            "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. Discovery-pass concern considered: deleting launch_excerpt from the reload and retained-launch RunCells could cause a failed host launch's error to omit its final explanation or quote a different run. Source refutation: at the parent revision service/launch_artifacts.rs:78–96 handles Terminal::Host directly, reads final-screen evidence and returns before :101–106 reads the launch_excerpt field. That field is a tmux capture fence, not a host cache. The reviewed replacement at launch_artifacts.rs:59–76 preserves the host branch's processed-exit test and same held host screen read. status.rs:624–652 still calls the reducer only after terminal-dead/no-sentinel wrapper-failure evidence; its :675–688 preserves the same terminal's recorded address with the transition. RunCells retain launch_reads_settled, launch_error and generation, while each host runs one child; the assigned field removals at core.rs:7219 and :10409 therefore remove no host provenance fence. SPEC_impl.md, Terminal host, terminal switch points (2210–2235), and Launch failure classification govern the same final-screen/generation contract. Suggested bucket if the premise held: other for misleading launch diagnostics, with no established security or work-loss route. Could-be-highest: no. Confidence: confirmed source refutation; no execution. proposed_drop: the removed field was never read on the retained host path, and the replacement preserves that path's final-exit gate. possible_cover: g100/l1 covers the distinct reducer allocation regression, not this provenance question; no new duplicate finding claimed. Material caveat: this does not dismiss g100's memory finding or certify every failure-classification branch. No tests, builds or reproductions."
+          }
+        }
+      ],
+      "latest": {
+        "line": 14,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c4",
+          "state": "open",
+          "summary": "Removing launch-excerpt fences does not remove host error provenance",
+          "location": "crates/farhelm-supervisor/src/service/core.rs:10409",
+          "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. Discovery-pass concern considered: deleting launch_excerpt from the reload and retained-launch RunCells could cause a failed host launch's error to omit its final explanation or quote a different run. Source refutation: at the parent revision service/launch_artifacts.rs:78–96 handles Terminal::Host directly, reads final-screen evidence and returns before :101–106 reads the launch_excerpt field. That field is a tmux capture fence, not a host cache. The reviewed replacement at launch_artifacts.rs:59–76 preserves the host branch's processed-exit test and same held host screen read. status.rs:624–652 still calls the reducer only after terminal-dead/no-sentinel wrapper-failure evidence; its :675–688 preserves the same terminal's recorded address with the transition. RunCells retain launch_reads_settled, launch_error and generation, while each host runs one child; the assigned field removals at core.rs:7219 and :10409 therefore remove no host provenance fence. SPEC_impl.md, Terminal host, terminal switch points (2210–2235), and Launch failure classification govern the same final-screen/generation contract. Suggested bucket if the premise held: other for misleading launch diagnostics, with no established security or work-loss route. Could-be-highest: no. Confidence: confirmed source refutation; no execution. proposed_drop: the removed field was never read on the retained host path, and the replacement preserves that path's final-exit gate. possible_cover: g100/l1 covers the distinct reducer allocation regression, not this provenance question; no new duplicate finding claimed. Material caveat: this does not dismiss g100's memory finding or certify every failure-classification branch. No tests, builds or reproductions."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g111/findings.jsonl",
+        "id": "c4",
+        "line": 14,
+        "disposition": "excluded",
+        "group": "removed-tmux-excerpt-field-does-not-gate-host-excerpts",
+        "reason": "Parent explicitly accepted named refuted proposal from claims-072 after inspecting it. The removed field was never read by the host excerpt branch. This refutes evidence loss caused by removing that field, but does not establish that inherited history can never contaminate the current screen. Refute only the removed-field regression. Reconcile this narrow scope with g112/c4; do not use host identity, processed exit or initial blank screen to dismiss resize contamination. Checked source/results: [\"At 1ed482d^ launch_artifacts.rs:78-96 the host branch reads final host-screen evidence and returns before :101-106 reads launch_excerpt. At 1ed482d :59-76 the replacement preserves that processed-exit/direct-screen branch.\",\"At 1ed482d vendor/alacritty_terminal/src/grid/resize.rs:25-28,46-71 height growth promotes history into visible rows. The inherited-blank-screen rationale at launch_artifacts.rs:54-56 is therefore not a general provenance proof. See the separately preserved qualification in g112/c4.\",\"Source-only check; no runtime reproduction.\"] Current coverage/results: [\"Current SPEC.md:2888-2894 requires safely attributable failed-launch excerpts. SPEC_impl.md:2658-2667 still claims blank initial screen prevents previous-run quotation; that is competing rationale, not exact acceptance of contamination.\",\"TODO Planned empty; BUGS, INDEX, active ledger and unlanded-plan searches found no exact removed-field omission or excerpt-provenance coverage. The tmux docs plan is landed per REPORTS.md:32. Supplied g100/g013 neighbour ownership is not independently established by this batch and is not treated as current queue coverage.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"A failed host launch loses its final explanation or quotes a different run because the launch_excerpt field was removed. Only the causal claim about field removal is refuted; the known resize/provenance route and distinct temporary-allocation issue remain untouched.\"; \"A host-path dependency on the removed field is absent. A broad assertion that no previous-run text can be quoted is not established and must not be carried forward as the basis for dismissal.\"."
+      },
+      "accepted_parent_decision": {
+        "key": "g111/c4",
+        "line": 14,
+        "disposition": "excluded",
+        "group": "removed-tmux-excerpt-field-does-not-gate-host-excerpts",
+        "bucket": "other",
+        "recording": "refuted",
+        "queue_target_candidate": null,
+        "needs_independent_drop_check": false,
+        "reason": "Parent explicitly accepted named refuted proposal from claims-072 after inspecting it. The removed field was never read by the host excerpt branch. This refutes evidence loss caused by removing that field, but does not establish that inherited history can never contaminate the current screen. Refute only the removed-field regression. Reconcile this narrow scope with g112/c4; do not use host identity, processed exit or initial blank screen to dismiss resize contamination. Checked source/results: [\"At 1ed482d^ launch_artifacts.rs:78-96 the host branch reads final host-screen evidence and returns before :101-106 reads launch_excerpt. At 1ed482d :59-76 the replacement preserves that processed-exit/direct-screen branch.\",\"At 1ed482d vendor/alacritty_terminal/src/grid/resize.rs:25-28,46-71 height growth promotes history into visible rows. The inherited-blank-screen rationale at launch_artifacts.rs:54-56 is therefore not a general provenance proof. See the separately preserved qualification in g112/c4.\",\"Source-only check; no runtime reproduction.\"] Current coverage/results: [\"Current SPEC.md:2888-2894 requires safely attributable failed-launch excerpts. SPEC_impl.md:2658-2667 still claims blank initial screen prevents previous-run quotation; that is competing rationale, not exact acceptance of contamination.\",\"TODO Planned empty; BUGS, INDEX, active ledger and unlanded-plan searches found no exact removed-field omission or excerpt-provenance coverage. The tmux docs plan is landed per REPORTS.md:32. Supplied g100/g013 neighbour ownership is not independently established by this batch and is not treated as current queue coverage.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"A failed host launch loses its final explanation or quotes a different run because the launch_excerpt field was removed. Only the causal claim about field removal is refuted; the known resize/provenance route and distinct temporary-allocation issue remain untouched.\"; \"A host-path dependency on the removed field is absent. A broad assertion that no previous-run text can be quoted is not established and must not be carried forward as the basis for dismissal.\"."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-072",
+          "key": "g111/c4",
+          "latest_line": 14,
+          "recommendation": "refuted",
+          "bucket": "other",
+          "underlying_key": "removed-tmux-excerpt-field-does-not-gate-host-excerpts",
+          "aliases": [
+            "g112/c4"
+          ],
+          "target_queue_file": null,
+          "why": "The removed field was never read by the host excerpt branch. This refutes evidence loss caused by removing that field, but does not establish that inherited history can never contaminate the current screen.",
+          "checks": [
+            "At 1ed482d^ launch_artifacts.rs:78-96 the host branch reads final host-screen evidence and returns before :101-106 reads launch_excerpt. At 1ed482d :59-76 the replacement preserves that processed-exit/direct-screen branch.",
+            "At 1ed482d vendor/alacritty_terminal/src/grid/resize.rs:25-28,46-71 height growth promotes history into visible rows. The inherited-blank-screen rationale at launch_artifacts.rs:54-56 is therefore not a general provenance proof. See the separately preserved qualification in g112/c4.",
+            "Source-only check; no runtime reproduction."
+          ],
+          "coverage_checked": [
+            "Current SPEC.md:2888-2894 requires safely attributable failed-launch excerpts. SPEC_impl.md:2658-2667 still claims blank initial screen prevents previous-run quotation; that is competing rationale, not exact acceptance of contamination.",
+            "TODO Planned empty; BUGS, INDEX, active ledger and unlanded-plan searches found no exact removed-field omission or excerpt-provenance coverage. The tmux docs plan is landed per REPORTS.md:32. Supplied g100/g013 neighbour ownership is not independently established by this batch and is not treated as current queue coverage."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": "A host-path dependency on the removed field is absent. A broad assertion that no previous-run text can be quoted is not established and must not be carried forward as the basis for dismissal.",
+          "original_stronger_consequence": "A failed host launch loses its final explanation or quotes a different run because the launch_excerpt field was removed. Only the causal claim about field removal is refuted; the known resize/provenance route and distinct temporary-allocation issue remain untouched.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Refute only the removed-field regression. Reconcile this narrow scope with g112/c4; do not use host identity, processed exit or initial blank screen to dismiss resize contamination.",
+          "new_interface_evidence": "The parent host branch returns before touching launch_excerpt (1ed482d^ launch_artifacts.rs:78-106), while the current reducer still reads a visible grid whose grow_lines can promote seeded history. Cache independence and current-cell provenance are separate facts."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "removed-tmux-excerpt-field-does-not-gate-host-excerpts",
+        "destination": null
+      }
+    },
+    {
+      "key": "g111/l2",
+      "owner": "g111",
+      "id": "l2",
+      "domain": "supervisor-core-integration",
+      "purpose": "supervisor-core-integration: crates/farhelm-supervisor/src/service/core.rs; phases @@ -4927,41 +4728,12 @@ pub struct Supervisor {",
+      "history": [
+        {
+          "line": 15,
+          "event": {
+            "version": 1,
+            "kind": "lead",
+            "id": "l2",
+            "state": "open",
+            "summary": "Check rewritten reload comment against Delete's recorded-host recovery",
+            "location": "crates/farhelm-supervisor/src/service/core.rs:6795",
+            "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. New discovery lead: the assigned sentinel-reload comment rewrites the old tmux rationale to say a SessionEntry with no terminal 'breaks Attach and leaks the host out from under DeleteSession’s teardown'. Attach does require the handle, but the current host contract also gives Delete launch records for hosts whose runtimes are absent. Need determine whether the specific found-host/sentinel branch can lack that record, or whether the new comment asserts a removed in-memory-only ownership dependency. Suspected consequence: inaccurate maintainer-facing lifecycle documentation, not an established runtime leak. Suggested bucket: other if confirmed. Could-be-highest: no demonstrated security or work-loss consequence from this comment. Confidence: unresolved source lead, not yet a finding. proposed_drop: false pending actual Delete collection and launch-record ordering checks. possible_cover: g129/l2 is a distinct report-anchor documentation defect; no matching neighbour record was supplied for this reload rationale. Checks so far: assigned patch lines 389–399 and pinned core.rs:6793–6801; previously read host contract requires records before host startup, but the specific collector must be checked. No tests, builds or reproductions."
+          }
+        },
+        {
+          "line": 16,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "l2",
+            "state": "open",
+            "summary": "Reload comment incorrectly makes the runtime handle Delete's only host ownership record",
+            "location": "crates/farhelm-supervisor/src/service/core.rs:6795",
+            "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. TLDR: the rewritten reload explanation teaches that failing to retain an in-memory terminal handle leaks its host past Delete, although ordinary host launches retain an independent record that Delete uses when the runtime is absent. This gives future maintainers the wrong ownership/recovery model; no production leak is claimed. Details: core.rs:6792–6799 says a SessionEntry with no terminal 'breaks Attach and leaks the host out from under DeleteSession’s teardown'. Preserving the terminal remains necessary for Attach and the final screen, but the Delete half is inaccurate for the ordinary shipped found-host/sentinel case. host_launch.rs:537–579 writes the .host record at :557–563 before starting.finish gives the first stage its child spec. Sentinel cleanup core.rs:7057–7058 calls cleanup_launch_artifacts; launch_artifacts.rs:327–329 delegates to remove_settled_best_effort, whose :483–494 expressly preserves .host because an agent error does not settle its host. The startup launch-dir sweep also retains .host records (:764–778). With agent=None, session_hosts.rs:238–260 has no held socket to exclude and collects this record; :272–305 settles/classifies it, :317–323 retains the resulting RecordedHost, and :743–791 shuts down an attributable host or refuses Delete if it cannot confirm the end. Therefore absence of this in-memory handle alone does not remove Delete's host ownership/teardown path. This is also the exact specification contract in SPEC_impl.md, Terminal host, Delete ends every terminal host of the session (:2423–2436): Delete acts on the agent runtime, tabs and all retained host launch records, including those no runtime holds. No undocumented runtime behavior needs changing to fix this comment: describe Attach/final-screen preservation accurately and acknowledge the recorded-host deletion path. Attribution across the pinned range: the immediate parent core.rs:7083–7091 specifically claimed a tmux-session leak, while the assigned rewrite newly names a host and its teardown. git log from exclusive base 6e423e30068b62c6cfa276c6d720ee35bb70387a through inclusive tip 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db shows the subsequent core changes f560058da19e02716e6f943883a9508b447aff4e and 08399d092d20815ced6619c26df2391944ae2b4a; their diff does not repair this comment. At tip the same claim remains at core.rs:6794–6798. Suggested bucket: other, internal documentation correctness. Could-be-highest: no established security or work-loss route from the misleading comment. Confidence: confirmed source/caller and exact contract comparison, not execution. proposed_drop: false; correct production recovery refutes an actual leak but not the newly inaccurate explanation. possible_cover: none matching in the supplied interface records; g129/l2 concerns report-anchor documentation at another boundary. Material caveats: a host whose record was removed out of band could lose this backstop, but the comment asserts the dependency without that premise and the ordinary sentinel path retains the record. Retaining the runtime is still correct; this finding does not ask to remove the branch. No tests, builds or reproductions performed. l2's readily checkable source premises are resolved."
+          }
+        },
+        {
+          "line": 17,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "l2",
+            "state": "open",
+            "summary": "Reload comment incorrectly makes the runtime handle Delete's only host ownership record",
+            "location": "crates/farhelm-supervisor/src/service/core.rs:6795",
+            "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. TLDR: the rewritten sentinel-reload explanation teaches that failing to retain an in-memory terminal handle leaks its host past Delete, despite retained launch records supplying an independent deletion path. This misstates the lifecycle/ownership contract for future maintainers; no production leak is claimed. Details: core.rs:6792–6799 says a SessionEntry with no terminal 'breaks Attach and leaks the host out from under DeleteSession’s teardown'. Keeping the handle is necessary for Attach and the final screen, but its absence alone does not leak the ordinary host in this branch. host_launch.rs:537–579 records the selected socket/starter in .host at :557–563 before starting.finish gives the first stage its child spec. Sentinel cleanup core.rs:7057–7058 invokes cleanup_launch_artifacts; launch_artifacts.rs:327–329 calls remove_settled_best_effort, whose :483–494 expressly preserves .host because settling the agent does not settle its host. The startup launch-dir sweep also keeps .host (:764–778). With agent=None, session_hosts.rs:238–260 includes the record because no held socket excludes it; :272–305 settles/classifies it and :317–323 retains the RecordedHost. At :743–791 Delete shuts down attributable recorded hosts or refuses if their end cannot be confirmed. This same-file source contract is explicit at core.rs:10367–10370: 'No discovery belongs here: an unknown terminal stays unknown, and Delete finds a terminal-less entry’s hosts by their launch records.' SPEC_impl.md, Terminal host, Delete ends every terminal host of the session (:2423–2436), names that same fallback. Correct production recovery refutes an actual leak, but does not make the newly rewritten explanation true. Fix the rationale to name Attach/final-screen preservation while acknowledging recorded-host recovery; retaining the found handle is still correct. Attribution across the whole pinned range: the parent core.rs:7083–7091 specifically described a tmux-session leak; the assigned rewrite newly generalizes it to hosts despite the independent .host path. The remaining in-range core changes f560058da19e02716e6f943883a9508b447aff4e and 08399d092d20815ced6619c26df2391944ae2b4a do not repair the comment. At inclusive tip 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db the same claim remains at :6794–6798. Suggested bucket: other (documentation correctness). Could-be-highest: no established security or work-loss route from this comment. Confidence: confirmed source/caller/contract analysis only. proposed_drop: false. possible_cover: no matching supplied interface finding; g129/l2 concerns report-anchor prose, a distinct boundary. Material caveat: removing a host record out of band could remove the backstop, but the comment states the dependency without that premise and the ordinary sentinel path retains the record. No tests, builds, runtime observations or reproductions. All readily checkable l2 premises are resolved. Final discovery checks of retained publication and successful host starts found no separate runtime defect."
+          }
+        }
+      ],
+      "latest": {
+        "line": 17,
+        "event": {
+          "version": 1,
+          "kind": "finding",
+          "id": "l2",
+          "state": "open",
+          "summary": "Reload comment incorrectly makes the runtime handle Delete's only host ownership record",
+          "location": "crates/farhelm-supervisor/src/service/core.rs:6795",
+          "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. TLDR: the rewritten sentinel-reload explanation teaches that failing to retain an in-memory terminal handle leaks its host past Delete, despite retained launch records supplying an independent deletion path. This misstates the lifecycle/ownership contract for future maintainers; no production leak is claimed. Details: core.rs:6792–6799 says a SessionEntry with no terminal 'breaks Attach and leaks the host out from under DeleteSession’s teardown'. Keeping the handle is necessary for Attach and the final screen, but its absence alone does not leak the ordinary host in this branch. host_launch.rs:537–579 records the selected socket/starter in .host at :557–563 before starting.finish gives the first stage its child spec. Sentinel cleanup core.rs:7057–7058 invokes cleanup_launch_artifacts; launch_artifacts.rs:327–329 calls remove_settled_best_effort, whose :483–494 expressly preserves .host because settling the agent does not settle its host. The startup launch-dir sweep also keeps .host (:764–778). With agent=None, session_hosts.rs:238–260 includes the record because no held socket excludes it; :272–305 settles/classifies it and :317–323 retains the RecordedHost. At :743–791 Delete shuts down attributable recorded hosts or refuses if their end cannot be confirmed. This same-file source contract is explicit at core.rs:10367–10370: 'No discovery belongs here: an unknown terminal stays unknown, and Delete finds a terminal-less entry’s hosts by their launch records.' SPEC_impl.md, Terminal host, Delete ends every terminal host of the session (:2423–2436), names that same fallback. Correct production recovery refutes an actual leak, but does not make the newly rewritten explanation true. Fix the rationale to name Attach/final-screen preservation while acknowledging recorded-host recovery; retaining the found handle is still correct. Attribution across the whole pinned range: the parent core.rs:7083–7091 specifically described a tmux-session leak; the assigned rewrite newly generalizes it to hosts despite the independent .host path. The remaining in-range core changes f560058da19e02716e6f943883a9508b447aff4e and 08399d092d20815ced6619c26df2391944ae2b4a do not repair the comment. At inclusive tip 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db the same claim remains at :6794–6798. Suggested bucket: other (documentation correctness). Could-be-highest: no established security or work-loss route from this comment. Confidence: confirmed source/caller/contract analysis only. proposed_drop: false. possible_cover: no matching supplied interface finding; g129/l2 concerns report-anchor prose, a distinct boundary. Material caveat: removing a host record out of band could remove the backstop, but the comment states the dependency without that premise and the ordinary sentinel path retains the record. No tests, builds, runtime observations or reproductions. All readily checkable l2 premises are resolved. Final discovery checks of retained publication and successful host starts found no separate runtime defect."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g111/findings.jsonl",
+        "id": "l2",
+        "line": 17,
+        "disposition": "verified",
+        "group": "sentinel-reload-comment-denies-recorded-host-delete-fallback",
+        "reason": "Parent explicitly accepted named retain-verified proposal from claims-072 after inspecting it. The changed comment incorrectly presents the in-memory handle as necessary to keep the ordinary host reachable by Delete. The retained record supplies an independent path. Correct runtime behavior does not refute this documentation defect. Record an other-priority comment-correctness finding explaining Attach/final-screen retention and the independent recorded-host Delete fallback. No behavior change is needed. Checked source/results: [\"At 1ed482d core.rs:6792-6799 says a terminal-less SessionEntry leaks the host out from under Delete teardown. At inclusive tip 00de0b6c core.rs:6791-6798 retains that assertion.\",\"At 1ed482d host_launch.rs:553-579 writes the .host record before starting.finish. launch_artifacts.rs:483-494 deliberately preserves .host on sentinel settlement, and :764-778 retains it during startup sweeps.\",\"session_hosts.rs:238-260 includes recorded hosts when no runtime holds their socket; :272-324 settles/classifies and retains them; :743-791 ends attributable recorded hosts or refuses if end cannot be confirmed.\",\"The same core.rs:10367-10370 explicitly says Delete finds terminal-less entries' hosts by launch records. Retaining the handle is still needed for Attach/final-screen access; removing that branch is not proposed.\",\"The host-specific comment rewrite is in 1ed482d and survives the remaining in-range changes. No actual runtime leak, security consequence or work loss is claimed; no execution was performed.\"] Current coverage/results: [\"Current SPEC_impl.md:2345-2399 explicitly defines agent/tab runtimes plus retained launch records as Delete ownership sources. This supports the defect rather than accepting the false explanation. Current SPEC.md lifecycle/terminal sections give no exception making the runtime Delete's sole record.\",\"TODO Planned empty. BUGS, INDEX and active TRIAGE_OUTCOMES searches found no exact comment/recorded-host dependency issue. The existing launch-hold and spare queue matches are unrelated.\",\"The matching tmux docs/comments plan is landed per plans/REPORTS.md:32 and did not remove the assertion at the reviewed tip; its generic audit is not unlanded exact coverage. Other plan searches supplied no targeted repair. FILTER.md's rare-diagnostic rules do not match an unconditional maintainer-facing ownership explanation.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Inaccurate maintainer-facing lifecycle documentation; the initial lead explicitly did not claim a production host leak. The final source confirms the documentation defect, not a runtime leak.\"; \"None for the documentation mismatch. A deleted-out-of-band .host record could remove the fallback, but that is not the ordinary branch the comment describes and does not rescue its unconditional rationale.\"."
+      },
+      "accepted_parent_decision": {
+        "key": "g111/l2",
+        "line": 17,
+        "disposition": "verified",
+        "group": "sentinel-reload-comment-denies-recorded-host-delete-fallback",
+        "bucket": "other",
+        "recording": "retain-verified",
+        "queue_target_candidate": null,
+        "needs_independent_drop_check": false,
+        "reason": "Parent explicitly accepted named retain-verified proposal from claims-072 after inspecting it. The changed comment incorrectly presents the in-memory handle as necessary to keep the ordinary host reachable by Delete. The retained record supplies an independent path. Correct runtime behavior does not refute this documentation defect. Record an other-priority comment-correctness finding explaining Attach/final-screen retention and the independent recorded-host Delete fallback. No behavior change is needed. Checked source/results: [\"At 1ed482d core.rs:6792-6799 says a terminal-less SessionEntry leaks the host out from under Delete teardown. At inclusive tip 00de0b6c core.rs:6791-6798 retains that assertion.\",\"At 1ed482d host_launch.rs:553-579 writes the .host record before starting.finish. launch_artifacts.rs:483-494 deliberately preserves .host on sentinel settlement, and :764-778 retains it during startup sweeps.\",\"session_hosts.rs:238-260 includes recorded hosts when no runtime holds their socket; :272-324 settles/classifies and retains them; :743-791 ends attributable recorded hosts or refuses if end cannot be confirmed.\",\"The same core.rs:10367-10370 explicitly says Delete finds terminal-less entries' hosts by launch records. Retaining the handle is still needed for Attach/final-screen access; removing that branch is not proposed.\",\"The host-specific comment rewrite is in 1ed482d and survives the remaining in-range changes. No actual runtime leak, security consequence or work loss is claimed; no execution was performed.\"] Current coverage/results: [\"Current SPEC_impl.md:2345-2399 explicitly defines agent/tab runtimes plus retained launch records as Delete ownership sources. This supports the defect rather than accepting the false explanation. Current SPEC.md lifecycle/terminal sections give no exception making the runtime Delete's sole record.\",\"TODO Planned empty. BUGS, INDEX and active TRIAGE_OUTCOMES searches found no exact comment/recorded-host dependency issue. The existing launch-hold and spare queue matches are unrelated.\",\"The matching tmux docs/comments plan is landed per plans/REPORTS.md:32 and did not remove the assertion at the reviewed tip; its generic audit is not unlanded exact coverage. Other plan searches supplied no targeted repair. FILTER.md's rare-diagnostic rules do not match an unconditional maintainer-facing ownership explanation.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Inaccurate maintainer-facing lifecycle documentation; the initial lead explicitly did not claim a production host leak. The final source confirms the documentation defect, not a runtime leak.\"; \"None for the documentation mismatch. A deleted-out-of-band .host record could remove the fallback, but that is not the ordinary branch the comment describes and does not rescue its unconditional rationale.\"."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-072",
+          "key": "g111/l2",
+          "latest_line": 17,
+          "recommendation": "retain-verified",
+          "bucket": "other",
+          "underlying_key": "sentinel-reload-comment-denies-recorded-host-delete-fallback",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The changed comment incorrectly presents the in-memory handle as necessary to keep the ordinary host reachable by Delete. The retained record supplies an independent path. Correct runtime behavior does not refute this documentation defect.",
+          "checks": [
+            "At 1ed482d core.rs:6792-6799 says a terminal-less SessionEntry leaks the host out from under Delete teardown. At inclusive tip 00de0b6c core.rs:6791-6798 retains that assertion.",
+            "At 1ed482d host_launch.rs:553-579 writes the .host record before starting.finish. launch_artifacts.rs:483-494 deliberately preserves .host on sentinel settlement, and :764-778 retains it during startup sweeps.",
+            "session_hosts.rs:238-260 includes recorded hosts when no runtime holds their socket; :272-324 settles/classifies and retains them; :743-791 ends attributable recorded hosts or refuses if end cannot be confirmed.",
+            "The same core.rs:10367-10370 explicitly says Delete finds terminal-less entries' hosts by launch records. Retaining the handle is still needed for Attach/final-screen access; removing that branch is not proposed.",
+            "The host-specific comment rewrite is in 1ed482d and survives the remaining in-range changes. No actual runtime leak, security consequence or work loss is claimed; no execution was performed."
+          ],
+          "coverage_checked": [
+            "Current SPEC_impl.md:2345-2399 explicitly defines agent/tab runtimes plus retained launch records as Delete ownership sources. This supports the defect rather than accepting the false explanation. Current SPEC.md lifecycle/terminal sections give no exception making the runtime Delete's sole record.",
+            "TODO Planned empty. BUGS, INDEX and active TRIAGE_OUTCOMES searches found no exact comment/recorded-host dependency issue. The existing launch-hold and spare queue matches are unrelated.",
+            "The matching tmux docs/comments plan is landed per plans/REPORTS.md:32 and did not remove the assertion at the reviewed tip; its generic audit is not unlanded exact coverage. Other plan searches supplied no targeted repair. FILTER.md's rare-diagnostic rules do not match an unconditional maintainer-facing ownership explanation."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": "None for the documentation mismatch. A deleted-out-of-band .host record could remove the fallback, but that is not the ordinary branch the comment describes and does not rescue its unconditional rationale.",
+          "original_stronger_consequence": "Inaccurate maintainer-facing lifecycle documentation; the initial lead explicitly did not claim a production host leak. The final source confirms the documentation defect, not a runtime leak.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Record an other-priority comment-correctness finding explaining Attach/final-screen retention and the independent recorded-host Delete fallback. No behavior change is needed."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": true,
+        "clearly_refuted_candidate": false,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Source-confirmed by an existing parent decision; not runtime reproduced",
+        "deduplication_key": "sentinel-reload-comment-denies-recorded-host-delete-fallback",
+        "destination": "trailing-sentinel-reload-comment-denies-recorded-host-delete-fallback.md"
+      }
+    }
+  ],
+  "replies": [
+    {
+      "turn": 1,
+      "reply": "Initial review complete: all 999 assigned patch lines reviewed at the pinned revision.\n\nNo actionable defect established. Logged `l1` with a proposed policy drop and refuted candidates `c1`–`c3`. No unresolved technical leads or unread assigned scope.\n\nFindings and progress are saved in the assigned group directory. No tests or reproductions run."
+    },
+    {
+      "turn": 2,
+      "reply": "Revised `l1`: cleanup’s open handles can follow moved directories into an allocated checkout and delete a surviving borrower’s work. This source-supported route predates the assigned patch; the prior confinement claim and policy-drop rationale are withdrawn.\n\nRevalidated `c2`’s full lock interval and `c3`’s transactional retry refusal; both remain refuted.\n\nNo unresolved technical leads. Policy ambiguity remains under `l1`: whether the migration exception overrides live-claim retention. All revisions are logged."
+    },
+    {
+      "turn": 3,
+      "reply": "Discovery found one new verified documentation issue, `l2`: the reload comment incorrectly says losing the runtime handle leaks a host past Delete.\n\nChecked launch-record ordering, cleanup retention, Delete recovery, and attribution through the pinned tip. Recorded `c4` as source-refuted.\n\nNew unverified IDs: none. Open lead IDs: none. No new runtime defect found. Progress and findings are saved."
+    },
+    {
+      "turn": 4,
+      "reply": "Discovery pass 2 found nothing new.\n\nChecked startup-option propagation, constructor ownership, reload state, reservation settlement, and failure rollback against the refreshed interface records.\n\nNew verified IDs: none. New unverified IDs: none. Open lead IDs: none.\n\nProgress updated; no runtime tests or reproductions run."
+    }
+  ],
+  "progress": "Group: g111 (supervisor-core-integration)\nState: initial review complete; await caller's later synthesis/discovery prompt. No actionable defect established.\nTurn type/count: initial/1. Discovery-pass count: 0. No later-turn protocol was performed inside this turn.\n\nAssigned revision: 1ed482dde220452e424973faf38a5e1318986333.\nAssigned evidence: prep/parts/00923-001.patch, lines 1–999, delivered in five evidence packets (1–200, 201–400, 401–600, 601–800, 801–999). Full brief and complete inventory commits field read; excluded coverage metadata was not read.\nUnread assigned scope: none.\n\nContracts read at the pinned revision: SPEC.md Managed checkouts (1570–1883), Lifecycle operations (1884–2126), Terminal experience (2855–3187); SPEC_impl.md Terminal host (1963–2700), Terminal substrate: private tmux server (2880–2991), Owned checkout admission and lifetime (3774–4102), Side-by-side versions inside Farhelm.app (7429–7680), and GUI Answers bind to what was drawn (1071–1101, with following context through 1105). Contract snapshots and their separate evidence manifest are private group artifacts. Root AGENTS.md End sentinel present; Priority buckets and What goes in a feedback file read. Skillette, machine instructions and scode-voice loaded.\n\nChecks/results: traced the simplified launch-hold probe through the parent revision's Host delegation and the new TerminalProbe mapping; traced attachment shutdown's atomic/lock admission; traced reservation evidence through retry takeover and the old-kind refusal before allocation or terminal creation; checked startup's surviving-host collection, ownership-return shape and staged-file sweep caller; traced spare protection through migration failure handling and confined claim deletion. All conclusions are from source, not execution. No runtime tests, builds or reproductions were requested or run. No checkout files changed.\n\nDurable IDs in this pass: l1 first recorded as an investigation lead, then revised to a source-supported finding with proposed_drop under the explicit old-session-ended migration policy; its original possible working-checkout-loss consequence and the narrower established private-spare consequence are both preserved. c1, c2 and c3 are refuted candidates, with source routes and could-be-highest assessments recorded. New verified actionable IDs: none. New unverified substantive IDs: none. Open technical lead IDs: none. Independent policy-drop review of l1 remains for the caller; general live-claim retention and the old-session-ended exception are both cited in its detail.\n\nInterface assumptions: terminal hosts are the only live terminal implementation at this revision; old tmux rows remain durable provenance and are treated as ended even after teardown failures. The caller owns cross-group coverage and independent drop checks. No queued findings or prohibited coverage sources were consulted. No helper agents were spawned.\nNext action: return for the caller's later synthesis turn, retaining all append-only log history. No separate final report file created.\n\nTurn 2 started: later-turn synthesis. Revisit l1 policy ambiguity and exact claim/destination move confinement; independently recheck c2 lock ownership and c3 retry refusal. Prior patch delivery is audited; no assigned patch needs re-delivery. Findings log exists and is retained.\n\nTurn 2 boundary: synthesis complete. Turn count: 2 (initial 1, synthesis 1); discovery-pass count: 0. Assigned patch unread scope: none. No repeated mandatory delivery was needed after the parent's audit. No checkout changes, runtime tests, builds or reproductions.\n\nThis turn revised l1 repeatedly as checks resolved its premises, preserving history and the original work-loss hypothesis. Final l1 is a source-supported potential work-loss finding: removal's opened child handles can survive the take's fd-relative move into the allocated checkout, permitting deletion of subsequent work by an independent retained host-backed borrower. Exact source ordering, identity checks, historical shim shape, origin hook/agent abort and borrower route are in the final event. The prior blanket claim of confinement to disposable private spare content is withdrawn. Suggested bucket is highest for that borrower route; the isolated failed-preparation consequence remains narrower. Nothing was observed by execution.\n\nAttribution resolved: dbfc69751215dbf15e1d31d5bed73c3754c4ebc4 already forces the old driver's pane snapshot empty after migration, so the assigned 1ed482dde220452e424973faf38a5e1318986333 simplification is equivalent, not the introduction. This is a migration-specific interface referral to the parent, not an independently found retired-driver defect. Parent reports g109/g112 cover surviving-old-agent policy but not spare cleanup; no coverage sources were consulted.\n\nc2 revised with the complete mutex interval through stream insertion; c3 revised with the transactional kind check and retention of allocated checkout records on refusal. Both remain source-refuted concerns. c1 has no new evidence or change this turn.\n\nNew source-supported substantive discovery this turn: l1's opened-handle/borrower route. No new IDs. New verified actionable IDs for the assigned patch alone: none; l1 broader migration route needs parent ownership and an independent assessment. Unresolved technical premises readily checkable in the available source: none. Retained policy ambiguity under l1: whether the old-session-ended exception overrides specific retention of legitimate live clone claims; the replacement/out-of-band rule is not a valid basis. That wording does not expressly accept work loss in another surviving host-backed session. No parent drop accepted. No remaining record whose latest kind is lead; l1 remains an open finding with this policy caveat.\n\nNext action: return this turn's delta to the parent; a substantive discovery warrants a later pass under the caller's protocol. No separate final report created.\n\nTurn 3 started: separate discovery pass 1 beyond known issues, restricted to the assigned g111 patch. Existing complete findings history remains in context and on disk. No pending named cross-group questions. Next: read discovery-neighbours.json in bounded chunks, then revisit the assigned integration changes for fresh concrete leads. No runtime tests, reproductions or live-install actions.\n\nTurn 3 boundary: discovery pass 1 complete. Turn count: 3 (initial, synthesis, discovery). All 806 lines/204359 bytes of discovery-neighbours.json were read in bounded chunks 1–60 through 721–780 and 781–806 before the new source search. No pending cross-group questions were supplied; novelty was checked against these exact interface records and this group's entire history. Unread assigned patch/interface scope: none.\n\nNew verified finding ID: l2, other/documentation. The rewritten reload comment incorrectly claims that losing an in-memory host terminal leaks it past Delete. Checked the actual .host write-before-child-spec ordering, sentinel/artifact cleanup retention, startup sweep retention, Delete's no-runtime record collection and endings, the adjacent retained-publication documentation, parent wording and all remaining core changes through the pinned tip. It is a source-confirmed misleading rationale, not a production leak; the final record retains that distinction and the exact attribution. New verified source-refutation candidate: c4, deleted launch-excerpt fences were used only by the old tmux branch and do not remove host provenance. g100/l1's separate reducer resource finding remains distinct.\n\nOther useful checks: revisited constructor ownership/store ordering, surviving-host collection, field removals, retained launch publication and successful host-start forwarding within the assigned patch. Search of the pinned supervisor source found no executable output_reaps/self.sinks/stop_began references; only a test name mentions stop_began. No additional concrete defect emerged. Known l1 and earlier c1–c3 were not restated or revised during this discovery pass.\n\nNew unverified-after-investigation IDs: none. Remaining record whose latest kind is lead: none. Existing l1 policy ambiguity remains an open finding caveat, unchanged; no parent drop/lowering was accepted. Discovery result: yes, one new verified documentation finding (l2); no new runtime finding. No runtime tests, builds, reproductions, fixes, checkout writes or live-install actions.\n\nNext action: return this pass's delta. Because l2 is a substantive new discovery, await a later pass under the caller's protocol. All records remain append-only; no separate final report file created.\n\nTurn 4 started: discovery pass 2, restricted to the assigned g111 patch and beyond prior findings/candidates. No named pending interface questions. Refresh supplied neighbour records in bounded chunks before source search; reuse the complete durable findings history. No runtime tests, reproductions or live-install actions.\n\nTurn 4 boundary: discovery pass 2 complete; result empty. Turn count: 4 (initial, synthesis, discovery 1, discovery 2). Read all 1021 lines/312361 bytes of the refreshed discovery-neighbours.json in bounded ranges 1–70 through 911–980 and 981–1021 before source search. Existing complete finding/candidate history was reused. No named pending questions were supplied. Unread assigned/interface scope: none.\n\nInterface synthesis/novelty: refreshed g096/c2 and g109/c1 corroborate the already-recorded l1 moved-subtree/borrower route and in-range dbfc attribution; no new issue or accepted disposition follows. Refreshed g100/c1 concerns pre-existing resize promotion of seeded history into quoted screens. That is distinct from c4's narrower source refutation that the deleted field was not used by the host path; c4 does not refute the contamination route. Other refreshed records concern different assigned files/patch segments and were used for overlap, not to broaden this search. Existing l1/l2 and their consequences, priorities, caveats and proposed-drop bases are unchanged; no parent drop/lowering accepted.\n\nUseful fresh source checks in the assigned group at 1ed482dde220452e424973faf38a5e1318986333: startup option definition/default/destructuring/Seams propagation (core.rs:5230–5266,5868–5950); constructor reload authority, host notifier/gone registry and retained ownership/field initialization (:6155–6250); trust-removal worker retains ownership across cancellation (:6260–6282); reloaded RunCells and canonical directory/tab metadata (:7153–7245); reservation provenance/settlement and error-conservative probes (:7270–7371); host failure classification and scope sweep before row rollback (:11388–11496). Reviewed these alongside the previously delivered assigned patch and governing contracts. No fresh concrete source discrepancy or uninvestigated lead emerged.\n\nNew verified finding IDs: none. New verified candidate IDs: none. New unverified-after-investigation IDs: none. Remaining latest-kind lead IDs: none. Existing l1's policy-interpretation caveat remains with its open finding, unchanged. Explicit discovery result: nothing new found in this pass. No findings events were invented for routine successful checks.\n\nNo runtime tests, builds, reproductions, checkout writes or live-install actions. Only private progress was updated. Next action: report the empty discovery delta and await the caller's next instruction; no separate report file created.\n"
+}

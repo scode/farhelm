@@ -1,0 +1,749 @@
+{
+  "group": {
+    "id": "g104",
+    "domain": "supervisor-core-integration",
+    "purpose": "supervisor-core-integration: crates/farhelm-supervisor/src/service/core.rs, crates/farhelm-supervisor/src/files.rs, crates/farhelm-supervisor/src/lib.rs, crates/farhelm-supervisor/src/service/core/tests/claude_pin.rs, crates/farhelm-supervisor/src/service/mod.rs, crates/farhelm-supervisor/src/service/session_hosts.rs, crates/farhelm-supervisor/src/session_hold.rs, crates/farhelm-supervisor/src/version_lock.rs, crates/farhelm-supervisor/src/bounded_command.rs; phases @@ -40054,20 +40101,33 @@ exit 0",
+    "interfaces": [
+      "g001",
+      "g003",
+      "g005",
+      "g007",
+      "g008",
+      "g009",
+      "g010",
+      "g011",
+      "g012",
+      "g097",
+      "g098",
+      "g099",
+      "g100",
+      "g101",
+      "g102",
+      "g103",
+      "g105",
+      "g106",
+      "g107",
+      "g108",
+      "g109",
+      "g110",
+      "g111",
+      "g112",
+      "g113",
+      "g114",
+      "g115",
+      "g116",
+      "g117",
+      "g118",
+      "g119",
+      "g120",
+      "g121",
+      "g122",
+      "g123",
+      "g124",
+      "g125",
+      "g126",
+      "g127",
+      "g128",
+      "g129",
+      "g130",
+      "g131",
+      "g132",
+      "g133",
+      "g134",
+      "g149",
+      "g150",
+      "g159",
+      "g160",
+      "g161",
+      "g162",
+      "g163",
+      "g164",
+      "g165",
+      "g166",
+      "g167",
+      "g168",
+      "g169",
+      "g170",
+      "g171",
+      "g172",
+      "g173"
+    ],
+    "sources": [
+      {
+        "path": "[private-run]/prep/parts/00742-001.patch",
+        "ranges": [
+          [
+            1,
+            786
+          ]
+        ],
+        "original_path": "crates/farhelm-supervisor/src/service/core.rs",
+        "commit": "70bc66a9f285cc2a9984924f389834d118b7cfdc",
+        "notes": "@@ -40054,20 +40101,33 @@ exit 0; patch character offsets [59538,96958)",
+        "lines": 786,
+        "bytes": 37426,
+        "start": 59538,
+        "end": 96958,
+        "original": "[private-run]/prep/originals/00742.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/00906-000.patch",
+        "ranges": [
+          [
+            1,
+            73
+          ]
+        ],
+        "original_path": "crates/farhelm-supervisor/src/files.rs",
+        "commit": "1ed482dde220452e424973faf38a5e1318986333",
+        "notes": "patch header; patch character offsets [0,4719)",
+        "lines": 73,
+        "bytes": 4733,
+        "start": 0,
+        "end": 4719,
+        "original": "[private-run]/prep/originals/00906.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/00916-000.patch",
+        "ranges": [
+          [
+            1,
+            51
+          ]
+        ],
+        "original_path": "crates/farhelm-supervisor/src/lib.rs",
+        "commit": "1ed482dde220452e424973faf38a5e1318986333",
+        "notes": "patch header; patch character offsets [0,3128)",
+        "lines": 51,
+        "bytes": 3150,
+        "start": 0,
+        "end": 3128,
+        "original": "[private-run]/prep/originals/00916.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/00929-000.patch",
+        "ranges": [
+          [
+            1,
+            13
+          ]
+        ],
+        "original_path": "crates/farhelm-supervisor/src/service/core/tests/claude_pin.rs",
+        "commit": "1ed482dde220452e424973faf38a5e1318986333",
+        "notes": "patch header; patch character offsets [0,840)",
+        "lines": 13,
+        "bytes": 840,
+        "start": 0,
+        "end": 840,
+        "original": "[private-run]/prep/originals/00929.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/00936-000.patch",
+        "ranges": [
+          [
+            1,
+            61
+          ]
+        ],
+        "original_path": "crates/farhelm-supervisor/src/service/mod.rs",
+        "commit": "1ed482dde220452e424973faf38a5e1318986333",
+        "notes": "patch header; patch character offsets [0,3862)",
+        "lines": 61,
+        "bytes": 3874,
+        "start": 0,
+        "end": 3862,
+        "original": "[private-run]/prep/originals/00936.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/00940-000.patch",
+        "ranges": [
+          [
+            1,
+            85
+          ]
+        ],
+        "original_path": "crates/farhelm-supervisor/src/service/session_hosts.rs",
+        "commit": "1ed482dde220452e424973faf38a5e1318986333",
+        "notes": "patch header; patch character offsets [0,4216)",
+        "lines": 85,
+        "bytes": 4216,
+        "start": 0,
+        "end": 4216,
+        "original": "[private-run]/prep/originals/00940.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/00947-000.patch",
+        "ranges": [
+          [
+            1,
+            24
+          ]
+        ],
+        "original_path": "crates/farhelm-supervisor/src/session_hold.rs",
+        "commit": "1ed482dde220452e424973faf38a5e1318986333",
+        "notes": "patch header; patch character offsets [0,1410)",
+        "lines": 24,
+        "bytes": 1410,
+        "start": 0,
+        "end": 1410,
+        "original": "[private-run]/prep/originals/00947.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/00959-000.patch",
+        "ranges": [
+          [
+            1,
+            15
+          ]
+        ],
+        "original_path": "crates/farhelm-supervisor/src/version_lock.rs",
+        "commit": "1ed482dde220452e424973faf38a5e1318986333",
+        "notes": "patch header; patch character offsets [0,910)",
+        "lines": 15,
+        "bytes": 910,
+        "start": 0,
+        "end": 910,
+        "original": "[private-run]/prep/originals/00959.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/01048-000.patch",
+        "ranges": [
+          [
+            1,
+            134
+          ]
+        ],
+        "original_path": "crates/farhelm-supervisor/src/service/core.rs",
+        "commit": "f560058da19e02716e6f943883a9508b447aff4e",
+        "notes": "patch header; patch character offsets [0,6717)",
+        "lines": 134,
+        "bytes": 6717,
+        "start": 0,
+        "end": 6717,
+        "original": "[private-run]/prep/originals/01048.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/01235-000.patch",
+        "ranges": [
+          [
+            1,
+            14
+          ]
+        ],
+        "original_path": "crates/farhelm-supervisor/src/bounded_command.rs",
+        "commit": "17a3fe858c5511a24b7403af15dd41c93bf69fd7",
+        "notes": "patch header; patch character offsets [0,661)",
+        "lines": 14,
+        "bytes": 661,
+        "start": 0,
+        "end": 661,
+        "original": "[private-run]/prep/originals/01235.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/01236-000.patch",
+        "ranges": [
+          [
+            1,
+            21
+          ]
+        ],
+        "original_path": "crates/farhelm-supervisor/src/lib.rs",
+        "commit": "17a3fe858c5511a24b7403af15dd41c93bf69fd7",
+        "notes": "patch header; patch character offsets [0,1309)",
+        "lines": 21,
+        "bytes": 1309,
+        "start": 0,
+        "end": 1309,
+        "original": "[private-run]/prep/originals/01236.patch"
+      }
+    ],
+    "lines": 1277,
+    "bytes": 65246
+  },
+  "records": [
+    {
+      "key": "g104/c1",
+      "owner": "g104",
+      "id": "c1",
+      "domain": "supervisor-core-integration",
+      "purpose": "supervisor-core-integration: crates/farhelm-supervisor/src/service/core.rs, crates/farhelm-supervisor/src/files.rs, crates/farhelm-supervisor/src/lib.rs, crates/farhelm-supervisor/src/service/core/tests/claude_pin.rs, crates/farhelm-supervisor/src/service/mod.rs, crates/farhelm-supervisor/src/service/session_hosts.rs, crates/farhelm-supervisor/src/session_hold.rs, crates/farhelm-supervisor/src/version_lock.rs, crates/farhelm-supervisor/src/bounded_command.rs; phases @@ -40054,20 +40101,33 @@ exit 0",
+      "history": [
+        {
+          "line": 1,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c1",
+            "state": "open",
+            "summary": "tab scope conversion preserves cleanup fallback",
+            "location": "crates/farhelm-supervisor/src/service/session_hosts.rs:552",
+            "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. TLDR: considered whether simplifying the tab scope argument could leave tab processes alive after Delete. Source analysis: session_hosts.rs:552-573 passes each runtime or recorded tag's scoped boolean unchanged; service/sweep.rs:1312-1315 requires the portable sweep when the tab is unscoped or has no scope name. The old code mapped true to TabScope::Scoped and false to Unscoped, so this boundary preserves the decision. Suggested bucket: other (no established defect). Confidence: confirmed from source, no execution. proposed_drop: source refutation; no behavior change in the scoped/unscoped mapping. Could-be-highest: process leakage would qualify if established, but the changed mapping has no such route. possible_cover: none; no coverage sources searched. Caveat: this conclusion covers the assigned argument conversion, not independent sweep implementation defects."
+          }
+        },
+        {
+          "line": 4,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c1",
+            "state": "open",
+            "summary": "tab scope conversion preserves cleanup fallback",
+            "location": "crates/farhelm-supervisor/src/service/session_hosts.rs:552",
+            "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. TLDR: original potential consequence retained: simplifying tab scope provenance incorrectly could omit cleanup and leave user-owned tab processes alive after Delete. Suggested bucket: highest if that route were established; no defect in this conversion is established. Confidence: confirmed source refutation of the assigned conversion, not blanket sweep correctness; no execution. proposed_drop: narrowly, source refutation of a changed scoped/unscoped mapping. The prior code maps true to Scoped and false to Unscoped; the new extend_tab at service/sweep.rs:1312-1315 sets needs_sweep for !scoped or absent unit, preserving that truth table. Synthesis checks: core/host_tabs.rs:130-148 defines scoped as tag-derived, false for unknown startup placeholders; placeholder at 217 sets false; after_retry:240-246 preserves known scope metadata; host_tabs_of:260 clones all tabs without filtering exited ones. session_hosts.rs:248 partitions placeholders but retains them; add_tab_scopes:552-578 carries runtime and placeholder bools, decoded recorded tags' bools, and requires the sweep for Gone/Unreadable records. teardown.rs:320-376 gathers pinned agent/tab roots before destructive work; 404-424 independently requires sweep for incomplete/no terminal inventory and adds these host scopes. prepare_teardown and finish_teardown retain the same lifecycle claim and directory admission; finish_teardown reaps before ending hosts (about 532-555), with refusal retaining the row. The actual caller therefore does not replace false/unknown provenance with the agent's scoped state at this boundary. Could-be-highest: yes, the original suspected process leak concerns user-owned processes; rarity would not lower it. The source checks refute this specific conversion route, not all possible sweep, adoption or scope bugs. possible_cover: parent reports independent g099/c3 and g098/g101 checks agree on mapping and pinned roots; this is corroboration, not accepted queue coverage or a parent drop decision. Caveats: no parent drop accepted; retain for independent disposition. No coverage sources searched."
+          }
+        }
+      ],
+      "latest": {
+        "line": 4,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c1",
+          "state": "open",
+          "summary": "tab scope conversion preserves cleanup fallback",
+          "location": "crates/farhelm-supervisor/src/service/session_hosts.rs:552",
+          "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. TLDR: original potential consequence retained: simplifying tab scope provenance incorrectly could omit cleanup and leave user-owned tab processes alive after Delete. Suggested bucket: highest if that route were established; no defect in this conversion is established. Confidence: confirmed source refutation of the assigned conversion, not blanket sweep correctness; no execution. proposed_drop: narrowly, source refutation of a changed scoped/unscoped mapping. The prior code maps true to Scoped and false to Unscoped; the new extend_tab at service/sweep.rs:1312-1315 sets needs_sweep for !scoped or absent unit, preserving that truth table. Synthesis checks: core/host_tabs.rs:130-148 defines scoped as tag-derived, false for unknown startup placeholders; placeholder at 217 sets false; after_retry:240-246 preserves known scope metadata; host_tabs_of:260 clones all tabs without filtering exited ones. session_hosts.rs:248 partitions placeholders but retains them; add_tab_scopes:552-578 carries runtime and placeholder bools, decoded recorded tags' bools, and requires the sweep for Gone/Unreadable records. teardown.rs:320-376 gathers pinned agent/tab roots before destructive work; 404-424 independently requires sweep for incomplete/no terminal inventory and adds these host scopes. prepare_teardown and finish_teardown retain the same lifecycle claim and directory admission; finish_teardown reaps before ending hosts (about 532-555), with refusal retaining the row. The actual caller therefore does not replace false/unknown provenance with the agent's scoped state at this boundary. Could-be-highest: yes, the original suspected process leak concerns user-owned processes; rarity would not lower it. The source checks refute this specific conversion route, not all possible sweep, adoption or scope bugs. possible_cover: parent reports independent g099/c3 and g098/g101 checks agree on mapping and pinned roots; this is corroboration, not accepted queue coverage or a parent drop decision. Caveats: no parent drop accepted; retain for independent disposition. No coverage sources searched."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g104/findings.jsonl",
+        "id": "c1",
+        "line": 4,
+        "disposition": "under-investigation",
+        "group": "g104-c1",
+        "reason": "Record durably acknowledged; parent source/contract validation, cross-group synthesis, coverage/filter matching and any independent drop check remain pending. This preserves the claim and uncertainty without accepting, dropping or lowering it."
+      },
+      "accepted_parent_decision": null,
+      "returned_claim_checks": [
+        {
+          "batch": "claims-067",
+          "key": "g104/c1",
+          "latest_line": 4,
+          "recommendation": "refuted",
+          "bucket": "other",
+          "underlying_key": "host-tab-scope-bool-conversion-preserves-sweep-fallback",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The old Scoped/Unscoped mapping and new bool retain the same truth table, including unknown placeholders. This assigned conversion does not make an unscoped tab inherit its agent's containment.",
+          "checks": [
+            "1ed482dde220452e424973faf38a5e1318986333^:service/session_hosts.rs:552-590 maps each tab.scoped/tag.scoped true to Scoped, false to Unscoped.",
+            "1ed482dde220452e424973faf38a5e1318986333:service/session_hosts.rs:510-578 passes those same bools for runtime tabs, placeholders and recorded tags; Gone/Unreadable records require_sweep.",
+            "Same revision:service/sweep.rs:1312-1315 sets needs_sweep when unit is absent or scoped is false, preserving the old decision.",
+            "Same revision:service/core/host_tabs.rs:130-148,205-221,234-264: unknown startup placeholders use false, later retry preserves learned scope metadata, host_tabs_of clones all tabs without filtering exited ones.",
+            "Current SPEC_impl.md:4880-4898 explicitly makes unreadable tab tags unscoped and keeps portable fallback; agent launch selection is no substitute. Source-only comparison."
+          ],
+          "coverage_checked": {
+            "TODO.md:25-27": "Planned is empty; no cover.",
+            "BUGS.md": "Only the local SSH output-holder provisioning hang is recorded; no matching trigger/consequence/scope.",
+            "TRIAGE_OUTCOMES.md": "Searched active ledger for the actual lifecycle, marker, replay, shim, metadata and terminal-field claims; no exact matching disposition. Archive not read.",
+            "plans/queue": "Searched named behavior and symbols. Podman and tmux plans provide retirement context; none explicitly accepts the claimed test-oracle gap or fixes the named timer/serialization hypothesis. No plan used as cover merely because its subsystem matches.",
+            "FILTER.md": "Read in full. No entire filter boundary matches the retained integrated test gap; rarity alone was not used. Refuted hypotheses are resolved from source rather than filtered.",
+            "SPEC.md / SPEC_impl.md": "Per-tab containment and fallback contract matches this conversion; no spec accepts silently losing unscoped cleanup.",
+            "INDEX.md / matching files": "unscoped-tab-log-says-scoped.md was read: it concerns a misleading log, not cleanup bool provenance. gone-retry-forgets-pinned-foreground-child.md concerns discarded child identity, not this conversion. No exact aliases."
+          },
+          "exact_cover_quotes": [],
+          "missing_premise": "No mapping/provenance change is established at this boundary. Other adoption, scope or sweep defects are outside this narrow conclusion.",
+          "original_stronger_consequence": "Incorrect scope-provenance simplification could omit cleanup and leave user-owned tab processes alive after Delete. Highest if established; the source refutes this specific conversion route, not every sweep failure.",
+          "needs_independent_drop_check": true,
+          "proposed_basis": "Narrow source truth-table/provenance refutation. Preserve the original potential process-loss consequence and corroboration caveat for independent judgment."
+        }
+      ],
+      "parent_proposals": [
+        {
+          "artifact": "parent-flagged-judgments-067.json",
+          "key": "g104/c1",
+          "proposal": "claim-checks/claims-067/result.json",
+          "parent_proposal": "source-refuted-tab-scope-bool-conversion-loses-portable-sweep",
+          "final_independent_gate": "required-before-original-possible-process-loss-drop",
+          "reason": "Full067 old enum mapping equals retained bool for actual tabs, placeholders and recorded tags; unknown unreadable metadata is false and requires sweep, preserved learned metadata and exited tabs remain enumerated. Agent containment does not replace tab provenance. Refute named conversion only, no blanket adoption/sweep correctness. Original user-process/work implication remains for gate."
+        }
+      ],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": true,
+        "provisional_bucket": "highest",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "host-tab-scope-bool-conversion-preserves-sweep-fallback",
+        "destination": null
+      }
+    },
+    {
+      "key": "g104/c2",
+      "owner": "g104",
+      "id": "c2",
+      "domain": "supervisor-core-integration",
+      "purpose": "supervisor-core-integration: crates/farhelm-supervisor/src/service/core.rs, crates/farhelm-supervisor/src/files.rs, crates/farhelm-supervisor/src/lib.rs, crates/farhelm-supervisor/src/service/core/tests/claude_pin.rs, crates/farhelm-supervisor/src/service/mod.rs, crates/farhelm-supervisor/src/service/session_hosts.rs, crates/farhelm-supervisor/src/session_hold.rs, crates/farhelm-supervisor/src/version_lock.rs, crates/farhelm-supervisor/src/bounded_command.rs; phases @@ -40054,20 +40101,33 @@ exit 0",
+      "history": [
+        {
+          "line": 2,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c2",
+            "state": "open",
+            "summary": "removed terminal capability fields are fenced by protocol skew",
+            "location": "crates/farhelm-supervisor/src/service/core.rs:11847",
+            "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e. TLDR: considered whether supervisor replies that no longer report terminal kinds could make an older client select the wrong attachment behavior or hide required migration controls. Source analysis: the same commit removes agent_terminal and supervisor_creates_host_terminals from farhelm-proto::SessionInfo and bumps PROTOCOL_VERSION from 76 to 77 (farhelm-proto/src/lib.rs:255). SPEC_impl.md, Version and skew, requires incompatible peers to refuse at hello and explicitly says omission that changes receiver behavior needs a bump. The core patch removes only construction/projection of those removed members; the revision supports terminal hosts only. Suggested bucket: other (refuted compatibility defect). Confidence: confirmed from source, no execution. proposed_drop: source refutation, protocol bump fences old live peers; this does not rely on accepting a dangerous behavior in the specification. Could-be-highest: no security or loss-of-work route established for these reply fields. possible_cover: none; no coverage sources searched. Caveat: this checks the assigned reply-field removal and adjacent protocol contract, not all grid-only transport changes in the commit."
+          }
+        },
+        {
+          "line": 5,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c2",
+            "state": "open",
+            "summary": "removed terminal capability fields are fenced by protocol skew",
+            "location": "crates/farhelm-supervisor/src/service/core.rs:11847",
+            "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e. TLDR: original potential consequence retained: removing terminal-kind replies could send an older client down the wrong attachment path or hide migration controls. Suggested bucket: other; no established defect or loss-of-work route. Confidence: confirmed source refutation for the assigned field removal, no execution. proposed_drop: source refutation. Same-commit farhelm-proto/src/lib.rs:255 bumps protocol 76 to 77; io.rs:629 accepts only exact protocol equality, otherwise returns structured VersionSkew. This is an implementation fence, not merely a specification acceptance. Synthesis checked the second path through persisted listings: SessionInfo and TabInfo tolerate unknown old JSON keys; the existing test a_session_cached_with_terminal_kinds_still_decodes (lib.rs:7449-7508) asserts omission on serialization and successful decode with both removed members and mixed old tab kinds. No live consumer of either removed member remains in supervisor/helm/UI source (targeted git grep; other agent_terminal matches name functions, not members). service/terminals.rs:225-283 resolves Attach from the actual entry's HostTerminal or refuses a missing terminal; it does not infer a terminal from SessionInfo. Helm terminal.rs:40-68 relays only grids and documents the live handshake fence; its query no longer chooses a stream kind. core.rs:11820-11862 still publishes before projecting checkout metadata and keeps the accepted session ID in an error after publication. Therefore field omission is neither a host-readiness oracle nor a replacement for the actual Attach resolution. Could-be-highest: no route established; a wrongly selected display path alone does not establish destructive action or lost user work. possible_cover: none. Caveats: this is not an audit of all grid transport, UI bootstrap, cached-host connection policy or old-terminal retirement changes; no parent drop accepted, retain for independent disposition. Source conclusions only; existing test read, not executed."
+          }
+        }
+      ],
+      "latest": {
+        "line": 5,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c2",
+          "state": "open",
+          "summary": "removed terminal capability fields are fenced by protocol skew",
+          "location": "crates/farhelm-supervisor/src/service/core.rs:11847",
+          "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e. TLDR: original potential consequence retained: removing terminal-kind replies could send an older client down the wrong attachment path or hide migration controls. Suggested bucket: other; no established defect or loss-of-work route. Confidence: confirmed source refutation for the assigned field removal, no execution. proposed_drop: source refutation. Same-commit farhelm-proto/src/lib.rs:255 bumps protocol 76 to 77; io.rs:629 accepts only exact protocol equality, otherwise returns structured VersionSkew. This is an implementation fence, not merely a specification acceptance. Synthesis checked the second path through persisted listings: SessionInfo and TabInfo tolerate unknown old JSON keys; the existing test a_session_cached_with_terminal_kinds_still_decodes (lib.rs:7449-7508) asserts omission on serialization and successful decode with both removed members and mixed old tab kinds. No live consumer of either removed member remains in supervisor/helm/UI source (targeted git grep; other agent_terminal matches name functions, not members). service/terminals.rs:225-283 resolves Attach from the actual entry's HostTerminal or refuses a missing terminal; it does not infer a terminal from SessionInfo. Helm terminal.rs:40-68 relays only grids and documents the live handshake fence; its query no longer chooses a stream kind. core.rs:11820-11862 still publishes before projecting checkout metadata and keeps the accepted session ID in an error after publication. Therefore field omission is neither a host-readiness oracle nor a replacement for the actual Attach resolution. Could-be-highest: no route established; a wrongly selected display path alone does not establish destructive action or lost user work. possible_cover: none. Caveats: this is not an audit of all grid transport, UI bootstrap, cached-host connection policy or old-terminal retirement changes; no parent drop accepted, retain for independent disposition. Source conclusions only; existing test read, not executed."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g104/findings.jsonl",
+        "id": "c2",
+        "line": 5,
+        "disposition": "excluded",
+        "group": "removed-terminal-kind-reply-fields-protocol-fence",
+        "reason": "Parent explicitly accepted named covered proposal from claims-067 after inspecting it. The live helm/supervisor skew hypothesis is source-refuted, but the broader older-client claim has a real browser-page variant explicitly accepted by the Grid streams contract: a page retained across update can misdraw a reconnect until reloaded. Do not describe the protocol hello as fencing that browser path. Refute only the incompatible live-peer and cached-JSON routes; cover the broader old-browser display route by the exact Grid streams acceptance. Do not retain the primary record's overbroad implication that the hello fences all older clients. Checked source/results: [\"f560058da19e02716e6f943883a9508b447aff4e:crates/farhelm-proto/src/lib.rs:255 sets PROTOCOL_VERSION=77; lib.rs:7449-7508 test requires old removed fields/tab kinds to decode and new serialization to omit them.\",\"Same revision:crates/farhelm-proto/src/io.rs:629-650 accepts exact version equality only, otherwise constructs structured VersionSkew and refuses the connection.\",\"Same revision:service/terminals.rs:225-283 resolves agent/tab attachment from actual HostTerminal or returns missing-terminal refusal; it does not select a transport using SessionInfo fields.\",\"Current SPEC_impl.md:2945 onward and Version and skew:8231-8246 require the bump for omission that changes receiver behavior. Existing tests were read, not run.\",\"Reviewed f560058da19e02716e6f943883a9508b447aff4e:SPEC_impl.md:3010-3027, retained at current SPEC_impl.md:2937-2955: an old page left open across update can choose its old component for a listing whose kind is gone, interpret grids as bytes and end attachment on malformed input. The contract explicitly chooses reload as the remedy. This is specification acceptance, not runtime reproduction or proof that the browser path is impossible.\"] Current coverage/results: {\"TODO.md:25-27\":\"Planned is empty; no cover.\",\"BUGS.md\":\"Only the local SSH output-holder provisioning hang is recorded; no matching trigger/consequence/scope.\",\"TRIAGE_OUTCOMES.md\":\"Searched active ledger for the actual lifecycle, marker, replay, shim, metadata and terminal-field claims; no exact matching disposition. Archive not read.\",\"plans/queue\":\"Searched named behavior and symbols. Podman and tmux plans provide retirement context; none explicitly accepts the claimed test-oracle gap or fixes the named timer/serialization hypothesis. No plan used as cover merely because its subsystem matches.\",\"FILTER.md\":\"Read in full. No entire filter boundary matches the retained integrated test gap; rarity alone was not used. Refuted hypotheses are resolved from source rather than filtered.\",\"SPEC.md / SPEC_impl.md\":\"Version/skew fences incompatible helm/supervisor peers. Grid streams expressly accepts the precise retained-old-browser-page attachment failure until reload. That acceptance supplies cover for the broader older-client display path, not a blanket transport clearance.\",\"INDEX.md / matching files\":\"No exact reply-field-removal compatibility item found. tmux plan text describes the same removal/bump but was not treated as independent coverage.\"} Exact cited cover: [\"f560058da19e02716e6f943883a9508b447aff4e:SPEC_impl.md:3021-3027 / current SPEC_impl.md:2949-2955: A page loaded from the previous helm and left open across the update must be reloaded; nothing keeps it working.\",\"Same paragraph: Keeping the stream notice for such pages was considered and not done: a reload is the whole remedy.\"] Original stronger consequence and missing premise remain preserved: \"Older clients might choose the wrong attachment path or hide migration controls after terminal-kind reply fields disappear. No security, destructive action or user-work-loss route was established from those fields.\"; \"No live old-protocol helm/supervisor peer can pass the checked hello; no persisted-field decoding failure or new loss-of-work route established. The retained-old-browser-page display path needs no missing premise: it is explicitly described and accepted in the reviewed contract.\"."
+      },
+      "accepted_parent_decision": {
+        "key": "g104/c2",
+        "line": 5,
+        "disposition": "excluded",
+        "group": "removed-terminal-kind-reply-fields-protocol-fence",
+        "bucket": "other",
+        "recording": "covered",
+        "queue_target_candidate": null,
+        "needs_independent_drop_check": false,
+        "reason": "Parent explicitly accepted named covered proposal from claims-067 after inspecting it. The live helm/supervisor skew hypothesis is source-refuted, but the broader older-client claim has a real browser-page variant explicitly accepted by the Grid streams contract: a page retained across update can misdraw a reconnect until reloaded. Do not describe the protocol hello as fencing that browser path. Refute only the incompatible live-peer and cached-JSON routes; cover the broader old-browser display route by the exact Grid streams acceptance. Do not retain the primary record's overbroad implication that the hello fences all older clients. Checked source/results: [\"f560058da19e02716e6f943883a9508b447aff4e:crates/farhelm-proto/src/lib.rs:255 sets PROTOCOL_VERSION=77; lib.rs:7449-7508 test requires old removed fields/tab kinds to decode and new serialization to omit them.\",\"Same revision:crates/farhelm-proto/src/io.rs:629-650 accepts exact version equality only, otherwise constructs structured VersionSkew and refuses the connection.\",\"Same revision:service/terminals.rs:225-283 resolves agent/tab attachment from actual HostTerminal or returns missing-terminal refusal; it does not select a transport using SessionInfo fields.\",\"Current SPEC_impl.md:2945 onward and Version and skew:8231-8246 require the bump for omission that changes receiver behavior. Existing tests were read, not run.\",\"Reviewed f560058da19e02716e6f943883a9508b447aff4e:SPEC_impl.md:3010-3027, retained at current SPEC_impl.md:2937-2955: an old page left open across update can choose its old component for a listing whose kind is gone, interpret grids as bytes and end attachment on malformed input. The contract explicitly chooses reload as the remedy. This is specification acceptance, not runtime reproduction or proof that the browser path is impossible.\"] Current coverage/results: {\"TODO.md:25-27\":\"Planned is empty; no cover.\",\"BUGS.md\":\"Only the local SSH output-holder provisioning hang is recorded; no matching trigger/consequence/scope.\",\"TRIAGE_OUTCOMES.md\":\"Searched active ledger for the actual lifecycle, marker, replay, shim, metadata and terminal-field claims; no exact matching disposition. Archive not read.\",\"plans/queue\":\"Searched named behavior and symbols. Podman and tmux plans provide retirement context; none explicitly accepts the claimed test-oracle gap or fixes the named timer/serialization hypothesis. No plan used as cover merely because its subsystem matches.\",\"FILTER.md\":\"Read in full. No entire filter boundary matches the retained integrated test gap; rarity alone was not used. Refuted hypotheses are resolved from source rather than filtered.\",\"SPEC.md / SPEC_impl.md\":\"Version/skew fences incompatible helm/supervisor peers. Grid streams expressly accepts the precise retained-old-browser-page attachment failure until reload. That acceptance supplies cover for the broader older-client display path, not a blanket transport clearance.\",\"INDEX.md / matching files\":\"No exact reply-field-removal compatibility item found. tmux plan text describes the same removal/bump but was not treated as independent coverage.\"} Exact cited cover: [\"f560058da19e02716e6f943883a9508b447aff4e:SPEC_impl.md:3021-3027 / current SPEC_impl.md:2949-2955: A page loaded from the previous helm and left open across the update must be reloaded; nothing keeps it working.\",\"Same paragraph: Keeping the stream notice for such pages was considered and not done: a reload is the whole remedy.\"] Original stronger consequence and missing premise remain preserved: \"Older clients might choose the wrong attachment path or hide migration controls after terminal-kind reply fields disappear. No security, destructive action or user-work-loss route was established from those fields.\"; \"No live old-protocol helm/supervisor peer can pass the checked hello; no persisted-field decoding failure or new loss-of-work route established. The retained-old-browser-page display path needs no missing premise: it is explicitly described and accepted in the reviewed contract.\"."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-067",
+          "key": "g104/c2",
+          "latest_line": 5,
+          "recommendation": "covered",
+          "bucket": "other",
+          "underlying_key": "removed-terminal-kind-reply-fields-protocol-fence",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The live helm/supervisor skew hypothesis is source-refuted, but the broader older-client claim has a real browser-page variant explicitly accepted by the Grid streams contract: a page retained across update can misdraw a reconnect until reloaded. Do not describe the protocol hello as fencing that browser path.",
+          "checks": [
+            "f560058da19e02716e6f943883a9508b447aff4e:crates/farhelm-proto/src/lib.rs:255 sets PROTOCOL_VERSION=77; lib.rs:7449-7508 test requires old removed fields/tab kinds to decode and new serialization to omit them.",
+            "Same revision:crates/farhelm-proto/src/io.rs:629-650 accepts exact version equality only, otherwise constructs structured VersionSkew and refuses the connection.",
+            "Same revision:service/terminals.rs:225-283 resolves agent/tab attachment from actual HostTerminal or returns missing-terminal refusal; it does not select a transport using SessionInfo fields.",
+            "Current SPEC_impl.md:2945 onward and Version and skew:8231-8246 require the bump for omission that changes receiver behavior. Existing tests were read, not run.",
+            "Reviewed f560058da19e02716e6f943883a9508b447aff4e:SPEC_impl.md:3010-3027, retained at current SPEC_impl.md:2937-2955: an old page left open across update can choose its old component for a listing whose kind is gone, interpret grids as bytes and end attachment on malformed input. The contract explicitly chooses reload as the remedy. This is specification acceptance, not runtime reproduction or proof that the browser path is impossible."
+          ],
+          "coverage_checked": {
+            "TODO.md:25-27": "Planned is empty; no cover.",
+            "BUGS.md": "Only the local SSH output-holder provisioning hang is recorded; no matching trigger/consequence/scope.",
+            "TRIAGE_OUTCOMES.md": "Searched active ledger for the actual lifecycle, marker, replay, shim, metadata and terminal-field claims; no exact matching disposition. Archive not read.",
+            "plans/queue": "Searched named behavior and symbols. Podman and tmux plans provide retirement context; none explicitly accepts the claimed test-oracle gap or fixes the named timer/serialization hypothesis. No plan used as cover merely because its subsystem matches.",
+            "FILTER.md": "Read in full. No entire filter boundary matches the retained integrated test gap; rarity alone was not used. Refuted hypotheses are resolved from source rather than filtered.",
+            "SPEC.md / SPEC_impl.md": "Version/skew fences incompatible helm/supervisor peers. Grid streams expressly accepts the precise retained-old-browser-page attachment failure until reload. That acceptance supplies cover for the broader older-client display path, not a blanket transport clearance.",
+            "INDEX.md / matching files": "No exact reply-field-removal compatibility item found. tmux plan text describes the same removal/bump but was not treated as independent coverage."
+          },
+          "exact_cover_quotes": [
+            "f560058da19e02716e6f943883a9508b447aff4e:SPEC_impl.md:3021-3027 / current SPEC_impl.md:2949-2955: A page loaded from the previous helm and left open across the update must be reloaded; nothing keeps it working.",
+            "Same paragraph: Keeping the stream notice for such pages was considered and not done: a reload is the whole remedy."
+          ],
+          "missing_premise": "No live old-protocol helm/supervisor peer can pass the checked hello; no persisted-field decoding failure or new loss-of-work route established. The retained-old-browser-page display path needs no missing premise: it is explicitly described and accepted in the reviewed contract.",
+          "original_stronger_consequence": "Older clients might choose the wrong attachment path or hide migration controls after terminal-kind reply fields disappear. No security, destructive action or user-work-loss route was established from those fields.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Refute only the incompatible live-peer and cached-JSON routes; cover the broader old-browser display route by the exact Grid streams acceptance. Do not retain the primary record's overbroad implication that the hello fences all older clients.",
+          "new_interface_evidence": "The reviewed Grid streams section at f560058d:SPEC_impl.md:3021-3027 explicitly describes old browser pages choosing the wrong display path when terminal kinds and stream notices disappear. It accepts reload as the whole remedy. This narrows the primary refutation without establishing unaccepted harm."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": false,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "removed-terminal-kind-reply-fields-protocol-fence",
+        "destination": null
+      }
+    },
+    {
+      "key": "g104/c3",
+      "owner": "g104",
+      "id": "c3",
+      "domain": "supervisor-core-integration",
+      "purpose": "supervisor-core-integration: crates/farhelm-supervisor/src/service/core.rs, crates/farhelm-supervisor/src/files.rs, crates/farhelm-supervisor/src/lib.rs, crates/farhelm-supervisor/src/service/core/tests/claude_pin.rs, crates/farhelm-supervisor/src/service/mod.rs, crates/farhelm-supervisor/src/service/session_hosts.rs, crates/farhelm-supervisor/src/session_hold.rs, crates/farhelm-supervisor/src/version_lock.rs, crates/farhelm-supervisor/src/bounded_command.rs; phases @@ -40054,20 +40101,33 @@ exit 0",
+      "history": [
+        {
+          "line": 3,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c3",
+            "state": "open",
+            "summary": "reload test waits for the host exit observation boundary",
+            "location": "crates/farhelm-supervisor/src/service/core.rs:40101",
+            "detail": "Reviewed commit: 70bc66a9f285cc2a9984924f389834d118b7cfdc. TLDR: considered whether observing exits after reload weakened the pending-Stop regression test by manufacturing the desired outcome. Source analysis: core.rs:39905-40023 first adopts the real host and waits for its exit, asserts the competing wrapper/preparation inference applies, and durably records StopRequested. release_fixture_host aborts only that runtime before reload; observe_reloaded_host_exits at 40046 waits for each returned host runtime to read Exited and invokes the shipped ticker observer with those entries. The changed test at 40101-40152 also asserts the host is found exactly in the non-absent case. SPEC_impl.md:2678-2685 says an offline child's exit reads as running until replay, after which the ticker records the exit, and reload leaves a durable Stop request intact for that case. This matches the actual boundary rather than bypassing it. Suggested bucket: other (no established test defect). Confidence: confirmed from source, no execution. proposed_drop: source and contract refutation; the helper uses the production observer after the documented exit replay boundary. Could-be-highest: no shipped data-loss or security route established; this concern was about regression-test strength. possible_cover: none; no coverage sources searched. Caveat: source review does not show a runtime pass."
+          }
+        },
+        {
+          "line": 6,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c3",
+            "state": "open",
+            "summary": "reload test waits for the host exit observation boundary",
+            "location": "crates/farhelm-supervisor/src/service/core.rs:40101",
+            "detail": "Reviewed commit: 70bc66a9f285cc2a9984924f389834d118b7cfdc. TLDR: original concern retained: a test that completes reload with a manufactured observation could conceal a lost pending-Stop annotation or incorrect startup error. Suggested bucket: other for this test-strength concern, no established shipped defect. Confidence: confirmed source refutation of the oracle concern, no execution. proposed_drop: source and contract refutation. Synthesis checks of readiness and teardown: pending_startup_stop_fixture:39905-40023 waits for the actual host exit, verifies dead owned evidence and the competing wrapper/preparation inference before durably storing StopRequested. The reload test:40101-40152 ends the host through shutdown and asserts ended plus empty sockets in the absent case, or aborts only its runtime in the present case; it asserts terminal presence matches that choice. hosts/terminal.rs:2398 abort cancels the runtime task and encodes, without a host shutdown; a recovered runtime then reads the host's actual journal. on_exited at 3814-3823 flushes/publishes emulator state before setting Liveness::Exited, so wait_for_host_exit establishes processed exit rather than mere process disappearance. core/tests/host_terminals.rs:73-93 subscribes before checking, bounds the wait, and prints current status on failure. observe_reloaded_host_exits:40046 calls the production ticker observer on returned entries, not synthetic terminal evidence. Production ticker.rs:1211-1240 selects Running/StopRequested host entries with Owned dead evidence and calls the same observer; core.rs:7586 leaves StopRequested while reaped-child replay is incomplete, and status.rs:871/894 suppresses only inferred failures. Thus those entries satisfy the caller's observation readiness. The helper deliberately does not exercise ticker scheduling or installation of the returned reload map; that is a limit of this classification test, not evidence it claims those boundaries. StateDir wraps TestDir; teststate/lib.rs:794-808 ends remaining hosts before deleting their socket directory and keeps the directory if shutdown cannot be confirmed. Diagnostics remain within the live fixture. Could-be-highest: no security or user-work-loss route established for this oracle concern. possible_cover: none. Caveats: source-only; no runtime pass, scheduling coverage or full teardown correctness claimed. No parent drop accepted; retain for independent disposition."
+          }
+        }
+      ],
+      "latest": {
+        "line": 6,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c3",
+          "state": "open",
+          "summary": "reload test waits for the host exit observation boundary",
+          "location": "crates/farhelm-supervisor/src/service/core.rs:40101",
+          "detail": "Reviewed commit: 70bc66a9f285cc2a9984924f389834d118b7cfdc. TLDR: original concern retained: a test that completes reload with a manufactured observation could conceal a lost pending-Stop annotation or incorrect startup error. Suggested bucket: other for this test-strength concern, no established shipped defect. Confidence: confirmed source refutation of the oracle concern, no execution. proposed_drop: source and contract refutation. Synthesis checks of readiness and teardown: pending_startup_stop_fixture:39905-40023 waits for the actual host exit, verifies dead owned evidence and the competing wrapper/preparation inference before durably storing StopRequested. The reload test:40101-40152 ends the host through shutdown and asserts ended plus empty sockets in the absent case, or aborts only its runtime in the present case; it asserts terminal presence matches that choice. hosts/terminal.rs:2398 abort cancels the runtime task and encodes, without a host shutdown; a recovered runtime then reads the host's actual journal. on_exited at 3814-3823 flushes/publishes emulator state before setting Liveness::Exited, so wait_for_host_exit establishes processed exit rather than mere process disappearance. core/tests/host_terminals.rs:73-93 subscribes before checking, bounds the wait, and prints current status on failure. observe_reloaded_host_exits:40046 calls the production ticker observer on returned entries, not synthetic terminal evidence. Production ticker.rs:1211-1240 selects Running/StopRequested host entries with Owned dead evidence and calls the same observer; core.rs:7586 leaves StopRequested while reaped-child replay is incomplete, and status.rs:871/894 suppresses only inferred failures. Thus those entries satisfy the caller's observation readiness. The helper deliberately does not exercise ticker scheduling or installation of the returned reload map; that is a limit of this classification test, not evidence it claims those boundaries. StateDir wraps TestDir; teststate/lib.rs:794-808 ends remaining hosts before deleting their socket directory and keeps the directory if shutdown cannot be confirmed. Diagnostics remain within the live fixture. Could-be-highest: no security or user-work-loss route established for this oracle concern. possible_cover: none. Caveats: source-only; no runtime pass, scheduling coverage or full teardown correctness claimed. No parent drop accepted; retain for independent disposition."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g104/findings.jsonl",
+        "id": "c3",
+        "line": 6,
+        "disposition": "excluded",
+        "group": "pending-stop-reload-test-real-exit-observer-boundary",
+        "reason": "Parent explicitly accepted named refuted proposal from claims-067 after inspecting it. Same root as g103/c2: actual host replay followed by the production observer completes the deliberately combined reload/classification boundary. Refute the narrow oracle concern; reconcile with g103/c2. The omission of scheduling/installation coverage remains explicit. Checked source/results: [\"70bc66a9f285cc2a9984924f389834d118b7cfdc:service/core.rs:39905-40023 establishes dead owned-host and competing inference premises before StopRequested.\",\"Same revision:service/core.rs:40046-40152: helper waits for actual host exit; test verifies host found exactly in present case and uses production ticker::observe_entries over reloaded entries.\",\"Same revision:service/ticker.rs:1362-1483 observes supplied entries and writes transitions to store; it does not require the returned map installed.\",\"Current SPEC.md:2663-2683 and SPEC_impl.md:2440-2455 explicitly preserve the pending Stop until replay and ticker observation. No runtime pass, ticker scheduling coverage or full fixture-teardown guarantee claimed.\"] Current coverage/results: {\"TODO.md:25-27\":\"Planned is empty; no cover.\",\"BUGS.md\":\"Only the local SSH output-holder provisioning hang is recorded; no matching trigger/consequence/scope.\",\"TRIAGE_OUTCOMES.md\":\"Searched active ledger for the actual lifecycle, marker, replay, shim, metadata and terminal-field claims; no exact matching disposition. Archive not read.\",\"plans/queue\":\"Searched named behavior and symbols. Podman and tmux plans provide retirement context; none explicitly accepts the claimed test-oracle gap or fixes the named timer/serialization hypothesis. No plan used as cover merely because its subsystem matches.\",\"FILTER.md\":\"Read in full. No entire filter boundary matches the retained integrated test gap; rarity alone was not used. Refuted hypotheses are resolved from source rather than filtered.\",\"SPEC.md / SPEC_impl.md\":\"Pending Stop classification and replay/observer split match the helper's intended boundary.\",\"INDEX.md / matching files\":\"No exact queue item covering this manufactured-observation hypothesis; stop-annotation-exit-witness.md addresses a separate missing wait.\",\"Named aliases\":\"Exact same-root alias g103/c2, with the same test/helper and reviewed revision. This is reconciliation, not queue coverage.\"} Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"A manufactured observation might conceal lost pending-Stop annotation or incorrect startup error. Test-strength concern only; no established shipped security or user-work-loss route.\"; \"No synthetic terminal evidence or vacuous store observation was found. Ticker scheduling is outside this classification test's claim.\"."
+      },
+      "accepted_parent_decision": {
+        "key": "g104/c3",
+        "line": 6,
+        "disposition": "excluded",
+        "group": "pending-stop-reload-test-real-exit-observer-boundary",
+        "bucket": "other",
+        "recording": "refuted",
+        "queue_target_candidate": null,
+        "needs_independent_drop_check": false,
+        "reason": "Parent explicitly accepted named refuted proposal from claims-067 after inspecting it. Same root as g103/c2: actual host replay followed by the production observer completes the deliberately combined reload/classification boundary. Refute the narrow oracle concern; reconcile with g103/c2. The omission of scheduling/installation coverage remains explicit. Checked source/results: [\"70bc66a9f285cc2a9984924f389834d118b7cfdc:service/core.rs:39905-40023 establishes dead owned-host and competing inference premises before StopRequested.\",\"Same revision:service/core.rs:40046-40152: helper waits for actual host exit; test verifies host found exactly in present case and uses production ticker::observe_entries over reloaded entries.\",\"Same revision:service/ticker.rs:1362-1483 observes supplied entries and writes transitions to store; it does not require the returned map installed.\",\"Current SPEC.md:2663-2683 and SPEC_impl.md:2440-2455 explicitly preserve the pending Stop until replay and ticker observation. No runtime pass, ticker scheduling coverage or full fixture-teardown guarantee claimed.\"] Current coverage/results: {\"TODO.md:25-27\":\"Planned is empty; no cover.\",\"BUGS.md\":\"Only the local SSH output-holder provisioning hang is recorded; no matching trigger/consequence/scope.\",\"TRIAGE_OUTCOMES.md\":\"Searched active ledger for the actual lifecycle, marker, replay, shim, metadata and terminal-field claims; no exact matching disposition. Archive not read.\",\"plans/queue\":\"Searched named behavior and symbols. Podman and tmux plans provide retirement context; none explicitly accepts the claimed test-oracle gap or fixes the named timer/serialization hypothesis. No plan used as cover merely because its subsystem matches.\",\"FILTER.md\":\"Read in full. No entire filter boundary matches the retained integrated test gap; rarity alone was not used. Refuted hypotheses are resolved from source rather than filtered.\",\"SPEC.md / SPEC_impl.md\":\"Pending Stop classification and replay/observer split match the helper's intended boundary.\",\"INDEX.md / matching files\":\"No exact queue item covering this manufactured-observation hypothesis; stop-annotation-exit-witness.md addresses a separate missing wait.\",\"Named aliases\":\"Exact same-root alias g103/c2, with the same test/helper and reviewed revision. This is reconciliation, not queue coverage.\"} Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"A manufactured observation might conceal lost pending-Stop annotation or incorrect startup error. Test-strength concern only; no established shipped security or user-work-loss route.\"; \"No synthetic terminal evidence or vacuous store observation was found. Ticker scheduling is outside this classification test's claim.\"."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-067",
+          "key": "g104/c3",
+          "latest_line": 6,
+          "recommendation": "refuted",
+          "bucket": "other",
+          "underlying_key": "pending-stop-reload-test-real-exit-observer-boundary",
+          "aliases": [
+            "g103/c2"
+          ],
+          "target_queue_file": null,
+          "why": "Same root as g103/c2: actual host replay followed by the production observer completes the deliberately combined reload/classification boundary.",
+          "checks": [
+            "70bc66a9f285cc2a9984924f389834d118b7cfdc:service/core.rs:39905-40023 establishes dead owned-host and competing inference premises before StopRequested.",
+            "Same revision:service/core.rs:40046-40152: helper waits for actual host exit; test verifies host found exactly in present case and uses production ticker::observe_entries over reloaded entries.",
+            "Same revision:service/ticker.rs:1362-1483 observes supplied entries and writes transitions to store; it does not require the returned map installed.",
+            "Current SPEC.md:2663-2683 and SPEC_impl.md:2440-2455 explicitly preserve the pending Stop until replay and ticker observation. No runtime pass, ticker scheduling coverage or full fixture-teardown guarantee claimed."
+          ],
+          "coverage_checked": {
+            "TODO.md:25-27": "Planned is empty; no cover.",
+            "BUGS.md": "Only the local SSH output-holder provisioning hang is recorded; no matching trigger/consequence/scope.",
+            "TRIAGE_OUTCOMES.md": "Searched active ledger for the actual lifecycle, marker, replay, shim, metadata and terminal-field claims; no exact matching disposition. Archive not read.",
+            "plans/queue": "Searched named behavior and symbols. Podman and tmux plans provide retirement context; none explicitly accepts the claimed test-oracle gap or fixes the named timer/serialization hypothesis. No plan used as cover merely because its subsystem matches.",
+            "FILTER.md": "Read in full. No entire filter boundary matches the retained integrated test gap; rarity alone was not used. Refuted hypotheses are resolved from source rather than filtered.",
+            "SPEC.md / SPEC_impl.md": "Pending Stop classification and replay/observer split match the helper's intended boundary.",
+            "INDEX.md / matching files": "No exact queue item covering this manufactured-observation hypothesis; stop-annotation-exit-witness.md addresses a separate missing wait.",
+            "Named aliases": "Exact same-root alias g103/c2, with the same test/helper and reviewed revision. This is reconciliation, not queue coverage."
+          },
+          "exact_cover_quotes": [],
+          "missing_premise": "No synthetic terminal evidence or vacuous store observation was found. Ticker scheduling is outside this classification test's claim.",
+          "original_stronger_consequence": "A manufactured observation might conceal lost pending-Stop annotation or incorrect startup error. Test-strength concern only; no established shipped security or user-work-loss route.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Refute the narrow oracle concern; reconcile with g103/c2. The omission of scheduling/installation coverage remains explicit."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "pending-stop-reload-test-real-exit-observer-boundary",
+        "destination": null
+      }
+    },
+    {
+      "key": "g104/l4",
+      "owner": "g104",
+      "id": "l4",
+      "domain": "supervisor-core-integration",
+      "purpose": "supervisor-core-integration: crates/farhelm-supervisor/src/service/core.rs, crates/farhelm-supervisor/src/files.rs, crates/farhelm-supervisor/src/lib.rs, crates/farhelm-supervisor/src/service/core/tests/claude_pin.rs, crates/farhelm-supervisor/src/service/mod.rs, crates/farhelm-supervisor/src/service/session_hosts.rs, crates/farhelm-supervisor/src/session_hold.rs, crates/farhelm-supervisor/src/version_lock.rs, crates/farhelm-supervisor/src/bounded_command.rs; phases @@ -40054,20 +40101,33 @@ exit 0",
+      "history": [
+        {
+          "line": 7,
+          "event": {
+            "version": 1,
+            "kind": "lead",
+            "id": "l4",
+            "state": "open",
+            "summary": "borrower reload test may keep a competing origin runtime attached",
+            "location": "crates/farhelm-supervisor/src/service/core.rs:41879",
+            "detail": "Reviewed commit: 70bc66a9f285cc2a9984924f389834d118b7cfdc. TLDR: the borrower case of checkout_interruption_status_matches_reload may run reload while the original checkout session's host runtime is still attached, permitting two runtimes to contend for the same host instead of modeling a restarted supervisor. Source basis: core.rs:41773-41800 creates a live origin with long_lived_launcher, then creates a borrower; :41857-41862 shuts down only the selected borrower's host, and :41879 reloads all sessions without releasing the origin runtime. Earlier assigned fixture documentation at 39729-39734 explicitly warns that two runtimes keep taking a host over, and release_fixture_host handles that boundary in the pending-Stop tests. Need source checks: determine whether reload automatically keeps/skips this live origin's runtime through a global registry or whether this wrapper scans/adopts it; check ownership and lifetime of the original origin runtime through reload and test return. Exact missing premise: whether this test actually creates a second owning runtime for the still-live origin rather than preserving the existing one, and whether that affects the tested borrower oracle or solely leaves a bad fixture premise. Suspected consequence is test reliability/lifecycle validity, not production data loss. Suggested bucket: other pending checks. Confidence: concrete source lead, no execution. Could-be-highest: no established security or user-work-loss route. proposed_drop: false pending source investigation. possible_cover: none in supplied neighbour findings; not c3's already-released pending-Stop fixture. No reproduction or runtime test."
+          }
+        },
+        {
+          "line": 8,
+          "event": {
+            "version": 1,
+            "kind": "lead",
+            "id": "l4",
+            "state": "open",
+            "summary": "borrower reload creates competing runtimes for its live origin",
+            "location": "crates/farhelm-supervisor/src/service/core.rs:41879",
+            "detail": "Reviewed commit: 70bc66a9f285cc2a9984924f389834d118b7cfdc. Original suspected consequence retained: the borrower case may contend for its origin host and weaken reload-fixture validity or reliability. Source checks establish the ownership premise: test wrapper reload_sessions at 7957-7978 explicitly supplies an empty adopted map and tabs with no notifier; attribute_host_rows (core/host_handover.rs:672-710) skips only supplied adopted hosts, then scans/takes over and adopts pending rows (736-790). The original supervisor still holds the live origin handle, so a second runtime is created for that origin. terminal.rs:3964-4040 reconnects when a connection is taken over, until the bounded reconnect limit or handles disappear; there is no automatic global reuse. However the test asserts only the stopped borrower's classification, not the origin's post-reload liveness, so contention alone does not establish failure of its asserted result. A separate exact documentation discrepancy is now visible: wrapper doc at 7961 says The tests that use it have no hosts, while the assigned migration explicitly calls it with hosts, including the origin not shut down in the borrower case. Need check attribution across the full pinned range and later state, then retain only the supported consequence, not a conjectured flake. Suggested bucket: other. Confidence: source-confirmed competing runtime and stale helper assumption; no execution, no observed failing schedule. Could-be-highest: no. proposed_drop: false while attribution and distinction are checked. possible_cover: no matching item in supplied neighbour context; not the known exit-oracle c3. Exact remaining premise for a test-failure claim: a dependency from origin contention to the selected borrower's asserted result; the inspected code has not supplied one."
+          }
+        },
+        {
+          "line": 9,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "l4",
+            "state": "open",
+            "summary": "borrower reload fixture retains a competing origin runtime",
+            "location": "crates/farhelm-supervisor/src/service/core.rs:41879",
+            "detail": "Reviewed commit: 70bc66a9f285cc2a9984924f389834d118b7cfdc. TLDR: the converted checkout-status test reloads a still-running origin host while its original runtime is attached. The test creates two owners that can take the same host back from each other, rather than modeling a restarted supervisor. The supported finding is an unintended fixture ownership conflict and inaccurate helper assumption, not an observed flaky assertion or production failure. Suggested bucket: other (test fixture/lifecycle validity). Confidence: confirmed by source/caller ownership analysis, no execution. proposed_drop: false. Could-be-highest: no established security or user-work-loss route. possible_cover: none in the supplied exact neighbour records; no prohibited coverage sources searched.\n\nSource: checkout_interruption_status_matches_reload creates a live origin using long_lived_launcher at core.rs:41773-41780. In the borrower branch :41793-41799 it creates another session and selects that borrower's info; the supervisor's session map still owns the origin runtime. :41857-41862 ends only the selected borrower's host. :41879 invokes reload_sessions over all rows, without aborting or passing the live origin handle. This wrapper at :7957-7978 supplies adopted: HashMap::new() and tabs: HashMap::new(); its comment explicitly states no runtime counts as already adopted and incorrectly still says The tests that use it have no hosts. attribute_host_rows in core/host_handover.rs:672-710 skips only passed adopted/tab sockets, scans with HostRegistry, and at :764-790 adopts the origin over the scan's connection. Registry scan calls HostConnection::connect_with at hosts/registry.rs:775; client.rs:1277-1279 always sends take_over: true. The original handle remains in sup.sessions. hosts/terminal.rs:3964-4040 reconnects on takeover while its control channel is open, up to its bounded instability limit. Thus no global registry or handle drop silently prevents the second owner. The host contract at SPEC_impl.md:2077-2078 says Each host has one owning connection inside the supervisor, since a second connection takes the host over from the first without notice. The same commit's helper docs at core.rs:39729-39734 explicitly warn about two runtimes taking over and require abort before another reload.\n\nAttribution and limits: the range base 6e423e30068b62c6cfa276c6d720ee35bb70387a's corresponding test (:41488 onward) uses tmux_supervisor; this origin has no reconnecting host runtime. The immediate parent has the same tmux fixture. The assigned migration introduces the still-live competing host owner in this test. The no-hosts wrapper comment predates the range (git log -S found no introduction inside the complete range); this finding does not claim that old comment itself was newly authored. The new caller violates its stated assumption, just as it begins making the stale claim false for this caller. Production reload already supports preserving existing runtimes via its adopted map; this test wrapper passes none.\n\nOriginal potential consequence preserved and narrowed after investigation: origin takeover could affect test reliability or make the reload fixture unrepresentative. The test checks only the stopped borrower's result, so source has not established that contention changes those assertions. Do not label this a confirmed flake, fabricate a failure trace, or claim the borrower is misclassified. Neither current correct borrower classification nor that limitation removes the concrete second-owner setup. Fix direction: release the origin's runtime before the manual reload (or pass the existing runtime deliberately), and document the wrapper's ownership requirement. Keep the selected borrower's stopped/absent boundary unchanged. No reproduction, runtime test, build or live-install operation."
+          }
+        },
+        {
+          "line": 10,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "l4",
+            "state": "open",
+            "summary": "borrower reload fixture retains a competing origin runtime",
+            "location": "crates/farhelm-supervisor/src/service/core.rs:41879",
+            "detail": "Reviewed commit: 70bc66a9f285cc2a9984924f389834d118b7cfdc. TLDR: the converted checkout-status test reloads a still-running origin host while its original runtime is attached. The test creates two owners that can take the same host back from each other, rather than modeling a restarted supervisor. The supported finding is an unintended fixture ownership conflict and inaccurate helper assumption, not an observed flaky assertion or production failure. Suggested bucket: other (test fixture/lifecycle validity). Confidence: confirmed by source/caller ownership analysis, no execution. proposed_drop: false. Could-be-highest: no established security or user-work-loss route. possible_cover: none in the supplied exact neighbour records; no prohibited coverage sources searched.\n\nSource: checkout_interruption_status_matches_reload creates a live origin using long_lived_launcher at core.rs:41773-41780. In the borrower branch :41793-41799 it creates another session and selects that borrower's info; the supervisor's session map still owns the origin runtime. :41857-41862 ends only the selected borrower's host. :41879 invokes reload_sessions over all rows, without aborting or passing the live origin handle. This wrapper at :7957-7978 supplies adopted: HashMap::new() and tabs: HashMap::new(); its comment explicitly states no runtime counts as already adopted and incorrectly still says The tests that use it have no hosts. attribute_host_rows in core/host_handover.rs:672-710 skips only passed adopted/tab sockets, scans with HostRegistry, and at :764-790 adopts the origin over the scan's connection. Registry scan calls HostConnection::connect_with at hosts/registry.rs:775; client.rs:1277-1279 always sends take_over: true. The original handle remains in sup.sessions. hosts/terminal.rs:3964-4040 reconnects on takeover while its control channel is open, up to its bounded instability limit. Thus no global registry or handle drop silently prevents the second owner. The host contract at SPEC_impl.md:2077-2078 says Each host has one owning connection inside the supervisor, since a second connection takes the host over from the first without notice. The same commit's helper docs at core.rs:39729-39734 explicitly warn about two runtimes taking over and require abort before another reload.\n\nAttribution and limits: the range base 6e423e30068b62c6cfa276c6d720ee35bb70387a's corresponding test (:41488 onward) uses tmux_supervisor; this origin has no reconnecting host runtime. The immediate parent has the same tmux fixture. The assigned migration introduces the still-live competing host owner in this test. The no-hosts wrapper comment predates the range (git log -S found no introduction inside the complete range); this finding does not claim that old comment itself was newly authored. The new caller violates its stated assumption, just as it begins making the stale claim false for this caller. Production reload already supports preserving existing runtimes via its adopted map; this test wrapper passes none.\n\nOriginal potential consequence preserved and narrowed after investigation: origin takeover could affect test reliability or make the reload fixture unrepresentative. The test checks only the stopped borrower's result, so source has not established that contention changes those assertions. Do not label this a confirmed flake, fabricate a failure trace, or claim the borrower is misclassified. Neither current correct borrower classification nor that limitation removes the concrete second-owner setup. Fix direction: release the origin's runtime before the manual reload (or pass the existing runtime deliberately), and document the wrapper's ownership requirement. Keep the selected borrower's stopped/absent boundary unchanged. No reproduction, runtime test, build or live-install operation.\n\nLater-range check: pinned tip 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db still uses the live origin fixture at core.rs:36689-36700, ends only the selected host at :36768-36773, and reloads at :36782-36790 without releasing the origin. Its wrapper :7379-7407 still passes an empty adopted map and retains the no-hosts comment. No later repair for this lifetime interaction is present at tip."
+          }
+        }
+      ],
+      "latest": {
+        "line": 10,
+        "event": {
+          "version": 1,
+          "kind": "finding",
+          "id": "l4",
+          "state": "open",
+          "summary": "borrower reload fixture retains a competing origin runtime",
+          "location": "crates/farhelm-supervisor/src/service/core.rs:41879",
+          "detail": "Reviewed commit: 70bc66a9f285cc2a9984924f389834d118b7cfdc. TLDR: the converted checkout-status test reloads a still-running origin host while its original runtime is attached. The test creates two owners that can take the same host back from each other, rather than modeling a restarted supervisor. The supported finding is an unintended fixture ownership conflict and inaccurate helper assumption, not an observed flaky assertion or production failure. Suggested bucket: other (test fixture/lifecycle validity). Confidence: confirmed by source/caller ownership analysis, no execution. proposed_drop: false. Could-be-highest: no established security or user-work-loss route. possible_cover: none in the supplied exact neighbour records; no prohibited coverage sources searched.\n\nSource: checkout_interruption_status_matches_reload creates a live origin using long_lived_launcher at core.rs:41773-41780. In the borrower branch :41793-41799 it creates another session and selects that borrower's info; the supervisor's session map still owns the origin runtime. :41857-41862 ends only the selected borrower's host. :41879 invokes reload_sessions over all rows, without aborting or passing the live origin handle. This wrapper at :7957-7978 supplies adopted: HashMap::new() and tabs: HashMap::new(); its comment explicitly states no runtime counts as already adopted and incorrectly still says The tests that use it have no hosts. attribute_host_rows in core/host_handover.rs:672-710 skips only passed adopted/tab sockets, scans with HostRegistry, and at :764-790 adopts the origin over the scan's connection. Registry scan calls HostConnection::connect_with at hosts/registry.rs:775; client.rs:1277-1279 always sends take_over: true. The original handle remains in sup.sessions. hosts/terminal.rs:3964-4040 reconnects on takeover while its control channel is open, up to its bounded instability limit. Thus no global registry or handle drop silently prevents the second owner. The host contract at SPEC_impl.md:2077-2078 says Each host has one owning connection inside the supervisor, since a second connection takes the host over from the first without notice. The same commit's helper docs at core.rs:39729-39734 explicitly warn about two runtimes taking over and require abort before another reload.\n\nAttribution and limits: the range base 6e423e30068b62c6cfa276c6d720ee35bb70387a's corresponding test (:41488 onward) uses tmux_supervisor; this origin has no reconnecting host runtime. The immediate parent has the same tmux fixture. The assigned migration introduces the still-live competing host owner in this test. The no-hosts wrapper comment predates the range (git log -S found no introduction inside the complete range); this finding does not claim that old comment itself was newly authored. The new caller violates its stated assumption, just as it begins making the stale claim false for this caller. Production reload already supports preserving existing runtimes via its adopted map; this test wrapper passes none.\n\nOriginal potential consequence preserved and narrowed after investigation: origin takeover could affect test reliability or make the reload fixture unrepresentative. The test checks only the stopped borrower's result, so source has not established that contention changes those assertions. Do not label this a confirmed flake, fabricate a failure trace, or claim the borrower is misclassified. Neither current correct borrower classification nor that limitation removes the concrete second-owner setup. Fix direction: release the origin's runtime before the manual reload (or pass the existing runtime deliberately), and document the wrapper's ownership requirement. Keep the selected borrower's stopped/absent boundary unchanged. No reproduction, runtime test, build or live-install operation.\n\nLater-range check: pinned tip 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db still uses the live origin fixture at core.rs:36689-36700, ends only the selected host at :36768-36773, and reloads at :36782-36790 without releasing the origin. Its wrapper :7379-7407 still passes an empty adopted map and retains the no-hosts comment. No later repair for this lifetime interaction is present at tip."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g104/findings.jsonl",
+        "id": "l4",
+        "line": 10,
+        "disposition": "verified",
+        "group": "checkout-status-borrower-reload-keeps-origin-runtime",
+        "reason": "Parent explicitly accepted named retain-verified proposal from claims-068 after inspecting it. The migrated borrower fixture reloads all rows while its supervisor still owns the live origin runtime. The reload wrapper supplies no adopted hosts, so discovery takes over that host and creates another runtime. This is a fixture ownership defect, not an observed assertion failure or product failure. Retain the concrete fixture lifetime conflict as other; preserve the unproved assertion-failure consequence as a caveat. Checked source/results: [\"70bc66a9f285cc2a9984924f389834d118b7cfdc:crates/farhelm-supervisor/src/service/core.rs:41773-41799 creates the live origin and a separate borrower; 41857-41862 shuts down only the selected borrower; 41879-41900 reloads all rows and asserts only the borrower's outcome. The origin remains in sup.sessions.\",\"Same revision core.rs:7957-7978 supplies adopted/tabs as empty maps and claims these tests have no hosts. core/host_handover.rs:672-790 skips supplied runtimes only, then scans and adopts the origin. hosts/client.rs:1277-1279 sends take_over:true; hosts/terminal.rs:3964-4040 reconnects while handles remain, subject to its instability limit. No implicit global reuse removes the ownership conflict.\",\"Exclusive base 6e423e30068b62c6cfa276c6d720ee35bb70387a:core.rs:41488-41530 uses tmux_supervisor for this test. The host migration introduces this particular competing-runtime setup; the wrapper's old comment itself is not claimed newly authored.\",\"Pinned tip 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db:core.rs:36689-36798 retains the live origin, shuts down only the selected host, and reloads; 7379-7407 still supplies no adopted hosts. No runtime tests or reproductions ran.\"] Current coverage/results: [\"Current SPEC.md and SPEC_impl.md searched for borrower/reload/ownership. SPEC_impl.md:1948-1949 requires one owning connection and explains takeover; host reload preservation describes production behavior, not acceptance of this test conflict. No exact acceptance found.\",\"Current TODO.md Planned bucket is empty (25-27). BUGS.md has only an SSH-helper provisioning hang, unrelated. plans/queue searched for the fixture and ownership trigger; tmux-end-old-terminals and tmux-drop-from-docs are already landed per plans/REPORTS.md:29,32, and provide no unlanded fix coverage.\",\"INDEX.md and matching queue text searched for borrower/reload/competing runtime and exact test/helper names. No same-root item found. Existing readoption and runtime-drop items have different triggers. Active TRIAGE_OUTCOMES.md has no matching decision; archive not read.\",\"FILTER.md read in full. This deterministic fixture ownership setup is not wholly a rare self-correcting product diagnostic/status consequence; no filter applies.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Origin takeover might weaken reliability or make the reload fixture unrepresentative. History narrowed this to the source-established second-owner setup and stale wrapper assumption; no failing schedule was observed.\"; \"A dependency from origin contention to failure of the selected borrower's assertions remains unestablished. Do not call this a confirmed flake, wrong borrower classification, or production failure.\"."
+      },
+      "accepted_parent_decision": {
+        "key": "g104/l4",
+        "line": 10,
+        "disposition": "verified",
+        "group": "checkout-status-borrower-reload-keeps-origin-runtime",
+        "bucket": "other",
+        "recording": "retain-verified",
+        "queue_target_candidate": null,
+        "needs_independent_drop_check": false,
+        "reason": "Parent explicitly accepted named retain-verified proposal from claims-068 after inspecting it. The migrated borrower fixture reloads all rows while its supervisor still owns the live origin runtime. The reload wrapper supplies no adopted hosts, so discovery takes over that host and creates another runtime. This is a fixture ownership defect, not an observed assertion failure or product failure. Retain the concrete fixture lifetime conflict as other; preserve the unproved assertion-failure consequence as a caveat. Checked source/results: [\"70bc66a9f285cc2a9984924f389834d118b7cfdc:crates/farhelm-supervisor/src/service/core.rs:41773-41799 creates the live origin and a separate borrower; 41857-41862 shuts down only the selected borrower; 41879-41900 reloads all rows and asserts only the borrower's outcome. The origin remains in sup.sessions.\",\"Same revision core.rs:7957-7978 supplies adopted/tabs as empty maps and claims these tests have no hosts. core/host_handover.rs:672-790 skips supplied runtimes only, then scans and adopts the origin. hosts/client.rs:1277-1279 sends take_over:true; hosts/terminal.rs:3964-4040 reconnects while handles remain, subject to its instability limit. No implicit global reuse removes the ownership conflict.\",\"Exclusive base 6e423e30068b62c6cfa276c6d720ee35bb70387a:core.rs:41488-41530 uses tmux_supervisor for this test. The host migration introduces this particular competing-runtime setup; the wrapper's old comment itself is not claimed newly authored.\",\"Pinned tip 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db:core.rs:36689-36798 retains the live origin, shuts down only the selected host, and reloads; 7379-7407 still supplies no adopted hosts. No runtime tests or reproductions ran.\"] Current coverage/results: [\"Current SPEC.md and SPEC_impl.md searched for borrower/reload/ownership. SPEC_impl.md:1948-1949 requires one owning connection and explains takeover; host reload preservation describes production behavior, not acceptance of this test conflict. No exact acceptance found.\",\"Current TODO.md Planned bucket is empty (25-27). BUGS.md has only an SSH-helper provisioning hang, unrelated. plans/queue searched for the fixture and ownership trigger; tmux-end-old-terminals and tmux-drop-from-docs are already landed per plans/REPORTS.md:29,32, and provide no unlanded fix coverage.\",\"INDEX.md and matching queue text searched for borrower/reload/competing runtime and exact test/helper names. No same-root item found. Existing readoption and runtime-drop items have different triggers. Active TRIAGE_OUTCOMES.md has no matching decision; archive not read.\",\"FILTER.md read in full. This deterministic fixture ownership setup is not wholly a rare self-correcting product diagnostic/status consequence; no filter applies.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Origin takeover might weaken reliability or make the reload fixture unrepresentative. History narrowed this to the source-established second-owner setup and stale wrapper assumption; no failing schedule was observed.\"; \"A dependency from origin contention to failure of the selected borrower's assertions remains unestablished. Do not call this a confirmed flake, wrong borrower classification, or production failure.\"."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-068",
+          "key": "g104/l4",
+          "latest_line": 10,
+          "recommendation": "retain-verified",
+          "bucket": "other",
+          "underlying_key": "checkout-status-borrower-reload-keeps-origin-runtime",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The migrated borrower fixture reloads all rows while its supervisor still owns the live origin runtime. The reload wrapper supplies no adopted hosts, so discovery takes over that host and creates another runtime. This is a fixture ownership defect, not an observed assertion failure or product failure.",
+          "checks": [
+            "70bc66a9f285cc2a9984924f389834d118b7cfdc:crates/farhelm-supervisor/src/service/core.rs:41773-41799 creates the live origin and a separate borrower; 41857-41862 shuts down only the selected borrower; 41879-41900 reloads all rows and asserts only the borrower's outcome. The origin remains in sup.sessions.",
+            "Same revision core.rs:7957-7978 supplies adopted/tabs as empty maps and claims these tests have no hosts. core/host_handover.rs:672-790 skips supplied runtimes only, then scans and adopts the origin. hosts/client.rs:1277-1279 sends take_over:true; hosts/terminal.rs:3964-4040 reconnects while handles remain, subject to its instability limit. No implicit global reuse removes the ownership conflict.",
+            "Exclusive base 6e423e30068b62c6cfa276c6d720ee35bb70387a:core.rs:41488-41530 uses tmux_supervisor for this test. The host migration introduces this particular competing-runtime setup; the wrapper's old comment itself is not claimed newly authored.",
+            "Pinned tip 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db:core.rs:36689-36798 retains the live origin, shuts down only the selected host, and reloads; 7379-7407 still supplies no adopted hosts. No runtime tests or reproductions ran."
+          ],
+          "coverage_checked": [
+            "Current SPEC.md and SPEC_impl.md searched for borrower/reload/ownership. SPEC_impl.md:1948-1949 requires one owning connection and explains takeover; host reload preservation describes production behavior, not acceptance of this test conflict. No exact acceptance found.",
+            "Current TODO.md Planned bucket is empty (25-27). BUGS.md has only an SSH-helper provisioning hang, unrelated. plans/queue searched for the fixture and ownership trigger; tmux-end-old-terminals and tmux-drop-from-docs are already landed per plans/REPORTS.md:29,32, and provide no unlanded fix coverage.",
+            "INDEX.md and matching queue text searched for borrower/reload/competing runtime and exact test/helper names. No same-root item found. Existing readoption and runtime-drop items have different triggers. Active TRIAGE_OUTCOMES.md has no matching decision; archive not read.",
+            "FILTER.md read in full. This deterministic fixture ownership setup is not wholly a rare self-correcting product diagnostic/status consequence; no filter applies."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": "A dependency from origin contention to failure of the selected borrower's assertions remains unestablished. Do not call this a confirmed flake, wrong borrower classification, or production failure.",
+          "original_stronger_consequence": "Origin takeover might weaken reliability or make the reload fixture unrepresentative. History narrowed this to the source-established second-owner setup and stale wrapper assumption; no failing schedule was observed.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Retain the concrete fixture lifetime conflict as other; preserve the unproved assertion-failure consequence as a caveat."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": true,
+        "clearly_refuted_candidate": false,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Source-confirmed by an existing parent decision; not runtime reproduced",
+        "deduplication_key": "checkout-status-borrower-reload-keeps-origin-runtime",
+        "destination": "trailing-checkout-status-borrower-reload-keeps-origin-runtime.md"
+      }
+    }
+  ],
+  "replies": [
+    {
+      "turn": 1,
+      "reply": "Initial review complete. Read all 1,277 assigned patch lines and the complete commits field.\n\nNo reportable findings or unresolved leads. Recorded three considered candidates with source refutations in [findings.jsonl]([private-run]/g104/findings.jsonl); updated progress.md. No tests or reproductions run."
+    },
+    {
+      "turn": 2,
+      "reply": "Revised c1–c3 with caller, readiness and teardown evidence. c1 preserves the potential process-leak consequence and limits its refutation to the provenance conversion.\n\nNo new findings. Unresolved leads: none. Source-only conclusions; no execution."
+    },
+    {
+      "turn": 3,
+      "reply": "Discovery pass 1 found one new source-supported issue: l4, a competing origin runtime in the borrower reload fixture. No test failure or production effect is claimed.\n\nChecked fixture ownership, takeover/reconnect callers, range attribution, tip persistence, and remaining assigned documentation changes.\n\nNew verified IDs: l4. New unverified IDs: none. Open leads: none. Log and progress updated; no execution performed."
+    },
+    {
+      "turn": 4,
+      "reply": "Discovery pass 2 found nothing new.\n\nChecked the updated neighbour records, replay-fixture shutdown premises, provenance/reboot assertions, and file-publication/sweep contracts.\n\nNew verified IDs: none. New unverified IDs: none. Open leads: none. Progress updated; no execution performed."
+    }
+  ],
+  "progress": "Group: g104 supervisor-core-integration\nState: initial review complete; awaiting caller's later synthesis/discovery prompt.\nTurn type/count: initial / 1. Discovery-pass count: 0.\nCoverage: brief fully read; inventory.json only commits field read in full. All 1,277 mandatory patch lines (11 sources, four revisions) delivered through evidence read, in separate packets of at most 200 lines. No unread assigned material.\nResults: no reportable findings; candidates c1, c2 and c3 recorded immediately with source refutations. New verified finding IDs: none. New unverified finding IDs: none. Open leads: none.\nSource checks: scoped booleans preserve the prior enum conversion and require_sweep fallback; Delete still receives the agent's HostTerminal directly and holds placeholders aside. Reply-field removal matches removed protocol members and version 76 -> 77; io.rs:629 accepts only the exact protocol version and otherwise returns skew. Pending-Stop host fixtures assert the original competing inference, release their runtime before reload, and wait on the host's subscribed exit status before the production ticker observation. Reload core.rs:7586 preserves StopRequested while a reaped child's exit record is replaying; status.rs:871,894 gates only inferred failures during pending Stop while direct sentinel errors retain precedence. Preparation-cache tests wait for the actual exit and distinguish repeated reads by corrupting a previously Ready record. Refusal test checks the fake host's counted start, own refusal text, retained checkout/session ownership, and no second host start after reopen. Comment-only changes agree with the terminal-host replacement and removal of the synchronous tmux probe.\nInterface assumptions: all results are source conclusions at the original commit, not observations from execution. Protocol skew fences mixed live peers; host runtimes exclusively own their connections; a reaped host child may still read Running until its exit record is replayed. No GUI action handlers are changed in this group.\nEvidence tooling: first c1 append rejected invalid state closed; corrected to supported state open and appended successfully. No evidence read failed or clipped. One context lookup used a nonexistent host_terminals.rs path; corrected to core/tests/host_terminals.rs and read wait_for there.\nExecution: no tests, builds, reproductions, helper agents, live-install operations, or checkout changes. Only private group artifacts written.\nNext action: return this initial pass; caller defines later-turn protocol. Do not run synthesis as another pass in this turn.\n\nSynthesis turn 2 complete. Turn type/count: synthesis / 2. Discovery-pass count remains 0.\nRevised c1, c2, c3 under their original IDs (events 4-6). No new findings or candidates. No unresolved lead IDs. No unread assigned material.\nc1 now preserves the potential highest consequence of leaked user-owned tab processes and explicitly limits its refutation to scoped provenance conversion. Checked tag-derived and placeholder false provenance, retry preservation, unfiltered teardown inventory, held lifecycle/directory boundary, pinned roots and sweep-before-host-end ordering. Parent's cross-group agreement is corroboration only; no drop is treated as accepted.\nc2 additionally checks cached JSON tolerance, absence of live readers for removed fields, actual HostTerminal resolution during Attach and post-publication checkout projection. Protocol version skew is an implementation fence; removed metadata does not serve as an attachment readiness check. No broader grid/bootstrap correctness claimed.\nc3 additionally checks the actual journal-exit publication boundary, subscribe-before-check bounded wait and diagnostics, abort-versus-shutdown behavior, matching production ticker eligibility and the StateDir/TestDir host cleanup order. It explicitly excludes scheduler and map-installation coverage from this classification test's claim.\nInterface assumptions: unchanged, now checked at callers rather than inferred from helper names. The deletion preparation and finish retain lifecycle and directory admission; terminal kind wire removal is accompanied by an incompatible hello version; recovered host exit evidence is authoritative only after its journal record is processed.\nAll conclusions are source-supported. No runtime execution, reproduction, helper agent or checkout modification. Next action belongs to caller's later discovery/synthesis protocol.\n\nDiscovery turn 3 complete. Turn type/count: discovery / 3. Discovery-pass count: 1.\nRead discovery-neighbours.json completely in 15 bounded 16,000-byte chunks (offset blocks 0-14). The initial 160-line combined read was clipped; the bounded reads replaced that partial delivery. Neighbour context was used for novelty only, not mandatory source credit or dispositions. No pending named interface questions were supplied.\nNew verified source finding: l4, borrower reload fixture retains a competing origin runtime (events 7-10: lead, strengthened lead, resolved finding, later-range check). New unverified-after-investigation IDs: none. Open leads: none. No unread assigned material.\nDiscovery checks beyond c1-c3: checked the migrated checkout-interruption matrix's live/absent/borrower setup and reload ownership, the first-stage refusal fixture and retained idempotent result, Running-record staging and its actual root sweep, version hold argv and environment-removal callers, and the final bounded-command/lib documentation cleanup. Running-record publication still uses the described atomic helper and actual narrow temp-file sweep; host startup clears inherited environment and main removes the version-lock environment before normal command dispatch; the removed synchronous tmux probe has no remaining declaration in the narrowed tmux module. No additional substantive concern from those checks.\nl4 evidence: before the selected change the checkout test used tmux, not a reconnecting origin runtime. The migrated borrower keeps its original live host handle in the original supervisor but passes no adopted handles to the manual reload. Registry always uses takeover, and the old runtime reconnects, so the fixture introduces competing owners. The target borrower is already absent and its correctness assertions do not prove a dependency on the origin contention; no flake, failure, product effect or data loss is claimed. Source-verified issue is the unintended ownership conflict and violated helper assumption. Checked persistence at pinned tip. No matching supplied neighbour issue. This finding needs the caller's later synthesis; do not silently promote it to an observed failure.\nRecording note: l4 finding's first JSON append was rejected for unescaped detail newlines. Corrected the private event JSON and successfully appended; no prior log event was erased. No source evidence call failed this turn.\nResult: something new was found, l4. Existing c1-c3 unchanged this turn; parent drops/lowerings are not accepted. No tests, builds, reproductions, helper agents, checkout edits or live-install actions. Next action belongs to caller.\n\nDiscovery turn 4 complete. Turn type/count: discovery / 4. Discovery-pass count: 2.\nNeighbour snapshot fully read before new source search: 407,599 bytes, timestamp 2026-11-13T17:21:44.049Z, SHA-256 887a31fefb45c2ce3a43ed67303fbfb5d1d23256000cc4fcc01fff5aca5185c8. Read in 21 bounded byte chunks (20,000 bytes, blocks 0-20), all delivered without clipping. This replaces the prior snapshot for novelty context. No named pending question supplied. No prohibited queue or coverage source searched.\nNew search checked the assigned files' actual atomic-file tier and Running-record publication/sweep callers, the service/crate module ownership explanations, the pre-shim provenance test's shutdown/reopen sequence, reboot-finality cache assertions, and every assert_sentinel_replay caller's empty-host premise. pending_sentinel_fixture at original core.rs:39864-39885 explicitly ends all hosts and asserts all_stopped plus socket absence/empty directory before supplying the sole sentinel. The pre-shim test independently confirms ended and socket removal. The replay helper therefore is not accidentally checking emptiness while an unrelated retained fixture host should remain. Existing read-only reconciliation assertions preserve files and Pending intent before allowing authoritative cleanup; no new distinct assertion defect identified in assigned changed lines.\nThe BestEffort implementation still uses its described file fsync/replace tier; app_bundle owns blocking publication, and serve awaits it under the retained state-dir ownership before later session access. The root sweep remains narrow to .running-version.tmp- and follows publication. Later-range diff of the small assigned non-core files changes only historical wording in files.rs; no overlooked executable delta there. Cross-group issues in adjacent documentation, old-terminal consent, excerpt provenance, test catch-up and teardown were used for novelty only and not adopted as new g104 findings or broadened into this search.\nResult: nothing new found. New verified finding IDs: none. New unverified-after-investigation IDs: none. Remaining lead IDs: none. Findings log remains at 10 events; existing IDs/consequences/proposed-drop bases unchanged. No unread assigned material. No runtime execution, tests, builds, reproductions, helper agents, checkout edits or live-install actions. Next action belongs to caller.\n"
+}

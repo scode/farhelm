@@ -1,0 +1,282 @@
+[
+  {
+    "key": "g193/c3",
+    "latest_line": 11,
+    "recommendation": "retain-verified",
+    "bucket": "highest",
+    "underlying_key": "legacy-browser-grid-json-input-reinterpretation",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The source establishes successful reinterpretation of a complete small JSON paste from a freshly mounted unknown-kind old page. A literal JSON escape becomes control input outside paste framing. This is stronger than the accepted stale-page rendering failure or malformed-input detach. The result is conditional source evidence, not an observed command execution.",
+    "checks": [
+      "Read every supplied history event, including the initial parser-removal refutation, line 9's proposed stale-page acceptance, line 10's reopening and line 11's retained highest finding. No withdrawal or accepted parent drop appears.",
+      "f560058da19e02716e6f943883a9508b447aff4e^:crates/farhelm-ui/src/session_view.rs:3839-3849 serializes an absent terminal kind as null; parent assets/terminal.js:4658-4665 constructs xterm for a non-host kind, and :5721-5724 chooses bytes when no stream notice arrives.",
+      "Parent assets/terminal.js:2650-2675 intercepts a text paste, :2232-2235 sanitizes it, :4628-4634 passes it to term.paste, :4191-4195 sends onData through :4158-4159 as one UTF-8 binary WebSocket message. Parent term-bytes.js:55-56 removes literal ESC, not backslash escapes in JSON.",
+      "Parent assets/vendor/xterm.js:2, complete matched Clipboard paste and CoreService default snippets: paste calls triggerDataEvent once and brackets only when local bracketedPasteMode is true; its initial value is false. A fresh surface with that default can therefore send the literal JSON as one frame.",
+      "f560058da19e02716e6f943883a9508b447aff4e:crates/farhelm-helm/src/terminal.rs:762-773 forwards binary input. crates/farhelm-proto/src/grid.rs:1565-1566,1610-1612,1650-1655,1686-1693 deserializes tagged Text JSON and validates length without rejecting controls in its decoded data.",
+      "f560058da19e02716e6f943883a9508b447aff4e:crates/farhelm-supervisor/src/service/grid_stream.rs:1064-1091 decodes and queues Text as OneOff; grid_input.rs:175 emits data.as_bytes() regardless of bracketed-paste mode. The same Text branch remains at inclusive tip 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db:175.",
+      "Parent skew.rs:32-35 explicitly avoids blocking/render refusal; :287-294 draws a notice. Parent terminal.js:1561-1580 preserves manual reconnect during skew. This notice is not an input interlock.",
+      "Current-peer parser replacement is separately supported: f560058 emulator.rs:151-160 still advances its retained parser, terminal.js:3387-3394 mounts the independent grid, and the license/helper removal does not negate the legacy-input route. No runtime tests, builds or reproductions were performed."
+    ],
+    "coverage_checked": [
+      "SPEC.md Terminal experience: program-query/emulator responsibilities and ordinary paste intent do not accept reclassifying literal pasted JSON as commands. Its separate recovery-journal mode-loss acceptance has a different trigger.",
+      "SPEC_impl.md:2937-2955 Grid streams, also f560058:3022-3028: explicitly accepts old-page misdrawing and malformed-input detach. The exact successful Text reinterpretation consequence is absent. The grid-client section at :1836-1873 assigns typed messages to the new client; it supplies no legacy-input fence.",
+      "TODO.md:25-26 Planned is empty. Near-term/later grid history and IME work is neither exact coverage nor a planned repair of this input classifier.",
+      "Searched plans/queue for old/stale pages, grid input, JSON paste, stream notices and xterm removal. tmux-end-old-terminals has already supplied the removal; tmux-drop-from-docs:31-100 preserves attribution and limits its audit to behavior-preserving work. No unlanded plan states a repair for this trigger and consequence.",
+      "BUGS.md read in full: only the local ssh-helper install/update hang is accepted there.",
+      "INDEX.md read in full; queue files and active TRIAGE_OUTCOMES.md searched for literal JSON paste, stale browser/page input, grid input and xterm. No exact queued or active-decision match. Different grid mouse, selection, attachment-announcement and test-oracle items do not cover it. Archive not read.",
+      "FILTER.md checked in full. Rare-safe-failure and upgrade-plus-rare-condition filters exclude a security/trust-boundary consequence; this paste-to-control-input route is not merely the accepted old-page disconnect. No filter recommendation."
+    ],
+    "exact_cover_quotes": [
+      {
+        "source": "SPEC_impl.md:2949-2955; f560058da19e02716e6f943883a9508b447aff4e:SPEC_impl.md:3022-3028",
+        "quote": "A page loaded from the previous helm and left open across the update must be reloaded; nothing keeps it working.",
+        "scope": "Possible cover for old-page availability, not explicit acceptance of successful input reinterpretation."
+      },
+      {
+        "source": "SPEC_impl.md:2954-2955",
+        "quote": "what is typed into it ends the attachment as malformed input. Keeping the stream notice for such pages was considered and not done: a reload is the whole remedy.",
+        "scope": "The Text-JSON route does not end as malformed input; retain that distinction."
+      }
+    ],
+    "missing_premise": "No missing source premise for the conditional route: it requires a fresh unknown-kind xterm mount on an old page, local bracketed mode still false, an open attachment and a complete small valid Text JSON paste before malformed input detaches it. Actual shell/TUI command outcome and frequency were not observed.",
+    "original_stronger_consequence": "Original removal concern: unavailable or uninterpreted output/input. Line 9 proposed dropping accepted stale-page misrender/refusal, then line 10 reopened the no-highest conclusion. Line 11 establishes the stronger security/work-loss possibility: JSON escapes become unbracketed control input, potentially executing embedded commands. Preserve that stronger consequence and its conditional assumptions; do not replace it with ordinary detach.",
+    "needs_independent_drop_check": true,
+    "proposed_basis": "Retain highest on the established conditional input reinterpretation route. Any later attempt to apply the broad stale-page acceptance, upgrade filter, duplication, withdrawal or consequence lowering requires the parent's fresh independent drop check. Supplied mentions of g196/l1 and g082/c2 are reconciliation leads only; their records are outside this batch and were not independently checked as aliases."
+  },
+  {
+    "key": "g193/c4",
+    "latest_line": 4,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "xterm-removal-retained-port-attribution",
+    "aliases": ["g195/c2"],
+    "target_queue_file": null,
+    "why": "The retained ports' attribution lives independently of the deleted vendor bundle. Source refutes the alleged attribution removal; release-artifact contents remain uninspected.",
+    "checks": [
+      "All supplied history read; only line 4, a proposed source-refuted candidate, exists.",
+      "f560058da19e02716e6f943883a9508b447aff4e:crates/farhelm-ui/assets/grid-ported-code-LICENSES.txt read in full: it identifies the retained input, sizing, selection and link ports and includes complete xterm, addon-fit, addon-web-links and Visual Studio Code MIT notices.",
+      "f560058:crates/farhelm-ui/src/lib.rs:1484-1495 keeps GRID_PORTED_CODE_LICENSES as a #[used] unhashed asset. THIRD_PARTY_NOTICES.md:19-45 independently lists the retained ports and distributed notice.",
+      "No artifact build or release inspection; this checks source attribution retention only."
+    ],
+    "coverage_checked": [
+      "SPEC.md and SPEC_impl.md searched for xterm/ports/license/attribution. SPEC_impl.md:1692-1700 assigns the grid and retained port notices; no accepted omission.",
+      "TODO.md Planned is empty; BUGS.md contains only the ssh-helper hang. No exact attribution omission in active TRIAGE_OUTCOMES.md or INDEX.md, read in full, or matching queue-file search.",
+      "plans/queue/tmux-drop-from-docs.md:31-48 explicitly keeps port attribution; :68-75 preserves attribution comments. This is preservation context, not a planned repair for missing notices. Other tmux plans have no exact missing-attribution repair.",
+      "FILTER.md has no attribution-removal filter. No coverage/filter basis is used; disposition rests on source refutation."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": "Distributed artifact verification was not performed; no source premise of a missing notice remains.",
+    "original_stronger_consequence": "Hypothetical loss of required attribution for retained keyboard, mouse and scrollbar ports. No security or user-work-loss consequence or withdrawal was claimed.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Do not queue the source-refuted missing-attribution hypothesis. Same root as named g195/c2; keep the built-artifact caveat."
+  },
+  {
+    "key": "g193/c5",
+    "latest_line": 14,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "xterm-removal-normal-grid-lifecycle-dependency",
+    "aliases": ["g194/c1"],
+    "target_queue_file": null,
+    "why": "Successful grid mounts own normal teardown without the deleted xterm lifecycle services. The record's later qualification correctly leaves failed-constructor cleanup and its test oracle separate.",
+    "checks": [
+      "Both history events read: line 5's broad lifecycle statement is narrowed at line 14 to successfully returned components. No accepted parent drop appears.",
+      "f560058da19e02716e6f943883a9508b447aff4e:terminal.js:4761-4832 removes observers and external handlers, retires deferred work, clears and closes the socket, then freezes or disposes the returned grid.",
+      "f560058:grid-terminal.js:2080-2086 freeze nulls send/onResize and stops gestures; :2109-2140 dispose cancels paints/drains, closes channels, releases gesture/slider handlers, clears the fade timer and callbacks and removes the element. :1747-1759 independently releases document gesture listeners.",
+      "Read createGridSurface at terminal.js:4294-4358. Its outer catch does not prove a throwing constructor returned a component or preserved its initial exception. Normal dispose is not used to refute supplied g083/l1, g135/l2 or g136/l1. No runtime measurements."
+    ],
+    "coverage_checked": [
+      "SPEC_impl.md:1692-1718,1836-1873 assigns grid DOM/input ownership and terminal.js connection ownership; SPEC.md Terminal experience requires the displaced non-live snapshot. These describe the independent lifecycle, not acceptance of leaked live input.",
+      "TODO.md Planned empty; no exact removal-caused lifecycle defect in BUGS.md, active TRIAGE_OUTCOMES.md, INDEX.md or matching queue-file searches.",
+      "plans/queue searches found removal/comment-audit work, not an unlanded repair for this hypothesized missing lifecycle dependency.",
+      "FILTER.md checked; no filter invoked. Resource leakage is not assumed rare or self-correcting."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": "No retained dependency on a removed lifecycle service was shown. Constructor-failure cleanup, allocation completeness and repeated-mount resource behavior are not certified.",
+    "original_stronger_consequence": "Original candidate considered active terminal input or listeners remaining after close/displacement. Latest narrows refutation to successfully constructed grid components and expressly preserves the distinct constructor-failure diagnostic/test concern. No established loss-of-work route was asserted.",
+    "needs_independent_drop_check": true,
+    "proposed_basis": "Refute only the removed-service dependency for normal returned components. Because the original wording included active input after closure, send any broader dismissal or security-consequence lowering to the parent's independent drop check. Named g194/c1 shares the normal-lifecycle root; constructor/test claims remain separate."
+  },
+  {
+    "key": "g193/c6",
+    "latest_line": 12,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "xterm-removal-grid-size-and-parser-api-dependency",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The grid clamps fit dimensions and constructs bounded messages independently. No surviving call to the enumerated retired parser/buffer APIs was found.",
+    "checks": [
+      "All supplied history read; one candidate at line 12, no withdrawal.",
+      "f560058da19e02716e6f943883a9508b447aff4e:grid-terminal.js:234-248 clamps proposed dimensions to 2..1000 columns and 1..1000 rows.",
+      "f560058:grid-input.js:412-491 splits Text and Paste at character boundaries under decoded and encoded bounds and JSON-encodes the resulting messages.",
+      "Pinned git grep over crates/farhelm-ui for loadAddon, registerOscHandler/registerCsiHandler/registerDcsHandler, onWriteParsed, .buffer.active, .buffers.normal/.alt and _core.unicodeService returned no matches (exit 1). No test execution."
+    ],
+    "coverage_checked": [
+      "SPEC_impl.md The grid client:1836-1873 defines independent fit/input ownership; SPEC.md Terminal experience defines terminal display/input. Neither accepts invalid dimensions.",
+      "TODO.md Planned empty; BUGS.md ssh-helper hang unrelated. Active ledger and full INDEX searches for grid bounds, removed APIs and xterm helpers found no exact cover. initial-oversized-grid-cannot-attach is different: external/legacy attach admission above 1000, not removal of the current grid's lower-bound clamp.",
+      "plans/queue xterm-removal and grid-input searches found no unlanded fix for these exact missing-bound/API hypotheses. Attribution and comment-audit preservation is unrelated.",
+      "FILTER.md checked; no filter used. Current-client builder correctness does not refute stale-browser JSON input reinterpretation."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": "No missing-helper caller or invalid current-client fit route established. This is not an audit of total grid resource use or every protocol admission path.",
+    "original_stronger_consequence": "Hypothetical unusably small terminals or a broken retained parser/buffer API dependency. No security/work-loss consequence or withdrawal claimed; g193/c3 remains separate.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Refute the named size/API removal hypotheses by the retained implementation and targeted absence check; do not generalize to every grid input path."
+  },
+  {
+    "key": "g194/c1",
+    "latest_line": 7,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "xterm-removal-normal-grid-lifecycle-dependency",
+    "aliases": ["g193/c5"],
+    "target_queue_file": null,
+    "why": "The independent grid releases its gestures, listeners and scheduled work, and normal unmount reaches that cleanup. This source-refutes a removed-helper dependency without certifying a constructor that throws.",
+    "checks": [
+      "All three history events read. Line 5's failed-mount rollback claim is explicitly qualified at line 7: outer rollback calls do not establish all failed-constructor cleanup or preservation of the original exception.",
+      "f560058da19e02716e6f943883a9508b447aff4e:grid-terminal.js:1747-1759 removes document gesture handlers; :1877-1940 owns history scheduling with disposed guards; :2109-2140 cancels frames, channels, watchers, gestures and slider/fade work.",
+      "f560058:terminal.js:4761-4832 reaches independent cleanup for a returned grid, freezing only a deliberately retained snapshot. createGridSurface:4294-4358 was read; it is not evidence that normal dispose runs before successful construction.",
+      "No runtime test or repeated-mount measurement."
+    ],
+    "coverage_checked": [
+      "SPEC_impl.md:1692-1718 and :1836-1873 assigns the grid lifetime; SPEC.md Terminal experience accepts the deliberately retained selectable non-live takeover snapshot, not arbitrary leaked DOM work.",
+      "TODO.md Planned empty; BUGS.md unrelated. INDEX read fully and queue/active-ledger searches found no exact removed-helper lifecycle item. detached-grid-retains-program-drag-guidance concerns a different retained-snapshot callback, not a missing old DOM utility.",
+      "plans/queue searches found no unlanded repair of the hypothesized normal-grid dependency. FILTER.md provides no basis used here."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": "No retained DOM utility dependency. Failed-construction cleanup and supplied test-oracle/diagnostic claims are expressly outside this refutation.",
+    "original_stronger_consequence": "Stale gesture listeners, retained DOM and animation work after terminal closure. The failed-mount wording was narrowed, not silently accepted. No security or user-work-loss route was proposed for this record.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Refute this narrow normal-lifecycle removal concern. Exact named root alias g193/c5; no independent defect search and no dismissal of the separately supplied constructor/test concerns."
+  },
+  {
+    "key": "g194/c2",
+    "latest_line": 2,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "xterm-removal-retained-private-utility-consumer",
+    "aliases": ["g195/c1", "g196/c1"],
+    "target_queue_file": null,
+    "why": "The page loads and mounts the independent grid. Targeted references to the deleted bundle, Terminal global and private helpers are absent at the reviewed commit.",
+    "checks": [
+      "All supplied history read; line 2 proposes source refutation, no withdrawal.",
+      "f560058da19e02716e6f943883a9508b447aff4e:lib.rs:1479-1483,1914-1926 declares and loads grid assets; terminal.js:3203-3222 gates on those globals and :3387-3394 builds and fits the grid before its socket.",
+      "f560058:terminal.js:4294-4358 constructs farhelmGridTerminal with retained input, resize, clipboard, link and paste callbacks.",
+      "Pinned git grep across UI/helm/desktop/scripts/.github for vendor/xterm, VENDOR_XTERM, window.Terminal, new Terminal and representative retired event/cancellation/hash/scroll helpers returned no matches (exit 1). No runtime behavior inferred beyond this dependency boundary."
+    ],
+    "coverage_checked": [
+      "SPEC_impl.md:1692-1718,1836-1873 states the current grid-only ownership/input contract; SPEC.md Terminal experience confirms the new terminal route.",
+      "TODO.md Planned empty; BUGS.md unrelated. INDEX read fully and queue/active-ledger searches found no exact absent-private-helper dependency. Existing keyboard/mouse parity items concern behavior of retained code, not such a dependency.",
+      "plans/queue removal and comment-audit scope does not specify an unlanded repair for a retained private helper. FILTER.md checked, no filter invoked."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": "No missing runtime consumer identified. This does not certify all key-table entries, scrolling behavior, build artifacts or incompatible old pages.",
+    "original_stronger_consequence": "Hypothetical terminal mount failure or unavailable keyboard/scroll input, originally suggested high if established. No actual defect, security or work-loss route was established or lowered.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Refute the absent-helper dependency; reconcile named g195/c1 and g196/c1 under this root while preserving their individual checks."
+  },
+  {
+    "key": "g194/l1",
+    "latest_line": 6,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "xterm-removal-touch-gesture-dependency",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "Deleting the vendor touch helper does not newly remove touch handling from a known terminal-host grid: that grid already bypassed xterm. Old tmux terminal rows no longer resolve a live terminal. This does not establish complete touch support or acceptance of missing touch support.",
+    "checks": [
+      "All history read: line 3's open touch-scrolling lead, line 4's deletion-specific refutation and line 6's server-lookup qualification. No accepted drop appears.",
+      "f560058da19e02716e6f943883a9508b447aff4e^:terminal.js:4650-4667 routes known host terminals directly to createGridSurface. Parent grid-terminal.js:1830-1870 already uses its own mouse/wheel path.",
+      "f560058:service/core.rs:6372-6388 describes old rows reloading without a terminal; :6675-6682 actually returns None for TerminalKind::Tmux and never looks up its old pane address. terminal.js:3387-3394 unconditionally creates the grid.",
+      "git log --diff-filter=A over the full exclusive/inclusive review range for grid-terminal.js returned no addition. Its only changes in that range were f560058 removal migration and 61e632323dbc6b4a35ed27bf5b9833102ffd5a4e comment cleanup. No new whole-grid touch audit was performed."
+    ],
+    "coverage_checked": [
+      "SPEC.md Terminal experience explicitly ends old private-tmux terminals and uses terminal hosts; SPEC_impl.md:1692-1718,1836-1873 assigns the grid. These do not explicitly accept absent touch support.",
+      "TODO.md Planned empty; no exact touch-scroll removal item in BUGS.md, full INDEX, queue search or active ledger. SPEC_impl.md's wheel/touch navigation wording is about the sidebar, a different scope.",
+      "plans/queue removal plans and docs audit do not state a touch-input implementation. No exact unlanded coverage found. FILTER.md checked; neither rarity nor touch use alone supplies a filter."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": "A surviving supported terminal route that used the deleted touch helper was not shown. Broader pre-existing grid touch completeness remains outside this named deletion concern.",
+    "original_stronger_consequence": "A touch-only viewer unable to scroll, originally high if a still-supported route was removed. The record resolves the deletion-specific premise, not the general UX question. No security/work-loss consequence claimed.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Refute the new dependency-removal regression only; do not cite this as specification acceptance or comprehensive source refutation of missing touch support."
+  },
+  {
+    "key": "g195/c1",
+    "latest_line": 3,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "xterm-removal-retained-private-utility-consumer",
+    "aliases": ["g194/c2", "g196/c1"],
+    "target_queue_file": null,
+    "why": "The entire vendor asset is deleted atomically, while current mounts and normal teardown use the retained grid. No remaining private-utility consumer was identified.",
+    "checks": [
+      "All three history events read, including the initial mount concern, cleanup extension and final atomic/private-module qualification. No withdrawal or accepted parent drop appears.",
+      "git diff --summary f560058^ f560058 reports delete mode for assets/vendor/xterm.js. There is no surviving half of TimeoutTimer or CancellationTokenSource in that asset.",
+      "f560058da19e02716e6f943883a9508b447aff4e:lib.rs:1479-1483,1921-1926 loads grid assets; terminal.js:3203-3222 waits on grid globals and :3387-3394/:4313 builds the independent grid.",
+      "Pinned grep for vendor/Terminal/event/cancellation/scheduling helper names across UI/helm/desktop/scripts/.github returned no matches. terminal.js:4761-4832 and grid-terminal.js:2109-2140 establish independent normal cleanup. No runtime tests or artifact builds."
+    ],
+    "coverage_checked": [
+      "SPEC_impl.md Terminal widget/The grid client and SPEC.md Terminal experience describe the replacement ownership; neither accepts missing helpers.",
+      "TODO.md Planned empty, BUGS.md unrelated. Full INDEX plus queue/active-ledger searches found no exact private-helper removal item. No unlanded plans/queue repair of this hypothetical dependency found; tmux docs audit is behavior-preserving. FILTER.md checked, no filter used."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": "No retained helper caller. This is not comprehensive replacement-renderer or failed-constructor certification, and does not dismiss g193/c3's incompatible old-page route.",
+    "original_stronger_consequence": "Terminal mounts fail or cleanup depends on deleted private utilities; high if established. Original no-security/no-work-loss assessment remains a statement about this narrow dependency concern only.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Source-refute only the missing-private-helper dependency; same named root as g194/c2 and g196/c1."
+  },
+  {
+    "key": "g195/c2",
+    "latest_line": 4,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "xterm-removal-retained-port-attribution",
+    "aliases": ["g193/c4"],
+    "target_queue_file": null,
+    "why": "The separate port-notice file and retained asset declaration survive removal of the vendor bundle. Source does not support the alleged loss of Visual Studio Code or xterm port attribution.",
+    "checks": [
+      "Entire supplied history read; one line-4 source-refuted candidate, no withdrawal.",
+      "f560058da19e02716e6f943883a9508b447aff4e:grid-ported-code-LICENSES.txt read completely, including Microsoft copyright and complete MIT permission at :121-146, plus xterm and both addon notices.",
+      "f560058:lib.rs:1491-1495 keeps #[used] GRID_PORTED_CODE_LICENSES as an unhashed asset; THIRD_PARTY_NOTICES.md:19-45 identifies the same ports and their standalone notices. No built distribution inspected."
+    ],
+    "coverage_checked": [
+      "SPEC_impl.md:1692-1700 preserves port attribution; SPEC.md contains no acceptance of omission. TODO.md Planned empty; BUGS.md unrelated.",
+      "Full INDEX and queue/active-ledger searches found no exact missing-port-notice item. plans/queue/tmux-drop-from-docs.md:31-48,68-75 explicitly preserves these notices and comments, supplying preservation context rather than a planned repair. FILTER.md has no matching license/attribution filter."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": "Actual distribution contents not inspected; source retention is established.",
+    "original_stronger_consequence": "Hypothetical loss of required attribution for surviving Visual Studio Code-derived utilities and xterm ports. No security/work-loss route or withdrawal claimed.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Source-refute the named attribution-removal hypothesis; same root as g193/c4, preserving the artifact caveat."
+  },
+  {
+    "key": "g196/c1",
+    "latest_line": 17,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "xterm-removal-retained-private-utility-consumer",
+    "aliases": ["g194/c2", "g195/c1"],
+    "target_queue_file": null,
+    "why": "The removed event/hash/platform/scroll utilities have no identified retained consumer. Mounting and normal scheduling/teardown use grid-owned code. The many later history extensions preserve that limited source conclusion.",
+    "checks": [
+      "Read all six supplied history events at lines 1,5,13,14,16,17 and the latest copy without clipping. Original mounting/input failure, proposed-only drop, old-page l1 separation and failed-constructor/test qualifications are preserved.",
+      "f560058da19e02716e6f943883a9508b447aff4e:terminal.js:3203-3222 waits on retained grid globals; :3387-3394 mounts and fits the grid before its WebSocket; lib.rs:1921-1926 loads the corresponding assets.",
+      "Pinned git grep across UI/helm/desktop/scripts/.github for vendor/xterm, VENDOR_XTERM, window.Terminal/new Terminal, TimeoutTimer, CancellationTokenSource, EventMultiplexer, StringSHA1, ScrollState, DisposableStore, ResolvedKeybinding and setTimeout0 returned no matches (exit 1).",
+      "f560058:grid-terminal.js:1877-1940 uses its own frame/message-channel drain with disposed guards; :2109-2140 releases owned work/listeners/channels/callbacks. terminal.js:4761-4832 owns normal unmount. Its constructor catch at :4294-4358 is not comprehensive failure cleanup evidence.",
+      "Full-range log for vendor/xterm.js and grid-terminal.js shows wholesale vendor deletion at f560058 and later comment cleanup at 61e6323, no surviving edited vendor helper. No runtime tests, builds or reproductions."
+    ],
+    "coverage_checked": [
+      "SPEC_impl.md:1692-1718,1836-1873 assigns independent grid drawing/input and terminal.js connection lifetime; SPEC.md Terminal experience describes that terminal route. These do not accept a missing helper.",
+      "TODO.md Planned empty; BUGS.md unrelated. Full INDEX and queue/active-ledger searches for xterm utilities, removed runtime consumers, grid lifecycle and stale input found no exact absent-helper item. Related grid behavior/test items remain separate.",
+      "plans/queue removal/comment-audit work does not state an unlanded repair for a retained private-helper dependency. FILTER.md checked in full, no filter used."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": "No retained utility consumer. Platform/input-table parity, all constructor failures, comprehensive grid behavior and actual bundle artifacts are not certified by the absence check.",
+    "original_stronger_consequence": "Terminal mounting or ordinary input fails after utility deletion. The history never replaces that consequence with a lesser leak; it finds no route. It expressly leaves the security-capable old-page input finding and the constructor/test-oracle findings intact. No accepted drop/lowering recorded.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Source-refute only an orphaned removed-utility dependency. Same named root as g194/c2 and g195/c1. This result is not a drop or lowering of the separately preserved old-page input or failed-constructor claims."
+  }
+]

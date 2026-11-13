@@ -1,0 +1,219 @@
+[
+  {
+    "key": "g008/f2",
+    "latest_line": 4,
+    "recommendation": "retain-verified",
+    "bucket": "other",
+    "underlying_key": "spec-terminal-switch-point-names-deleted-terminal-type",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The rewritten authoritative architecture pointer names a deleted type in the wrong module. This is established documentation drift; no runtime failure is claimed.",
+    "checks": [
+      "1ed482dde220452e424973faf38a5e1318986333:SPEC_impl.md:2210-2211 names service/terminals.rs's Terminal; the base-to-reviewed diff explicitly rewrites this pointer while retaining the old name.",
+      "At that hash, service/terminals.rs:1-13 names/imports HostTerminal and :122-128 returns HostTerminal. Whole-file git grep -w Terminal finds only the English word at line 1, not an alias or definition.",
+      "Recording-time SPEC_impl.md:2134 retains the stale pointer. The claim concerns finding the abstraction, not whether the rest of its behavioral description is correct."
+    ],
+    "coverage_checked": [
+      "Current SPEC.md/SPEC_impl.md searched for terminal switch points, HostTerminal and service/terminals; the incorrect pointer is the subject, not an acceptance of incorrect architecture guidance.",
+      "TODO.md Planned is empty (:25-26). BUGS.md contains only an unrelated SSH provisioning hang. Active TRIAGE_OUTCOMES.md and full INDEX.md have no matching item.",
+      "Matching plans tmux-end-old-terminals and tmux-drop-from-docs are already landed (plans/REPORTS.md:29,32), so their broad cleanup criteria are not pending coverage. No unlanded matching plan was found.",
+      "FILTER.md: an incorrect architecture pointer is neither a rare self-correcting display nor a diagnostic, and no other filter boundary matches."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": null,
+    "original_stronger_consequence": "No stronger runtime consequence was alleged: developers are directed to a nonexistent abstraction and implementation location; ordinary behavior may remain correct.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Retain the narrow in-range documentation defect. Source checks only; no runtime observation."
+  },
+  {
+    "key": "g008/f3",
+    "latest_line": 8,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "removed-retired-tmux-flow-control-explanation",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "Deleting the retired producer's explanation does not remove the current grid flow-control contract. The caller really refuses non-grid attachments and constructs only a grid sender.",
+    "checks": [
+      "1ed482dde220452e424973faf38a5e1318986333:SPEC_impl.md:1748-1753 explicitly limits byte-stream and tmux mechanics to older supervisors; :2627-2660 separately specifies grid pause, current-screen sampling and retained-history delivery.",
+      "At that hash service/terminals.rs:1-13,122-128 exposes HostTerminal only; service/handlers.rs:1697-1713 refuses !grid with InvalidRequest before takeover, and :1927-1956 returns StreamKind::Grid and constructs GridStream/GridSender.",
+      "This refutes the claimed implication of this text deletion. It does not certify every flow-control implementation or retrospectively audit older supervisors."
+    ],
+    "coverage_checked": [
+      "Current SPEC_impl.md:1715-1719 preserves the no-silent-output-drop rule; :2551-2591 preserves grid pause/resume and retained-history behavior. SPEC.md terminal/recovery wording also retains output/history behavior; no weakened live contract found for this deletion.",
+      "TODO Planned empty; BUGS.md unrelated; active TRIAGE_OUTCOMES.md and INDEX.md searched for pause-after, slow/stalled viewers and flow control. Existing host-flood-stall-window-claim and stopped-reader-output-witness concern test premises, not deleting retired producer prose.",
+      "Matching tmux plans already landed per plans/REPORTS.md:29,32; no unlanded repair covers this alleged cause. FILTER.md is not the proposed basis."
+    ],
+    "exact_cover_quotes": [
+      "1ed482dde220452e424973faf38a5e1318986333:SPEC_impl.md:1748-1749: This supervisor produces no byte stream: every terminal it serves is in a terminal host, and reaches a viewer as a grid"
+    ],
+    "missing_premise": "No source path links this deletion to loss of retained output or one slow viewer blocking another terminal.",
+    "original_stronger_consequence": "The original concern was removal of a live flow-control invariant, potentially weakening output retention or allowing a slow viewer to block another terminal. Older supervisors keep their own byte-stream obligations.",
+    "needs_independent_drop_check": true,
+    "proposed_basis": "Propose source refutation limited to the deletion's supposed live effect. Because the abandoned concern mentions lost terminal output, send the proposed exclusion through the parent's independent drop check."
+  },
+  {
+    "key": "g008/f4",
+    "latest_line": 13,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "old-terminal-create-refusal-qualified-rollback-wording",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The sentence compares refusal with an existing qualified policy; it does not say every allocated checkout or row is removed. The original categorical contradiction is not established. The withdrawn stronger interpretation remains recorded here.",
+    "checks": [
+      "1ed482dde220452e424973faf38a5e1318986333:SPEC_impl.md:2258-2259 says rolled back LIKE a launch whose spec never landed. git log -S places introduction in in-range 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513; this is not a pre-range dismissal.",
+      "647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513:service/core.rs:11827-11863 makes FailedStart::Spec retain an allocated checkout, while ordinary non-checkout failure abandons the row. The referenced policy is itself qualified.",
+      "Same hash core.rs:15854-15925 documents and implements the same distinction for old-terminal retries: Planned can roll back; allocated or unreadable retains all ownership records. Correct runtime behavior alone is not the refutation; the comparison refers to that same failure policy.",
+      "Reviewed SPEC.md:1757 and SPEC_impl.md:3807-3809 explicitly retain post-allocation sessions and membership. Current SPEC_impl.md:2180-2185 retains the comparison, with the allocation rule at :3648-3650."
+    ],
+    "coverage_checked": [
+      "Current SPEC.md/SPEC_impl.md searched for spec-never-landed, rollback and post-allocation retention. The governing retention rules qualify the referenced policy; no rule accepts deleting allocated checkout ownership.",
+      "TODO Planned empty; BUGS.md unrelated; active TRIAGE_OUTCOMES.md, INDEX.md and matching queue references contain no exact wording item. confirmation-rollback-omits-container-cleanup and retained-refusal-can-clear-restart-delete-protection are different runtime causes.",
+      "The relevant tmux plans already landed per plans/REPORTS.md. No unlanded plan or exact queue item was found. FILTER.md is not the proposed basis."
+    ],
+    "exact_cover_quotes": [
+      "SPEC.md:1761: Once allocation has occurred, failures retain the session and its checkout association for inspection and Delete.",
+      "SPEC_impl.md:3648-3650: A post-allocation failure atomically retains an error session and membership instead of losing the only deletion handle."
+    ],
+    "missing_premise": "The claim of an unconditional removal policy would require text overriding the referenced failure policy's explicit post-allocation exception; none was identified.",
+    "original_stronger_consequence": "Earlier events called the paragraph inaccurate failure-lifecycle documentation that could make maintainers expect no retained session. Runtime preservation was always acknowledged; no actual deletion or orphaning was claimed. Latest event withdraws the categorical mismatch, preserving a possible isolated-reader clarity concern.",
+    "needs_independent_drop_check": true,
+    "proposed_basis": "Propose the latest source/contract refutation, preserving the withdrawal. The original ambiguity touches the only deletion handle for user-owned checkout work, so obtain an independent drop judgment. History mentions external g006/f3 as an alias, but that record was not assigned or read here and no cross-batch duplicate decision is inferred."
+  },
+  {
+    "key": "g009/l1",
+    "latest_line": 8,
+    "recommendation": "retain-verified",
+    "bucket": "other",
+    "underlying_key": "restart-history-promoted-by-growth-invalidates-excerpt-provenance",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The initial blank screen does not prove all later visible cells came from the new child. Height growth can promote inherited history before failure classification. Retain the newly authoritative unconditional provenance explanation as an in-range documentation defect; the runtime mechanism predates the range.",
+    "checks": [
+      "1ed482dde220452e424973faf38a5e1318986333:SPEC_impl.md:2756-2765 asserts that one child plus a blank initial screen prevents quotes reaching the previous run. Base-to-reviewed diff adds this host-only proof while removing the older tmux capture discussion.",
+      "At that hash snapshot/v1/paint.rs:404-436 really paints primary history above blank screen rows; this supports the initial-state claim only. vendor/alacritty_terminal/src/grid/resize.rs:25-28,46-76 pulls history into visible rows on height growth; term/mod.rs:756-758 and emulator.rs:224-226 use that resize path.",
+      "host_launch.rs:508-518 passes the restart snapshot, :579-645 adopts the host and tracks its pending spec without awaiting consumption. host_restart.rs:294-305,363-388 confirms and publishes the replacement before shim-consumption proof.",
+      "handlers.rs:2050-2083 and hosts/terminal.rs:2344-2353 admit an owned viewer resize without launch-readiness gating; terminal.rs:3872-3885,4063-4070 applies the resize to the emulator.",
+      "status.rs:630-652 can append the excerpt for dead/unconsumed-spec/no-sentinel shape; launch_artifacts.rs:59-80 checks processed dead evidence and quotes screen_tail, :97-105 removes blanks then keeps nonblank lines. screen.rs:50-96 includes every visible row, including promoted rows.",
+      "The earlier blank-seed refutation in lines 2/4 was explicitly reopened and superseded at lines 6-8. No runtime occurrence or frequency was observed."
+    ],
+    "coverage_checked": [
+      "Current SPEC_impl.md:2658-2668 retains the unconditional provenance proof. SPEC.md/SPEC_impl.md restart/history/excerpt sections do not accept attributing inherited history to new launch output; retained history itself is accepted.",
+      "TODO Planned empty; BUGS.md unrelated; active TRIAGE_OUTCOMES.md and full INDEX.md have no matching excerpt-provenance item. Searches for excerpt, previous run and provenance found no exact existing coverage.",
+      "Matching tmux cleanup plans already landed; empty-scrollback-messages concerns deferred browser history numbering and wrong URL lookup, not emulator history growth or launch-error attribution. No unlanded matching repair found.",
+      "FILTER.md rare diagnostic filter could cover a separately reported rare runtime misdiagnosis, but does not clearly cover a newly incorrect authoritative implementation proof. Retain this documentation remainder rather than infer whole-finding coverage."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": "For an observed misdiagnosis: inherited history, growth after replacement publication but before classification, shell failure before shim consumption, and at least one promoted nonblank row surviving overwrite. Source admits these conditions; no reproduction establishes their actual occurrence.",
+    "original_stronger_consequence": "A failed restarted session can durably quote a previous-run message as its last terminal output. This is misleading diagnosis only, with no established security or work-loss route. Initial source-refuted proposal is withdrawn, not accepted.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Retain other for the in-range documentation contradiction. Do not present the pre-range runtime route as newly introduced, or claim the whole terminal feature is broken.",
+    "new_interface_evidence": "The supplied history names g013/f2 and g100/c1 as related to this route. The inspected resize/admission/excerpt chain confirms the common mechanism, but those unassigned records were not read, so exact aliasing remains the parent's reconciliation."
+  },
+  {
+    "key": "g009/c2",
+    "latest_line": 5,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "removed-xterm-missing-link-tag-fallback",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The grid caller supplies integer hyperlink identity tags, so removing the old library's tag-unavailable exception does not establish a weakened deceptive-link safeguard.",
+    "checks": [
+      "f560058da19e02716e6f943883a9508b447aff4e:assets/grid-buffer.js:612-680 creates per-hover integer identity tags, positive for links and zero for blanks, and exposes the tag on every cell.",
+      "Same hash terminal.js:940-950 builds view.lines from getGrid().linkLines; :1036-1037 passes it to linkHoverText. grid-terminal.js:2048-2049 returns gridBuffer.linkLines(source()). This checks the actual caller adapter.",
+      "terminal-links.js:413-489 uses those tags for joined comparison; its defensive undefined-tag fallback does not show that the grid ever lacks tags. Current SPEC.md:3091-3111 still requires authoritative full target disclosure and refuses clicks without fully visible disclosure."
+    ],
+    "coverage_checked": [
+      "Both current specs searched for hyperlink tags, fallback, joined-link comparison and destination disclosure; complete applicable link bullet read. They preserve comparison and disclosure rather than authorize hiding targets.",
+      "TODO Planned empty; BUGS.md unrelated; active TRIAGE_OUTCOMES.md and INDEX.md contain no exact missing-tag item. Read joined-link-spec-omits-cursor-tail-exception.md: that concerns accepted generated-id tail selection and extra warnings, a different cause and consequence.",
+      "Empty-scrollback-messages plan concerns zero-row queue numbering and wrong plain-URL lookup, not missing hyperlink tags. Landed tmux-doc cleanup is not pending coverage. FILTER.md is not the proposed basis."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": "A shipped grid caller producing unavailable link tags was not found; the inspected caller supplies them.",
+    "original_stronger_consequence": "A removed fallback could in principle hide a misleading destination split over several rows and weaken a security safeguard. No missing-tag route or undisclosed target was established; target display remains required.",
+    "needs_independent_drop_check": true,
+    "proposed_basis": "Propose source refutation narrowly for removed tag-unavailable wording; independent security drop check required. This does not certify all hyperlink warning or disclosure mechanisms."
+  },
+  {
+    "key": "g009/l3",
+    "latest_line": 11,
+    "recommendation": "retain-verified",
+    "bucket": "other",
+    "underlying_key": "spec-shim-container-execution-branch-retired",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The authoritative launch explanation still names an execution branch retired within this range. The actual container supervisor now uses the ordinary launch path inside its environment.",
+    "checks": [
+      "1ed482dde220452e424973faf38a5e1318986333:SPEC_impl.md:2753-2754 describes the shim and its container branch receiving the same Bash vector. Current SPEC_impl.md:2655-2656 retains this sentence.",
+      "At the reviewed hash launch.rs:220-225 preserves container only as a decode/refuse compatibility marker; :1165-1172 returns the retired-model sentinel before preparation or exec; :1232 executes ordinary agent_command.",
+      "In-range 04d85f0c98a9b635709d00b056719a0baa7fd3fc retires legacy containerized sessions and changes launch.rs. Reviewed SPEC_impl.md:8440-8453 explicitly says the current supervisor runs inside its container and uses ordinary host paths, with the supervisor-outside model retired.",
+      "This is stale execution-boundary guidance, not evidence of a production launch failure or an isolation bypass."
+    ],
+    "coverage_checked": [
+      "Current SPEC.md/SPEC_impl.md searched for shim/container branch and rootless container execution. The correct current-container subsection supplies contradictory context, not acceptance of a nonexistent shim branch.",
+      "TODO Planned empty; BUGS.md unrelated; active TRIAGE_OUTCOMES.md and INDEX.md have no matching shim-branch item. Existing launch-input-database-duplication-rationale-overstated concerns missing database prompt content, not the execution boundary.",
+      "No unlanded matching plan found; broad tmux-doc cleanup is already landed per plans/REPORTS.md:32. FILTER.md has no matching boundary for persistent incorrect architecture guidance."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": null,
+    "original_stronger_consequence": "Maintainers are directed to a retired container execution branch. No runtime misexecution, security effect or loss of work was alleged.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Retain other, with retirement attributed to 04d85f0c rather than the later documentation relocation. Source-only conclusion."
+  },
+  {
+    "key": "g010/f1",
+    "latest_line": 4,
+    "recommendation": "retain-verified",
+    "bucket": "other",
+    "underlying_key": "shift-enter-unconditional-pty-write-guarantee",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The new explanation overstates what a single encoded input establishes: the host initially offers all bytes, but a short write can require a later suffix write. The lower contract explicitly permits this.",
+    "checks": [
+      "f560058da19e02716e6f943883a9508b447aff4e:SPEC_impl.md:1722-1727 promises one PTY write; recording-time :1721-1726 retains that wording. SPEC.md:2869-2876 already contains the stronger product-level promise and motivation, so it is not newly introduced by this implementation paragraph.",
+      "Same reviewed hash crates/terminal-host/src/host.rs:570-617 explicitly explains macOS short writes, writes segment.data[segment.written..], advances by the returned count and keeps the suffix for a later call.",
+      "Same hash crates/terminal-host/SPEC.md:399-403 promises offering a small Input whole in the initial call, expressly allows short-write suffixes and disclaims program-read boundaries. This directly limits the new unconditional explanation.",
+      "One encoder message, one initial write offer, successful physical writes, and program read boundaries are distinct. No source claim here establishes an actual unintended submit or destructive command."
+    ],
+    "coverage_checked": [
+      "Both current root specs searched for single/short write and Shift+Enter; applicable product bullet and implementation paragraph read. Repeating an overstrong promise does not cover the contradictory implementation explanation.",
+      "TODO Planned empty; BUGS.md unrelated; active TRIAGE_OUTCOMES.md and INDEX.md contain no exact documentation-guarantee item. Read shift-enter-test-lacks-reader-readiness.md: it concerns an integration-test blocked-reader premise and independently notes deterministic initial-offer coverage. That is not this documentation defect or an extension of the same cause.",
+      "grid-shift-enter-loses-independent-altgraph concerns modifier recognition, not PTY boundaries. No unlanded matching plan found; matching docs cleanup plan already landed. FILTER.md does not clearly cover a persistent false implementation guarantee."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": "A concrete supported terminal/line-editor input sequence and effect showing a destructive submit or loss of work is missing. Short-write possibility alone does not establish that stronger consequence.",
+    "original_stronger_consequence": "ESC and CR might reach a boundary-sensitive line editor separately, changing a newline chord into Escape-plus-submit. No runtime split, unintended submit, destructive command or loss-of-work sequence was observed or established. The ordinary initial offer and single-message encoder behavior are correct.",
+    "needs_independent_drop_check": true,
+    "proposed_basis": "Retain the other-priority documentation mismatch and reconcile the root wording with the lower contract. Because the history narrows a potential unintended-submit route to documentation, have the parent independently check that consequence narrowing; this consultation does not accept a drop of a security/work-loss route."
+  },
+  {
+    "key": "g010/f2",
+    "latest_line": 5,
+    "recommendation": "covered",
+    "bucket": "other",
+    "underlying_key": "slow-clipboard-single-flight-replaces-pending-value",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The exact slow/hung-clipboard exception permits dropping copies while requiring unrelated processing to remain nonblocking. One in-flight plus replaceable pending value implements this accepted consequence.",
+    "checks": [
+      "f560058da19e02716e6f943883a9508b447aff4e:assets/clipboard-writer.js:22-59 retains one in-flight operation and one pending value. A third request replaces the second while the first remains pending; an indefinitely pending first operation keeps that slot indefinitely.",
+      "Same hash terminal.js:4326-4334 sends program system-clipboard writes and completed local selections to the same synchronous enqueue operation. It does not await the sink in the parser/selection caller.",
+      "Current SPEC.md:3053-3073 both requires completed selections to copy and expressly permits drops while the clipboard is broken, hung or slow. Current SPEC_impl.md:1728-1744 describes the native-first page-wide queue and invokes this best-effort exception.",
+      "These checks establish two retained values, not an independent byte bound inside this helper. No read, disclosure, credential or wider-stall claim was made."
+    ],
+    "coverage_checked": [
+      "Both specifications checked for completed selection, slow clipboard, queue and best-effort behavior; the exact trigger/consequence/scope is explicitly accepted in SPEC.md's clipboard paragraph.",
+      "TODO Planned empty; BUGS.md unrelated; active TRIAGE_OUTCOMES.md and INDEX.md searched for clipboard queue/pending replacement. Read clipboard-notice-drain-lacks-per-turn-work-bound.md: it concerns supervisor broadcast draining before scheduling/cancellation, a different stage and consequence; it does not duplicate this browser writer policy.",
+      "No unlanded matching plan found; landed tmux-doc cleanup and clipboard-cap work are not pending coverage. FILTER.md is unnecessary because the specification directly accepts the narrow value-replacement consequence."
+    ],
+    "exact_cover_quotes": [
+      "SPEC.md:3071-3073: Farhelm assumes the host's system clipboard works. A broken, hung or slow clipboard is not something Farhelm adds complexity to support well: copies may be dropped while it is in that state, but nothing else in Farhelm may stall because of it."
+    ],
+    "missing_premise": null,
+    "original_stronger_consequence": "In the three-copy case the middle pending copy may never reach the sink. No promise that every accepted enqueue reaches the sink is inferred. Clipboard-value replacement alone is excluded from loss-of-user-owned-work severity by the queue's priority rules.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Propose exclusion only for replacement of pending clipboard values during a slow or hung sink, using the exact specification exception. No parent decision is inferred."
+  }
+]

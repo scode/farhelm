@@ -1,0 +1,311 @@
+[
+  {
+    "key": "g088/c1",
+    "latest_line": 10,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "header-environment-delete-preserves-rendered-scope",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The examined header, persistent request owner and API encoder preserve the answered Delete scope. A connection change does not widen Session to Whole along this path.",
+    "checks": [
+      "2ef10815f12ed719ab6c51c6e3ac6fcd3f8bc1fa session_view.rs:745-755 stores DeleteScope in ConfirmSlot; :2789-2799 consumes the rendered token and applies delete.with_scope(*shown_delete.key()).",
+      "2ef10815 list/view.rs:2978-2985 sends environment.scope unchanged to delete_in_environment.",
+      "f560058da19e02716e6f943883a9508b447aff4e api/sandbox_sessions.rs:186-234 exhaustively encodes Session as delete_environment_session=true and Whole as delete_sandbox=true; a refusal returns without a wider retry.",
+      "Source-only check. This is not an independent review of server deletion, identity binding or unrelated delayed handlers. Host absence does not widen this encoder's scope."
+    ],
+    "coverage_checked": [
+      "SPEC.md:1510-1541 and SPEC_impl.md:6086-6158 distinguish ordinary session deletion from warned whole-environment destruction; SPEC_impl.md:1069-1096 binds answers to the rendered question. These are contracts supporting the refutation, not acceptance of unconsented destruction.",
+      "Current TODO.md Planned is empty; plans/queue/INDEX.md contains no unlanded plan entries. BUGS.md concerns only a retained local SSH output pipe. Current queue INDEX and active TRIAGE_OUTCOMES searches show no exact scope-widening claim. Nearby sandbox lifecycle-token items concern different handlers/triggers."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": null,
+    "original_stronger_consequence": "If the scope widened, unconsented sessions, processes and files could be destroyed. Both history records retain that highest-capable hypothetical; source refutes this examined route only.",
+    "needs_independent_drop_check": true,
+    "proposed_basis": "Source refutation of the named scope-widening path; obtain the independent drop verdict before dismissal because its original consequence involves user-owned work."
+  },
+  {
+    "key": "g088/c2",
+    "latest_line": 2,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "deleting-environment-header-controls-use-frozen-predicate",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "Deleting is already included in the shared frozen predicate used by the remaining header lifecycle controls.",
+    "checks": [
+      "2ef10815f12ed719ab6c51c6e3ac6fcd3f8bc1fa sandbox_sessions.rs:95-103 includes HostPhase::Deleting in frozen.",
+      "The same revision session_view.rs:1990-1992 derives sandbox_frozen from that predicate; Stop :2443, Stop and suspend :2494, Restart :2552 and Replace :2653 disable from it.",
+      "No runtime observation. This settles rendered ordinary controls, not answers retained from an earlier render or every server race."
+    ],
+    "coverage_checked": [
+      "SPEC.md:1527-1529 and SPEC_impl.md:6151-6158 require actions unavailable during deletion. Current queue frozen-sandbox-retains-header-lifecycle-answers describes already-open answers and the interrupted card, a distinct trigger from the ordinary controls examined here.",
+      "Both specs searched; TODO Planned empty; unlanded plans index empty; BUGS and active TRIAGE_OUTCOMES contain no exact ordinary-header-enable claim. Queue INDEX read and relevant frozen-control entries distinguished."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": null,
+    "original_stronger_consequence": "Stop, Restart and Replace might remain usable while deletion runs. No unauthorized destruction or work-loss route was alleged or established.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Direct source refutation through the predicate the disabled expressions call."
+  },
+  {
+    "key": "g088/l1",
+    "latest_line": 12,
+    "recommendation": "filtered",
+    "bucket": "other",
+    "underlying_key": "restart-success-retired-before-mounted-observer",
+    "aliases": ["g089/l1 (same f560058 stale-response route; this record also includes the earlier eligible-new-listing route)"],
+    "target_queue_file": null,
+    "why": "The conditional missing-terminal mechanism is source-supported. Its whole established consequence is a temporary incorrect recovery card, repaired by independent live detail or ordinary reopening. The rare self-correcting display filter applies; rarity alone is not the basis.",
+    "checks": [
+      "b3d6b3eff6b7508e0b1fb6ec5b5cde31d27ebabe session_ops.rs:92-106,215-233 permits an eligible post-floor sidebar listing to clear restart before the observer; session_view.rs:549-564 sets relaunched and terminal-kind override only from surviving success, although it always increments mount_generation; :3711-3732 refuses an Interrupted terminal without relaunched.",
+      "f560058da19e02716e6f943883a9508b447aff4e session_ops.rs:77-105,215-226 removes the read-age floor and lets stale rows clear restart_succeeded. list/view.rs:1976-1985 retires it independently of the view detail; :3416-3419 finishes Restart, queues refresh and releases pending without fencing the listing.",
+      "f560058 ops.rs:182-190 accepts any success newer than applied, and reader.rs:405-458,644-680 leaves an existing read alive while recording a new refresh demand. aggregate.rs:547-578 snapshots host state before awaiting cached_slice, and :357 derives stale from that snapshot. This permits an older stale reply after completion.",
+      "f560058 session_view.rs:549-564 can therefore advance generation without setting relaunched; :1709-1710,3701-3722 produces no terminal for its existing Interrupted current. :1245-1273 follows only title and requests detail, not sidebar status. :1475-1487 independently requests post-boundary detail.",
+      "f560058 helm sessions.rs:3052-3095,3162-3227 serves cached Interrupted only without a client; connected detail drains live sessions. The earlier claim that merged_status prolongs newly fetched connected detail is withdrawn and source-refuted. Later live detail repairs the surface. No runtime delivery order or incidence was observed.",
+      "History preserved: line 4's generation-survival refutation was withdrawn at lines 7-9 because a generation increment does not establish terminal admission. The newer-listing route with the floor intact and the later old-stale-response route have different trigger/fix boundaries."
+    ],
+    "coverage_checked": [
+      "SPEC.md:1890-1904 and SPEC_impl.md:1134-1164 require mounted Restart observation and reattachment, not this temporary omission. No specification acceptance found.",
+      "TODO Planned empty; plans/queue/INDEX.md has no unlanded entries. The historical session-action-leftovers plan is landed and is not current repair coverage.",
+      "BUGS has no matching trigger. Queue INDEX and retained-restart-hides-reboot-card.md read: that item concerns too-long retention after a second reboot, the opposite retention boundary; it does not cover premature retirement before a mounted consumer. Active TRIAGE_OUTCOMES has no exact claim.",
+      "FILTER.md, Rare, self-correcting glitches and imprecise diagnostics: a narrow reply/effect ordering causes only a wrong temporary display and attachment presentation, repaired by the next successful live detail or reopening. No wrong-target operation, false mutation success, durable wrong record, work loss or security effect is established."
+    ],
+    "exact_cover_quotes": [
+      "FILTER.md: The trigger is rare: a narrow timing window, a crash or interruption at a specific point, or an input the shipped clients never send.",
+      "FILTER.md: a display that is briefly wrong and corrects itself on the next refresh, retry or reconnect, or when the user leaves the view"
+    ],
+    "missing_premise": "The response-before-observer ordering remains conditional and unobserved. No source route to permanent terminal loss, killing an unseen agent, or lost user work was established. Framework scheduling was reported by the reviewer but not independently rechecked here.",
+    "original_stronger_consequence": "Initially high for missing remount or lingering interruption presentation; line 12 preserves high pending parent adjudication. The latest source-supported scope is temporary inability to see the restarted agent until fresh detail. Preserve the withdrawn generation-only refutation and the withdrawn cache-prolongation premise; no highest consequence was alleged.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Apply the complete rare self-correcting display filter to the narrowed consequence. The high-versus-other disagreement remains explicit; this is a proposed recording disposition, not a parent decision."
+  },
+  {
+    "key": "g088/c3",
+    "latest_line": 5,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "removed-tab-kind-projection-preserves-ids-order-focus",
+    "aliases": ["g089/c2 (identity/order/cap subset)"],
+    "target_queue_file": null,
+    "why": "The removed wrapper preserves exactly the IDs and order of its replacement helper; it adds kind metadata only. The surviving focus selector matches the only renderer's input field.",
+    "checks": [
+      "f560058da19e02716e6f943883a9508b447aff4e^ tabs.rs:156-168 constructs visible IDs; :198-216 maps precisely those IDs to Tab { id, kind } without reordering. f560058 session_view.rs:1712-1718 uses the same IDs for selection and the same MAX_MOUNTED_TAB_ISLANDS prefix, and :1763-1780 derives tab element and socket paths from them.",
+      "f560058 terminal.js:3387-3393 creates the grid unconditionally. grid-terminal.js:367-368 gives its textarea class grid-terminal-input; tunnels.rs:388 focuses that same selected terminal input.",
+      "No runtime focus or routing observation. This is the local projection/focus contract, not a full transport or migration review."
+    ],
+    "coverage_checked": [
+      "Both specs searched. SPEC_impl.md:1692-1707,1844 describes the grid island for every terminal; :2943-2958 removes terminal kinds at protocol 77. These support the replacement design, not acceptance of wrong-shell routing.",
+      "TODO Planned empty; unlanded plans index empty; BUGS, queue INDEX and active TRIAGE_OUTCOMES contain no exact projection-induced identity/order/focus defect. Existing tab transport/test items have different triggers."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": null,
+    "original_stronger_consequence": "Considered targeting the wrong shell or leaving terminals unfocused; stable opaque IDs remain unchanged. No destructive operation or user-work loss was established.",
+    "needs_independent_drop_check": true,
+    "proposed_basis": "Source refutation. Conservatively request a drop check for the original wrong-shell-target concern, even though no harmful target change was found."
+  },
+  {
+    "key": "g088/c4",
+    "latest_line": 6,
+    "recommendation": "covered",
+    "bucket": "other",
+    "underlying_key": "stop-and-suspend-host-scoped-launch-exclusion",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The product expressly accepts host-scoped Suspend/Resume exclusion instead of the page-wide registry token. The changed header checks the target host at render and answer time.",
+    "checks": [
+      "1d24c6af0b6fdbbec854623ff53f90281b8271ab session_view.rs:2420-2437 disables Stop and suspend for composer_ops.launch_targets(host), rechecks launch_targets_now(host), then consumes the rendered Stop token and sends captured no-tabs/ended guards.",
+      "The accepted contract is admission on this page, not cross-page exclusion or holding a launch token through the entire asynchronous Stop. No runtime test was run."
+    ],
+    "coverage_checked": [
+      "SPEC.md:1338-1348 and SPEC_impl.md:1144-1151 explicitly cover Stop and suspend and the same-host click/answer checks. This is exact accepted behavior.",
+      "TODO Planned empty; plans/queue/INDEX.md contains no unlanded plans. Historical sandbox-suspend-overlap is already reflected in the accepted specs. BUGS, queue INDEX and active TRIAGE_OUTCOMES have no different exact claim requiring extension."
+    ],
+    "exact_cover_quotes": [
+      "SPEC_impl.md: Suspend and Resume, from Hosts or a sandbox session (Stop and suspend included), are not registry mutations and never claim it.",
+      "SPEC_impl.md: those controls are refused while it names their host, at the click and again at the answer."
+    ],
+    "missing_premise": null,
+    "original_stronger_consequence": "Considered whether Stop and suspend could race an unrelated launch and freeze its environment. The accepted rule deliberately permits work on other hosts and preserves this page's same-host check; suspension retains processes and files.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Exact specification acceptance of the named exclusion boundary, supported by the changed handler."
+  },
+  {
+    "key": "g088/l2",
+    "latest_line": 13,
+    "recommendation": "retain-unverified",
+    "bucket": "highest",
+    "underlying_key": "legacy-unknown-kind-page-raw-json-paste-to-grid-input",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The caller/mount premise is source-established. Keep this as supporting evidence for the parent-supplied g196/l1 concern, preserving its conditional command-execution consequence until the decoder owner supplies the remaining route. Do not create a second independent discovery from this contribution.",
+    "checks": [
+      "f560058da19e02716e6f943883a9508b447aff4e^ lib.rs:520-527 defaults missing agent_terminal to None and host-terminal capability to false. session_view.rs:1771-1776,1833-1840 passes unknown agent/tab kind into specs; :3793-3814 permits a nonretired, fresh Running terminal; :3839-3849 preserves null outside active Restart.",
+      "The same parent lib.rs:2042-2098 renders the mismatch notice while retaining the authenticated tree; :2272-2282 still renders SessionView. skew.rs:30-35 deliberately does not block rendering; :286-293 is only a PeerLine. reconnect.rs:186-224 disables unattended heartbeat/reconnect on skew but explicitly preserves manual reconnect.",
+      "The parent terminal.js:4650-4665 builds xterm for unknown kind. :5631-5650 accepts replay_complete without a stream notice as bytes; :5721-5724 and :5891-5915 likewise permit the bytes path. :4158-4159,4191-4195 sends raw UTF-8 on an open socket and :4628-4634 supplies term.paste without a skew/input-format veto.",
+      "This establishes an interactive old-page raw-input mount, not the full current grid decoder or exact pasted payload consequence. No paste, runtime schedule or shell command was executed. Known-host grid mounts need not take this branch; fresh unknown kind and a valid grid-shaped JSON paste before invalid input remain required."
+    ],
+    "coverage_checked": [
+      "Both specifications searched. SPEC_impl.md:2943-2958 explicitly accepts an old page misdrawing and typed input ending its attachment as malformed; that is not exact acceptance of successful reinterpretation of JSON document contents into commands. SPEC.md:2855-2858 says typing reaches the real TUI.",
+      "TODO Planned empty; unlanded plans index empty. BUGS has no related input issue. Current queue INDEX and active TRIAGE_OUTCOMES have no exact legacy-raw-JSON reinterpretation claim. auth-skew-remount-retains-row-operation-count and take-control-skips-recovery-terminals have different triggers/consequences.",
+      "FILTER.md upgrade-plus-rare-condition explicitly excludes security/trust-boundary consequences. No filter covers the alleged input-execution consequence merely because an old page is involved."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": "The current grid decoder's acceptance of the supplied small Text JSON paste, its default paste-mode handling, exact control-byte delivery and command execution remain with g196/l1. They were not independently established by this caller-only consultation. Parent must consolidate that evidence before finalizing confidence/severity; preserve highest meanwhile.",
+    "original_stronger_consequence": "A document pasted into a stale legacy surface may become input instructions containing executable control bytes against a live shell, with potential security or user-work loss. The earlier unresolved lead and latest caller confirmation retain that consequence conditionally; no withdrawal or lowering occurred.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Retain the named contribution with confirmed mount premises and explicit missing decoder premises. No proposed dismissal, upgrade filter or consequence lowering.",
+    "new_interface_evidence": "For g196/l1: parent session_view.rs:3839-3849 returns null kind outside Restart; lib.rs:2085-2098 keeps the authenticated tree on build skew, and terminal.js:4158-4159 gates raw UTF-8 only on socket-open state. These confirm the caller-side opportunity; they do not prove the decoder consequence."
+  },
+  {
+    "key": "g088/l3",
+    "latest_line": 16,
+    "recommendation": "filtered",
+    "bucket": "other",
+    "underlying_key": "header-unasked-delete-handoff-discards-only-refusal-reason",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The lost-refusal mechanism is source-supported, but its entire consequence is a lost diagnostic for a Delete that changed nothing. It requires a narrow publication-to-effect navigation/claim ordering and fully matches the rare lost-diagnostic filter.",
+    "checks": [
+      "2ef10815f12ed719ab6c51c6e3ac6fcd3f8bc1fa list/view.rs:3022-3034 releases the request claim and selects HeaderQuestion from current selection; :3052-3054 removes its persistent error and publishes only the ID. :3004-3014 publishes notices only on success, so this refusal has no parallel notice.",
+      "The new session_view.rs:781-796 clears warned_delete before checking the view ID or claim_guard; a replacement view or intervening claim loses the handoff. f560058 session_ops.rs:135-141 stores only the source ID, with no refusal text to reconstruct.",
+      "00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db session_view.rs:773-783 and list/view.rs:3015-3021 retain both sides of the gap. Navigation before completion correctly selects the Error branch; only navigation/claim after publication is affected. The later listing cannot restore this request's reason. No actual occurrence was observed."
+    ],
+    "coverage_checked": [
+      "SPEC.md:1901-1904 and SPEC_impl.md:1155-1164 require source outcomes to persist; they do not accept losing the explanation. Both specifications searched for the handoff/refusal boundary.",
+      "TODO Planned empty; unlanded plans index empty; BUGS, current queue INDEX and active TRIAGE_OUTCOMES contain no exact ID-only header handoff loss. Row-menu transient ownership and delayed-refusal reopening items describe different triggers and are not exact coverage.",
+      "FILTER.md Rare, self-correcting glitches and imprecise diagnostics covers a narrow timing trigger whose whole consequence is a diagnostic that is lost. No deletion is sent from the discarded handoff and no wrong-target, work-loss, security or false-success result is established."
+    ],
+    "exact_cover_quotes": [
+      "FILTER.md: The trigger is rare: a narrow timing window, a crash or interruption at a specific point, or an input the shipped clients never send.",
+      "FILTER.md: an error message, log line or other diagnostic that is imprecise, misleading, missing detail, or lost."
+    ],
+    "missing_premise": "The publication/navigation/effect schedule is conditional and its frequency unmeasured; the source route itself is established. No destructive consequence was alleged.",
+    "original_stronger_consequence": "Delete remains undone while both its follow-up question and only refusal explanation disappear. Initial other-or-high was narrowed to other diagnostics after investigation, without any security or user-work-loss claim.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Apply the complete rare lost-diagnostic filter. Do not use cancellation of the late question alone as specification acceptance of losing its refusal reason."
+  },
+  {
+    "key": "g088/c5",
+    "latest_line": 17,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "missing-tab-initial-attach-explanation-versus-live-tab-reap",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The comment's failed-first-attach explanation and the silent removal of a previously working tab concern different phases.",
+    "checks": [
+      "61e632323dbc6b4a35ed27bf5b9833102ffd5a4e session_view.rs:298-304 discusses a terminal host already gone when attachment is attempted, then separately describes reaping an exited shell.",
+      "The same revision terminal.js:4119-4123 sets silentDetach only for tabClosed && attachProved; :4148 shows the decision banner otherwise. A refused first attach retains the explanation, while an already-working attachment disappearing is silent. No runtime behavior was tested."
+    ],
+    "coverage_checked": [
+      "Both specs searched for tab disappearance/attachment. SPEC_impl.md Grid streams and terminal-widget contracts distinguish detach explanations and shell-tab reaping; neither requires a banner for every later closure.",
+      "TODO Planned empty; unlanded plans index empty; BUGS, queue INDEX and active TRIAGE_OUTCOMES contain no exact first-attach-versus-proven-attachment documentation mismatch. Existing tab-helper and delete-reader notice items concern different failures."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": null,
+    "original_stronger_consequence": "The changed comment might wrongly promise a missing-terminal explanation for a deliberately silent closed/reaped tab. Documentation accuracy only; no security or work-loss consequence.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Source refutation from the attachProved phase guard, rather than production correctness as a blanket answer to a comment defect."
+  },
+  {
+    "key": "g089/l1",
+    "latest_line": 5,
+    "recommendation": "filtered",
+    "bucket": "other",
+    "underlying_key": "restart-success-retired-before-mounted-observer",
+    "aliases": ["g088/l1 (exact f560058 stale-response subset only)"],
+    "target_queue_file": null,
+    "why": "This is the f560058 old-stale-sidebar route also present in g088/l1. The source permits its ordering, but its whole established consequence is temporary wrong presentation/terminal admission repaired by live detail or ordinary reopening, within the rare self-correcting filter.",
+    "checks": [
+      "f560058da19e02716e6f943883a9508b447aff4e aggregate.rs:357,547-578 can return stale from a host snapshot taken before cached_slice awaits; reader.rs:405-458,644-680 leaves the older listing in flight when completion requests another read; ops.rs:182-190 checks last applied generation, not Restart age.",
+      "The same revision list/view.rs:3416-3419 records success, requests refresh and releases pending; :1976-1985 retires outcomes. session_ops.rs:77-105,215-226 accepts stale as confirming without the former age floor, clearing success before its mounted observer can consume it.",
+      "session_view.rs:549-564 advances mount_generation but only surviving success sets relaunched; :1709-1710,3701-3722 gives the existing nonstale Interrupted detail an empty terminal set. :1245-1273 does not copy sidebar status and :1475-1487 independently requests detail.",
+      "helm sessions.rs:3052-3095,3162-3227 establishes live connected detail repair, not cached-status prolongation. The original source-only confidence remains conditional on reply-before-observer/fresh-detail delivery; no runtime schedule was observed. The reviewer reported Dioxus dependency scheduling checks, not independently repeated here.",
+      "b3d6b3e session_ops.rs:92-106 already had the generation floor, but a newer eligible listing could still retire the optional payload before consumption. Restoring that floor fixes this stale-evidence trigger only; it does not settle the broader eligible-listing race recorded by g088/l1."
+    ],
+    "coverage_checked": [
+      "SPEC.md:1890-1904 and SPEC_impl.md:1134-1140 require mounted completion reattachment. No exact acceptance found in either spec.",
+      "TODO Planned empty; unlanded plan index empty. BUGS has no matching issue. Queue INDEX and retained-restart-hides-reboot-card.md read: the existing item concerns success retained too long across another reboot, not prematurely cleared success. Active TRIAGE_OUTCOMES has no exact claim.",
+      "FILTER.md Rare, self-correcting glitches and imprecise diagnostics fully covers the narrow ordering trigger and temporary display/attachment consequence. No irreversible loss, wrong-target action, security boundary or false mutation success is established."
+    ],
+    "exact_cover_quotes": [
+      "FILTER.md: The trigger is rare: a narrow timing window, a crash or interruption at a specific point, or an input the shipped clients never send.",
+      "FILTER.md: a display that is briefly wrong and corrects itself on the next refresh, retry or reconnect, or when the user leaves the view"
+    ],
+    "missing_premise": "The delivery-before-observer schedule remains unobserved; source permits it. No permanent outage or lost user work is established. Parent-supplied g037/f3 and g038/l1 were not batch inputs, so no independent alias judgment is made for them.",
+    "original_stronger_consequence": "Initially high if material terminal-remount failure were established; latest history explicitly narrows to other, temporary missing terminal until live detail succeeds. Preserve the distinction from lost numerical generation and from the earlier eligible-new-listing/terminal-kind route.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Filter the established narrowed consequence; reconcile this named alias with g088/l1 without erasing its broader earlier trigger or severity disagreement."
+  },
+  {
+    "key": "g089/c1",
+    "latest_line": 2,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "grid-only-current-page-needs-no-renderer-kind-selection",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The matching new page always builds the grid; removing kind selection and migration presentation cannot choose a different surviving renderer. Old-page protocol skew is explicitly outside this candidate and remains preserved separately under g088/l2.",
+    "checks": [
+      "f560058da19e02716e6f943883a9508b447aff4e terminal.js:3387-3393 creates and fits a grid unconditionally before opening the socket. session_view.rs:1705-1778 retains ID-based encoded paths, lease, generation and focus without kind-dependent consumption.",
+      "The same revision's specification removes byte streams and terminal-kind fields at protocol 77; current SPEC_impl.md:1692-1707,2780-2807,2943-2958 confirms terminal hosts/grid-only product architecture and explicitly requires old pages to reload. No runtime attachment was tested."
+    ],
+    "coverage_checked": [
+      "Both specifications searched. SPEC_impl.md Grid streams and Ending the old private tmux server explicitly establish the new grid-only contract. This does not accept or refute the separate old-page input reinterpretation claim.",
+      "TODO Planned empty; unlanded plans index empty; BUGS, queue INDEX and active TRIAGE_OUTCOMES contain no exact matching-current-page wrong-renderer defect. Skew/remount queue items have different state/attachment triggers."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": null,
+    "original_stronger_consequence": "An old or restarting terminal might mount the wrong renderer after kind metadata and migration presentation disappear. The checked matching-page path permits only the grid; no user-work-loss or security route was alleged in this candidate.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Refute current-page renderer selection only. Do not broaden this dismissal to cross-update stale-page behavior."
+  },
+  {
+    "key": "g089/c2",
+    "latest_line": 6,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "removed-tab-kind-projection-preserves-ids-order-focus",
+    "aliases": ["g088/c3 (identity/order/cap subset)"],
+    "target_queue_file": null,
+    "why": "The replacement is precisely the ID helper the old projection called. Removing its metadata map does not change tab identity, sequence, selected membership or mount-cap position.",
+    "checks": [
+      "f560058da19e02716e6f943883a9508b447aff4e^ tabs.rs:156-168 appends optimistic IDs and removes closed IDs; :198-216 calls that helper and maps each result to Tab { id, kind } without reordering.",
+      "f560058 session_view.rs:1712-1718 uses visible_tabs directly, ids.contains for the same selection membership and the same MAX_MOUNTED_TAB_ISLANDS prefix. :1763-1780 constructs tab elements and WebSocket tab arguments from the same opaque IDs. No runtime routing or focus test was run."
+    ],
+    "coverage_checked": [
+      "Both specifications searched; SPEC_impl.md:1692-1707,2943-2958 establishes grid-only kind removal but does not excuse routing mistakes. Direct before/after helper equivalence settles this candidate.",
+      "TODO Planned empty; unlanded plans index empty; BUGS, queue INDEX and active TRIAGE_OUTCOMES have no exact projection-induced tab reordering or identity issue. g088/c3 independently describes the same local equivalence plus focus."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": null,
+    "original_stronger_consequence": "Considered reordering tabs, changing the selected shell or moving a terminal across the mount cap. No changed target or destructive operation was established; the exact IDs are preserved.",
+    "needs_independent_drop_check": true,
+    "proposed_basis": "Source refutation of identity/order change. Conservatively flag an independent drop check for the considered wrong-shell target consequence."
+  },
+  {
+    "key": "g089/l2",
+    "latest_line": 8,
+    "recommendation": "out-of-range",
+    "bucket": "other",
+    "underlying_key": "pre-range-grid-reveal-comment-still-names-term-write-callback",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The comment is inaccurate for the grid path, but that exact mismatch already existed at the full exclusive review base. The assigned removal neither introduced this wording nor first made it false.",
+    "checks": [
+      "6e423e30068b62c6cfa276c6d720ee35bb70387a session_view.rs:3076-3083 already says reveal happens inside a term.write completion callback. The same base terminal.js:5247-5260 already directly scrolls and flushes its grid before revealing it, contradicting the unqualified explanation.",
+      "f560058da19e02716e6f943883a9508b447aff4e session_view.rs:3088-3095 retains the same explanation; terminal.js:3756-3783 directly reveals the grid without a term.write callback.",
+      "Targeted git log -G 'term.write|reveal it performs' over 6e423e3..00de0b6 for session_view.rs returned no matching changes. This is actual stale lifecycle documentation, not a production defect refuted by correct output. No runtime test or reproduction was run."
+    ],
+    "coverage_checked": [
+      "Both specifications searched. SPEC_impl.md:1692-1707 describes JS-owned grid rendering outside Dioxus and does not accept the obsolete named callback. No term.write acceptance or matching queue claim found.",
+      "TODO Planned empty; plans/queue/INDEX.md contains no unlanded entries. Historical tmux-drop-from-docs material is landed and not current unlanded-plan coverage. BUGS, queue INDEX and active TRIAGE_OUTCOMES have no exact callback explanation issue. Attribution, rather than coverage or filtering, supplies this proposed disposition."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": null,
+    "original_stronger_consequence": "Future maintainers receive an obsolete explanation of the reveal lifecycle. The high-level reason for JS ownership remains valid; no user-facing runtime failure, security effect or work-loss route was alleged.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Outside this newly introduced review range: the complete base already contains both the inaccurate explanation and the conflicting grid reveal path. Preserve the documentation defect if pursued separately."
+  }
+]

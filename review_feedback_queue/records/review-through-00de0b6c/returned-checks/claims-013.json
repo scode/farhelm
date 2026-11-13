@@ -1,0 +1,308 @@
+[
+  {
+    "key": "g024/c4",
+    "latest_line": 12,
+    "recommendation": "retain-verified",
+    "bucket": "other",
+    "underlying_key": "shared-suspended-refusal-retains-tensorlake-noun",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The refusal really names Tensorlake for a paused Podman container. Correct provider dispatch does not repair that diagnostic. Neither a rare timing window nor unsupported client input is necessary for the authenticated API route, so the rare-diagnostic filter does not fully match.",
+    "checks": [
+      "56659839785691f76da3af5d8f51b511cff4ba8b:crates/farhelm-helm/src/sessions.rs:904-925,1005-1013 routes cached nonconnected sessions to the literal Tensorlake refusal.",
+      "Same revision environment/podman.rs:1256-1262 projects paused as Suspended; lib.rs:2459-2493 constructs the production Podman service and provider registry.",
+      "Same revision environment/lifecycle.rs:22-44 selects the stored binding's provider; environment/podman.rs:1286-1292 resumes through Podman. The original wrong-provider-operation suspicion is source-refuted, independently of the diagnostic defect. No execution occurred."
+    ],
+    "coverage_checked": [
+      "SPEC.md Container sessions:4806-4898 requires the sandbox pattern with container wording; it does not accept calling the resource Tensorlake.",
+      "SPEC_impl.md Disposable environments, especially :5940-5981, owns per-provider wording and shared state; no acceptance of this noun.",
+      "TODO.md Planned is empty. BUGS.md has only the escaped-SSH-helper install hang; no match.",
+      "Searched plans/queue for paused, Tensorlake wording, refusal and lifecycle. podman-environments.md:840-847 concerns the plan's listed Tensorlake-text regressions and container equivalents, not this specific shared API refusal; no unlanded repair established.",
+      "Searched INDEX.md and active TRIAGE_OUTCOMES.md for the trigger and provider-noun consequence. Existing lifecycle/opening and suspension-attribution findings differ; no exact cover found. FILTER.md rare-diagnostic boundary does not cover ordinary API refusal."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": null,
+    "original_stronger_consequence": "An early investigation considered wrong-provider lifecycle dispatch. Stored-binding dispatch refutes that route. The first proposed low-impact drop was expressly replaced by retention of the real naming error.",
+    "needs_independent_drop_check": true,
+    "proposed_basis": "Retain the diagnostic. Include the earlier wrong-resource-operation refutation in the parent's drop register if it is treated as a possible user-work consequence; this consultation does not authorize that drop. g024/c5 supplies related enum documentation, not exact coverage of this user-facing refusal."
+  },
+  {
+    "key": "g024/f1",
+    "latest_line": 17,
+    "recommendation": "retain-verified",
+    "bucket": "other",
+    "underlying_key": "create-history-current-claim-comment-contradiction",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The caller comment says remembered defaults bypass the claim check, while the new guarded transaction contains their only writer. This is a source-comment defect, not a production bypass.",
+    "checks": [
+      "56659839785691f76da3af5d8f51b511cff4ba8b:sessions.rs:1748-1755 says remembered default does not revalidate; :2038-2111 documents and checks current entry, incarnation, connected client and identity before history admission (paths under crates/farhelm-helm/src).",
+      "Same revision store.rs:283-291 writes remembered permissions/wrappers; :8864 calls current() before the transaction; :9023-9024 calls record_launch_history within it.",
+      "The sessions.rs patch adds record_created_history and its current-claim callback. At 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db:sessions.rs:1882-1884 and :2175-2178 the contradictory explanations remain. No runtime bypass or execution is claimed."
+    ],
+    "coverage_checked": [
+      "SPEC_impl.md Composer history:5038-5092 and preferences:262-278 describe accepted-launch provenance and transaction-owned remembered choices, not an accepted false code comment. SPEC.md environment/ordinary launch rules do not accept this contradiction.",
+      "TODO.md Planned is empty; BUGS.md does not concern history. Searched plans/queue, INDEX.md and active TRIAGE_OUTCOMES.md for remembered defaults, claim/history guards and provenance.",
+      "TRIAGE_OUTCOMES.md history-reply-lacks-installation-provenance.md:1056-1068 concerns late GUI GET replies, not this server-side comment; not exact coverage. No matching unlanded plan or queue item found. FILTER.md does not cover durable misleading maintainer documentation merely because reconnect is an edge case."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": null,
+    "original_stronger_consequence": "No runtime security or work-loss consequence was asserted; the record consistently concerns misleading documentation of the guard.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Record the changed invariant's inaccurate explanation. Preserve that skipping convenience bookkeeping must not fail an already successful create."
+  },
+  {
+    "key": "g024/l1",
+    "latest_line": 16,
+    "recommendation": "retain-verified",
+    "bucket": "other",
+    "underlying_key": "stopped-episode-test-does-not-witness-settled-unavailable-cycle",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "Two provider observations do not require completion of the active seven-attempt cycle. The test can interrupt the cycle before the outer Failed arm, so it cannot prove retention specifically across that settlement boundary.",
+    "checks": [
+      "56659839785691f76da3af5d8f51b511cff4ba8b:crates/farhelm-helm/src/manager.rs:13282-13338 installs unanswered status, awaits only checked+2, restores Stopped and sends Retry. The same sequence remains at 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db:13524-13559.",
+      "5665983 manager.rs:12912-12916 waits on invocation count; :12979-12981 records an invocation, not outer failure. :13014 releases the scripted start hold with fresh_window=true; :13037-13077 builds a Tensorlake fixture with Cadence::default.",
+      "Same revision :116-123,237-244 sets six backoff waits; :3951-4020 retains individual Failed outcomes inside the ladder and turns nudges into Interrupted. Only the outer :3812-3817 publishes Unreachable. The first failed-start publication at :3883-3889 is separate from that later connection settlement. No mutation or reproduction was run."
+    ],
+    "coverage_checked": [
+      "SPEC.md Container sessions:4857-4865 and SPEC_impl.md Environment rows/provider state:5972-5981 and ownership:6160-6165 state the one-attempt/explicit-Resume policy. They do not accept incomplete regression assurance.",
+      "TODO.md Planned is empty. Searched BUGS.md, plans/queue, INDEX.md and active TRIAGE_OUTCOMES.md for unanswered reads, stopped autostart, settled failure and episode tests; no exact cover found.",
+      "Existing suspended-plan-test-erases-its-suspension-premise concerns a different fixture and setup guard. Browser readiness findings do not cover this actor test. No FILTER.md boundary covers this ordinary test-oracle omission."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": "No runtime schedule or frequency was measured. The established defect is that the test does not require the distinguishing outer settlement, not that every run avoids it or that production currently resets incorrectly.",
+    "original_stronger_consequence": "No product failure or highest consequence was asserted. The initial lead's fixture, cadence and settlement questions were resolved by source.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Retain as a narrow test-oracle gap. Require a settled unavailable result before restoring Stopped, or an explicitly single-attempt fixture plus a settlement witness. Do not describe production retention as broken."
+  },
+  {
+    "key": "g024/l2",
+    "latest_line": 19,
+    "recommendation": "retain-verified",
+    "bucket": "other",
+    "underlying_key": "host-phase-vocabulary-test-omits-stopped",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The phase consistency guard explicitly promises every variant but omits the Stopped variant introduced by the patch. Correct current literals do not refute the test and documentation defect.",
+    "checks": [
+      "56659839785691f76da3af5d8f51b511cff4ba8b:crates/farhelm-helm/src/hosts.rs:265-270 adds the serde tag; :304 separately returns stopped. :278-292 and :1766-1774 promise universal comparison.",
+      "Same revision :1777-1830 enumerates the existing variants but never constructs Stopped. The patch updates changing fixtures while leaving out this new variant.",
+      "00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db:hosts.rs:1807-1878 retains the same omission. A change only to the Stopped phase literal or serde rename is absent from the tested matrix. This is source inspection, not an executed mutation."
+    ],
+    "coverage_checked": [
+      "SPEC.md Container sessions:4857-4862 requires a distinct Stopped state; SPEC_impl.md Environment rows/provider state:5972-5981 does too. Neither accepts a false universal test guarantee.",
+      "TODO.md Planned is empty. Searched BUGS.md, plans/queue, INDEX.md and active TRIAGE_OUTCOMES.md for phase/serialized-tag vocabulary, phase_matches_the_serialized_tag and Stopped test coverage; no matching item found.",
+      "FILTER.md has no matching ordinary test-coverage/documentation filter. Other test-oracle records concern different subjects."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": null,
+    "original_stronger_consequence": "No shipped phase mismatch, security consequence or work loss was claimed; the lead was narrowed to the declared test contract.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Retain the missing Stopped fixture and inaccurate universal guarantee as one finding."
+  },
+  {
+    "key": "g024/c5",
+    "latest_line": 20,
+    "recommendation": "retain-verified",
+    "bucket": "other",
+    "underlying_key": "shared-suspended-view-doc-retains-tensorlake-only-contract",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The enum documentation inaccurately limits the now-shared Suspended state to Tensorlake. It is related to c4 but names a different artifact; correcting the refusal alone would leave this explanation false.",
+    "checks": [
+      "56659839785691f76da3af5d8f51b511cff4ba8b:crates/farhelm-helm/src/hosts.rs:250-258 describes Tensorlake reporting suspension and supplying resume_failed; :415-423 copies the shared manager Suspended state.",
+      "Same revision environment/podman.rs:1258-1262 sends paused Podman resources through that state. Stored provider dispatch remains correct; no runtime wrong-provider operation is inferred."
+    ],
+    "coverage_checked": [
+      "SPEC.md Container sessions:4850-4865 and SPEC_impl.md Disposable environments:5940-5981 establish shared lifecycle state and provider-owned wording, rather than accepting a Tensorlake-only view contract.",
+      "TODO.md Planned is empty. Searched BUGS.md, plans/queue, INDEX.md and active TRIAGE_OUTCOMES.md for shared Suspended vocabulary and Tensorlake-only documentation; no exact cover found.",
+      "podman-environments.md:840-847 lists other provider-specific UI wording repairs, not this enum explanation. FILTER.md does not cover a standing internal contract error. g024/c4 is related new evidence for grouping, not exact existing queue coverage."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": null,
+    "original_stronger_consequence": "The author proposed omitting a standalone item by grouping this documentation with c4, explicitly preserving its real discrepancy and absence of a wrong-runtime-dispatch claim.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Preserve as an explicit documentation extension if the parent groups provider-vocabulary omissions into c4; otherwise record separately. Do not silently mark exact duplicate merely because both mention Tensorlake."
+  },
+  {
+    "key": "g024/c6",
+    "latest_line": 21,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "manager-weak-self-constructor-get-mut-compatibility",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The investigated panic requires mutable access to the manager Arc after construction. The changed constructor installs provider and alert services before creating the Weak self-reference; no such remaining manager mutation route was found.",
+    "checks": [
+      "56659839785691f76da3af5d8f51b511cff4ba8b:crates/farhelm-helm/src/manager.rs:1488-1512 uses unstarted_with for provider/alert assembly; :1530-1560 constructs the fully initialized value with Arc::new_cyclic.",
+      "git grep of Arc::get_mut and Arc::make_mut at that revision under crates/farhelm-helm/src finds only AppState mutation in downloads.rs and ProvisioningService mutation in provisioning.rs, not ConnectionManager mutation. These distinct Arc allocations do not inherit the manager's Weak reference.",
+      "This refutes only the named constructor/fixture compatibility suspicion. No claim about all manager lifetime behavior and no runtime observation is made."
+    ],
+    "coverage_checked": [
+      "Searched SPEC.md and SPEC_impl.md for cyclic/Weak manager construction and mutable-Arc compatibility; no acceptance rule is needed for the source refutation.",
+      "TODO.md Planned is empty. Searched BUGS.md, plans/queue, INDEX.md and active TRIAGE_OUTCOMES.md for Arc::get_mut/new_cyclic/Weak fixture assembly; no matching item found. No FILTER.md basis is used."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": "A remaining Arc::get_mut/Arc::make_mut call on this manager would be required; the checked source does not supply one.",
+    "original_stronger_consequence": "A fixture/provider-assembly panic was considered, with other priority and no security or user-work-loss consequence.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Propose source refutation only for mutable-manager fixture assembly after Weak creation."
+  },
+  {
+    "key": "g024/l3",
+    "latest_line": 23,
+    "recommendation": "covered",
+    "bucket": "other",
+    "underlying_key": "failed-stopped-start-requires-explicit-resume-until-usable-recovery",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The narrow sequence starts with an already failed automatic start and never uses explicit Resume. The implementation specification explicitly makes failures wait for that action; an intervening provider Running observation without a usable supervisor is not expressly promised to clear the failure.",
+    "checks": [
+      "56659839785691f76da3af5d8f51b511cff4ba8b:crates/farhelm-helm/src/manager.rs:3715,3820 resets the episode for Connected/Suspended; :4202-4203 dials after Running; the outer Failed arm :3812-3817 does not reset it.",
+      "The considered sequence really can retain the previous failed-start reason. This is not source-refuted and is not claimed to identify the newest external event. The code comment :3221-3228 is explanatory context, not the acceptance basis. No execution occurred."
+    ],
+    "coverage_checked": [
+      "SPEC.md Container sessions:4857-4865 says one automatic start and offers Resume after failure. SPEC_impl.md Environment rows/provider state:5980-5981 and Environment ownership/refusal:6160-6165 explicitly require failed starts to wait for explicit Resume.",
+      "TODO.md Planned is empty. Searched BUGS.md, plans/queue, INDEX.md and active TRIAGE_OUTCOMES.md for failed autostart rearming, Running-to-dial failure and new stopped episodes; no additional exact cover found.",
+      "The coverage is the narrow implementation-spec failure policy, not the mere existence of the Podman plan or a rarity filter."
+    ],
+    "exact_cover_quotes": [
+      "SPEC_impl.md:6160-6163: Stopped auto-start is attempted once after observation with a connected place, then failures wait for explicit Resume.",
+      "SPEC_impl.md:5980-5981: Failure publishes its reason and an explicit Resume remedy, without a timed start retry."
+    ],
+    "missing_premise": "Reopening this as a defect would require a contract that provider Running alone, despite failed supervisor connection, starts a distinct guaranteed automatic-start episode. The general Whenever wording does not clearly override the explicit failed-start policy.",
+    "original_stronger_consequence": "The lead considered a later external stop receiving no new automatic attempt and retaining an older failure. That source behavior is preserved, with other/high availability impact considered but no security or loss route.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Propose narrow specification coverage for this failed-attempt/no-explicit-Resume sequence only. Successful usable recovery and arbitrary later episodes are outside the proposed drop."
+  },
+  {
+    "key": "g025/f1",
+    "latest_line": 13,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "sandbox-controls-cross-session-component-retarget-hypothesis",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "Both production component owners are keyed by immutable session ID. A new selected/replacement session remounts the controls instead of refreshing their identity, so the named cross-session retargeting route lacks its required component reuse.",
+    "checks": [
+      "350a4b33b6d4476f4a78e43cea124bc2b828f462:crates/farhelm-ui/src/lib.rs:2264-2266 keys SessionView by session.id.raw(); list/view.rs:5919-5921 keys SessionRow likewise.",
+      "Same revision session_view.rs:2357-2362 and list/row.rs:2768-2772 mount Controls inside those owners. sandbox_sessions.rs:251-267 refreshes execution captures, but within the same session identity.",
+      "Same-session no-tabs/ended guards are read at execution :259-260 in this revision; do not import a later repair or treat keyed identity as consent authority. No runtime activation was tested."
+    ],
+    "coverage_checked": [
+      "SPEC_impl.md Answers bind to what was drawn:1069-1101 requires captured answer authority; source identity refutation is narrower than that full contract. SPEC.md lifecycle/destructive-precondition requirements are not waived.",
+      "TODO.md Planned is empty. Searched BUGS.md, plans/queue, INDEX.md and active TRIAGE_OUTCOMES.md for lifecycle retargeting and confirmation ownership.",
+      "Read review_feedback_queue/sandbox-lifecycle-questions-lack-opening-guards.md in full: it covers opening-token/claim ownership, not a proven cross-session retarget. Read the relevant sandbox-stop-click-guards.md plan sections: its guard-capture repair concerns same-session destructive conditions and expressly excludes Suspend/Resume direction. Neither is exact coverage of this refuted identity route. No filter is used."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": "A shipped lifetime in which this same Controls question survives a change to another session ID is required and source-refuted by the two keyed callers.",
+    "original_stronger_consequence": "A delayed Suspend or Stop and suspend could act on another session, potentially ending another agent or its tabs. That possible highest consequence must remain in the parent's register even though the required identity-reuse route is absent.",
+    "needs_independent_drop_check": true,
+    "proposed_basis": "Propose refutation only of cross-session identity drift. Do not drop same-session precondition drift or the existing ConfirmSlot omission on this basis."
+  },
+  {
+    "key": "g025/f2",
+    "latest_line": 16,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "extracted-environment-lifecycle-hold-release-hypothesis",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The shared helper still releases holds after transition/record errors and preserves already-connected no-op Resume. The manager publishes nonconnected state when a hold is taken, making the final release condition true even when record returns None.",
+    "checks": [
+      "56659839785691f76da3af5d8f51b511cff4ba8b:crates/farhelm-helm/src/tensorlake/lifecycle.rs:62-84 validates under the provisioning lock and obtains the account key before environment/lifecycle.rs:69-71 withdraws the connection.",
+      "Same revision environment/lifecycle.rs:64-97 captures transition/record errors in result before release, skips withdrawal for connected no-op Resume, withdraws after a real transition, records before release and retries successful Resume.",
+      "manager.rs:1604-1627 assigns shown nonconnected state, removes client/live sessions and takes the hold; :1651-1661 releases it and nudges. tensorlake/lifecycle.rs:142-181 bounds the transition. Routes at :18-31 retain run_owned task lifetime. No runtime failure was reproduced."
+    ],
+    "coverage_checked": [
+      "SPEC_impl.md Tensorlake hosts:6703-6718 requires already-running connected Resume to preserve viewers and every failure to release the hold. SPEC.md host/environment lifecycle sections do not accept stranded holds; source meets the named obligations.",
+      "TODO.md Planned is empty. Searched BUGS.md, plans/queue, INDEX.md and active TRIAGE_OUTCOMES.md for held lifecycle failures and repeated Resume.",
+      "INDEX.md failed-setup-refresh-overwrites-held-lifecycle-status, retired-connection-leaves-suspend-progress-stuck and identity-adoption-overwrites-held-lifecycle-display describe different setup/retirement/adoption routes. No exact coverage or filter basis is asserted."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": "The proposed extraction bug would require a path past a taken hold that escapes the captured result/final release, or connected no-op Resume withdrawing viewers. The checked helper does neither.",
+    "original_stronger_consequence": "Persistent disconnection after API/storage failure, or viewer disruption on repeated Resume; high if real. No user-work-loss/security route was established or claimed.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Source-refute the named hold extraction regression. Do not infer correctness of the separate retirement, adoption or setup-refresh findings."
+  },
+  {
+    "key": "g025/f3",
+    "latest_line": 11,
+    "recommendation": "covered",
+    "bucket": "other",
+    "underlying_key": "plain-environment-lifecycle-direction-before-screen-update",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The latest record correctly withdraws the unqualified defect claim. Direction uses refreshed render state, but it is captured before the activity await and retained by the question. The shown physical old-screen/current-handler route falls within the explicit short input-delivery acceptance; no separate long-lived stale answer was established.",
+    "checks": [
+      "350a4b33b6d4476f4a78e43cea124bc2b828f462:crates/farhelm-ui/src/sandbox_sessions.rs:230-237 projects Stopped as Resume; :274-300 chooses Operation synchronously before awaiting activity; :305-336 stores and executes that Operation; :343-348 and list/row.rs:2779-2795 send only the plain lifecycle activation.",
+      "Pinned local dioxus-hooks-0.7.10/src/use_callback.rs:8-27 replaces the closure each render; dioxus-web-0.7.10/src/dom.rs:86-110 synchronously dispatches to runtime.handle_event. dioxus-desktop-0.7.10/src/webview.rs:185-191 dispatches against current runtime, and :562-588 renders VDOM before sending edits.",
+      "56659839785691f76da3af5d8f51b511cff4ba8b:environment/podman.rs:643-719,1421-1434 establishes that Resume can unpause/start and Suspend can pause. Those conditional commands are real source facts, not runtime observations. The physical interval length and frequency were not measured."
+    ],
+    "coverage_checked": [
+      "SPEC.md One GUI at a time:5104-5108 explicitly accepts subsecond actions before the screen updates, preserving explicit destructive guards. SPEC_impl.md:1069-1101 requires drawn-answer binding, but the established question retains its chosen Operation.",
+      "TODO.md Planned is empty. Searched BUGS.md, plans/queue, INDEX.md and active TRIAGE_OUTCOMES.md for opposite lifecycle direction, stale activations and refresh inversion.",
+      "TRIAGE_OUTCOMES.md quick-launch-mark-inverts-live-owner.md:967-980 is a similar accepted plain-control inversion, not exact same-finding coverage. sandbox-stop-click-guards.md expressly excludes the direction subclaim; existing sandbox-lifecycle-questions-lack-opening-guards.md concerns distinct opening/claim ownership. No filter is relied on: wrong-direction mutation would exceed the rare-diagnostic filter."
+    ],
+    "exact_cover_quotes": [
+      "SPEC.md:5104-5105: an action a user takes inside a sub-second window before the screen updates, or in a dialog hidden behind another, may be carried out as delivered.",
+      "SPEC.md:5107-5108: Guards this spec names explicitly, such as the approval cards' 700 ms pause and the preconditions destructive prompts carry, still hold."
+    ],
+    "missing_premise": "An old visible action retained beyond the accepted short physical delivery interval, or a confirmation whose captured Operation changes, would reopen the defect. Neither was established by these entrypoints. No claim that all delayed native input is bounded was proven.",
+    "original_stronger_consequence": "Earlier findings called the opposite-action defect confirmed and suggested high: Suspend might resume/start, or Resume might suspend. The latest history withdraws that certainty after examining event delivery. No security or work-loss route was asserted; preserve the earlier confirmed/high wording and its withdrawal.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Propose specification coverage narrowly for the identified short plain-control interval. If the parent cannot confine the proposed drop to that route, retain-unverified rather than treating every possible stale activation as accepted."
+  },
+  {
+    "key": "g025/f4",
+    "latest_line": 19,
+    "recommendation": "retain-verified",
+    "bucket": "other",
+    "underlying_key": "ordinary-tensorlake-add-keeps-source-mutex-through-ssh-readiness",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "Ordinary Add holds its actual source guard in the caller while the extracted helper now waits for SSH after Running. The helper drops only its None argument, extending exclusion past the specified Running boundary.",
+    "checks": [
+      "56659839785691f76da3af5d8f51b511cff4ba8b:crates/farhelm-helm/src/provisioning/tensorlake_add.rs:1352-1385 retains source_guard around create_host_sandbox; :1599-1616 calls create_recorded with None for the guard.",
+      "Same revision tensorlake/hosts.rs:471-497 observes Running, drops its guard argument and awaits wait_tensorlake_ssh when prepared-install facts exist. Immediate parent tensorlake_add.rs:1069 drops the real guard before the separate readiness wait at :1074, establishing introduced ordering.",
+      "provisioning/tensorlake_backend.rs:58-89 performs paced, bounded SSH attempts without acquiring that recipe mutex. No recursive-lock cycle or permanent deadlock is established; the nominal minute may be extended by the final shell attempt/cleanup.",
+      "tensorlake/hosts.rs:394-447 requires saved ID/pending creation for name adoption, requires a source before a fresh create and records create facts before sending. This supports the narrower ownership refutation, not a blanket proof about unrelated resource loss. Only 222bf625 later changes tensorlake_add.rs in the reviewed tail; tensorlake/hosts.rs is unchanged. No runtime observation occurred."
+    ],
+    "coverage_checked": [
+      "SPEC_impl.md Tensorlake prepared snapshots:6533-6580, especially :6560-6565, sets exclusion through first Running and puts installation/attachment outside it; this is a violated contract, not coverage. SPEC.md preparation/launch rules do not accept this extra mutex lifetime.",
+      "TODO.md Planned is empty. Searched BUGS.md, plans/queue, INDEX.md and active TRIAGE_OUTCOMES.md for source exclusion, source mutex/guard, Running and SSH readiness; no exact existing queue or unlanded-plan repair found.",
+      "No FILTER.md boundary covers ordinary post-Running serialization of peer launches/build publication. The supplied history names g045/l1 as same root, but that record is outside this batch and was not read; the parent must reconcile it using underlying_key rather than treating an unseen record as verified alias."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": "No runtime incidence, exact elapsed delay or measured billing increase. The latest source delay conclusion is established. The proposed g045/l1 alias still needs the parent's comparison of that named record.",
+    "original_stronger_consequence": "The initial candidate considered deleted-source use, unrelated sandbox adoption and later deletion, or recreation without admitted source; unrelated-resource loss would be highest. Those ownership suspicions were proposed source-refuted. The initial caveat about post-Running delay was then investigated and promoted to this retained finding; preserve both dispositions.",
+    "needs_independent_drop_check": true,
+    "proposed_basis": "Retain the lock-transfer regression and its misleading effective-boundary comment together. Send the original unrelated-resource-loss refutation/lowering to the independent drop check. Parent may consolidate g045/l1 only after confirming exact cause and fix."
+  },
+  {
+    "key": "g025/f5",
+    "latest_line": 12,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "environment-create-api-wrong-host-or-duplicate-dispatch-hypothesis",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The request uses the distinct protected environment endpoint with captured recipe/place and no ordinary host field. The HTTP funnel dispatches once; transport/header/decode uncertainty does not trigger a resend or fallback.",
+    "checks": [
+      "350a4b33b6d4476f4a78e43cea124bc2b828f462:crates/farhelm-ui/src/api/sandbox_sessions.rs:38-50 removes host; :55-126 sends recipe/place only to /api/environment-sessions, validates progress headers and classifies transport/header/decode failures as Unknown.",
+      "Same revision helm lib.rs:721-722 registers that route. sessions/sandbox.rs:44-105 strictly decodes EnvironmentCreateRequest, admits one owned provisioning task and streams one result with matching headers; the sandbox endpoint is an explicit Tensorlake adapter.",
+      "Same revision ui api.rs:2482-2549 uses the true argument for configuration-save ordering, invokes execute_with_receipt once and returns Unauthenticated after requesting sign-in; it does not resend launch on auth refusal. No runtime dispatch or reproduction was run."
+    ],
+    "coverage_checked": [
+      "Searched SPEC.md/SPEC_impl.md for protected environment admission, ordinary-host fallback, uncertainty and launch retry. Their distinct environment placement and owned-launch contracts do not accept wrong-host creation; the inspected migration preserves the named boundary.",
+      "TODO.md Planned is empty. Searched BUGS.md, plans/queue, INDEX.md and active TRIAGE_OUTCOMES.md for environment-sessions, duplicate creation, uncertain launch and wrong/default host.",
+      "TRIAGE_OUTCOMES.md uncertain-launch-marker-overwrites-older-attempt.md concerns an uncertainty marker and expressly withdraws its original duplicate-launch claim; it is not exact coverage of this migration hypothesis. No exact current item/plan or filter basis found."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": "Wrong ordinary-host fallback or a second actual send would be required; neither is supplied by the checked client/server path. Any highest consequence additionally requires a destructive cleanup route, which was never established.",
+    "original_stronger_consequence": "The candidate considered wrong-host or duplicate resource creation (high) and possible later cleanup destroying unrelated work (highest only with an additional missing destructive route). Keep that original possibility and the proposed refutation in the parent's drop register.",
+    "needs_independent_drop_check": true,
+    "proposed_basis": "Propose source refutation of this endpoint migration's fallback/resend mechanism only. The parent still needs the independent check for dismissal of the preserved possible work-loss chain."
+  }
+]

@@ -1,0 +1,757 @@
+{
+  "group": {
+    "id": "g124",
+    "domain": "supervisor-request-admission",
+    "purpose": "supervisor-request-admission: crates/farhelm-supervisor/src/service/connection.rs; phases complete small per-commit changes",
+    "interfaces": [
+      "g001",
+      "g007",
+      "g008",
+      "g009",
+      "g018",
+      "g019",
+      "g020",
+      "g021",
+      "g052",
+      "g053",
+      "g054",
+      "g102",
+      "g103",
+      "g104",
+      "g105",
+      "g106",
+      "g107",
+      "g108",
+      "g109",
+      "g110",
+      "g111",
+      "g112",
+      "g113",
+      "g114",
+      "g115",
+      "g116",
+      "g117",
+      "g119",
+      "g120",
+      "g122",
+      "g123",
+      "g125"
+    ],
+    "sources": [
+      {
+        "path": "[private-run]/prep/parts/00922-000.patch",
+        "ranges": [
+          [
+            1,
+            1068
+          ]
+        ],
+        "original_path": "crates/farhelm-supervisor/src/service/connection.rs",
+        "commit": "1ed482dde220452e424973faf38a5e1318986333",
+        "notes": "patch header; patch character offsets [0,54634)",
+        "lines": 1068,
+        "bytes": 54706,
+        "start": 0,
+        "end": 54634,
+        "original": "[private-run]/prep/originals/00922.patch"
+      }
+    ],
+    "lines": 1068,
+    "bytes": 54706
+  },
+  "records": [
+    {
+      "key": "g124/c1",
+      "owner": "g124",
+      "id": "c1",
+      "domain": "supervisor-request-admission",
+      "purpose": "supervisor-request-admission: crates/farhelm-supervisor/src/service/connection.rs; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 1,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c1",
+            "state": "open",
+            "summary": "Removed output cleanup barriers are unnecessary for grid-only attachments",
+            "location": "crates/farhelm-supervisor/src/service/connection.rs:775",
+            "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. TLDR: Considered whether removing process-reaping barriers and joining attachment output tasks sequentially could leave future terminal attachments blocked or conflict with a surviving old output client. Details: the changed connection cleanup signals every extracted attachment before joining (connection.rs:787-792); terminals.rs:478-483 joins the actual GridSender task, and grid_stream.rs:937-965 races stream.run against shutdown.changed with the shutdown branch biased first. The stream future is dropped before report_forwarder_end, which schedules map mutations in separate tasks rather than awaiting the attachments lock. The replacement output task owns no external tmux client; terminals.rs:438-441 says 'it holds no external process, so it stops at once.' Thus the removed reaping barrier protected the retired tmux resources rather than a surviving grid resource, and sequential joining after signal-all does not serialize the start of shutdown. Suggested bucket: other (not a finding). Confidence: confirmed by source; no execution. proposed_drop: source refutation; no process remains for this removed barrier to protect. Could-be-highest: no established security or loss-of-work route from this concern; it concerned blocked attachment cleanup. possible_cover: none; coverage sources not searched. Caveat: this conclusion covers the assigned connection cleanup and GridSender shutdown interface, not terminal-host runtime persistence internals."
+          }
+        },
+        {
+          "line": 11,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c1",
+            "state": "open",
+            "summary": "Output joins do not wait on the attachment map",
+            "location": "crates/farhelm-supervisor/src/service/connection.rs:775",
+            "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. TLDR: Replacing tmux process-reaping barriers with direct grid-task joins does not establish a blocked replacement attachment or output-join deadlock. Details: connection cleanup signals every extracted attachment before joining (connection.rs:787-792). join_forwarder awaits only the GridSender handle (terminals.rs:478-483). GridSender::run (grid_stream.rs:937-965) biases shutdown.changed before stream.run and drops the stream future before calling report_forwarder_end. The dispatcher (connection.rs:1272-1330) is synchronous: natural and stall endings spawn arbiters that acquire attachments separately; Requested/ClientGone do nothing. Thus an output task awaited while attachments is locked never waits for an arbiter to take that lock. Removed barriers concern external tmux output-client processes; the grid sender owns no such process. Suggested bucket: other; no established regression. Confidence: confirmed source analysis, no execution. proposed_drop: source refutation of the output-join/process-reaping concern; no parent drop accepted. Could-be-highest: no established security or loss-of-work consequence for this output-join concern. possible_cover: parent reports g117/g125 independently checked that the GridSender dispatcher does not await the attachment lock. Material caveat: this does not settle input-pump cancellation lifetime, now separately retained as finding l1. This synthesis revision makes the output/input distinction and independent interface check explicit; it does not rely on those peers as a substitute for the source read."
+          }
+        },
+        {
+          "line": 16,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c1",
+            "state": "open",
+            "summary": "Connection cleanup signals all output tasks and drops inputs before reopening admission",
+            "location": "crates/farhelm-supervisor/src/service/connection.rs:775",
+            "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. TLDR: the disconnect path's replacement of concurrent output joins with sequential joins does not establish output-join deadlock or old input reaching a new viewer after admission. Details: connection.rs:780-792 holds attachments across extract, signal-all, every join and each iteration's remaining attachment field drops. The moved forwarder does not cause the iteration's input side to survive the later drop(attachments); each partially moved binding ends at its loop-iteration boundary. Although a later iteration's input can remain alive while an earlier output join runs, replacement admission cannot enter under this same guard. This refutes the distinct replacement-control crossing considered for disconnect; it does not refute l1's natural-detach binding that outlives an explicit guard drop. join_forwarder (terminals.rs:478-483) joins only the GridSender task. GridSender::run (grid_stream.rs:937-965) biases shutdown.changed over stream.run and drops its stream before invoking the synchronous dispatcher. report_forwarder_end (connection.rs:1272-1330) spawns natural/stall arbiters without awaiting them; those separately acquire attachments. Output shutdown therefore never waits for its own map arbiter. Removed reaping barriers protected tmux child processes absent from the grid sender, not surviving host runtimes. Suggested bucket: other; no new defect established. Confidence: source-confirmed scope, cancellation and lock analysis, no execution. proposed_drop: source refutation of the connection-disconnect/output-join concern; no parent drop accepted. Could-be-highest: original c1 concern concerned blocked cleanup, not an established loss route; the newly considered stale-input crossing would be potentially highest if it could pass replacement admission, but holding the guard until every per-iteration input drop refutes that route here. possible_cover: parent previously reports independent g117/g125 non-awaiting dispatcher confirmation; no new neighbour finding duplicates this candidate. Caveats: input already handed to the runtime can outlive its viewer by contract; no promise of instantaneous preemptive pump cancellation is inferred. Unchanged midpoll pump cancellation and l1's distinct post-unlock natural-detach gap remain separate. This discovery revision preserves the original process-reaping/drop basis and adds the concrete per-iteration lifetime check."
+          }
+        }
+      ],
+      "latest": {
+        "line": 16,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c1",
+          "state": "open",
+          "summary": "Connection cleanup signals all output tasks and drops inputs before reopening admission",
+          "location": "crates/farhelm-supervisor/src/service/connection.rs:775",
+          "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. TLDR: the disconnect path's replacement of concurrent output joins with sequential joins does not establish output-join deadlock or old input reaching a new viewer after admission. Details: connection.rs:780-792 holds attachments across extract, signal-all, every join and each iteration's remaining attachment field drops. The moved forwarder does not cause the iteration's input side to survive the later drop(attachments); each partially moved binding ends at its loop-iteration boundary. Although a later iteration's input can remain alive while an earlier output join runs, replacement admission cannot enter under this same guard. This refutes the distinct replacement-control crossing considered for disconnect; it does not refute l1's natural-detach binding that outlives an explicit guard drop. join_forwarder (terminals.rs:478-483) joins only the GridSender task. GridSender::run (grid_stream.rs:937-965) biases shutdown.changed over stream.run and drops its stream before invoking the synchronous dispatcher. report_forwarder_end (connection.rs:1272-1330) spawns natural/stall arbiters without awaiting them; those separately acquire attachments. Output shutdown therefore never waits for its own map arbiter. Removed reaping barriers protected tmux child processes absent from the grid sender, not surviving host runtimes. Suggested bucket: other; no new defect established. Confidence: source-confirmed scope, cancellation and lock analysis, no execution. proposed_drop: source refutation of the connection-disconnect/output-join concern; no parent drop accepted. Could-be-highest: original c1 concern concerned blocked cleanup, not an established loss route; the newly considered stale-input crossing would be potentially highest if it could pass replacement admission, but holding the guard until every per-iteration input drop refutes that route here. possible_cover: parent previously reports independent g117/g125 non-awaiting dispatcher confirmation; no new neighbour finding duplicates this candidate. Caveats: input already handed to the runtime can outlive its viewer by contract; no promise of instantaneous preemptive pump cancellation is inferred. Unchanged midpoll pump cancellation and l1's distinct post-unlock natural-detach gap remain separate. This discovery revision preserves the original process-reaping/drop basis and adds the concrete per-iteration lifetime check."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g124/findings.jsonl",
+        "id": "c1",
+        "line": 16,
+        "disposition": "under-investigation",
+        "group": "g124-c1",
+        "reason": "Record durably acknowledged; parent source/contract validation, cross-group synthesis, coverage/filter matching and any independent drop check remain pending. This preserves the claim and uncertainty without accepting, dropping or lowering it."
+      },
+      "accepted_parent_decision": null,
+      "returned_claim_checks": [
+        {
+          "batch": "claims-078",
+          "key": "g124/c1",
+          "latest_line": 16,
+          "recommendation": "refuted",
+          "bucket": "other",
+          "underlying_key": "connection-disconnect-output-join-lock-and-input-drop-lifetime",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "Disconnect signals every extracted output task before joining; those joins do not await an attachment-map arbiter. The map guard also remains held until every loop iteration has dropped the remaining input fields, excluding the claimed replacement-admission crossing in this disconnect path.",
+          "checks": [
+            "1ed482dde220452e424973faf38a5e1318986333:connection.rs:780-795 extracts under attachments, signals all, joins each output, and only then drops the map guard. Each partially moved attachment's input field drops at that loop iteration's end, before the later guard drop.",
+            "service/terminals.rs:438-441 identifies a process-free GridSender; join_forwarder at 478-483 awaits only its JoinHandle. grid_stream.rs:937-965 biases shutdown over streaming and leaves the streaming-future scope before report_forwarder_end.",
+            "connection.rs:1272-1330 dispatches synchronously. detach_stalled and detach_naturally at 1428-1518 spawn separate tasks to acquire the map; Requested/ClientGone do nothing. Joining output under the map lock therefore does not wait for those arbiters.",
+            "The natural-detach binding survives an explicit guard drop in its distinct path; this record's refutation does not settle that separately owned finding. No runtime cancellation or deadlock reproduction was performed."
+          ],
+          "coverage_checked": [
+            "Both specs' attachment, flow-control and input ownership sections were searched/read for this bounded concern; no requirement to retain obsolete tmux child-process barriers was found. Correct disconnect ordering is a source refutation, not acceptance of stale newly received input.",
+            "TODO.md Planned is empty. plans/queue terminal-removal plans are landed; no unlanded exact output-join correction was found. BUGS.md, full INDEX.md and active TRIAGE_OUTCOMES.md contain no same disconnect-loop defect.",
+            "FILTER.md's displaced-input-task rule covers only an already-running send poll stalled across cancellation. It does not cover newly accepted post-ownership input or the distinct natural-detach drop gap, and is not used to dismiss either here."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": "No blocked output-join route or admission of replacement input before this loop's input drops is established. Already-running input sends can outlive cancellation under the separate accepted midpoll case; no instantaneous preemption is claimed.",
+          "original_stronger_consequence": "Original concern: removing reaping barriers or sequential joins might block replacement attachment or leave an old output client. The later considered stale-input crossing could cause an old Enter to submit replacement typing, potentially losing user work, but this disconnect path holds admission closed through the relevant drops. The natural-detach gap remains separate.",
+          "needs_independent_drop_check": true,
+          "proposed_basis": "Propose bounded source refutation of disconnect/output cleanup. Independently check the lowered stale-input/work-loss variant before accepting the dismissal; do not generalize to natural detach or midpoll cancellation."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": true,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "connection-disconnect-output-join-lock-and-input-drop-lifetime",
+        "destination": null
+      }
+    },
+    {
+      "key": "g124/l1",
+      "owner": "g124",
+      "id": "l1",
+      "domain": "supervisor-request-admission",
+      "purpose": "supervisor-request-admission: crates/farhelm-supervisor/src/service/connection.rs; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 2,
+          "event": {
+            "version": 1,
+            "kind": "lead",
+            "id": "l1",
+            "state": "open",
+            "summary": "Natural detach releases attachment ownership before dropping its input pump",
+            "location": "crates/farhelm-supervisor/src/service/connection.rs:1514",
+            "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. TLDR: A failed or naturally ended terminal attachment may leave previously queued input able to reach the terminal after a replacement viewer acquires control. Details: detach_naturally removes old, moves only old.forwarder into join_forwarder, then drops the attachments guard and calls notify_detached; old.input remains a partially moved local until the async block ends. The previous implementation explicitly dropped backend before dropping attachments. HostAttach::drop sends the cancellation signal (grid_stream.rs:1169-1175); Pump::run continues handing queued input into the runtime until cancellation (1201-1233). Exact missing premise: whether this ordering permits a meaningful input handoff after a shipped replacement attachment becomes active, beyond input the terminal runtime already accepted before detach; inspect attach installation and notification paths, and compare existing input lifetime contracts. Suggested bucket: highest if stale-viewer input can cross the control boundary (terminal input can execute commands), otherwise high/other according to established effect. Confidence: unresolved source lead, not executed. proposed_drop: false. Could-be-highest: yes, pending the ownership/handoff premise. possible_cover: none; coverage sources not searched. Next checks: pinned attach handler, notify_detached, original host input wrapper, and input lifetime contract. No reproduction requested or performed."
+          }
+        },
+        {
+          "line": 3,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "l1",
+            "state": "open",
+            "summary": "Natural-detach input drop ordering has no established live-terminal route",
+            "location": "crates/farhelm-supervisor/src/service/connection.rs:1514",
+            "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. TLDR: Considered whether a failed attachment could leave queued old-viewer input able to execute after a replacement viewer takes control. The partial-move lifetime observation remains: detach_naturally releases attachments before old.input is dropped at the async block end, unlike the former explicit backend drop. Checks/results: notify_detached (connection.rs:1110-1129) never awaits; HostAttach::drop signals cancellation and Pump::run prioritizes it (grid_stream.rs:1169-1233). The caller cannot submit further frames through the removed map entry (connection.rs:507-513). Every natural-detach route in GridStream::live (603-624) represents Gone, Unavailable or runtime end, where this old input sequence cannot drive a replacement runtime; InputFailed is reported by an already-failed pump. The remaining route is send's encoding-error branch (818-822), expressly documented as 'A message that does not encode is a sender bug'. Source checks of grid_output row conversion and packing, protocol limits and the emulator's combining-character cap found no legal output that establishes that premise: dimensions cap at 1000, per-cell text at 68 bytes, links at 256 with bounded id/URI, and packing drops links to fit. A new encoding bug cannot be assumed for this finding. Runtime input already handed over is explicitly permitted to outlive a viewer by grid_stream.rs:155-160: 'Input it handed over is the runtime's, and is written in order before anything a replacement attachment sends.' SPEC_impl.md:2290-2294 similarly says dropping a receipt does not take accepted input back (implementation source is hosts/terminal.rs:2290-2294; this is a source contract, not a SPEC citation). Suggested bucket: other for the unsupported lifetime concern, not a verified impact. Confidence: source-validated narrowing; no execution. proposed_drop: no established shipped route from the lifetime gap to executable stale input on a still-usable runtime. Could-be-highest: yes, original suspected consequence was old-viewer command execution crossing a replacement's control boundary; it would need a legal StreamFailed encoding path while the input runtime remains live, and actual queued-input reordering. Neither is established. possible_cover: none; coverage sources not searched. Caveat: cancellation itself is cooperative even before this commit, and neither old nor new cleanup joins the input pump. A separate proven encoder defect or a changed input-pump lifecycle would require revisiting this candidate."
+          }
+        },
+        {
+          "line": 5,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "l1",
+            "state": "open",
+            "summary": "Natural-detach input drop ordering has no established live-terminal route",
+            "location": "crates/farhelm-supervisor/src/service/connection.rs:1514",
+            "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. TLDR: Considered whether a failed attachment could leave queued old-viewer input able to execute after a replacement viewer takes control. The partial-move lifetime observation remains: detach_naturally releases attachments before old.input is dropped at the async block end, unlike the former explicit backend drop. Checks/results: notify_detached (connection.rs:1110-1129) never awaits; HostAttach::drop signals cancellation and Pump::run prioritizes it (grid_stream.rs:1169-1233). Further frames cannot pass the removed map entry (connection.rs:507-513). GridStream::live (603-624) naturally detaches for Gone, Unavailable or runtime end, where the old input sequence cannot drive a replacement runtime; InputFailed comes from an already-failed pump. The remaining route is send's encoding-error branch (818-822), documented as 'A message that does not encode is a sender bug'. Source checks of grid_output row conversion and packing, protocol limits and the emulator combining-character cap found no legal output establishing that premise: dimensions cap at 1000, per-cell text at 68 bytes, links at 256 with bounded id/URI, and packing drops links to fit. A separate encoding defect cannot be assumed. Input already handed over is allowed to outlive a viewer by grid_stream.rs:155-160: 'Input it handed over is the runtime's, and is written in order before anything a replacement attachment sends.' hosts/terminal.rs:2290-2294 (source contract, not SPEC_impl.md) says that dropping a receipt does not take accepted input back. SPEC_impl.md:2112-2116 governs ordered input and lost-input fencing, not revocation of accepted runtime input. Suggested bucket: other for the unsupported lifetime concern. Confidence: source-validated narrowing; no execution. proposed_drop: no established shipped route from the lifetime gap to executable stale input on a still-usable runtime. Could-be-highest: yes; the original suspected consequence was old-viewer command execution crossing a replacement's control boundary. It needs a legal StreamFailed encoding path while the input runtime stays live, and actual queued-input reordering; neither is established. possible_cover: none; coverage sources not searched. Caveat: cancellation was already cooperative, and neither cleanup implementation joins the input pump. Revisit if a live-runtime encoding failure or changed pump lifecycle is established. This revision corrects the previous event's mistaken SPEC_impl.md label for the hosts/terminal.rs source quotation; no actual SPEC_impl.md claim relies on that incorrect label."
+          }
+        },
+        {
+          "line": 7,
+          "event": {
+            "version": 1,
+            "kind": "lead",
+            "id": "l1",
+            "state": "open",
+            "summary": "Natural-detach live-runtime premise requires checking encoder counters",
+            "location": "crates/farhelm-supervisor/src/service/connection.rs:1514",
+            "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. TLDR: The original possible consequence remains queued old-viewer input reaching a terminal after a replacement viewer takes control, potentially executing commands outside the new viewer's control boundary. Synthesis checks: GridStream::wait_for_work/cycle (grid_stream.rs:630-793) adds no natural verdict beyond input failure, runtime end, and send's encoder errors; every serialized output variant goes through GridOutput::validate (proto/grid.rs:1287-1397). Bounded row/link packing alone does not prove encode cannot fail: Frame.rev and History.first/end also have GRID_MAX_LINE_NUMBER checks (1323-1325,1347-1361), whereas SentScreen::update increments rev (grid_output.rs:441) and HistoryCursor::read_within derives numbering from the emulator's lines-scrolled counter (643-702). Exact missing premise being checked now: whether shipped fresh/restore paths can reach such a counter failure with a usable runtime, or whether limits/reset rules refute it. Color/style, cursor clamping, clipboard splitting and row packing were read; no ordinary legal failure was identified in those paths. Suggested bucket: highest only if the changed gap has an established live-runtime route and stale-input handoff; otherwise other/unverified. Confidence: unresolved source lead reopened to qualify the earlier broad no-legal-output statement; no execution. proposed_drop: false pending counter and terminal-runtime finalization checks. Could-be-highest: yes, preserving the original command-execution consequence. possible_cover: caller reports g119/c4 covers a pre-range already-polled pump handover race; that unchanged midpoll cancellation race does not establish this commit's distinct later-drop gap. Caller reports g117/g125 independently refute a GridSender output-join deadlock; that does not resolve this input concern. No parent drop accepted. Remaining checks: counter bounds and restore reset, final Gone/Unavailable runtime input disposition, full dispatcher verdict enumeration. No reproduction performed."
+          }
+        },
+        {
+          "line": 8,
+          "event": {
+            "version": 1,
+            "kind": "lead",
+            "id": "l1",
+            "state": "open",
+            "summary": "Host size range exceeds grid range; trace shipped large-size admission",
+            "location": "crates/farhelm-supervisor/src/service/connection.rs:1514",
+            "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. TLDR: The suspected consequence remains executable old-viewer input crossing a replacement viewer's control boundary through natural detach's changed late input drop. A newly checked premise invalidates a blanket 1000-dimension assumption: terminal-host/protocol.rs:102,135-145 accepts dimensions up to 10,000; snapshot/v1/mod.rs:15 also documents that size range; GridOutput::Hello/Frame validation caps each dimension at 1000 (proto/grid.rs:446-447,1294-1295,1323). grid_output::screen copies the emulator's dimensions without a 1000 clamp. Thus a live host at a larger admitted size would cause a real encoding failure, though shipped supervisor/GUI admission has not yet been traced and may enforce 1000. Exact next premise: find all production fresh/resize/adoption dimensions and whether they can exceed 1000 without local protocol tampering or hand-edited state. Runtime finalization now source-confirmed: hosts/terminal.rs:3028-3053 breaks out of work on Unavailable and finishes after settling encoding; finish:4365-4377 resolves pending input NotSent and closes/drains the input receiver. InputSequence holds a Weak of the old Inner (1519-1522), so adoption of a new runtime does not retarget it. Suggested bucket: potentially highest, pending live-large-size admission and the distinct changed-gap handoff. Confidence: unresolved investigated source lead; no execution. proposed_drop: false. Could-be-highest: yes; original command-execution consequence preserved, not lowered for rarity. possible_cover: g119/c4 is caller-reported unchanged midpoll handover race, separate from this changed gap; g117/g125 independently refute output-join deadlock only. Counter validation remains noted but no short source route to counter exhaustion has been identified; no claim that row/link bounds prove all encoding failures impossible. No parent drop accepted."
+          }
+        },
+        {
+          "line": 9,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "l1",
+            "state": "open",
+            "summary": "Natural detach can leave the old viewer's input pump live after takeover",
+            "location": "crates/farhelm-supervisor/src/service/connection.rs:1514",
+            "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. TLDR: When a terminal viewer's output fails while its terminal still runs, input queued by that viewer can survive until after another viewer takes control, allowing old keystrokes to land among the new viewer's commands. Details: detach_naturally removes old, moves only old.forwarder into join_forwarder, releases the global attachments lock, calls notify_detached, and only at the async block's end drops old.input (connection.rs:1510-1519). The parent explicitly dropped backend before releasing that lock. This creates a new cross-worker scheduling gap in which replacement attach can install a new input pump under the released lock (handlers.rs:1729-1969), while the old pump has not even received its cancellation signal. HostAttach::drop signals it (grid_stream.rs:1169-1175); Pump::run/handle (1201-1278) can otherwise continue dequeuing and handing input to the host. An old pump that had not yet polled its queued input before this unlock can now do so after replacement admission; this is distinct from the unchanged already-polled handover race reported by the caller as g119/c4. A source-established live-terminal encoding-failure route exists: the authenticated terminal WebSocket accepts u16 size query fields (helm/terminal.rs:198-202) and resize controls (627-630,910-913), client.rs:4153-4212/4388-4403 forwards them unchanged, supervisor handlers.rs:1910/2081 calls HostTerminal::resize, and host Size::is_valid allows 1..=10000 (terminal-host/protocol.rs:102,135-145). A 1001-column size is valid for the running host, but grid_output::screen (319-363) copies that size to Hello/Frame and GridOutput::validate rejects dimensions over 1000 (proto/grid.rs:446,1294,1323). GridStream::send returns StreamFailed while the input runtime remains live (818-822), and report_forwarder_end routes that to detach_naturally (connection.rs:1292-1307). Thus no hypothetical encoder bug, giant link, or counter exhaustion is needed. A replacement attaching at an ordinary size repairs the size and can drive the same runtime. Suggested fix: explicitly drop the removed attachment's input side before releasing attachments, preserving the pre-change cancellation-before-new-admission ordering; this does not purport to fix the separate pre-existing midpoll race. Contract: the grid input module says 'The pump ends with the attachment' and drops input not yet handed to the runtime (grid_stream.rs:155-160). The connection ownership guard itself remains intact; this concern is input already queued at that guard, not new frames bypassing it. Suggested bucket: highest if authenticated scripted/API terminal viewers count as the shipped control route; terminal input can execute commands. If the caller applies the priority rule to require generation by the bundled GUI specifically, bucket other for the established cancellation-order regression and retain the potentially highest consequence explicitly: grid-terminal.js:246-250 clamps that GUI's fitted size to 1000, so ordinary GUI resize alone does not trigger this route. Confidence: confirmed source ordering and accepted API encoding-failure route; concurrency consequence is source analysis, not execution. proposed_drop: false. Could-be-highest: yes; original consequence is old-viewer command execution crossing the replacement's exclusive-input boundary. possible_cover: g119/c4, caller-reported, covers only pre-range already-polled handover; not this changed late-drop gap. Caveats: natural host Gone/Unavailable/runtime-end verdicts cannot write through a replacement runtime (old InputSequence holds Weak<old Inner>); InputFailed already stopped its pump. The size-range mismatch is an existing interface premise, not claimed as newly introduced by this removal. Already runtime-accepted input is expressly allowed to outlive the viewer and is not the defect. No tests, builds or reproductions run. No parent drop accepted."
+          }
+        },
+        {
+          "line": 10,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "l1",
+            "state": "open",
+            "summary": "Natural detach can leave old viewer input live after replacement admission",
+            "location": "crates/farhelm-supervisor/src/service/connection.rs:1514",
+            "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. TLDR: If a viewer's output fails while its terminal still runs, queued input from that viewer can reach the terminal after another viewer takes control, potentially mixing old keystrokes into the new viewer's commands. Details: connection.rs:1510-1519 removes old, moves only old.forwarder into join_forwarder, drops attachments, calls notify_detached, then drops the unmoved old.input at the async block's end. The parent revision connection.rs:2172-2191 explicitly dropped backend before dropping attachments. Rust's partial-move lifetime therefore leaves cancellation unsignalled after new admission becomes possible. HostAttach::drop sends cancellation (grid_stream.rs:1169-1175); Pump::run prioritizes it at poll boundaries but otherwise keeps handling queued input (1201-1278). The supervisor uses a multi-threaded Tokio Runtime::new (core.rs:16022); detach can be preempted after releasing attachments while another worker installs a replacement (handlers.rs:1729-1969). An old pump not yet polled before that release can then start handing over its queued input after replacement admission. This is distinct from the caller-reported g119/c4 race: cancellation cannot preempt a pump already executing a poll, which existed before this commit. The suggested fix is to drop old.input before releasing attachments, restoring the previous cancellation-before-admission order; this does not claim to fix g119/c4. Live-runtime failure premise: the authenticated terminal WebSocket accepts u16 query dimensions (helm/terminal.rs:198-202) and resize messages (627-630,910-913). client.rs:4153-4212/4388-4403 forwards them unchanged. Supervisor handle_attach/handle_resize pass them to terminal.resize (handlers.rs:1910,2081), whose Size::is_valid permits 1..=10000 (terminal-host/protocol.rs:102,135-145). Runtime::turn applies an accepted size without ending the runtime (hosts/terminal.rs:3082-3098). A valid host size of 1001 columns is copied by grid_output::screen into grid output (319-363), but GridOutput::validate refuses Hello/Frame dimensions over 1000 (proto/grid.rs:446,1294,1323). GridStream::send returns StreamFailed on that encoding failure (818-822); report_forwarder_end routes it to detach_naturally (connection.rs:1292-1307). Thus this route needs no separate hypothetical encoder defect, giant link or counter exhaustion. A replacement viewer can attach at <=1000 columns to repair the terminal size and use the same live runtime. Extra checks: Gone/Unavailable stop runtime work and finish resolves unsent input NotSent and drains/closes input_rx (hosts/terminal.rs:3028-3053,4365-4377); InputSequence holds Weak<old Inner> (1519-1522), so it does not retarget a newly adopted runtime; InputFailed comes from a stopped pump. Those verdicts do not supply the route. Requested/ClientGone report no natural detach; Stalled takes a separate removal scope where old.input drops before the guard is released. Grid output row/link limits are not a proof that encoding never fails. Styles use defined flags/colors, screen cursors clamp, clipboard parts are bounded, row text is capped at 68 bytes per cell and links at 256 with id/URI bounds; Frame.rev/History numbers separately cap at 2^53-1. No short route to counter exhaustion was found, and it is unnecessary to this size-based route. Contract: grid_stream.rs:155-160 says 'The pump ends with the attachment' and drops input not handed to the runtime. Runtime-accepted input is expressly allowed to outlive a viewer; that is not this defect. Suggested bucket: highest for the source-established authenticated terminal API route, because stale terminal input can execute commands across the exclusive-control boundary. Could-be-highest: yes, preserving the original command-execution consequence. Material priority caveat: the bundled GUI's proposeSize clamps dimensions to 1000 (grid-terminal.js:246-250), so that GUI alone does not generate the large-size trigger. This route is through accepted API/scripted-client input; if the caller requires a bundled-GUI-generated route under the priority rule, retain that missing premise and rebucket by the established cancellation-order defect rather than silently dropping the original consequence. Confidence: confirmed source ordering and accepted API failure route; scheduling consequence is source analysis, not observed execution. proposed_drop: false. possible_cover: caller-reported g119/c4 covers unchanged already-polled handover, not this distinct new lifetime gap. Caveats: the size-range mismatch predates this patch and is used only as an established trigger, not reported as newly introduced here. The channel/connection ownership check remains intact; the affected input was queued while its old viewer still owned the attachment. No tests, builds or reproductions performed. No parent drop accepted."
+          }
+        },
+        {
+          "line": 12,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "l1",
+            "state": "open",
+            "summary": "Natural detach can leave old viewer input live after replacement admission",
+            "location": "crates/farhelm-supervisor/src/service/connection.rs:1514",
+            "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. TLDR and original strongest consequence preserved: when viewer output fails with the input runtime still live, queued old-viewer input can reach the terminal after a replacement acquires control, potentially executing commands mixed with the new viewer's input. Details: connection.rs:1510-1519 moves only old.forwarder, releases attachments, calls non-awaiting notify_detached, then drops old.input at the async block's end. Parent :2172-2191 explicitly drops backend before the lock. On separate runtime workers (core.rs:16022), the detach task can be preempted in the new unlocked/not-cancelled window, a replacement can install its pump, and an old pump not yet polled can then dequeue input. HostAttach::drop signals cancellation (grid_stream.rs:1169-1175); Pump::run/handle:1201-1278 otherwise keep handing over queued input. This distinct changed not-yet-polled window is not the pre-range already-polled cancellation race previously supplied by parent as g119/c4. New neighbours snapshot lists g119 records empty; no cover or accepted disposition is inferred from that absence. Live-runtime encoder trigger is source-established for accepted API input: terminal WebSocket query/resize u16 dimensions pass unchanged through helm/terminal.rs:198-202,627-630,910-913 and client.rs:4153-4212,4388-4403; supervisor handlers.rs:1910,2081 calls terminal.resize; host Size::is_valid accepts 1..=10000 (terminal-host/protocol.rs:102,135-145), and Runtime::turn applies it while continuing (hosts/terminal.rs:3082-3098). Grid output copies size (grid_output.rs:319-363), while Hello/Frame validation caps at 1000 (proto/grid.rs:446,1294,1323). Therefore 1001 columns causes StreamFailed through grid_stream.rs:818-822 and connection.rs:1292-1307 without ending input. A replacement attach at an ordinary size can repair the size and use the same runtime. Gone/Unavailable/runtime-end instead stop old runtime work and resolve unsent input NotSent (hosts/terminal.rs:3028-3053,4365-4377); old InputSequence is Weak<old Inner> (:1519-1522). InputFailed already stopped its pump; Stalled uses a scope that drops input before unlocking. Existing accepted runtime input is not the defect. Fix direction: explicitly drop old.input before releasing attachments, restoring the previous order without claiming to fix midpoll cancellation. Discovery-turn producer/contract check: helm/terminal.rs:363-390 expressly documents the authenticated socket's cols/rows query and resize message shape; :190-195 names 'an older UI build, a bookmarked URL, a script' as callers whose missing fields retain legacy meaning. This is concrete implementation-level client-contract text, not proof of a separately published stable terminal API or a bundled producer for >1000. Targeted SPEC.md/SPEC_impl.md searches found no explicit public/stable-terminal-API guarantee. The shipped grid GUI's proposeSize at grid-terminal.js:246-250 caps at 1000. CLI main.rs has no ordinary attach size flag; its only 1..10000 --size producer found is internal agent-screen (main.rs:1344-1364,1593-1604), explicitly 'A development tool, with no compatibility promise', creating its own host/control socket rather than an ordinary session attachment. It does not establish this bug's bundled-client trigger and is not counted as one. Thus accepted authenticated API/script input and its documented message shape are established; a bundled GUI/ordinary CLI >1000 producer is not. Do not equate these premises or blanket-exclude authenticated clients. Parent owns priority judgment under the shipped-route rule. Contract: grid_stream.rs:155-160 says 'The pump ends with the attachment' and drops input not handed to the runtime. Suggested bucket: retain the original highest proposal for the command-execution route through accepted authenticated API/script input, with the exact producer distinction above for independent priority judgment; no parent lowering/drop accepted. Could-be-highest: yes. Confidence: source-confirmed changed lifetime, accepted API failure path and scheduling consequence; no execution. proposed_drop: false. possible_cover: earlier parent-reported g119/c4 is a different pre-existing midpoll window, not this new late drop; current neighbour records supply no duplicate. Caveats: size-range mismatch is an existing trigger, not newly introduced here; no GUI-only trigger or public stable-client guarantee is claimed. Useful bounds checks retained: per-cell text <=68 bytes, at most 256 bounded links, defined styles/colors, clamped cursors, bounded clipboard parts and row packing do not rule out all encoder failures; frame/history counters separately cap at 2^53-1, and no short route to exhaustion was found or needed. This revision adds the requested producer/declared-contract synthesis before a separate discovery search; it does not report a new issue. No tests, builds, reproductions or live-install actions."
+          }
+        }
+      ],
+      "latest": {
+        "line": 12,
+        "event": {
+          "version": 1,
+          "kind": "finding",
+          "id": "l1",
+          "state": "open",
+          "summary": "Natural detach can leave old viewer input live after replacement admission",
+          "location": "crates/farhelm-supervisor/src/service/connection.rs:1514",
+          "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. TLDR and original strongest consequence preserved: when viewer output fails with the input runtime still live, queued old-viewer input can reach the terminal after a replacement acquires control, potentially executing commands mixed with the new viewer's input. Details: connection.rs:1510-1519 moves only old.forwarder, releases attachments, calls non-awaiting notify_detached, then drops old.input at the async block's end. Parent :2172-2191 explicitly drops backend before the lock. On separate runtime workers (core.rs:16022), the detach task can be preempted in the new unlocked/not-cancelled window, a replacement can install its pump, and an old pump not yet polled can then dequeue input. HostAttach::drop signals cancellation (grid_stream.rs:1169-1175); Pump::run/handle:1201-1278 otherwise keep handing over queued input. This distinct changed not-yet-polled window is not the pre-range already-polled cancellation race previously supplied by parent as g119/c4. New neighbours snapshot lists g119 records empty; no cover or accepted disposition is inferred from that absence. Live-runtime encoder trigger is source-established for accepted API input: terminal WebSocket query/resize u16 dimensions pass unchanged through helm/terminal.rs:198-202,627-630,910-913 and client.rs:4153-4212,4388-4403; supervisor handlers.rs:1910,2081 calls terminal.resize; host Size::is_valid accepts 1..=10000 (terminal-host/protocol.rs:102,135-145), and Runtime::turn applies it while continuing (hosts/terminal.rs:3082-3098). Grid output copies size (grid_output.rs:319-363), while Hello/Frame validation caps at 1000 (proto/grid.rs:446,1294,1323). Therefore 1001 columns causes StreamFailed through grid_stream.rs:818-822 and connection.rs:1292-1307 without ending input. A replacement attach at an ordinary size can repair the size and use the same runtime. Gone/Unavailable/runtime-end instead stop old runtime work and resolve unsent input NotSent (hosts/terminal.rs:3028-3053,4365-4377); old InputSequence is Weak<old Inner> (:1519-1522). InputFailed already stopped its pump; Stalled uses a scope that drops input before unlocking. Existing accepted runtime input is not the defect. Fix direction: explicitly drop old.input before releasing attachments, restoring the previous order without claiming to fix midpoll cancellation. Discovery-turn producer/contract check: helm/terminal.rs:363-390 expressly documents the authenticated socket's cols/rows query and resize message shape; :190-195 names 'an older UI build, a bookmarked URL, a script' as callers whose missing fields retain legacy meaning. This is concrete implementation-level client-contract text, not proof of a separately published stable terminal API or a bundled producer for >1000. Targeted SPEC.md/SPEC_impl.md searches found no explicit public/stable-terminal-API guarantee. The shipped grid GUI's proposeSize at grid-terminal.js:246-250 caps at 1000. CLI main.rs has no ordinary attach size flag; its only 1..10000 --size producer found is internal agent-screen (main.rs:1344-1364,1593-1604), explicitly 'A development tool, with no compatibility promise', creating its own host/control socket rather than an ordinary session attachment. It does not establish this bug's bundled-client trigger and is not counted as one. Thus accepted authenticated API/script input and its documented message shape are established; a bundled GUI/ordinary CLI >1000 producer is not. Do not equate these premises or blanket-exclude authenticated clients. Parent owns priority judgment under the shipped-route rule. Contract: grid_stream.rs:155-160 says 'The pump ends with the attachment' and drops input not handed to the runtime. Suggested bucket: retain the original highest proposal for the command-execution route through accepted authenticated API/script input, with the exact producer distinction above for independent priority judgment; no parent lowering/drop accepted. Could-be-highest: yes. Confidence: source-confirmed changed lifetime, accepted API failure path and scheduling consequence; no execution. proposed_drop: false. possible_cover: earlier parent-reported g119/c4 is a different pre-existing midpoll window, not this new late drop; current neighbour records supply no duplicate. Caveats: size-range mismatch is an existing trigger, not newly introduced here; no GUI-only trigger or public stable-client guarantee is claimed. Useful bounds checks retained: per-cell text <=68 bytes, at most 256 bounded links, defined styles/colors, clamped cursors, bounded clipboard parts and row packing do not rule out all encoder failures; frame/history counters separately cap at 2^53-1, and no short route to exhaustion was found or needed. This revision adds the requested producer/declared-contract synthesis before a separate discovery search; it does not report a new issue. No tests, builds, reproductions or live-install actions."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g124/findings.jsonl",
+        "id": "l1",
+        "line": 12,
+        "disposition": "under-investigation",
+        "group": "g124-l1",
+        "reason": "Record durably acknowledged; parent source/contract validation, cross-group synthesis, coverage/filter matching and any independent drop check remain pending. This preserves the claim and uncertainty without accepting, dropping or lowering it."
+      },
+      "accepted_parent_decision": null,
+      "returned_claim_checks": [
+        {
+          "batch": "claims-079",
+          "key": "g124/l1",
+          "latest_line": 12,
+          "recommendation": "retain-verified",
+          "bucket": "highest",
+          "underlying_key": "natural-detach-unlocks-before-cancelling-unpolled-grid-input",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The changed cleanup releases attachment ownership before signalling input cancellation. A live-runtime encoding failure is reachable through accepted authenticated terminal messages. This establishes a conditional source route for old queued input to follow replacement input. It was not reproduced. Keep the original highest proposal: the endpoint explicitly documents scripts as callers, and no specification exclusion for those authenticated callers was found. A different interpretation of the shipped-control rule needs an independent priority check.",
+          "checks": [
+            "1ed482dde220452e424973faf38a5e1318986333:crates/farhelm-supervisor/src/service/connection.rs:1510-1519 partially moves old.forwarder, drops attachments, notifies, then drops old.input at scope end. Its parent:2172-2191 explicitly drops backend before attachments. The same late-drop order remains at 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db:1509-1518.",
+            "1ed482d:service/grid_stream.rs:1169-1175 signals cancellation only on HostAttach drop; :1201-1278 prioritizes cancellation at poll boundaries but otherwise dequeues and sends queued input. :155-160 distinguishes unhanded input from input the runtime already owns. service/core.rs:16022 creates the multithread Tokio runtime.",
+            "1ed482d:farhelm-helm/src/terminal.rs:198-202,627-630,910-913 accepts and forwards u16 dimensions; :190-195 names scripts as callers and :363-390 documents initial-size and resize shapes. farhelm-helm/src/client.rs:4153-4212,4388-4403 forwards dimensions unchanged; supervisor service/handlers.rs:1910,2081 passes them to terminal.resize.",
+            "1ed482d:terminal-host/src/protocol.rs:102,135-145 allows 1..10000. supervisor hosts/terminal.rs:3082-3098 applies a resize while continuing; grid_output.rs:319-363 copies emulator dimensions; proto/grid.rs:446,1287-1325 limits Hello/Frame to 1000. grid_stream.rs:818-822 returns StreamFailed on encode failure, and connection.rs:1292-1307 schedules natural detach. A replacement at ordinary size can resize the same runtime.",
+            "1ed482d:farhelm-ui/assets/grid-terminal.js:246-250 caps the bundled GUI at 1000. No ordinary bundled >1000 producer is established. Gone/Unavailable finish the old runtime and drain unsent input (hosts/terminal.rs:3028-3053,4365-4377), so those verdicts are not the live-runtime route. Runtime-accepted input, hypothetical encoder faults and counter exhaustion are not needed for the retained route."
+          ],
+          "coverage_checked": [
+            "SPEC.md:3010-3013 requires supervisor-enforced exclusive attachment; SPEC_impl.md:2551-2588 requires an ending attachment to stop its pump and discard unhanded input. Neither accepts cancellation after replacement admission.",
+            "TODO.md Planned is empty (:25-27). Searched plans/queue for natural detach, input pump/cancellation, arbitration and the actual size-trigger route; no unlanded plan covering this cause. The tmux cleanup plans are already landed (plans/REPORTS.md:29-32).",
+            "BUGS.md contains only the SSH-helper provisioning hang. Searched INDEX.md, matching queue text and active TRIAGE_OUTCOMES.md for detach/takeover, input ownership/handoff/cancellation and the actual trigger. No exact queued or decided cover. kicked-input-test-local-filter.md concerns a test that locally discards stale frames, not queued input surviving natural detach.",
+            "FILTER.md's displaced-input handoff filter requires an already-polled send stalled after observing cancellation pending. This claim instead starts a previously unpolled pump while cancellation has not been signalled; the full boundary does not match. Rare-diagnostic and upgrade filters do not cover this input/control consequence."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": "No bundled GUI or ordinary CLI producer of >1000 dimensions is established, and there is no explicit public stable-terminal-API guarantee. Accepted authenticated scripted input and its wire contract are established. Parent must preserve that distinction when deciding whether its priority rule requires a bundled producer. Scheduling and command mixing are source conclusions, not runtime observations.",
+          "original_stronger_consequence": "Old-viewer input can cross replacement ownership and execute commands mixed into the replacement viewer's input. Earlier lines 3 and 5 proposed dropping/narrowing this route; lines 7-12 reopen and establish the accepted-API size trigger. No parent drop was accepted.",
+          "needs_independent_drop_check": true,
+          "proposed_basis": "Retain the distinct cancellation-before-admission regression. Do not merge it into the pre-existing already-polled handoff filter or lower its original command-execution consequence without the required independent check."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": true,
+        "clearly_refuted_candidate": false,
+        "needs_unfinished_gate": true,
+        "provisional_bucket": "highest",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "natural-detach-unlocks-before-cancelling-unpolled-grid-input",
+        "destination": "trailing-natural-detach-unlocks-before-cancelling-unpolled-grid-input.md"
+      }
+    },
+    {
+      "key": "g124/c2",
+      "owner": "g124",
+      "id": "c2",
+      "domain": "supervisor-request-admission",
+      "purpose": "supervisor-request-admission: crates/farhelm-supervisor/src/service/connection.rs; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 4,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c2",
+            "state": "open",
+            "summary": "Deleted byte-replay tests target the retired tmux implementation",
+            "location": "crates/farhelm-supervisor/src/service/connection.rs:1592",
+            "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. TLDR: Removing the old replay chunk and final-output recovery tests does not establish a loss of final terminal output in the remaining grid implementation. Details: read the entire removed 247-line test hunk in the parent revision, including pane_death_recovers_missing_final_output_after_client_resume and receive_through. The fixture exclusively constructs Forwarder, AttachOutput::Tmux, PaneDeath and AttachBackend::Tmux and tests recovery from tmux control-output loss. These mechanisms are deleted rather than retained untested. The replacement grid path obtains terminal state from its runtime, preserves Exited liveness (grid_stream.rs:603-624), and retains separate grid tests for an exit during catch-up, final-screen visibility, paused output and stall handling (grid_stream/tests.rs:390,485,778,914). These are source observations, not test execution or proof those tests pass. Governing contract: SPEC.md:3003-3007 says 'Every terminal is new: it runs in a terminal host of its own' and 'This release ends them: the first time a host's supervisor of this release starts, it ends that tmux server'. Suggested bucket: other; no established user-facing regression from these deletions. Confidence: confirmed source scope. proposed_drop: removed tests exercise only removed implementation; no missing surviving mechanism established. Could-be-highest: no for the test-removal concern; intentional retirement's process/data-loss tradeoff is explicitly specified and is outside this test-focused candidate. possible_cover: none; coverage queues not searched. Caveat: did not assess unrelated defects in retired test machinery, per the removal-only review charter."
+          }
+        }
+      ],
+      "latest": {
+        "line": 4,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c2",
+          "state": "open",
+          "summary": "Deleted byte-replay tests target the retired tmux implementation",
+          "location": "crates/farhelm-supervisor/src/service/connection.rs:1592",
+          "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. TLDR: Removing the old replay chunk and final-output recovery tests does not establish a loss of final terminal output in the remaining grid implementation. Details: read the entire removed 247-line test hunk in the parent revision, including pane_death_recovers_missing_final_output_after_client_resume and receive_through. The fixture exclusively constructs Forwarder, AttachOutput::Tmux, PaneDeath and AttachBackend::Tmux and tests recovery from tmux control-output loss. These mechanisms are deleted rather than retained untested. The replacement grid path obtains terminal state from its runtime, preserves Exited liveness (grid_stream.rs:603-624), and retains separate grid tests for an exit during catch-up, final-screen visibility, paused output and stall handling (grid_stream/tests.rs:390,485,778,914). These are source observations, not test execution or proof those tests pass. Governing contract: SPEC.md:3003-3007 says 'Every terminal is new: it runs in a terminal host of its own' and 'This release ends them: the first time a host's supervisor of this release starts, it ends that tmux server'. Suggested bucket: other; no established user-facing regression from these deletions. Confidence: confirmed source scope. proposed_drop: removed tests exercise only removed implementation; no missing surviving mechanism established. Could-be-highest: no for the test-removal concern; intentional retirement's process/data-loss tradeoff is explicitly specified and is outside this test-focused candidate. possible_cover: none; coverage queues not searched. Caveat: did not assess unrelated defects in retired test machinery, per the removal-only review charter."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g124/findings.jsonl",
+        "id": "c2",
+        "line": 4,
+        "disposition": "excluded",
+        "group": "retired-tmux-byte-replay-tests-removal",
+        "reason": "Parent explicitly accepted named refuted proposal from claims-079 after inspecting it. The deleted fixture tests tmux's control-output recovery and byte-chunk bound, mechanisms the same patch removes. No surviving grid mechanism loses its only final-output oracle on this evidence. This is a bounded source refutation of the test-removal claim, not proof that all grid output behavior is correct. Dismiss this obsolete-mechanism test-removal claim only. Deliberate legacy-process termination is separately preserved in g125/c1 for independent checking. Checked source/results: [\"1ed482d parent:service/connection.rs:2265-2510 contains replay_chunk_stays_within_the_helm_terminal_data_limit, pane_death_recovers_missing_final_output_after_client_resume and receive_through. The full fixture creates tmux sessions/input/replay clients, AttachOutput::Tmux, PaneDeath and AttachBackend::Tmux, and verifies an escape reset replacing missing control-output bytes.\",\"1ed482d:service/grid_stream/tests.rs:380-404,472-500,765-795,900-930 retains separate source tests for an exit during catch-up, paused history, stall timeout and an exited program's final screen. These tests were inspected, not run.\"] Current coverage/results: [\"SPEC.md Terminal experience at 1ed482d:3003-3016 and current :2998-3011 retires old terminals; current SPEC_impl.md:2551-2588 describes grid output from the runtime. These contracts explain why tmux control-stream recovery is obsolete; they do not excuse a surviving coverage gap.\",\"Searched SPEC.md, SPEC_impl.md, empty TODO.md Planned, plans/queue, BUGS.md, INDEX.md and active TRIAGE_OUTCOMES.md for byte replay, final-output recovery and the removed tests. No exact independent cover. tmux cleanup plans are landed per plans/REPORTS.md:29-32. No FILTER.md boundary applies.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"The considered concern was loss of final terminal output from deleting replay/recovery tests. The sole record already confines it to obsolete test machinery and does not claim a product regression or a new security/process-loss route.\"; \"A specific surviving grid failure mechanism left untested by these deletions was not identified.\"."
+      },
+      "accepted_parent_decision": {
+        "key": "g124/c2",
+        "line": 4,
+        "disposition": "excluded",
+        "group": "retired-tmux-byte-replay-tests-removal",
+        "bucket": "other",
+        "recording": "refuted",
+        "queue_target_candidate": null,
+        "needs_independent_drop_check": false,
+        "reason": "Parent explicitly accepted named refuted proposal from claims-079 after inspecting it. The deleted fixture tests tmux's control-output recovery and byte-chunk bound, mechanisms the same patch removes. No surviving grid mechanism loses its only final-output oracle on this evidence. This is a bounded source refutation of the test-removal claim, not proof that all grid output behavior is correct. Dismiss this obsolete-mechanism test-removal claim only. Deliberate legacy-process termination is separately preserved in g125/c1 for independent checking. Checked source/results: [\"1ed482d parent:service/connection.rs:2265-2510 contains replay_chunk_stays_within_the_helm_terminal_data_limit, pane_death_recovers_missing_final_output_after_client_resume and receive_through. The full fixture creates tmux sessions/input/replay clients, AttachOutput::Tmux, PaneDeath and AttachBackend::Tmux, and verifies an escape reset replacing missing control-output bytes.\",\"1ed482d:service/grid_stream/tests.rs:380-404,472-500,765-795,900-930 retains separate source tests for an exit during catch-up, paused history, stall timeout and an exited program's final screen. These tests were inspected, not run.\"] Current coverage/results: [\"SPEC.md Terminal experience at 1ed482d:3003-3016 and current :2998-3011 retires old terminals; current SPEC_impl.md:2551-2588 describes grid output from the runtime. These contracts explain why tmux control-stream recovery is obsolete; they do not excuse a surviving coverage gap.\",\"Searched SPEC.md, SPEC_impl.md, empty TODO.md Planned, plans/queue, BUGS.md, INDEX.md and active TRIAGE_OUTCOMES.md for byte replay, final-output recovery and the removed tests. No exact independent cover. tmux cleanup plans are landed per plans/REPORTS.md:29-32. No FILTER.md boundary applies.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"The considered concern was loss of final terminal output from deleting replay/recovery tests. The sole record already confines it to obsolete test machinery and does not claim a product regression or a new security/process-loss route.\"; \"A specific surviving grid failure mechanism left untested by these deletions was not identified.\"."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-079",
+          "key": "g124/c2",
+          "latest_line": 4,
+          "recommendation": "refuted",
+          "bucket": "other",
+          "underlying_key": "retired-tmux-byte-replay-tests-removal",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The deleted fixture tests tmux's control-output recovery and byte-chunk bound, mechanisms the same patch removes. No surviving grid mechanism loses its only final-output oracle on this evidence. This is a bounded source refutation of the test-removal claim, not proof that all grid output behavior is correct.",
+          "checks": [
+            "1ed482d parent:service/connection.rs:2265-2510 contains replay_chunk_stays_within_the_helm_terminal_data_limit, pane_death_recovers_missing_final_output_after_client_resume and receive_through. The full fixture creates tmux sessions/input/replay clients, AttachOutput::Tmux, PaneDeath and AttachBackend::Tmux, and verifies an escape reset replacing missing control-output bytes.",
+            "1ed482d:service/grid_stream/tests.rs:380-404,472-500,765-795,900-930 retains separate source tests for an exit during catch-up, paused history, stall timeout and an exited program's final screen. These tests were inspected, not run."
+          ],
+          "coverage_checked": [
+            "SPEC.md Terminal experience at 1ed482d:3003-3016 and current :2998-3011 retires old terminals; current SPEC_impl.md:2551-2588 describes grid output from the runtime. These contracts explain why tmux control-stream recovery is obsolete; they do not excuse a surviving coverage gap.",
+            "Searched SPEC.md, SPEC_impl.md, empty TODO.md Planned, plans/queue, BUGS.md, INDEX.md and active TRIAGE_OUTCOMES.md for byte replay, final-output recovery and the removed tests. No exact independent cover. tmux cleanup plans are landed per plans/REPORTS.md:29-32. No FILTER.md boundary applies."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": "A specific surviving grid failure mechanism left untested by these deletions was not identified.",
+          "original_stronger_consequence": "The considered concern was loss of final terminal output from deleting replay/recovery tests. The sole record already confines it to obsolete test machinery and does not claim a product regression or a new security/process-loss route.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Dismiss this obsolete-mechanism test-removal claim only. Deliberate legacy-process termination is separately preserved in g125/c1 for independent checking."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "retired-tmux-byte-replay-tests-removal",
+        "destination": null
+      }
+    },
+    {
+      "key": "g124/c3",
+      "owner": "g124",
+      "id": "c3",
+      "domain": "supervisor-request-admission",
+      "purpose": "supervisor-request-admission: crates/farhelm-supervisor/src/service/connection.rs; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 6,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c3",
+            "state": "open",
+            "summary": "Direct grid input call preserves the prior delivery contract",
+            "location": "crates/farhelm-supervisor/src/service/connection.rs:510",
+            "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. TLDR: Calling the grid input side directly does not introduce a new premature hook warning or weaken viewer ownership checks. Details: the removed AttachBackend::send_input Host arm already returned host.send_input(bytes) directly (parent terminals.rs:1961-1984); it did not await a runtime receipt despite the wrapper being async. The new connection.rs:507-513 call keeps the same attachments lock, channel check and same_channel connection check. HostAttach::send_input returns whether queued encoded bytes submit a line (grid_stream.rs:1052-1064), and the first-input mark remains guarded by Agent terminal and Ok(true). The comment in connection.rs about confirmed delivery is imprecise for grids but was already imprecise before this patch; no changed behavior to report. Suggested bucket: other, no established regression. Confidence: confirmed by before/after source comparison; no execution. proposed_drop: source refutation; the host branch's behavior and ownership guard are unchanged. Could-be-highest: no for the hook-warning timing concern; the security-sensitive ownership guard remains intact. possible_cover: none; coverage sources not searched. Caveat: the input-pump implementation is an interface here, not independently reviewed for unrelated defects."
+          }
+        },
+        {
+          "line": 17,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c3",
+            "state": "open",
+            "summary": "Direct grid input call preserves the prior delivery contract",
+            "location": "crates/farhelm-supervisor/src/service/connection.rs:510",
+            "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. TLDR: replacing the async backend wrapper with a direct grid-input call does not establish newly premature hook warnings or weaker ownership checks. Details: parent terminals.rs:1976-1984 already dispatches its Host branch directly to host.send_input. New connection.rs:507-513 keeps the same attachments lock and channel-plus-connection owner check, and :532-535 keeps Agent plus Ok(true) gating. HostAttach::send_input reports whether encoded input queued for its pump submits a line; it does not await runtime delivery. Discovery attribution check across the whole pinned range: exclusive base 6e423e30068b62c6cfa276c6d720ee35bb70387a:connection.rs:528-542 already contains the 'whole frame must have been confirmed' and Enter-arrival wording; base terminals.rs:1986-1993 already returns host.send_input for Host, and base grid_stream.rs:1058-1074 already documents queue acceptance as delivery for this mark. Thus both the actual queued-input behavior and the imprecise whole-frame confirmation explanation predate the entire range, not just this assigned commit. The changed comment now points to HostAttach by its correct remaining name, without adding a new delivery invariant. Suggested bucket: other; no established in-scope regression. Confidence: confirmed source comparison, including exclusive base, no execution. proposed_drop: source refutation for runtime changes and pre-range attribution for the retained wording, not merely current production correctness refuting a distinct documentation issue. Could-be-highest: no for hook-warning timing; the security-sensitive ownership check remains intact. possible_cover: none; prohibited coverage sources not searched. Caveat: this does not dispose of l1's independently changed natural-detach input lifetime. This revision adds the required full-range attribution check and preserves the original direct-call/ownership basis."
+          }
+        }
+      ],
+      "latest": {
+        "line": 17,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c3",
+          "state": "open",
+          "summary": "Direct grid input call preserves the prior delivery contract",
+          "location": "crates/farhelm-supervisor/src/service/connection.rs:510",
+          "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. TLDR: replacing the async backend wrapper with a direct grid-input call does not establish newly premature hook warnings or weaker ownership checks. Details: parent terminals.rs:1976-1984 already dispatches its Host branch directly to host.send_input. New connection.rs:507-513 keeps the same attachments lock and channel-plus-connection owner check, and :532-535 keeps Agent plus Ok(true) gating. HostAttach::send_input reports whether encoded input queued for its pump submits a line; it does not await runtime delivery. Discovery attribution check across the whole pinned range: exclusive base 6e423e30068b62c6cfa276c6d720ee35bb70387a:connection.rs:528-542 already contains the 'whole frame must have been confirmed' and Enter-arrival wording; base terminals.rs:1986-1993 already returns host.send_input for Host, and base grid_stream.rs:1058-1074 already documents queue acceptance as delivery for this mark. Thus both the actual queued-input behavior and the imprecise whole-frame confirmation explanation predate the entire range, not just this assigned commit. The changed comment now points to HostAttach by its correct remaining name, without adding a new delivery invariant. Suggested bucket: other; no established in-scope regression. Confidence: confirmed source comparison, including exclusive base, no execution. proposed_drop: source refutation for runtime changes and pre-range attribution for the retained wording, not merely current production correctness refuting a distinct documentation issue. Could-be-highest: no for hook-warning timing; the security-sensitive ownership check remains intact. possible_cover: none; prohibited coverage sources not searched. Caveat: this does not dispose of l1's independently changed natural-detach input lifetime. This revision adds the required full-range attribution check and preserves the original direct-call/ownership basis."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g124/findings.jsonl",
+        "id": "c3",
+        "line": 17,
+        "disposition": "under-investigation",
+        "group": "g124-c3",
+        "reason": "Record durably acknowledged; parent source/contract validation, cross-group synthesis, coverage/filter matching and any independent drop check remain pending. This preserves the claim and uncertainty without accepting, dropping or lowering it."
+      },
+      "accepted_parent_decision": null,
+      "returned_claim_checks": [
+        {
+          "batch": "claims-079",
+          "key": "g124/c3",
+          "latest_line": 17,
+          "recommendation": "out-of-range",
+          "bucket": "other",
+          "underlying_key": "pre-range-grid-first-input-queue-acceptance-wording",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The direct call keeps the host branch's existing queue-acceptance semantics and both ownership checks. The imprecise whole-frame-confirmed explanation also exists at the exclusive base. Thus the retained wording issue predates this range, and the claimed behavioral weakening is source-refuted.",
+          "checks": [
+            "6e423e30068b62c6cfa276c6d720ee35bb70387a:service/connection.rs:520-550 already checks attachment channel plus same_channel under the mutex, awaits the backend wrapper, and contains whole-frame confirmation wording and Agent/Ok(true) gating.",
+            "Exclusive-base service/terminals.rs:1975-1993 explicitly defines host delivery as queue acceptance and returns host.send_input(bytes) directly. 1ed482d:service/connection.rs:507-535 preserves the same check and gating; grid_stream.rs:1052-1071 explicitly returns whether queued encoded input submits a line."
+          ],
+          "coverage_checked": [
+            "Current SPEC_impl.md:4280-4300 describes queued grid input as the first-input mark. SPEC.md Terminal experience retains supervisor-enforced ownership; neither establishes a changed violation here.",
+            "Searched both specifications, TODO.md Planned (empty), plans/queue, BUGS.md, INDEX.md, matching kicked-input-test-local-filter.md and active TRIAGE_OUTCOMES.md for hook warning/delivery, input ownership and confirmation. No exact cover needed for the source/range disposition. No FILTER.md boundary applies."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": "No in-range change to grid delivery semantics, hook timing or the ownership guard is shown.",
+          "original_stronger_consequence": "The initial concern was newly premature hook warnings or weakened ownership after removing the async wrapper. The latest record preserves the guard refutation and adds full-range attribution; this does not dispose of g124/l1.",
+          "needs_independent_drop_check": true,
+          "proposed_basis": "Pre-range attribution for the retained imprecise comment, and unchanged source behavior for the direct-call/ownership suspicion. Marked for independent checking conservatively because the rejected concern includes terminal-input ownership."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": true,
+        "clearly_refuted_candidate": false,
+        "needs_unfinished_gate": true,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "pre-range-grid-first-input-queue-acceptance-wording",
+        "destination": "trailing-pre-range-grid-first-input-queue-acceptance-wording.md"
+      }
+    },
+    {
+      "key": "g124/l2",
+      "owner": "g124",
+      "id": "l2",
+      "domain": "supervisor-request-admission",
+      "purpose": "supervisor-request-admission: crates/farhelm-supervisor/src/service/connection.rs; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 13,
+          "event": {
+            "version": 1,
+            "kind": "lead",
+            "id": "l2",
+            "state": "open",
+            "summary": "Writer-queue documentation references the removed replay chunk and byte-stream bound",
+            "location": "crates/farhelm-supervisor/src/service/connection.rs:44",
+            "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. TLDR: the queue's memory explanation may now understate a grid terminal's queued data and link to a deleted constant, misleading maintainers assessing resource bounds. Details: this assigned patch deletes REPLAY_CHUNK and its definition/import context, but connection.rs:44-46 still says 'Terminal data frames are chunked at [`REPLAY_CHUNK`] (32 KiB)' and puts worst-case data-only backlog at 2 MiB per connection. GridStream::send sends one encoded grid message as a data frame, and the grid format allows messages up to 1 MiB, with oversized rows intentionally sent alone. That contradicts the old universal chunking claim. Exact remaining checks: verify no replacement REPLAY_CHUNK import/name at the pinned revision or tip; compare full range for attribution; read the grid packing contract and source to establish the intended hard-bound-versus-32KiB-target distinction, and later changes for repair. Suggested bucket: other (documentation correctness/resource-bound reasoning), not an observed memory regression. Confidence: concrete source lead, no execution. proposed_drop: false pending readily checkable source/range checks. Could-be-highest: no established security or user-work-loss route from this internal comment. possible_cover: none in the supplied interface records; no prohibited coverage sources searched. This is separate from retained l1 and the c1 output-join candidate."
+          }
+        },
+        {
+          "line": 14,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "l2",
+            "state": "open",
+            "summary": "Replay removal leaves a dangling writer-queue documentation link",
+            "location": "crates/farhelm-supervisor/src/service/connection.rs:44",
+            "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. TLDR: maintainers reading the connection's queue-memory contract are sent to a constant this patch deletes, while the explanation still describes byte-stream chunking rather than the remaining grid messages. This is internal documentation drift, not a demonstrated runtime resource regression. Details: the assigned patch deletes the sole REPLAY_CHUNK definition at former connection.rs:40 but leaves the intra-doc link [`REPLAY_CHUNK`] at new :44 and the plain-name drain-throughput explanation at :867. Pinned git grep over connection.rs and its service/terminal scopes finds no definition/import to resolve the link, only those remaining prose references. The surrounding :43-46 asserts every terminal frame is 32KiB-chunked and worst-case data backlog is 2MiB; GridStream::send (grid_stream.rs:818-825) actually encodes a whole grid message then queues one Frame::data. grid_output.rs:67-78 declares 32KiB a packing target and expressly sends a larger row alone; the grid format hard cap is 1MiB, so the 64-frame queue's paper data bound is 64MiB, not the inherited claimed 2MiB. Attribution caveat: the false universal byte-size wording is already at exclusive range base 6e423e30068b62c6cfa276c6d720ee35bb70387a:connection.rs:53-59; do not claim this removal newly introduced that numeric claim. The newly established defect here is deletion of its linked constant without updating the surviving source contract. The actual grid framing was already present; no memory growth or encoder change is attributed to this patch. Later status: pinned tip 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db:connection.rs:41-60 correctly describes the 32KiB target/1MiB hard cap and removes the link. Scoped -G history names f560058da19e02716e6f943883a9508b447aff4e as the only subsequent matching change, with exact repair diff being checked next. The original charter includes intermediate changes even when corrected later. Suggested fix at reviewed revision: describe grid message packing versus hard cap and remove/replace obsolete constant references; the endpoint already does this for the queue paragraph. Suggested bucket: other (developer-documentation navigation and resource-bound explanation). Confidence: source-confirmed unresolved reference and stale explanation at the reviewed revision, not a rendered rustdoc warning or build failure; no documentation build run. Could-be-highest: no established security or loss-of-work route. proposed_drop: false; later repair is provenance, not assumed parent exclusion. possible_cover: none in supplied neighbour records; prohibited coverage sources not searched. No tests, builds, reproductions or live-install actions. This revision closes l2's alias/name-resolution check; final exact later-repair source attribution is a follow-up within this same pass."
+          }
+        },
+        {
+          "line": 15,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "l2",
+            "state": "open",
+            "summary": "Replay removal leaves a dangling writer-queue documentation link",
+            "location": "crates/farhelm-supervisor/src/service/connection.rs:44",
+            "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. TLDR: maintainers reading the connection's queue-memory contract are sent to a constant this patch deletes, while the explanation still describes byte-stream chunking rather than the remaining grid messages. This is internal documentation drift, not a demonstrated runtime resource regression. Details: the assigned patch deletes the sole REPLAY_CHUNK definition at former connection.rs:40 but leaves the intra-doc link [`REPLAY_CHUNK`] at new :44 and the plain-name drain-throughput explanation at :867. Pinned git grep over connection.rs and its service/terminal scopes finds no definition/import to resolve the link, only those remaining prose references. The surrounding :43-46 asserts every terminal frame is 32KiB-chunked and worst-case data backlog is 2MiB; GridStream::send (grid_stream.rs:818-825) actually encodes a whole grid message then queues one Frame::data. grid_output.rs:67-78 declares 32KiB a packing target and expressly sends a larger row alone; the grid format hard cap is 1MiB, so the 64-frame queue's paper data bound is 64MiB, not the inherited claimed 2MiB. Attribution caveat: the false universal byte-size wording is already at exclusive range base 6e423e30068b62c6cfa276c6d720ee35bb70387a:connection.rs:53-59; do not claim this removal newly introduced that numeric claim. The newly established defect here is deletion of its linked constant without updating the surviving source contract. The actual grid framing was already present; no memory growth or encoder change is attributed to this patch. Later status: pinned tip 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db:connection.rs:41-60 correctly describes the 32KiB target/1MiB hard cap and removes the link. Scoped -G history names f560058da19e02716e6f943883a9508b447aff4e as the only subsequent matching change, and the complete f560 connection.rs patch confirms it replaces the queue paragraph and the obsolete drain_writer constant reference with grid-message wording. The original charter includes intermediate changes even when corrected later. Suggested fix at reviewed revision: describe grid message packing versus hard cap and remove/replace obsolete constant references; the endpoint already does this for the queue paragraph. Suggested bucket: other (developer-documentation navigation and resource-bound explanation). Confidence: source-confirmed unresolved reference and stale explanation at the reviewed revision, not a rendered rustdoc warning or build failure; no documentation build run. Could-be-highest: no established security or loss-of-work route. proposed_drop: false; later repair is provenance, not assumed parent exclusion. possible_cover: none in supplied neighbour records; prohibited coverage sources not searched. No tests, builds, reproductions or live-install actions. This revision closes l2's alias/name-resolution check; exact later-repair attribution is now confirmed and no source premise remains open."
+          }
+        }
+      ],
+      "latest": {
+        "line": 15,
+        "event": {
+          "version": 1,
+          "kind": "finding",
+          "id": "l2",
+          "state": "open",
+          "summary": "Replay removal leaves a dangling writer-queue documentation link",
+          "location": "crates/farhelm-supervisor/src/service/connection.rs:44",
+          "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. TLDR: maintainers reading the connection's queue-memory contract are sent to a constant this patch deletes, while the explanation still describes byte-stream chunking rather than the remaining grid messages. This is internal documentation drift, not a demonstrated runtime resource regression. Details: the assigned patch deletes the sole REPLAY_CHUNK definition at former connection.rs:40 but leaves the intra-doc link [`REPLAY_CHUNK`] at new :44 and the plain-name drain-throughput explanation at :867. Pinned git grep over connection.rs and its service/terminal scopes finds no definition/import to resolve the link, only those remaining prose references. The surrounding :43-46 asserts every terminal frame is 32KiB-chunked and worst-case data backlog is 2MiB; GridStream::send (grid_stream.rs:818-825) actually encodes a whole grid message then queues one Frame::data. grid_output.rs:67-78 declares 32KiB a packing target and expressly sends a larger row alone; the grid format hard cap is 1MiB, so the 64-frame queue's paper data bound is 64MiB, not the inherited claimed 2MiB. Attribution caveat: the false universal byte-size wording is already at exclusive range base 6e423e30068b62c6cfa276c6d720ee35bb70387a:connection.rs:53-59; do not claim this removal newly introduced that numeric claim. The newly established defect here is deletion of its linked constant without updating the surviving source contract. The actual grid framing was already present; no memory growth or encoder change is attributed to this patch. Later status: pinned tip 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db:connection.rs:41-60 correctly describes the 32KiB target/1MiB hard cap and removes the link. Scoped -G history names f560058da19e02716e6f943883a9508b447aff4e as the only subsequent matching change, and the complete f560 connection.rs patch confirms it replaces the queue paragraph and the obsolete drain_writer constant reference with grid-message wording. The original charter includes intermediate changes even when corrected later. Suggested fix at reviewed revision: describe grid message packing versus hard cap and remove/replace obsolete constant references; the endpoint already does this for the queue paragraph. Suggested bucket: other (developer-documentation navigation and resource-bound explanation). Confidence: source-confirmed unresolved reference and stale explanation at the reviewed revision, not a rendered rustdoc warning or build failure; no documentation build run. Could-be-highest: no established security or loss-of-work route. proposed_drop: false; later repair is provenance, not assumed parent exclusion. possible_cover: none in supplied neighbour records; prohibited coverage sources not searched. No tests, builds, reproductions or live-install actions. This revision closes l2's alias/name-resolution check; exact later-repair attribution is now confirmed and no source premise remains open."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g124/findings.jsonl",
+        "id": "l2",
+        "line": 15,
+        "disposition": "rejected",
+        "group": "deleted-replay-chunk-leaves-connection-doc-reference",
+        "reason": "Parent read full claims079.1ed482 deletes linked REPLAY_CHUNK leaving connection43-46/867 dangling; false universal2MiB bound itself already existed. f560058 repairs references and explains32KiBtarget/1MiBcap/64MiBpaperbound, retained at00de. Preserve real intermediate dangling-reference defect and repair without residual item; no observed rustdoc/build/memory failure or stronger consequence."
+      },
+      "accepted_parent_decision": {
+        "key": "g124/l2",
+        "line": 15,
+        "disposition": "rejected",
+        "group": "deleted-replay-chunk-leaves-connection-doc-reference",
+        "bucket": "other",
+        "recording": "repaired-in-range",
+        "needs_independent_drop_check": false,
+        "reason": "Parent read full claims079.1ed482 deletes linked REPLAY_CHUNK leaving connection43-46/867 dangling; false universal2MiB bound itself already existed. f560058 repairs references and explains32KiBtarget/1MiBcap/64MiBpaperbound, retained at00de. Preserve real intermediate dangling-reference defect and repair without residual item; no observed rustdoc/build/memory failure or stronger consequence."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-079",
+          "key": "g124/l2",
+          "latest_line": 15,
+          "recommendation": "needs-parent",
+          "bucket": "other",
+          "underlying_key": "deleted-replay-chunk-leaves-connection-doc-reference",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The historical documentation defect is verified, but it is repaired later within the reviewed range. Preserve it as an intermediate defect and an explicit already-repaired disposition; no current fix remains to queue. Parent owns how this completed historical correction is represented.",
+          "checks": [
+            "1ed482d:service/connection.rs:43-46 links REPLAY_CHUNK and claims 32 KiB chunks/2 MiB worst-case data backlog; :867 retains another obsolete name. git grep over supervisor source at this revision finds only these two prose references, no definition/import.",
+            "1ed482d:grid_output.rs:67-78 makes 32 KiB a target and allows an oversized row alone; grid_stream.rs:818-825 encodes one whole message into a frame. connection queue depth is 64 and the grid cap is 1 MiB. The pre-existing universal 2 MiB statement is not newly introduced; the dangling link is.",
+            "The complete f560058da19e02716e6f943883a9508b447aff4e connection.rs patch replaces both obsolete references and states the 32 KiB target, 1 MiB cap and 64 MiB paper data bound. The repaired paragraph remains at pinned tip."
+          ],
+          "coverage_checked": [
+            "SPEC_impl.md:2973-2980 distinguishes ordinary packing from 1 MiB messages. No specification accepts a dangling link or the false universal bound.",
+            "Searched empty TODO.md Planned, plans/queue, BUGS.md, INDEX.md and active TRIAGE_OUTCOMES.md for REPLAY_CHUNK, writer-queue memory bounds and grid-message packing. No exact queued/planned cover. tmux-drop-from-docs's comment audit is already landed (plans/REPORTS.md:32), not an unlanded cover. No FILTER.md boundary applies to this source documentation defect."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": "None for the historical dangling-reference defect. No rendered rustdoc warning, build failure or runtime memory regression is claimed or observed.",
+          "original_stronger_consequence": "The lead suggested misleading memory-bound reasoning; the finding narrows attribution to deletion of the linked constant. The inherited numeric claim predates the range, and the later in-range repair is explicitly preserved.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Verified at 1ed482d, repaired by f560058d within the range. Do not falsely label it pre-range, presently unfixed, or a runtime resource regression."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": true,
+        "clearly_refuted_candidate": false,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "deleted-replay-chunk-leaves-connection-doc-reference",
+        "destination": "trailing-deleted-replay-chunk-leaves-connection-doc-reference.md"
+      }
+    },
+    {
+      "key": "g124/l3",
+      "owner": "g124",
+      "id": "l3",
+      "domain": "supervisor-request-admission",
+      "purpose": "supervisor-request-admission: crates/farhelm-supervisor/src/service/connection.rs; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 18,
+          "event": {
+            "version": 1,
+            "kind": "lead",
+            "id": "l3",
+            "state": "open",
+            "summary": "Natural-detach gate removal requires checking the earlier arbitration oracle",
+            "location": "crates/farhelm-supervisor/src/service/connection.rs:1494",
+            "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. TLDR: removing the natural-detach scheduling gate may be the tail of a lost regression test for an old viewer's verdict racing a replacement. Production identity checks alone would not refute such a test-oracle loss. Details: assigned patch removes the natural_detach_gate await in detach_naturally. Immediate-parent git grep across crates finds no test installing the gate, only its declaration, export and connection call. However the exclusive range base 6e423e30068b62c6cfa276c6d720ee35bb70387a does have an actual caller at crates/farhelm/tests/e2e/terminal_tabs.rs:2825. Thus lack of a parent test cannot be treated as pre-range absence. Exact checks next: trace the in-range test deletion and read its tested boundary, then find any grid equivalent or establish that its mechanism is obsolete; keep attribution limited to the assigned connection gate and tell parent if the actual test deletion belongs to an earlier group. Suggested bucket: other if a surviving contract loses its oracle; original possible consequence would be replacement attachment being disrupted by stale verdict, with no current runtime failure established. Confidence: concrete source lead, no execution. proposed_drop: false pending deletion/replacement checks. Could-be-highest: no established security or user-work-loss route for a missing test; retain potential stale-input/ownership implications only if the original test actually covers them. possible_cover: none in supplied neighbour records; no prohibited coverage sources searched. This is separate from l1's production input lifetime and l2's dangling doc reference."
+          }
+        },
+        {
+          "line": 19,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "l3",
+            "state": "open",
+            "summary": "Assigned gate removal follows an earlier in-range arbitration-test deletion",
+            "location": "crates/farhelm-supervisor/src/service/connection.rs:1494",
+            "detail": "Reviewed assigned commit: 1ed482dde220452e424973faf38a5e1318986333. Related test deletion: 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513, within the overall pinned range. TLDR: the assigned removal deletes an already-unused scheduling gate; it does not itself remove an active test. The earlier in-range migration did remove an arbitration regression oracle whose generic contract survives, and later f560058da19e02716e6f943883a9508b447aff4e adds a grid replacement. Preserve that provenance for parent ownership rather than calling it pre-range or asserting production correctness replaces the oracle. Details: exclusive base terminal_tabs.rs:2805-2899 contains takeover_reason_wins_over_a_gated_natural_detach. It first establishes a live owner, kills its tmux output client, waits until the natural arbiter reaches the gate, performs an explicit takeover, asserts TakenOver, releases the old arbiter, then checks fresh output through the winner. The tmux-client kill is obsolete in the host path; the competing explicit-vs-natural verdict contract is not. git log -G natural_detach_gate on this test path and the complete matching deletion hunk identify 647f0227 as its removal. Immediate-parent grep across crates/e2e finds the gate only in declarations/export and connection's call, with no test installing it. Thus deleting the call in assigned connection.rs:1494 has no active test caller to remove. At 1ed, targeted source searches of connection.rs, grid_stream/tests.rs, core/tests/host_terminals.rs and terminal_tabs.rs found no held natural-verdict replacement; ordinary takeover fixtures do not force that scheduling boundary. At pinned tip, core/tests/host_terminals.rs:3939-4055 contains takeover_reason_wins_over_a_held_natural_detach, introduced by f560 (scoped -G history). Its source explicitly says 'The removed end-to-end test held the arbiter with a fault seam that no longer exists' and uses mark_delete_in_progress as the production hold instead. It establishes the loser's input-failure verdict while held, admits the winner, releases the mark, checks only the takeover notice and fresh winner output. The final production gate is therefore unnecessary for the replacement mechanism. Suggested bucket: other for any independently retained historical test-coverage gap; no current runtime failure alleged. Confidence: confirmed source history/caller analysis, no execution. proposed_drop: narrowly, no test-oracle loss is caused by this assigned 1ed hook deletion because its only test caller was already removed; source-test-loss ownership belongs to the earlier 647f0227 terminal_tabs.rs patch, outside this group's assigned patch. This is scope/attribution coordination, not a claim the earlier gap predates the overall range or that later repair erases intermediate history. No parent drop accepted. Could-be-highest: no established security or user-work-loss route for this test concern; the original potential stale-verdict disruption is retained as a regression the missing oracle would have guarded. l1's distinct production command consequence is not subsumed here. possible_cover: no matching finding in supplied neighbours; parent may coordinate with the terminal_tabs deletion group. Material caveat: the old oracle used yield_now after releasing its gate rather than an explicit arbiter-completed acknowledgement, so do not call it a perfect race-completion proof. Production identity checks being correct are not used as a refutation of its distinct historical test value. This revision closes l3's source checks without broadening this group into an independent review of unassigned test deletion."
+          }
+        }
+      ],
+      "latest": {
+        "line": 19,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "l3",
+          "state": "open",
+          "summary": "Assigned gate removal follows an earlier in-range arbitration-test deletion",
+          "location": "crates/farhelm-supervisor/src/service/connection.rs:1494",
+          "detail": "Reviewed assigned commit: 1ed482dde220452e424973faf38a5e1318986333. Related test deletion: 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513, within the overall pinned range. TLDR: the assigned removal deletes an already-unused scheduling gate; it does not itself remove an active test. The earlier in-range migration did remove an arbitration regression oracle whose generic contract survives, and later f560058da19e02716e6f943883a9508b447aff4e adds a grid replacement. Preserve that provenance for parent ownership rather than calling it pre-range or asserting production correctness replaces the oracle. Details: exclusive base terminal_tabs.rs:2805-2899 contains takeover_reason_wins_over_a_gated_natural_detach. It first establishes a live owner, kills its tmux output client, waits until the natural arbiter reaches the gate, performs an explicit takeover, asserts TakenOver, releases the old arbiter, then checks fresh output through the winner. The tmux-client kill is obsolete in the host path; the competing explicit-vs-natural verdict contract is not. git log -G natural_detach_gate on this test path and the complete matching deletion hunk identify 647f0227 as its removal. Immediate-parent grep across crates/e2e finds the gate only in declarations/export and connection's call, with no test installing it. Thus deleting the call in assigned connection.rs:1494 has no active test caller to remove. At 1ed, targeted source searches of connection.rs, grid_stream/tests.rs, core/tests/host_terminals.rs and terminal_tabs.rs found no held natural-verdict replacement; ordinary takeover fixtures do not force that scheduling boundary. At pinned tip, core/tests/host_terminals.rs:3939-4055 contains takeover_reason_wins_over_a_held_natural_detach, introduced by f560 (scoped -G history). Its source explicitly says 'The removed end-to-end test held the arbiter with a fault seam that no longer exists' and uses mark_delete_in_progress as the production hold instead. It establishes the loser's input-failure verdict while held, admits the winner, releases the mark, checks only the takeover notice and fresh winner output. The final production gate is therefore unnecessary for the replacement mechanism. Suggested bucket: other for any independently retained historical test-coverage gap; no current runtime failure alleged. Confidence: confirmed source history/caller analysis, no execution. proposed_drop: narrowly, no test-oracle loss is caused by this assigned 1ed hook deletion because its only test caller was already removed; source-test-loss ownership belongs to the earlier 647f0227 terminal_tabs.rs patch, outside this group's assigned patch. This is scope/attribution coordination, not a claim the earlier gap predates the overall range or that later repair erases intermediate history. No parent drop accepted. Could-be-highest: no established security or user-work-loss route for this test concern; the original potential stale-verdict disruption is retained as a regression the missing oracle would have guarded. l1's distinct production command consequence is not subsumed here. possible_cover: no matching finding in supplied neighbours; parent may coordinate with the terminal_tabs deletion group. Material caveat: the old oracle used yield_now after releasing its gate rather than an explicit arbiter-completed acknowledgement, so do not call it a perfect race-completion proof. Production identity checks being correct are not used as a refutation of its distinct historical test value. This revision closes l3's source checks without broadening this group into an independent review of unassigned test deletion."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g124/findings.jsonl",
+        "id": "l3",
+        "line": 19,
+        "disposition": "rejected",
+        "group": "natural-detach-arbitration-oracle-migration-gap",
+        "reason": "Parent read full claims079.647f0227 removes the earlier natural-versus-takeover arbitration test;1ed482 then only deletes its already-unused hook. f560058 adds a host/grid replacement with held natural verdict, takeover notice and fresh winner output. Preserve historical test-coverage gap and complete attribution/repair, rather than claiming the gap lies outside the range or that the unused-hook deletion caused it. No current missing entire arbitration oracle established. Both old and new tests use yield without explicit arbiter completion, so the separate g101/l1 uncertainty still needs its own attribution/completion analysis; this repaired historical disposition does not refute it or certify its scheduler premise. Separate g124/l1 actual input-lifetime concern untouched."
+      },
+      "accepted_parent_decision": {
+        "key": "g124/l3",
+        "line": 19,
+        "disposition": "rejected",
+        "group": "natural-detach-arbitration-oracle-migration-gap",
+        "bucket": "other",
+        "recording": "repaired-in-range",
+        "needs_independent_drop_check": false,
+        "reason": "Parent read full claims079.647f0227 removes the earlier natural-versus-takeover arbitration test;1ed482 then only deletes its already-unused hook. f560058 adds a host/grid replacement with held natural verdict, takeover notice and fresh winner output. Preserve historical test-coverage gap and complete attribution/repair, rather than claiming the gap lies outside the range or that the unused-hook deletion caused it. No current missing entire arbitration oracle established. Both old and new tests use yield without explicit arbiter completion, so the separate g101/l1 uncertainty still needs its own attribution/completion analysis; this repaired historical disposition does not refute it or certify its scheduler premise. Separate g124/l1 actual input-lifetime concern untouched."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-079",
+          "key": "g124/l3",
+          "latest_line": 19,
+          "recommendation": "needs-parent",
+          "bucket": "other",
+          "underlying_key": "natural-detach-arbitration-oracle-migration-gap",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The assigned hook deletion removes an unused hook, but the overall range includes an earlier deletion of the arbitration test and a later grid replacement. Assignment boundaries do not make that earlier gap outside this review range. Preserve the history and reconcile ownership with the reviewer of the earlier test deletion; no current missing oracle is established.",
+          "checks": [
+            "Exclusive-base terminal_tabs.rs:2805-2899 forces the natural-versus-explicit takeover boundary using a tmux-client kill and a gate, then checks TakenOver and fresh winner output. The tmux mechanism is obsolete, while the arbitration contract survives. The old test uses yield_now after releasing the gate, not an explicit arbiter-completed acknowledgement.",
+            "Scoped historical log identifies 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513 deleting takeover_reason_wins_over_a_gated_natural_detach, and f560058da19e02716e6f943883a9508b447aff4e adding takeover_reason_wins_over_a_held_natural_detach. Both commits are in the pinned range.",
+            "git grep natural_detach_gate at 1ed482d's parent finds only the connection call and core declaration, no test caller. Pinned-tip core/tests/host_terminals.rs:3939-4055 holds arbitration using mark_delete_in_progress, witnesses a natural verdict before takeover, checks only TakenOver and fresh output through the winner. The complete replacement was read, not run."
+          ],
+          "coverage_checked": [
+            "SPEC.md Terminal experience and SPEC_impl.md Grid streams preserve exclusive takeover and detach behavior. They do not accept loss of a surviving regression contract.",
+            "Searched both specs, empty TODO.md Planned, plans/queue, BUGS.md, INDEX.md and active TRIAGE_OUTCOMES.md for arbitration, held natural detach and takeover test deletion. kicked-input-test-local-filter.md covers a different stale-frame test oracle, not this verdict-arbitration boundary. No exact open cover or FILTER.md boundary. Later source replacement is repair evidence, not an unlanded-plan cover."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": "No current missing arbitration oracle or shipped runtime failure is established. Parent must reconcile the earlier in-range deletion with its source owner and represent the later repair.",
+          "original_stronger_consequence": "Loss of regression protection against an old viewer's natural verdict disrupting a replacement. The latest narrow drop applies only to attribution of that loss to the unused-hook deletion; it does not erase the earlier in-range test deletion or subsume l1's production input lifetime issue.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Historical test-coverage gap, attributed to 647f0227 and repaired at f560058d. The assigned 1ed hook deletion alone is not its cause."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": false,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "natural-detach-arbitration-oracle-migration-gap",
+        "destination": null
+      }
+    }
+  ],
+  "replies": [
+    {
+      "turn": 1,
+      "reply": "Initial pass complete: all 1,068 assigned patch lines reviewed at the pinned revision.\n\nNo verified findings. Four candidates recorded; lead `l1` investigated and revised to a proposed-drop candidate. No open leads or unread assigned scope.\n\nFindings and progress logs updated. No runtime tests or reproductions performed."
+    },
+    {
+      "turn": 2,
+      "reply": "- Revised `l1` to a finding: accepted API sizes above 1,000 trigger output failure while input remains live, exposing the changed cancellation gap. Recorded the GUI’s 1,000-cell cap as a priority caveat.\n- Revised `c1` with the source proof refuting output-join deadlock.\n- Unresolved lead IDs: none.\n\nLogs updated; source analysis only."
+    },
+    {
+      "turn": 3,
+      "reply": "Discovery pass complete. Checked teardown scopes, ownership guards, pause deadlines, removed-symbol references, client-size contracts, and arbitration-test history.\n\n- New verified ID: `l2` — dangling documentation link, repaired later in-range.\n- New unverified-after-investigation IDs: none.\n- Open leads: none.\n\nSomething new was found. Findings and progress logs updated; source analysis only."
+    },
+    {
+      "turn": 4,
+      "reply": "Discovery pass 2 complete. Checked verdict routing, task identity, teardown ownership, pause deadlines, and references to removed helpers.\n\n- New verified IDs: none.\n- New unverified IDs: none.\n- Open leads: none.\n- Nothing new found.\n\nProgress updated; findings log unchanged. No runtime tests or reproductions."
+    }
+  ],
+  "progress": "# g124 progress\n\nInitial review complete, turn 1. Turn type/count: initial / 1. Discovery-pass count: 0 (no later synthesis or discovery turn performed).\n\nAssigned scope: all 1,068 lines of prep/parts/00922-000.patch, at commit 1ed482dde220452e424973faf38a5e1318986333, delivered through six evidence packets (1–180, 181–360, 361–540, 541–720, 721–900, 901–1068). No omitted or unread assigned material. Complete inventory commits field read; excluded coverage metadata not read. No checkout changes, tests, builds or reproductions.\n\nContracts read at the pinned revision: SPEC.md Terminal experience (2855–3187); SPEC_impl.md transport and Grid streams (2992–3187), writer progress and One owning helm (3290–3322), Answers bind to what was drawn (1071–1121), and terminal runtime input/recovery contract context (2090–2195). Root AGENTS.md End sentinel present; required Priority buckets and What goes in a feedback file read. Test checklist from brief applied to deleted test scope. Parent revision's entire deleted 247-line test hunk also inspected as context.\n\nInterfaces checked: connection input dispatch and disconnect cleanup; ActiveAttach and join_forwarder; GridSender shutdown; HostAttach decoding/queue/drop and Pump cancellation; natural/stalled detach arbiters; attach takeover installation; notify_detached nonblocking dispatch; host runtime queue acceptance; grid output bounds/packing and existing final-screen/flow-control tests as source. Output tasks do not await the attachments lock. Shutdown is signalled to every extracted attachment before joins. Input frames still require the same channel-plus-connection owner check under the attachments lock. Runtime-accepted input may outlive a viewer; failed/gone runtime input cannot drive a separately adopted replacement runtime.\n\nDurable records in findings.jsonl: c1, c2 and c3 are source-refuted candidates. l1 was opened as a lead, investigated and revised to a proposed-drop candidate; its possible highest consequence and the missing live-runtime route remain explicit for independent checking. No verified findings, no retained unverified finding, and no open lead. New verified IDs this pass: none. New unverified IDs this pass: none retained. Candidate IDs: c1, l1, c2, c3. l1's final revision corrects an earlier source citation label.\n\nNext action: return to caller for the separately prompted synthesis turn. No separate final report created. No coverage queues, excluded inventory metadata, TODO, plans, or triage records consulted.\n\n## Synthesis turn 2\n\nCompleted later-turn synthesis of cross-batch output/input cleanup interactions, production verdicts, legal encoder failures, and runtime finalization. Discovery-pass count remains 0; this was synthesis, not a separate discovery pass. All original assigned material remains read, with no omissions. No tests, builds or reproductions performed.\n\nRevisions: l1 reopened as a lead during checks, then revised to a source-supported finding. The previous broad 1000-dimension assumption was wrong: 1000 is the grid output cap, while the authenticated terminal API forwards sizes that the host accepts through 10000. A 1001-column resize establishes StreamFailed on a still-running input runtime. The partial-move input lifetime spans the global attachments unlock, unlike the parent's explicit backend drop, allowing a replacement to be admitted before old-pump cancellation is signalled. The finding distinguishes this new unpolled-input window from caller-reported pre-range g119/c4's already-polled handover race. It retains the potentially highest command-execution consequence and the material priority caveat that bundled GUI size generation caps at 1000; the proven route is authenticated API/scripted-client input.\n\nAdditional resolved premises: Gone/Unavailable stop runtime turns and finalization marks unsent input NotSent and drains/closes input_rx; an InputSequence stays bound to Weak<old Inner>. InputFailed already stopped its pump. Requested/ClientGone do not call natural detach; Stalled uses a separate scope that drops input before the guard. Source size/row/link/style/clipboard and counter checks were performed; theoretical counter exhaustion is not needed for the size route. Supervisor production startup uses Runtime::new and supports separate workers. notify_detached is non-awaiting, but that does not exclude cross-worker preemption between lock release and the remaining field drop.\n\nc1 revised with the full non-awaiting dispatcher proof and caller-reported independent g117/g125 confirmation. No parent drop accepted. c2/c3 unchanged. New verified finding ID this turn: l1 (source-supported, not executed). New unverified finding IDs: none retained. Open lead IDs: none. Current records: one finding l1; three proposed-drop candidates c1/c2/c3.\n\nOne evidence record call rejected malformed JSON in the temporary event file; it appended nothing. The JSON was repaired and the same complete l1 event was successfully appended through the evidence launcher. Diagnostic retained in the transcript. No coverage read/audit was substituted or bypassed.\n\nNext action: caller reviews l1's accepted-API route and priority caveat, then requests the next protocol turn if needed. No separate final report created.\n\n## Discovery turn 3\n\nSeparate discovery pass 1 completed after the required interface synthesis. Read discovery-neighbours.json through line 464 (all neighbour records) in bounded context chunks, without treating it as mandatory source credit or consulting prohibited coverage sources. Reused complete durable history. No unread assigned source; no expansion of the assigned patch. No tests, builds, reproductions or live-install actions.\n\nPending producer question resolved as far as accessible source allows and revised under original l1: the terminal module expressly declares size query fields and resize messages, and names script/bookmarked callers. That is an implementation-level authenticated client contract, not evidence of a stable public-terminal-API guarantee or bundled >1000 producer. Bundled grid GUI clamps to 1000. No ordinary CLI attach size producer found; internal agent-screen's 10000 limit is a separate development tool with no compatibility promise, not a trigger counted for ordinary session attachments. Parent retains independent priority judgment; original strongest command consequence and new not-yet-polled gap are preserved. No parent drop/lowering assumed.\n\nDiscovery checks: reread all changed live dispatch/cleanup sections and surrounding module/queue docs; checked input-failure explicit input drop, disconnect iteration drop scopes, stalled-detach scope, task-id/channel/connection checks, shared pause/deadline changes, and lingering retired-symbol references. Confirmed disconnect's sequential joins do not permit new admission before per-iteration input drops; revised c1 with that concrete scope proof, distinct from l1. Rechecked c3 through the exclusive base so its queued-input semantics and imprecise confirmation wording are established pre-range, not dismissed merely because they predate 1ed.\n\nNew verified finding: l2, a dangling REPLAY_CHUNK intra-doc link introduced by deleting its definition while retaining writer-queue/drain prose. The byte-stream memory explanation is inherited from the base, not newly caused here. Exact f560 connection.rs diff repairs both references and explains grid target versus hard bound; tip is corrected, while the charter includes the intermediate defect. No runtime/resource regression or rustdoc diagnostic execution claimed.\n\nNew considered lead l3 closed to a scope/attribution candidate: assigned natural-detach gate removal has no active parent test caller, but the old gated natural-vs-takeover oracle existed at the exclusive base and was deleted in-range by 647f0227 in terminal_tabs.rs. This is not labeled pre-range and correct production does not refute its historical test value. Exact tip replacement is takeover_reason_wins_over_a_held_natural_detach, introduced by f560 and using a Delete mark rather than the removed seam. Parent can coordinate that earlier test-deletion group; this pass does not independently broaden into its patch.\n\nResult: something new found, l2 only. New verified IDs: l2 (historical source documentation defect, later repaired). New unverified-after-investigation finding IDs: none. Remaining open leads: none. Candidate revisions/new considered records: c1, c3, l3. Existing l1 revised with producer/contract evidence only, not counted as new. Discovery-pass count: 1. No separate final report created. Next: return turn delta to caller.\n\n## Discovery turn 4\n\nSeparate discovery pass 2 complete. Refreshed discovery-neighbours.json through its current line 714 in bounded context chunks (version timestamp 2026-11-13T17:26:29.550Z); no named pending questions. Neighbour source claims were used for interface context/novelty only. No new reconciliation changes to this group's existing records were warranted. Complete prior finding/candidate history reused; no parent exclusion or priority lowering assumed.\n\nFresh assigned-scope checks: re-enumerated the assigned live additions/removals and reread the complete surviving ForwarderEnd dispatcher against GridSender's actual task identity and shutdown path; checked each verdict routes or suppresses notices as its contract says. Compared the comment-only changes in the shared pause/deadline machinery with the preserved function bodies and start-anchor transition. Rechecked ActiveAttach field ownership and join_forwarder interface against the input-failure/disconnect/stall scopes, without re-reporting known natural-detach lifetime concerns. Checked that removed tmux replay/death/recovery helpers, types and tracing macro are not still referenced in surviving connection source. The targeted symbol scan returned no use of wait_for_pane_death, wait_until_resumed, send_replay, AttachOutput, TmuxOutput, ReplayOccasion, RenderedReplay or info! in the reviewed connection module. No unresolved new call, verdict, ownership or link premise emerged beyond the already-recorded historical documentation issue.\n\nResult: nothing new found in this pass. New verified IDs: none. New unverified-after-investigation IDs: none. New candidate IDs: none. Open lead IDs: none. findings.jsonl remains at line 19 with no new events; no invented records were appended for an empty result. All assigned material remains read; no omissions or independent review of unassigned modules. Source analysis only: no runtime tests, builds, reproductions or live-install operations. Discovery-pass count: 2. Next action: return the empty discovery delta to caller.\n"
+}

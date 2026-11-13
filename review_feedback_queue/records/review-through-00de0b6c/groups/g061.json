@@ -1,0 +1,1111 @@
+{
+  "group": {
+    "id": "g061",
+    "domain": "release-build-payloads",
+    "purpose": "release-build-payloads: crates/farhelm-helm/src/tensorlake/build.rs, crates/farhelm-helm/src/environment/podman/build.rs, .github/workflows/release.yml; phases complete small per-commit changes",
+    "interfaces": [
+      "g005",
+      "g006",
+      "g058",
+      "g060",
+      "g062",
+      "g071",
+      "g072",
+      "g073",
+      "g188",
+      "g189",
+      "g190",
+      "g191",
+      "g192",
+      "g193",
+      "g194",
+      "g195",
+      "g196",
+      "g197",
+      "g003",
+      "g065"
+    ],
+    "sources": [
+      {
+        "path": "[private-run]/prep/parts/00127-000.patch",
+        "ranges": [
+          [
+            1,
+            191
+          ]
+        ],
+        "original_path": "crates/farhelm-helm/src/tensorlake/build.rs",
+        "commit": "56040bb964270bb40d191902173dbb84b3ba78fc",
+        "notes": "patch header; patch character offsets [0,9206)",
+        "lines": 191,
+        "bytes": 9208,
+        "start": 0,
+        "end": 9206,
+        "original": "[private-run]/prep/originals/00127.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/00179-000.patch",
+        "ranges": [
+          [
+            1,
+            847
+          ]
+        ],
+        "original_path": "crates/farhelm-helm/src/environment/podman/build.rs",
+        "commit": "56659839785691f76da3af5d8f51b511cff4ba8b",
+        "notes": "patch header; patch character offsets [0,33768)",
+        "lines": 847,
+        "bytes": 33768,
+        "start": 0,
+        "end": 33768,
+        "original": "[private-run]/prep/originals/00179.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/00207-000.patch",
+        "ranges": [
+          [
+            1,
+            468
+          ]
+        ],
+        "original_path": "crates/farhelm-helm/src/tensorlake/build.rs",
+        "commit": "56659839785691f76da3af5d8f51b511cff4ba8b",
+        "notes": "patch header; patch character offsets [0,20226)",
+        "lines": 468,
+        "bytes": 20226,
+        "start": 0,
+        "end": 20226,
+        "original": "[private-run]/prep/originals/00207.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/00275-000.patch",
+        "ranges": [
+          [
+            1,
+            21
+          ]
+        ],
+        "original_path": ".github/workflows/release.yml",
+        "commit": "04d85f0c98a9b635709d00b056719a0baa7fd3fc",
+        "notes": "patch header; patch character offsets [0,1197)",
+        "lines": 21,
+        "bytes": 1197,
+        "start": 0,
+        "end": 1197,
+        "original": "[private-run]/prep/originals/00275.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/00758-000.patch",
+        "ranges": [
+          [
+            1,
+            16
+          ]
+        ],
+        "original_path": ".github/workflows/release.yml",
+        "commit": "647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513",
+        "notes": "patch header; patch character offsets [0,935)",
+        "lines": 16,
+        "bytes": 935,
+        "start": 0,
+        "end": 935,
+        "original": "[private-run]/prep/originals/00758.patch"
+      }
+    ],
+    "lines": 1543,
+    "bytes": 65334
+  },
+  "records": [
+    {
+      "key": "g061/l1",
+      "owner": "g061",
+      "id": "l1",
+      "domain": "release-build-payloads",
+      "purpose": "release-build-payloads: crates/farhelm-helm/src/tensorlake/build.rs, crates/farhelm-helm/src/environment/podman/build.rs, .github/workflows/release.yml; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 1,
+          "event": {
+            "version": 1,
+            "kind": "lead",
+            "id": "l1",
+            "state": "open",
+            "summary": "Rebuild removes current image records before replacement succeeds",
+            "location": "crates/farhelm-helm/src/environment/podman/build.rs:258",
+            "detail": "Reviewed commit: 56659839785691f76da3af5d8f51b511cff4ba8b. TLDR: a failed container recipe rebuild may discard the recipe's previously usable software and installation checkpoints. Source: prepare_images moves state.image and state.prepared to retired_images before prepare_images_owned begins, and failure cleanup calls retire_images. Contract and callers still need checking. Suggested bucket: high/material UX if failed rebuild should preserve usable checkpoints; could-be-highest is not established because owned containers appear protected from image retirement. Confidence: uninvestigated lead. proposed_drop: false. possible_cover: none. Next checks: pinned SPEC/SPEC_impl rebuild contract, image retirement usage guards, launch and rebuild callers. No behavior observed through execution."
+          }
+        },
+        {
+          "line": 2,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "l1",
+            "state": "open",
+            "summary": "Failed container rebuild discards the previous usable images",
+            "location": "crates/farhelm-helm/src/environment/podman/build.rs:258",
+            "detail": "Reviewed commit: 56659839785691f76da3af5d8f51b511cff4ba8b. TLDR: rebuilding a working container recipe can delete its usable software and installation images even when the replacement fails. Future launches must rebuild and can remain blocked by the same installer, network or edited-base failure. Details: prepare_images removes both state.image and state.prepared into retired_images before calling prepare_images_owned. On any failure its cleanup calls retire_images, which deletes these prior images when no containers use them. This contradicts SPEC.md, Container sessions: 'Superseded Farhelm-built images are removed after successful replacement once no container uses them.' SPEC_impl.md, Podman places, creation and images likewise says 'After successful build/preparation replacement, remove a superseded owned image once no container uses it.' The current source records are already gone if cleanup fails or the helm exits. Keep old current records until a replacement software image is durably published, while forcing software() to build for an admitted Rebuild independently of cache presence. Suggested bucket: high/material UX. Confidence: confirmed by source and explicit contract; caller route still being inspected for completeness. proposed_drop: false. possible_cover: none. Could-be-highest: no established loss-of-user-work route; retire_images uses non-forcing removal and checks any container's use, so existing containers are protected. This finding concerns recipe availability and unnecessary rebuilding. No execution or reproduction performed."
+          }
+        },
+        {
+          "line": 10,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "l1",
+            "state": "open",
+            "summary": "Failed container rebuild discards the previous usable images",
+            "location": "crates/farhelm-helm/src/environment/podman/build.rs:253",
+            "detail": "Reviewed commit: 56659839785691f76da3af5d8f51b511cff4ba8b. TLDR: rebuilding a working container recipe can delete its usable software and installation images even when the replacement fails. Future launches must rebuild and can remain blocked by the same installer, network or edited-base failure. Details: prepare_images removes both state.image and state.prepared into retired_images before calling prepare_images_owned (build.rs:250-264). On any failure cleanup calls retire_images (:275), which deletes these prior images when no containers use them (:721-755). This contradicts SPEC.md:4809-4811, Container sessions: 'Superseded Farhelm-built images are removed after successful replacement once no container uses them.' SPEC_impl.md:6566 likewise says 'After successful build/preparation replacement, remove a superseded owned image once no container uses it.' Current records are already gone if cleanup fails or the helm exits. The concrete admitted Rebuild route is Podman::rebuild_recipe in podman.rs:913-942, which reads the current definition and supplies rebuild=true at :939. ensure_prepared (:993-1035) then sees no fresh image and joins or starts another build instead of reusing the lost prior checkpoint. Keep old current records until a replacement software image is durably published, while forcing software() to build for an admitted Rebuild independently of cache presence. Suggested bucket: high/material UX. Confidence: confirmed by source, caller analysis and explicit contract; no execution or reproduction performed. proposed_drop: false. possible_cover: none. Could-be-highest: no established loss-of-user-work route; retire_images uses non-forcing removal and checks any container's use, so existing containers are protected. The established consequence is lost recipe availability and unnecessary rebuilding, not destruction of files inside running containers."
+          }
+        },
+        {
+          "line": 12,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "l1",
+            "state": "open",
+            "summary": "Failed container rebuild discards the previous usable images",
+            "location": "crates/farhelm-helm/src/environment/podman/build.rs:253",
+            "detail": "Reviewed commit: 56659839785691f76da3af5d8f51b511cff4ba8b; unchanged affected implementation through pinned tip 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db. TLDR: a failed recipe rebuild discards the previously usable software and installation checkpoints, leaving future launches to rebuild and potentially fail for the same network, installer or edited-base reason. Source: prepare_images takes image/prepared into retired_images before replacement begins (build.rs:250-264), and its failure path attempts physical retirement (:267-278, :721-755). SPEC.md:4809-4811 requires removal 'after successful replacement once no container uses them'; SPEC_impl.md:6566 repeats the successful-replacement boundary. Rebuild is admitted with the current definition and rebuild=true in podman.rs:913-942; subsequent ensure_prepared calls (:993-1035) have no prior current checkpoint to reuse. Synthesis correction to fix guidance: merely removing the early state.image/state.prepared takes would hide the admitted Rebuild, because prepare_images_owned first returns a fresh prepared image (build.rs:306-307), then software independently returns an existing software image (:128-132). Rebuild needs explicit force intent past both reuse shortcuts until the replacement software layer is published. The existing publication transaction already replaces state.image and retires the predecessor together (:216-224), so old current records can remain available to concurrent launches until that boundary. Admission remains the same recipe/place job; a launch needing preparation joins its actual outcome, while a launch with a fresh old checkpoint can use it under the source guard until replacement. Once software replacement succeeds, old prepared provenance becomes stale naturally through source_image; a later preparation failure need not roll back a successful software rebuild. The confirmed loss contract concerns software failure before successful replacement; it does not require preserving old readiness after successful software replacement. Suggested bucket: high/material UX, unchanged. Confidence: confirmed source and explicit contract; no execution or reproduction. proposed_drop: false. possible_cover: none. Could-be-highest: no established user-work loss: non-forcing retirement and any-container use checks protect files/processes in existing containers. Original availability and unnecessary-rebuild consequences retained; no priority lowering."
+          }
+        },
+        {
+          "line": 13,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "l1",
+            "state": "open",
+            "summary": "Failed container rebuild discards the previous usable images",
+            "location": "crates/farhelm-helm/src/environment/podman/build.rs:253",
+            "detail": "Reviewed commit: 56659839785691f76da3af5d8f51b511cff4ba8b; affected implementation unchanged through pinned tip 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db. TLDR: a failed recipe rebuild discards the previously usable software and installation checkpoints, leaving future launches to rebuild and potentially fail for the same network, installer or edited-base reason. Source: prepare_images takes image/prepared into retired_images before replacement begins (build.rs:250-264), and failure attempts physical retirement (:267-278, :721-755). SPEC.md:4809-4811 requires removal 'after successful replacement once no container uses them'; SPEC_impl.md:6566 repeats that boundary. Rebuild is admitted with the current definition and rebuild=true in podman.rs:913-942; subsequent ensure_prepared calls (:993-1035) have no prior current checkpoint to reuse. Synthesis correction to fix guidance: simply removing the early takes would hide the admitted Rebuild, because prepare_images_owned first returns a fresh prepared image (build.rs:306-307), then software independently returns an existing software image (:128-132). Rebuild needs explicit force intent past both reuse shortcuts until replacement software is published. The existing transaction already replaces state.image and retires its predecessor together (:216-224). Keep old current records until that successful publication, so later launches can reuse them after a failed rebuild. Do not silently change active-job joining: SPEC_impl.md:6508-6509 requires concurrent requests to join that recipe/place's build or preparation. If records are preserved during Rebuild, ensure_prepared's current fresh-image-first ordering must also recognize an active job before ordinary reuse; retained records must not conceal admitted replacement work from launch joiners or Settings. Source selection still holds its existing guard through Running. Once software replacement succeeds, old prepared provenance becomes stale through source_image; a later preparation failure need not roll back a successful software rebuild. The confirmed failure contract concerns software failure before successful replacement; it does not require keeping old readiness after successful software replacement. Suggested bucket: high/material UX, unchanged. Confidence: confirmed source and explicit contract; no execution or reproduction. proposed_drop: false. possible_cover: none. Could-be-highest: no established user-work loss: non-forcing retirement and any-container use checks protect existing files/processes. Original availability and unnecessary-rebuild consequences retained; no priority lowering. This revision tightens the preceding fix sketch to preserve the contract's active-job joining requirement."
+          }
+        },
+        {
+          "line": 17,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "l1",
+            "state": "open",
+            "summary": "Failed container rebuild discards the previous usable images",
+            "location": "crates/farhelm-helm/src/environment/podman/build.rs:253",
+            "detail": "Reviewed commit: 56659839785691f76da3af5d8f51b511cff4ba8b; affected implementation unchanged through pinned tip 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db. TLDR: failure of an admitted container recipe Rebuild can discard the previous usable software and installation images, making later launches rebuild and potentially fail on the same external cause. Source: build.rs:250-264 removes both current records before replacement and :267-278 attempts retirement on failure; :721-755 deletes unused owned images without force. SPEC.md:4809-4811 and SPEC_impl.md:6566 require retirement after successful replacement. The admitted current-definition Rebuild route is podman.rs:913-942; ensure_prepared at :993-1035 then has no fallback records. Preserve the original availability/unnecessary-rebuild consequence, high/material UX recommendation and confirmed source confidence; no execution observed and no priority lowering. Rebuild force intent must bypass both prepared reuse at build.rs:306-307 and software reuse at :128-132 without hiding an active job. Retain old records until publication (:216-224); launch admission must still join active work per SPEC_impl.md:6508-6509. Successful software publication can legitimately stale old preparation even if later preparation fails; no software rollback is required then. Interface synthesis before discovery pass 1: supplied g058/l2 reports the exact same before-success retirement route and failure consequence. It is an alias for consolidation, not a new finding, new discovery or accepted drop. Original ID l1 remains open. proposed_drop: false. possible_cover: g058/l2 exact duplicate supplied in discovery-neighbours.json. Could-be-highest: no established user-work loss because retirement checks every container's use and is nonforcing. This alias does not alter original impact, fix constraints, caveats or bucket."
+          }
+        }
+      ],
+      "latest": {
+        "line": 17,
+        "event": {
+          "version": 1,
+          "kind": "finding",
+          "id": "l1",
+          "state": "open",
+          "summary": "Failed container rebuild discards the previous usable images",
+          "location": "crates/farhelm-helm/src/environment/podman/build.rs:253",
+          "detail": "Reviewed commit: 56659839785691f76da3af5d8f51b511cff4ba8b; affected implementation unchanged through pinned tip 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db. TLDR: failure of an admitted container recipe Rebuild can discard the previous usable software and installation images, making later launches rebuild and potentially fail on the same external cause. Source: build.rs:250-264 removes both current records before replacement and :267-278 attempts retirement on failure; :721-755 deletes unused owned images without force. SPEC.md:4809-4811 and SPEC_impl.md:6566 require retirement after successful replacement. The admitted current-definition Rebuild route is podman.rs:913-942; ensure_prepared at :993-1035 then has no fallback records. Preserve the original availability/unnecessary-rebuild consequence, high/material UX recommendation and confirmed source confidence; no execution observed and no priority lowering. Rebuild force intent must bypass both prepared reuse at build.rs:306-307 and software reuse at :128-132 without hiding an active job. Retain old records until publication (:216-224); launch admission must still join active work per SPEC_impl.md:6508-6509. Successful software publication can legitimately stale old preparation even if later preparation fails; no software rollback is required then. Interface synthesis before discovery pass 1: supplied g058/l2 reports the exact same before-success retirement route and failure consequence. It is an alias for consolidation, not a new finding, new discovery or accepted drop. Original ID l1 remains open. proposed_drop: false. possible_cover: g058/l2 exact duplicate supplied in discovery-neighbours.json. Could-be-highest: no established user-work loss because retirement checks every container's use and is nonforcing. This alias does not alter original impact, fix constraints, caveats or bucket."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g061/findings.jsonl",
+        "id": "l1",
+        "line": 17,
+        "disposition": "duplicate",
+        "group": "podman-rebuild-retires-fallback-before-success",
+        "reason": "Parent read complete claims-039 g061/l1 and claims-037 g058/l2. Both report the same admitted explicit Podman Rebuild taking current software/prepared records at build.rs:250-264 before replacement, retiring them on error, so later launch lacks a working fallback. Canonicalg058/l2 already retains high availability harm; g061 adds force intent past both reuse shortcuts, active-job joining and the successful-software/later-preparation distinction. Preserve all source references, continued-dependency-failure condition and no observed runtime/current-container-work-loss claim. This does not lower or refute the distinct highest implicit user-base pruning route g061/l8/g058/c2."
+      },
+      "accepted_parent_decision": {
+        "key": "g061/l1",
+        "line": 17,
+        "disposition": "duplicate",
+        "group": "podman-rebuild-retires-fallback-before-success",
+        "bucket": "high",
+        "recording": "same-failed-rebuild-fallback-defect",
+        "needs_independent_drop_check": false,
+        "reason": "Parent read complete claims-039 g061/l1 and claims-037 g058/l2. Both report the same admitted explicit Podman Rebuild taking current software/prepared records at build.rs:250-264 before replacement, retiring them on error, so later launch lacks a working fallback. Canonicalg058/l2 already retains high availability harm; g061 adds force intent past both reuse shortcuts, active-job joining and the successful-software/later-preparation distinction. Preserve all source references, continued-dependency-failure condition and no observed runtime/current-container-work-loss claim. This does not lower or refute the distinct highest implicit user-base pruning route g061/l8/g058/c2."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-039",
+          "key": "g061/l1",
+          "latest_line": 17,
+          "recommendation": "retain-verified",
+          "bucket": "high",
+          "underlying_key": "podman-rebuild-retires-current-images-before-success",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "An admitted Rebuild discards both reusable checkpoints before attempting replacement. Failure leaves subsequent launches rebuilding, contrary to the successful-replacement boundary. This is source-established availability loss, with no runtime reproduction.",
+          "checks": [
+            "56659839785691f76da3af5d8f51b511cff4ba8b:crates/farhelm-helm/src/environment/podman/build.rs:250-264 takes current image/prepared records before prepare_images_owned; 267-278 attempts retirement on failure; 690-757 verifies explicit ownership and container use before nonforcing removal.",
+            "Same revision: environment/podman.rs:913-942 admits current-definition Rebuild with rebuild=true; 993-1035 cannot reuse records removed by the failed job.",
+            "Same revision: build.rs:128-132 and 306-307 are separate reuse shortcuts; 216-224 already publishes the successful software replacement and retires its predecessor together. A fix must carry force intent past both shortcuts and preserve active-job joining required by SPEC_impl.md:6508-6509. Successful software replacement may legitimately stale prior preparation even if later preparation fails.",
+            "Diff from 5665983 to reviewed tip 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db has no changes to environment/podman/build.rs or tensorlake/build.rs.",
+            "The record names g058/l2 as an alias, but that named record was not supplied to this batch. Parent can reconcile the underlying key without treating the uninspected cross-batch record as checked coverage. Nonforcing removal protects existing containers; it does not settle the separate implicit-base-pruning defect in g061/l8."
+          ],
+          "coverage_checked": [
+            "Current SPEC.md:4885-4889 and SPEC_impl.md:6025-6050,6087-6091 require successful replacement before superseded retirement; they do not accept this failure route.",
+            "TODO.md:25-27 Planned is empty. BUGS.md records only the unrelated stalled provisioning-output helper. Active TRIAGE_OUTCOMES.md searches for rebuild, retired images, image cleanup/pruning, proxy, bootstrap and Podman found no matching decision.",
+            "plans/queue searched for the actual image-retirement/build-failure scope. podman-environments.md:251-253 repeats the required success boundary and is already landed per plans/REPORTS.md:21. environment-agent-operations.md:8-80 concerns agent authority/lifetime, not failed image replacement. No unlanded repair found.",
+            "INDEX.md read in full and searched. packages-build-result-retired-under-changed-image-source.md is a Tensorlake frozen-definition/result handoff defect; rebuild-order-test-misses-persistence-boundary.md concerns a Tensorlake test oracle. Neither covers this Podman implementation failure. No exact queued alias found.",
+            "FILTER.md read in full: failure can discard durable reusable image records and physical images. The rare self-correcting/display, hung-manager, session-history and upgrade filters do not cover that scope."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": "No missing premise for the availability defect. Work loss inside an existing container is not established. The distinct user-base pruning route is retained separately under g061/l8.",
+          "original_stronger_consequence": "A failed recipe rebuild deletes the previously usable software and installation checkpoints; later launches must rebuild and may fail for the same network, installer or edited-base cause. Existing-container files/processes were never claimed lost. The supplied history reports g058/l2 as the same route without changing this consequence.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Retain a high-priority source-confirmed availability finding; preserve force/reuse/joining fix constraints and the distinction from user-owned-base pruning. No accepted coverage or filter match."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": true,
+        "clearly_refuted_candidate": false,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "high",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "podman-rebuild-retires-fallback-before-success",
+        "destination": "trailing-podman-rebuild-retires-fallback-before-success.md"
+      }
+    },
+    {
+      "key": "g061/l2",
+      "owner": "g061",
+      "id": "l2",
+      "domain": "release-build-payloads",
+      "purpose": "release-build-payloads: crates/farhelm-helm/src/tensorlake/build.rs, crates/farhelm-helm/src/environment/podman/build.rs, .github/workflows/release.yml; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 3,
+          "event": {
+            "version": 1,
+            "kind": "lead",
+            "id": "l2",
+            "state": "open",
+            "summary": "Managed Ubuntu bootstrap starts apt before proxy setup",
+            "location": "crates/farhelm-helm/src/environment/podman/build.rs:41",
+            "detail": "Reviewed commit: 56659839785691f76da3af5d8f51b511cff4ba8b. TLDR: first-time builds on a container host that requires its configured HTTP proxy may fail during managed Ubuntu bootstrap. Source: managed_base invokes BOOTSTRAP, including apt update/install, before software calls proxies; Podman::run uses --http-proxy=false. Need inspect command route and container exec environment plus proxy specification to establish whether another path injects proxy values. Suggested bucket: high/material UX if required supported proxy configuration is bypassed. Could-be-highest: no established security or loss-of-work impact. Confidence: uninvestigated lead. proposed_drop: false. possible_cover: none. No execution performed."
+          }
+        },
+        {
+          "line": 4,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "l2",
+            "state": "open",
+            "summary": "Managed Ubuntu bootstrap receives proxies through private script input",
+            "location": "crates/farhelm-helm/src/environment/podman/build.rs:41",
+            "detail": "Reviewed commit: 56659839785691f76da3af5d8f51b511cff4ba8b. TLDR of considered issue: first-time builds on a container host requiring HTTP proxies appeared liable to fail because bootstrap apt precedes environment.d setup and Podman run disables implicit proxy inheritance. Source refutation: crates/farhelm-helm/src/environment/podman.rs:347-369 prepends build::proxy_exports(&ready.proxy) to every script before private stdin delivery, including managed_base's BOOTSTRAP invocation (build.rs:45). build.rs:421-432 unsets known names then shell-quotes and exports the observed values. Explicit script exports do not depend on the later user-manager environment file. Suggested bucket if real: high/material UX. Confidence: confirmed source refutation; no runtime observation. proposed_drop: the bootstrap already receives explicit proxy exports through Podman::script. possible_cover: none. Could-be-highest: no, the considered consequence was initial-build availability, with no established security or user-work loss route."
+          }
+        },
+        {
+          "line": 18,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "l2",
+            "state": "open",
+            "summary": "Bootstrap receives proxy exports; creation-time cache staleness is distinct",
+            "location": "crates/farhelm-helm/src/environment/podman/build.rs:41",
+            "detail": "Reviewed commit: 56659839785691f76da3af5d8f51b511cff4ba8b. Original considered consequence: managed Ubuntu's bootstrap apt might fail on a proxy-required host because it precedes environment.d setup and Podman run disables implicit inheritance. Source refutation of that exact missing-export claim remains: podman.rs:347-369 prepends build::proxy_exports(&ready.proxy) to every script, including managed_base BOOTSTRAP (build.rs:45); proxy_exports clears known names then quotes/exports the observed values. It does not depend on later manager-file setup. Suggested bucket if that claim were real: high/material UX. Confidence: confirmed source refutation, no execution. proposed_drop: explicit private script exports supply bootstrap proxies; this is only a proposed drop and has no parent acceptance. Could-be-highest: no established security/user-work loss from the considered bootstrap availability failure. Interface synthesis before discovery pass 1: caller-named g003/f1 line8 is a different, source-confirmed creation-time cache defect, not a refutation of the bootstrap-export mechanism or a new discovery here. I checked the original implementation: podman_probe.rs:324-332 accepts a same-route observation within FRESH_FOR, fresh :383-399 returns it without a new read, and runtime :338-362 accepts a same-route success without an age check. podman.rs:1197-1207 obtains ready through self.place and installs ready.proxy after new-container Running; :1225-1228 deliberately preserves an admitted environment's snapshot across later probes/retries/reboots. Thus explicit exports can still contain stale/absent cached host values. This agrees with g003/f1's separate creation-time consequence: new containers after a host-manager change may retain old proxies. It does not reopen the original claim that bootstrap gets no explicit values. The original SPEC.md:4802-4804 creation-time inheritance contract applies to that separate record. possible_cover: g003/f1 is the supplied owner for cache freshness and creation; no duplicate finding ID or novelty credit here. Preserve original bootstrap consequence and proposed-drop basis without treating correctness of one mechanism as a drop of the other defect. No runtime actions."
+          }
+        }
+      ],
+      "latest": {
+        "line": 18,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "l2",
+          "state": "open",
+          "summary": "Bootstrap receives proxy exports; creation-time cache staleness is distinct",
+          "location": "crates/farhelm-helm/src/environment/podman/build.rs:41",
+          "detail": "Reviewed commit: 56659839785691f76da3af5d8f51b511cff4ba8b. Original considered consequence: managed Ubuntu's bootstrap apt might fail on a proxy-required host because it precedes environment.d setup and Podman run disables implicit inheritance. Source refutation of that exact missing-export claim remains: podman.rs:347-369 prepends build::proxy_exports(&ready.proxy) to every script, including managed_base BOOTSTRAP (build.rs:45); proxy_exports clears known names then quotes/exports the observed values. It does not depend on later manager-file setup. Suggested bucket if that claim were real: high/material UX. Confidence: confirmed source refutation, no execution. proposed_drop: explicit private script exports supply bootstrap proxies; this is only a proposed drop and has no parent acceptance. Could-be-highest: no established security/user-work loss from the considered bootstrap availability failure. Interface synthesis before discovery pass 1: caller-named g003/f1 line8 is a different, source-confirmed creation-time cache defect, not a refutation of the bootstrap-export mechanism or a new discovery here. I checked the original implementation: podman_probe.rs:324-332 accepts a same-route observation within FRESH_FOR, fresh :383-399 returns it without a new read, and runtime :338-362 accepts a same-route success without an age check. podman.rs:1197-1207 obtains ready through self.place and installs ready.proxy after new-container Running; :1225-1228 deliberately preserves an admitted environment's snapshot across later probes/retries/reboots. Thus explicit exports can still contain stale/absent cached host values. This agrees with g003/f1's separate creation-time consequence: new containers after a host-manager change may retain old proxies. It does not reopen the original claim that bootstrap gets no explicit values. The original SPEC.md:4802-4804 creation-time inheritance contract applies to that separate record. possible_cover: g003/f1 is the supplied owner for cache freshness and creation; no duplicate finding ID or novelty credit here. Preserve original bootstrap consequence and proposed-drop basis without treating correctness of one mechanism as a drop of the other defect. No runtime actions."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g061/findings.jsonl",
+        "id": "l2",
+        "line": 18,
+        "disposition": "excluded",
+        "group": "podman-bootstrap-missing-explicit-proxy-exports",
+        "reason": "Parent explicitly accepted named refuted proposal from claims-039 after inspecting it. The exact missing-export suspicion is refuted: bootstrap scripts receive explicit proxy exports before apt runs. This does not refute stale cached proxy observations during later container creation. Propose dismissing only the missing-explicit-export claim, on direct historical source. No claim that all proxy-required builds succeed, or that cached creation-time proxy values are fresh. Checked source/results: [\"56659839785691f76da3af5d8f51b511cff4ba8b:crates/farhelm-helm/src/environment/podman/build.rs:41-46 calls self.script for BOOTSTRAP; environment/podman.rs:347-369 obtains ready.proxy and prepends proxy_exports before private stdin delivery.\",\"Same revision: build.rs:420-429 unsets known proxy variables and exports shell-quoted observed values. This mechanism precedes and does not depend on the later environment.d/user-manager setup at software:160-161.\",\"No runtime bootstrap or network behavior was executed. The supplied g003/f1 cache-freshness concern is a different input-value premise; it is not an alias or a basis to drop that separate record.\"] Current coverage/results: [\"SPEC.md:4877-4879 and SPEC_impl.md:6082-6085 specify host-manager proxy inheritance and explicit environment setup. They do not accept missing bootstrap exports; source supplies them.\",\"TODO Planned is empty; BUGS.md and active TRIAGE_OUTCOMES.md contain no matching bootstrap/export decision. plans/queue proxy hits are in the landed podman-environments plan or agent-operations context, not an unlanded fix for this exact claim.\",\"Full INDEX.md and targeted searches found no bootstrap missing-export queue item. Existing container/account inspection issues have different triggers and causes. No filter is used for this refutation.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"First-time managed Ubuntu builds might fail on a proxy-required host because apt precedes environment.d and implicit Podman inheritance is disabled; suggested high if real. Later history explicitly preserved a separate creation-time stale-proxy defect instead of withdrawing it with this mechanism.\"; \"The suspected absence of exports is contradicted by self.script. Correct freshness/content of ready.proxy remains a separate question owned by the supplied g003/f1 record.\"."
+      },
+      "accepted_parent_decision": {
+        "key": "g061/l2",
+        "line": 18,
+        "disposition": "excluded",
+        "group": "podman-bootstrap-missing-explicit-proxy-exports",
+        "bucket": "other",
+        "recording": "refuted",
+        "queue_target_candidate": null,
+        "needs_independent_drop_check": false,
+        "reason": "Parent explicitly accepted named refuted proposal from claims-039 after inspecting it. The exact missing-export suspicion is refuted: bootstrap scripts receive explicit proxy exports before apt runs. This does not refute stale cached proxy observations during later container creation. Propose dismissing only the missing-explicit-export claim, on direct historical source. No claim that all proxy-required builds succeed, or that cached creation-time proxy values are fresh. Checked source/results: [\"56659839785691f76da3af5d8f51b511cff4ba8b:crates/farhelm-helm/src/environment/podman/build.rs:41-46 calls self.script for BOOTSTRAP; environment/podman.rs:347-369 obtains ready.proxy and prepends proxy_exports before private stdin delivery.\",\"Same revision: build.rs:420-429 unsets known proxy variables and exports shell-quoted observed values. This mechanism precedes and does not depend on the later environment.d/user-manager setup at software:160-161.\",\"No runtime bootstrap or network behavior was executed. The supplied g003/f1 cache-freshness concern is a different input-value premise; it is not an alias or a basis to drop that separate record.\"] Current coverage/results: [\"SPEC.md:4877-4879 and SPEC_impl.md:6082-6085 specify host-manager proxy inheritance and explicit environment setup. They do not accept missing bootstrap exports; source supplies them.\",\"TODO Planned is empty; BUGS.md and active TRIAGE_OUTCOMES.md contain no matching bootstrap/export decision. plans/queue proxy hits are in the landed podman-environments plan or agent-operations context, not an unlanded fix for this exact claim.\",\"Full INDEX.md and targeted searches found no bootstrap missing-export queue item. Existing container/account inspection issues have different triggers and causes. No filter is used for this refutation.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"First-time managed Ubuntu builds might fail on a proxy-required host because apt precedes environment.d and implicit Podman inheritance is disabled; suggested high if real. Later history explicitly preserved a separate creation-time stale-proxy defect instead of withdrawing it with this mechanism.\"; \"The suspected absence of exports is contradicted by self.script. Correct freshness/content of ready.proxy remains a separate question owned by the supplied g003/f1 record.\"."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-039",
+          "key": "g061/l2",
+          "latest_line": 18,
+          "recommendation": "refuted",
+          "bucket": "other",
+          "underlying_key": "podman-bootstrap-missing-explicit-proxy-exports",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The exact missing-export suspicion is refuted: bootstrap scripts receive explicit proxy exports before apt runs. This does not refute stale cached proxy observations during later container creation.",
+          "checks": [
+            "56659839785691f76da3af5d8f51b511cff4ba8b:crates/farhelm-helm/src/environment/podman/build.rs:41-46 calls self.script for BOOTSTRAP; environment/podman.rs:347-369 obtains ready.proxy and prepends proxy_exports before private stdin delivery.",
+            "Same revision: build.rs:420-429 unsets known proxy variables and exports shell-quoted observed values. This mechanism precedes and does not depend on the later environment.d/user-manager setup at software:160-161.",
+            "No runtime bootstrap or network behavior was executed. The supplied g003/f1 cache-freshness concern is a different input-value premise; it is not an alias or a basis to drop that separate record."
+          ],
+          "coverage_checked": [
+            "SPEC.md:4877-4879 and SPEC_impl.md:6082-6085 specify host-manager proxy inheritance and explicit environment setup. They do not accept missing bootstrap exports; source supplies them.",
+            "TODO Planned is empty; BUGS.md and active TRIAGE_OUTCOMES.md contain no matching bootstrap/export decision. plans/queue proxy hits are in the landed podman-environments plan or agent-operations context, not an unlanded fix for this exact claim.",
+            "Full INDEX.md and targeted searches found no bootstrap missing-export queue item. Existing container/account inspection issues have different triggers and causes. No filter is used for this refutation."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": "The suspected absence of exports is contradicted by self.script. Correct freshness/content of ready.proxy remains a separate question owned by the supplied g003/f1 record.",
+          "original_stronger_consequence": "First-time managed Ubuntu builds might fail on a proxy-required host because apt precedes environment.d and implicit Podman inheritance is disabled; suggested high if real. Later history explicitly preserved a separate creation-time stale-proxy defect instead of withdrawing it with this mechanism.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Propose dismissing only the missing-explicit-export claim, on direct historical source. No claim that all proxy-required builds succeed, or that cached creation-time proxy values are fresh."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "high",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "podman-bootstrap-missing-explicit-proxy-exports",
+        "destination": null
+      }
+    },
+    {
+      "key": "g061/c3",
+      "owner": "g061",
+      "id": "c3",
+      "domain": "release-build-payloads",
+      "purpose": "release-build-payloads: crates/farhelm-helm/src/tensorlake/build.rs, crates/farhelm-helm/src/environment/podman/build.rs, .github/workflows/release.yml; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 5,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c3",
+            "state": "open",
+            "summary": "Removing focused tmux shutdown gate retains the driver regressions",
+            "location": ".github/workflows/release.yml:239",
+            "detail": "Reviewed commit: 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513. TLDR of considered issue: deleting the explicit shutdown gate might drop regression coverage for legacy terminals still served during the transition. Source checks: the removed scripts/test-tmux-pinned-shutdown.sh invoked three driver tests plus integration scenarios that created tmux sessions through the retired switch. All three driver tests still exist in crates/farhelm-supervisor/src/tmux/stream.rs:2632,2724,2845. The preceding release step still runs cargo nextest run --workspace --exclude farhelm-desktop under PATH selecting the pinned tmux, so removing their extra focused invocation does not remove them from the release run. SPEC_impl.md:2305 states 'the tests of the tmux driver build their own tmux servers'; :2970-2971 says the supervisor 'creates no old terminals and so never starts a server.' Retired integration scenarios no longer have their current-product creation route. This is not evidence of a release workflow regression. Suggested bucket if real: other/test coverage. Confidence: confirmed source analysis, no execution. proposed_drop: retained driver regressions remain in the workspace selection, and removal of tmux-creation scenarios accompanies the specified removal of new tmux creation. possible_cover: none. Could-be-highest: no established security or user-work loss consequence from this workflow deletion."
+          }
+        }
+      ],
+      "latest": {
+        "line": 5,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c3",
+          "state": "open",
+          "summary": "Removing focused tmux shutdown gate retains the driver regressions",
+          "location": ".github/workflows/release.yml:239",
+          "detail": "Reviewed commit: 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513. TLDR of considered issue: deleting the explicit shutdown gate might drop regression coverage for legacy terminals still served during the transition. Source checks: the removed scripts/test-tmux-pinned-shutdown.sh invoked three driver tests plus integration scenarios that created tmux sessions through the retired switch. All three driver tests still exist in crates/farhelm-supervisor/src/tmux/stream.rs:2632,2724,2845. The preceding release step still runs cargo nextest run --workspace --exclude farhelm-desktop under PATH selecting the pinned tmux, so removing their extra focused invocation does not remove them from the release run. SPEC_impl.md:2305 states 'the tests of the tmux driver build their own tmux servers'; :2970-2971 says the supervisor 'creates no old terminals and so never starts a server.' Retired integration scenarios no longer have their current-product creation route. This is not evidence of a release workflow regression. Suggested bucket if real: other/test coverage. Confidence: confirmed source analysis, no execution. proposed_drop: retained driver regressions remain in the workspace selection, and removal of tmux-creation scenarios accompanies the specified removal of new tmux creation. possible_cover: none. Could-be-highest: no established security or user-work loss consequence from this workflow deletion."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g061/findings.jsonl",
+        "id": "c3",
+        "line": 5,
+        "disposition": "excluded",
+        "group": "release-focused-tmux-shutdown-gate-removal-coverage",
+        "reason": "Parent explicitly accepted named refuted proposal from claims-039 after inspecting it. At the named intermediate revision, deleting the focused invocation does not remove the three surviving driver regressions from the workspace release selection. This conclusion does not claim those tests survive the later driver removal. Dismiss only the alleged loss of these driver regressions from the release selection at 647f022. Do not generalize this into certification of all legacy-terminal coverage or of later workflow revisions. Checked source/results: [\"647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513^:scripts/test-tmux-pinned-shutdown.sh names the three driver tests and integration tests using retired creation scenarios.\",\"647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513:crates/farhelm-supervisor/src/tmux/stream.rs:2632,2724,2845 still defines all three driver tests. .github/workflows/release.yml:228-239 still selects workspace Rust targets except desktop with pinned tmux on PATH.\",\"Same revision: SPEC_impl.md:2305-2307 says driver tests create their own tmux servers; 2965-2978 explains adoption of old terminals and no creation of new old terminals. The paired template/workflow patch removes only the redundant focused step in this concern.\",\"No tests were run. Source selection is evidence of retained selection, not proof that the substrate executed.\"] Current coverage/results: [\"Both current specifications searched for tmux shutdown/driver/test coverage; current contracts describe the subsequent retirement, not a requirement to retain the removed driver indefinitely. Historical governing sections checked above.\",\"TODO Planned is empty; no matching BUGS.md or active TRIAGE_OUTCOMES.md decision. tmux-end-old-terminals, tmux-drop-from-install and tmux-drop-from-tooling queue files describe the coordinated retirement and are landed, not unlanded remediation coverage.\",\"Full INDEX.md and targeted tmux/shutdown/pinned-builder searches found no exact queue item. No filter used; this is a narrow source refutation rather than acceptance of missing tests.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Removing the focused shutdown gate might drop regression coverage for legacy terminals still served during transition. The historical source refutation retains driver tests while new-tmux integration creation scenarios are retired.\"; \"No missing premise for the three-test selection conclusion at 647f022. Successful actual execution is unobserved. Later removal of the driver is outside this narrow retained-test claim.\"."
+      },
+      "accepted_parent_decision": {
+        "key": "g061/c3",
+        "line": 5,
+        "disposition": "excluded",
+        "group": "release-focused-tmux-shutdown-gate-removal-coverage",
+        "bucket": "other",
+        "recording": "refuted",
+        "queue_target_candidate": null,
+        "needs_independent_drop_check": false,
+        "reason": "Parent explicitly accepted named refuted proposal from claims-039 after inspecting it. At the named intermediate revision, deleting the focused invocation does not remove the three surviving driver regressions from the workspace release selection. This conclusion does not claim those tests survive the later driver removal. Dismiss only the alleged loss of these driver regressions from the release selection at 647f022. Do not generalize this into certification of all legacy-terminal coverage or of later workflow revisions. Checked source/results: [\"647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513^:scripts/test-tmux-pinned-shutdown.sh names the three driver tests and integration tests using retired creation scenarios.\",\"647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513:crates/farhelm-supervisor/src/tmux/stream.rs:2632,2724,2845 still defines all three driver tests. .github/workflows/release.yml:228-239 still selects workspace Rust targets except desktop with pinned tmux on PATH.\",\"Same revision: SPEC_impl.md:2305-2307 says driver tests create their own tmux servers; 2965-2978 explains adoption of old terminals and no creation of new old terminals. The paired template/workflow patch removes only the redundant focused step in this concern.\",\"No tests were run. Source selection is evidence of retained selection, not proof that the substrate executed.\"] Current coverage/results: [\"Both current specifications searched for tmux shutdown/driver/test coverage; current contracts describe the subsequent retirement, not a requirement to retain the removed driver indefinitely. Historical governing sections checked above.\",\"TODO Planned is empty; no matching BUGS.md or active TRIAGE_OUTCOMES.md decision. tmux-end-old-terminals, tmux-drop-from-install and tmux-drop-from-tooling queue files describe the coordinated retirement and are landed, not unlanded remediation coverage.\",\"Full INDEX.md and targeted tmux/shutdown/pinned-builder searches found no exact queue item. No filter used; this is a narrow source refutation rather than acceptance of missing tests.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Removing the focused shutdown gate might drop regression coverage for legacy terminals still served during transition. The historical source refutation retains driver tests while new-tmux integration creation scenarios are retired.\"; \"No missing premise for the three-test selection conclusion at 647f022. Successful actual execution is unobserved. Later removal of the driver is outside this narrow retained-test claim.\"."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-039",
+          "key": "g061/c3",
+          "latest_line": 5,
+          "recommendation": "refuted",
+          "bucket": "other",
+          "underlying_key": "release-focused-tmux-shutdown-gate-removal-coverage",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "At the named intermediate revision, deleting the focused invocation does not remove the three surviving driver regressions from the workspace release selection. This conclusion does not claim those tests survive the later driver removal.",
+          "checks": [
+            "647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513^:scripts/test-tmux-pinned-shutdown.sh names the three driver tests and integration tests using retired creation scenarios.",
+            "647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513:crates/farhelm-supervisor/src/tmux/stream.rs:2632,2724,2845 still defines all three driver tests. .github/workflows/release.yml:228-239 still selects workspace Rust targets except desktop with pinned tmux on PATH.",
+            "Same revision: SPEC_impl.md:2305-2307 says driver tests create their own tmux servers; 2965-2978 explains adoption of old terminals and no creation of new old terminals. The paired template/workflow patch removes only the redundant focused step in this concern.",
+            "No tests were run. Source selection is evidence of retained selection, not proof that the substrate executed."
+          ],
+          "coverage_checked": [
+            "Both current specifications searched for tmux shutdown/driver/test coverage; current contracts describe the subsequent retirement, not a requirement to retain the removed driver indefinitely. Historical governing sections checked above.",
+            "TODO Planned is empty; no matching BUGS.md or active TRIAGE_OUTCOMES.md decision. tmux-end-old-terminals, tmux-drop-from-install and tmux-drop-from-tooling queue files describe the coordinated retirement and are landed, not unlanded remediation coverage.",
+            "Full INDEX.md and targeted tmux/shutdown/pinned-builder searches found no exact queue item. No filter used; this is a narrow source refutation rather than acceptance of missing tests."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": "No missing premise for the three-test selection conclusion at 647f022. Successful actual execution is unobserved. Later removal of the driver is outside this narrow retained-test claim.",
+          "original_stronger_consequence": "Removing the focused shutdown gate might drop regression coverage for legacy terminals still served during transition. The historical source refutation retains driver tests while new-tmux integration creation scenarios are retired.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Dismiss only the alleged loss of these driver regressions from the release selection at 647f022. Do not generalize this into certification of all legacy-terminal coverage or of later workflow revisions."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "release-focused-tmux-shutdown-gate-removal-coverage",
+        "destination": null
+      }
+    },
+    {
+      "key": "g061/l4",
+      "owner": "g061",
+      "id": "l4",
+      "domain": "release-build-payloads",
+      "purpose": "release-build-payloads: crates/farhelm-helm/src/tensorlake/build.rs, crates/farhelm-helm/src/environment/podman/build.rs, .github/workflows/release.yml; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 6,
+          "event": {
+            "version": 1,
+            "kind": "lead",
+            "id": "l4",
+            "state": "open",
+            "summary": "An absent pending commit tag may prevent recipe deletion permanently",
+            "location": "crates/farhelm-helm/src/environment/podman/build.rs:748",
+            "detail": "Reviewed commit: 56659839785691f76da3af5d8f51b511cff4ba8b. TLDR: an interrupted image-capture request that never creates an image may leave the recipe and container host permanently blocked from deletion or retargeting. Source basis: Podman::commit records a fresh tag in retired_images before sending the command (podman.rs:505-524). Transport loss leaves that tag, while retire_images_unlocked refuses to clear any absent non-ID tag (build.rs:748 onward), with no visible age bound. Unlike helper creates, it records no settle timestamp. Need examine every retired_images writer, cleanup/removal routes and exact acceptance text for an alternate settlement path or an explicit intentional manual-recovery contract. Suggested bucket: high/material UX if no retry can clear the absent artifact. Could-be-highest: no established user-work or security loss; conservative retention blocks operations. Confidence: uninvestigated lead. proposed_drop: false. possible_cover: none. No execution performed."
+          }
+        },
+        {
+          "line": 7,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "l4",
+            "state": "open",
+            "summary": "Interrupted image capture can permanently block recipe cleanup",
+            "location": "crates/farhelm-helm/src/environment/podman/build.rs:748",
+            "detail": "Reviewed commit: 56659839785691f76da3af5d8f51b511cff4ba8b. TLDR: stopping the helm at the wrong point in an image build can leave a recipe permanently undeletable, even when its recorded image never existed. Its container host also remains protected from removal or retargeting by the retained recipe artifact. Details: Podman::commit persists a fresh lookup tag in retired_images before issuing podman commit (podman.rs:505-524). A helm crash after that durable write but before command dispatch leaves an absent tag that can never appear; a transport failure before remote dispatch has the same effect. On every retry, retire_images_unlocked rejects absence unless image_id(&id).is_ok() (build.rs:748-752); a lookup tag cannot satisfy that predicate. The only recovery branch converts a tag after positive image inspection (706-718), so it cannot settle this crash window. git grep over all retired_images writers found no alternate tag settlement path: commit clears on its own synchronous refusal/success; publication removes only exact canonical IDs; cleanup removes a tag only after positive observation. clean_images always calls this function before removing the place state (779-788), and delete_recipe_owned returns on provider cleanup error before deleting the recipe row (tensorlake/recipes.rs:610-614). SPEC_impl.md:6521 requires failures to retain records, and :6570 promises retryable explicit cleanup; conservative immediate retention is correct but permanent absence needs a bounded or otherwise certified settlement mechanism, such as a durable remotely owned commit job/outcome. Do not fix by immediately treating an absent tag as proof of failed commit: a disconnected commit may still publish. The existing tests.rs:464 scenario only covers absence followed by eventual image appearance, not the no-send crash window. Suggested bucket: high/material UX. Confidence: confirmed by source crash-window and exhaustive state-writer analysis; no execution or reproduction. proposed_drop: false. possible_cover: none. Could-be-highest: no established security or user-work-loss consequence; the established impact is permanently blocked cleanup and host administration. Rarity does not change that impact."
+          }
+        },
+        {
+          "line": 14,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "l4",
+            "state": "open",
+            "summary": "Interrupted image capture can permanently block recipe cleanup",
+            "location": "crates/farhelm-helm/src/environment/podman/build.rs:748",
+            "detail": "Reviewed commit: 56659839785691f76da3af5d8f51b511cff4ba8b; settlement paths checked through pinned tip 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db. TLDR: a helm crash during an image build can leave the recipe permanently undeletable even though the recorded image never existed, and block removal or retargeting of its container host. The decisive no-dispatch window is after Podman::commit's awaited durable retired_images.push(tag) completes (podman.rs:505-511) and before the following command future is polled/dispatched (:512-525); stopping the helm there destroys the stack frame, so its later refusal/success settlement cannot run and no image can later appear from that invocation. Enumerated every production retirement-tag settlement at the pinned tip: (1) commit's own definite refusal plus absent tag clears it (:526-534); (2) successful commit parses an image ID then replaces the tag (:542-550); (3) retire_images_unlocked sees an existing tagged image, verifies ownership, persists its canonical ID, checks all containers and removes without force (build.rs:690-747); (4) absent canonical IDs can be cleared (:748-757). None settles an absent lookup tag after the no-dispatch crash. Software/prepared publication removes canonical IDs, not earlier random tags (:219,:387). The sole place-map removal is clean_images :788, reached only after tag cleanup succeeds (:785-787). Full searches for retired_images, state.podman, whole-state reset and recipe state SQL found no other production reset: definition saves and historical migrations change spec_json only; recipe deletion refuses needs_cleanup (tensorlake/recipes.rs:414-420). Leftover deletion removes containers, not recipe image records (podman.rs:725-763). Host removal/retarget checks retained PodmanRecipeState::needs_cleanup in store/podman.rs:213-249. git log/diff across the remainder of the range shows no later change to these paths; the only podman.rs follow-up changes an unrelated lifecycle lock. SPEC_impl.md:6521 requires failed cleanup records retained and :6570 requires retryable explicit cleanup; retaining ambiguity immediately is necessary, but this crash window has no recovery through the product. Keep original high/material UX bucket and blocked-cleanup/host-administration consequence. Confidence: confirmed source crash-window and enumerated production settlement analysis; no execution or reproduction. proposed_drop: false. possible_cover: none. Could-be-highest: no established security/user-work-loss route. Fix caveat: absence alone is NOT proof a remotely dispatched commit has stopped. Do not clear tags immediately or apply a guessed age bound without establishing remote process completion. A durable remotely owned operation/outcome or another certified completion mechanism is needed; the finding does not authorize unsafe deletion. Existing tests cover absence followed by positive image appearance, not this never-dispatched case. No priority lowering."
+          }
+        }
+      ],
+      "latest": {
+        "line": 14,
+        "event": {
+          "version": 1,
+          "kind": "finding",
+          "id": "l4",
+          "state": "open",
+          "summary": "Interrupted image capture can permanently block recipe cleanup",
+          "location": "crates/farhelm-helm/src/environment/podman/build.rs:748",
+          "detail": "Reviewed commit: 56659839785691f76da3af5d8f51b511cff4ba8b; settlement paths checked through pinned tip 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db. TLDR: a helm crash during an image build can leave the recipe permanently undeletable even though the recorded image never existed, and block removal or retargeting of its container host. The decisive no-dispatch window is after Podman::commit's awaited durable retired_images.push(tag) completes (podman.rs:505-511) and before the following command future is polled/dispatched (:512-525); stopping the helm there destroys the stack frame, so its later refusal/success settlement cannot run and no image can later appear from that invocation. Enumerated every production retirement-tag settlement at the pinned tip: (1) commit's own definite refusal plus absent tag clears it (:526-534); (2) successful commit parses an image ID then replaces the tag (:542-550); (3) retire_images_unlocked sees an existing tagged image, verifies ownership, persists its canonical ID, checks all containers and removes without force (build.rs:690-747); (4) absent canonical IDs can be cleared (:748-757). None settles an absent lookup tag after the no-dispatch crash. Software/prepared publication removes canonical IDs, not earlier random tags (:219,:387). The sole place-map removal is clean_images :788, reached only after tag cleanup succeeds (:785-787). Full searches for retired_images, state.podman, whole-state reset and recipe state SQL found no other production reset: definition saves and historical migrations change spec_json only; recipe deletion refuses needs_cleanup (tensorlake/recipes.rs:414-420). Leftover deletion removes containers, not recipe image records (podman.rs:725-763). Host removal/retarget checks retained PodmanRecipeState::needs_cleanup in store/podman.rs:213-249. git log/diff across the remainder of the range shows no later change to these paths; the only podman.rs follow-up changes an unrelated lifecycle lock. SPEC_impl.md:6521 requires failed cleanup records retained and :6570 requires retryable explicit cleanup; retaining ambiguity immediately is necessary, but this crash window has no recovery through the product. Keep original high/material UX bucket and blocked-cleanup/host-administration consequence. Confidence: confirmed source crash-window and enumerated production settlement analysis; no execution or reproduction. proposed_drop: false. possible_cover: none. Could-be-highest: no established security/user-work-loss route. Fix caveat: absence alone is NOT proof a remotely dispatched commit has stopped. Do not clear tags immediately or apply a guessed age bound without establishing remote process completion. A durable remotely owned operation/outcome or another certified completion mechanism is needed; the finding does not authorize unsafe deletion. Existing tests cover absence followed by positive image appearance, not this never-dispatched case. No priority lowering."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g061/findings.jsonl",
+        "id": "l4",
+        "line": 14,
+        "disposition": "verified",
+        "group": "podman-pending-commit-tag-no-dispatch-crash-never-settles",
+        "reason": "Parent explicitly accepted named retain-verified proposal from claims-039 after inspecting it. A crash after persisting the fresh lookup tag but before dispatch leaves an image that can never appear and a record no ordinary cleanup path can clear. Recipe deletion and container-host removal/retargeting remain blocked. Retain high for permanent blocked cleanup and host administration. Preserve the remote-ambiguity safety constraint and source-only confidence. Checked source/results: [\"56659839785691f76da3af5d8f51b511cff4ba8b:environment/podman.rs:505-525 awaits the persistent retired_images tag write before constructing/polling command dispatch. A process crash in between loses the future's later settlement.\",\"Same revision: podman.rs:526-550 clears a definitely refused absent tag or replaces a successful tag with canonical ID. build.rs:690-719 converts a tag only after positive image observation; 748-757 refuses absent non-ID tags. clean_images:779-788 removes place state only after successful retirement.\",\"At reviewed tip 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db, git grep enumerates production retired_images mutations only in podman.rs, podman/build.rs and the state definition. No alternate absent-tag settlement appears in that complete named-field writer set.\",\"5665983:tensorlake/recipes.rs:610-614 returns provider cleanup failure before recipe deletion; 414-420 refuses residual cleanup state. store/podman.rs:213-249 refuses removing or retargeting a place with needs_cleanup recipe state. Relevant build implementation remains unchanged to tip.\",\"This is a source crash-window argument, not an executed crash or transport-loss reproduction. Absence alone cannot safely settle a genuinely dispatched remote commit.\"] Current coverage/results: [\"SPEC.md:4870-4874 keeps place routes until cleanup; SPEC_impl.md:6039-6044 requires retained failure records, and 6087-6091 promises retryable explicit cleanup. Neither accepts permanent blockage after a never-dispatched capture.\",\"TODO Planned empty; BUGS.md concerns provisioning pipes only; active TRIAGE_OUTCOMES.md has no commit-tag/image-cleanup decision. podman-environments.md is already landed; its definite-create-refusal follow-up does not settle never-dispatched image commits. No unlanded plan fixes the tag state machine.\",\"Full INDEX.md and image/capture/cleanup searches found no exact queue item. The older interrupted-image-inspection-leaves-unnamed-allocation item concerns another inspector's container allocation, not durable commit lookup tags.\",\"FILTER.md does not cover durable administration blockage: no ordinary retry can clear it. The hung-manager and session-history boundaries do not match.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"An interrupted capture can permanently block recipe deletion and its place host's removal/retargeting. Conservative immediate retention is necessary; the defect is absence of eventual certified settlement. Do not fix with immediate absence acceptance or an arbitrary age timeout.\"; \"None for the no-dispatch crash window. Other transport-failure routes need actual remote outcome knowledge and are not necessary to this proof.\"."
+      },
+      "accepted_parent_decision": {
+        "key": "g061/l4",
+        "line": 14,
+        "disposition": "verified",
+        "group": "podman-pending-commit-tag-no-dispatch-crash-never-settles",
+        "bucket": "high",
+        "recording": "retain-verified",
+        "queue_target_candidate": null,
+        "needs_independent_drop_check": false,
+        "reason": "Parent explicitly accepted named retain-verified proposal from claims-039 after inspecting it. A crash after persisting the fresh lookup tag but before dispatch leaves an image that can never appear and a record no ordinary cleanup path can clear. Recipe deletion and container-host removal/retargeting remain blocked. Retain high for permanent blocked cleanup and host administration. Preserve the remote-ambiguity safety constraint and source-only confidence. Checked source/results: [\"56659839785691f76da3af5d8f51b511cff4ba8b:environment/podman.rs:505-525 awaits the persistent retired_images tag write before constructing/polling command dispatch. A process crash in between loses the future's later settlement.\",\"Same revision: podman.rs:526-550 clears a definitely refused absent tag or replaces a successful tag with canonical ID. build.rs:690-719 converts a tag only after positive image observation; 748-757 refuses absent non-ID tags. clean_images:779-788 removes place state only after successful retirement.\",\"At reviewed tip 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db, git grep enumerates production retired_images mutations only in podman.rs, podman/build.rs and the state definition. No alternate absent-tag settlement appears in that complete named-field writer set.\",\"5665983:tensorlake/recipes.rs:610-614 returns provider cleanup failure before recipe deletion; 414-420 refuses residual cleanup state. store/podman.rs:213-249 refuses removing or retargeting a place with needs_cleanup recipe state. Relevant build implementation remains unchanged to tip.\",\"This is a source crash-window argument, not an executed crash or transport-loss reproduction. Absence alone cannot safely settle a genuinely dispatched remote commit.\"] Current coverage/results: [\"SPEC.md:4870-4874 keeps place routes until cleanup; SPEC_impl.md:6039-6044 requires retained failure records, and 6087-6091 promises retryable explicit cleanup. Neither accepts permanent blockage after a never-dispatched capture.\",\"TODO Planned empty; BUGS.md concerns provisioning pipes only; active TRIAGE_OUTCOMES.md has no commit-tag/image-cleanup decision. podman-environments.md is already landed; its definite-create-refusal follow-up does not settle never-dispatched image commits. No unlanded plan fixes the tag state machine.\",\"Full INDEX.md and image/capture/cleanup searches found no exact queue item. The older interrupted-image-inspection-leaves-unnamed-allocation item concerns another inspector's container allocation, not durable commit lookup tags.\",\"FILTER.md does not cover durable administration blockage: no ordinary retry can clear it. The hung-manager and session-history boundaries do not match.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"An interrupted capture can permanently block recipe deletion and its place host's removal/retargeting. Conservative immediate retention is necessary; the defect is absence of eventual certified settlement. Do not fix with immediate absence acceptance or an arbitrary age timeout.\"; \"None for the no-dispatch crash window. Other transport-failure routes need actual remote outcome knowledge and are not necessary to this proof.\"."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-039",
+          "key": "g061/l4",
+          "latest_line": 14,
+          "recommendation": "retain-verified",
+          "bucket": "high",
+          "underlying_key": "podman-pending-commit-tag-no-dispatch-crash-never-settles",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "A crash after persisting the fresh lookup tag but before dispatch leaves an image that can never appear and a record no ordinary cleanup path can clear. Recipe deletion and container-host removal/retargeting remain blocked.",
+          "checks": [
+            "56659839785691f76da3af5d8f51b511cff4ba8b:environment/podman.rs:505-525 awaits the persistent retired_images tag write before constructing/polling command dispatch. A process crash in between loses the future's later settlement.",
+            "Same revision: podman.rs:526-550 clears a definitely refused absent tag or replaces a successful tag with canonical ID. build.rs:690-719 converts a tag only after positive image observation; 748-757 refuses absent non-ID tags. clean_images:779-788 removes place state only after successful retirement.",
+            "At reviewed tip 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db, git grep enumerates production retired_images mutations only in podman.rs, podman/build.rs and the state definition. No alternate absent-tag settlement appears in that complete named-field writer set.",
+            "5665983:tensorlake/recipes.rs:610-614 returns provider cleanup failure before recipe deletion; 414-420 refuses residual cleanup state. store/podman.rs:213-249 refuses removing or retargeting a place with needs_cleanup recipe state. Relevant build implementation remains unchanged to tip.",
+            "This is a source crash-window argument, not an executed crash or transport-loss reproduction. Absence alone cannot safely settle a genuinely dispatched remote commit."
+          ],
+          "coverage_checked": [
+            "SPEC.md:4870-4874 keeps place routes until cleanup; SPEC_impl.md:6039-6044 requires retained failure records, and 6087-6091 promises retryable explicit cleanup. Neither accepts permanent blockage after a never-dispatched capture.",
+            "TODO Planned empty; BUGS.md concerns provisioning pipes only; active TRIAGE_OUTCOMES.md has no commit-tag/image-cleanup decision. podman-environments.md is already landed; its definite-create-refusal follow-up does not settle never-dispatched image commits. No unlanded plan fixes the tag state machine.",
+            "Full INDEX.md and image/capture/cleanup searches found no exact queue item. The older interrupted-image-inspection-leaves-unnamed-allocation item concerns another inspector's container allocation, not durable commit lookup tags.",
+            "FILTER.md does not cover durable administration blockage: no ordinary retry can clear it. The hung-manager and session-history boundaries do not match."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": "None for the no-dispatch crash window. Other transport-failure routes need actual remote outcome knowledge and are not necessary to this proof.",
+          "original_stronger_consequence": "An interrupted capture can permanently block recipe deletion and its place host's removal/retargeting. Conservative immediate retention is necessary; the defect is absence of eventual certified settlement. Do not fix with immediate absence acceptance or an arbitrary age timeout.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Retain high for permanent blocked cleanup and host administration. Preserve the remote-ambiguity safety constraint and source-only confidence."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": true,
+        "clearly_refuted_candidate": false,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "high",
+        "confidence": "Source-confirmed by an existing parent decision; not runtime reproduced",
+        "deduplication_key": "podman-pending-commit-tag-no-dispatch-crash-never-settles",
+        "destination": "trailing-podman-pending-commit-tag-no-dispatch-crash-never-settles.md"
+      }
+    },
+    {
+      "key": "g061/l5",
+      "owner": "g061",
+      "id": "l5",
+      "domain": "release-build-payloads",
+      "purpose": "release-build-payloads: crates/farhelm-helm/src/tensorlake/build.rs, crates/farhelm-helm/src/environment/podman/build.rs, .github/workflows/release.yml; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 8,
+          "event": {
+            "version": 1,
+            "kind": "lead",
+            "id": "l5",
+            "state": "open",
+            "summary": "Podman job completion may not invalidate the per-place building view",
+            "location": "crates/farhelm-helm/src/tensorlake/build.rs:696",
+            "detail": "Reviewed commit: 56659839785691f76da3af5d8f51b511cff4ba8b. TLDR: Settings may retain a building status after a container recipe job ends, and an early failed prerequisite check may disappear without a reported failure. Source basis: place_view derives building from podman_jobs membership. start_podman publishes watch result and removes admission on drop without bumping the fleet feed. prepare_images bumps events before the admission guard drops, while rebuild_recipe's fresh prerequisite check can fail before prepare_images runs at all (podman.rs:936-940). Need inspect actual Rebuild HTTP route, UI invalidation behavior, and FleetEvents consumption before concluding observable behavior or severity. Suggested bucket: other or high depending on established persistence and remedy. Could-be-highest: no security/user-work loss route. Confidence: uninvestigated lead. proposed_drop: false. possible_cover: none. No execution performed."
+          }
+        },
+        {
+          "line": 9,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "l5",
+            "state": "open",
+            "summary": "Container job completion lacks a final fleet invalidation",
+            "location": "crates/farhelm-helm/src/tensorlake/build.rs:718",
+            "detail": "Reviewed commit: 56659839785691f76da3af5d8f51b511cff4ba8b. TLDR: a recipe list reader can retain Preparing and a disabled Rebuild button after container image work has completed, until another change refreshes the list or it is reopened. Details: place_view derives building from podman_jobs membership (build.rs:601-610). start_podman publishes the job result at 723, then PodmanJobAdmission::drop removes the registry entry at 443-446, without publishing a fleet invalidation afterward. prepare_images sends its final event at podman/build.rs:288 while this admission guard still exists; its success path also publishes Ready at :404 while the job is still registered. A concurrent GET served between that event and admission removal truthfully reads building=true but spends the last invalidation on that state. The Rebuild endpoint returns 202 without a later completion invalidation (hosts.rs:4402-4407); FleetEvents explicitly carries no payload and asks readers to reread current state (feed.rs:14-30). Unlike the existing Tensorlake task at the earlier reviewed revision 56040bb964270bb40d191902173dbb84b3ba78fc, build.rs:642-653, Podman does not bump after registry removal. The new per-place GUI caller is integrated in the next commit 350a4b33b6d4476f4a78e43cea124bc2b828f462: RecipeList restarts place_status on fleet notices or changed host-probe observations (tensorlake/recipes.rs:367-385), and RecipePlaces disables Rebuild on row.building (containers_settings.rs:257-260). A settled, unchanged probe does not provide a build-completion event. At the reviewed 5665983 revision this is a backend feed-contract defect; that subsequent caller establishes the visible consequence after integration. Fix completion publication to remove admission before bumping, also handling panics/cancellation consistently. Suggested bucket: other, a source-proven notification ordering race whose occurrence and duration were not measured. Confidence: confirmed missing invalidation and source-supported concurrent schedule, not execution-observed behavior. proposed_drop: false. possible_cover: none. Could-be-highest: no established security or user-work loss route. Caveat on the original early-prerequisite concern: a failed fresh probe may become visible through the GUI's place-observation refresh, so silent prerequisite failure is not claimed as a separate confirmed consequence."
+          }
+        },
+        {
+          "line": 11,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "l5",
+            "state": "open",
+            "summary": "Container job completion lacks a final fleet invalidation",
+            "location": "crates/farhelm-helm/src/tensorlake/build.rs:718",
+            "detail": "Reviewed commit: 56659839785691f76da3af5d8f51b511cff4ba8b. TLDR: a recipe list reader can retain Preparing and a disabled Rebuild button after container image work completes, until another change refreshes the list or it is reopened. Details: place_view derives building from podman_jobs membership (build.rs:605-615). start_podman publishes the watch result at :723, then PodmanJobAdmission::drop removes the registry entry at :446-448, without a fleet invalidation afterward. prepare_images sends its final event at environment/podman/build.rs:288 while that admission guard still exists; success also publishes Ready at :404 while still registered. A concurrent GET between the event and registry removal reads building=true but spends the last invalidation on that state. The Rebuild endpoint returns 202 without completion invalidation (hosts.rs:4402-4407). FleetEvents carries no payload and requires readers to reread current state (feed.rs:14-30). The existing Tensorlake task removes admission before bumping (56040bb964270bb40d191902173dbb84b3ba78fc, tensorlake/build.rs:642-653). The subsequent GUI integration commit 350a4b33b6d4476f4a78e43cea124bc2b828f462 establishes the visible route: RecipeList refreshes place_status on fleet notices or changed host-probe observations (tensorlake/recipes.rs:367-385); RecipePlaces disables Rebuild on row.building (containers_settings.rs:257-260). Settled unchanged probes provide no completion invalidation. At the reviewed revision this is a backend feed-contract defect; that later caller establishes its GUI consequence. Publish completion after removing admission, handling panic/cancellation consistently. Suggested bucket: other; the notification ordering race is supported by source, but frequency and duration were not measured. Confidence: confirmed missing invalidation and source-supported concurrent schedule; no execution or reproduction. proposed_drop: false. possible_cover: none. Could-be-highest: no security or user-work loss route. Caveat preserving the original lead: a failed fresh prerequisite probe may become visible through the GUI's place-observation refresh, so silent prerequisite failure is not claimed separately. This revision corrects source line ranges in the earlier event; consequence and bucket are unchanged."
+          }
+        },
+        {
+          "line": 15,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "l5",
+            "state": "open",
+            "summary": "Container job completion lacks a final fleet invalidation",
+            "location": "crates/farhelm-helm/src/tensorlake/build.rs:718",
+            "detail": "Reviewed commit: 56659839785691f76da3af5d8f51b511cff4ba8b; GUI caller checked at integration commit 350a4b33b6d4476f4a78e43cea124bc2b828f462. TLDR: a successful recipe-status refresh can retain Preparing and disable Rebuild after container image work ends, until another invalidation, changed place observation or remount refreshes it. The independent HTTP read-failure/retry problem supplied by the caller as g060/l1 is not required for this consequence. Source: place_view derives building from podman_jobs membership (tensorlake/build.rs:605-615). prepare_images bumps at environment/podman/build.rs:288, and success enters Ready and bumps at :404, while the job remains registered. Only after work returns does start_podman set the watch result (:718-723), then PodmanJobAdmission::drop removes admission (:446-448); neither sends a fleet invalidation. A successful GET concurrent with the final bump but before removal can return building=true. A feed notice is not the resulting view; FleetEvents requires a later REST read (feed.rs:14-30). The GUI at 350a4b3 reads place_status through a separate resource restarted on feed notices or changed successful place observations (tensorlake/recipes.rs:367-385); RecipePlaces disables Rebuild on row.building (containers_settings.rs:257-260). Its initial POST success invokes on_refresh (:270-279), but that is admission, not job completion, and normally precedes long image work. A settled unchanged place cache does not rescue this: use_environment_places reads periodically only while a probe is in flight or the feed fallback is active (environment_ui.rs:684-724). Distinction from g060/l1, confirmed directly in source: failed place_status renders an error with no retry (containers_settings.rs:213-215); the visible Retry loading restarts the separate recipe-definition reload (tensorlake/recipes.rs:540-545), not place_status. That caller defect can prolong a failed refresh even if a correct completion event is sent. Here the refresh can succeed and still read before admission removal; adding its retry alone does not supply a missing completion event. Conversely, bumping after removal fixes this event-order race but not recovery from a failed resulting GET. Preserve these separate causal routes rather than counting the same failed-refresh symptom twice. Existing Tensorlake completion removes admission then bumps (56040bb964270bb40d191902173dbb84b3ba78fc, tensorlake/build.rs:642-653). Suggested fix: publish final invalidation after admission removal, with panic/cancellation behavior owned there as appropriate. Suggested bucket: other, unchanged. Confidence: confirmed missing invalidation and source-supported concurrency window, not observed execution. The normal return sequence has no await between the final bump and drop, so this consequence requires concurrent handling/preemption within a narrow window; frequency and duration have not been measured. No guarantee is claimed that every completed job leaves stale UI. proposed_drop: false. possible_cover: caller-supplied g060/l1 is related but addresses failed read recovery, not the successful stale-read schedule here; other reviewer duplication is not known or searched. Could-be-highest: no security/user-work loss route. Original Preparing/disabled-button consequence retained with the narrow-window caveat; no priority lowering. The original early-prerequisite silent-failure suspicion remains unclaimed separately because place-observation refresh may show a probe failure. No tests or reproductions performed."
+          }
+        },
+        {
+          "line": 16,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "l5",
+            "state": "open",
+            "summary": "Container job completion lacks a final fleet invalidation",
+            "location": "crates/farhelm-helm/src/tensorlake/build.rs:718",
+            "detail": "Reviewed commit: 56659839785691f76da3af5d8f51b511cff4ba8b; caller at 350a4b33b6d4476f4a78e43cea124bc2b828f462; affected backend and GUI status paths unchanged through pinned tip 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db. TLDR: a successful status refresh can leave Preparing and a disabled Rebuild button after container image work finishes, until an unrelated invalidation, changed place observation or remount supplies another read. Source: place_view selects building from podman_jobs membership (tensorlake/build.rs:605-615). prepare_images bumps events before returning (environment/podman/build.rs:288), and success enters Ready before return (:404); the job remains registered for both. start_podman publishes its watch result (:718-723), then PodmanJobAdmission::drop removes the entry (:446-448), with no fleet bump afterward. The Rebuild HTTP route returns admission/202 (hosts.rs:4402-4407). A successful GET between final invalidation and registry removal reads building=true with no later completion invalidation. FleetEvents carries only a revision hint (feed.rs:14-30). The normal final-bump-to-drop sequence has no await, so this needs a narrow concurrent/preemption schedule; it is not claimed on every completion. The CLI runtime is explicitly multithreaded (crates/farhelm/src/main.rs:2672-2677), so other request tasks are not excluded by that lack of await. Frequency and duration are unmeasured. GUI: RecipeList at 350a4b3 restarts place_status on fleet notices or changed successful place observations (tensorlake/recipes.rs:367-385); RecipePlaces disables Rebuild on row.building (containers_settings.rs:257-260). Its POST-completion on_refresh (:270-279) follows admission and ordinarily precedes image work. Stable place observations do not rescue this: environment_ui.rs:684-724 polls only during in-flight probing or feed fallback. Tip checks found no diff in RecipeList/RecipePlaces and the complete use_environment_places function retains that behavior. Distinction from caller-supplied g060/l1: failed place_status renders only an error (containers_settings.rs:213-215); Retry loading invokes the separate definition reload (tensorlake/recipes.rs:540-545). That defect can keep a failed GET unresolved even with a correctly ordered completion event. This finding instead admits a successful stale GET: retry alone does not supply the missing completion invalidation, and moving the event alone does not fix a failed read. Preserve both causal routes without counting the failed-refresh symptom as new here. Fix guidance: remove admission before final fleet invalidation, owning panic/cancellation publication consistently. Existing Tensorlake completion does that (56040bb964270bb40d191902173dbb84b3ba78fc, tensorlake/build.rs:642-653). Suggested bucket: other, unchanged. Confidence: confirmed source defect and available concurrent route, not runtime-observed behavior. proposed_drop: false. possible_cover: g060/l1 is related but concerns failed read recovery; other reviewers may have this completion-feed defect, but no such findings were searched. Could-be-highest: no security/user-work loss. Original Preparing/disabled-button consequence retained with the narrow-window caveat; no priority lowering. Original early-prerequisite silent-failure suspicion remains unclaimed separately because place-observation refresh may expose probe failure. No tests or reproductions performed."
+          }
+        }
+      ],
+      "latest": {
+        "line": 16,
+        "event": {
+          "version": 1,
+          "kind": "finding",
+          "id": "l5",
+          "state": "open",
+          "summary": "Container job completion lacks a final fleet invalidation",
+          "location": "crates/farhelm-helm/src/tensorlake/build.rs:718",
+          "detail": "Reviewed commit: 56659839785691f76da3af5d8f51b511cff4ba8b; caller at 350a4b33b6d4476f4a78e43cea124bc2b828f462; affected backend and GUI status paths unchanged through pinned tip 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db. TLDR: a successful status refresh can leave Preparing and a disabled Rebuild button after container image work finishes, until an unrelated invalidation, changed place observation or remount supplies another read. Source: place_view selects building from podman_jobs membership (tensorlake/build.rs:605-615). prepare_images bumps events before returning (environment/podman/build.rs:288), and success enters Ready before return (:404); the job remains registered for both. start_podman publishes its watch result (:718-723), then PodmanJobAdmission::drop removes the entry (:446-448), with no fleet bump afterward. The Rebuild HTTP route returns admission/202 (hosts.rs:4402-4407). A successful GET between final invalidation and registry removal reads building=true with no later completion invalidation. FleetEvents carries only a revision hint (feed.rs:14-30). The normal final-bump-to-drop sequence has no await, so this needs a narrow concurrent/preemption schedule; it is not claimed on every completion. The CLI runtime is explicitly multithreaded (crates/farhelm/src/main.rs:2672-2677), so other request tasks are not excluded by that lack of await. Frequency and duration are unmeasured. GUI: RecipeList at 350a4b3 restarts place_status on fleet notices or changed successful place observations (tensorlake/recipes.rs:367-385); RecipePlaces disables Rebuild on row.building (containers_settings.rs:257-260). Its POST-completion on_refresh (:270-279) follows admission and ordinarily precedes image work. Stable place observations do not rescue this: environment_ui.rs:684-724 polls only during in-flight probing or feed fallback. Tip checks found no diff in RecipeList/RecipePlaces and the complete use_environment_places function retains that behavior. Distinction from caller-supplied g060/l1: failed place_status renders only an error (containers_settings.rs:213-215); Retry loading invokes the separate definition reload (tensorlake/recipes.rs:540-545). That defect can keep a failed GET unresolved even with a correctly ordered completion event. This finding instead admits a successful stale GET: retry alone does not supply the missing completion invalidation, and moving the event alone does not fix a failed read. Preserve both causal routes without counting the failed-refresh symptom as new here. Fix guidance: remove admission before final fleet invalidation, owning panic/cancellation publication consistently. Existing Tensorlake completion does that (56040bb964270bb40d191902173dbb84b3ba78fc, tensorlake/build.rs:642-653). Suggested bucket: other, unchanged. Confidence: confirmed source defect and available concurrent route, not runtime-observed behavior. proposed_drop: false. possible_cover: g060/l1 is related but concerns failed read recovery; other reviewers may have this completion-feed defect, but no such findings were searched. Could-be-highest: no security/user-work loss. Original Preparing/disabled-button consequence retained with the narrow-window caveat; no priority lowering. Original early-prerequisite silent-failure suspicion remains unclaimed separately because place-observation refresh may expose probe failure. No tests or reproductions performed."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g061/findings.jsonl",
+        "id": "l5",
+        "line": 16,
+        "disposition": "verified",
+        "group": "podman-job-removal-after-last-fleet-invalidation",
+        "reason": "Parent explicitly accepted named retain-verified proposal from claims-039 after inspecting it. The last fleet event precedes registry removal. A successful concurrent status read can spend that event on building=true and leave Preparing/Rebuild disabled until another read trigger. The schedule is narrow, unmeasured and source-supported. Retain other with the narrow concurrent-read schedule, source-only confidence, distinct failed-read route and explicit filter ambiguity. Checked source/results: [\"56659839785691f76da3af5d8f51b511cff4ba8b:tensorlake/build.rs:605-615 computes building from podman_jobs membership; 718-724 publishes result before PodmanJobAdmission::drop:446-448 removes the entry, with no following fleet event.\",\"Same revision: environment/podman/build.rs:288 bumps before returning; success enters Ready at 404 while admission remains held. No await separates normal final return and admission drop, so concurrent handling/preemption is required.\",\"350a4b33b6d4476f4a78e43cea124bc2b828f462:farhelm-ui/src/tensorlake/recipes.rs:367-385 restarts the status resource on fleet notices/changed successful place observations; containers_settings.rs:213-215 only displays status-read error, 234-260 derives Preparing/disabled Rebuild, and 270-279 refreshes after admission reply rather than after job completion.\",\"Reviewed tip 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db:farhelm-ui/src/environment_ui.rs:948-992 polls only during probing/feed fallback. The record's old 684-724 citation shifted; the actual tip function is at 952. This supports lack of a guaranteed quiet-state reread.\",\"The supplied g060/l1 failed-read recovery defect is distinct: this route requires a successful stale GET. The initial silent-prerequisite-failure suspicion remains unclaimed because place observation can expose it. No runtime observation.\"] Current coverage/results: [\"Current SPEC.md recipe build-status contract at 450-483 and SPEC_impl.md:6025-6056 describe per-place readiness/registry projection; neither accepts missing completion invalidation.\",\"TODO Planned empty; BUGS and active TRIAGE_OUTCOMES searches found no matching completion-feed decision. No unlanded plan states removal-before-final-invalidation work; landed podman-environments scope is not future coverage.\",\"Full INDEX.md and preparing/build-completion/feed searches found no exact queue item. orphan-cleanup-start-does-not-invalidate-feed.md concerns another operation's start event, not this completion registry ordering.\",\"FILTER.md rare self-correcting display rule might be argued to cover remount recovery, but its 'briefly wrong' boundary is unclear when the state can persist indefinitely and disables Rebuild. The sub-second-person-action filter does not match an automatic GET. Recommend retention on that ambiguity, not filtering solely because the window is narrow.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Preparing and a disabled Rebuild button can remain after image work completes until unrelated invalidation, changed place observation or remount. Original early-prerequisite silent failure was investigated but not claimed separately. No security or user-work-loss consequence was proposed.\"; \"No runtime frequency or duration measurement. No claim every completion leaves stale state. The exact filter interpretation of an indefinitely retained display plus disabled command remains for parent/triage.\"."
+      },
+      "accepted_parent_decision": {
+        "key": "g061/l5",
+        "line": 16,
+        "disposition": "verified",
+        "group": "podman-job-removal-after-last-fleet-invalidation",
+        "bucket": "other",
+        "recording": "retain-verified",
+        "queue_target_candidate": null,
+        "needs_independent_drop_check": false,
+        "reason": "Parent explicitly accepted named retain-verified proposal from claims-039 after inspecting it. The last fleet event precedes registry removal. A successful concurrent status read can spend that event on building=true and leave Preparing/Rebuild disabled until another read trigger. The schedule is narrow, unmeasured and source-supported. Retain other with the narrow concurrent-read schedule, source-only confidence, distinct failed-read route and explicit filter ambiguity. Checked source/results: [\"56659839785691f76da3af5d8f51b511cff4ba8b:tensorlake/build.rs:605-615 computes building from podman_jobs membership; 718-724 publishes result before PodmanJobAdmission::drop:446-448 removes the entry, with no following fleet event.\",\"Same revision: environment/podman/build.rs:288 bumps before returning; success enters Ready at 404 while admission remains held. No await separates normal final return and admission drop, so concurrent handling/preemption is required.\",\"350a4b33b6d4476f4a78e43cea124bc2b828f462:farhelm-ui/src/tensorlake/recipes.rs:367-385 restarts the status resource on fleet notices/changed successful place observations; containers_settings.rs:213-215 only displays status-read error, 234-260 derives Preparing/disabled Rebuild, and 270-279 refreshes after admission reply rather than after job completion.\",\"Reviewed tip 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db:farhelm-ui/src/environment_ui.rs:948-992 polls only during probing/feed fallback. The record's old 684-724 citation shifted; the actual tip function is at 952. This supports lack of a guaranteed quiet-state reread.\",\"The supplied g060/l1 failed-read recovery defect is distinct: this route requires a successful stale GET. The initial silent-prerequisite-failure suspicion remains unclaimed because place observation can expose it. No runtime observation.\"] Current coverage/results: [\"Current SPEC.md recipe build-status contract at 450-483 and SPEC_impl.md:6025-6056 describe per-place readiness/registry projection; neither accepts missing completion invalidation.\",\"TODO Planned empty; BUGS and active TRIAGE_OUTCOMES searches found no matching completion-feed decision. No unlanded plan states removal-before-final-invalidation work; landed podman-environments scope is not future coverage.\",\"Full INDEX.md and preparing/build-completion/feed searches found no exact queue item. orphan-cleanup-start-does-not-invalidate-feed.md concerns another operation's start event, not this completion registry ordering.\",\"FILTER.md rare self-correcting display rule might be argued to cover remount recovery, but its 'briefly wrong' boundary is unclear when the state can persist indefinitely and disables Rebuild. The sub-second-person-action filter does not match an automatic GET. Recommend retention on that ambiguity, not filtering solely because the window is narrow.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Preparing and a disabled Rebuild button can remain after image work completes until unrelated invalidation, changed place observation or remount. Original early-prerequisite silent failure was investigated but not claimed separately. No security or user-work-loss consequence was proposed.\"; \"No runtime frequency or duration measurement. No claim every completion leaves stale state. The exact filter interpretation of an indefinitely retained display plus disabled command remains for parent/triage.\"."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-039",
+          "key": "g061/l5",
+          "latest_line": 16,
+          "recommendation": "retain-verified",
+          "bucket": "other",
+          "underlying_key": "podman-job-removal-after-last-fleet-invalidation",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The last fleet event precedes registry removal. A successful concurrent status read can spend that event on building=true and leave Preparing/Rebuild disabled until another read trigger. The schedule is narrow, unmeasured and source-supported.",
+          "checks": [
+            "56659839785691f76da3af5d8f51b511cff4ba8b:tensorlake/build.rs:605-615 computes building from podman_jobs membership; 718-724 publishes result before PodmanJobAdmission::drop:446-448 removes the entry, with no following fleet event.",
+            "Same revision: environment/podman/build.rs:288 bumps before returning; success enters Ready at 404 while admission remains held. No await separates normal final return and admission drop, so concurrent handling/preemption is required.",
+            "350a4b33b6d4476f4a78e43cea124bc2b828f462:farhelm-ui/src/tensorlake/recipes.rs:367-385 restarts the status resource on fleet notices/changed successful place observations; containers_settings.rs:213-215 only displays status-read error, 234-260 derives Preparing/disabled Rebuild, and 270-279 refreshes after admission reply rather than after job completion.",
+            "Reviewed tip 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db:farhelm-ui/src/environment_ui.rs:948-992 polls only during probing/feed fallback. The record's old 684-724 citation shifted; the actual tip function is at 952. This supports lack of a guaranteed quiet-state reread.",
+            "The supplied g060/l1 failed-read recovery defect is distinct: this route requires a successful stale GET. The initial silent-prerequisite-failure suspicion remains unclaimed because place observation can expose it. No runtime observation."
+          ],
+          "coverage_checked": [
+            "Current SPEC.md recipe build-status contract at 450-483 and SPEC_impl.md:6025-6056 describe per-place readiness/registry projection; neither accepts missing completion invalidation.",
+            "TODO Planned empty; BUGS and active TRIAGE_OUTCOMES searches found no matching completion-feed decision. No unlanded plan states removal-before-final-invalidation work; landed podman-environments scope is not future coverage.",
+            "Full INDEX.md and preparing/build-completion/feed searches found no exact queue item. orphan-cleanup-start-does-not-invalidate-feed.md concerns another operation's start event, not this completion registry ordering.",
+            "FILTER.md rare self-correcting display rule might be argued to cover remount recovery, but its 'briefly wrong' boundary is unclear when the state can persist indefinitely and disables Rebuild. The sub-second-person-action filter does not match an automatic GET. Recommend retention on that ambiguity, not filtering solely because the window is narrow."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": "No runtime frequency or duration measurement. No claim every completion leaves stale state. The exact filter interpretation of an indefinitely retained display plus disabled command remains for parent/triage.",
+          "original_stronger_consequence": "Preparing and a disabled Rebuild button can remain after image work completes until unrelated invalidation, changed place observation or remount. Original early-prerequisite silent failure was investigated but not claimed separately. No security or user-work-loss consequence was proposed.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Retain other with the narrow concurrent-read schedule, source-only confidence, distinct failed-read route and explicit filter ambiguity."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": true,
+        "clearly_refuted_candidate": false,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Source-confirmed by an existing parent decision; not runtime reproduced",
+        "deduplication_key": "podman-job-removal-after-last-fleet-invalidation",
+        "destination": "trailing-podman-job-removal-after-last-fleet-invalidation.md"
+      }
+    },
+    {
+      "key": "g061/l6",
+      "owner": "g061",
+      "id": "l6",
+      "domain": "release-build-payloads",
+      "purpose": "release-build-payloads: crates/farhelm-helm/src/tensorlake/build.rs, crates/farhelm-helm/src/environment/podman/build.rs, .github/workflows/release.yml; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 19,
+          "event": {
+            "version": 1,
+            "kind": "lead",
+            "id": "l6",
+            "state": "open",
+            "summary": "Custom-image account lookup assumes an existing /root directory",
+            "location": "crates/farhelm-helm/src/environment/podman/build.rs:69",
+            "detail": "Reviewed commit: 56659839785691f76da3af5d8f51b511cff4ba8b. Discovery pass 1. TLDR: a custom container base satisfying the documented requirements may fail before its selected login account is resolved if that image does not contain /root. Source basis: login invokes self.script as root_user(); root_user hard-codes uid/name 0 and home /root. Need verify exec lowering uses that home as a mandatory work directory, confirm the full custom-base contract, and inspect whether another caller establishes /root before lookup. Suggested bucket if established: other/custom-base compatibility. Could-be-highest: no established security or user-work-loss route. Confidence: uninvestigated source lead. proposed_drop: false. possible_cover: none in supplied neighbour findings. No runtime tests, reproductions or live actions."
+          }
+        },
+        {
+          "line": 20,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "l6",
+            "state": "open",
+            "summary": "Custom-image login lookup unnecessarily requires /root",
+            "location": "crates/farhelm-helm/src/environment/podman/build.rs:69",
+            "detail": "Reviewed commit: 56659839785691f76da3af5d8f51b511cff4ba8b. Discovery pass 1. TLDR: a valid custom container base without a /root directory cannot build, even when the selected login account has a usable home and meets all documented requirements. Farhelm fails before it can resolve that account. Source: software selects a custom reference/user without managed bootstrap (build.rs:142-150) and immediately calls login (:151). login runs getent through self.script using root_user (:65-73), whose home is hard-coded /root (:411-417). RemoteRoute::container_argv turns that guessed home into podman exec --user 0 --workdir /root as well as HOME (access.rs:193-230). No prior custom-base step creates /root: pull_base only pulls/inspects and helper starts /sbin/init; the readiness check for the actual login occurs only after lookup (:152-159). SPEC.md:471-475 requires systemd, passwordless sudo, Ubuntu/Debian apt, bash, curl and git; neither it nor SPEC_impl.md:6552-6559 requires root to have /root. A base can satisfy those requirements with its selected user's home elsewhere and no /root. The selected login is precisely what getent is meant to discover, so guessing another account's directory is an unrelated prerequisite. External primary checks, not execution here: official Podman exec docs define --workdir as the execution working directory (https://docs.podman.io/en/stable/markdown/podman-exec.1.html); v4.9.3 source passes WorkDir into opts.Cwd (https://github.com/containers/podman/blob/v4.9.3/libpod/container_exec.go#L1012-L1025) and into the OCI process cwd without creating it (https://github.com/containers/podman/blob/v4.9.3/libpod/oci_conmon_exec_common.go#L648-L650). The upstream crun missing-workdir report confirms exec fails at chdir, rather than creating the directory (https://github.com/containers/crun/issues/1823). Fix by using a guaranteed neutral working directory such as / for the privileged account-observation step, then use the observed selected account home for its actual setup. Do not impose /root as a new undocumented custom-base requirement. Suggested bucket: other/custom-base compatibility; no measured prevalence or material-user-impact threshold claimed. Confidence: confirmed source and upstream exec semantics; no local tests, reproduction or runtime observation. proposed_drop: false. possible_cover: none in supplied neighbour records; no prohibited sources searched. Could-be-highest: no security or user-work-loss route; this blocks a new build, with ordinary failed-helper cleanup. Caveats: managed Ubuntu normally has /root; custom images retaining it are unaffected. Existing built images can postpone this until preparation/account lookup is required. The lead's original custom-base build-failure consequence is retained."
+          }
+        },
+        {
+          "line": 21,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "l6",
+            "state": "open",
+            "summary": "Custom-image login lookup unnecessarily requires /root",
+            "location": "crates/farhelm-helm/src/environment/podman/build.rs:69",
+            "detail": "Reviewed commit: 56659839785691f76da3af5d8f51b511cff4ba8b; new assigned build.rs implementation remains unchanged through pinned tip 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db. Discovery pass 1. TLDR: a custom container base without /root cannot build even when its selected login account has a usable home and meets the documented requirements. Lookup fails before Farhelm can resolve that account. Source: software selects the custom reference/user without managed bootstrap (build.rs:142-150), then calls login (:151). login executes getent through self.script with root_user (:65-73), whose home is hard-coded /root (:411-417). RemoteRoute::container_argv converts that guess into podman exec --user 0 --workdir /root and HOME (access.rs:193-230). No preceding custom-image step establishes /root: pull_base only pulls/inspects, and helper starts /sbin/init. The actual selected user's readiness check runs afterward (:152-159). SPEC.md:471-475 requires systemd, passwordless sudo, Ubuntu/Debian apt, bash, curl and git; SPEC_impl.md:6552-6559 imposes the same readiness contract. Neither requires root's home to be /root or that directory to exist. A custom image may satisfy those requirements with the selected user's home elsewhere and no /root. A neutral directory such as / is sufficient for observing passwd; use the observed selected account home only for that account's setup. External primary source checks, not a local run: Podman documentation defines --workdir as the exec cwd (https://docs.podman.io/en/stable/markdown/podman-exec.1.html). Podman v4.9.3 passes WorkDir into ExecOptions.Cwd at container_exec.go:1012-1025 (https://github.com/containers/podman/blob/v4.9.3/libpod/container_exec.go#L1012-L1025), then assigns it to the OCI process without creating it at oci_conmon_exec_common.go:648-650 (https://github.com/containers/podman/blob/v4.9.3/libpod/oci_conmon_exec_common.go#L648-L650). crun 1.14's exec_process_entrypoint selects process cwd and attempts chdir at container.c:3016-3018; if still unsuccessful it fails at :3132-3133 before execv at :3175 (https://github.com/containers/crun/blob/1.14/src/libcrun/container.c#L3132-L3133). This directly settles the missing-directory runtime premise without reproduction. The upstream missing-workdir report is consistent supplementary evidence, not an execution observed here (https://github.com/containers/crun/issues/1823). Suggested bucket: other/custom-base compatibility, unchanged from the lead; no prevalence or measured impact claim. Confidence: confirmed source/contract and supported exec semantics. proposed_drop: false. possible_cover: none in supplied neighbour records; no prohibited coverage sources searched. Could-be-highest: no security/user-work loss route; this blocks a new build with ordinary helper cleanup. Caveat: managed Ubuntu normally contains /root and custom images retaining it are unaffected. No claim that every custom base fails, or that an already usable environment loses files. A cached artifact can avoid a new lookup, but no cached artifact is assumed in this failing new-build route. Original custom-base failure consequence preserved; no priority lowering. No runtime test, build, reproduction or live-install action performed."
+          }
+        }
+      ],
+      "latest": {
+        "line": 21,
+        "event": {
+          "version": 1,
+          "kind": "finding",
+          "id": "l6",
+          "state": "open",
+          "summary": "Custom-image login lookup unnecessarily requires /root",
+          "location": "crates/farhelm-helm/src/environment/podman/build.rs:69",
+          "detail": "Reviewed commit: 56659839785691f76da3af5d8f51b511cff4ba8b; new assigned build.rs implementation remains unchanged through pinned tip 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db. Discovery pass 1. TLDR: a custom container base without /root cannot build even when its selected login account has a usable home and meets the documented requirements. Lookup fails before Farhelm can resolve that account. Source: software selects the custom reference/user without managed bootstrap (build.rs:142-150), then calls login (:151). login executes getent through self.script with root_user (:65-73), whose home is hard-coded /root (:411-417). RemoteRoute::container_argv converts that guess into podman exec --user 0 --workdir /root and HOME (access.rs:193-230). No preceding custom-image step establishes /root: pull_base only pulls/inspects, and helper starts /sbin/init. The actual selected user's readiness check runs afterward (:152-159). SPEC.md:471-475 requires systemd, passwordless sudo, Ubuntu/Debian apt, bash, curl and git; SPEC_impl.md:6552-6559 imposes the same readiness contract. Neither requires root's home to be /root or that directory to exist. A custom image may satisfy those requirements with the selected user's home elsewhere and no /root. A neutral directory such as / is sufficient for observing passwd; use the observed selected account home only for that account's setup. External primary source checks, not a local run: Podman documentation defines --workdir as the exec cwd (https://docs.podman.io/en/stable/markdown/podman-exec.1.html). Podman v4.9.3 passes WorkDir into ExecOptions.Cwd at container_exec.go:1012-1025 (https://github.com/containers/podman/blob/v4.9.3/libpod/container_exec.go#L1012-L1025), then assigns it to the OCI process without creating it at oci_conmon_exec_common.go:648-650 (https://github.com/containers/podman/blob/v4.9.3/libpod/oci_conmon_exec_common.go#L648-L650). crun 1.14's exec_process_entrypoint selects process cwd and attempts chdir at container.c:3016-3018; if still unsuccessful it fails at :3132-3133 before execv at :3175 (https://github.com/containers/crun/blob/1.14/src/libcrun/container.c#L3132-L3133). This directly settles the missing-directory runtime premise without reproduction. The upstream missing-workdir report is consistent supplementary evidence, not an execution observed here (https://github.com/containers/crun/issues/1823). Suggested bucket: other/custom-base compatibility, unchanged from the lead; no prevalence or measured impact claim. Confidence: confirmed source/contract and supported exec semantics. proposed_drop: false. possible_cover: none in supplied neighbour records; no prohibited coverage sources searched. Could-be-highest: no security/user-work loss route; this blocks a new build with ordinary helper cleanup. Caveat: managed Ubuntu normally contains /root and custom images retaining it are unaffected. No claim that every custom base fails, or that an already usable environment loses files. A cached artifact can avoid a new lookup, but no cached artifact is assumed in this failing new-build route. Original custom-base failure consequence preserved; no priority lowering. No runtime test, build, reproduction or live-install action performed."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g061/findings.jsonl",
+        "id": "l6",
+        "line": 21,
+        "disposition": "verified",
+        "group": "podman-account-observation-exec-guesses-root-home",
+        "reason": "Parent explicitly accepted named retain-verified proposal from claims-039 after inspecting it. A supported custom base without /root fails privileged passwd lookup before the selected account can be resolved. The documented base contract does not require /root. Retain other for conditional custom-base compatibility failure; use a neutral guaranteed directory for privileged account observation rather than expanding the product prerequisites. Checked source/results: [\"56659839785691f76da3af5d8f51b511cff4ba8b:environment/podman/build.rs:142-151 selects the custom reference/user, starts helper and calls login without managed bootstrap; 65-73 uses root_user; 411-417 hardcodes its home to /root. The selected account's actual readiness check follows at 152-159.\",\"Same revision: access.rs:193-230 lowers user.home to podman exec --workdir and HOME. pull_base:808-837 only pulls/inspects; it does not establish /root.\",\"Primary upstream checks: https://github.com/containers/podman/blob/v4.9.3/libpod/container_exec.go#L1012-L1025 maps WorkDir to Cwd; https://github.com/containers/podman/blob/v4.9.3/libpod/oci_conmon_exec_common.go#L648-L650 places it in the OCI process; https://github.com/containers/crun/blob/1.14/src/libcrun/container.c#L3132-L3133 fails an unsuccessful chdir before exec. No reproduction was run.\",\"build.rs is unchanged from its introduction to reviewed tip. Managed Ubuntu and custom bases retaining /root are unaffected; a cached artifact may postpone lookup. No existing environment file loss is claimed.\"] Current coverage/results: [\"Current SPEC.md:450-483 and SPEC_impl.md:6073-6079 require systemd, passwordless sudo, Debian/Ubuntu apt and build tools, with a selected login user; neither requires root's /root directory. Historical SPEC_impl.md:6552-6559 has the same boundary.\",\"TODO Planned empty; no matching BUGS or active TRIAGE_OUTCOMES decision. No unlanded plan adds a neutral privileged lookup directory or otherwise removes this prerequisite. Landed podman-environments plan is not future coverage.\",\"Full INDEX.md and matching image-inspection-inherits-keep-id-account.md and inspector-workdir-hides-missing-home.md read. They concern retired supervisor-side account synthesis/implicit WORKDIR creation, not helm-side privileged exec guessing /root. No exact queue alias or useful extension to those different roots.\",\"No FILTER.md match: a valid custom-base build repeatedly fails until the base or implementation changes; rarity alone is insufficient.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"A custom base satisfying the documented requirements cannot build if /root is absent, even with a usable selected login home elsewhere. Suggested other from the initial lead onward; no universal custom-base failure or work loss was asserted.\"; \"None for the conditional missing-/root source route on the checked supported exec implementation. Prevalence and observed user impact are unmeasured.\"."
+      },
+      "accepted_parent_decision": {
+        "key": "g061/l6",
+        "line": 21,
+        "disposition": "verified",
+        "group": "podman-account-observation-exec-guesses-root-home",
+        "bucket": "other",
+        "recording": "retain-verified",
+        "queue_target_candidate": null,
+        "needs_independent_drop_check": false,
+        "reason": "Parent explicitly accepted named retain-verified proposal from claims-039 after inspecting it. A supported custom base without /root fails privileged passwd lookup before the selected account can be resolved. The documented base contract does not require /root. Retain other for conditional custom-base compatibility failure; use a neutral guaranteed directory for privileged account observation rather than expanding the product prerequisites. Checked source/results: [\"56659839785691f76da3af5d8f51b511cff4ba8b:environment/podman/build.rs:142-151 selects the custom reference/user, starts helper and calls login without managed bootstrap; 65-73 uses root_user; 411-417 hardcodes its home to /root. The selected account's actual readiness check follows at 152-159.\",\"Same revision: access.rs:193-230 lowers user.home to podman exec --workdir and HOME. pull_base:808-837 only pulls/inspects; it does not establish /root.\",\"Primary upstream checks: https://github.com/containers/podman/blob/v4.9.3/libpod/container_exec.go#L1012-L1025 maps WorkDir to Cwd; https://github.com/containers/podman/blob/v4.9.3/libpod/oci_conmon_exec_common.go#L648-L650 places it in the OCI process; https://github.com/containers/crun/blob/1.14/src/libcrun/container.c#L3132-L3133 fails an unsuccessful chdir before exec. No reproduction was run.\",\"build.rs is unchanged from its introduction to reviewed tip. Managed Ubuntu and custom bases retaining /root are unaffected; a cached artifact may postpone lookup. No existing environment file loss is claimed.\"] Current coverage/results: [\"Current SPEC.md:450-483 and SPEC_impl.md:6073-6079 require systemd, passwordless sudo, Debian/Ubuntu apt and build tools, with a selected login user; neither requires root's /root directory. Historical SPEC_impl.md:6552-6559 has the same boundary.\",\"TODO Planned empty; no matching BUGS or active TRIAGE_OUTCOMES decision. No unlanded plan adds a neutral privileged lookup directory or otherwise removes this prerequisite. Landed podman-environments plan is not future coverage.\",\"Full INDEX.md and matching image-inspection-inherits-keep-id-account.md and inspector-workdir-hides-missing-home.md read. They concern retired supervisor-side account synthesis/implicit WORKDIR creation, not helm-side privileged exec guessing /root. No exact queue alias or useful extension to those different roots.\",\"No FILTER.md match: a valid custom-base build repeatedly fails until the base or implementation changes; rarity alone is insufficient.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"A custom base satisfying the documented requirements cannot build if /root is absent, even with a usable selected login home elsewhere. Suggested other from the initial lead onward; no universal custom-base failure or work loss was asserted.\"; \"None for the conditional missing-/root source route on the checked supported exec implementation. Prevalence and observed user impact are unmeasured.\"."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-039",
+          "key": "g061/l6",
+          "latest_line": 21,
+          "recommendation": "retain-verified",
+          "bucket": "other",
+          "underlying_key": "podman-account-observation-exec-guesses-root-home",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "A supported custom base without /root fails privileged passwd lookup before the selected account can be resolved. The documented base contract does not require /root.",
+          "checks": [
+            "56659839785691f76da3af5d8f51b511cff4ba8b:environment/podman/build.rs:142-151 selects the custom reference/user, starts helper and calls login without managed bootstrap; 65-73 uses root_user; 411-417 hardcodes its home to /root. The selected account's actual readiness check follows at 152-159.",
+            "Same revision: access.rs:193-230 lowers user.home to podman exec --workdir and HOME. pull_base:808-837 only pulls/inspects; it does not establish /root.",
+            "Primary upstream checks: https://github.com/containers/podman/blob/v4.9.3/libpod/container_exec.go#L1012-L1025 maps WorkDir to Cwd; https://github.com/containers/podman/blob/v4.9.3/libpod/oci_conmon_exec_common.go#L648-L650 places it in the OCI process; https://github.com/containers/crun/blob/1.14/src/libcrun/container.c#L3132-L3133 fails an unsuccessful chdir before exec. No reproduction was run.",
+            "build.rs is unchanged from its introduction to reviewed tip. Managed Ubuntu and custom bases retaining /root are unaffected; a cached artifact may postpone lookup. No existing environment file loss is claimed."
+          ],
+          "coverage_checked": [
+            "Current SPEC.md:450-483 and SPEC_impl.md:6073-6079 require systemd, passwordless sudo, Debian/Ubuntu apt and build tools, with a selected login user; neither requires root's /root directory. Historical SPEC_impl.md:6552-6559 has the same boundary.",
+            "TODO Planned empty; no matching BUGS or active TRIAGE_OUTCOMES decision. No unlanded plan adds a neutral privileged lookup directory or otherwise removes this prerequisite. Landed podman-environments plan is not future coverage.",
+            "Full INDEX.md and matching image-inspection-inherits-keep-id-account.md and inspector-workdir-hides-missing-home.md read. They concern retired supervisor-side account synthesis/implicit WORKDIR creation, not helm-side privileged exec guessing /root. No exact queue alias or useful extension to those different roots.",
+            "No FILTER.md match: a valid custom-base build repeatedly fails until the base or implementation changes; rarity alone is insufficient."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": "None for the conditional missing-/root source route on the checked supported exec implementation. Prevalence and observed user impact are unmeasured.",
+          "original_stronger_consequence": "A custom base satisfying the documented requirements cannot build if /root is absent, even with a usable selected login home elsewhere. Suggested other from the initial lead onward; no universal custom-base failure or work loss was asserted.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Retain other for conditional custom-base compatibility failure; use a neutral guaranteed directory for privileged account observation rather than expanding the product prerequisites."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": true,
+        "clearly_refuted_candidate": false,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Source-confirmed by an existing parent decision; not runtime reproduced",
+        "deduplication_key": "podman-account-observation-exec-guesses-root-home",
+        "destination": "trailing-podman-account-observation-exec-guesses-root-home.md"
+      }
+    },
+    {
+      "key": "g061/l7",
+      "owner": "g061",
+      "id": "l7",
+      "domain": "release-build-payloads",
+      "purpose": "release-build-payloads: crates/farhelm-helm/src/tensorlake/build.rs, crates/farhelm-helm/src/environment/podman/build.rs, .github/workflows/release.yml; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 22,
+          "event": {
+            "version": 1,
+            "kind": "lead",
+            "id": "l7",
+            "state": "open",
+            "summary": "Retirement order may block removal of parent images before children",
+            "location": "crates/farhelm-helm/src/environment/podman/build.rs:690",
+            "detail": "Reviewed commit: 56659839785691f76da3af5d8f51b511cff4ba8b. Discovery pass 2. TLDR: managed Ubuntu's temporary base and superseded software/prepared images may become impossible to clean through the recipe path if nonforcing Podman removal refuses a parent image while its committed children still exist. Source basis: managed_base's commit puts its artifact in retired_images before software/prepared publication; retire_images_unlocked iterates stored order and returns on the first rm error. clean_images appends software then prepared to that list. Need settle whether podman commit at the supported floor records an enforced parent relationship (rather than merely shared layers), inspect nonforcing image-removal semantics, and confirm retirement ordering from the reviewed source. Suggested bucket if established: high/material UX for blocked recipe/host cleanup, otherwise refute from actual image semantics. Could-be-highest: no established security/user-work loss; removal is nonforcing. Confidence: uninvestigated source lead. proposed_drop: false. possible_cover: none in supplied neighbour records. No runtime tests or reproductions."
+          }
+        },
+        {
+          "line": 24,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "l7",
+            "state": "open",
+            "summary": "Parent-first retirement is not blocked merely by child image layers",
+            "location": "crates/farhelm-helm/src/environment/podman/build.rs:690",
+            "detail": "Reviewed commit: 56659839785691f76da3af5d8f51b511cff4ba8b. Discovery pass 2. Original considered consequence: creation-order retirement might permanently block recipe/host cleanup when nonforcing image rm sees parent images before their committed children. Source inspection confirms the stored order and first-error return (build.rs:690-757, :781-785), but refutes the required Podman refusal premise for the supported floor. Primary Podman v4.9.3 source: vendored libimage/image.go:460-494 computes hasChildren for reporting, calls storage.DeleteImage, and does not reject merely because it has children (https://github.com/containers/podman/blob/v4.9.3/vendor/github.com/containers/common/libimage/image.go#L460-L494). Vendored storage/store.go:2393-2394 refuses direct container references, but :2417-2421 deletes the image record and :2439-2457 simply stops deleting layers needed by children (https://github.com/containers/podman/blob/v4.9.3/vendor/github.com/containers/storage/store.go#L2417-L2457). ABI images.go:512-524 and :550-579 derives nonzero exit from errors, not report.Removed being false (https://github.com/containers/podman/blob/v4.9.3/pkg/domain/infra/abi/images.go#L550-L579). Farhelm verifies image existence afterward, so retained shared filesystem layers are not themselves a failed record deletion. The rmi manual's child-image exit-status wording alone was insufficient evidence for the initial suspicion. Suggested bucket if real: high/material UX for blocked cleanup; no such route established after source checks. Confidence: confirmed source refutation at the supported Podman floor; no runtime observation. proposed_drop: actual removal permits deleting parent image records while preserving needed layers; original claimed child-only refusal is absent. No parent drop accepted. possible_cover: none in supplied neighbour records. Could-be-highest: no, the considered consequence was blocked administration, not work loss. Preserve original consequence and this precise refutation; do not treat it as a refutation of distinct implicit-pruning lead l8."
+          }
+        }
+      ],
+      "latest": {
+        "line": 24,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "l7",
+          "state": "open",
+          "summary": "Parent-first retirement is not blocked merely by child image layers",
+          "location": "crates/farhelm-helm/src/environment/podman/build.rs:690",
+          "detail": "Reviewed commit: 56659839785691f76da3af5d8f51b511cff4ba8b. Discovery pass 2. Original considered consequence: creation-order retirement might permanently block recipe/host cleanup when nonforcing image rm sees parent images before their committed children. Source inspection confirms the stored order and first-error return (build.rs:690-757, :781-785), but refutes the required Podman refusal premise for the supported floor. Primary Podman v4.9.3 source: vendored libimage/image.go:460-494 computes hasChildren for reporting, calls storage.DeleteImage, and does not reject merely because it has children (https://github.com/containers/podman/blob/v4.9.3/vendor/github.com/containers/common/libimage/image.go#L460-L494). Vendored storage/store.go:2393-2394 refuses direct container references, but :2417-2421 deletes the image record and :2439-2457 simply stops deleting layers needed by children (https://github.com/containers/podman/blob/v4.9.3/vendor/github.com/containers/storage/store.go#L2417-L2457). ABI images.go:512-524 and :550-579 derives nonzero exit from errors, not report.Removed being false (https://github.com/containers/podman/blob/v4.9.3/pkg/domain/infra/abi/images.go#L550-L579). Farhelm verifies image existence afterward, so retained shared filesystem layers are not themselves a failed record deletion. The rmi manual's child-image exit-status wording alone was insufficient evidence for the initial suspicion. Suggested bucket if real: high/material UX for blocked cleanup; no such route established after source checks. Confidence: confirmed source refutation at the supported Podman floor; no runtime observation. proposed_drop: actual removal permits deleting parent image records while preserving needed layers; original claimed child-only refusal is absent. No parent drop accepted. possible_cover: none in supplied neighbour records. Could-be-highest: no, the considered consequence was blocked administration, not work loss. Preserve original consequence and this precise refutation; do not treat it as a refutation of distinct implicit-pruning lead l8."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g061/findings.jsonl",
+        "id": "l7",
+        "line": 24,
+        "disposition": "excluded",
+        "group": "podman-parent-first-image-record-removal-refusal",
+        "reason": "Parent explicitly accepted named refuted proposal from claims-039 after inspecting it. The suspected child-only refusal is absent in the checked Podman 4.9.3 implementation. Image records can be removed while shared layers stay needed by children. This says nothing about implicit ancestor pruning. Dismiss the exact child-only refusal suspicion at the supported floor. Preserve the separate highest-priority ancestor-pruning finding; successful parent record removal does not imply ownership-safe pruning. Checked source/results: [\"56659839785691f76da3af5d8f51b511cff4ba8b:environment/podman/build.rs:690-757 iterates stored order and propagates removal failure; 781-785 appends software before prepared. That order is real; the required child-only failure premise is not.\",\"https://github.com/containers/podman/blob/v4.9.3/vendor/github.com/containers/common/libimage/image.go#L460-L494 observes children for reporting, then deletes the image record. https://github.com/containers/podman/blob/v4.9.3/vendor/github.com/containers/storage/store.go#L2393-L2457 refuses direct container users but preserves still-needed layers after image deletion.\",\"https://github.com/containers/podman/blob/v4.9.3/pkg/domain/infra/abi/images.go#L512-L579 derives command failure from errors; report.Removed=false alone is not an error. Farhelm subsequently checks record absence at build.rs:744-747.\",\"The rmi manual's child-image exit-status sentence is broader than these implementation conditions. No runtime removal executed.\"] Current coverage/results: [\"Current SPEC.md:4885-4889 and SPEC_impl.md:6087-6091 require nonforcing owned-image cleanup, but do not explicitly accept permanently blocked parent-first cleanup. Refutation comes from implementation semantics, not spec coverage.\",\"TODO Planned empty; no matching BUGS or active ledger decision. No unlanded plan covers child-only removal refusal. Full INDEX.md and parent/child/image-retirement searches find no matching item. No filter used.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Creation-order retirement might permanently block recipe/host cleanup when nonforcing removal encounters parent images before committed children; suggested high if real. The latest record proposes refutation of that prerequisite only and explicitly keeps l8's distinct pruning concern.\"; \"The required refusal merely because committed child layers exist is contradicted by the checked supported-floor implementation. Other removal errors are outside this narrowly considered claim.\"."
+      },
+      "accepted_parent_decision": {
+        "key": "g061/l7",
+        "line": 24,
+        "disposition": "excluded",
+        "group": "podman-parent-first-image-record-removal-refusal",
+        "bucket": "other",
+        "recording": "refuted",
+        "queue_target_candidate": null,
+        "needs_independent_drop_check": false,
+        "reason": "Parent explicitly accepted named refuted proposal from claims-039 after inspecting it. The suspected child-only refusal is absent in the checked Podman 4.9.3 implementation. Image records can be removed while shared layers stay needed by children. This says nothing about implicit ancestor pruning. Dismiss the exact child-only refusal suspicion at the supported floor. Preserve the separate highest-priority ancestor-pruning finding; successful parent record removal does not imply ownership-safe pruning. Checked source/results: [\"56659839785691f76da3af5d8f51b511cff4ba8b:environment/podman/build.rs:690-757 iterates stored order and propagates removal failure; 781-785 appends software before prepared. That order is real; the required child-only failure premise is not.\",\"https://github.com/containers/podman/blob/v4.9.3/vendor/github.com/containers/common/libimage/image.go#L460-L494 observes children for reporting, then deletes the image record. https://github.com/containers/podman/blob/v4.9.3/vendor/github.com/containers/storage/store.go#L2393-L2457 refuses direct container users but preserves still-needed layers after image deletion.\",\"https://github.com/containers/podman/blob/v4.9.3/pkg/domain/infra/abi/images.go#L512-L579 derives command failure from errors; report.Removed=false alone is not an error. Farhelm subsequently checks record absence at build.rs:744-747.\",\"The rmi manual's child-image exit-status sentence is broader than these implementation conditions. No runtime removal executed.\"] Current coverage/results: [\"Current SPEC.md:4885-4889 and SPEC_impl.md:6087-6091 require nonforcing owned-image cleanup, but do not explicitly accept permanently blocked parent-first cleanup. Refutation comes from implementation semantics, not spec coverage.\",\"TODO Planned empty; no matching BUGS or active ledger decision. No unlanded plan covers child-only removal refusal. Full INDEX.md and parent/child/image-retirement searches find no matching item. No filter used.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Creation-order retirement might permanently block recipe/host cleanup when nonforcing removal encounters parent images before committed children; suggested high if real. The latest record proposes refutation of that prerequisite only and explicitly keeps l8's distinct pruning concern.\"; \"The required refusal merely because committed child layers exist is contradicted by the checked supported-floor implementation. Other removal errors are outside this narrowly considered claim.\"."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-039",
+          "key": "g061/l7",
+          "latest_line": 24,
+          "recommendation": "refuted",
+          "bucket": "other",
+          "underlying_key": "podman-parent-first-image-record-removal-refusal",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The suspected child-only refusal is absent in the checked Podman 4.9.3 implementation. Image records can be removed while shared layers stay needed by children. This says nothing about implicit ancestor pruning.",
+          "checks": [
+            "56659839785691f76da3af5d8f51b511cff4ba8b:environment/podman/build.rs:690-757 iterates stored order and propagates removal failure; 781-785 appends software before prepared. That order is real; the required child-only failure premise is not.",
+            "https://github.com/containers/podman/blob/v4.9.3/vendor/github.com/containers/common/libimage/image.go#L460-L494 observes children for reporting, then deletes the image record. https://github.com/containers/podman/blob/v4.9.3/vendor/github.com/containers/storage/store.go#L2393-L2457 refuses direct container users but preserves still-needed layers after image deletion.",
+            "https://github.com/containers/podman/blob/v4.9.3/pkg/domain/infra/abi/images.go#L512-L579 derives command failure from errors; report.Removed=false alone is not an error. Farhelm subsequently checks record absence at build.rs:744-747.",
+            "The rmi manual's child-image exit-status sentence is broader than these implementation conditions. No runtime removal executed."
+          ],
+          "coverage_checked": [
+            "Current SPEC.md:4885-4889 and SPEC_impl.md:6087-6091 require nonforcing owned-image cleanup, but do not explicitly accept permanently blocked parent-first cleanup. Refutation comes from implementation semantics, not spec coverage.",
+            "TODO Planned empty; no matching BUGS or active ledger decision. No unlanded plan covers child-only removal refusal. Full INDEX.md and parent/child/image-retirement searches find no matching item. No filter used."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": "The required refusal merely because committed child layers exist is contradicted by the checked supported-floor implementation. Other removal errors are outside this narrowly considered claim.",
+          "original_stronger_consequence": "Creation-order retirement might permanently block recipe/host cleanup when nonforcing removal encounters parent images before committed children; suggested high if real. The latest record proposes refutation of that prerequisite only and explicitly keeps l8's distinct pruning concern.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Dismiss the exact child-only refusal suspicion at the supported floor. Preserve the separate highest-priority ancestor-pruning finding; successful parent record removal does not imply ownership-safe pruning."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "podman-parent-first-image-record-removal-refusal",
+        "destination": null
+      }
+    },
+    {
+      "key": "g061/l8",
+      "owner": "g061",
+      "id": "l8",
+      "domain": "release-build-payloads",
+      "purpose": "release-build-payloads: crates/farhelm-helm/src/tensorlake/build.rs, crates/farhelm-helm/src/environment/podman/build.rs, .github/workflows/release.yml; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 23,
+          "event": {
+            "version": 1,
+            "kind": "lead",
+            "id": "l8",
+            "state": "open",
+            "summary": "Default image pruning may remove an untagged user base",
+            "location": "crates/farhelm-helm/src/environment/podman/build.rs:740",
+            "detail": "Reviewed commit: 56659839785691f76da3af5d8f51b511cff4ba8b. Discovery pass 2. TLDR: deleting an owned committed image might implicitly prune a user-owned base even though the explicit removal ID is helm-owned. Source basis: retire_images_unlocked invokes podman image rm without --no-prune. Official Podman v4.9.3 rmi docs say it also deletes dangling parent images, and --no-prune disables that behavior (https://docs.podman.io/en/v4.9.3/markdown/podman-rmi.1.html). The code promises user base images stay separate from retirement. Need trace actual parent/dependency detection and deletion in the supported Podman implementation, confirm custom references can select an existing untagged base, and inspect whether a saved user base or later container reference prevents pruning. Suggested bucket pending established route: high for unwanted base removal; could-be-highest: possible if an unbacked local custom image containing user-owned work is actually deleted, but that route is not yet established. Confidence: uninvestigated source lead. proposed_drop: false. possible_cover: none in supplied neighbour records. No runtime tests or reproductions."
+          }
+        },
+        {
+          "line": 25,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "l8",
+            "state": "open",
+            "summary": "Owned-image cleanup can prune an untagged user-owned base",
+            "location": "crates/farhelm-helm/src/environment/podman/build.rs:740",
+            "detail": "Reviewed commit: 56659839785691f76da3af5d8f51b511cff4ba8b; this assigned build implementation is unchanged through pinned tip 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db. Discovery pass 2. TLDR: cleaning up a recipe can also delete its user-owned local base image when that image has no tag. If that local image is the user's only retained copy of its contents, recipe deletion destroys work outside the helm-owned artifacts the cleanup is supposed to remove. Details: retire_images_unlocked checks the explicit target's ownership labels, then invokes podman image rm -- <id> without --no-prune (build.rs:690-743). Podman's default removal also recursively prunes dangling parent images; those implicit targets never pass Farhelm's ownership-label check. Shipped input route: RecipeBase::ContainerImage accepts any nonempty NUL-free reference (farhelm-proto/src/recipes.rs:788-797), including a local image ID. pull_base accepts an already-existing image by that reference, skips pulling or tagging it, and rejects only a prepared Farhelm checkpoint (build.rs:808-837). Thus a user may select an untagged local custom base with their chosen login account, required systemd/tools and otherwise valid contents. software runs a helper from that reference (:142-150) and commits a new owned layer (:203-224); preparation makes another owned child. With no containers left using these artifacts, clean_images appends software and prepared for removal (:781-785). Removing an owned layer can make its untagged user-owned parent dangling and prune its image record/content automatically. The saved recipe reference is not a Podman tag or container reference, so it does not protect the parent. No UI control or cleanup path adds a protective tag to the existing base. The contract is explicit: SPEC.md:4811 says 'User-owned base images are retained'; SPEC_impl.md:6566-6568 says 'Never delete a user's base image.' Fix by passing --no-prune to owned-image removal and continuing to remove only separately recorded, verified owned IDs; nonforcing removal alone does not constrain implicit parent pruning. Primary source checks at the supported Podman floor: v4.9.3 rmi docs describe default dangling-parent deletion and the --no-prune option (https://docs.podman.io/en/v4.9.3/markdown/podman-rmi.1.html). Vendored libimage/image.go:496-518 returns early only for NoPrune, otherwise checks Parent.IsDangling then recursively removes it without a Farhelm ownership predicate; :185-193 defines dangling as no names and no children (https://github.com/containers/podman/blob/v4.9.3/vendor/github.com/containers/common/libimage/image.go#L496-L518). Podman ABI passes opts.NoPrune through (pkg/domain/infra/abi/images.go:558-568). Podman commit imports the source builder and commits without squash/history omission (libpod/container_commit.go:57-70,160); vendored Buildah image.go:256-278 preserves base history and :631-660 appends the new layer history. Libimage layer_tree.go:147-152,263-340 recognizes the corresponding parent via layer/history. These establish the ordinary committed-image ancestry and prune route, rather than inferring data deletion from shared layers alone. Suggested bucket: highest/security or loss of user-owned work for a sole-copy local base; the direct unwanted-base deletion is established independently of whether a particular image contains irreplaceable data. Could-be-highest: yes, a valid shipped image-ID input can name a sole-copy user-authored image, and deletion removes that original outside the owned-artifact boundary. Confidence: confirmed source/contract route, conditional on an untagged local base and no other container/image reference that keeps it non-dangling; not observed execution. proposed_drop: false. possible_cover: none in supplied neighbour records. Caveats: tagged/digest-named bases remain protected by their names; other dependent images/containers may prevent pruning. No claim of deleting a currently used base forcibly, no claim that all recipes are affected, and no claim of measured frequency. Original l8 unwanted-base-removal consequence is preserved and its possible work-loss route is now explicit. No tests, builds, reproductions or live-install actions performed."
+          }
+        },
+        {
+          "line": 26,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "l8",
+            "state": "open",
+            "summary": "Owned-image cleanup can prune an untagged user-owned base",
+            "location": "crates/farhelm-helm/src/environment/podman/build.rs:740",
+            "detail": "Reviewed commit: 56659839785691f76da3af5d8f51b511cff4ba8b; assigned implementation unchanged through pinned tip 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db. Discovery pass 2. TLDR: recipe cleanup can delete its user-owned local base image if it has no tag. When that image is the user's only retained copy, deleting the recipe destroys work outside the helm-owned artifacts. Source: retire_images_unlocked verifies only the explicit target's ownership labels, then calls podman image rm -- <id> without --no-prune (build.rs:690-743). Podman's default recursive parent pruning does not re-enter those label checks. Shipped input: RecipeBase::ContainerImage permits any nonempty NUL-free reference (farhelm-proto/src/recipes.rs:788-797), including a local image ID. pull_base accepts an existing ID, neither pulls nor tags it, and only rejects prepared Farhelm checkpoints (build.rs:808-837). software creates an owned child from it (:142-150,:203-224); preparation makes another child. After containers are removed, clean_images retires software and prepared (:781-785). The persisted recipe reference supplies no Podman name/container reference to protect its untagged base. No protective-tag route exists. SPEC.md:4811 expressly says 'User-owned base images are retained'; SPEC_impl.md:6566-6568 says 'Never delete a user's base image.' Fix: pass --no-prune and separately remove only recorded, ownership-verified IDs. Nonforcing removal does not forbid implicit ancestor pruning. Primary semantic evidence: Podman v4.9.3 rmi documents default parent pruning and --no-prune (https://docs.podman.io/en/v4.9.3/markdown/podman-rmi.1.html). Its vendored libimage/image.go:185-193 tests dangling by absence of names/children; :496-518 recurses unless NoPrune (https://github.com/containers/podman/blob/v4.9.3/vendor/github.com/containers/common/libimage/image.go#L496-L518). ABI images.go:558-568 passes that flag. Ordinary commit ancestry is also settled: Podman container_commit.go:57-70,160 imports/commits without squash; Buildah image.go:256-278 preserves base history and :631-660 appends one entry. Libimage oci.go:66-99 accepts shared parent diffIDs and that one-entry history extension (https://github.com/containers/podman/blob/v4.9.3/vendor/github.com/containers/common/libimage/oci.go#L66-L99); layer_tree.go:263-340 returns that parent. This source check confirms the committed-image parent premise. A supported concrete route is a valid untagged user-authored base selected by ID, with no remaining containers or other protecting images, followed by ordinary recipe deletion. Its only retained local image contents may include user work; no backup is promised or required by the interface. Suggested bucket: highest/security or loss of user-owned work. Could-be-highest: yes, deletion can cross the expressly preserved base boundary and remove that sole copy. Confidence: confirmed source/contract route conditional on the stated image/reference state, not observed execution. proposed_drop: false. possible_cover: none in supplied neighbour records. Caveats: tagged/digest-named bases are protected by names; another dependent image/container may prevent pruning. No claim of forced deletion of an in-use image, universal effect, observed data loss or measured frequency. The initial high unwanted-base-removal concern and possible highest consequence are both preserved; the latter now has the shipped input/prune route stated explicitly. Not the refuted l7 parent-order concern: deleting image records while retaining child layers permits progress and does not constrain later default pruning. No tests, builds, reproductions or live-install actions performed."
+          }
+        }
+      ],
+      "latest": {
+        "line": 26,
+        "event": {
+          "version": 1,
+          "kind": "finding",
+          "id": "l8",
+          "state": "open",
+          "summary": "Owned-image cleanup can prune an untagged user-owned base",
+          "location": "crates/farhelm-helm/src/environment/podman/build.rs:740",
+          "detail": "Reviewed commit: 56659839785691f76da3af5d8f51b511cff4ba8b; assigned implementation unchanged through pinned tip 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db. Discovery pass 2. TLDR: recipe cleanup can delete its user-owned local base image if it has no tag. When that image is the user's only retained copy, deleting the recipe destroys work outside the helm-owned artifacts. Source: retire_images_unlocked verifies only the explicit target's ownership labels, then calls podman image rm -- <id> without --no-prune (build.rs:690-743). Podman's default recursive parent pruning does not re-enter those label checks. Shipped input: RecipeBase::ContainerImage permits any nonempty NUL-free reference (farhelm-proto/src/recipes.rs:788-797), including a local image ID. pull_base accepts an existing ID, neither pulls nor tags it, and only rejects prepared Farhelm checkpoints (build.rs:808-837). software creates an owned child from it (:142-150,:203-224); preparation makes another child. After containers are removed, clean_images retires software and prepared (:781-785). The persisted recipe reference supplies no Podman name/container reference to protect its untagged base. No protective-tag route exists. SPEC.md:4811 expressly says 'User-owned base images are retained'; SPEC_impl.md:6566-6568 says 'Never delete a user's base image.' Fix: pass --no-prune and separately remove only recorded, ownership-verified IDs. Nonforcing removal does not forbid implicit ancestor pruning. Primary semantic evidence: Podman v4.9.3 rmi documents default parent pruning and --no-prune (https://docs.podman.io/en/v4.9.3/markdown/podman-rmi.1.html). Its vendored libimage/image.go:185-193 tests dangling by absence of names/children; :496-518 recurses unless NoPrune (https://github.com/containers/podman/blob/v4.9.3/vendor/github.com/containers/common/libimage/image.go#L496-L518). ABI images.go:558-568 passes that flag. Ordinary commit ancestry is also settled: Podman container_commit.go:57-70,160 imports/commits without squash; Buildah image.go:256-278 preserves base history and :631-660 appends one entry. Libimage oci.go:66-99 accepts shared parent diffIDs and that one-entry history extension (https://github.com/containers/podman/blob/v4.9.3/vendor/github.com/containers/common/libimage/oci.go#L66-L99); layer_tree.go:263-340 returns that parent. This source check confirms the committed-image parent premise. A supported concrete route is a valid untagged user-authored base selected by ID, with no remaining containers or other protecting images, followed by ordinary recipe deletion. Its only retained local image contents may include user work; no backup is promised or required by the interface. Suggested bucket: highest/security or loss of user-owned work. Could-be-highest: yes, deletion can cross the expressly preserved base boundary and remove that sole copy. Confidence: confirmed source/contract route conditional on the stated image/reference state, not observed execution. proposed_drop: false. possible_cover: none in supplied neighbour records. Caveats: tagged/digest-named bases are protected by names; another dependent image/container may prevent pruning. No claim of forced deletion of an in-use image, universal effect, observed data loss or measured frequency. The initial high unwanted-base-removal concern and possible highest consequence are both preserved; the latter now has the shipped input/prune route stated explicitly. Not the refuted l7 parent-order concern: deleting image records while retaining child layers permits progress and does not constrain later default pruning. No tests, builds, reproductions or live-install actions performed."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g061/findings.jsonl",
+        "id": "l8",
+        "line": 26,
+        "disposition": "verified",
+        "group": "podman-owned-image-rm-default-prunes-user-base",
+        "reason": "Parent explicitly accepted named retain-verified proposal from claims-039 after inspecting it. Owned-image retirement omits --no-prune. A valid untagged user-authored local base selected by ID can be removed implicitly outside the ownership-checked target list. Once no retained image/container protects its contents, this can destroy the user's sole local copy. Retain highest on the supported sole-copy local-base route. Ownership checks and nonforcing removal do not constrain implicit ancestor deletion. Add --no-prune while continuing explicit verified-ID retirement; no dismissal or consequence lowering is proposed. Checked source/results: [\"56659839785691f76da3af5d8f51b511cff4ba8b:environment/podman/build.rs:690-743 checks labels only for the explicit target, then runs image rm without --no-prune. clean_images:781-785 retires software and prepared images. Source unchanged through reviewed tip.\",\"Same revision: farhelm-proto/src/recipes.rs:788-797 accepts any nonempty NUL-free custom reference, including a local ID. pull_base:808-837 accepts an existing image without pulling or tagging it; software:142-151,203-224 commits an owned child. A saved reference does not add a Podman name.\",\"https://docs.podman.io/en/v4.9.3/markdown/podman-rmi.1.html documents dangling-parent removal and --no-prune. Checked https://github.com/containers/podman/blob/v4.9.3/vendor/github.com/containers/common/libimage/image.go#L496-L518: absent NoPrune, removal recurses into a dangling parent without Farhelm's ownership predicate. ABI images.go:558-568 passes that option.\",\"Ancestry premise checked in primary v4.9.3 source: libpod/container_commit.go:57-70,160 imports/commits through Buildah; vendor/github.com/containers/buildah/image.go:250-286,566-647 preserves base history/diff IDs and appends commit history; common/libimage/oci.go:60-94 and layer_tree.go:263-340 recognize the immediate committed parent.\",\"Tagged/digest-named parents remain protected by names; direct container use can refuse deletion; other images may keep a parent non-dangling. The route is conditional on absence of those protections. No forced in-use deletion, measured prevalence or runtime data loss is asserted. Parent-first removal can preserve layers temporarily; it does not preserve the original base record or prevent eventual loss when remaining owned descendants are removed.\"] Current coverage/results: [\"Current SPEC.md:4885-4889 and SPEC_impl.md:6048-6050,6087-6091 expressly preserve user base images. They prohibit rather than accept this route.\",\"TODO Planned empty. BUGS.md and active TRIAGE_OUTCOMES searches for pruning, untagged bases, image retirement, Podman and cleanup contain no matching accepted bug/decision. Archive not read.\",\"plans/queue searched for no-prune, untagged, image retirement/cleanup and Podman. podman-environments.md:251-253 also preserves user bases and is landed per REPORTS.md:21. Agent-operations scope does not fix image pruning; no unlanded plan supplies coverage.\",\"Full INDEX.md read and image/pruning matches checked. snapshot-cleanup-spec-omits-unrecorded-builder-exception.md covers a Tensorlake-owned package snapshot accepted as another source, with an explicit implementation exception; it does not cover a user-authored local Podman base or default ancestor pruning. No exact queued alias or extension found.\",\"FILTER.md excludes user-work loss and trust-boundary consequences from the relevant rare-condition filters. No upgrade premise or other exact accepted filter route is needed here.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Initial high unwanted-base-removal concern included possible highest if an unbacked local image held user work. Latest history establishes the image-ID input, commit ancestry and implicit prune route and recommends highest. Keep both unwanted deletion and conditional sole-copy work loss, with all name/container/dependent-image caveats.\"; \"No missing source premise for the conditional unsupported deletion boundary. Actual presence of sole-copy user-authored contents is a valid input condition, not an observed installation fact. Runtime occurrence remains untested.\"."
+      },
+      "accepted_parent_decision": {
+        "key": "g061/l8",
+        "line": 26,
+        "disposition": "verified",
+        "group": "podman-owned-image-rm-default-prunes-user-base",
+        "bucket": "highest",
+        "recording": "retain-verified",
+        "queue_target_candidate": null,
+        "needs_independent_drop_check": false,
+        "reason": "Parent explicitly accepted named retain-verified proposal from claims-039 after inspecting it. Owned-image retirement omits --no-prune. A valid untagged user-authored local base selected by ID can be removed implicitly outside the ownership-checked target list. Once no retained image/container protects its contents, this can destroy the user's sole local copy. Retain highest on the supported sole-copy local-base route. Ownership checks and nonforcing removal do not constrain implicit ancestor deletion. Add --no-prune while continuing explicit verified-ID retirement; no dismissal or consequence lowering is proposed. Checked source/results: [\"56659839785691f76da3af5d8f51b511cff4ba8b:environment/podman/build.rs:690-743 checks labels only for the explicit target, then runs image rm without --no-prune. clean_images:781-785 retires software and prepared images. Source unchanged through reviewed tip.\",\"Same revision: farhelm-proto/src/recipes.rs:788-797 accepts any nonempty NUL-free custom reference, including a local ID. pull_base:808-837 accepts an existing image without pulling or tagging it; software:142-151,203-224 commits an owned child. A saved reference does not add a Podman name.\",\"https://docs.podman.io/en/v4.9.3/markdown/podman-rmi.1.html documents dangling-parent removal and --no-prune. Checked https://github.com/containers/podman/blob/v4.9.3/vendor/github.com/containers/common/libimage/image.go#L496-L518: absent NoPrune, removal recurses into a dangling parent without Farhelm's ownership predicate. ABI images.go:558-568 passes that option.\",\"Ancestry premise checked in primary v4.9.3 source: libpod/container_commit.go:57-70,160 imports/commits through Buildah; vendor/github.com/containers/buildah/image.go:250-286,566-647 preserves base history/diff IDs and appends commit history; common/libimage/oci.go:60-94 and layer_tree.go:263-340 recognize the immediate committed parent.\",\"Tagged/digest-named parents remain protected by names; direct container use can refuse deletion; other images may keep a parent non-dangling. The route is conditional on absence of those protections. No forced in-use deletion, measured prevalence or runtime data loss is asserted. Parent-first removal can preserve layers temporarily; it does not preserve the original base record or prevent eventual loss when remaining owned descendants are removed.\"] Current coverage/results: [\"Current SPEC.md:4885-4889 and SPEC_impl.md:6048-6050,6087-6091 expressly preserve user base images. They prohibit rather than accept this route.\",\"TODO Planned empty. BUGS.md and active TRIAGE_OUTCOMES searches for pruning, untagged bases, image retirement, Podman and cleanup contain no matching accepted bug/decision. Archive not read.\",\"plans/queue searched for no-prune, untagged, image retirement/cleanup and Podman. podman-environments.md:251-253 also preserves user bases and is landed per REPORTS.md:21. Agent-operations scope does not fix image pruning; no unlanded plan supplies coverage.\",\"Full INDEX.md read and image/pruning matches checked. snapshot-cleanup-spec-omits-unrecorded-builder-exception.md covers a Tensorlake-owned package snapshot accepted as another source, with an explicit implementation exception; it does not cover a user-authored local Podman base or default ancestor pruning. No exact queued alias or extension found.\",\"FILTER.md excludes user-work loss and trust-boundary consequences from the relevant rare-condition filters. No upgrade premise or other exact accepted filter route is needed here.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Initial high unwanted-base-removal concern included possible highest if an unbacked local image held user work. Latest history establishes the image-ID input, commit ancestry and implicit prune route and recommends highest. Keep both unwanted deletion and conditional sole-copy work loss, with all name/container/dependent-image caveats.\"; \"No missing source premise for the conditional unsupported deletion boundary. Actual presence of sole-copy user-authored contents is a valid input condition, not an observed installation fact. Runtime occurrence remains untested.\"."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-039",
+          "key": "g061/l8",
+          "latest_line": 26,
+          "recommendation": "retain-verified",
+          "bucket": "highest",
+          "underlying_key": "podman-owned-image-rm-default-prunes-user-base",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "Owned-image retirement omits --no-prune. A valid untagged user-authored local base selected by ID can be removed implicitly outside the ownership-checked target list. Once no retained image/container protects its contents, this can destroy the user's sole local copy.",
+          "checks": [
+            "56659839785691f76da3af5d8f51b511cff4ba8b:environment/podman/build.rs:690-743 checks labels only for the explicit target, then runs image rm without --no-prune. clean_images:781-785 retires software and prepared images. Source unchanged through reviewed tip.",
+            "Same revision: farhelm-proto/src/recipes.rs:788-797 accepts any nonempty NUL-free custom reference, including a local ID. pull_base:808-837 accepts an existing image without pulling or tagging it; software:142-151,203-224 commits an owned child. A saved reference does not add a Podman name.",
+            "https://docs.podman.io/en/v4.9.3/markdown/podman-rmi.1.html documents dangling-parent removal and --no-prune. Checked https://github.com/containers/podman/blob/v4.9.3/vendor/github.com/containers/common/libimage/image.go#L496-L518: absent NoPrune, removal recurses into a dangling parent without Farhelm's ownership predicate. ABI images.go:558-568 passes that option.",
+            "Ancestry premise checked in primary v4.9.3 source: libpod/container_commit.go:57-70,160 imports/commits through Buildah; vendor/github.com/containers/buildah/image.go:250-286,566-647 preserves base history/diff IDs and appends commit history; common/libimage/oci.go:60-94 and layer_tree.go:263-340 recognize the immediate committed parent.",
+            "Tagged/digest-named parents remain protected by names; direct container use can refuse deletion; other images may keep a parent non-dangling. The route is conditional on absence of those protections. No forced in-use deletion, measured prevalence or runtime data loss is asserted. Parent-first removal can preserve layers temporarily; it does not preserve the original base record or prevent eventual loss when remaining owned descendants are removed."
+          ],
+          "coverage_checked": [
+            "Current SPEC.md:4885-4889 and SPEC_impl.md:6048-6050,6087-6091 expressly preserve user base images. They prohibit rather than accept this route.",
+            "TODO Planned empty. BUGS.md and active TRIAGE_OUTCOMES searches for pruning, untagged bases, image retirement, Podman and cleanup contain no matching accepted bug/decision. Archive not read.",
+            "plans/queue searched for no-prune, untagged, image retirement/cleanup and Podman. podman-environments.md:251-253 also preserves user bases and is landed per REPORTS.md:21. Agent-operations scope does not fix image pruning; no unlanded plan supplies coverage.",
+            "Full INDEX.md read and image/pruning matches checked. snapshot-cleanup-spec-omits-unrecorded-builder-exception.md covers a Tensorlake-owned package snapshot accepted as another source, with an explicit implementation exception; it does not cover a user-authored local Podman base or default ancestor pruning. No exact queued alias or extension found.",
+            "FILTER.md excludes user-work loss and trust-boundary consequences from the relevant rare-condition filters. No upgrade premise or other exact accepted filter route is needed here."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": "No missing source premise for the conditional unsupported deletion boundary. Actual presence of sole-copy user-authored contents is a valid input condition, not an observed installation fact. Runtime occurrence remains untested.",
+          "original_stronger_consequence": "Initial high unwanted-base-removal concern included possible highest if an unbacked local image held user work. Latest history establishes the image-ID input, commit ancestry and implicit prune route and recommends highest. Keep both unwanted deletion and conditional sole-copy work loss, with all name/container/dependent-image caveats.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Retain highest on the supported sole-copy local-base route. Ownership checks and nonforcing removal do not constrain implicit ancestor deletion. Add --no-prune while continuing explicit verified-ID retirement; no dismissal or consequence lowering is proposed."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": true,
+        "clearly_refuted_candidate": false,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "highest",
+        "confidence": "Source-confirmed by an existing parent decision; not runtime reproduced",
+        "deduplication_key": "podman-owned-image-rm-default-prunes-user-base",
+        "destination": "trailing-podman-owned-image-rm-default-prunes-user-base.md"
+      }
+    }
+  ],
+  "replies": [
+    {
+      "turn": 1,
+      "reply": "Initial review complete. All five patches read; no unread scope or unresolved leads.\n\nRecorded in [findings.jsonl]([private-run]/g061/findings.jsonl):\n\n- **l1 — high:** failed rebuild discards usable images.\n- **l4 — high:** interrupted image capture can permanently block cleanup.\n- **l5 — other:** job completion lacks a final list invalidation.\n\nTwo refuted candidates are also recorded. Source analysis only; no tests or reproductions run."
+    },
+    {
+      "turn": 2,
+      "reply": "Revised original IDs:\n\n- **l1:** clarified force-rebuild requirements and active-job joining while preserving prior images.\n- **l4:** verified all settlement paths through pinned tip; none resolves the no-dispatch crash window.\n- **l5:** distinguished successful stale refreshes from g060/l1’s failed-refresh recovery; documented the narrow concurrency window.\n\nPriorities unchanged. No new findings or unresolved lead IDs."
+    },
+    {
+      "turn": 3,
+      "reply": "Checked helper ownership, image freshness, provider/deletion guards, release selections, and custom-login exec lowering.\n\n- **New verified:** l6 — custom-image login lookup unnecessarily requires `/root`; missing working directories fail in [upstream exec source](https://github.com/containers/crun/blob/1.14/src/libcrun/container.c#L3132-L3133).\n- **New unverified:** none.\n- **Open leads:** none.\n- **Anything new found:** yes, l6.\n\nRecorded in the findings log. No runtime tests or reproductions performed."
+    },
+    {
+      "turn": 4,
+      "reply": "Checked image retirement, commit ancestry, state transactions, and release payload consistency.\n\n- **New verified:** l8 — cleanup can prune an untagged user-owned base, including a sole-copy work-loss route. [Podman pruning semantics](https://docs.podman.io/en/v4.9.3/markdown/podman-rmi.1.html).\n- **New unverified:** none.\n- **New candidate:** l7 — parent-order concern refuted by source.\n- **Open leads:** none.\n- **Anything new found:** yes, l8.\n\nRecords and progress updated. No runtime actions performed."
+    },
+    {
+      "turn": 5,
+      "reply": "Checked cancellation, source locking, installation-fact publication, provider refusal ordering, state compatibility, and release-step changes.\n\n- **New verified IDs:** none.\n- **New unverified IDs:** none.\n- **Open leads:** none.\n- **Anything new found:** no.\n\nDiscovery pass 3 is complete; progress updated. No runtime actions performed."
+    }
+  ],
+  "progress": "# g061 release-build-payloads\n\nDiscovery, turn 5 complete. Initial review, synthesis and three discovery passes complete. Discovery passes completed: 3. Read the full refreshed 307-line discovery-neighbours.json in bounded chunks before source search. No named pending questions. This pass checked cancellation/error propagation, snapshot installation facts and first publication, provider support/refusal ordering, and release-step replacement boundaries beyond known findings. No accepted drops or lowerings.\n\nAll mandatory assigned material read through the evidence command: 00127 lines 1–191; 00179 lines 1–847 in five packets; 00207 lines 1–468 in three packets; 00275 lines 1–21; 00758 lines 1–16. No unread assigned scope. Read only inventory.json's commits field. No coverage metadata or queued findings read for coverage.\n\nContracts inspected at pinned revisions: shared recipes and container sessions; disposable environment state, transport, prepared artifacts, Podman image creation/retirement; Tensorlake recipe/build/preparation; GUI answers bind to what was drawn; cross-compilation/testing and the tmux transition. SPEC.md and SPEC_impl.md have no diff between the two assigned environment commits, so the complete 5665983 contract sections also apply to 56040bb. Large combined contract output that reported clipping was reread in smaller packets. Release payload setup was checked against the nextest setup script and its native musl/static payload requirements. Removed focused tmux gate was checked against retained driver tests and the full workspace release selection.\n\nVerified findings from the initial pass: l1 (high: failed rebuild discards previous usable checkpoints), l4 (high: absent pending image tag can permanently block cleanup), l5 (other: no invalidation after job admission removal). No unverified findings or unresolved leads remain. Proposed-drop candidates remain recorded and unaccepted by the parent: l2 (bootstrap proxies are explicitly prepended to private script stdin), c3 (driver teardown regressions remain in the full workspace selection). Their original consequences and source refutations remain in the append-only log.\n\nInterface assumptions: both providers preserve shared state through one immediate transactional writer; global deletion admission excludes new work; place locks protect source selection through Running; non-forcing retirement protects images used by existing containers. l4's host-administration consequence is backed by store/podman.rs:213–249 and PodmanRecipeState::needs_cleanup. l5's original backend defect is at 5665983; the visible GUI route was checked at the following integration commit 350a4b3, whose per-place reader consumes fleet invalidations and disables Rebuild while building. Do not infer runtime observation from these source-only conclusions.\n\nSynthesis checks: l1 force intent must bypass both fresh-prepared and software reuse without hiding active rebuild admission. Retaining old records supports later launches after failed software replacement; active launch join semantics must remain. l4's four production tag-settlement paths were enumerated at tip, plus whole-state resets, place-map removal, SQL updates, deletion refusals and leftovers cleanup; none settles the absent never-dispatched tag. No later backend fix exists in the range. l5's successful stale-read path is independent of g060/l1's failed-refresh retry path. Confirmed CLI runtime is multithreaded; no-await final event/drop sequence still has a narrow preemption/concurrent-read window. Original and revised consequences, caveats and unchanged buckets are in the log. Relevant tip GUI status readers, resource triggers and probe-poll condition are unchanged. No useful accessible premise remains unresolved.\n\nDiscovery checks beyond known issues: reread bootstrap/login and user-manager preparation, helper intent and identity settlement, fresh-image age/version/source/existence checks, canonical container inspect/role/helm/recipe guards, provider refusal before Tensorlake create markers, deletion/source mutex use and cooperative job cancellation. Rechecked release musl/digest fixture changes and the later nextest workspace selection/configuration; no additional release issue found. New concrete login-directory lead l6 was recorded immediately and resolved to a verified other finding after tracing exec lowering, the custom-base contract, all preceding custom-base steps, Podman v4.9.3 cwd propagation and crun 1.14's exec chdir failure. Primary upstream source was read only to settle the vendor exec premise; no runtime execution. A finding did not end the pass: provider/cancellation/release checks finished afterward.\n\nDiscovery pass 1 result: new verified ID l6, no unverified or open leads. Pass 2 recorded l7 and l8 leads immediately. l7 resolved to a source-refuted candidate: supported Podman removes parent image records while retaining layers required by children, so child-only removal refusal is not established. Its proposed drop remains unaccepted. l8 resolved to a new verified finding: default recursive image pruning can delete an untagged user-owned local base selected by ID; an unbacked local base supplies a potential highest loss-of-work route outside the specified owned-artifact boundary. Primary source checks covered Podman v4.9.3 removal options, libimage recursion/dangling and OCI parent/history detection, storage record-versus-layer deletion, and Buildah commit history. Actual commands were not executed against Podman. The finding was recorded before completing the remaining state/release checks.\n\nOther pass 2 checks/results: immediate transactional recipe-state writer preserves both providers' fields, place identity/kind/destination are checked within that transaction, aggregate cleanup guards cover both providers, and image base admission accepts an existing literal ID without tagging it. Verified release Ubuntu digest equals the provider constant; musl dependency/setup and native payload producer line up; removing the later focused tmux step retains the normal workspace nextest/doctest commands. No new issue from these checks. Relevant source attribution is inside the pinned range; build.rs was introduced by the assigned commit and its retirement command remains unchanged at tip.\n\nPass 2 result: new verified ID l8; new unverified-after-investigation IDs none; open lead IDs none. New candidate ID l7 retains original consequence and source refutation. Something new found: yes, implicit pruning can remove a user-owned base.\n\nPass 3 checks/results: traced prepare_images_owned's source guard through observed Running, later lineage recheck and prepared publication (assigned build.rs:304-405). The shared installer returns facts only after finish_snapshot_install succeeds, skips attachment/credential delivery and rejects degraded boot preparation (snapshot_preparer.rs:46-121). Cancellation sets owned job flags and awaits watch-sender closure; job admission is held for work/error cleanup and source-lock deletion authority remains guard-gated (tensorlake/build.rs:676-794). Existing cache/provider checks occur before new incompatible resource requests and frozen snapshot reuse (56040bb build.rs:573-612,668-710). Re-read shared-state field changes for defaulting/preservation versus first Podman production publication; no new compatibility defect established. Re-read both assigned release workflow patches and surviving nextest/doctest steps; musl prerequisite and digest fixture remain consistent with the native payload setup. Bounded whole-range path history and zero later diff in the affected build files establish attribution/persistence without treating later unrelated release edits as new assigned scope.\n\nPass 3 result: empty discovery. New verified IDs none; new unverified-after-investigation IDs none; new candidates none; open lead IDs none. No substantive unsettled premise or unread assigned scope. Existing findings/candidate consequences and proposed-drop bases are unchanged; no findings event was invented for this empty pass. No tests, builds, reproductions, live-install actions or checkout modifications in any turn. Only private group artifacts changed. Findings are in findings.jsonl; no separate final report created. Next action: await the caller's next pass prompt.\n"
+}

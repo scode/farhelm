@@ -1,0 +1,665 @@
+{
+  "group": {
+    "id": "g148",
+    "domain": "documentation-capture-tooling",
+    "purpose": "documentation-capture-tooling: e2e/docs-shots/visual-review.spec.ts, e2e/docs-shots/add-a-remote-host.spec.ts, e2e/docs-shots/manage-hosts.spec.ts, e2e/docs-shots/start-a-session.spec.ts, e2e/docs-shots/stop-restart-resume.spec.ts, e2e/docs-shots/release-notes.spec.ts, e2e/docs-shots/work-in-a-session.spec.ts, e2e/readme-hero/stage.ts, e2e/readme-hero/start-stack.sh, e2e/readme-video/capture.spec.ts, e2e/readme-video/overlay.ts, docs/docs-shots/scenario.json5, e2e/readme-hero/scenario.ts; phases complete small per-commit changes",
+    "interfaces": [
+      "g005",
+      "g006",
+      "g012",
+      "g091",
+      "g092"
+    ],
+    "sources": [
+      {
+        "path": "[private-run]/prep/parts/00551-000.patch",
+        "ranges": [
+          [
+            1,
+            30
+          ]
+        ],
+        "original_path": "e2e/docs-shots/visual-review.spec.ts",
+        "commit": "dfeb437d47e735c08ca303ddf6add2c4fc8325c9",
+        "notes": "patch header; patch character offsets [0,2031)",
+        "lines": 30,
+        "bytes": 2031,
+        "start": 0,
+        "end": 2031,
+        "original": "[private-run]/prep/originals/00551.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/00552-000.patch",
+        "ranges": [
+          [
+            1,
+            13
+          ]
+        ],
+        "original_path": "e2e/docs-shots/add-a-remote-host.spec.ts",
+        "commit": "2c5a1d5a8ebe7c0d0889ac5db40b272d75ae02cb",
+        "notes": "patch header; patch character offsets [0,864)",
+        "lines": 13,
+        "bytes": 864,
+        "start": 0,
+        "end": 864,
+        "original": "[private-run]/prep/originals/00552.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/00553-000.patch",
+        "ranges": [
+          [
+            1,
+            22
+          ]
+        ],
+        "original_path": "e2e/docs-shots/manage-hosts.spec.ts",
+        "commit": "2c5a1d5a8ebe7c0d0889ac5db40b272d75ae02cb",
+        "notes": "patch header; patch character offsets [0,1115)",
+        "lines": 22,
+        "bytes": 1115,
+        "start": 0,
+        "end": 1115,
+        "original": "[private-run]/prep/originals/00553.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/00554-000.patch",
+        "ranges": [
+          [
+            1,
+            41
+          ]
+        ],
+        "original_path": "e2e/docs-shots/start-a-session.spec.ts",
+        "commit": "2c5a1d5a8ebe7c0d0889ac5db40b272d75ae02cb",
+        "notes": "patch header; patch character offsets [0,2420)",
+        "lines": 41,
+        "bytes": 2422,
+        "start": 0,
+        "end": 2420,
+        "original": "[private-run]/prep/originals/00554.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/00555-000.patch",
+        "ranges": [
+          [
+            1,
+            51
+          ]
+        ],
+        "original_path": "e2e/docs-shots/stop-restart-resume.spec.ts",
+        "commit": "2c5a1d5a8ebe7c0d0889ac5db40b272d75ae02cb",
+        "notes": "patch header; patch character offsets [0,2601)",
+        "lines": 51,
+        "bytes": 2601,
+        "start": 0,
+        "end": 2601,
+        "original": "[private-run]/prep/originals/00555.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/00604-000.patch",
+        "ranges": [
+          [
+            1,
+            132
+          ]
+        ],
+        "original_path": "e2e/docs-shots/release-notes.spec.ts",
+        "commit": "53d618e4a033749efc9f9f10adef168643737b99",
+        "notes": "patch header; patch character offsets [0,7717)",
+        "lines": 132,
+        "bytes": 7721,
+        "start": 0,
+        "end": 7717,
+        "original": "[private-run]/prep/originals/00604.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/00605-000.patch",
+        "ranges": [
+          [
+            1,
+            30
+          ]
+        ],
+        "original_path": "e2e/docs-shots/start-a-session.spec.ts",
+        "commit": "53d618e4a033749efc9f9f10adef168643737b99",
+        "notes": "patch header; patch character offsets [0,1653)",
+        "lines": 30,
+        "bytes": 1653,
+        "start": 0,
+        "end": 1653,
+        "original": "[private-run]/prep/originals/00605.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/00606-000.patch",
+        "ranges": [
+          [
+            1,
+            23
+          ]
+        ],
+        "original_path": "e2e/docs-shots/stop-restart-resume.spec.ts",
+        "commit": "53d618e4a033749efc9f9f10adef168643737b99",
+        "notes": "patch header; patch character offsets [0,1323)",
+        "lines": 23,
+        "bytes": 1323,
+        "start": 0,
+        "end": 1323,
+        "original": "[private-run]/prep/originals/00606.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/00807-000.patch",
+        "ranges": [
+          [
+            1,
+            59
+          ]
+        ],
+        "original_path": "e2e/docs-shots/release-notes.spec.ts",
+        "commit": "647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513",
+        "notes": "patch header; patch character offsets [0,2661)",
+        "lines": 59,
+        "bytes": 2661,
+        "start": 0,
+        "end": 2661,
+        "original": "[private-run]/prep/originals/00807.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/00808-000.patch",
+        "ranges": [
+          [
+            1,
+            50
+          ]
+        ],
+        "original_path": "e2e/docs-shots/visual-review.spec.ts",
+        "commit": "647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513",
+        "notes": "patch header; patch character offsets [0,2988)",
+        "lines": 50,
+        "bytes": 2988,
+        "start": 0,
+        "end": 2988,
+        "original": "[private-run]/prep/originals/00808.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/00809-000.patch",
+        "ranges": [
+          [
+            1,
+            56
+          ]
+        ],
+        "original_path": "e2e/docs-shots/work-in-a-session.spec.ts",
+        "commit": "647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513",
+        "notes": "patch header; patch character offsets [0,2539)",
+        "lines": 56,
+        "bytes": 2539,
+        "start": 0,
+        "end": 2539,
+        "original": "[private-run]/prep/originals/00809.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/00815-000.patch",
+        "ranges": [
+          [
+            1,
+            32
+          ]
+        ],
+        "original_path": "e2e/readme-hero/stage.ts",
+        "commit": "647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513",
+        "notes": "patch header; patch character offsets [0,1776)",
+        "lines": 32,
+        "bytes": 1776,
+        "start": 0,
+        "end": 1776,
+        "original": "[private-run]/prep/originals/00815.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/00816-000.patch",
+        "ranges": [
+          [
+            1,
+            101
+          ]
+        ],
+        "original_path": "e2e/readme-hero/start-stack.sh",
+        "commit": "647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513",
+        "notes": "patch header; patch character offsets [0,4060)",
+        "lines": 101,
+        "bytes": 4060,
+        "start": 0,
+        "end": 4060,
+        "original": "[private-run]/prep/originals/00816.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/00817-000.patch",
+        "ranges": [
+          [
+            1,
+            44
+          ]
+        ],
+        "original_path": "e2e/readme-video/capture.spec.ts",
+        "commit": "647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513",
+        "notes": "patch header; patch character offsets [0,2333)",
+        "lines": 44,
+        "bytes": 2333,
+        "start": 0,
+        "end": 2333,
+        "original": "[private-run]/prep/originals/00817.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/00818-000.patch",
+        "ranges": [
+          [
+            1,
+            47
+          ]
+        ],
+        "original_path": "e2e/readme-video/overlay.ts",
+        "commit": "647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513",
+        "notes": "patch header; patch character offsets [0,2865)",
+        "lines": 47,
+        "bytes": 2865,
+        "start": 0,
+        "end": 2865,
+        "original": "[private-run]/prep/originals/00818.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/01283-000.patch",
+        "ranges": [
+          [
+            1,
+            13
+          ]
+        ],
+        "original_path": "docs/docs-shots/scenario.json5",
+        "commit": "500548b9253b07a26fd03119679184b69544e31d",
+        "notes": "patch header; patch character offsets [0,669)",
+        "lines": 13,
+        "bytes": 669,
+        "start": 0,
+        "end": 669,
+        "original": "[private-run]/prep/originals/01283.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/01286-000.patch",
+        "ranges": [
+          [
+            1,
+            29
+          ]
+        ],
+        "original_path": "e2e/readme-hero/scenario.ts",
+        "commit": "500548b9253b07a26fd03119679184b69544e31d",
+        "notes": "patch header; patch character offsets [0,1195)",
+        "lines": 29,
+        "bytes": 1195,
+        "start": 0,
+        "end": 1195,
+        "original": "[private-run]/prep/originals/01286.patch"
+      }
+    ],
+    "lines": 773,
+    "bytes": 40816
+  },
+  "records": [
+    {
+      "key": "g148/c1",
+      "owner": "g148",
+      "id": "c1",
+      "domain": "documentation-capture-tooling",
+      "purpose": "documentation-capture-tooling: e2e/docs-shots/visual-review.spec.ts, e2e/docs-shots/add-a-remote-host.spec.ts, e2e/docs-shots/manage-hosts.spec.ts, e2e/docs-shots/start-a-session.spec.ts, e2e/docs-shots/stop-restart-resume.spec.ts, e2e/docs-shots/release-notes.spec.ts, e2e/docs-shots/work-in-a-session.spec.ts, e2e/readme-hero/stage.ts, e2e/readme-hero/start-stack.sh, e2e/readme-video/capture.spec.ts, e2e/readme-video/overlay.ts, docs/docs-shots/scenario.json5, e2e/readme-hero/scenario.ts; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 1,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c1",
+            "state": "open",
+            "summary": "Stop callout's broad descendant claim predates the assigned change",
+            "location": "e2e/docs-shots/stop-restart-resume.spec.ts:60",
+            "detail": "Reviewed commit: 2c5a1d5a8ebe7c0d0889ac5db40b272d75ae02cb. TLDR: The intermediate screenshot says Stop ends everything the agent started, although some detached jobs can survive. Details: The assigned patch adds terminal-tab closure to the old wording, which already said 'Stop: ends the agent and everything it started.' SPEC.md, Lifecycle operations, lines 2037-2070 describes the limits: 'jobs a user-run tmux moves outside those groups may survive Stop, Restart, Replace, Delete or tab close; this is accepted as the intent of running them under tmux' and 'a detached process that hides or overwrites its environment survives stop and delete there.' This is not a newly introduced independent defect in the assigned change. Commit 53d618e4a033749efc9f9f10adef168643737b99 subsequently corrects this exact callout to say some detached Linux jobs can keep running. Suggested bucket: other (documentation-capture wording); confidence: confirmed by patch and pinned contract, not execution. proposed_drop: the overbroad claim was pre-existing, and the assigned later patch corrects it; no new regression established. Could-be-highest: no established security or loss-of-work route in these screenshot changes. possible_cover: none searched. Caveat: accepted process-containment limitations do not themselves make inaccurate documentation correct; the basis for dropping is the unchanged pre-existing claim, not specification acceptance of misleading wording."
+          }
+        },
+        {
+          "line": 5,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c1",
+            "state": "open",
+            "summary": "Broad Stop prose is pre-existing; later repair does not erase intermediate wording",
+            "location": "e2e/docs-shots/stop-restart-resume.spec.ts:60",
+            "detail": "Reviewed commit: 2c5a1d5a8ebe7c0d0889ac5db40b272d75ae02cb. TLDR: The intermediate capture source would tell readers that Stop ends everything the agent started, although detached jobs can survive. Exact chronology checked in source: the parent revision already has the row-menu string 'Stop: ends the agent and everything it started. The session and its terminal stay.' at lines 53-56. The reviewed commit changes that string at line 60 to 'Stop: ends the agent and everything it started, and closes its shell tabs. The session and its terminal stay.' It also newly adds a separate header Stop callout at line 26, 'Stop: ends the agent and closes its shell tabs. The session stays.' Commit 53d618e4a033749efc9f9f10adef168643737b99 later replaces only the row-menu explanation at line 61 with 'Stop: ends the agent and closes its terminal tabs. Some detached jobs on Linux can keep running. The session stays.' and adjusts its placement. Contract: SPEC.md at the reviewed revision, Lifecycle operations, describes tab closure and expressly limits descendant cleanup: 'jobs a user-run tmux moves outside those groups may survive Stop, Restart, Replace, Delete or tab close; this is accepted as the intent of running them under tmux'; without a scope, 'a detached process that hides or overwrites its environment survives stop and delete there.' The broad prose is inaccurate at the intermediate revision; a later repair alone would not justify dropping an introduced error. The assigned executable capture test is in review scope, but this particular error is generated prose already present before its patch. Its runnable changes add a header annotation, crop/layout changes and tab-closing wording; neither Stop action is clicked or implemented by this test. No changed runnable capture logic is shown to stop incorrect processes or manufacture the broad behavior claim for the first time. Suggested bucket: other (noncatastrophic capture/documentation error). Confidence: confirmed from parent/reviewed/later source and pinned contract; no capture, rendering or runtime behavior was observed. proposed_drop: no newly introduced defect in the unchanged broad claim; not ordinary-docs exclusion, not acceptance of inaccurate prose, and not merely the later repair. Could-be-highest: no established route from this wording to security or loss of user-owned work; it describes an incomplete cleanup guarantee rather than instructing deletion or credential disclosure. possible_cover: none searched. Caveat: parent has not accepted this proposed drop, and this event leaves the full intermediate error and consequence visible for its independent decision."
+          }
+        },
+        {
+          "line": 6,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c1",
+            "state": "open",
+            "summary": "Exclusive range base already contains the broad Stop claim and conflicting cleanup caveat",
+            "location": "e2e/docs-shots/stop-restart-resume.spec.ts:60",
+            "detail": "Reviewed commit: 2c5a1d5a8ebe7c0d0889ac5db40b272d75ae02cb. TLDR: The intermediate capture source overpromises that Stop ends everything the agent started, although detached jobs may remain. Whole-range attribution now checked: at the exclusive base 6e423e30068b62c6cfa276c6d720ee35bb70387a, e2e/docs-shots/stop-restart-resume.spec.ts:53-56 already contains exactly 'Stop: ends the agent and everything it started. The session and its terminal stay.' The same base's SPEC.md:2038 already says jobs a user-run tmux moves outside its groups may survive Stop, Restart, Replace, Delete or tab close, and :2048 says exactly 'a detached process that hides or overwrites its environment survives stop and delete there.' Therefore both the misleading generated prose and the governing descendant-cleanup exception predate the entire reviewed range, not merely the immediate reviewed parent. Bounded git log of exclusive base through 2c5a1d5a8ebe7c0d0889ac5db40b272d75ae02cb for the assigned capture file returns only that reviewed commit. Its change adds tab closure to the already-broad row-menu claim, plus a new header callout that does not promise all descendants end. Later assigned commit 53d618e4a033749efc9f9f10adef168643737b99 corrects the row-menu prose and moves its annotation; that repair is separate from the attribution proof and would not erase an introduced intermediate defect. Suggested bucket: other, generated documentation/capture wording. Confidence: confirmed by exclusive-base, bounded history, reviewed and later source; no runtime or visual execution. proposed_drop: exact pre-range source proof for both sides of the contradiction, not scope exclusion or correctness of production cleanup. Original inaccurate-prose consequence remains intact. Could-be-highest: no established security or loss-of-work route from this Stop description. possible_cover: none searched. Caveat: parent has not accepted a drop; this event supplies the missing whole-range premise for independent judgment. This revises c1's earlier immediate-parent-only proposed-drop basis without deleting its history."
+          }
+        }
+      ],
+      "latest": {
+        "line": 6,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c1",
+          "state": "open",
+          "summary": "Exclusive range base already contains the broad Stop claim and conflicting cleanup caveat",
+          "location": "e2e/docs-shots/stop-restart-resume.spec.ts:60",
+          "detail": "Reviewed commit: 2c5a1d5a8ebe7c0d0889ac5db40b272d75ae02cb. TLDR: The intermediate capture source overpromises that Stop ends everything the agent started, although detached jobs may remain. Whole-range attribution now checked: at the exclusive base 6e423e30068b62c6cfa276c6d720ee35bb70387a, e2e/docs-shots/stop-restart-resume.spec.ts:53-56 already contains exactly 'Stop: ends the agent and everything it started. The session and its terminal stay.' The same base's SPEC.md:2038 already says jobs a user-run tmux moves outside its groups may survive Stop, Restart, Replace, Delete or tab close, and :2048 says exactly 'a detached process that hides or overwrites its environment survives stop and delete there.' Therefore both the misleading generated prose and the governing descendant-cleanup exception predate the entire reviewed range, not merely the immediate reviewed parent. Bounded git log of exclusive base through 2c5a1d5a8ebe7c0d0889ac5db40b272d75ae02cb for the assigned capture file returns only that reviewed commit. Its change adds tab closure to the already-broad row-menu claim, plus a new header callout that does not promise all descendants end. Later assigned commit 53d618e4a033749efc9f9f10adef168643737b99 corrects the row-menu prose and moves its annotation; that repair is separate from the attribution proof and would not erase an introduced intermediate defect. Suggested bucket: other, generated documentation/capture wording. Confidence: confirmed by exclusive-base, bounded history, reviewed and later source; no runtime or visual execution. proposed_drop: exact pre-range source proof for both sides of the contradiction, not scope exclusion or correctness of production cleanup. Original inaccurate-prose consequence remains intact. Could-be-highest: no established security or loss-of-work route from this Stop description. possible_cover: none searched. Caveat: parent has not accepted a drop; this event supplies the missing whole-range premise for independent judgment. This revises c1's earlier immediate-parent-only proposed-drop basis without deleting its history."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g148/findings.jsonl",
+        "id": "c1",
+        "line": 6,
+        "disposition": "under-investigation",
+        "group": "g148-c1",
+        "reason": "Record durably acknowledged; parent source/contract validation, cross-group synthesis, coverage/filter matching and any independent drop check remain pending. This preserves the claim and uncertainty without accepting, dropping or lowering it."
+      },
+      "accepted_parent_decision": null,
+      "returned_claim_checks": [
+        {
+          "batch": "claims-095",
+          "key": "g148/c1",
+          "latest_line": 6,
+          "recommendation": "out-of-range",
+          "bucket": "other",
+          "underlying_key": "docs-stop-callout-overpromises-descendant-cleanup",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The intermediate screenshot source does overpromise descendant cleanup, but both the broad wording and its conflicting cleanup exception exist at the exclusive range base. The reviewed change adds tab closure, not the overpromise. The later repair is corroboration, not the attribution basis.",
+          "checks": [
+            "6e423e30068b62c6cfa276c6d720ee35bb70387a:e2e/docs-shots/stop-restart-resume.spec.ts:53-56 already says Stop ends the agent and everything it started.",
+            "The same exclusive base's SPEC.md:2024-2057 explicitly limits process cleanup, including user-tmux jobs at 2038-2039 and detached processes with hidden/overwritten environments at 2048-2057.",
+            "2c5a1d5a8ebe7c0d0889ac5db40b272d75ae02cb changes the row-menu sentence only by adding shell-tab closure; its new header sentence does not promise that every descendant ends. The test only opens menus and adds annotations.",
+            "53d618e4a033749efc9f9f10adef168643737b99 corrects this exact row-menu sentence to acknowledge detached Linux jobs. Bounded full-range git log shows only these two changes to this capture file.",
+            "No runtime, screenshot capture or user reliance was observed. No security or user-work-loss route is established by the named wording claim."
+          ],
+          "coverage_checked": [
+            "SPEC.md:2069-2104 and SPEC_impl.md process-tree ownership discussion at 4791-4805 and 4890-4943 accept cleanup limitations; they do not accept inaccurate documentation of them.",
+            "TODO.md Planned bucket at 25-26 is empty. Searches of plans/queue for Stop wording, everything-started promises, detached jobs and capture annotations found no exact unlanded fix. tmux-drop-from-docs is reported landed in plans/REPORTS.md:32 and is not unlanded-plan coverage.",
+            "BUGS.md contains only an SSH provisioning-pipe hang, not this documentation error. Searches of active TRIAGE_OUTCOMES.md found no matching callout decision; archive not read.",
+            "INDEX.md read fully; container-tab-close-overpromises-process-termination.md read fully. It concerns container tab Close warnings/protocol text, not this screenshot's session Stop promise. Different trigger and scope; no exact alias or extension proposed.",
+            "FILTER.md read fully. No filter covers a standing inaccurate screenshot explanation merely because some surviving jobs are unusual."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": "None for pre-range attribution. A security or loss-of-work consequence caused by relying on this screenshot has not been shown.",
+          "original_stronger_consequence": "The intermediate generated screenshot tells readers Stop ends everything the agent started although detached jobs may remain. Earlier records first relied on the immediate parent and later repair; the latest record supplies whole-range base proof. That inaccurate-prose consequence is preserved.",
+          "needs_independent_drop_check": true,
+          "proposed_basis": "Exclude only this pre-range documentation defect, using the exact exclusive-base contradiction. Do not use acceptable production cleanup, ordinary-docs scope exclusion or subsequent repair as a substitute. Flagged conservatively for independent judgment because dismissal concerns a process-termination guarantee, although only documentation correctness is established."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": true,
+        "clearly_refuted_candidate": false,
+        "needs_unfinished_gate": true,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "docs-stop-callout-overpromises-descendant-cleanup",
+        "destination": "trailing-docs-stop-callout-overpromises-descendant-cleanup.md"
+      }
+    },
+    {
+      "key": "g148/c2",
+      "owner": "g148",
+      "id": "c2",
+      "domain": "documentation-capture-tooling",
+      "purpose": "documentation-capture-tooling: e2e/docs-shots/visual-review.spec.ts, e2e/docs-shots/add-a-remote-host.spec.ts, e2e/docs-shots/manage-hosts.spec.ts, e2e/docs-shots/start-a-session.spec.ts, e2e/docs-shots/stop-restart-resume.spec.ts, e2e/docs-shots/release-notes.spec.ts, e2e/docs-shots/work-in-a-session.spec.ts, e2e/readme-hero/stage.ts, e2e/readme-hero/start-stack.sh, e2e/readme-video/capture.spec.ts, e2e/readme-video/overlay.ts, docs/docs-shots/scenario.json5, e2e/readme-hero/scenario.ts; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 2,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c2",
+            "state": "open",
+            "summary": "Grid row queries do not include offscreen overscan rows",
+            "location": "e2e/readme-video/overlay.ts:310",
+            "detail": "Reviewed commit: 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513. TLDR: Considered whether the migrated terminal annotations or hover helper could choose an offscreen history match instead of the visible text. Details: overlay.ts:305-318 and e2e/docs-shots/visual-review.spec.ts:334-348 query .grid-terminal-row elements. Pinned crates/farhelm-ui/assets/grid-terminal.js:631-646 creates exactly model.rows DOM rows, sizes each to cellHeight and the screen to model.rows * cellHeight; it does not create overscan/history rows. Lines 547-580 compute a clamped viewport over history and screen. SPEC_impl.md, The grid client, says 'Rendering is one element per visible row with its runs as spans reused in place'. The query therefore covers the drawn view rather than every historical match. Suggested bucket: other (capture tooling); confidence: confirmed source analysis, not execution. proposed_drop: source refutes the offscreen-overscan premise. Could-be-highest: no, consequence considered is incorrect capture annotation only. possible_cover: none searched. Caveat: character-to-cell assumptions remain limited to suitable plain text, explicitly documented in overlay.ts:294-296 and already present before the migration."
+          }
+        },
+        {
+          "line": 3,
+          "event": {
+            "version": 1,
+            "kind": "lead",
+            "id": "c2",
+            "state": "open",
+            "summary": "Check whether annotation callers can target an exit-clipped grid row",
+            "location": "e2e/readme-video/overlay.ts:310",
+            "detail": "Reviewed commit: 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513. TLDR: The migrated annotations query drawn grid rows, but a drawn row is not necessarily visible after an exited terminal is lifted to make room for its exit line. Details: The earlier c2 source check established no overscan rows, which remains correct. Additional synthesis read of crates/farhelm-ui/assets/grid-terminal.js:880-885 finds negative screen margin and clipPath used by layoutExit; paint():919-932 paints model.rows rows and then applies that exit layout. Suspected consequence: an annotation or hover can select a clipped row and fail or point at hidden content. Checks completed: pinned row-count/layout and paint implementation. Exact missing premise: whether any assigned helper caller runs against an exited terminal whose matching text is in a clipped row; inspect callers and staged session behavior before deciding. Suggested bucket: other, capture tooling only. Confidence: unverified pending readily available caller analysis; not execution. proposed_drop: false while caller premise is open. Could-be-highest: no, no established route beyond capture correctness. possible_cover: none searched. Original considered consequence remains an annotation selecting text outside the visible region; the offscreen-history-overscan mechanism was refuted, but actual exit clipping needs a separate caller check."
+          }
+        },
+        {
+          "line": 4,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c2",
+            "state": "open",
+            "summary": "Assigned annotation callers use live, unclipped grid terminals",
+            "location": "e2e/readme-video/overlay.ts:310",
+            "detail": "Reviewed commit: 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513. TLDR: The changed row query does not establish a broken capture in its actual callers. Details: The original concern was an annotation selecting text outside the visible region. Grid-terminal.js:631-646 creates exactly model.rows DOM rows, not history overscan; paint():912-932 renders lineRow(top + y, shape) into those rows, so their text is the drawn viewport. A narrower issue considered during synthesis is real as a helper limitation: layoutExit():868-885 can shift and clip the first rows after exit, and the query does not inspect that clip. Checked all relevant callers: visual-review.spec.ts:451-512 hovers only the scenario's initial and terminal-review sessions; docs/docs-shots/scenario.json5:30-39 and 73-82 assign those running and idle, respectively, without a then override. The regular work-in-a-session and release file-hover shots use the same open running session. All Director.terminalText callers found are capture.spec.ts:117/127 and first-session.spec.ts:55. The video scenario's migrate session is waiting with then: quiet (docs/readme-video/scenario.json5:40-47), and its transcript pauses at the menu before those annotations. The first-session shot opens the docs scenario's running session. stage.ts:73-75 maps running/idle/waiting to spin/quiet/menu rather than exit. Thus none of these callers supplies the missing exited-terminal premise. Suggested bucket: other, capture tooling only. Confidence: confirmed source and caller analysis, not runtime or visual execution. proposed_drop: no established reachable failure in assigned runnable capture logic; overscan is refuted and exit clipping is outside actual callers. Could-be-highest: no, the suspected consequence is a misplaced annotation or failed capture. possible_cover: none searched. Caveats: the helpers are not general guarantees of clipping-aware visibility; adding exited-terminal callers would require revisiting them. Character-index-to-cell mapping remains the existing documented plain-text assumption. This candidate revision closes the c2 synthesis lead; no premise remains open for its actual callers."
+          }
+        }
+      ],
+      "latest": {
+        "line": 4,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c2",
+          "state": "open",
+          "summary": "Assigned annotation callers use live, unclipped grid terminals",
+          "location": "e2e/readme-video/overlay.ts:310",
+          "detail": "Reviewed commit: 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513. TLDR: The changed row query does not establish a broken capture in its actual callers. Details: The original concern was an annotation selecting text outside the visible region. Grid-terminal.js:631-646 creates exactly model.rows DOM rows, not history overscan; paint():912-932 renders lineRow(top + y, shape) into those rows, so their text is the drawn viewport. A narrower issue considered during synthesis is real as a helper limitation: layoutExit():868-885 can shift and clip the first rows after exit, and the query does not inspect that clip. Checked all relevant callers: visual-review.spec.ts:451-512 hovers only the scenario's initial and terminal-review sessions; docs/docs-shots/scenario.json5:30-39 and 73-82 assign those running and idle, respectively, without a then override. The regular work-in-a-session and release file-hover shots use the same open running session. All Director.terminalText callers found are capture.spec.ts:117/127 and first-session.spec.ts:55. The video scenario's migrate session is waiting with then: quiet (docs/readme-video/scenario.json5:40-47), and its transcript pauses at the menu before those annotations. The first-session shot opens the docs scenario's running session. stage.ts:73-75 maps running/idle/waiting to spin/quiet/menu rather than exit. Thus none of these callers supplies the missing exited-terminal premise. Suggested bucket: other, capture tooling only. Confidence: confirmed source and caller analysis, not runtime or visual execution. proposed_drop: no established reachable failure in assigned runnable capture logic; overscan is refuted and exit clipping is outside actual callers. Could-be-highest: no, the suspected consequence is a misplaced annotation or failed capture. possible_cover: none searched. Caveats: the helpers are not general guarantees of clipping-aware visibility; adding exited-terminal callers would require revisiting them. Character-index-to-cell mapping remains the existing documented plain-text assumption. This candidate revision closes the c2 synthesis lead; no premise remains open for its actual callers."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g148/findings.jsonl",
+        "id": "c2",
+        "line": 4,
+        "disposition": "excluded",
+        "group": "capture-terminal-target-offscreen-row-premise",
+        "reason": "Parent explicitly accepted named refuted proposal from claims-095 after inspecting it. The original overscan premise is source-refuted. Exit clipping is real, but the inspected annotation and hover callers use staged live terminals. The record does not establish a failing capture in its actual callers. Refute the alleged reachable capture failure narrowly: no overscan rows and no exited-terminal premise in the examined callers. Preserve the clipping limitation and the existing plain-text geometry assumption. All alleged consequences are confined to noncatastrophic maintainer capture correctness. Checked source/results: [\"647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513:crates/farhelm-ui/assets/grid-terminal.js:631-646 creates exactly model.rows DOM rows, not offscreen history overscan; paint at 912-932 paints the clamped viewport into those rows.\",\"At that revision grid-terminal.js:868-885 can lift and clip rows after exit. overlay.ts:305-318 does not inspect clipping; this remains a helper limitation rather than a general guarantee of visibility.\",\"Pinned git grep finds Director.terminalText callers only at capture.spec.ts:117,127 and first-session.spec.ts:55. capture.spec.ts:73,110-130 targets migrate auth tokens before answering its input-gated menu; docs/readme-video/scenario.json5:40-47 sets waiting then quiet, and transcripts/migrate.txt:20 gates progress at that menu. first-session.spec.ts:40-60 uses the open docs session, declared running at docs/docs-shots/scenario.json5:30-39.\",\"visual-review.spec.ts:451-512 targets only the original open session and terminal-review session, declared running and idle at docs/docs-shots/scenario.json5:30-39,73-82. stage.ts:73-75 maps these statuses to spin/quiet rather than exit.\",\"The plain-text character-to-cell limitation is explicit in overlay.ts:294-296 and predates the migration. No capture or runtime reproduction was run.\"] Current coverage/results: [\"Both specifications searched for row rendering, clipping, overscan and capture annotation behavior. SPEC_impl.md The grid client at 1836-1889 describes one element per visible row; it does not accept a broken annotation. The historical section at 647f0227:1948-2002 states the same row-rendering design.\",\"TODO.md Planned at 25-26 is empty. Searches of plans/queue, BUGS.md and active TRIAGE_OUTCOMES.md for the actual helper, offscreen annotation and clipping claim found no exact coverage; archive not read.\",\"INDEX.md read fully; exit-notice-hides-oldest-scrollback-row.md read fully. That item covers actual exited-terminal history viewing, not a capture helper used on live staged sessions. It corroborates the clipping mechanism, but is neither an exact duplicate nor a substantive extension supplied by this record.\",\"FILTER.md read fully. No filter is needed for source refutation, and none grants a blanket exception for capture-target mistakes.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"An annotation or hover could select hidden text and fail or point at the wrong visible location. Initial offscreen-history overscan was refuted; a later exit-clipping lead was explicitly investigated and closed for the current callers, not erased.\"; \"A shipped capture caller targeting an exited terminal whose matching text is clipped. Actual named callers supply no such premise; future callers would need rechecking.\"."
+      },
+      "accepted_parent_decision": {
+        "key": "g148/c2",
+        "line": 4,
+        "disposition": "excluded",
+        "group": "capture-terminal-target-offscreen-row-premise",
+        "bucket": "other",
+        "recording": "refuted",
+        "queue_target_candidate": null,
+        "needs_independent_drop_check": false,
+        "reason": "Parent explicitly accepted named refuted proposal from claims-095 after inspecting it. The original overscan premise is source-refuted. Exit clipping is real, but the inspected annotation and hover callers use staged live terminals. The record does not establish a failing capture in its actual callers. Refute the alleged reachable capture failure narrowly: no overscan rows and no exited-terminal premise in the examined callers. Preserve the clipping limitation and the existing plain-text geometry assumption. All alleged consequences are confined to noncatastrophic maintainer capture correctness. Checked source/results: [\"647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513:crates/farhelm-ui/assets/grid-terminal.js:631-646 creates exactly model.rows DOM rows, not offscreen history overscan; paint at 912-932 paints the clamped viewport into those rows.\",\"At that revision grid-terminal.js:868-885 can lift and clip rows after exit. overlay.ts:305-318 does not inspect clipping; this remains a helper limitation rather than a general guarantee of visibility.\",\"Pinned git grep finds Director.terminalText callers only at capture.spec.ts:117,127 and first-session.spec.ts:55. capture.spec.ts:73,110-130 targets migrate auth tokens before answering its input-gated menu; docs/readme-video/scenario.json5:40-47 sets waiting then quiet, and transcripts/migrate.txt:20 gates progress at that menu. first-session.spec.ts:40-60 uses the open docs session, declared running at docs/docs-shots/scenario.json5:30-39.\",\"visual-review.spec.ts:451-512 targets only the original open session and terminal-review session, declared running and idle at docs/docs-shots/scenario.json5:30-39,73-82. stage.ts:73-75 maps these statuses to spin/quiet rather than exit.\",\"The plain-text character-to-cell limitation is explicit in overlay.ts:294-296 and predates the migration. No capture or runtime reproduction was run.\"] Current coverage/results: [\"Both specifications searched for row rendering, clipping, overscan and capture annotation behavior. SPEC_impl.md The grid client at 1836-1889 describes one element per visible row; it does not accept a broken annotation. The historical section at 647f0227:1948-2002 states the same row-rendering design.\",\"TODO.md Planned at 25-26 is empty. Searches of plans/queue, BUGS.md and active TRIAGE_OUTCOMES.md for the actual helper, offscreen annotation and clipping claim found no exact coverage; archive not read.\",\"INDEX.md read fully; exit-notice-hides-oldest-scrollback-row.md read fully. That item covers actual exited-terminal history viewing, not a capture helper used on live staged sessions. It corroborates the clipping mechanism, but is neither an exact duplicate nor a substantive extension supplied by this record.\",\"FILTER.md read fully. No filter is needed for source refutation, and none grants a blanket exception for capture-target mistakes.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"An annotation or hover could select hidden text and fail or point at the wrong visible location. Initial offscreen-history overscan was refuted; a later exit-clipping lead was explicitly investigated and closed for the current callers, not erased.\"; \"A shipped capture caller targeting an exited terminal whose matching text is clipped. Actual named callers supply no such premise; future callers would need rechecking.\"."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-095",
+          "key": "g148/c2",
+          "latest_line": 4,
+          "recommendation": "refuted",
+          "bucket": "other",
+          "underlying_key": "capture-terminal-target-offscreen-row-premise",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The original overscan premise is source-refuted. Exit clipping is real, but the inspected annotation and hover callers use staged live terminals. The record does not establish a failing capture in its actual callers.",
+          "checks": [
+            "647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513:crates/farhelm-ui/assets/grid-terminal.js:631-646 creates exactly model.rows DOM rows, not offscreen history overscan; paint at 912-932 paints the clamped viewport into those rows.",
+            "At that revision grid-terminal.js:868-885 can lift and clip rows after exit. overlay.ts:305-318 does not inspect clipping; this remains a helper limitation rather than a general guarantee of visibility.",
+            "Pinned git grep finds Director.terminalText callers only at capture.spec.ts:117,127 and first-session.spec.ts:55. capture.spec.ts:73,110-130 targets migrate auth tokens before answering its input-gated menu; docs/readme-video/scenario.json5:40-47 sets waiting then quiet, and transcripts/migrate.txt:20 gates progress at that menu. first-session.spec.ts:40-60 uses the open docs session, declared running at docs/docs-shots/scenario.json5:30-39.",
+            "visual-review.spec.ts:451-512 targets only the original open session and terminal-review session, declared running and idle at docs/docs-shots/scenario.json5:30-39,73-82. stage.ts:73-75 maps these statuses to spin/quiet rather than exit.",
+            "The plain-text character-to-cell limitation is explicit in overlay.ts:294-296 and predates the migration. No capture or runtime reproduction was run."
+          ],
+          "coverage_checked": [
+            "Both specifications searched for row rendering, clipping, overscan and capture annotation behavior. SPEC_impl.md The grid client at 1836-1889 describes one element per visible row; it does not accept a broken annotation. The historical section at 647f0227:1948-2002 states the same row-rendering design.",
+            "TODO.md Planned at 25-26 is empty. Searches of plans/queue, BUGS.md and active TRIAGE_OUTCOMES.md for the actual helper, offscreen annotation and clipping claim found no exact coverage; archive not read.",
+            "INDEX.md read fully; exit-notice-hides-oldest-scrollback-row.md read fully. That item covers actual exited-terminal history viewing, not a capture helper used on live staged sessions. It corroborates the clipping mechanism, but is neither an exact duplicate nor a substantive extension supplied by this record.",
+            "FILTER.md read fully. No filter is needed for source refutation, and none grants a blanket exception for capture-target mistakes."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": "A shipped capture caller targeting an exited terminal whose matching text is clipped. Actual named callers supply no such premise; future callers would need rechecking.",
+          "original_stronger_consequence": "An annotation or hover could select hidden text and fail or point at the wrong visible location. Initial offscreen-history overscan was refuted; a later exit-clipping lead was explicitly investigated and closed for the current callers, not erased.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Refute the alleged reachable capture failure narrowly: no overscan rows and no exited-terminal premise in the examined callers. Preserve the clipping limitation and the existing plain-text geometry assumption. All alleged consequences are confined to noncatastrophic maintainer capture correctness."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "capture-terminal-target-offscreen-row-premise",
+        "destination": null
+      }
+    },
+    {
+      "key": "g148/f1",
+      "owner": "g148",
+      "id": "f1",
+      "domain": "documentation-capture-tooling",
+      "purpose": "documentation-capture-tooling: e2e/docs-shots/visual-review.spec.ts, e2e/docs-shots/add-a-remote-host.spec.ts, e2e/docs-shots/manage-hosts.spec.ts, e2e/docs-shots/start-a-session.spec.ts, e2e/docs-shots/stop-restart-resume.spec.ts, e2e/docs-shots/release-notes.spec.ts, e2e/docs-shots/work-in-a-session.spec.ts, e2e/readme-hero/stage.ts, e2e/readme-hero/start-stack.sh, e2e/readme-video/capture.spec.ts, e2e/readme-video/overlay.ts, docs/docs-shots/scenario.json5, e2e/readme-hero/scenario.ts; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 7,
+          "event": {
+            "version": 1,
+            "kind": "lead",
+            "id": "f1",
+            "state": "open",
+            "summary": "Terminal target helper may retain the removed no-row-DOM rationale",
+            "location": "e2e/readme-video/overlay.ts:445",
+            "detail": "Reviewed commit: 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513. TLDR: The helper's public documentation still explains its tracking element by saying terminal lines have no elements, although this migration reads a DOM element for every drawn grid row. Details: overlay.ts:442-447 says 'The terminal draws its text without an element per line, so this places an invisible tracking element over it'. In this same assigned file, changed terminalAnchor():289-293 states the grid draws each visible row as .grid-terminal-row, and :310 iterates those actual elements. Pinned grid-terminal.js:631-646 creates those rows and :737-797 paints into them. Suspected consequence is misleading maintenance documentation for why this capture helper exists, not a broken annotation or production terminal behavior. Checked current public docstring, changed private implementation and actual grid painter. Exact remaining premise: whole-range attribution and whether an old-renderer caller still makes the unqualified public explanation valid; check the exclusive-base/parent helper and assigned stack's renderer switch before concluding. Suggested bucket: other. Confidence: unverified lead pending readily available history/interface checks, not execution. proposed_drop: false. Could-be-highest: no, only source documentation correctness is implicated. possible_cover: related g092/l1 concerns a different removed asynchronous write rationale; no known exact cover from supplied neighbour context. No coverage sources searched. Distinct from c2: this concerns the helper's stated reason for existence, not whether its row query picks a hidden target."
+          }
+        },
+        {
+          "line": 8,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "f1",
+            "state": "open",
+            "summary": "Update the terminal target helper's obsolete no-row-DOM rationale",
+            "location": "e2e/readme-video/overlay.ts:445",
+            "detail": "Reviewed commit: 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513. TLDR: A maintainer reading the capture helper is still told that terminal lines have no elements, even though the migrated helper now finds and measures those exact row elements. This is inaccurate maintenance guidance, not an established broken capture. Details: The public Director.terminalText docstring at overlay.ts:442-447 says 'The terminal draws its text without an element per line, so this places an invisible tracking element over it'. The same commit rewrites terminalAnchor():289-293 to explain that the grid draws each visible row as .grid-terminal-row and :310-316 to iterate those actual elements and use their bounding boxes. The painter creates exactly model.rows row elements at crates/farhelm-ui/assets/grid-terminal.js:631-646 and paints the visible rows at :919-922. The authoritative SPEC_impl.md, The grid client, describes rendering as one element per visible row and new terminals mounting the grid directly. Exact attribution checked across the whole range: exclusive base 6e423e30068b62c6cfa276c6d720ee35bb70387a has the same public explanation at overlay.ts:440-445, where terminalAnchor():303-315 reads xterm's buffer and cell size. That explanation was valid for the prior capture stack, whose immediate-parent start-stack.sh:150-165 explicitly creates tmux/xterm terminals with --new-terminals tmux. The reviewed commit removes that selector from both supervisors (reviewed start-stack.sh:197-209) and makes the helper grid-only; it updates the private explanation but leaves the public rationale false. Bounded history over the full pinned range returns this as the only overlay.ts change, so this is an introduced stale explanation, not merely old inaccurate text inherited from before the range. Fix by explaining that the match has no element of its own and the tracking anchor covers the matching substring within a row, using row geometry and the grid's cell width, as the new private docstring already does. Suggested bucket: other, source-documentation correctness only. Confidence: confirmed source, caller and whole-range history analysis; no runtime or visual execution. proposed_drop: false. Could-be-highest: no, there is no security, loss-of-work or runtime failure claim. possible_cover: none known from supplied neighbour records; g092/l1 concerns a distinct asynchronous-write rationale, and no coverage sources were searched. Caveat: the tracking helper can remain useful despite row elements; this finding is about the false reason it gives, not a claim that the helper should be removed or that production rendering is wrong. This resolves the f1 discovery lead; no missing premise remains."
+          }
+        }
+      ],
+      "latest": {
+        "line": 8,
+        "event": {
+          "version": 1,
+          "kind": "finding",
+          "id": "f1",
+          "state": "open",
+          "summary": "Update the terminal target helper's obsolete no-row-DOM rationale",
+          "location": "e2e/readme-video/overlay.ts:445",
+          "detail": "Reviewed commit: 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513. TLDR: A maintainer reading the capture helper is still told that terminal lines have no elements, even though the migrated helper now finds and measures those exact row elements. This is inaccurate maintenance guidance, not an established broken capture. Details: The public Director.terminalText docstring at overlay.ts:442-447 says 'The terminal draws its text without an element per line, so this places an invisible tracking element over it'. The same commit rewrites terminalAnchor():289-293 to explain that the grid draws each visible row as .grid-terminal-row and :310-316 to iterate those actual elements and use their bounding boxes. The painter creates exactly model.rows row elements at crates/farhelm-ui/assets/grid-terminal.js:631-646 and paints the visible rows at :919-922. The authoritative SPEC_impl.md, The grid client, describes rendering as one element per visible row and new terminals mounting the grid directly. Exact attribution checked across the whole range: exclusive base 6e423e30068b62c6cfa276c6d720ee35bb70387a has the same public explanation at overlay.ts:440-445, where terminalAnchor():303-315 reads xterm's buffer and cell size. That explanation was valid for the prior capture stack, whose immediate-parent start-stack.sh:150-165 explicitly creates tmux/xterm terminals with --new-terminals tmux. The reviewed commit removes that selector from both supervisors (reviewed start-stack.sh:197-209) and makes the helper grid-only; it updates the private explanation but leaves the public rationale false. Bounded history over the full pinned range returns this as the only overlay.ts change, so this is an introduced stale explanation, not merely old inaccurate text inherited from before the range. Fix by explaining that the match has no element of its own and the tracking anchor covers the matching substring within a row, using row geometry and the grid's cell width, as the new private docstring already does. Suggested bucket: other, source-documentation correctness only. Confidence: confirmed source, caller and whole-range history analysis; no runtime or visual execution. proposed_drop: false. Could-be-highest: no, there is no security, loss-of-work or runtime failure claim. possible_cover: none known from supplied neighbour records; g092/l1 concerns a distinct asynchronous-write rationale, and no coverage sources were searched. Caveat: the tracking helper can remain useful despite row elements; this finding is about the false reason it gives, not a claim that the helper should be removed or that production rendering is wrong. This resolves the f1 discovery lead; no missing premise remains."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g148/findings.jsonl",
+        "id": "f1",
+        "line": 8,
+        "disposition": "verified",
+        "group": "capture-terminaltext-stale-no-row-dom-rationale",
+        "reason": "Parent explicitly accepted named retain-verified proposal from claims-095 after inspecting it. The migration makes the helper's public reason for its tracking element false: it says terminal lines have no elements while its implementation now measures a DOM element per visible row. The helper remains useful for a substring; its explanation needs that distinction. Record a verified other-priority source-documentation finding at overlay.ts:445, with the renderer migration as attribution. Explain the substring anchor's purpose using row geometry; do not claim the helper is unnecessary or that captures fail. Checked source/results: [\"647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513:e2e/readme-video/overlay.ts:442-447 states the no-element-per-line rationale. In the same revision, 286-296 documents one .grid-terminal-row per visible row and 310-316 measures those row elements.\",\"Pinned grid-terminal.js:631-646 constructs the row elements and 919-922 paints model.rows visible rows. Historical SPEC_impl.md The grid client, 1948-2002, expressly describes one element per visible row and direct grid mounting for new terminals.\",\"Exclusive base 6e423e30068b62c6cfa276c6d720ee35bb70387a:overlay.ts:303-315 uses xterm buffer geometry; its identical public explanation is at 440-445. Immediate-parent start-stack.sh:150-165 explicitly selects tmux/xterm for capture supervisors. The reviewed migration removes that selector and changes the helper to grid DOM geometry.\",\"Bounded full-range git log shows 647f0227 as the only overlay.ts change. Recording-time main 24bc058066fd57848e788b465719b0e6da2f98f7:overlay.ts:442-447 still contains the stale explanation.\",\"No broken annotation, rendering regression, security consequence or user-work loss is established. This is source-comment correctness within changed executable capture tooling, not an independent ordinary-docs review target.\"] Current coverage/results: [\"Both specifications searched for the helper, tracking elements and row rendering. SPEC_impl.md The grid client:1836-1889 confirms row DOM rendering; neither specification accepts the false public rationale.\",\"TODO.md Planned:25-26 is empty. plans/queue searched for terminalText, terminalAnchor, tracking element, no-row rationale and capture/grid cleanup. tmux-drop-from-docs criteria 3 and 5 concern stale rationales generally, but do not name this claim; plans/REPORTS.md:32 reports that plan landed in #3381-#3385. It is not current unlanded coverage, and the stale comment remains on recording-time main.\",\"BUGS.md has no capture-helper item. Active TRIAGE_OUTCOMES.md searched for helper and rationale terms without an exact decision; archive not read.\",\"INDEX.md read fully and queue text searched for overlay.ts, terminalText, terminalAnchor, no-row DOM and tracking elements. No exact queue item or useful extension found. g148/c2 is distinct: target visibility rather than the helper's explanation. The supplied mention of g092/l1 concerns a different async-write rationale and was not treated as an alias.\",\"FILTER.md read fully. A permanently false source explanation does not match the rare-diagnostic or self-correcting-glitch boundary; no other filter matches.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"No stronger runtime consequence was claimed. The initial lead asked whether whole-range attribution and old-renderer callers made the explanation valid; the later source checks resolve both and retain inaccurate maintenance guidance as the finding.\"; null."
+      },
+      "accepted_parent_decision": {
+        "key": "g148/f1",
+        "line": 8,
+        "disposition": "verified",
+        "group": "capture-terminaltext-stale-no-row-dom-rationale",
+        "bucket": "other",
+        "recording": "retain-verified",
+        "queue_target_candidate": null,
+        "needs_independent_drop_check": false,
+        "reason": "Parent explicitly accepted named retain-verified proposal from claims-095 after inspecting it. The migration makes the helper's public reason for its tracking element false: it says terminal lines have no elements while its implementation now measures a DOM element per visible row. The helper remains useful for a substring; its explanation needs that distinction. Record a verified other-priority source-documentation finding at overlay.ts:445, with the renderer migration as attribution. Explain the substring anchor's purpose using row geometry; do not claim the helper is unnecessary or that captures fail. Checked source/results: [\"647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513:e2e/readme-video/overlay.ts:442-447 states the no-element-per-line rationale. In the same revision, 286-296 documents one .grid-terminal-row per visible row and 310-316 measures those row elements.\",\"Pinned grid-terminal.js:631-646 constructs the row elements and 919-922 paints model.rows visible rows. Historical SPEC_impl.md The grid client, 1948-2002, expressly describes one element per visible row and direct grid mounting for new terminals.\",\"Exclusive base 6e423e30068b62c6cfa276c6d720ee35bb70387a:overlay.ts:303-315 uses xterm buffer geometry; its identical public explanation is at 440-445. Immediate-parent start-stack.sh:150-165 explicitly selects tmux/xterm for capture supervisors. The reviewed migration removes that selector and changes the helper to grid DOM geometry.\",\"Bounded full-range git log shows 647f0227 as the only overlay.ts change. Recording-time main 24bc058066fd57848e788b465719b0e6da2f98f7:overlay.ts:442-447 still contains the stale explanation.\",\"No broken annotation, rendering regression, security consequence or user-work loss is established. This is source-comment correctness within changed executable capture tooling, not an independent ordinary-docs review target.\"] Current coverage/results: [\"Both specifications searched for the helper, tracking elements and row rendering. SPEC_impl.md The grid client:1836-1889 confirms row DOM rendering; neither specification accepts the false public rationale.\",\"TODO.md Planned:25-26 is empty. plans/queue searched for terminalText, terminalAnchor, tracking element, no-row rationale and capture/grid cleanup. tmux-drop-from-docs criteria 3 and 5 concern stale rationales generally, but do not name this claim; plans/REPORTS.md:32 reports that plan landed in #3381-#3385. It is not current unlanded coverage, and the stale comment remains on recording-time main.\",\"BUGS.md has no capture-helper item. Active TRIAGE_OUTCOMES.md searched for helper and rationale terms without an exact decision; archive not read.\",\"INDEX.md read fully and queue text searched for overlay.ts, terminalText, terminalAnchor, no-row DOM and tracking elements. No exact queue item or useful extension found. g148/c2 is distinct: target visibility rather than the helper's explanation. The supplied mention of g092/l1 concerns a different async-write rationale and was not treated as an alias.\",\"FILTER.md read fully. A permanently false source explanation does not match the rare-diagnostic or self-correcting-glitch boundary; no other filter matches.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"No stronger runtime consequence was claimed. The initial lead asked whether whole-range attribution and old-renderer callers made the explanation valid; the later source checks resolve both and retain inaccurate maintenance guidance as the finding.\"; null."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-095",
+          "key": "g148/f1",
+          "latest_line": 8,
+          "recommendation": "retain-verified",
+          "bucket": "other",
+          "underlying_key": "capture-terminaltext-stale-no-row-dom-rationale",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The migration makes the helper's public reason for its tracking element false: it says terminal lines have no elements while its implementation now measures a DOM element per visible row. The helper remains useful for a substring; its explanation needs that distinction.",
+          "checks": [
+            "647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513:e2e/readme-video/overlay.ts:442-447 states the no-element-per-line rationale. In the same revision, 286-296 documents one .grid-terminal-row per visible row and 310-316 measures those row elements.",
+            "Pinned grid-terminal.js:631-646 constructs the row elements and 919-922 paints model.rows visible rows. Historical SPEC_impl.md The grid client, 1948-2002, expressly describes one element per visible row and direct grid mounting for new terminals.",
+            "Exclusive base 6e423e30068b62c6cfa276c6d720ee35bb70387a:overlay.ts:303-315 uses xterm buffer geometry; its identical public explanation is at 440-445. Immediate-parent start-stack.sh:150-165 explicitly selects tmux/xterm for capture supervisors. The reviewed migration removes that selector and changes the helper to grid DOM geometry.",
+            "Bounded full-range git log shows 647f0227 as the only overlay.ts change. Recording-time main 24bc058066fd57848e788b465719b0e6da2f98f7:overlay.ts:442-447 still contains the stale explanation.",
+            "No broken annotation, rendering regression, security consequence or user-work loss is established. This is source-comment correctness within changed executable capture tooling, not an independent ordinary-docs review target."
+          ],
+          "coverage_checked": [
+            "Both specifications searched for the helper, tracking elements and row rendering. SPEC_impl.md The grid client:1836-1889 confirms row DOM rendering; neither specification accepts the false public rationale.",
+            "TODO.md Planned:25-26 is empty. plans/queue searched for terminalText, terminalAnchor, tracking element, no-row rationale and capture/grid cleanup. tmux-drop-from-docs criteria 3 and 5 concern stale rationales generally, but do not name this claim; plans/REPORTS.md:32 reports that plan landed in #3381-#3385. It is not current unlanded coverage, and the stale comment remains on recording-time main.",
+            "BUGS.md has no capture-helper item. Active TRIAGE_OUTCOMES.md searched for helper and rationale terms without an exact decision; archive not read.",
+            "INDEX.md read fully and queue text searched for overlay.ts, terminalText, terminalAnchor, no-row DOM and tracking elements. No exact queue item or useful extension found. g148/c2 is distinct: target visibility rather than the helper's explanation. The supplied mention of g092/l1 concerns a different async-write rationale and was not treated as an alias.",
+            "FILTER.md read fully. A permanently false source explanation does not match the rare-diagnostic or self-correcting-glitch boundary; no other filter matches."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": null,
+          "original_stronger_consequence": "No stronger runtime consequence was claimed. The initial lead asked whether whole-range attribution and old-renderer callers made the explanation valid; the later source checks resolve both and retain inaccurate maintenance guidance as the finding.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Record a verified other-priority source-documentation finding at overlay.ts:445, with the renderer migration as attribution. Explain the substring anchor's purpose using row geometry; do not claim the helper is unnecessary or that captures fail."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": true,
+        "clearly_refuted_candidate": false,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Source-confirmed by an existing parent decision; not runtime reproduced",
+        "deduplication_key": "capture-terminaltext-stale-no-row-dom-rationale",
+        "destination": "trailing-capture-terminaltext-stale-no-row-dom-rationale.md"
+      }
+    }
+  ],
+  "replies": [
+    {
+      "turn": 1,
+      "reply": "Initial review complete: all 17 assigned patch packets reviewed at their recorded revisions.\n\nNo reportable findings or open leads. Two rejected candidates are recorded in `findings.jsonl`; coverage and source checks are in `progress.md`.\n\nSource-only review; no tests, reproductions, or checkout changes."
+    },
+    {
+      "turn": 2,
+      "reply": "Revised `c1` with exact wording chronology and separated generated prose from runnable capture changes.\n\nRevised `c2` after checking exit clipping and every relevant caller; resolved its temporary lead because those callers target live terminals.\n\nNo new findings. Unresolved lead IDs: none. Source analysis only."
+    },
+    {
+      "turn": 3,
+      "reply": "Checks: whole-range attribution, release-shot isolation, grid painting, overlay contracts, cleanup guards, and scenario/backend compatibility.\n\nRevised `c1` with exact pre-range evidence.\n\nNew verified: `f1` (`other`)—obsolete no-row-DOM rationale in the capture helper’s documentation. New unverified: none. Open leads: none.\n\nNew issue found: yes. Source-only analysis; no execution."
+    },
+    {
+      "turn": 4,
+      "reply": "Checks: callout/configuration scope, terminal sizing, video input focus, and stack ownership/setup order.\n\nNew verified IDs: none. New unverified IDs: none. Open leads: none. Anything new found: no.\n\nDiscovery pass 2 recorded in `progress.md`. Source-only; no execution."
+    }
+  ],
+  "progress": "# Initial review complete\n\nGroup: g148, documentation-capture-tooling. Turn type/count: initial/1. Discovery-pass count: 0. This turn completes the initial pass only; no later-turn synthesis or discovery protocol was performed.\n\nRead the full brief and the complete inventory commits field, without reading excluded coverage metadata. Delivered all 17 assigned mandatory patch packets through the evidence reader (773 lines). Unread assigned scope: none.\n\nNo reportable findings and no open leads. Appended candidates c1 and c2 immediately when deciding against reporting them; their complete records and source bases are in findings.jsonl. New verified finding IDs: none. New unverified finding IDs: none.\n\nSource checks at the recorded revisions:\n\n- dfeb437d47e735c08ca303ddf6add2c4fc8325c9: Settings has twelve declared entries with App gated off for web, matching eleven expected buttons. The lifecycle contract permits opening a session while its confirmation is pending.\n- 2c5a1d5a8ebe7c0d0889ac5db40b272d75ae02cb: checked same-host and fleet permission boundaries, host checkout inheritance, supported remote-host platforms and Stop/tab cleanup contracts. c1 retains the pre-existing broad Stop wording and its later correction as a rejected candidate.\n- 53d618e4a033749efc9f9f10adef168643737b99: checked new release-shot controls against recipe editor markup, host permission controls, shared recipe/build contracts and disposable-container deletion semantics. The shots edit unsaved drafts and never submit launches, saves or deletion.\n- 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513: checked shared terminal input, fit, viewport and screen helpers; grid row layout and sizing; changed hover helpers and video choreography; full hero stack setup and cleanup; and terminal-host cleanup's exit-status and creator-lifetime contracts. c2 records why grid row queries do not accidentally search offscreen overscan rows. Read the complete hero, video and docs-capture requirement documents at this revision, plus the governing grid-client and render-bound-answer contracts.\n- 500548b9253b07a26fd03119679184b69544e31d: checked scenario serialization against the strict E2E provisioning behavior schema and its supported inspection result. The removed needs_tmux field is absent from that backend schema, and the remaining fields retain the intended invented Ubuntu host.\n\nInterface assumptions: each capture owns its staged fleet and temporary state; every new terminal in the migrated stack is a terminal host drawn by the grid. Coordinate readers use the committed model dimensions for drawn cells; staging uses the fitted proposal to create sessions at their final requested size. Cleanup waits for owned creators to exit, stops hosts in each owned state directory and preserves state if completion is unconfirmed. No production GUI confirmation handlers were introduced by the assigned patches.\n\nValidation was source and contract analysis only. No builds, runtime tests or reproductions were run, and no behavior is claimed as observed in execution. No checkout files were changed.\n\nNext action: return to caller for its later synthesis/discovery turn. Durable artifacts remain in this private group directory.\n\n## Later-turn synthesis complete\n\nTurn type/count: synthesis/2. Discovery-pass count: 0. No assigned source packets were omitted; no new verified or unverified findings were added. No open lead IDs remain.\n\nRevised c1 under its original ID with source from the parent of 2c5a1d5a8ebe7c0d0889ac5db40b272d75ae02cb, that reviewed commit and the later 53d618e4a033749efc9f9f10adef168643737b99 repair. The record now distinguishes inaccurate generated prose from changed runnable capture behavior. The later repair is chronology, not an independent reason to drop an intermediate introduced bug. The proposed drop still rests on the specific overbroad claim predating the assigned change; parent has not accepted that drop.\n\nRevisited c2 against the grid's actual paint path and exit layout. Appended a lead immediately upon finding that layoutExit can clip a row despite the lack of overscan. Resolved it under c2 after checking every relevant annotation and hover caller, both scenarios and the replay-mode mapping. Actual callers target live spin/menu/quiet sessions, not exited terminals; the missing exit-clipping premise is refuted for these callers. The latest c2 candidate records the limitation without calling all drawn DOM rows universally visible.\n\nCross-batch assumptions retained: shared overlay migration affects both ordinary docs captures and video choreography; those runnable callers are in scope. The subsequent scenario-field removal matches the strict provisioning backend's schema rather than changing capture host behavior. New header Stop wording describes agent and tab closure, while the existing row-menu claim is the source of c1. No new interaction was established between these prose changes, terminal fit/coordinate changes and host teardown.\n\nAll results this turn are source and contract analysis. No tests, builds, captures or reproductions ran. No checkout changes. Next action: return the synthesis delta to the caller; any later discovery pass requires its next prompt.\n\n## Discovery pass 1 complete\n\nTurn type/count: discovery/3. Discovery-pass count: 1. Read the complete discovery-neighbours.json first (69 lines, 13,373 bytes), including the exact supplied interface records. No prohibited coverage sources were searched.\n\nResolved the parent's whole-range attribution question under original ID c1. Exclusive base 6e423e30068b62c6cfa276c6d720ee35bb70387a already contains the broad Stop claim in the selected capture test at line 55 and both governing detached-descendant caveats in SPEC.md:2030-2057. The bounded file history before the reviewed 2c5a1d5a8ebe7c0d0889ac5db40b272d75ae02cb contains only that assigned change. The revised candidate gives exact pre-range proof and preserves the inaccurate generated-prose consequence; no parent drop is claimed accepted.\n\nSearched beyond the known candidates through changed release-shot setup/draft handling, crop/annotation dependencies, grid span painting, overlay public caller contracts, the capture stack's host teardown guards, scenario/backend serialization and changed Settings/row-confirmation review steps. Rechecked that release-shot edits do not submit saves or launch environments, cleanup retains state on an unconfirmed creator/host, and the scenario's removed field matches the strict backend schema. No further runtime correctness finding was established from those checks.\n\nNew verified finding: f1, other, public Director.terminalText documentation retains the obsolete no-row-element rationale after the same commit changes the capture stack and helper to grid row elements. Logged its lead immediately, checked exclusive base, immediate parent, complete bounded overlay history, actual grid painter, assigned stack switch and authoritative grid-client contract, then revised f1 to a confirmed source-documentation finding. This is distinct from the physical visibility/query question in c2. Continued the pass after recording it, checking the remaining release-shot and visual-review interactions.\n\nNew unverified-after-investigation finding IDs: none. Remaining lead IDs: none. New discovery this pass: yes, f1. Unread assigned source scope: none. No runtime tests, visual execution, reproductions, live-install actions or checkout edits. Next action: return the discovery delta; the substantive new finding warrants the caller's later pass rather than silently treating this as an empty-discovery checkpoint.\n\n## Discovery pass 2 complete\n\nTurn type/count: discovery/4. Discovery-pass count: 2. Read the complete updated discovery-neighbours.json first (78 lines, 19,697 bytes). There were no named pending questions. The supplied interface updates did not establish a new route into the assigned capture scenarios; no neighbouring issue is claimed as a new discovery here.\n\nSearched beyond existing records, with pinned source checks of destination/checkout callout setup, host-permission callout targets, configuration-field scope and submit behavior, the terminal size probe and its reuse in staged creates, video focus assertions at both input points, and stack setup order, wrappers, lock descriptor closure, generated remote state paths and cleanup ownership. The launcher's CheckoutRootField omits a host override and therefore edits the default, matching the changed callout; host settings supplies its host scope, and input only edits the local draft until explicit Save. The terminal proposal size read is passed unchanged as cols/rows into staged session creation. Video typing is preceded by focus assertions on the terminal input after the appropriate selection/menu step. Every generated remote state lies inside the owned run directory and is registered before helm startup can request sessions there.\n\nThese checks produced no new substantive finding, rejected candidate or unresolved lead. No new event IDs were appended this turn. New verified IDs: none. New unverified-after-investigation IDs: none. Remaining lead IDs: none. Anything new found: no. Unread assigned source scope: none.\n\nSource and contract analysis only; no builds, runtime/visual execution, reproductions, live-install actions, checkout edits or prohibited coverage searches. Existing records remain unchanged and no parent drop/lowering is assumed accepted. Next action: return this empty discovery delta to the caller.\n"
+}

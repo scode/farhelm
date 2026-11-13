@@ -1,0 +1,486 @@
+{
+  "group": {
+    "id": "g130",
+    "domain": "supervisor-status-reporting",
+    "purpose": "supervisor-status-reporting: crates/farhelm-supervisor/src/service/status.rs; phases complete small per-commit changes",
+    "interfaces": [
+      "g001",
+      "g007",
+      "g008",
+      "g009",
+      "g102",
+      "g103",
+      "g104",
+      "g105",
+      "g106",
+      "g107",
+      "g108",
+      "g109",
+      "g110",
+      "g111",
+      "g112",
+      "g113",
+      "g114",
+      "g115",
+      "g116",
+      "g129",
+      "g131",
+      "g159",
+      "g160",
+      "g161",
+      "g162",
+      "g163",
+      "g164",
+      "g165",
+      "g166",
+      "g167",
+      "g168",
+      "g169",
+      "g170",
+      "g171",
+      "g172",
+      "g173"
+    ],
+    "sources": [
+      {
+        "path": "[private-run]/prep/parts/00941-000.patch",
+        "ranges": [
+          [
+            1,
+            1181
+          ]
+        ],
+        "original_path": "crates/farhelm-supervisor/src/service/status.rs",
+        "commit": "1ed482dde220452e424973faf38a5e1318986333",
+        "notes": "patch header; patch character offsets [0,59644)",
+        "lines": 1181,
+        "bytes": 59719,
+        "start": 0,
+        "end": 59644,
+        "original": "[private-run]/prep/originals/00941.patch"
+      }
+    ],
+    "lines": 1181,
+    "bytes": 59719
+  },
+  "records": [
+    {
+      "key": "g130/c1",
+      "owner": "g130",
+      "id": "c1",
+      "domain": "supervisor-status-reporting",
+      "purpose": "supervisor-status-reporting: crates/farhelm-supervisor/src/service/status.rs; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 1,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c1",
+            "state": "open",
+            "summary": "Removal of old tmux status and tab discovery is specified retirement",
+            "location": "crates/farhelm-supervisor/src/service/status.rs:124",
+            "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. TLDR: Existing terminals in the private tmux server no longer report through these status classifiers, and old tabs no longer appear in replies. Considered the resulting loss of running agents and terminal history. Could-be-highest: yes, since removal of still-running terminals can lose user processes and terminal contents. Suggested bucket if contrary to contract: highest. Confidence: confirmed specification acceptance; source retirement/startup correspondence still being checked. proposed_drop: exact acceptance in SPEC.md, Terminal experience, lines 3003–3016: \"This release ends them: the first time a host's supervisor of this release starts, it ends that tmux server, and with it everything that still ran in an old terminal, without needing a tmux program.\" The same paragraph says \"A session whose agent or tabs already run in terminal hosts keeps them\" and explicitly accepts that a failure to stop the old server may leave a second agent on Restart. The status.rs patch removes KnownTmuxNames, pane_evidence, old tab discovery, and dead_pane_exit_code while preserving host evidence/classification. possible_cover: none searched. Evidence is source and contract only, no execution. Next check: retirement conversion/startup ordering must make host-only status safe for old rows."
+          }
+        },
+        {
+          "line": 2,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c1",
+            "state": "open",
+            "summary": "Removal of old tmux status and tab discovery is specified retirement",
+            "location": "crates/farhelm-supervisor/src/service/status.rs:124",
+            "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. TLDR: Old private-tmux terminals and tabs intentionally stop reporting here because this release retires them at startup. Could-be-highest: yes; the considered consequence was loss of still-running agents and terminal contents. Suggested bucket if contrary to contract: highest. Confidence: confirmed specification acceptance and matching startup/source ordering. proposed_drop: SPEC.md, Terminal experience, paragraph beginning at line 3003, explicitly says \"This release ends them: the first time a host's supervisor of this release starts, it ends that tmux server, and with it everything that still ran in an old terminal, without needing a tmux program.\" SPEC_impl.md:2891–2927 specifies that this runs after the store opens and before reload, and that old-kind rows have no terminal and live outcomes become interrupted. Source checked: service/core.rs:6142–6184 invokes OldTerminals::end_private_server before reload_sessions_with_hosts; :6675–6679 never resolves old pane addresses; :6805–6822 queues TerminalEnded for Launching, Running and StopRequested old rows and otherwise retains ended outcomes. Thus removal of pane_evidence and old tab discovery is consistent with the replacement's contract. possible_cover: none searched. All evidence is source and contract analysis; no execution. No unresolved premise remains for this candidate. Preserve original consequence: retirement can end user processes and discard terminal screens, explicitly accepted by the cited contract."
+          }
+        },
+        {
+          "line": 4,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "c1",
+            "state": "open",
+            "summary": "Retired tmux status and tab discovery follows explicitly accepted process loss",
+            "location": "crates/farhelm-supervisor/src/service/status.rs:124",
+            "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. TLDR: Old private-tmux terminals and tabs intentionally stop reporting here because this release retires them at startup. This can end running agents and discard their terminal contents. Could-be-highest: yes; the consequence is loss of user processes and terminal contents. Suggested bucket: highest if the specification acceptance is rejected. Confidence: confirmed specification acceptance and matching startup/source ordering. proposed_drop: SPEC.md, Terminal experience, paragraph beginning at line 3003, explicitly says \"This release ends them: the first time a host's supervisor of this release starts, it ends that tmux server, and with it everything that still ran in an old terminal, without needing a tmux program.\" SPEC_impl.md:2891–2927 specifies that this runs after the store opens and before reload, and that old-kind rows have no terminal and live outcomes become interrupted. Source checked: service/core.rs:6142–6184 invokes OldTerminals::end_private_server before reload_sessions_with_hosts; :6675–6679 never resolves old pane addresses; :6805–6822 queues TerminalEnded for Launching, Running and StopRequested old rows and otherwise retains ended outcomes. Removal of pane_evidence and old tab discovery therefore follows the specified retirement. This record uses kind finding because accepting a potentially highest consequence on specification grounds requires independent checking; it is a proposed drop, not a claimed implementation defect. possible_cover: none searched. All evidence is source and contract analysis; no execution. No unresolved premise remains for this item. Preserve original consequence: retirement can end user processes and discard terminal screens, explicitly accepted by the cited contract."
+          }
+        },
+        {
+          "line": 5,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "c1",
+            "state": "open",
+            "summary": "Retired tmux status and tab discovery follows explicitly accepted process loss",
+            "location": "crates/farhelm-supervisor/src/service/status.rs:124",
+            "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. TLDR: Retiring private-tmux terminals can terminate running agents, close old tabs and discard terminal screens/history. This release deliberately treats those terminals as ended even if teardown fails, so Restart can create a second agent beside one that survived. Could-be-highest: yes, established process/history loss. Suggested bucket: highest if explicit acceptance is rejected. Confidence: confirmed source behavior and specification acceptance, source-only. proposed_drop: SPEC.md:3006–3010 says \"This release ends them: the first time a host's supervisor of this release starts, it ends that tmux server, and with it everything that still ran in an old terminal, without needing a tmux program\" and \"its terminal's last screen, which lived in the server, is gone; old tabs are closed\". SPEC.md:3013–3016 says \"A session whose agent or tabs already run in terminal hosts keeps them\" and explicitly accepts Restart beside a surviving old agent. SPEC_impl.md:2891–2927 specifies retirement before reload, terminal-less old rows, Interrupted conversion for active outcomes, and preservation of ended outcomes. Source: service/core.rs:6142–6184 ends old terminals before reload; :6675–6679 never resolves old pane addresses; :6769–6782 reads direct generation-scoped sentinel evidence before :6805–6822 converts remaining active old rows to Interrupted. :6635–6645 separately adopts host tabs for every session, including old-kind agent rows, so old-agent conversion does not itself discard host tabs. Removing pane_evidence and old tab discovery from status.rs follows that replacement contract. possible_cover: caller reports likely duplicate coverage in g099/g110/g113/g118; no coverage sources were read here. The parent has accepted no drop; retain this as a potentially highest finding proposed for drop and independent checking. No implementation violation is established. Original strongest consequences preserved: terminating user processes, losing terminal content, and possible second agent after failed teardown. No runtime execution or unresolved source premise."
+          }
+        }
+      ],
+      "latest": {
+        "line": 5,
+        "event": {
+          "version": 1,
+          "kind": "finding",
+          "id": "c1",
+          "state": "open",
+          "summary": "Retired tmux status and tab discovery follows explicitly accepted process loss",
+          "location": "crates/farhelm-supervisor/src/service/status.rs:124",
+          "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. TLDR: Retiring private-tmux terminals can terminate running agents, close old tabs and discard terminal screens/history. This release deliberately treats those terminals as ended even if teardown fails, so Restart can create a second agent beside one that survived. Could-be-highest: yes, established process/history loss. Suggested bucket: highest if explicit acceptance is rejected. Confidence: confirmed source behavior and specification acceptance, source-only. proposed_drop: SPEC.md:3006–3010 says \"This release ends them: the first time a host's supervisor of this release starts, it ends that tmux server, and with it everything that still ran in an old terminal, without needing a tmux program\" and \"its terminal's last screen, which lived in the server, is gone; old tabs are closed\". SPEC.md:3013–3016 says \"A session whose agent or tabs already run in terminal hosts keeps them\" and explicitly accepts Restart beside a surviving old agent. SPEC_impl.md:2891–2927 specifies retirement before reload, terminal-less old rows, Interrupted conversion for active outcomes, and preservation of ended outcomes. Source: service/core.rs:6142–6184 ends old terminals before reload; :6675–6679 never resolves old pane addresses; :6769–6782 reads direct generation-scoped sentinel evidence before :6805–6822 converts remaining active old rows to Interrupted. :6635–6645 separately adopts host tabs for every session, including old-kind agent rows, so old-agent conversion does not itself discard host tabs. Removing pane_evidence and old tab discovery from status.rs follows that replacement contract. possible_cover: caller reports likely duplicate coverage in g099/g110/g113/g118; no coverage sources were read here. The parent has accepted no drop; retain this as a potentially highest finding proposed for drop and independent checking. No implementation violation is established. Original strongest consequences preserved: terminating user processes, losing terminal content, and possible second agent after failed teardown. No runtime execution or unresolved source premise."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g130/findings.jsonl",
+        "id": "c1",
+        "line": 5,
+        "disposition": "under-investigation",
+        "group": "g130-c1",
+        "reason": "Record durably acknowledged; parent source/contract validation, cross-group synthesis, coverage/filter matching and any independent drop check remain pending. This preserves the claim and uncertainty without accepting, dropping or lowering it."
+      },
+      "accepted_parent_decision": null,
+      "returned_claim_checks": [
+        {
+          "batch": "claims-082",
+          "key": "g130/c1",
+          "latest_line": 5,
+          "recommendation": "covered",
+          "bucket": "highest",
+          "underlying_key": "old-private-tmux-startup-retirement-process-history-loss",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The specification explicitly accepts ending all old terminals, losing their screens/tabs, and treating them ended even after teardown failure. The source status cleanup follows that policy. This proposed dismissal requires the independent drop check.",
+          "checks": [
+            "1ed482dde220452e424973faf38a5e1318986333:service/core.rs:6142-6184 ends the old server before reload; :6675-6679 never resolves old pane addresses; :6769-6782 consults generation-scoped direct sentinel evidence before :6805-6822 converts active old rows.",
+            "Same revision core.rs:6635-6645 adopts terminal-host tabs for every session, including rows whose old agent is converted; removing tmux discovery does not itself discard those host tabs.",
+            "Current SPEC.md:2998-3012 and SPEC_impl.md:2780-2824 retain the explicit retirement contract and accepted failed-teardown/second-agent consequence."
+          ],
+          "coverage_checked": [
+            "SPEC.md Terminal experience and SPEC_impl.md Ending the old private tmux server are exact acceptance for the named process/history loss and second-agent route.",
+            "TODO Planned empty; plans queue index empty. TODO Mid term's later phase-3 removal is not required to cover this accepted policy. BUGS unrelated. Queue INDEX and active ledger searches for old-terminal/tmux retirement found no exact matching item. Other primary-review IDs mentioned in the supplied history are outside this batch and were not searched."
+          ],
+          "exact_cover_quotes": [
+            "SPEC.md:3000-3004: A supervisor that finds that tmux server when it starts ends it, and with it everything that still ran in an old terminal, without needing a tmux program. A session whose agent was still launching, running or being stopped in one becomes interrupted, as after a reboot, and gets the notice Status describes; one whose agent had already ended keeps its outcome, but its terminal's last screen, which lived in the server, is gone; old tabs are closed.",
+            "SPEC.md:3008-3011: A session whose agent or tabs already run in terminal hosts keeps them. A failure to end the server or to stop what ran there is logged and never stops the supervisor from starting; those sessions are treated as ended all the same, accepting that a Restart could then start a second agent beside one still running."
+          ],
+          "missing_premise": null,
+          "original_stronger_consequence": "Terminating still-running user agents, closing old tabs, losing terminal screens/history, and permitting a second agent after failed teardown. The earlier records proposed specification acceptance; none was a parent-approved drop. All are preserved here.",
+          "needs_independent_drop_check": true,
+          "proposed_basis": "Exact specification acceptance, not rarity, a filter, or an assertion that process/history loss is harmless. Parent must submit this proposed covered disposition to the independent drop check before dismissal."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": true,
+        "clearly_refuted_candidate": false,
+        "needs_unfinished_gate": true,
+        "provisional_bucket": "highest",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "old-private-tmux-startup-retirement-process-history-loss",
+        "destination": "trailing-old-private-tmux-startup-retirement-process-history-loss.md"
+      }
+    },
+    {
+      "key": "g130/c2",
+      "owner": "g130",
+      "id": "c2",
+      "domain": "supervisor-status-reporting",
+      "purpose": "supervisor-status-reporting: crates/farhelm-supervisor/src/service/status.rs; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 3,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c2",
+            "state": "open",
+            "summary": "Removing the capture budget does not remove a host-output attribution guard",
+            "location": "crates/farhelm-supervisor/src/service/status.rs:652",
+            "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. TLDR: Failed-launch details still quote only that launch's final screen; removing the tmux capture budget does not expose a later launch's output or introduce a new blocking capture operation for hosts. Considered consequence: stale observer quoting another run's output or repeated captures delaying fleet observation. Could-be-highest: no established security or loss-of-work route; the considered direct consequences were misleading diagnostics or delayed status. Suggested bucket if established: other (diagnostics), high if material sustained fleet delay were established. Confidence: confirmed source refutation. proposed_drop: parent revision launch_artifacts.rs:78–95 already used an unbudgeted synchronous host screen read before the tmux capture budget, while current launch_artifacts.rs:59–76 retains the same host.evidence Owned/dead check and memory-only screen read. The status.rs change at :652 only removes the retired tmux-specific branch/async signature. SPEC_impl.md:2755–2766 states: \"A host runs one child for its whole life, so everything on its screen is this launch's output; the screen is quoted only once the host's exit record has been processed, which follows the child's drained output\". hosts/terminal.rs:835–850 reports dead only for processed Exited state, so the observer's terminal_dead and excerpt's second check preserve final-output ordering. possible_cover: none searched. No execution; this is source and contract analysis. No unresolved premise remains for this candidate."
+          }
+        },
+        {
+          "line": 6,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c2",
+            "state": "open",
+            "summary": "Removing the capture budget does not remove a host-output attribution guard",
+            "location": "crates/farhelm-supervisor/src/service/status.rs:652",
+            "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. TLDR: Removing the old tmux capture timeout/budget does not introduce a new synchronous host capture or let an obsolete observer quote a later host's launch. Considered consequences: misleading launch diagnostics, later-launch output attribution, or sustained fleet observation delay. Could-be-highest: no established security or loss-of-work route; suggested bucket if established: other for diagnostics, high for material sustained fleet delay. Confidence: confirmed source refutation of this change-specific concern, with exact boundary clarified during synthesis. proposed_drop: baseline launch_artifacts.rs:78–95 already read host.screen_tail synchronously and without the tmux budget; current :59–76 keeps that host-only path, so status.rs:652 removes only the obsolete tmux async capture plumbing. Current host evidence is Owned/dead only after Liveness::Exited, not merely after an OS process probe reports dead (hosts/terminal.rs:818–850). The ordered runtime dispatch handles output/resizes/gaps before Exited (:3342–3370); on_exited (:3929–3942) flushes an open synchronized update and publishes it before setting Exited. Thus the observer's terminal_dead at status.rs:610–611 and append_launch_excerpt's second dead check do not quote an earlier process-probe boundary. Clarification: Exited does not promise an immutable screen forever; :3929–3931 explicitly continues feeding later descendant output from the same launch. That does not attribute another run's host screen. SPEC_impl.md:2760–2762 says \"A host runs one child for its whole life, so everything on its screen is this launch's output; the screen is quoted only once the host's exit record has been processed, which follows the child's drained output\". Current observe_entry reads the generation-specific sentinel before wrapper inference, while pending Stop suppresses that inference; the cache's applies_to check and store.rs:498–528 reject a late inferred error during Stop and all errors after annotated exit. possible_cover: caller says g100 independently checks bounded screen-tail copying; this record does not decide that distinct resource-bound issue or claim a parent-approved drop. No runtime execution. No unresolved premise remains for the removal-of-budget concern."
+          }
+        },
+        {
+          "line": 7,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c2",
+            "state": "open",
+            "summary": "Removing the capture budget preserves the existing processed-exit boundary",
+            "location": "crates/farhelm-supervisor/src/service/status.rs:652",
+            "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. TLDR: Removing the tmux capture budget does not introduce a new synchronous host capture or make an obsolete observer quote a later launch's host. Considered consequences remain misleading launch diagnostics, wrong-run output attribution, or sustained fleet observation delay. Could-be-highest: no established security or loss-of-work route. Suggested bucket if established: other for diagnostics, high for material sustained fleet delay. Confidence: confirmed source refutation of the change-specific capture concern; exact drain boundary now checked through producer, journal and consumer. proposed_drop: baseline launch_artifacts.rs:78–95 already read host.screen_tail synchronously without the tmux budget; current :59–76 retains that path. hosts/terminal.rs:818–850 distinguishes OS-probe dead from processed Exited; status evidence remains live until the latter. terminal-host/src/host.rs:454–485 reaps the child, drains available pty output, then journals exit once the drain empties or reaches its time/byte bound. terminal-host/SPEC.md:134–141 specifies: \"It then reads whatever output is already available, bounded by EXIT_DRAIN_TIME and EXIT_DRAIN_BYTES, appends an exit record with the child's exit status or terminating signal at the current offset, and goes on\"; :456–457 gives 200 ms and 4 MiB. terminal-host/src/journal.rs:418–427 sends Exited only after the stream cursor reaches that record's byte and resize position. hosts/terminal.rs:3342–3370 applies records in stream order, and :3929–3942 flushes an open synchronized update before setting Exited. status.rs:610–611 and launch_artifacts.rs:66–72 therefore use the processed bounded-drain boundary, not merely process death. Important caveat retained: this is not proof that every future byte or all output beyond the drain bounds has reached the screen. Descendants may continue writing after Exited, and the same host's screen may change; that remains same-launch output and was already possible in the baseline. SPEC_impl.md:2760–2762 attributes output by one-child-per-host lifetime and requires processed exit before quoting. The generation-scoped direct sentinel precedes wrapper inference, pending Stop suppresses inference, and store.rs:498–528 rejects late inferred Stop errors and errors after annotated exit. possible_cover: caller says g100 independently checks bounded screen-tail copying, a distinct issue this record does not decide. No parent-approved drop, no runtime execution, and no unresolved premise for removal of the old budget."
+          }
+        },
+        {
+          "line": 12,
+          "event": {
+            "version": 1,
+            "kind": "lead",
+            "id": "c2",
+            "state": "open",
+            "summary": "Reconcile inherited-history resize with the existing excerpt attribution candidate",
+            "location": "crates/farhelm-supervisor/src/service/status.rs:652",
+            "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. Original TLDR/consequences preserved: considered failed-launch diagnostics quoting a different run's output and repeated captures delaying fleet observation. Suggested bucket if established: other for diagnostics, high for material sustained fleet delay. Could-be-highest: no established security or loss-of-work route. The earlier source refutation remains valid for introduction of unbudgeted host capture: baseline launch_artifacts.rs:78–95 already reads host.screen_tail synchronously before the tmux budget, and current :59–76 retains that path. Processed-exit/drain ordering also remains established, with the prior 200ms/4MiB drain and later descendant-output caveats. New interface input requires narrowing/rechecking the broader attribution assertion: refreshed discovery-neighbours.json g009/l1 reports g013/f2 challenges blank-seed sufficiency because later grid growth can promote inherited history onto the visible screen before a never-started failure. This is potentially previous-run output in the same new host, distinct from selecting a later launch's host and not refuted merely by one-child-per-host identity. No new source conclusion or independent drop accepted. Confidence: reopened source lead for this attribution subclaim, not a new capture-budget regression. proposed_drop: undecided for inherited-history exposure; prior proposed source refutation applies only to new unbudgeted capture and wrong-host selection. possible_cover: g009/l1 is investigating this same inherited-history resize question; g100 owns bounded screen-tail copying. Next checks after completing neighbour reads: verify current/parent seed, resize-to-screen promotion and excerpt read, then compare the whole pinned range for attribution. Exact missing premise: whether old inherited history can reach screen_tail after a resize on a still-unconsumed failed launch and whether that route already predates the range. No execution, reproduction or broadening into an independent emulator audit."
+          }
+        },
+        {
+          "line": 13,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c2",
+            "state": "open",
+            "summary": "Capture-budget removal adds no new host capture; inherited-history attribution is a separate existing route",
+            "location": "crates/farhelm-supervisor/src/service/status.rs:652",
+            "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. Original TLDR/consequences preserved: failed-launch diagnostics might quote another run's output, or repeated captures might delay fleet observation. Suggested bucket if established: other for misleading diagnostics, high for material sustained fleet delay. Could-be-highest: no demonstrated security or user-work-loss route. Confidence: confirmed source/range analysis, no execution. proposed_drop remains proposed, with two narrow source bases: removal of the tmux budget does not introduce synchronous/unbudgeted host capture, and the inherited-history resize path was already present at the exclusive range base. The earlier blanket assertion that one child plus a blank seed excludes all previous-run text is retracted; it was too strong. No parent drop or lowering has been accepted. possible_cover: refreshed neighbour g009/l1 investigates this same inherited-history resize concern; g013/f2 is its supplied cross-reference; g100 owns bounded screen-tail copying, distinct from the removed timeout budget.\n\nChecks resolving the reopened lead: current host_restart.rs:216–255 supplies old host history/size to the new host, :418–490 obtains that history seed. snapshot/v1/paint.rs:401–436 paints primary history above a blank screen but does not tag inherited rows as non-current. vendor/alacritty_terminal/src/grid/resize.rs:41–71 grows the visible area by pulling rows from history, and term/mod.rs:735–758 delegates height growth to it. handlers.rs:1910 and :2060–2082 resize the selected attached host; hosts/terminal.rs:2344–2353 admits valid resizes while its runtime exists without testing whether the launch spec was consumed or the child exited. :3871–3884 applies the resize to the emulator. screen_tail at :2229–2240 reads the visible text, and launch_artifacts.rs:59–76 quotes it after processed exit without tracking inherited-row provenance. Consequently the blank initial screen alone does not prove that a later visible-screen excerpt excludes old seeded history; grid growth can put it there. This is diagnostic attribution, not selection of another host or a later generation's runtime. Processing Exited after the bounded 200ms/4MiB drain still establishes the previously checked ordering, but neither that ordering nor one-child-per-host identity excludes rows inherited in the seed. Later descendant output remains another same-launch screen mutability caveat.\n\nWhole-range attribution: exclusive base 6e423e30068b62c6cfa276c6d720ee35bb70387a already contains the unbudgeted host branch of append_launch_excerpt at launch_artifacts.rs:78–95, including host.screen_tail and the same processed-exit check; its status.rs:877–885 invokes it for wrapper failures. Base host_restart.rs:414 onward accepts a seed and :650 onward reads old.history_seed. Base emulator.rs:224–227 has the same resize forwarding, and the grid grow-lines implementation is byte-unchanged from base to reviewed commit. The complete base-to-reviewed paint.rs diff removes only an unused SGR helper at :743, leaving paint_history unchanged. Thus the ordinary host budget, blank-history seed and grid-promotion mechanisms already coexist before the full pinned range. This assigned status.rs edit removes tmux parameters/async plumbing while retaining those host contracts. Source refutes a newly introduced capture-budget or inherited-history mechanism in this assigned change; it does not refute the existing diagnostic concern or the neighbour's review of newly generalized documentation. No independent emulator audit is claimed. Suggested direction if that separate concern is retained: account for inherited history after resize, rather than treating blank-at-birth as a permanent provenance guarantee. The c2 lead is resolved to this candidate; no readily checkable premise remains for its change-attribution judgment."
+          }
+        },
+        {
+          "line": 14,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c2",
+            "state": "open",
+            "summary": "Capture-budget removal adds no new host capture; inherited-history attribution is a separate existing route",
+            "location": "crates/farhelm-supervisor/src/service/status.rs:652",
+            "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. Original TLDR/consequences preserved: failed-launch diagnostics might quote another run's output, or repeated captures might delay fleet observation. Suggested bucket if established: other for misleading diagnostics, high for material sustained fleet delay. Could-be-highest: no demonstrated security or user-work-loss route. Confidence: confirmed source/range analysis, no execution. proposed_drop remains proposed, with two narrow source bases: removal of the tmux budget does not introduce synchronous/unbudgeted host capture, and the inherited-history resize path was already present at the exclusive range base. The earlier blanket assertion that one child plus a blank seed excludes all previous-run text is retracted; it was too strong. No parent drop or lowering has been accepted. possible_cover: refreshed neighbour g009/l1 investigates this same inherited-history resize concern; g013/f2 is its supplied cross-reference; g100 owns bounded screen-tail copying, distinct from the removed timeout budget.\n\nChecks resolving the reopened lead: current host_restart.rs:216–255 supplies old host history/size to the new host, :418–490 obtains that history seed. snapshot/v1/paint.rs:401–436 paints primary history above a blank screen but does not tag inherited rows as non-current. vendor/alacritty_terminal/src/grid/resize.rs:41–71 grows the visible area by pulling rows from history, and term/mod.rs:735–758 delegates height growth to it. handlers.rs:1910 and :2060–2082 resize the selected attached host; hosts/terminal.rs:2344–2353 admits valid resizes while its runtime exists without testing whether the launch spec was consumed or the child exited. :3871–3884 applies the resize to the emulator. screen_tail at :2229–2240 reads the visible text, and launch_artifacts.rs:59–76 quotes it after processed exit without tracking inherited-row provenance. Consequently the blank initial screen alone does not prove that a later visible-screen excerpt excludes old seeded history; grid growth can put it there. This is diagnostic attribution, not selection of another host or a later generation's runtime. Processing Exited after the bounded 200ms/4MiB drain still establishes the previously checked ordering, but neither that ordering nor one-child-per-host identity excludes rows inherited in the seed. Later descendant output remains another same-launch screen mutability caveat.\n\nWhole-range attribution: exclusive base 6e423e30068b62c6cfa276c6d720ee35bb70387a already contains the unbudgeted host branch of append_launch_excerpt at launch_artifacts.rs:78–95, including host.screen_tail and the same processed-exit check; its status.rs:877–885 invokes it for wrapper failures. Base host_restart.rs:414 onward accepts a seed and :650 onward reads old.history_seed. Base handlers.rs:1916 and :2233 already dispatch attached resizes through Terminal::Host at terminals.rs:271–283 into identical hosts/terminal.rs:2328–2337 admission. Base emulator.rs:224–227 has the same resize forwarding, and the grid grow-lines implementation is byte-unchanged from base to reviewed commit. The complete base-to-reviewed paint.rs diff removes only an unused SGR helper at :743, leaving paint_history unchanged. Thus the ordinary host budget, blank-history seed and grid-promotion mechanisms already coexist before the full pinned range. This assigned status.rs edit removes tmux parameters/async plumbing while retaining those host contracts. Source refutes a newly introduced capture-budget or inherited-history mechanism in this assigned change; it does not refute the existing diagnostic concern or the neighbour's review of newly generalized documentation. No independent emulator audit is claimed. Suggested direction if that separate concern is retained: account for inherited history after resize, rather than treating blank-at-birth as a permanent provenance guarantee. The c2 lead is resolved to this candidate; no readily checkable premise remains for its change-attribution judgment."
+          }
+        }
+      ],
+      "latest": {
+        "line": 14,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c2",
+          "state": "open",
+          "summary": "Capture-budget removal adds no new host capture; inherited-history attribution is a separate existing route",
+          "location": "crates/farhelm-supervisor/src/service/status.rs:652",
+          "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. Original TLDR/consequences preserved: failed-launch diagnostics might quote another run's output, or repeated captures might delay fleet observation. Suggested bucket if established: other for misleading diagnostics, high for material sustained fleet delay. Could-be-highest: no demonstrated security or user-work-loss route. Confidence: confirmed source/range analysis, no execution. proposed_drop remains proposed, with two narrow source bases: removal of the tmux budget does not introduce synchronous/unbudgeted host capture, and the inherited-history resize path was already present at the exclusive range base. The earlier blanket assertion that one child plus a blank seed excludes all previous-run text is retracted; it was too strong. No parent drop or lowering has been accepted. possible_cover: refreshed neighbour g009/l1 investigates this same inherited-history resize concern; g013/f2 is its supplied cross-reference; g100 owns bounded screen-tail copying, distinct from the removed timeout budget.\n\nChecks resolving the reopened lead: current host_restart.rs:216–255 supplies old host history/size to the new host, :418–490 obtains that history seed. snapshot/v1/paint.rs:401–436 paints primary history above a blank screen but does not tag inherited rows as non-current. vendor/alacritty_terminal/src/grid/resize.rs:41–71 grows the visible area by pulling rows from history, and term/mod.rs:735–758 delegates height growth to it. handlers.rs:1910 and :2060–2082 resize the selected attached host; hosts/terminal.rs:2344–2353 admits valid resizes while its runtime exists without testing whether the launch spec was consumed or the child exited. :3871–3884 applies the resize to the emulator. screen_tail at :2229–2240 reads the visible text, and launch_artifacts.rs:59–76 quotes it after processed exit without tracking inherited-row provenance. Consequently the blank initial screen alone does not prove that a later visible-screen excerpt excludes old seeded history; grid growth can put it there. This is diagnostic attribution, not selection of another host or a later generation's runtime. Processing Exited after the bounded 200ms/4MiB drain still establishes the previously checked ordering, but neither that ordering nor one-child-per-host identity excludes rows inherited in the seed. Later descendant output remains another same-launch screen mutability caveat.\n\nWhole-range attribution: exclusive base 6e423e30068b62c6cfa276c6d720ee35bb70387a already contains the unbudgeted host branch of append_launch_excerpt at launch_artifacts.rs:78–95, including host.screen_tail and the same processed-exit check; its status.rs:877–885 invokes it for wrapper failures. Base host_restart.rs:414 onward accepts a seed and :650 onward reads old.history_seed. Base handlers.rs:1916 and :2233 already dispatch attached resizes through Terminal::Host at terminals.rs:271–283 into identical hosts/terminal.rs:2328–2337 admission. Base emulator.rs:224–227 has the same resize forwarding, and the grid grow-lines implementation is byte-unchanged from base to reviewed commit. The complete base-to-reviewed paint.rs diff removes only an unused SGR helper at :743, leaving paint_history unchanged. Thus the ordinary host budget, blank-history seed and grid-promotion mechanisms already coexist before the full pinned range. This assigned status.rs edit removes tmux parameters/async plumbing while retaining those host contracts. Source refutes a newly introduced capture-budget or inherited-history mechanism in this assigned change; it does not refute the existing diagnostic concern or the neighbour's review of newly generalized documentation. No independent emulator audit is claimed. Suggested direction if that separate concern is retained: account for inherited history after resize, rather than treating blank-at-birth as a permanent provenance guarantee. The c2 lead is resolved to this candidate; no readily checkable premise remains for its change-attribution judgment."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g130/findings.jsonl",
+        "id": "c2",
+        "line": 14,
+        "disposition": "excluded",
+        "group": "host-launch-excerpt-inherited-history-resize-attribution",
+        "reason": "Parent explicitly accepted named out-of-range proposal from claims-082 after inspecting it. The budget-removal regression is source-refuted; the separate inherited-history resize mechanism already coexists at the exclusive range base. The earlier blanket claim that one child plus a blank initial screen excludes all previous-run text is withdrawn and must not be revived. Exclude only the already-existing runtime mechanism and refuted change-specific budget regression. Preserve the diagnostic concern and supplied cross-group provenance for the parent; no FILTER.md rule applies to that enduring documentation issue. Checked source/results: [\"Exclusive base 6e423e30068b62c6cfa276c6d720ee35bb70387a:service/launch_artifacts.rs:78-95 reads host.screen_tail synchronously before the tmux capture budget; 1ed482dde220452e424973faf38a5e1318986333:59-76 keeps that path after removing tmux plumbing.\",\"At base, service/core/host_restart.rs:414-430 accepts a history seed and :683-703 reads old.history_seed. snapshot/v1/paint.rs:401-436 paints inherited history above a blank screen without provenance tags; vendor/alacritty_terminal/src/grid/resize.rs:41-71 grows the screen using history. Base-to-reviewed resize.rs is unchanged, and paint.rs only removes an unrelated unused SGR helper.\",\"1ed482d hosts/terminal.rs:818-850 separates process-probe death from processed exit evidence. Processed exit does not establish immutable text forever or remove inherited rows; later same-launch descendants can still write. These caveats do not establish a newly introduced capture budget or host-selection regression.\"] Current coverage/results: [\"SPEC.md Restart and SPEC_impl.md:2647-2669 launch excerpts were checked. The latter's one-child/blank-screen attribution assurance does not refute the inherited-history resize concern; that documentation generalization is a separate possible in-range target owned elsewhere.\",\"TODO Planned and unlanded plan index empty; BUGS unrelated. Queue INDEX and active ledger searches for launch excerpt/previous-run text/inherited history/capture budget found no exact item. Parent-supplied neighbour identities g009/l1, g013/f2 and g100 were not independently searched or treated as current queue coverage.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Failed-launch diagnostics might quote another run's output, or repeated capture might cause sustained fleet observation delay (high if established). Earlier blanket attribution refutation was retracted after the inherited-history resize route was raised; only introduction of unbudgeted capture/wrong-host selection was refuted. This is not a refutation of the existing diagnostic defect or newly generalized documentation.\"; \"No missing premise for pre-range existence of the named capture/seed/grow mechanisms. Material sustained fleet delay, and any security or user-owned-work consequence from diagnostic attribution, remain unestablished.\"."
+      },
+      "accepted_parent_decision": {
+        "key": "g130/c2",
+        "line": 14,
+        "disposition": "excluded",
+        "group": "host-launch-excerpt-inherited-history-resize-attribution",
+        "bucket": "other",
+        "recording": "out-of-range",
+        "queue_target_candidate": null,
+        "needs_independent_drop_check": false,
+        "reason": "Parent explicitly accepted named out-of-range proposal from claims-082 after inspecting it. The budget-removal regression is source-refuted; the separate inherited-history resize mechanism already coexists at the exclusive range base. The earlier blanket claim that one child plus a blank initial screen excludes all previous-run text is withdrawn and must not be revived. Exclude only the already-existing runtime mechanism and refuted change-specific budget regression. Preserve the diagnostic concern and supplied cross-group provenance for the parent; no FILTER.md rule applies to that enduring documentation issue. Checked source/results: [\"Exclusive base 6e423e30068b62c6cfa276c6d720ee35bb70387a:service/launch_artifacts.rs:78-95 reads host.screen_tail synchronously before the tmux capture budget; 1ed482dde220452e424973faf38a5e1318986333:59-76 keeps that path after removing tmux plumbing.\",\"At base, service/core/host_restart.rs:414-430 accepts a history seed and :683-703 reads old.history_seed. snapshot/v1/paint.rs:401-436 paints inherited history above a blank screen without provenance tags; vendor/alacritty_terminal/src/grid/resize.rs:41-71 grows the screen using history. Base-to-reviewed resize.rs is unchanged, and paint.rs only removes an unrelated unused SGR helper.\",\"1ed482d hosts/terminal.rs:818-850 separates process-probe death from processed exit evidence. Processed exit does not establish immutable text forever or remove inherited rows; later same-launch descendants can still write. These caveats do not establish a newly introduced capture budget or host-selection regression.\"] Current coverage/results: [\"SPEC.md Restart and SPEC_impl.md:2647-2669 launch excerpts were checked. The latter's one-child/blank-screen attribution assurance does not refute the inherited-history resize concern; that documentation generalization is a separate possible in-range target owned elsewhere.\",\"TODO Planned and unlanded plan index empty; BUGS unrelated. Queue INDEX and active ledger searches for launch excerpt/previous-run text/inherited history/capture budget found no exact item. Parent-supplied neighbour identities g009/l1, g013/f2 and g100 were not independently searched or treated as current queue coverage.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Failed-launch diagnostics might quote another run's output, or repeated capture might cause sustained fleet observation delay (high if established). Earlier blanket attribution refutation was retracted after the inherited-history resize route was raised; only introduction of unbudgeted capture/wrong-host selection was refuted. This is not a refutation of the existing diagnostic defect or newly generalized documentation.\"; \"No missing premise for pre-range existence of the named capture/seed/grow mechanisms. Material sustained fleet delay, and any security or user-owned-work consequence from diagnostic attribution, remain unestablished.\"."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-082",
+          "key": "g130/c2",
+          "latest_line": 14,
+          "recommendation": "out-of-range",
+          "bucket": "other",
+          "underlying_key": "host-launch-excerpt-inherited-history-resize-attribution",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The budget-removal regression is source-refuted; the separate inherited-history resize mechanism already coexists at the exclusive range base. The earlier blanket claim that one child plus a blank initial screen excludes all previous-run text is withdrawn and must not be revived.",
+          "checks": [
+            "Exclusive base 6e423e30068b62c6cfa276c6d720ee35bb70387a:service/launch_artifacts.rs:78-95 reads host.screen_tail synchronously before the tmux capture budget; 1ed482dde220452e424973faf38a5e1318986333:59-76 keeps that path after removing tmux plumbing.",
+            "At base, service/core/host_restart.rs:414-430 accepts a history seed and :683-703 reads old.history_seed. snapshot/v1/paint.rs:401-436 paints inherited history above a blank screen without provenance tags; vendor/alacritty_terminal/src/grid/resize.rs:41-71 grows the screen using history. Base-to-reviewed resize.rs is unchanged, and paint.rs only removes an unrelated unused SGR helper.",
+            "1ed482d hosts/terminal.rs:818-850 separates process-probe death from processed exit evidence. Processed exit does not establish immutable text forever or remove inherited rows; later same-launch descendants can still write. These caveats do not establish a newly introduced capture budget or host-selection regression."
+          ],
+          "coverage_checked": [
+            "SPEC.md Restart and SPEC_impl.md:2647-2669 launch excerpts were checked. The latter's one-child/blank-screen attribution assurance does not refute the inherited-history resize concern; that documentation generalization is a separate possible in-range target owned elsewhere.",
+            "TODO Planned and unlanded plan index empty; BUGS unrelated. Queue INDEX and active ledger searches for launch excerpt/previous-run text/inherited history/capture budget found no exact item. Parent-supplied neighbour identities g009/l1, g013/f2 and g100 were not independently searched or treated as current queue coverage."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": "No missing premise for pre-range existence of the named capture/seed/grow mechanisms. Material sustained fleet delay, and any security or user-owned-work consequence from diagnostic attribution, remain unestablished.",
+          "original_stronger_consequence": "Failed-launch diagnostics might quote another run's output, or repeated capture might cause sustained fleet observation delay (high if established). Earlier blanket attribution refutation was retracted after the inherited-history resize route was raised; only introduction of unbudgeted capture/wrong-host selection was refuted. This is not a refutation of the existing diagnostic defect or newly generalized documentation.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Exclude only the already-existing runtime mechanism and refuted change-specific budget regression. Preserve the diagnostic concern and supplied cross-group provenance for the parent; no FILTER.md rule applies to that enduring documentation issue."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": false,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "host-launch-excerpt-inherited-history-resize-attribution",
+        "destination": null
+      }
+    },
+    {
+      "key": "g130/l3",
+      "owner": "g130",
+      "id": "l3",
+      "domain": "supervisor-status-reporting",
+      "purpose": "supervisor-status-reporting: crates/farhelm-supervisor/src/service/status.rs; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 8,
+          "event": {
+            "version": 1,
+            "kind": "lead",
+            "id": "l3",
+            "state": "open",
+            "summary": "Exit-enrichment test documentation may conflate probe death with observer evidence",
+            "location": "crates/farhelm-supervisor/src/service/status.rs:1053",
+            "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. TLDR: A changed test explanation appears to teach that status observation can see a host dead before its exit record/code arrives, despite the observer using processed-exit evidence rather than the earlier process probe. Suspected consequence is a misleading lifecycle model for future maintainers, not an established runtime failure. Suggested bucket if confirmed: other, documentation correctness. Could-be-highest: no demonstrated security or loss-of-work route. Confidence: unresolved source lead. Basis: assigned patch's rewritten docstring at status.rs:1053–1057 says the host probe sees death before the exit record and the observation first sees death without a code; the retained observation test hand-builds OwnedTerminal dead/no-code then dead/code. Earlier synthesis checked hosts/terminal.rs:835–850 where evidence is live until Exited and current observe_entry uses that evidence at :580, not probe. Checks next: reread the full changed docstring and observation callers, compare original-range/parent/tip wording and establish whether any production caller actually offers the earlier probe state or re-adoption can supply such enrichment. proposed_drop: undecided. possible_cover: no matching item in the supplied neighbour records. No execution or reproduction. Exact missing premise: whether the docstring's claimed host observation sequence exists in the callers, rather than only the synthetic helper values."
+          }
+        },
+        {
+          "line": 9,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "l3",
+            "state": "open",
+            "summary": "Exit-enrichment test documentation conflates probe death with observer evidence",
+            "location": "crates/farhelm-supervisor/src/service/status.rs:1053",
+            "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. TLDR: The rewritten test documentation teaches the wrong lifecycle boundary: it says a host observation first sees death without a code because the process probe precedes the exit record, but these observations deliberately do not consume that probe. This can mislead maintainers about when status/launch classification may treat a terminal as dead. No runtime misclassification is established. Details: status.rs:1053–1057 newly says \"a host terminal's probe says dead before its exit record arrives\" and therefore \"the observation that first sees the death can have no code while the next one does\". The only production caller of this observation function is observe_entry at :704; it obtains live from terminal_evidence at :580–604, which calls host.evidence at :124–127. hosts/terminal.rs:835–850 makes Running evidence dead:false until the complete ChildExit has been processed, then reports dead:true and maps its code together. probe at :818–827 can report Dead earlier but is not this observer's input. Signal death yields no code (:853–859, :886–889), rather than a temporarily unread exit code for that same host. The test at :1060–1067 hand-builds dead/no-code and dead/code inputs; its assertions still test monotonic enrichment of an already stored unknown code, but do not demonstrate the claimed within-host observation sequence. Correct production ordering does not make the new explanation accurate. The documented processed-exit boundary in SPEC_impl.md:2703–2704, :2760–2762 and hosts/terminal.rs:835–837 is the governing contract.\n\nAttribution and persistence: exclusive-base 6e423e30068b62c6cfa276c6d720ee35bb70387a and the immediate parent describe tmux publishing pane_dead before pane_dead_status (base status.rs:1303–1306, parent :1298–1301). The assigned commit replaces that tmux rationale with the incorrect host rationale. The only later in-range status.rs change is f560058da19e02716e6f943883a9508b447aff4e; pinned tip 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db retains the exact false explanation at :1033–1037. Suggested fix: explain enrichment of previously stored incomplete outcomes, and preserve the distinction between lifecycle process probes and processed exit evidence rather than suggesting the observation uses probe death.\n\nSuggested bucket: other (newly inaccurate test/lifecycle documentation). Could-be-highest: no established or suspected security/user-work-loss route from this documentation itself. Confidence: confirmed source/caller/range analysis, no execution. proposed_drop: false. possible_cover: no matching item in supplied discovery-neighbours.json; no forbidden coverage search. Caveats: this does not claim the enrichment test should be deleted or that enrichment is unreachable for an existing stored unknown outcome. It concerns the newly asserted reason for the test. All readily checkable premises above settled; l3 is resolved from lead to finding."
+          }
+        },
+        {
+          "line": 10,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "l3",
+            "state": "open",
+            "summary": "Status documentation conflates process liveness with processed exit evidence",
+            "location": "crates/farhelm-supervisor/src/service/status.rs:179",
+            "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. TLDR: Rewritten status and test documentation teaches the wrong lifecycle boundary: it calls a live reading proof that the host's child has not exited and says observation can see death before the exit record/code arrives. The implementation deliberately keeps status live after process death until the exit record is processed. This misleads maintainers about the evidence required for status and launch classification; no runtime misclassification is established. Suggested bucket: other (newly inaccurate lifecycle documentation). Could-be-highest: no demonstrated security or user-work-loss route from the prose. Confidence: confirmed source/caller/range analysis, no execution. proposed_drop: false. possible_cover: none matching in supplied neighbour records; no prohibited coverage search.\nDetails: production docstring status.rs:179–181 newly describes liveness as \"the host's child has not exited — a fact\". The rewritten enrichment-test docstring :1053–1057 says \"a host terminal's probe says dead before its exit record arrives\" and therefore \"the observation that first sees the death can have no code while the next one does\". These are two manifestations of the same conflation. The only production caller of observation is observe_entry at :704, which obtains live from terminal_evidence at :580–604; :124–127 calls host.evidence, not probe. hosts/terminal.rs:835–850 explicitly keeps Running evidence dead:false until the complete ChildExit is processed, then publishes dead:true and maps the code together. probe at :818–827 can return Dead before that, but is not this observer's input. Signal death yields no code (:853–859, :886–889), rather than a temporarily unread normal-exit code. The synthetic test values at :1060–1067 still usefully check monotonic enrichment of a previously stored unknown code; they do not demonstrate the claimed within-host observation sequence. The processed-exit contract is explicit in hosts/terminal.rs:835–837 and SPEC_impl.md:2703–2704, :2760–2762. Correct production behavior does not refute the documentation defect.\nAttribution: exclusive-base 6e423e30068b62c6cfa276c6d720ee35bb70387a and the immediate parent explain tmux pane_dead before pane_dead_status (base status.rs:1303–1306, parent :1298–1301), rather than falsely describing host observation. The assigned patch also replaces the earlier live-tmux-pane fact with the incorrect child-not-exited claim. The only later in-range status.rs commit is f560058da19e02716e6f943883a9508b447aff4e, whose diff only removes terminal-kind reply fields/helper and leaves both explanations. Pinned tip 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db retains the test explanation at :1033–1037. Fix direction: describe liveness as the runtime not yet having processed exit, distinguish the earlier process-probe boundary, and explain enrichment in terms of a previously incomplete stored outcome. Do not delete the useful enrichment assertions or claim that all unknown-code outcomes are unreachable. Original consequence preserved: misleading future lifecycle/classification reasoning, not a demonstrated user-visible failure. Lead l3 is resolved; no missing source premise remains. Revision adds the second newly changed production-doc location for the same misconception."
+          }
+        },
+        {
+          "line": 11,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "l3",
+            "state": "open",
+            "summary": "Status documentation conflates process liveness with processed exit evidence",
+            "location": "crates/farhelm-supervisor/src/service/status.rs:179",
+            "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. TLDR: Rewritten status and test documentation teaches the wrong lifecycle boundary: it calls a live reading proof that the host's child has not exited and says observation can see death before the exit record/code arrives. The implementation deliberately keeps status live after process death until the exit record is processed. This misleads maintainers about when status and launch classification may treat a terminal as dead; no runtime misclassification is established. Suggested bucket: other (newly inaccurate lifecycle documentation). Could-be-highest: no demonstrated security or user-work-loss route from the prose. Confidence: confirmed source/caller/range analysis, no execution. proposed_drop: false. possible_cover: none matching in supplied neighbour records; no prohibited coverage search. Details: production docstring status.rs:179–181 newly describes liveness as \"the host's child has not exited — a fact\". The rewritten enrichment-test docstring :1053–1057 says \"a host terminal's probe says dead before its exit record arrives\" and therefore \"the observation that first sees the death can have no code while the next one does\". These are two manifestations of the same conflation. The only production caller of observation is observe_entry at :704, which obtains live from terminal_evidence at :580–604; :124–127 calls host.evidence, not probe. hosts/terminal.rs:835–850 explicitly keeps Running evidence dead:false until the complete ChildExit is processed, then publishes dead:true and maps the code together. probe at :818–827 can return Dead before that, but is not this observer's input. Signal death yields no code (:853–859, :886–889), rather than a temporarily unread normal-exit code. The synthetic test values at :1060–1067 still usefully check monotonic enrichment of a previously stored unknown code; they do not demonstrate the claimed within-host observation sequence. The processed-exit contract is explicit in hosts/terminal.rs:835–837 and SPEC_impl.md:2703–2704, :2760–2762. Correct production behavior does not refute the documentation defect. Attribution: exclusive-base 6e423e30068b62c6cfa276c6d720ee35bb70387a and the immediate parent explain tmux pane_dead before pane_dead_status (base status.rs:1303–1306, parent :1298–1301), rather than falsely describing host observation. The assigned patch also replaces the earlier live-tmux-pane fact with the incorrect child-not-exited claim. The only later in-range status.rs commit is f560058da19e02716e6f943883a9508b447aff4e, whose diff only removes terminal-kind reply fields/helper and leaves both explanations. Pinned tip 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db retains the test explanation at :1033–1037. Final source check supplies a valid enrichment reason without excusing the misleading prose: service/sweep.rs:2035–2050 can record StopCompleted with unknown code immediately after its process sweep and explicitly relies on a later tick to enrich it; handlers.rs:997–1026 likewise distinguishes process-probe death from final-state/exit-record arrival. Thus keep the useful synthetic enrichment assertions, but explain a previously incomplete stored outcome (for example Stop's earlier recording), rather than inventing an early-dead evidence reading by this observer. Original consequence preserved: misleading future lifecycle/classification reasoning, not a demonstrated user-visible failure. Lead l3 is resolved; no missing source premise remains. This revision adds the concrete valid producer of stored unknown-code outcomes and completes discovery checking."
+          }
+        }
+      ],
+      "latest": {
+        "line": 11,
+        "event": {
+          "version": 1,
+          "kind": "finding",
+          "id": "l3",
+          "state": "open",
+          "summary": "Status documentation conflates process liveness with processed exit evidence",
+          "location": "crates/farhelm-supervisor/src/service/status.rs:179",
+          "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. TLDR: Rewritten status and test documentation teaches the wrong lifecycle boundary: it calls a live reading proof that the host's child has not exited and says observation can see death before the exit record/code arrives. The implementation deliberately keeps status live after process death until the exit record is processed. This misleads maintainers about when status and launch classification may treat a terminal as dead; no runtime misclassification is established. Suggested bucket: other (newly inaccurate lifecycle documentation). Could-be-highest: no demonstrated security or user-work-loss route from the prose. Confidence: confirmed source/caller/range analysis, no execution. proposed_drop: false. possible_cover: none matching in supplied neighbour records; no prohibited coverage search. Details: production docstring status.rs:179–181 newly describes liveness as \"the host's child has not exited — a fact\". The rewritten enrichment-test docstring :1053–1057 says \"a host terminal's probe says dead before its exit record arrives\" and therefore \"the observation that first sees the death can have no code while the next one does\". These are two manifestations of the same conflation. The only production caller of observation is observe_entry at :704, which obtains live from terminal_evidence at :580–604; :124–127 calls host.evidence, not probe. hosts/terminal.rs:835–850 explicitly keeps Running evidence dead:false until the complete ChildExit is processed, then publishes dead:true and maps the code together. probe at :818–827 can return Dead before that, but is not this observer's input. Signal death yields no code (:853–859, :886–889), rather than a temporarily unread normal-exit code. The synthetic test values at :1060–1067 still usefully check monotonic enrichment of a previously stored unknown code; they do not demonstrate the claimed within-host observation sequence. The processed-exit contract is explicit in hosts/terminal.rs:835–837 and SPEC_impl.md:2703–2704, :2760–2762. Correct production behavior does not refute the documentation defect. Attribution: exclusive-base 6e423e30068b62c6cfa276c6d720ee35bb70387a and the immediate parent explain tmux pane_dead before pane_dead_status (base status.rs:1303–1306, parent :1298–1301), rather than falsely describing host observation. The assigned patch also replaces the earlier live-tmux-pane fact with the incorrect child-not-exited claim. The only later in-range status.rs commit is f560058da19e02716e6f943883a9508b447aff4e, whose diff only removes terminal-kind reply fields/helper and leaves both explanations. Pinned tip 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db retains the test explanation at :1033–1037. Final source check supplies a valid enrichment reason without excusing the misleading prose: service/sweep.rs:2035–2050 can record StopCompleted with unknown code immediately after its process sweep and explicitly relies on a later tick to enrich it; handlers.rs:997–1026 likewise distinguishes process-probe death from final-state/exit-record arrival. Thus keep the useful synthetic enrichment assertions, but explain a previously incomplete stored outcome (for example Stop's earlier recording), rather than inventing an early-dead evidence reading by this observer. Original consequence preserved: misleading future lifecycle/classification reasoning, not a demonstrated user-visible failure. Lead l3 is resolved; no missing source premise remains. This revision adds the concrete valid producer of stored unknown-code outcomes and completes discovery checking."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g130/findings.jsonl",
+        "id": "l3",
+        "line": 11,
+        "disposition": "verified",
+        "group": "status-documentation-probe-versus-processed-exit-evidence",
+        "reason": "Parent explicitly accepted named retain-verified proposal from claims-082 after inspecting it. New production and test prose attributes the observer's liveness/enrichment to process-probe timing, while its caller consumes evidence that stays live until the exit record and code are processed together. Retain introduced lifecycle documentation defect at both locations. Correct production ordering does not refute it. No FILTER.md boundary covers the entire consequence. Checked source/results: [\"1ed482dde220452e424973faf38a5e1318986333:service/status.rs:179-181 says the child has not exited; :1053-1057 claims the observer first sees host death without code because the probe precedes the exit record. The patch replaces tmux-specific explanations with these assertions.\",\"Same revision status.rs:124-127 terminal_evidence calls host.evidence; observe_entry at :580-604 obtains that evidence and :704 calls observation. hosts/terminal.rs:818-850 shows probe can report Dead while Running evidence remains dead:false; Exited evidence sets dead and maps the complete ChildExit together. Signals legitimately have no code (:853-889).\",\"Same revision service/sweep.rs:2035-2050 can record StopCompleted with an unknown code immediately after its sweep and explicitly relies on later enrichment. This provides a valid reason for the synthetic assertions without validating their rewritten timing explanation.\",\"00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db retains the false liveness prose at :179-181 and test explanation at :1033-1037; the only intervening status diff removes reply fields/helper.\"] Current coverage/results: [\"SPEC.md:2651-2684 Status and SPEC_impl.md:2134-2146/2662-2666 processed-exit boundaries were read. They support the evidence distinction; none accepts misleading lifecycle documentation.\",\"TODO Planned empty; plans queue index empty; BUGS unrelated. Queue INDEX and active ledger searches for probe death/processed exit/enrichment/liveness documentation found no exact item. stop-annotation-exit-witness.md was read: it concerns a particular test's premature assertion, not this explanatory contract. transition-accessor-comment.md is a stale accessor name with an otherwise accurate contract, also distinct.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Misleading future lifecycle/classification reasoning, with no demonstrated runtime misclassification, security harm, or user-owned-work loss. The test remains useful for enriching previously stored unknown codes; do not delete it or claim such outcomes unreachable.\"; null."
+      },
+      "accepted_parent_decision": {
+        "key": "g130/l3",
+        "line": 11,
+        "disposition": "verified",
+        "group": "status-documentation-probe-versus-processed-exit-evidence",
+        "bucket": "other",
+        "recording": "retain-verified",
+        "queue_target_candidate": null,
+        "needs_independent_drop_check": false,
+        "reason": "Parent explicitly accepted named retain-verified proposal from claims-082 after inspecting it. New production and test prose attributes the observer's liveness/enrichment to process-probe timing, while its caller consumes evidence that stays live until the exit record and code are processed together. Retain introduced lifecycle documentation defect at both locations. Correct production ordering does not refute it. No FILTER.md boundary covers the entire consequence. Checked source/results: [\"1ed482dde220452e424973faf38a5e1318986333:service/status.rs:179-181 says the child has not exited; :1053-1057 claims the observer first sees host death without code because the probe precedes the exit record. The patch replaces tmux-specific explanations with these assertions.\",\"Same revision status.rs:124-127 terminal_evidence calls host.evidence; observe_entry at :580-604 obtains that evidence and :704 calls observation. hosts/terminal.rs:818-850 shows probe can report Dead while Running evidence remains dead:false; Exited evidence sets dead and maps the complete ChildExit together. Signals legitimately have no code (:853-889).\",\"Same revision service/sweep.rs:2035-2050 can record StopCompleted with an unknown code immediately after its sweep and explicitly relies on later enrichment. This provides a valid reason for the synthetic assertions without validating their rewritten timing explanation.\",\"00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db retains the false liveness prose at :179-181 and test explanation at :1033-1037; the only intervening status diff removes reply fields/helper.\"] Current coverage/results: [\"SPEC.md:2651-2684 Status and SPEC_impl.md:2134-2146/2662-2666 processed-exit boundaries were read. They support the evidence distinction; none accepts misleading lifecycle documentation.\",\"TODO Planned empty; plans queue index empty; BUGS unrelated. Queue INDEX and active ledger searches for probe death/processed exit/enrichment/liveness documentation found no exact item. stop-annotation-exit-witness.md was read: it concerns a particular test's premature assertion, not this explanatory contract. transition-accessor-comment.md is a stale accessor name with an otherwise accurate contract, also distinct.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Misleading future lifecycle/classification reasoning, with no demonstrated runtime misclassification, security harm, or user-owned-work loss. The test remains useful for enriching previously stored unknown codes; do not delete it or claim such outcomes unreachable.\"; null."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-082",
+          "key": "g130/l3",
+          "latest_line": 11,
+          "recommendation": "retain-verified",
+          "bucket": "other",
+          "underlying_key": "status-documentation-probe-versus-processed-exit-evidence",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "New production and test prose attributes the observer's liveness/enrichment to process-probe timing, while its caller consumes evidence that stays live until the exit record and code are processed together.",
+          "checks": [
+            "1ed482dde220452e424973faf38a5e1318986333:service/status.rs:179-181 says the child has not exited; :1053-1057 claims the observer first sees host death without code because the probe precedes the exit record. The patch replaces tmux-specific explanations with these assertions.",
+            "Same revision status.rs:124-127 terminal_evidence calls host.evidence; observe_entry at :580-604 obtains that evidence and :704 calls observation. hosts/terminal.rs:818-850 shows probe can report Dead while Running evidence remains dead:false; Exited evidence sets dead and maps the complete ChildExit together. Signals legitimately have no code (:853-889).",
+            "Same revision service/sweep.rs:2035-2050 can record StopCompleted with an unknown code immediately after its sweep and explicitly relies on later enrichment. This provides a valid reason for the synthetic assertions without validating their rewritten timing explanation.",
+            "00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db retains the false liveness prose at :179-181 and test explanation at :1033-1037; the only intervening status diff removes reply fields/helper."
+          ],
+          "coverage_checked": [
+            "SPEC.md:2651-2684 Status and SPEC_impl.md:2134-2146/2662-2666 processed-exit boundaries were read. They support the evidence distinction; none accepts misleading lifecycle documentation.",
+            "TODO Planned empty; plans queue index empty; BUGS unrelated. Queue INDEX and active ledger searches for probe death/processed exit/enrichment/liveness documentation found no exact item. stop-annotation-exit-witness.md was read: it concerns a particular test's premature assertion, not this explanatory contract. transition-accessor-comment.md is a stale accessor name with an otherwise accurate contract, also distinct."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": null,
+          "original_stronger_consequence": "Misleading future lifecycle/classification reasoning, with no demonstrated runtime misclassification, security harm, or user-owned-work loss. The test remains useful for enriching previously stored unknown codes; do not delete it or claim such outcomes unreachable.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Retain introduced lifecycle documentation defect at both locations. Correct production ordering does not refute it. No FILTER.md boundary covers the entire consequence."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": true,
+        "clearly_refuted_candidate": false,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Source-confirmed by an existing parent decision; not runtime reproduced",
+        "deduplication_key": "status-documentation-probe-versus-processed-exit-evidence",
+        "destination": "trailing-status-documentation-probe-versus-processed-exit-evidence.md"
+      }
+    }
+  ],
+  "replies": [
+    {
+      "turn": 1,
+      "reply": "Initial pass complete; all 1,181 assigned patch lines reviewed.\n\nNo confirmed implementation defect. Recorded:\n- `c1`: potentially highest consequence explicitly accepted by the spec; proposed drop requires independent checking.\n- `c2`: capture-budget concern refuted by source.\n\nNo open leads or unread assigned scope. Findings and progress logs updated. No runtime execution."
+    },
+    {
+      "turn": 2,
+      "reply": "Revised `c1` with sentinel/conversion ordering, retained host tabs, likely duplicate coverage, and the strongest accepted loss consequences.\n\nRevised `c2` with the exact processed-exit boundary: bounded drain, ordered delivery, then terminal flush. Later descendant output remains possible; no new unbudgeted host capture was introduced.\n\nNo new defects. Unresolved lead IDs: none. Source analysis only."
+    },
+    {
+      "turn": 3,
+      "reply": "Discovery pass complete. Checked changed comments, classifiers, reply/cache fences, test helpers and assertions, with base/parent/tip attribution.\n\n- New verified: `l3` — documentation conflates process death with processed exit evidence.\n- New unverified: none.\n- Open leads: none.\n- Anything new found: **yes**, `l3`.\n\nLogs updated. Source analysis only; no execution."
+    },
+    {
+      "turn": 4,
+      "reply": "Second discovery pass complete. Checked observer branch equivalence, settlement/cache publication, reply projection, exit-code handling, and test-helper contracts.\n\nRevised `c2` to narrow its attribution conclusion after checking inherited-history resizing against the range base.\n\n- New verified IDs: none.\n- New unverified IDs: none.\n- Open leads: none.\n- Anything new found: **no**.\n\nLogs updated. Source analysis only; no execution."
+    }
+  ],
+  "progress": "# g130 progress\n\nDomain: supervisor-status-reporting. Initial review turn 1 complete. Discovery-pass count: 0 (initial assigned pass only).\n\nRead the complete inventory commits field, without its excluded coverage metadata. Delivered all assigned patch lines 1–1181 for 1ed482dde220452e424973faf38a5e1318986333 through six evidence packets. No unread assigned patch material. Read the governing pinned Status, Terminal experience, terminal retirement, launch classification, host-restart/unavailable-host and drawn-answer contracts. Source context was read at the patch revision, with the parent revision used only to compare the removed capture-budget behavior.\n\nReviewed status classification, durable/error precedence, launch observation and settlement, tab projection, exit-code replacement, and the changed test helpers/assertions. Checked listing and ticker callers, startup retirement/reload ordering, HostEvidence mapping, final-output evidence, host-tab ordering/finished filtering, and fixed-state test handles. No runtime tests, builds, reproductions, checkout edits, or coverage-source reads were performed.\n\nDurable records this pass: c1 (finding, proposed drop on explicit specification acceptance; potentially highest process/history loss requires caller's independent drop check), c2 (candidate, source-refuted concern about removal of the capture budget and output-attribution fence). No confirmed implementation defect. No unverified substantive finding. No open lead. c1 preserves the accepted user-process and terminal-content loss consequence; it is not a claim that the implementation violates the specification.\n\nInterface assumptions: old tmux rows are deliberately terminal-less after startup retirement and active outcomes convert to Interrupted; host runtime evidence stays live until its exit record follows drained output; unavailable hosts yield Unattributed and no observation; host tabs are read from the retained session cell, while finished tabs are hidden. Neighboring implementation was inspected only to validate these interfaces.\n\nNext action: return to caller for the separately prompted synthesis turn. Independent drop check for c1 belongs to the caller; no additional reviewer was spawned. Unread scope: none in the assigned patch; neighboring groups' remaining patches are outside this assignment.\n\n## Synthesis turn 2\n\nCompleted the later-turn interaction pass. Discovery-pass count remains 0; this was synthesis, not a separately requested discovery pass. Rechecked retirement conversion against direct-sentinel precedence, retained host tabs, committed-outcome projection and failed-write fallback. Checked the actual transition rules: direct sentinel errors can supersede Interrupted/unannotated Exited, inferred errors cannot supersede pending Stop, and annotated exit remains fenced. No additional implementation defect was established.\n\nTraced the processed exit boundary through the producer, journal and runtime consumer. Host reaping starts a bounded drain (200 ms / 4 MiB), journal delivery reaches the exit position after preceding retained records, and the supervisor flushes synchronized terminal output before publishing Exited. Process-probe dead alone does not enable the status observer's wrapper excerpt. The screen is not immutable after Exited: later descendant output can still update it, and bytes beyond the drain bound can follow the record. This is an existing host boundary, not a new consequence of removing the tmux capture budget.\n\nRevised original IDs c1 and c2 immediately as conclusions were settled. c1 now records the caller-supplied likely overlap with g099/g110/g113/g118, preserves process loss, terminal-content loss and a possible second agent on failed teardown, and remains a proposed drop requiring independent checking (none accepted by parent). c2 records exact exit/drain ordering and the continuing-output caveat, and explicitly leaves g100's distinct screen-tail allocation/bounds check undecided. No new IDs, no new verified or unverified findings, no unresolved lead IDs. All evidence remains source/contract analysis; no execution.\n\nUnread assigned scope: none. Interface assumptions checked: host tabs survive old-agent conversion through their own adopted session cell; sentinel/outcome fences agree between observer, reply cache and store; host-only status/excerpt reads the processed bounded-drain exit boundary. Next action: return synthesis delta to caller and await any later discovery prompt.\n\n## Discovery turn 3\n\nDiscovery-pass count: 1. Read all 546 lines of discovery-neighbours.json in bounded chunks before the new search. No named pending questions were supplied. Its findings were used for interface context/novelty only; none was claimed as newly found here or used as source-delivery credit.\n\nMade a separate new search within the assigned status.rs patch: checked changed status/observation documentation, synchronous reply projection and cache fences, terminal evidence conversion, the changed fixed-state test helpers and precedence/enrichment assertions, and retained host-tab filtering. Compared the source explanation against the only production observation caller, the host evidence/probe distinction, and Stop's independent unknown-code recording route. Checked attribution at the exclusive range base, immediate parent, assigned commit and pinned tip, plus all in-range status.rs history. No further implementation defect or test-oracle defect was established in the remaining assigned changes.\n\nNew verified ID: l3, resolved from lead to finding, other/documentation. The newly changed production/test comments conflate process liveness with processed exit evidence; the code keeps those boundaries separate. The existing synthetic enrichment assertions remain useful because Stop can record an unknown code before processed exit, rather than because this observer consumes process-probe death. New unverified-after-investigation IDs: none. Remaining lead IDs: none. Anything new found: yes, l3. Existing c1/c2 were not revised this turn; original consequences/proposed-drop bases remain intact, with no parent drops assumed.\n\nRecording note: one l3 event-file record attempt failed on literal newlines in the JSON string. It appended nothing; the event JSON was repaired and successfully recorded immediately before further source analysis. No evidence reads were credited from that failed record invocation. Tooling.md was then read; all successful finding events remain append-only.\n\nNo runtime tests, builds, reproductions, live-install actions, checkout edits or prohibited coverage searches. Unread assigned scope: none. Current assumptions: host status remains live until Exited is processed; Stop may write an earlier incomplete durable outcome; status reply uses fresh host evidence and existing cells; fixed-state unit handles intentionally need no real host. Next action: return this discovery delta, then await any separately prompted follow-up pass required by the new finding.\n\n## Discovery turn 4\n\nDiscovery-pass count: 2. Read the refreshed discovery-neighbours.json completely (666 lines, timestamp 2026-11-13T17:01:12.080Z) in bounded chunks before source work. No named pending questions were supplied. The g009/l1 inherited-history resize input qualified the broad attribution assertion in c2; reopened and resolved that existing ID before the separate new search, without treating a neighbour's issue as a new g130 discovery.\n\nc2 revision: removed the earlier blanket conclusion that blank-at-birth plus one child excludes every previous-run screen quote. A primary-grid height increase can promote inherited history into the visible screen; the excerpt reads that visible text. Checked source from seed through paint_history, grid growth, host resize admission/application, screen_tail and wrapper excerpt. Checked the whole pinned range: base already has host history seeding, blank-screen painting, the same grid growth, attached-host resize forwarding/admission and unbudgeted host excerpt. Thus neither new synchronous capture nor that pre-existing history-attribution mechanism is introduced by this assigned status edit. Source refutation is narrow, not a parent-approved drop. No complete independent emulator audit or cross-group issue ownership is claimed.\n\nNew search after that reconciliation: compared the removed unreadable-host/unattributed branches with the replacement observer for all host evidence states; checked generation-scoped launch inference, transition eligibility, negative-read settlement and ticker cache publication. Revisited the changed fixed-state terminal helpers and tests against their actual evidence-only contract; their cells are shared intentionally and no asynchronous real-host readiness premise is asserted. Rechecked current reply/cache projection, tab filtering, restart-offer derivation, and deleted exit-code helper's host replacement. No additional substantive defect or new candidate was established beyond existing IDs.\n\nNew verified IDs: none. New unverified-after-investigation IDs: none. Revised existing ID: c2 (attribution limitation and base-route evidence). Remaining open lead IDs: none. Anything new found in the separate discovery search: no. Existing c1 and l3 unchanged; no parent drops or lowerings assumed. No unread assigned material. Source/contract analysis only: no runtime tests, reproductions, builds, checkout edits, prohibited coverage searches or live-install actions.\n\nNext action: return the empty new-discovery result and c2 delta to caller. Any requested independent disposition or further pass remains the caller's.\n"
+}

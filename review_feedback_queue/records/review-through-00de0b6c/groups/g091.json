@@ -1,0 +1,793 @@
+{
+  "group": {
+    "id": "g091",
+    "domain": "browser-test-fixtures",
+    "purpose": "browser-test-fixtures: e2e/tests/helpers/fleet.ts, e2e/tests/helpers/settings.ts, e2e/global-setup.ts, e2e/playwright.config.ts, e2e/start-stack.sh, e2e/suite-terminals.ts, e2e/tests/helpers/evidence.ts, e2e/tests/helpers/host-premise.ts, e2e/tests/helpers/term.ts, e2e/tests/helpers/terminal-readiness.ts, e2e/tests/helpers/terminal-suite.ts, e2e/tests/helpers/program-input.ts; phases complete small per-commit changes",
+    "interfaces": [
+      "g005",
+      "g006",
+      "g009",
+      "g010",
+      "g011",
+      "g039",
+      "g040",
+      "g042",
+      "g092",
+      "g148",
+      "g174",
+      "g175",
+      "g176",
+      "g177",
+      "g178",
+      "g179",
+      "g180",
+      "g181",
+      "g182"
+    ],
+    "sources": [
+      {
+        "path": "[private-run]/prep/parts/00260-000.patch",
+        "ranges": [
+          [
+            1,
+            84
+          ]
+        ],
+        "original_path": "e2e/tests/helpers/fleet.ts",
+        "commit": "350a4b33b6d4476f4a78e43cea124bc2b828f462",
+        "notes": "patch header; patch character offsets [0,3648)",
+        "lines": 84,
+        "bytes": 3654,
+        "start": 0,
+        "end": 3648,
+        "original": "[private-run]/prep/originals/00260.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/00261-000.patch",
+        "ranges": [
+          [
+            1,
+            22
+          ]
+        ],
+        "original_path": "e2e/tests/helpers/settings.ts",
+        "commit": "350a4b33b6d4476f4a78e43cea124bc2b828f462",
+        "notes": "patch header; patch character offsets [0,658)",
+        "lines": 22,
+        "bytes": 658,
+        "start": 0,
+        "end": 658,
+        "original": "[private-run]/prep/originals/00261.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/00810-000.patch",
+        "ranges": [
+          [
+            1,
+            105
+          ]
+        ],
+        "original_path": "e2e/global-setup.ts",
+        "commit": "647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513",
+        "notes": "patch header; patch character offsets [0,5498)",
+        "lines": 105,
+        "bytes": 5498,
+        "start": 0,
+        "end": 5498,
+        "original": "[private-run]/prep/originals/00810.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/00814-000.patch",
+        "ranges": [
+          [
+            1,
+            144
+          ]
+        ],
+        "original_path": "e2e/playwright.config.ts",
+        "commit": "647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513",
+        "notes": "patch header; patch character offsets [0,7584)",
+        "lines": 144,
+        "bytes": 7590,
+        "start": 0,
+        "end": 7584,
+        "original": "[private-run]/prep/originals/00814.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/00819-000.patch",
+        "ranges": [
+          [
+            1,
+            148
+          ]
+        ],
+        "original_path": "e2e/start-stack.sh",
+        "commit": "647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513",
+        "notes": "patch header; patch character offsets [0,8814)",
+        "lines": 148,
+        "bytes": 8818,
+        "start": 0,
+        "end": 8814,
+        "original": "[private-run]/prep/originals/00819.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/00820-000.patch",
+        "ranges": [
+          [
+            1,
+            117
+          ]
+        ],
+        "original_path": "e2e/suite-terminals.ts",
+        "commit": "647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513",
+        "notes": "patch header; patch character offsets [0,5559)",
+        "lines": 117,
+        "bytes": 5559,
+        "start": 0,
+        "end": 5559,
+        "original": "[private-run]/prep/originals/00820.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/00823-000.patch",
+        "ranges": [
+          [
+            1,
+            60
+          ]
+        ],
+        "original_path": "e2e/tests/helpers/evidence.ts",
+        "commit": "647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513",
+        "notes": "patch header; patch character offsets [0,2831)",
+        "lines": 60,
+        "bytes": 2831,
+        "start": 0,
+        "end": 2831,
+        "original": "[private-run]/prep/originals/00823.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/00824-000.patch",
+        "ranges": [
+          [
+            1,
+            93
+          ]
+        ],
+        "original_path": "e2e/tests/helpers/host-premise.ts",
+        "commit": "647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513",
+        "notes": "patch header; patch character offsets [0,5285)",
+        "lines": 93,
+        "bytes": 5285,
+        "start": 0,
+        "end": 5285,
+        "original": "[private-run]/prep/originals/00824.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/00825-000.patch",
+        "ranges": [
+          [
+            1,
+            45
+          ]
+        ],
+        "original_path": "e2e/tests/helpers/term.ts",
+        "commit": "647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513",
+        "notes": "patch header; patch character offsets [0,2478)",
+        "lines": 45,
+        "bytes": 2478,
+        "start": 0,
+        "end": 2478,
+        "original": "[private-run]/prep/originals/00825.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/00826-000.patch",
+        "ranges": [
+          [
+            1,
+            23
+          ]
+        ],
+        "original_path": "e2e/tests/helpers/terminal-readiness.ts",
+        "commit": "647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513",
+        "notes": "patch header; patch character offsets [0,1252)",
+        "lines": 23,
+        "bytes": 1252,
+        "start": 0,
+        "end": 1252,
+        "original": "[private-run]/prep/originals/00826.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/00827-000.patch",
+        "ranges": [
+          [
+            1,
+            52
+          ]
+        ],
+        "original_path": "e2e/tests/helpers/terminal-suite.ts",
+        "commit": "647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513",
+        "notes": "patch header; patch character offsets [0,2880)",
+        "lines": 52,
+        "bytes": 2882,
+        "start": 0,
+        "end": 2880,
+        "original": "[private-run]/prep/originals/00827.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/01147-000.patch",
+        "ranges": [
+          [
+            1,
+            70
+          ]
+        ],
+        "original_path": "e2e/tests/helpers/evidence.ts",
+        "commit": "f560058da19e02716e6f943883a9508b447aff4e",
+        "notes": "patch header; patch character offsets [0,2652)",
+        "lines": 70,
+        "bytes": 2652,
+        "start": 0,
+        "end": 2652,
+        "original": "[private-run]/prep/originals/01147.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/01148-000.patch",
+        "ranges": [
+          [
+            1,
+            15
+          ]
+        ],
+        "original_path": "e2e/tests/helpers/fleet.ts",
+        "commit": "f560058da19e02716e6f943883a9508b447aff4e",
+        "notes": "patch header; patch character offsets [0,740)",
+        "lines": 15,
+        "bytes": 748,
+        "start": 0,
+        "end": 740,
+        "original": "[private-run]/prep/originals/01148.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/01149-000.patch",
+        "ranges": [
+          [
+            1,
+            194
+          ]
+        ],
+        "original_path": "e2e/tests/helpers/host-premise.ts",
+        "commit": "f560058da19e02716e6f943883a9508b447aff4e",
+        "notes": "patch header; patch character offsets [0,8354)",
+        "lines": 194,
+        "bytes": 8354,
+        "start": 0,
+        "end": 8354,
+        "original": "[private-run]/prep/originals/01149.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/01151-000.patch",
+        "ranges": [
+          [
+            1,
+            99
+          ]
+        ],
+        "original_path": "e2e/tests/helpers/program-input.ts",
+        "commit": "f560058da19e02716e6f943883a9508b447aff4e",
+        "notes": "patch header; patch character offsets [0,4304)",
+        "lines": 99,
+        "bytes": 4316,
+        "start": 0,
+        "end": 4304,
+        "original": "[private-run]/prep/originals/01151.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/01155-000.patch",
+        "ranges": [
+          [
+            1,
+            48
+          ]
+        ],
+        "original_path": "e2e/tests/helpers/terminal-suite.ts",
+        "commit": "f560058da19e02716e6f943883a9508b447aff4e",
+        "notes": "patch header; patch character offsets [0,2759)",
+        "lines": 48,
+        "bytes": 2759,
+        "start": 0,
+        "end": 2759,
+        "original": "[private-run]/prep/originals/01155.patch"
+      }
+    ],
+    "lines": 1319,
+    "bytes": 65334
+  },
+  "records": [
+    {
+      "key": "g091/c1",
+      "owner": "g091",
+      "id": "c1",
+      "domain": "browser-test-fixtures",
+      "purpose": "browser-test-fixtures: e2e/tests/helpers/fleet.ts, e2e/tests/helpers/settings.ts, e2e/global-setup.ts, e2e/playwright.config.ts, e2e/start-stack.sh, e2e/suite-terminals.ts, e2e/tests/helpers/evidence.ts, e2e/tests/helpers/host-premise.ts, e2e/tests/helpers/term.ts, e2e/tests/helpers/terminal-readiness.ts, e2e/tests/helpers/terminal-suite.ts, e2e/tests/helpers/program-input.ts; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 1,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c1",
+            "state": "open",
+            "summary": "Removing the host-premise watch does not permit a silent xterm fallback",
+            "location": "e2e/tests/helpers/evidence.ts:63",
+            "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e. TLDR: Considered whether deleting the per-socket grid-premise watch and openTerminal's grid assertion would let browser tests pass using the retired terminal renderer. Source checks: the assigned patches remove HostPremiseWatch, its evidence fixture, and the shared-session assertion; the same revision's crates/farhelm-ui/assets/terminal.js mounts a grid component (around 3273-3393), its island element/focus helpers use island.grid (736-743), and its source has no xterm renderer path. SPEC_impl.md, Terminal widget: the grid island, opens with the exact contract: 'Every terminal runs in a terminal host (\"Terminal host\") and is interpreted by the supervisor’s emulator, so the browser draws a grid stream with its own grid client' (the source uses an ASCII apostrophe in supervisor's). Terminal host says: 'every terminal the supervisor serves is a host. Old tmux terminals, which earlier supervisors created, are ended when this release starts'. The deleted watch existed to distinguish the two renderers; after the renderer deletion this particular silent fallback cannot occur. Suggested bucket: other if it were a test-premise gap; could-be-highest: no, the concern is confined to maintainer tooling and no catastrophic route was identified. Confidence: confirmed by source, not execution. proposed_drop: replacement has no xterm renderer to fall back to; the quoted contract agrees with that source. possible_cover: none; coverage sources were not searched. Caveat: this does not establish that all malformed grid streams are detected, only refutes the lost dual-renderer assertion concern."
+          }
+        },
+        {
+          "line": 4,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c1",
+            "state": "open",
+            "summary": "Removing the host-premise watch does not permit a silent xterm fallback",
+            "location": "e2e/tests/helpers/evidence.ts:63",
+            "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e. Revision: adds the final source checks and quotes the contract with its exact spelling; the original consequence is unchanged. TLDR: Considered whether deleting the per-socket grid-premise watch and openTerminal's grid assertion would let browser tests pass using the retired terminal renderer. Source checks: the assigned patches remove HostPremiseWatch, its evidence fixture, and the shared-session assertion. The same revision's crates/farhelm-ui/assets/terminal.js unconditionally calls createGridSurface and takes its grid component before constructing the socket (3387-3393); its island element/focus helpers use island.grid (736-743). The source has no xterm renderer path. SPEC_impl.md, Terminal widget: the grid island, states exactly: 'Every terminal runs in a terminal host (\"Terminal host\") and is interpreted by the supervisor's emulator, so the browser draws a grid stream with its own grid client'. Terminal host states exactly: 'every terminal the supervisor serves is a host. Old tmux terminals, which earlier supervisors created, are ended when this release starts'. The deleted watch distinguished two renderers; after renderer deletion this particular silent fallback cannot occur. The related program-input.ts change also matches the replacement: terminal.js:4495-4507 sends encoded grid inputs as binary frames, with resize sent as a JSON text frame at 4565; the helper still collects binary sent frames only and decodes them as grid messages. Targeted git grep found no stale host-premise, fabricatedTerminals, terminalKind, SocketKind, or frame.socket.kind consumers in e2e at this revision. Readiness independently requires an island grid, socket and test record (terminal-readiness.ts:68-78). Suggested bucket: other if it were a test-premise gap; could-be-highest: no, the concern is confined to maintainer tooling and no catastrophic route was identified. Confidence: confirmed by source, not execution. proposed_drop: replacement has no xterm renderer to fall back to, and binary grid-input decoding agrees with the shipped sender. possible_cover: none; coverage sources were not searched. Caveat: this does not establish that every malformed grid stream or every possible key encoding is detected, only refutes the loss of the dual-renderer premise and protocol selection concerns."
+          }
+        },
+        {
+          "line": 5,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c1",
+            "state": "open",
+            "summary": "Removing the host-premise watch does not permit a silent xterm fallback",
+            "location": "e2e/tests/helpers/evidence.ts:63",
+            "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e. Revision: adds the final source checks and quotes the contract with its exact spelling; the original consequence is unchanged. TLDR: Considered whether deleting the per-socket grid-premise watch and openTerminal's grid assertion would let browser tests pass using the retired terminal renderer. Source checks: the assigned patches remove HostPremiseWatch, its evidence fixture, and the shared-session assertion. The same revision's crates/farhelm-ui/assets/terminal.js unconditionally calls createGridSurface and takes its grid component before constructing the socket (3387-3393); its island element/focus helpers use island.grid (736-743). The source has no xterm renderer path. SPEC_impl.md, Terminal widget: the grid island, states exactly: 'Every terminal runs in a terminal host (\"Terminal host\") and is interpreted by the supervisor's emulator, so the browser draws a grid stream with its own grid client'. Terminal host states exactly: 'every terminal the supervisor serves is a host. Old tmux terminals, which earlier supervisors created, are ended when this release starts'. The deleted watch distinguished two renderers; after renderer deletion this particular silent fallback cannot occur. The related program-input.ts change also matches the replacement: terminal.js:4495-4507 sends encoded grid inputs as binary frames, with resize sent as a JSON text frame at 4565; the helper still collects binary sent frames only and decodes them as grid messages. Targeted git grep found no stale host-premise, fabricatedTerminals, terminalKind, SocketKind, or frame.socket.kind consumers in e2e at this revision. Readiness independently requires an island grid, socket and test record (terminal-readiness.ts:68-78). Suggested bucket: other if it were a test-premise gap; could-be-highest: no, the concern is confined to maintainer tooling and no catastrophic route was identified. Confidence: confirmed by source, not execution. proposed_drop: replacement has no xterm renderer to fall back to, and binary grid-input decoding agrees with the shipped sender. possible_cover: none; coverage sources were not searched. Caveat: this does not establish that every malformed grid stream or every possible key encoding is detected, only refutes the loss of the dual-renderer premise and protocol selection concerns. Synthesis turn 2: no broadened claim that every observation boundary is certified. At f560058da19e02716e6f943883a9508b447aff4e, terminal-readiness.ts:120-178 obtains one composite snapshot and matches the decoded session plus the exact tab selector before the mounted/socket-open/revealed/ready predicates can pass (272-350). Mounted deliberately does not require OPEN; socket-open deliberately does not require replay or focus; revealed requires OPEN and reveal but no focus; ready also requires the grid input itself to be the active element. This matches its documented distinct boundaries, and the wait observes rather than manufactures focus. Evidence cleanup remains independent of the removed premise fixture: evidence.ts:63-66 makes context observation depend on timeline, and timeline.close runs after use (34-61). Context/page/socket groups reserve removal before installing listeners, partially installed groups are rolled back, and closing the context or page removes its owned nested groups (87-140, 222-257, 286-320). timeline.ts:175-188 attempts every reserved removal before freezing the artifact, preserving cleanup diagnostics. The earlier 647f0227 watch is installed before context observation through the explicit hostPremise dependency (evidence.ts:96-101); its finally clears activeWatch and finish uses allSettled then disposes the lazily made request context (76-94; host-premise.ts:153-164). These are source checks of the changed fixture dependency and deletion, not execution evidence or a general certification of Playwright teardown. Parent relayed g092 agreement on grid-only readers, JSON input and retained-history isolation; no external coverage source was searched. Original proposed_drop and could-be-highest:no remain unchanged; no parent drop acceptance is claimed."
+          }
+        },
+        {
+          "line": 11,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c1",
+            "state": "open",
+            "summary": "Removing the host-premise watch does not permit a silent xterm fallback",
+            "location": "e2e/tests/helpers/evidence.ts:63",
+            "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e. Revision: adds the final source checks and quotes the contract with its exact spelling; the original consequence is unchanged. TLDR: Considered whether deleting the per-socket grid-premise watch and openTerminal's grid assertion would let browser tests pass using the retired terminal renderer. Source checks: the assigned patches remove HostPremiseWatch, its evidence fixture, and the shared-session assertion. The same revision's crates/farhelm-ui/assets/terminal.js unconditionally calls createGridSurface and takes its grid component before constructing the socket (3387-3393); its island element/focus helpers use island.grid (736-743). The source has no xterm renderer path. SPEC_impl.md, Terminal widget: the grid island, states exactly: 'Every terminal runs in a terminal host (\"Terminal host\") and is interpreted by the supervisor's emulator, so the browser draws a grid stream with its own grid client'. Terminal host states exactly: 'every terminal the supervisor serves is a host. Old tmux terminals, which earlier supervisors created, are ended when this release starts'. The deleted watch distinguished two renderers; after renderer deletion this particular silent fallback cannot occur. The related program-input.ts change also matches the replacement: terminal.js:4495-4507 sends encoded grid inputs as binary frames, with resize sent as a JSON text frame at 4565; the helper still collects binary sent frames only and decodes them as grid messages. Targeted git grep found no stale host-premise, fabricatedTerminals, terminalKind, SocketKind, or frame.socket.kind consumers in e2e at this revision. Readiness independently requires an island grid, socket and test record (terminal-readiness.ts:68-78). Suggested bucket: other if it were a test-premise gap; could-be-highest: no, the concern is confined to maintainer tooling and no catastrophic route was identified. Confidence: confirmed by source, not execution. proposed_drop: replacement has no xterm renderer to fall back to, and binary grid-input decoding agrees with the shipped sender. possible_cover: none; coverage sources were not searched. Caveat: this does not establish that every malformed grid stream or every possible key encoding is detected, only refutes the loss of the dual-renderer premise and protocol selection concerns. Synthesis turn 2: no broadened claim that every observation boundary is certified. At f560058da19e02716e6f943883a9508b447aff4e, terminal-readiness.ts:120-178 obtains one composite snapshot and matches the decoded session plus the exact tab selector before the mounted/socket-open/revealed/ready predicates can pass (272-350). Mounted deliberately does not require OPEN; socket-open deliberately does not require replay or focus; revealed requires OPEN and reveal but no focus; ready also requires the grid input itself to be the active element. This matches its documented distinct boundaries, and the wait observes rather than manufactures focus. Evidence cleanup remains independent of the removed premise fixture: evidence.ts:63-66 makes context observation depend on timeline, and timeline.close runs after use (34-61). Context/page/socket groups reserve removal before installing listeners, partially installed groups are rolled back, and closing the context or page removes its owned nested groups (87-140, 222-257, 286-320). timeline.ts:175-188 attempts every reserved removal before freezing the artifact, preserving cleanup diagnostics. The earlier 647f0227 watch is installed before context observation through the explicit hostPremise dependency (evidence.ts:96-101); its finally clears activeWatch and finish uses allSettled then disposes the lazily made request context (76-94; host-premise.ts:153-164). These are source checks of the changed fixture dependency and deletion, not execution evidence or a general certification of Playwright teardown. Parent relayed g092 agreement on grid-only readers, JSON input and retained-history isolation; no external coverage source was searched. Original proposed_drop and could-be-highest:no remain unchanged; no parent drop acceptance is claimed. Discovery pass 1, turn 3: checked the assigned changed helper documentation against the actual hooks rather than relying on production correctness. terminal-suite.ts:346-353 names the per-island registry and the agent-only __farhelmGrid singleton; terminal.js:4654-4668 publishes the singleton only for spec.primary and every island under its own element id, so the changed reference is accurate. Considered whether islandText implicitly promises drained replay history: its contract is the currently mounted terminal buffer, and it delegates directly to terminalText; term.ts:162-174 explicitly excludes history not yet applied. The full-range terminal-suite diff leaves that full-buffer first line unchanged and changes the singleton name, not any completion guarantee. This does not refute neighbour g181/c2 about a different helper newly claiming fully applied replay. The changed focus-spy explanation agrees with its focusin listener scoped to #terminal and the grid actual input.focus implementation (terminal-suite.ts:448-469; grid-terminal.js:368,1871-1872). program-input no longer needs byte-frame concatenation: grid-input.js:479-488 emits one complete JSON input per binary data frame, which the assigned decoder parses one frame at a time. Key/paste mode coverage is not inferred beyond its documented supported subset. These checks found no additional assigned documentation or oracle defect; original consequence, caveats and proposed-drop bases stand, without a parent acceptance claim."
+          }
+        }
+      ],
+      "latest": {
+        "line": 11,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c1",
+          "state": "open",
+          "summary": "Removing the host-premise watch does not permit a silent xterm fallback",
+          "location": "e2e/tests/helpers/evidence.ts:63",
+          "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e. Revision: adds the final source checks and quotes the contract with its exact spelling; the original consequence is unchanged. TLDR: Considered whether deleting the per-socket grid-premise watch and openTerminal's grid assertion would let browser tests pass using the retired terminal renderer. Source checks: the assigned patches remove HostPremiseWatch, its evidence fixture, and the shared-session assertion. The same revision's crates/farhelm-ui/assets/terminal.js unconditionally calls createGridSurface and takes its grid component before constructing the socket (3387-3393); its island element/focus helpers use island.grid (736-743). The source has no xterm renderer path. SPEC_impl.md, Terminal widget: the grid island, states exactly: 'Every terminal runs in a terminal host (\"Terminal host\") and is interpreted by the supervisor's emulator, so the browser draws a grid stream with its own grid client'. Terminal host states exactly: 'every terminal the supervisor serves is a host. Old tmux terminals, which earlier supervisors created, are ended when this release starts'. The deleted watch distinguished two renderers; after renderer deletion this particular silent fallback cannot occur. The related program-input.ts change also matches the replacement: terminal.js:4495-4507 sends encoded grid inputs as binary frames, with resize sent as a JSON text frame at 4565; the helper still collects binary sent frames only and decodes them as grid messages. Targeted git grep found no stale host-premise, fabricatedTerminals, terminalKind, SocketKind, or frame.socket.kind consumers in e2e at this revision. Readiness independently requires an island grid, socket and test record (terminal-readiness.ts:68-78). Suggested bucket: other if it were a test-premise gap; could-be-highest: no, the concern is confined to maintainer tooling and no catastrophic route was identified. Confidence: confirmed by source, not execution. proposed_drop: replacement has no xterm renderer to fall back to, and binary grid-input decoding agrees with the shipped sender. possible_cover: none; coverage sources were not searched. Caveat: this does not establish that every malformed grid stream or every possible key encoding is detected, only refutes the loss of the dual-renderer premise and protocol selection concerns. Synthesis turn 2: no broadened claim that every observation boundary is certified. At f560058da19e02716e6f943883a9508b447aff4e, terminal-readiness.ts:120-178 obtains one composite snapshot and matches the decoded session plus the exact tab selector before the mounted/socket-open/revealed/ready predicates can pass (272-350). Mounted deliberately does not require OPEN; socket-open deliberately does not require replay or focus; revealed requires OPEN and reveal but no focus; ready also requires the grid input itself to be the active element. This matches its documented distinct boundaries, and the wait observes rather than manufactures focus. Evidence cleanup remains independent of the removed premise fixture: evidence.ts:63-66 makes context observation depend on timeline, and timeline.close runs after use (34-61). Context/page/socket groups reserve removal before installing listeners, partially installed groups are rolled back, and closing the context or page removes its owned nested groups (87-140, 222-257, 286-320). timeline.ts:175-188 attempts every reserved removal before freezing the artifact, preserving cleanup diagnostics. The earlier 647f0227 watch is installed before context observation through the explicit hostPremise dependency (evidence.ts:96-101); its finally clears activeWatch and finish uses allSettled then disposes the lazily made request context (76-94; host-premise.ts:153-164). These are source checks of the changed fixture dependency and deletion, not execution evidence or a general certification of Playwright teardown. Parent relayed g092 agreement on grid-only readers, JSON input and retained-history isolation; no external coverage source was searched. Original proposed_drop and could-be-highest:no remain unchanged; no parent drop acceptance is claimed. Discovery pass 1, turn 3: checked the assigned changed helper documentation against the actual hooks rather than relying on production correctness. terminal-suite.ts:346-353 names the per-island registry and the agent-only __farhelmGrid singleton; terminal.js:4654-4668 publishes the singleton only for spec.primary and every island under its own element id, so the changed reference is accurate. Considered whether islandText implicitly promises drained replay history: its contract is the currently mounted terminal buffer, and it delegates directly to terminalText; term.ts:162-174 explicitly excludes history not yet applied. The full-range terminal-suite diff leaves that full-buffer first line unchanged and changes the singleton name, not any completion guarantee. This does not refute neighbour g181/c2 about a different helper newly claiming fully applied replay. The changed focus-spy explanation agrees with its focusin listener scoped to #terminal and the grid actual input.focus implementation (terminal-suite.ts:448-469; grid-terminal.js:368,1871-1872). program-input no longer needs byte-frame concatenation: grid-input.js:479-488 emits one complete JSON input per binary data frame, which the assigned decoder parses one frame at a time. Key/paste mode coverage is not inferred beyond its documented supported subset. These checks found no additional assigned documentation or oracle defect; original consequence, caveats and proposed-drop bases stand, without a parent acceptance claim."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g091/findings.jsonl",
+        "id": "c1",
+        "line": 11,
+        "disposition": "excluded",
+        "group": "browser-fixture-removed-renderer-premise-watch",
+        "reason": "Parent explicitly accepted named refuted proposal from claims-060 after inspecting it. Removing the dual-renderer premise watch cannot make this revision silently use the retired renderer: each attachment constructs a grid before its socket. This refutes the named fallback and protocol-selection concern, not every malformed-stream or key-encoding concern. Source refutation of the narrowly named retired-renderer fallback and wire-selection concern. No parent drop acceptance is inferred. Checked source/results: [\"f560058da19e02716e6f943883a9508b447aff4e:crates/farhelm-ui/assets/terminal.js:3387-3428 unconditionally constructs the grid surface before WebSocket construction; :4654-4668 publishes primary grid/socket/test globals and every island's grid/socket/test registry.\",\"At the same revision, terminal.js:4495-4507 sends encoded grid input as binary data; grid-input.js:479-488 JSON-encodes one complete message per frame. e2e/tests/helpers/program-input.ts:21-30 collects binary sent frames, :75-105 decodes each independently. Their interfaces agree.\",\"e2e/tests/helpers/terminal-readiness.ts:120-178 observes decoded session identity, exact tab selector, grid/socket/test presence, socket state, reveal and actual input focus; :272-354 keeps mounted/open/revealed/ready distinct. evidence.ts:33-67 still supplies timeline/context observation independently of the removed premise fixture.\",\"Targeted git grep at f560058 found no host-premise, fabricatedTerminals, terminalKind, SocketKind or frame.socket.kind consumers in e2e. These are source checks only; no runtime validation or general teardown certification is claimed.\"] Current coverage/results: [\"Current SPEC.md, Terminal experience: every terminal runs in a terminal host; SPEC_impl.md:1692-1718 explicitly specifies the grid island. These corroborate the source refutation.\",\"TODO.md Planned is empty. plans/queue/INDEX.md contains no unlanded plan; the tmux plan files remain on disk with reports and do not supply prospective coverage.\",\"Searched BUGS.md, review_feedback_queue/INDEX.md and matching queue text, and active TRIAGE_OUTCOMES.md for removed host premise, renderer fallback, byte-reader and readiness claims. No exact trigger/consequence/scope match found. FILTER.md has no matching boundary.\"] Exact cited cover: [\"SPEC_impl.md:1694-1696: Every terminal runs in a terminal host (\\\"Terminal host\\\") and is interpreted by the supervisor's emulator, so the browser draws a grid stream with its own grid client\"] Original stronger consequence and missing premise remain preserved: \"The initial candidate asked whether deleting the per-socket watch and openTerminal assertion could let browser tests pass on xterm instead of the required grid. Later source checks refuted that specific concern; no security or user-work-loss route was claimed. Malformed grid streams, all key encodings and all fixture teardown paths were expressly outside the conclusion.\"; null."
+      },
+      "accepted_parent_decision": {
+        "key": "g091/c1",
+        "line": 11,
+        "disposition": "excluded",
+        "group": "browser-fixture-removed-renderer-premise-watch",
+        "bucket": "other",
+        "recording": "refuted",
+        "queue_target_candidate": null,
+        "needs_independent_drop_check": false,
+        "reason": "Parent explicitly accepted named refuted proposal from claims-060 after inspecting it. Removing the dual-renderer premise watch cannot make this revision silently use the retired renderer: each attachment constructs a grid before its socket. This refutes the named fallback and protocol-selection concern, not every malformed-stream or key-encoding concern. Source refutation of the narrowly named retired-renderer fallback and wire-selection concern. No parent drop acceptance is inferred. Checked source/results: [\"f560058da19e02716e6f943883a9508b447aff4e:crates/farhelm-ui/assets/terminal.js:3387-3428 unconditionally constructs the grid surface before WebSocket construction; :4654-4668 publishes primary grid/socket/test globals and every island's grid/socket/test registry.\",\"At the same revision, terminal.js:4495-4507 sends encoded grid input as binary data; grid-input.js:479-488 JSON-encodes one complete message per frame. e2e/tests/helpers/program-input.ts:21-30 collects binary sent frames, :75-105 decodes each independently. Their interfaces agree.\",\"e2e/tests/helpers/terminal-readiness.ts:120-178 observes decoded session identity, exact tab selector, grid/socket/test presence, socket state, reveal and actual input focus; :272-354 keeps mounted/open/revealed/ready distinct. evidence.ts:33-67 still supplies timeline/context observation independently of the removed premise fixture.\",\"Targeted git grep at f560058 found no host-premise, fabricatedTerminals, terminalKind, SocketKind or frame.socket.kind consumers in e2e. These are source checks only; no runtime validation or general teardown certification is claimed.\"] Current coverage/results: [\"Current SPEC.md, Terminal experience: every terminal runs in a terminal host; SPEC_impl.md:1692-1718 explicitly specifies the grid island. These corroborate the source refutation.\",\"TODO.md Planned is empty. plans/queue/INDEX.md contains no unlanded plan; the tmux plan files remain on disk with reports and do not supply prospective coverage.\",\"Searched BUGS.md, review_feedback_queue/INDEX.md and matching queue text, and active TRIAGE_OUTCOMES.md for removed host premise, renderer fallback, byte-reader and readiness claims. No exact trigger/consequence/scope match found. FILTER.md has no matching boundary.\"] Exact cited cover: [\"SPEC_impl.md:1694-1696: Every terminal runs in a terminal host (\\\"Terminal host\\\") and is interpreted by the supervisor's emulator, so the browser draws a grid stream with its own grid client\"] Original stronger consequence and missing premise remain preserved: \"The initial candidate asked whether deleting the per-socket watch and openTerminal assertion could let browser tests pass on xterm instead of the required grid. Later source checks refuted that specific concern; no security or user-work-loss route was claimed. Malformed grid streams, all key encodings and all fixture teardown paths were expressly outside the conclusion.\"; null."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-060",
+          "key": "g091/c1",
+          "latest_line": 11,
+          "recommendation": "refuted",
+          "bucket": "other",
+          "underlying_key": "browser-fixture-removed-renderer-premise-watch",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "Removing the dual-renderer premise watch cannot make this revision silently use the retired renderer: each attachment constructs a grid before its socket. This refutes the named fallback and protocol-selection concern, not every malformed-stream or key-encoding concern.",
+          "checks": [
+            "f560058da19e02716e6f943883a9508b447aff4e:crates/farhelm-ui/assets/terminal.js:3387-3428 unconditionally constructs the grid surface before WebSocket construction; :4654-4668 publishes primary grid/socket/test globals and every island's grid/socket/test registry.",
+            "At the same revision, terminal.js:4495-4507 sends encoded grid input as binary data; grid-input.js:479-488 JSON-encodes one complete message per frame. e2e/tests/helpers/program-input.ts:21-30 collects binary sent frames, :75-105 decodes each independently. Their interfaces agree.",
+            "e2e/tests/helpers/terminal-readiness.ts:120-178 observes decoded session identity, exact tab selector, grid/socket/test presence, socket state, reveal and actual input focus; :272-354 keeps mounted/open/revealed/ready distinct. evidence.ts:33-67 still supplies timeline/context observation independently of the removed premise fixture.",
+            "Targeted git grep at f560058 found no host-premise, fabricatedTerminals, terminalKind, SocketKind or frame.socket.kind consumers in e2e. These are source checks only; no runtime validation or general teardown certification is claimed."
+          ],
+          "coverage_checked": [
+            "Current SPEC.md, Terminal experience: every terminal runs in a terminal host; SPEC_impl.md:1692-1718 explicitly specifies the grid island. These corroborate the source refutation.",
+            "TODO.md Planned is empty. plans/queue/INDEX.md contains no unlanded plan; the tmux plan files remain on disk with reports and do not supply prospective coverage.",
+            "Searched BUGS.md, review_feedback_queue/INDEX.md and matching queue text, and active TRIAGE_OUTCOMES.md for removed host premise, renderer fallback, byte-reader and readiness claims. No exact trigger/consequence/scope match found. FILTER.md has no matching boundary."
+          ],
+          "exact_cover_quotes": [
+            "SPEC_impl.md:1694-1696: Every terminal runs in a terminal host (\"Terminal host\") and is interpreted by the supervisor's emulator, so the browser draws a grid stream with its own grid client"
+          ],
+          "missing_premise": null,
+          "original_stronger_consequence": "The initial candidate asked whether deleting the per-socket watch and openTerminal assertion could let browser tests pass on xterm instead of the required grid. Later source checks refuted that specific concern; no security or user-work-loss route was claimed. Malformed grid streams, all key encodings and all fixture teardown paths were expressly outside the conclusion.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Source refutation of the narrowly named retired-renderer fallback and wire-selection concern. No parent drop acceptance is inferred."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "browser-fixture-removed-renderer-premise-watch",
+        "destination": null
+      }
+    },
+    {
+      "key": "g091/c2",
+      "owner": "g091",
+      "id": "c2",
+      "domain": "browser-test-fixtures",
+      "purpose": "browser-test-fixtures: e2e/tests/helpers/fleet.ts, e2e/tests/helpers/settings.ts, e2e/global-setup.ts, e2e/playwright.config.ts, e2e/start-stack.sh, e2e/suite-terminals.ts, e2e/tests/helpers/evidence.ts, e2e/tests/helpers/host-premise.ts, e2e/tests/helpers/term.ts, e2e/tests/helpers/terminal-readiness.ts, e2e/tests/helpers/terminal-suite.ts, e2e/tests/helpers/program-input.ts; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 2,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c2",
+            "state": "open",
+            "summary": "Host-menu timeout does not bound the panel-opening prelude, but the new caller already establishes that premise",
+            "location": "e2e/tests/helpers/fleet.ts:1444",
+            "detail": "Reviewed commit: 350a4b33b6d4476f4a78e43cea124bc2b828f462. TLDR: Considered whether the new one-second menu timeout still lets a vanished panel consume the provisioning test's retry budget. openMenuPanel passes the timeout into getAttribute, hover, click, visibility, evaluate, and the measured-state poll (1353-1399). openHostMenu first calls showHostsPanel without that timeout (1444), whose toggle visibility wait is 20 seconds (1211-1215), but the only new bounded caller, provisioning.spec.ts:3781, has already opened Hosts at 3756 and established both busy rows at 3787-3788; only the menu flyout disappears as connection evidence reshapes rows. SPEC_impl.md's GUI contract says a row menu 'closes on any layout change that could have moved the row it was measured against'; closing the menu does not unmount the host panel. The intended vanished-flyout path is bounded by the new options; absence of the whole host panel is not the documented caller premise. Suggested bucket: other; could-be-highest: no, this is a test wait with no destructive effect. Confidence: confirmed by source, not execution. proposed_drop: no affected route in the new caller; the timeout is documented as per-operation, not an overall function deadline. possible_cover: none. Caveat: a future caller needing a deadline for initially opening Hosts would also need to bound showHostsPanel."
+          }
+        },
+        {
+          "line": 8,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c2",
+            "state": "open",
+            "summary": "Host-menu timeout does not bound the panel-opening prelude, but the new caller already establishes that premise",
+            "location": "e2e/tests/helpers/fleet.ts:1444",
+            "detail": "Reviewed commit: 350a4b33b6d4476f4a78e43cea124bc2b828f462. TLDR: Considered whether the new one-second menu timeout still lets a vanished panel consume the provisioning test's retry budget. openMenuPanel passes the timeout into getAttribute, hover, click, visibility, evaluate, and the measured-state poll (1353-1399). openHostMenu first calls showHostsPanel without that timeout (1444), whose toggle visibility wait is 20 seconds (1211-1215), but the only new bounded caller, provisioning.spec.ts:3781, has already opened Hosts at 3756 and established both busy rows at 3787-3788; only the menu flyout disappears as connection evidence reshapes rows. SPEC_impl.md's GUI contract says a row menu 'closes on any layout change that could have moved the row it was measured against'; closing the menu does not unmount the host panel. The intended vanished-flyout path is bounded by the new options; absence of the whole host panel is not the documented caller premise. Suggested bucket: other; could-be-highest: no, this is a test wait with no destructive effect. Confidence: confirmed by source, not execution. proposed_drop: no affected route in the new caller; the timeout is documented as per-operation, not an overall function deadline. possible_cover: none. Caveat: a future caller needing a deadline for initially opening Hosts would also need to bound showHostsPanel. Synthesis turn 2: examined observation boundaries and cleanup of the new bounded caller. provisioning.spec.ts:3747-3758 creates two real ADD registrations under held backend actions, opens Hosts, and scopes each row by the returned host id. It asserts both page-side running premises before reading disabled Settings, then releases only row one, waits for its API completion and removal of its page running mark, reads its enabled Settings, and reasserts row two running before reading its disabled Settings (3787-3798). Reopening only the menu inside toPass does not release either held action or manufacture the page provisioning state. The helper still waits for measured opacity/style, not merely mounted visibility (fleet.ts:1362-1401). On assertion failure or normal hook teardown, afterEach aborts any held confirmation POSTs, resets backend config to release held actions, restores confirmation preferences, then removes registrations beyond the captured baseline (1118-1131). removeHostOnceIdle retries only the named 409 busy refusal rather than treating a final status as lock release, and it reports failure if a host never becomes removable (172-208); removeHostsBeyondBaseline asserts the exact inherited registry afterward (219-231). This test creates no additional detached process. Contrary useful evidence: the one-second values are per operation, the outer toPass is eight seconds per settingsReads call, and the backend action itself fails after thirty seconds (provisioning/e2e.rs:206-224). The source does not guarantee the entire scenario finishes inside that hold under arbitrary load; an expired hold becomes an action failure, rather than silently authorizing success for the expected held/disabled observation. The unbounded showHostsPanel prelude remains outside the menu operation budget but is already satisfied by this caller. This supports the original proposed_drop for the vanished-menu budget concern without claiming a universal scenario deadline or failure-proof cleanup. Bucket other, could-be-highest:no, source-only confidence unchanged; no parent drop acceptance is claimed."
+          }
+        }
+      ],
+      "latest": {
+        "line": 8,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c2",
+          "state": "open",
+          "summary": "Host-menu timeout does not bound the panel-opening prelude, but the new caller already establishes that premise",
+          "location": "e2e/tests/helpers/fleet.ts:1444",
+          "detail": "Reviewed commit: 350a4b33b6d4476f4a78e43cea124bc2b828f462. TLDR: Considered whether the new one-second menu timeout still lets a vanished panel consume the provisioning test's retry budget. openMenuPanel passes the timeout into getAttribute, hover, click, visibility, evaluate, and the measured-state poll (1353-1399). openHostMenu first calls showHostsPanel without that timeout (1444), whose toggle visibility wait is 20 seconds (1211-1215), but the only new bounded caller, provisioning.spec.ts:3781, has already opened Hosts at 3756 and established both busy rows at 3787-3788; only the menu flyout disappears as connection evidence reshapes rows. SPEC_impl.md's GUI contract says a row menu 'closes on any layout change that could have moved the row it was measured against'; closing the menu does not unmount the host panel. The intended vanished-flyout path is bounded by the new options; absence of the whole host panel is not the documented caller premise. Suggested bucket: other; could-be-highest: no, this is a test wait with no destructive effect. Confidence: confirmed by source, not execution. proposed_drop: no affected route in the new caller; the timeout is documented as per-operation, not an overall function deadline. possible_cover: none. Caveat: a future caller needing a deadline for initially opening Hosts would also need to bound showHostsPanel. Synthesis turn 2: examined observation boundaries and cleanup of the new bounded caller. provisioning.spec.ts:3747-3758 creates two real ADD registrations under held backend actions, opens Hosts, and scopes each row by the returned host id. It asserts both page-side running premises before reading disabled Settings, then releases only row one, waits for its API completion and removal of its page running mark, reads its enabled Settings, and reasserts row two running before reading its disabled Settings (3787-3798). Reopening only the menu inside toPass does not release either held action or manufacture the page provisioning state. The helper still waits for measured opacity/style, not merely mounted visibility (fleet.ts:1362-1401). On assertion failure or normal hook teardown, afterEach aborts any held confirmation POSTs, resets backend config to release held actions, restores confirmation preferences, then removes registrations beyond the captured baseline (1118-1131). removeHostOnceIdle retries only the named 409 busy refusal rather than treating a final status as lock release, and it reports failure if a host never becomes removable (172-208); removeHostsBeyondBaseline asserts the exact inherited registry afterward (219-231). This test creates no additional detached process. Contrary useful evidence: the one-second values are per operation, the outer toPass is eight seconds per settingsReads call, and the backend action itself fails after thirty seconds (provisioning/e2e.rs:206-224). The source does not guarantee the entire scenario finishes inside that hold under arbitrary load; an expired hold becomes an action failure, rather than silently authorizing success for the expected held/disabled observation. The unbounded showHostsPanel prelude remains outside the menu operation budget but is already satisfied by this caller. This supports the original proposed_drop for the vanished-menu budget concern without claiming a universal scenario deadline or failure-proof cleanup. Bucket other, could-be-highest:no, source-only confidence unchanged; no parent drop acceptance is claimed."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g091/findings.jsonl",
+        "id": "c2",
+        "line": 8,
+        "disposition": "excluded",
+        "group": "host-menu-timeout-prelude-already-satisfied",
+        "reason": "Parent explicitly accepted named refuted proposal from claims-060 after inspecting it. The shorter timeout covers the disappearing menu operations that motivated the change. The caller already opens Hosts, so the separately unbounded panel-opening prelude is not an established failure route for this caller. Refute the named new-caller route on its established panel premise and the documented per-operation timeout contract. Do not convert this into a claim of a universal overall deadline. Checked source/results: [\"350a4b33b6d4476f4a78e43cea124bc2b828f462:e2e/tests/helpers/fleet.ts:1211-1215 retains the 20-second Hosts-toggle wait; :1339-1401 documents and passes options to each menu operation, including evaluation and the measured-state poll; :1444 invokes showHostsPanel before these operations.\",\"At that revision e2e/tests/provisioning.spec.ts:3747-3758 holds two backend actions, opens Hosts and captures rows by returned IDs. :3781 bounds the menu waits to one second inside an eight-second retry, and :3787-3798 independently observes each page-side running/completed premise.\",\"crates/farhelm-helm/src/provisioning/e2e.rs:206-224 fails an action after its 30-second hold deadline. Per-operation timeouts and the retry do not prove the entire scenario fits that hold under arbitrary load. No execution or universal cleanup/deadline guarantee is claimed.\"] Current coverage/results: [\"Searched both specifications for host-menu layout closure and timeout behavior. SPEC_impl.md:1027-1030 requires menu closure when layout could move its row; it does not promise an overall helper deadline.\",\"TODO.md Planned is empty; plans/queue/INDEX.md has no unlanded plan. Searches of BUGS.md, INDEX.md, matching queue text and active TRIAGE_OUTCOMES.md found no exact menu-timeout/prelude item.\",\"Read review_feedback_queue/host-menu-requested-index-survives-command-removal.md: it concerns keyboard navigation after command removal, not bounded test waits. FILTER.md does not establish a matching rare trigger and whole consequence.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"The candidate considered a vanished panel consuming the provisioning test's retry budget despite the one-second override. The source preserves the distinction between the menu flyout and the whole Hosts panel. A future caller needing an overall opening deadline must bound showHostsPanel too; the 30-second hold and five separate observations are not guaranteed to finish under arbitrary load.\"; \"A supported path that hides the whole Hosts panel during this already-open caller would be needed to establish the proposed prelude budget regression.\"."
+      },
+      "accepted_parent_decision": {
+        "key": "g091/c2",
+        "line": 8,
+        "disposition": "excluded",
+        "group": "host-menu-timeout-prelude-already-satisfied",
+        "bucket": "other",
+        "recording": "refuted",
+        "queue_target_candidate": null,
+        "needs_independent_drop_check": false,
+        "reason": "Parent explicitly accepted named refuted proposal from claims-060 after inspecting it. The shorter timeout covers the disappearing menu operations that motivated the change. The caller already opens Hosts, so the separately unbounded panel-opening prelude is not an established failure route for this caller. Refute the named new-caller route on its established panel premise and the documented per-operation timeout contract. Do not convert this into a claim of a universal overall deadline. Checked source/results: [\"350a4b33b6d4476f4a78e43cea124bc2b828f462:e2e/tests/helpers/fleet.ts:1211-1215 retains the 20-second Hosts-toggle wait; :1339-1401 documents and passes options to each menu operation, including evaluation and the measured-state poll; :1444 invokes showHostsPanel before these operations.\",\"At that revision e2e/tests/provisioning.spec.ts:3747-3758 holds two backend actions, opens Hosts and captures rows by returned IDs. :3781 bounds the menu waits to one second inside an eight-second retry, and :3787-3798 independently observes each page-side running/completed premise.\",\"crates/farhelm-helm/src/provisioning/e2e.rs:206-224 fails an action after its 30-second hold deadline. Per-operation timeouts and the retry do not prove the entire scenario fits that hold under arbitrary load. No execution or universal cleanup/deadline guarantee is claimed.\"] Current coverage/results: [\"Searched both specifications for host-menu layout closure and timeout behavior. SPEC_impl.md:1027-1030 requires menu closure when layout could move its row; it does not promise an overall helper deadline.\",\"TODO.md Planned is empty; plans/queue/INDEX.md has no unlanded plan. Searches of BUGS.md, INDEX.md, matching queue text and active TRIAGE_OUTCOMES.md found no exact menu-timeout/prelude item.\",\"Read review_feedback_queue/host-menu-requested-index-survives-command-removal.md: it concerns keyboard navigation after command removal, not bounded test waits. FILTER.md does not establish a matching rare trigger and whole consequence.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"The candidate considered a vanished panel consuming the provisioning test's retry budget despite the one-second override. The source preserves the distinction between the menu flyout and the whole Hosts panel. A future caller needing an overall opening deadline must bound showHostsPanel too; the 30-second hold and five separate observations are not guaranteed to finish under arbitrary load.\"; \"A supported path that hides the whole Hosts panel during this already-open caller would be needed to establish the proposed prelude budget regression.\"."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-060",
+          "key": "g091/c2",
+          "latest_line": 8,
+          "recommendation": "refuted",
+          "bucket": "other",
+          "underlying_key": "host-menu-timeout-prelude-already-satisfied",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The shorter timeout covers the disappearing menu operations that motivated the change. The caller already opens Hosts, so the separately unbounded panel-opening prelude is not an established failure route for this caller.",
+          "checks": [
+            "350a4b33b6d4476f4a78e43cea124bc2b828f462:e2e/tests/helpers/fleet.ts:1211-1215 retains the 20-second Hosts-toggle wait; :1339-1401 documents and passes options to each menu operation, including evaluation and the measured-state poll; :1444 invokes showHostsPanel before these operations.",
+            "At that revision e2e/tests/provisioning.spec.ts:3747-3758 holds two backend actions, opens Hosts and captures rows by returned IDs. :3781 bounds the menu waits to one second inside an eight-second retry, and :3787-3798 independently observes each page-side running/completed premise.",
+            "crates/farhelm-helm/src/provisioning/e2e.rs:206-224 fails an action after its 30-second hold deadline. Per-operation timeouts and the retry do not prove the entire scenario fits that hold under arbitrary load. No execution or universal cleanup/deadline guarantee is claimed."
+          ],
+          "coverage_checked": [
+            "Searched both specifications for host-menu layout closure and timeout behavior. SPEC_impl.md:1027-1030 requires menu closure when layout could move its row; it does not promise an overall helper deadline.",
+            "TODO.md Planned is empty; plans/queue/INDEX.md has no unlanded plan. Searches of BUGS.md, INDEX.md, matching queue text and active TRIAGE_OUTCOMES.md found no exact menu-timeout/prelude item.",
+            "Read review_feedback_queue/host-menu-requested-index-survives-command-removal.md: it concerns keyboard navigation after command removal, not bounded test waits. FILTER.md does not establish a matching rare trigger and whole consequence."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": "A supported path that hides the whole Hosts panel during this already-open caller would be needed to establish the proposed prelude budget regression.",
+          "original_stronger_consequence": "The candidate considered a vanished panel consuming the provisioning test's retry budget despite the one-second override. The source preserves the distinction between the menu flyout and the whole Hosts panel. A future caller needing an overall opening deadline must bound showHostsPanel too; the 30-second hold and five separate observations are not guaranteed to finish under arbitrary load.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Refute the named new-caller route on its established panel premise and the documented per-operation timeout contract. Do not convert this into a claim of a universal overall deadline."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "host-menu-timeout-prelude-already-satisfied",
+        "destination": null
+      }
+    },
+    {
+      "key": "g091/c3",
+      "owner": "g091",
+      "id": "c3",
+      "domain": "browser-test-fixtures",
+      "purpose": "browser-test-fixtures: e2e/tests/helpers/fleet.ts, e2e/tests/helpers/settings.ts, e2e/global-setup.ts, e2e/playwright.config.ts, e2e/start-stack.sh, e2e/suite-terminals.ts, e2e/tests/helpers/evidence.ts, e2e/tests/helpers/host-premise.ts, e2e/tests/helpers/term.ts, e2e/tests/helpers/terminal-readiness.ts, e2e/tests/helpers/terminal-suite.ts, e2e/tests/helpers/program-input.ts; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 3,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c3",
+            "state": "open",
+            "summary": "Removing the suite terminal switch and tmux teardown agrees with host-only creation",
+            "location": "e2e/start-stack.sh:394",
+            "detail": "Reviewed commit: 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513. TLDR: Considered whether removing explicit --new-terminals flags, the old-terminal suite selector and private tmux-server cleanup would leave a browser run on the wrong terminal kind or leak that retired server. SPEC_impl.md, Terminal host, states: 'Every create starts its agent in a host, every new tab opens in one, and a Restart moves an agent out of tmux into one'. The recorded revision's supervisor source selects TerminalKind::Host for Reserved::New/Unkeyed (service/core.rs:11072-11073), and service/status.rs:600-613 says the capability is always true. start-stack.sh creates fresh state at 123 and a startup session through the API at 686-707, so no persisted old tmux session is present. The CLI option and its e2e consumers are removed at this revision: targeted git grep over e2e, scripts, product CLI and supervisor sources found no surviving new-terminals option or suite-terminals import (only unrelated old-terminal fixture names and explanatory references remain). Both supervisors are still signalled and checked gone before stop-terminal-hosts runs (352-405), with state retained on uncertainty. The removed suite mode is consistent with SPEC_impl.md, Testing: 'Its stacks create new terminals, as shipped supervisors do.' Suggested bucket: other for a tooling regression; could-be-highest: no, only isolated test fixtures were implicated. Confidence: confirmed by source, not execution. proposed_drop: the mode can no longer be selected and fresh stacks create only hosts; deleting its private tmux teardown does not remove cleanup for a resource this script now creates. possible_cover: none. Caveat: old terminals still exist in product compatibility at this intermediate revision; this record does not assert equivalent coverage of every retired old-terminal-only test."
+          }
+        },
+        {
+          "line": 6,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c3",
+            "state": "open",
+            "summary": "Removing the suite terminal switch and tmux teardown agrees with host-only creation",
+            "location": "e2e/start-stack.sh:394",
+            "detail": "Reviewed commit: 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513. TLDR: Considered whether removing explicit --new-terminals flags, the old-terminal suite selector and private tmux-server cleanup would leave a browser run on the wrong terminal kind or leak that retired server. SPEC_impl.md, Terminal host, states: 'Every create starts its agent in a host, every new tab opens in one, and a Restart moves an agent out of tmux into one'. The recorded revision's supervisor source selects TerminalKind::Host for Reserved::New/Unkeyed (service/core.rs:11072-11073), and service/status.rs:600-613 says the capability is always true. start-stack.sh creates fresh state at 123 and a startup session through the API at 686-707, so no persisted old tmux session is present. The CLI option and its e2e consumers are removed at this revision: targeted git grep over e2e, scripts, product CLI and supervisor sources found no surviving new-terminals option or suite-terminals import (only unrelated old-terminal fixture names and explanatory references remain). Both supervisors are still signalled and checked gone before stop-terminal-hosts runs (352-405), with state retained on uncertainty. The removed suite mode is consistent with SPEC_impl.md, Testing: 'Its stacks create new terminals, as shipped supervisors do.' Suggested bucket: other for a tooling regression; could-be-highest: no, only isolated test fixtures were implicated. Confidence: confirmed by source, not execution. proposed_drop: the mode can no longer be selected and fresh stacks create only hosts; deleting its private tmux teardown does not remove cleanup for a resource this script now creates. possible_cover: none. Caveat: old terminals still exist in product compatibility at this intermediate revision; this record does not assert equivalent coverage of every retired old-terminal-only test. Synthesis turn 2: checked failure/cancellation ownership without assuming every host can be ended inside Playwright grace. playwright.config.ts:125-160 still execs the stack shell and gives each owned stack SIGTERM with a five-second grace. start-stack.sh installs EXIT and TERM/INT traps before spawning services (352-417), reaps its watcher first, signals its helm and both supervisors, checks the recorded replacement against this stack remote path, and waits for every creator to be gone before scanning hosts (358-396). Every long-lived service/watcher and stop-terminal-hosts invocation closes fd 9; inherited liveness-lock retention was not reintroduced by removing the terminal-kind flag. The state directory is removed only after both stop commands return success (393-406). Contrary evidence worth preserving: stop-terminal-hosts may itself take thirty seconds (SPEC_impl.md, Terminal host: \"The whole command takes at most 30 seconds\"), so a slow cleanup can be cut off by the five-second process-group deadline. This is not proof of synchronous teardown completion. It leaves the state/socket directory for the subsequent dead-run sweep instead of deleting the only route to surviving terminal hosts; creators still live or any nonzero host-stop status likewise retain it. SPEC_impl.md states exactly: \"Exit status 0 is the only success\" and \"callers stop the supervisor first\"; this caller tests that success and creator boundary. The removed tmux teardown neither strengthens nor weakens the pre-existing interrupted-host-stop path. Original loss-of-resource concern, bucket other, could-be-highest:no, source-only confidence and proposed_drop remain as recorded. No parent acceptance of the drop is claimed."
+          }
+        },
+        {
+          "line": 12,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c3",
+            "state": "open",
+            "summary": "Removing the suite terminal switch and tmux teardown agrees with host-only creation",
+            "location": "e2e/start-stack.sh:394",
+            "detail": "Reviewed commit: 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513. TLDR: Considered whether removing explicit --new-terminals flags, the old-terminal suite selector and private tmux-server cleanup would leave a browser run on the wrong terminal kind or leak that retired server. SPEC_impl.md, Terminal host, states: 'Every create starts its agent in a host, every new tab opens in one, and a Restart moves an agent out of tmux into one'. The recorded revision's supervisor source selects TerminalKind::Host for Reserved::New/Unkeyed (service/core.rs:11072-11073), and service/status.rs:600-613 says the capability is always true. start-stack.sh creates fresh state at 123 and a startup session through the API at 686-707, so no persisted old tmux session is present. The CLI option and its e2e consumers are removed at this revision: targeted git grep over e2e, scripts, product CLI and supervisor sources found no surviving new-terminals option or suite-terminals import (only unrelated old-terminal fixture names and explanatory references remain). Both supervisors are still signalled and checked gone before stop-terminal-hosts runs (352-405), with state retained on uncertainty. The removed suite mode is consistent with SPEC_impl.md, Testing: 'Its stacks create new terminals, as shipped supervisors do.' Suggested bucket: other for a tooling regression; could-be-highest: no, only isolated test fixtures were implicated. Confidence: confirmed by source, not execution. proposed_drop: the mode can no longer be selected and fresh stacks create only hosts; deleting its private tmux teardown does not remove cleanup for a resource this script now creates. possible_cover: none. Caveat: old terminals still exist in product compatibility at this intermediate revision; this record does not assert equivalent coverage of every retired old-terminal-only test. Synthesis turn 2: checked failure/cancellation ownership without assuming every host can be ended inside Playwright grace. playwright.config.ts:125-160 still execs the stack shell and gives each owned stack SIGTERM with a five-second grace. start-stack.sh installs EXIT and TERM/INT traps before spawning services (352-417), reaps its watcher first, signals its helm and both supervisors, checks the recorded replacement against this stack remote path, and waits for every creator to be gone before scanning hosts (358-396). Every long-lived service/watcher and stop-terminal-hosts invocation closes fd 9; inherited liveness-lock retention was not reintroduced by removing the terminal-kind flag. The state directory is removed only after both stop commands return success (393-406). Contrary evidence worth preserving: stop-terminal-hosts may itself take thirty seconds (SPEC_impl.md, Terminal host: \"The whole command takes at most 30 seconds\"), so a slow cleanup can be cut off by the five-second process-group deadline. This is not proof of synchronous teardown completion. It leaves the state/socket directory for the subsequent dead-run sweep instead of deleting the only route to surviving terminal hosts; creators still live or any nonzero host-stop status likewise retain it. SPEC_impl.md states exactly: \"Exit status 0 is the only success\" and \"callers stop the supervisor first\"; this caller tests that success and creator boundary. The removed tmux teardown neither strengthens nor weakens the pre-existing interrupted-host-stop path. Original loss-of-resource concern, bucket other, could-be-highest:no, source-only confidence and proposed_drop remain as recorded. No parent acceptance of the drop is claimed. Discovery pass 1, turn 3: checked whether removing the final --new-terminals arguments breaks replacement-supervisor cleanup recognition. At 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513 terminal-multihost.spec.ts:750-759 still spawns supervisor run --state-dir <remote> --boot-id-file <file>; therefore start-stack.sh:312-323 still sees the space after the remote directory that its replacement_state pattern requires. The caller records the replacement pid and closes its own log descriptor in finally before waiting for reconnect (747-772), so this interface remains valid even if its reconnect wait fails. The removed terminal-kind metadata has no surviving consumer found in the targeted helper/caller/cleanup-script search. These checks refute this specific stale-argument/cleanup candidate, not the known intermediate loss of useful old-renderer regression tests reported by neighbours. Original wrong-kind/resource-loss concern, timing caveat and proposed-drop basis remain intact; no parent acceptance is inferred."
+          }
+        }
+      ],
+      "latest": {
+        "line": 12,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c3",
+          "state": "open",
+          "summary": "Removing the suite terminal switch and tmux teardown agrees with host-only creation",
+          "location": "e2e/start-stack.sh:394",
+          "detail": "Reviewed commit: 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513. TLDR: Considered whether removing explicit --new-terminals flags, the old-terminal suite selector and private tmux-server cleanup would leave a browser run on the wrong terminal kind or leak that retired server. SPEC_impl.md, Terminal host, states: 'Every create starts its agent in a host, every new tab opens in one, and a Restart moves an agent out of tmux into one'. The recorded revision's supervisor source selects TerminalKind::Host for Reserved::New/Unkeyed (service/core.rs:11072-11073), and service/status.rs:600-613 says the capability is always true. start-stack.sh creates fresh state at 123 and a startup session through the API at 686-707, so no persisted old tmux session is present. The CLI option and its e2e consumers are removed at this revision: targeted git grep over e2e, scripts, product CLI and supervisor sources found no surviving new-terminals option or suite-terminals import (only unrelated old-terminal fixture names and explanatory references remain). Both supervisors are still signalled and checked gone before stop-terminal-hosts runs (352-405), with state retained on uncertainty. The removed suite mode is consistent with SPEC_impl.md, Testing: 'Its stacks create new terminals, as shipped supervisors do.' Suggested bucket: other for a tooling regression; could-be-highest: no, only isolated test fixtures were implicated. Confidence: confirmed by source, not execution. proposed_drop: the mode can no longer be selected and fresh stacks create only hosts; deleting its private tmux teardown does not remove cleanup for a resource this script now creates. possible_cover: none. Caveat: old terminals still exist in product compatibility at this intermediate revision; this record does not assert equivalent coverage of every retired old-terminal-only test. Synthesis turn 2: checked failure/cancellation ownership without assuming every host can be ended inside Playwright grace. playwright.config.ts:125-160 still execs the stack shell and gives each owned stack SIGTERM with a five-second grace. start-stack.sh installs EXIT and TERM/INT traps before spawning services (352-417), reaps its watcher first, signals its helm and both supervisors, checks the recorded replacement against this stack remote path, and waits for every creator to be gone before scanning hosts (358-396). Every long-lived service/watcher and stop-terminal-hosts invocation closes fd 9; inherited liveness-lock retention was not reintroduced by removing the terminal-kind flag. The state directory is removed only after both stop commands return success (393-406). Contrary evidence worth preserving: stop-terminal-hosts may itself take thirty seconds (SPEC_impl.md, Terminal host: \"The whole command takes at most 30 seconds\"), so a slow cleanup can be cut off by the five-second process-group deadline. This is not proof of synchronous teardown completion. It leaves the state/socket directory for the subsequent dead-run sweep instead of deleting the only route to surviving terminal hosts; creators still live or any nonzero host-stop status likewise retain it. SPEC_impl.md states exactly: \"Exit status 0 is the only success\" and \"callers stop the supervisor first\"; this caller tests that success and creator boundary. The removed tmux teardown neither strengthens nor weakens the pre-existing interrupted-host-stop path. Original loss-of-resource concern, bucket other, could-be-highest:no, source-only confidence and proposed_drop remain as recorded. No parent acceptance of the drop is claimed. Discovery pass 1, turn 3: checked whether removing the final --new-terminals arguments breaks replacement-supervisor cleanup recognition. At 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513 terminal-multihost.spec.ts:750-759 still spawns supervisor run --state-dir <remote> --boot-id-file <file>; therefore start-stack.sh:312-323 still sees the space after the remote directory that its replacement_state pattern requires. The caller records the replacement pid and closes its own log descriptor in finally before waiting for reconnect (747-772), so this interface remains valid even if its reconnect wait fails. The removed terminal-kind metadata has no surviving consumer found in the targeted helper/caller/cleanup-script search. These checks refute this specific stale-argument/cleanup candidate, not the known intermediate loss of useful old-renderer regression tests reported by neighbours. Original wrong-kind/resource-loss concern, timing caveat and proposed-drop basis remain intact; no parent acceptance is inferred."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g091/findings.jsonl",
+        "id": "c3",
+        "line": 12,
+        "disposition": "excluded",
+        "group": "fresh-browser-stack-no-longer-creates-private-tmux",
+        "reason": "Parent explicitly accepted named refuted proposal from claims-060 after inspecting it. Fresh browser stacks cannot create the retired terminal kind at this revision, so removing its selection and private-server cleanup does not strand a server this script creates. Refute only the fresh-stack wrong-kind, removed-resource cleanup and stale replacement-argument routes. Preserve the interrupted host-stop caveat and separate old-renderer coverage issue. Checked source/results: [\"647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513:crates/farhelm-supervisor/src/service/core.rs:11060-11074 assigns Host to Reserved::New/Unkeyed; service/status.rs:600-613 always reports host creation.\",\"At that revision e2e/start-stack.sh:123 allocates fresh state; :686-707 creates its startup session through the API. :352-417 retains creator shutdown, creator-gone checks, host stopping, and removal of state only when both host stops succeed. An uncertain stop retains the socket/state directory.\",\"e2e/playwright.config.ts:125-160 retains exec and a five-second SIGTERM grace. SPEC_impl.md:1974-1985 permits stop-terminal-hosts to take 30 seconds, so synchronous completion within that grace is not proved; an interrupted stop remains eligible for a later dead-run sweep.\",\"e2e/tests/terminal-multihost.spec.ts:750-759 still puts --boot-id-file after the remote state path, satisfying start-stack.sh:312-323's replacement process pattern; :747-772 closes its log descriptor and records the replacement PID.\",\"Targeted git grep at 647f0227 found only explanatory/documentation URL references to new-terminals and no suite-terminals imports in e2e and the checked product sources. No runtime execution occurred.\"] Current coverage/results: [\"Current SPEC.md, Terminal experience, and SPEC_impl.md, Terminal widget/Terminal host/Testing, specify host-backed terminals, host-only browser stacks and caller shutdown before the host scan.\",\"TODO.md Planned and plans/queue/INDEX.md are empty. The tmux plan files are landed context, not unlanded coverage.\",\"Searched BUGS.md, INDEX.md and matching queue text, and active TRIAGE_OUTCOMES.md for suite selector removal, retired-server leakage, fresh-stack wrong-kind selection and cleanup. No exact coverage or alias found. FILTER.md does not apply to this refuted creation premise.\"] Exact cited cover: [\"SPEC_impl.md:1981: Exit status 0 is the only success\",\"SPEC_impl.md:1984-1985: callers stop the supervisor first\"] Original stronger consequence and missing premise remain preserved: \"The candidate asked whether deleting --new-terminals flags, the old suite selector and tmux cleanup would cause wrong-kind test runs or retired-server resource leaks. It never claimed security or user-owned work loss. Product compatibility with already-existing old terminals still existed at this intermediate revision; lost old-renderer regression coverage is a separate concern. A slow host stop may exceed Playwright's grace, with state retained rather than proof of completed teardown.\"; null."
+      },
+      "accepted_parent_decision": {
+        "key": "g091/c3",
+        "line": 12,
+        "disposition": "excluded",
+        "group": "fresh-browser-stack-no-longer-creates-private-tmux",
+        "bucket": "other",
+        "recording": "refuted",
+        "queue_target_candidate": null,
+        "needs_independent_drop_check": false,
+        "reason": "Parent explicitly accepted named refuted proposal from claims-060 after inspecting it. Fresh browser stacks cannot create the retired terminal kind at this revision, so removing its selection and private-server cleanup does not strand a server this script creates. Refute only the fresh-stack wrong-kind, removed-resource cleanup and stale replacement-argument routes. Preserve the interrupted host-stop caveat and separate old-renderer coverage issue. Checked source/results: [\"647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513:crates/farhelm-supervisor/src/service/core.rs:11060-11074 assigns Host to Reserved::New/Unkeyed; service/status.rs:600-613 always reports host creation.\",\"At that revision e2e/start-stack.sh:123 allocates fresh state; :686-707 creates its startup session through the API. :352-417 retains creator shutdown, creator-gone checks, host stopping, and removal of state only when both host stops succeed. An uncertain stop retains the socket/state directory.\",\"e2e/playwright.config.ts:125-160 retains exec and a five-second SIGTERM grace. SPEC_impl.md:1974-1985 permits stop-terminal-hosts to take 30 seconds, so synchronous completion within that grace is not proved; an interrupted stop remains eligible for a later dead-run sweep.\",\"e2e/tests/terminal-multihost.spec.ts:750-759 still puts --boot-id-file after the remote state path, satisfying start-stack.sh:312-323's replacement process pattern; :747-772 closes its log descriptor and records the replacement PID.\",\"Targeted git grep at 647f0227 found only explanatory/documentation URL references to new-terminals and no suite-terminals imports in e2e and the checked product sources. No runtime execution occurred.\"] Current coverage/results: [\"Current SPEC.md, Terminal experience, and SPEC_impl.md, Terminal widget/Terminal host/Testing, specify host-backed terminals, host-only browser stacks and caller shutdown before the host scan.\",\"TODO.md Planned and plans/queue/INDEX.md are empty. The tmux plan files are landed context, not unlanded coverage.\",\"Searched BUGS.md, INDEX.md and matching queue text, and active TRIAGE_OUTCOMES.md for suite selector removal, retired-server leakage, fresh-stack wrong-kind selection and cleanup. No exact coverage or alias found. FILTER.md does not apply to this refuted creation premise.\"] Exact cited cover: [\"SPEC_impl.md:1981: Exit status 0 is the only success\",\"SPEC_impl.md:1984-1985: callers stop the supervisor first\"] Original stronger consequence and missing premise remain preserved: \"The candidate asked whether deleting --new-terminals flags, the old suite selector and tmux cleanup would cause wrong-kind test runs or retired-server resource leaks. It never claimed security or user-owned work loss. Product compatibility with already-existing old terminals still existed at this intermediate revision; lost old-renderer regression coverage is a separate concern. A slow host stop may exceed Playwright's grace, with state retained rather than proof of completed teardown.\"; null."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-060",
+          "key": "g091/c3",
+          "latest_line": 12,
+          "recommendation": "refuted",
+          "bucket": "other",
+          "underlying_key": "fresh-browser-stack-no-longer-creates-private-tmux",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "Fresh browser stacks cannot create the retired terminal kind at this revision, so removing its selection and private-server cleanup does not strand a server this script creates.",
+          "checks": [
+            "647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513:crates/farhelm-supervisor/src/service/core.rs:11060-11074 assigns Host to Reserved::New/Unkeyed; service/status.rs:600-613 always reports host creation.",
+            "At that revision e2e/start-stack.sh:123 allocates fresh state; :686-707 creates its startup session through the API. :352-417 retains creator shutdown, creator-gone checks, host stopping, and removal of state only when both host stops succeed. An uncertain stop retains the socket/state directory.",
+            "e2e/playwright.config.ts:125-160 retains exec and a five-second SIGTERM grace. SPEC_impl.md:1974-1985 permits stop-terminal-hosts to take 30 seconds, so synchronous completion within that grace is not proved; an interrupted stop remains eligible for a later dead-run sweep.",
+            "e2e/tests/terminal-multihost.spec.ts:750-759 still puts --boot-id-file after the remote state path, satisfying start-stack.sh:312-323's replacement process pattern; :747-772 closes its log descriptor and records the replacement PID.",
+            "Targeted git grep at 647f0227 found only explanatory/documentation URL references to new-terminals and no suite-terminals imports in e2e and the checked product sources. No runtime execution occurred."
+          ],
+          "coverage_checked": [
+            "Current SPEC.md, Terminal experience, and SPEC_impl.md, Terminal widget/Terminal host/Testing, specify host-backed terminals, host-only browser stacks and caller shutdown before the host scan.",
+            "TODO.md Planned and plans/queue/INDEX.md are empty. The tmux plan files are landed context, not unlanded coverage.",
+            "Searched BUGS.md, INDEX.md and matching queue text, and active TRIAGE_OUTCOMES.md for suite selector removal, retired-server leakage, fresh-stack wrong-kind selection and cleanup. No exact coverage or alias found. FILTER.md does not apply to this refuted creation premise."
+          ],
+          "exact_cover_quotes": [
+            "SPEC_impl.md:1981: Exit status 0 is the only success",
+            "SPEC_impl.md:1984-1985: callers stop the supervisor first"
+          ],
+          "missing_premise": null,
+          "original_stronger_consequence": "The candidate asked whether deleting --new-terminals flags, the old suite selector and tmux cleanup would cause wrong-kind test runs or retired-server resource leaks. It never claimed security or user-owned work loss. Product compatibility with already-existing old terminals still existed at this intermediate revision; lost old-renderer regression coverage is a separate concern. A slow host stop may exceed Playwright's grace, with state retained rather than proof of completed teardown.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Refute only the fresh-stack wrong-kind, removed-resource cleanup and stale replacement-argument routes. Preserve the interrupted host-stop caveat and separate old-renderer coverage issue."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "fresh-browser-stack-no-longer-creates-private-tmux",
+        "destination": null
+      }
+    },
+    {
+      "key": "g091/l1",
+      "owner": "g091",
+      "id": "l1",
+      "domain": "browser-test-fixtures",
+      "purpose": "browser-test-fixtures: e2e/tests/helpers/fleet.ts, e2e/tests/helpers/settings.ts, e2e/global-setup.ts, e2e/playwright.config.ts, e2e/start-stack.sh, e2e/suite-terminals.ts, e2e/tests/helpers/evidence.ts, e2e/tests/helpers/host-premise.ts, e2e/tests/helpers/term.ts, e2e/tests/helpers/terminal-readiness.ts, e2e/tests/helpers/terminal-suite.ts, e2e/tests/helpers/program-input.ts; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 7,
+          "event": {
+            "version": 1,
+            "kind": "lead",
+            "id": "l1",
+            "state": "open",
+            "summary": "Check whether startup-wait failure adds an undisposed request context",
+            "location": "e2e/global-setup.ts:99",
+            "detail": "Reviewed commit: 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513. TLDR: A setup failure can leave its explicitly created HTTP request context undisposed until runner exit. authenticateStack creates the context at 86, performs the new startup wait at 99, and disposes only on the success path at 111, with no finally. This is a substantive cleanup boundary to check, not yet a finding against this change: the patch replaced a previous terminal-premise wait at the same call site. Next source check: compare the parent authenticateStack and expectStackTerminals failure paths to determine whether the assigned commit introduced or expanded the route. Suggested bucket: other; could-be-highest: no, the affected context belongs to the test runner and no catastrophic route is established. Confidence: source confirms success-only disposal; regression status and practical consequence remain under investigation. proposed_drop: false pending parent comparison. possible_cover: none. No execution or reproduction performed."
+          }
+        },
+        {
+          "line": 9,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "l1",
+            "state": "open",
+            "summary": "Startup failure has success-only context disposal, unchanged by the assigned patch",
+            "location": "e2e/global-setup.ts:99",
+            "detail": "Reviewed commit: 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513. Synthesis resolves the original cleanup lead without erasing its consequence. TLDR: A failed setup can leave its explicitly created HTTP request context undisposed until the runner exits, but the assigned change does not introduce or expand that failure route. At this revision authenticateStack creates the request context at 86, awaits startup at 99 and disposes only on success at 111, with no finally. Parent source comparison: global-setup.ts in 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513^ has the same success-only disposal at 92-117 and awaited expectStackTerminals at 105. That older helper already performs the same session-list GET, reply assertion, JSON decoding, e2e-session existence check and 30-second poll at 139-149, before its additional terminal-kind assertion. The main config always supplies valid suiteTerminals metadata (parent playwright.config.ts:73,152-158), so removing that metadata does not newly enable the startup wait for the supported main suite. Capture configs still omit stackSlots and call authenticateStack without the wait. The new wait removes a possible failure after startup; it does not add an undisposed-context failure path. Exact governing test constraint supplied by the caller: 'Keep failure diagnostics inside the lifetime of the owned fixture they inspect.' No new diagnostic is being attempted after disposal here; the concern is the pre-existing missing finally. Suggested bucket: other; could-be-highest: no, only a test-runner resource is implicated and no catastrophic route is established. Confidence: confirmed by parent and reviewed source, not execution. proposed_drop: pre-existing unchanged cleanup gap, outside the assigned patch's introduced behavior. possible_cover: none. Caveat: this does not assert that success-only disposal is desirable or that the runner reclaims it promptly; only that it is not attributable to this change. No parent drop acceptance is claimed."
+          }
+        },
+        {
+          "line": 10,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "l1",
+            "state": "open",
+            "summary": "Startup failure has success-only context disposal, unchanged by the assigned patch",
+            "location": "e2e/global-setup.ts:99",
+            "detail": "Reviewed commit: 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513. Synthesis resolves the original cleanup lead without erasing its consequence. TLDR: A failed setup can leave its explicitly created HTTP request context undisposed until the runner exits, but the assigned change does not introduce or expand that failure route. At this revision authenticateStack creates the request context at 86, awaits startup at 99 and disposes only on success at 111, with no finally. Parent source comparison: global-setup.ts in 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513^ has the same success-only disposal at 92-117 and awaited expectStackTerminals at 105. That older helper already performs the same session-list GET, reply assertion, JSON decoding, e2e-session existence check and 30-second poll at 139-149, before its additional terminal-kind assertion. The main config always supplies valid suiteTerminals metadata (parent playwright.config.ts:73,152-158), so removing that metadata does not newly enable the startup wait for the supported main suite. Capture configs still omit stackSlots and call authenticateStack without the wait. The new wait removes a possible failure after startup; it does not add an undisposed-context failure path. Exact governing test constraint supplied by the caller: 'Keep failure diagnostics inside the lifetime of the owned fixture they inspect.' No new diagnostic is being attempted after disposal here; the concern is the pre-existing missing finally. Suggested bucket: other; could-be-highest: no, only a test-runner resource is implicated and no catastrophic route is established. Confidence: confirmed by parent and reviewed source, not execution. proposed_drop: pre-existing unchanged cleanup gap, outside the assigned patch's introduced behavior. possible_cover: none. Caveat: this does not assert that success-only disposal is desirable or that the runner reclaims it promptly; only that it is not attributable to this change. No parent drop acceptance is claimed. Turn 3 required range-attribution synthesis: compared the exclusive base 6e423e30068b62c6cfa276c6d720ee35bb70387a directly, not only the immediate assigned parent. At the base, e2e/global-setup.ts:92 already creates client, :105 awaits expectStackTerminals before disposal, :117 disposes only on success, and :143-149 contains the identical failing GET/HTTP assertion/JSON decode/startup-existence poll. The base main suite already supplies the terminal-kind metadata that enables this call. Bounded git log for this path over base..00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db returned exactly one modifying commit, 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513; the full-range path diff is exactly its assigned patch. Thus the exact undisposed-context failure route demonstrably predates the entire trailing range. This replaces the insufficient immediate-parent-only attribution basis, while retaining the original consequence, bucket other, could-be-highest:no and source-only confidence. proposed_drop: pre-range unchanged cleanup gap established from the exclusive base and complete bounded path history. No parent drop acceptance is claimed."
+          }
+        }
+      ],
+      "latest": {
+        "line": 10,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "l1",
+          "state": "open",
+          "summary": "Startup failure has success-only context disposal, unchanged by the assigned patch",
+          "location": "e2e/global-setup.ts:99",
+          "detail": "Reviewed commit: 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513. Synthesis resolves the original cleanup lead without erasing its consequence. TLDR: A failed setup can leave its explicitly created HTTP request context undisposed until the runner exits, but the assigned change does not introduce or expand that failure route. At this revision authenticateStack creates the request context at 86, awaits startup at 99 and disposes only on success at 111, with no finally. Parent source comparison: global-setup.ts in 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513^ has the same success-only disposal at 92-117 and awaited expectStackTerminals at 105. That older helper already performs the same session-list GET, reply assertion, JSON decoding, e2e-session existence check and 30-second poll at 139-149, before its additional terminal-kind assertion. The main config always supplies valid suiteTerminals metadata (parent playwright.config.ts:73,152-158), so removing that metadata does not newly enable the startup wait for the supported main suite. Capture configs still omit stackSlots and call authenticateStack without the wait. The new wait removes a possible failure after startup; it does not add an undisposed-context failure path. Exact governing test constraint supplied by the caller: 'Keep failure diagnostics inside the lifetime of the owned fixture they inspect.' No new diagnostic is being attempted after disposal here; the concern is the pre-existing missing finally. Suggested bucket: other; could-be-highest: no, only a test-runner resource is implicated and no catastrophic route is established. Confidence: confirmed by parent and reviewed source, not execution. proposed_drop: pre-existing unchanged cleanup gap, outside the assigned patch's introduced behavior. possible_cover: none. Caveat: this does not assert that success-only disposal is desirable or that the runner reclaims it promptly; only that it is not attributable to this change. No parent drop acceptance is claimed. Turn 3 required range-attribution synthesis: compared the exclusive base 6e423e30068b62c6cfa276c6d720ee35bb70387a directly, not only the immediate assigned parent. At the base, e2e/global-setup.ts:92 already creates client, :105 awaits expectStackTerminals before disposal, :117 disposes only on success, and :143-149 contains the identical failing GET/HTTP assertion/JSON decode/startup-existence poll. The base main suite already supplies the terminal-kind metadata that enables this call. Bounded git log for this path over base..00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db returned exactly one modifying commit, 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513; the full-range path diff is exactly its assigned patch. Thus the exact undisposed-context failure route demonstrably predates the entire trailing range. This replaces the insufficient immediate-parent-only attribution basis, while retaining the original consequence, bucket other, could-be-highest:no and source-only confidence. proposed_drop: pre-range unchanged cleanup gap established from the exclusive base and complete bounded path history. No parent drop acceptance is claimed."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g091/findings.jsonl",
+        "id": "l1",
+        "line": 10,
+        "disposition": "excluded",
+        "group": "global-setup-request-context-success-only-disposal",
+        "reason": "Parent explicitly accepted named out-of-range proposal from claims-060 after inspecting it. The undisposed request context on setup failure is real in source, but its exact startup-wait route already exists at the exclusive base and is not expanded by the sole in-range change to this path. Exclude as an unchanged pre-range cleanup gap, preserving the source-established consequence and the earlier insufficient immediate-parent-only basis in the record history. Checked source/results: [\"6e423e30068b62c6cfa276c6d720ee35bb70387a:e2e/global-setup.ts:92 creates the context, :105 awaits expectStackTerminals, :117 disposes only on success; :143-149 already has the same failing GET/status assertion/JSON/startup-session poll.\",\"Base e2e/playwright.config.ts:73,152-158 supplies valid suite-terminal metadata, so the ordinary main suite already enters that wait. 647f0227:e2e/global-setup.ts:86,99,111 preserves the lifetime while renaming/narrowing the startup helper.\",\"git log over the complete reviewed base..tip range names only 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513 for e2e/global-setup.ts. The full-range diff removes the extra kind assertion and preserves the same earlier startup failure route. No prompt reclamation or runner-resource lifetime was measured.\"] Current coverage/results: [\"Searched both specifications for authenticateStack/startup-session/request-context cleanup; no explicit acceptance of success-only disposal found.\",\"TODO.md Planned is empty and plans/queue/INDEX.md has no unlanded plans. Searches of BUGS.md, INDEX.md/queue text and active TRIAGE_OUTCOMES.md found no exact setup-context lifetime coverage.\",\"FILTER.md supplies no exact matching boundary. The proposed exclusion rests on complete-range attribution, not coverage or desirability of the behavior.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"The initial lead said a failed startup wait could leave its explicitly created HTTP request context undisposed until runner exit. Later revisions withdrew regression attribution, first by immediate-parent comparison and then by exclusive-base plus full-path-history comparison. The resource leak is not denied; practical lifetime/reclamation is unmeasured, and the affected resource is isolated maintainer tooling.\"; null."
+      },
+      "accepted_parent_decision": {
+        "key": "g091/l1",
+        "line": 10,
+        "disposition": "excluded",
+        "group": "global-setup-request-context-success-only-disposal",
+        "bucket": "other",
+        "recording": "out-of-range",
+        "queue_target_candidate": null,
+        "needs_independent_drop_check": false,
+        "reason": "Parent explicitly accepted named out-of-range proposal from claims-060 after inspecting it. The undisposed request context on setup failure is real in source, but its exact startup-wait route already exists at the exclusive base and is not expanded by the sole in-range change to this path. Exclude as an unchanged pre-range cleanup gap, preserving the source-established consequence and the earlier insufficient immediate-parent-only basis in the record history. Checked source/results: [\"6e423e30068b62c6cfa276c6d720ee35bb70387a:e2e/global-setup.ts:92 creates the context, :105 awaits expectStackTerminals, :117 disposes only on success; :143-149 already has the same failing GET/status assertion/JSON/startup-session poll.\",\"Base e2e/playwright.config.ts:73,152-158 supplies valid suite-terminal metadata, so the ordinary main suite already enters that wait. 647f0227:e2e/global-setup.ts:86,99,111 preserves the lifetime while renaming/narrowing the startup helper.\",\"git log over the complete reviewed base..tip range names only 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513 for e2e/global-setup.ts. The full-range diff removes the extra kind assertion and preserves the same earlier startup failure route. No prompt reclamation or runner-resource lifetime was measured.\"] Current coverage/results: [\"Searched both specifications for authenticateStack/startup-session/request-context cleanup; no explicit acceptance of success-only disposal found.\",\"TODO.md Planned is empty and plans/queue/INDEX.md has no unlanded plans. Searches of BUGS.md, INDEX.md/queue text and active TRIAGE_OUTCOMES.md found no exact setup-context lifetime coverage.\",\"FILTER.md supplies no exact matching boundary. The proposed exclusion rests on complete-range attribution, not coverage or desirability of the behavior.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"The initial lead said a failed startup wait could leave its explicitly created HTTP request context undisposed until runner exit. Later revisions withdrew regression attribution, first by immediate-parent comparison and then by exclusive-base plus full-path-history comparison. The resource leak is not denied; practical lifetime/reclamation is unmeasured, and the affected resource is isolated maintainer tooling.\"; null."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-060",
+          "key": "g091/l1",
+          "latest_line": 10,
+          "recommendation": "out-of-range",
+          "bucket": "other",
+          "underlying_key": "global-setup-request-context-success-only-disposal",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The undisposed request context on setup failure is real in source, but its exact startup-wait route already exists at the exclusive base and is not expanded by the sole in-range change to this path.",
+          "checks": [
+            "6e423e30068b62c6cfa276c6d720ee35bb70387a:e2e/global-setup.ts:92 creates the context, :105 awaits expectStackTerminals, :117 disposes only on success; :143-149 already has the same failing GET/status assertion/JSON/startup-session poll.",
+            "Base e2e/playwright.config.ts:73,152-158 supplies valid suite-terminal metadata, so the ordinary main suite already enters that wait. 647f0227:e2e/global-setup.ts:86,99,111 preserves the lifetime while renaming/narrowing the startup helper.",
+            "git log over the complete reviewed base..tip range names only 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513 for e2e/global-setup.ts. The full-range diff removes the extra kind assertion and preserves the same earlier startup failure route. No prompt reclamation or runner-resource lifetime was measured."
+          ],
+          "coverage_checked": [
+            "Searched both specifications for authenticateStack/startup-session/request-context cleanup; no explicit acceptance of success-only disposal found.",
+            "TODO.md Planned is empty and plans/queue/INDEX.md has no unlanded plans. Searches of BUGS.md, INDEX.md/queue text and active TRIAGE_OUTCOMES.md found no exact setup-context lifetime coverage.",
+            "FILTER.md supplies no exact matching boundary. The proposed exclusion rests on complete-range attribution, not coverage or desirability of the behavior."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": null,
+          "original_stronger_consequence": "The initial lead said a failed startup wait could leave its explicitly created HTTP request context undisposed until runner exit. Later revisions withdrew regression attribution, first by immediate-parent comparison and then by exclusive-base plus full-path-history comparison. The resource leak is not denied; practical lifetime/reclamation is unmeasured, and the affected resource is isolated maintainer tooling.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Exclude as an unchanged pre-range cleanup gap, preserving the source-established consequence and the earlier insufficient immediate-parent-only basis in the record history."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": false,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "global-setup-request-context-success-only-disposal",
+        "destination": null
+      }
+    }
+  ],
+  "replies": [
+    {
+      "turn": 1,
+      "reply": "Initial pass complete: all 16 assigned patches reviewed. No reportable findings or open leads; three ruled-out candidates recorded in [findings.jsonl]([private-run]/g091/findings.jsonl).\n\n[Progress updated]([private-run]/g091/progress.md). No unread assigned scope. Source-only review; no tests or reproductions run."
+    },
+    {
+      "turn": 2,
+      "reply": "Revised c1–c3 with readiness, caller, and failure/cancellation cleanup evidence. Opened l1, then resolved it to a candidate: startup’s success-only context disposal predates the change.\n\nNo new findings. Unresolved lead IDs: none. Progress and findings logs updated."
+    },
+    {
+      "turn": 3,
+      "reply": "Discovery pass 1 found nothing new.\n\nChecked full-range attribution, replacement-supervisor cleanup matching, JSON frame boundaries, helper documentation, and Settings label consumers. Revised l1, c1, and c3 with source evidence.\n\nNew verified IDs: none. New unverified IDs: none. Open leads: none. No tests or reproductions run."
+    }
+  ],
+  "progress": "# g091 browser-test-fixtures\n\nInitial review complete, turn 1. Discovery passes: 0. Await a separate caller prompt for synthesis or discovery; no later-turn protocol was performed inside this turn.\n\nRead all 16 assigned patch packets through the evidence read command, totaling 1,319 lines at their three recorded revisions. No assigned patch material remains unread. Read the complete inventory commits field without delivering or inspecting excluded coverage metadata. Root AGENTS.md End sentinel was present. Read the requested queue priority and feedback format sections, the brief's full test checklist, machine instructions, and the governing targeted SPEC/SPEC_impl contracts at the recorded revisions.\n\nChecks: traced the bounded menu caller and panel visibility premise; compared new settings keys with actual labels and panels; inspected global authentication/startup-session waiting and the complete stack script; traced fresh-session terminal selection; searched removed suite exports and options for stale consumers; inspected the replacement grid-only island, readiness surface, binary input sender and decoder unit-test source. All conclusions are source-supported. No runtime tests, builds, reproductions, live-install actions, or checkout mutations were performed.\n\nDurable records: no findings; candidates c1, c2, c3 stand as ruled-out concerns. c1 was revised with final source checks and exact contract wording. No open leads. New verified findings this pass: none. New unverified findings this pass: none.\n\nInterface assumptions: fresh harness state cannot contain a terminal from an earlier supervisor; the 647f0227 intermediate revision creates host terminals but still supports persisted old ones; f560058d removes the browser's xterm fallback altogether. The only new bounded host-menu caller opens Hosts and observes its rows before retrying menu reads. Input observation records sent binary grid messages, while controls remain text frames. Capture suites had no imports of the evidence fixture in the targeted searches. These assumptions were checked at the recorded revisions, not inferred from the working tree.\n\nTooling note: the first c1 append was rejected because state \"closed\" is invalid; read tooling.md and retried with state \"open\" before continuing source analysis. The append then succeeded. All patch read commands succeeded with end markers; the parent owns the delivery audit. Exploratory combined output that clipped was followed by smaller reads for governing contract text. No omitted assigned scope.\n\n## Synthesis turn 2\n\nSynthesis complete. Turn count: 2. Discovery passes: 0. No unread assigned scope and no open leads. Next action: await the caller's separate discovery or synthesis prompt.\n\nRevised c1 with the distinct mounted/socket-open/revealed/ready predicates, session/tab URL identity checks, unchanged passive evidence collection and owned-listener rollback/finalization paths. Preserved the grid-only source/spec refutation and its limits; this does not certify every observation boundary. Parent relayed g092 agreement, recorded as such rather than as independently observed behavior.\n\nRevised c2 with the actual busy-row caller premises, per-operation versus per-scenario timing, backend hold timeout and registry cleanup after failed assertions. Verified the host Settings item exposes the rendered settings_disabled value through aria-disabled, with the same rendered guard on activation. The busy test releases backend holds in afterEach, retries only the named busy removal refusal, and asserts restoration to baseline. Generic cleanup failures can still prevent later cleanup statements; no failure-proof cleanup claim is made.\n\nRevised c3 with cancellation/teardown ordering and contrary timing evidence: host stopping can exceed the five-second graceful deadline. The state and sockets remain available to the sweep if stopping is incomplete or interrupted. The retired tmux teardown is not responsible for that existing limitation.\n\nOpened l1 immediately on noticing success-only request-context disposal in global setup, then resolved it to a candidate under the same ID after parent-source comparison. The old startup poll already had the identical failing operations before the same success-only dispose; the change removes the extra terminal-kind assertion. Targeted source search confirms only the main config supplies stackSlots, so no supported second config newly acquires the wait. The pre-existing resource consequence remains in the durable record.\n\nNew verified findings: none. New unverified findings: none. Revised IDs: c1, c2, c3; l1 opened and resolved to candidate. Parent has accepted no proposed drop. Findings log now contains nine events. All checks were source/contract comparisons at pinned revisions; no runtime tests, builds or reproductions. No checkout mutations.\n\n## Discovery turn 3\n\nDiscovery pass 1 complete. Turn count: 3. Read all 281 lines of discovery-neighbours.json in bounded chunks before the new search. Synthesized the pending range-attribution input first: direct exclusive-base global-setup.ts and playwright.config.ts reads establish l1's same undisposed-context failure path and enabled startup poll at the base. Complete bounded path history returned only 647f0227 for global-setup.ts; its full-range diff is the assigned patch. Revised l1 immediately with this stronger basis; the earlier immediate-parent-only rationale was insufficient on its own.\n\nNew search remained within assigned helper/setup changes and their direct interfaces. Checked replacement-supervisor argv against cleanup matching after option removal; verified complete JSON input frame construction against per-frame decoding; checked agent-only singleton publication, per-island text reads and focus-spy documentation against actual hooks; compared settings helper label consumers to distinguish a mapping from neighbour g039's known ordered navigation assertion. Used full-range diffs for attribution, including the preserved current-buffer wording, rather than treating an unchanged immediate parent as sufficient.\n\nRevised c1 and c3 with concrete discovery checks and source refutations; l1 revised for whole-range attribution. No new IDs. New verified findings: none. New unverified-after-investigation findings: none. Remaining open leads: none. Explicit discovery result: nothing new found. No unread assigned scope. No runtime tests, builds, reproductions, prohibited coverage searches or live-install actions. No parent proposed drop accepted. Next action: await the caller.\n"
+}

@@ -1,0 +1,306 @@
+[
+  {
+    "key": "g198/c1",
+    "latest_line": 7,
+    "recommendation": "needs-parent",
+    "bucket": "other",
+    "underlying_key": "mac-brick-terminal-host-only-baseline",
+    "aliases": ["g199/c2"],
+    "target_queue_file": null,
+    "why": "The support limitation is real and deliberate, and unsupported fixtures fail closed. The proposed dismissal rests on the brick-test contract and a recorded maintainer decision in a now-landed plan. Those establish intent, but neither is an unlanded-plan cover under the recording rules. Parent should explicitly decide whether to close this considered limitation as intended behavior, rather than claim current queue/spec coverage that was not found.",
+    "checks": [
+      "6f1a36144ede6f87c33c0bfedd871c208cc930d4:guest_operations.py:689-696 refuses a baseline without its captured session and exactly one host with one child; :712-716 also refuses legacy empty-host receipts.",
+      "Same revision checkpoint_contract.py:130-135 requires both baseline terminal samples; guest_operations.py:287-319 latches failures; guest_tester.py:277-290 rejects the latch or missing pass operations.",
+      "Same revision brick_test.py:894-901,935-942,1151-1157 preserves automation failure/could-not-run rather than treating this unavailable fixture as a passing release check.",
+      "Same revision BRICK-TEST.md:416-441 explicitly narrows the baseline and delegates old-terminal retirement coverage to supervisor Rust tests. That separate Rust coverage was not checked.",
+      "All source references above are under releasing/mac-vm-test/. No execution or reproduction was performed. Managed enforcement does not establish that a plain tester follows its instructions."
+    ],
+    "coverage_checked": {
+      "SPEC.md": "Current :2998-3010 explicitly ends legacy terminals and preserves host terminals; it does not explicitly define which historical fixtures the brick test must accept.",
+      "SPEC_impl.md": "Current Ending the old private tmux server (:2780-2823) accepts retirement; no exact brick-baseline coverage rule found.",
+      "TODO.md Planned": "Empty (:25-26). The separate before-signing brick-test entry is unrelated.",
+      "plans/queue": "tmux-drop-from-tooling criterion 5 and Decisions explicitly authorize retiring this branch and relying on Rust shutdown tests. plans/REPORTS.md:31 says it already landed, so it is intent evidence, not unlanded-plan cover.",
+      "BUGS.md": "Read in full; its SSH-pipe hang is unrelated.",
+      "INDEX.md and queue": "Index read in full. Nearby brick-recovery, native-app-binding and Mac-uninstall records concern different triggers and oracles; no exact alias found.",
+      "TRIAGE_OUTCOMES.md": "Searched for brick, old-session, terminal-kind and operation terms. Matching release-tool decisions concern other boundaries, not baseline support. Archive not read.",
+      "FILTER.md": "No entire filter boundary matches this deliberate persistent tooling support limitation."
+    },
+    "exact_cover_quotes": [
+      "BRICK-TEST.md:421-422 at 6f1: requires exactly one terminal host with one live child: a previous stable that runs the session anywhere else cannot be tested this way.",
+      "plans/queue/tmux-drop-from-tooling.md:97: Brick test: retire the tmux branch and the terminal-kind checks; rely on the Rust tests for the shutdown. This is a landed decision, not an eligible unlanded cover."
+    ],
+    "missing_premise": "No runtime premise is needed for the limitation. The remaining issue is the recording disposition of an explicitly accepted tooling limitation when its acceptance is in BRICK-TEST.md and a landed plan rather than an enumerated coverage source.",
+    "original_stronger_consequence": "Baselines whose old sessions run in tmux can no longer complete the macOS brick test. This does not prove old product upgrades or cleanup work, and unavailable fixtures can be classified as harness failure/could-not-run rather than product failure.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Preserve the original contract-acceptance proposal and the actual loss of historical-fixture coverage. Other priority: maintainer tooling only, without an established catastrophic, security or user-owned-work consequence. No drop decision is made here."
+  },
+  {
+    "key": "g198/c2",
+    "latest_line": 8,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "release-rehearsal-renamed-step-marker",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The changed literal exactly matches the pinned retained workflow step. The named suspected mismatch is absent.",
+    "checks": [
+      "d751ff1633bb479c7bf53920f2e4ea4ba932a1c2:.github/workflows/release.yml:225 contains the quoted Run the test suite marker; :226-236 invokes recorded nextest and doctests on Linux X64.",
+      "Same revision releasing/rehearse-release-gate.py:98-107 removes two earlier tag-dependent sections and later jobs, preserving this build-local-artifacts step; :71-75 requires exactly one match per rewrite.",
+      "Same file :131 checks the matching marker and :143-152 returns failure before output writing when rewrites or properties fail. Source inspection only; no self-test was run."
+    ],
+    "coverage_checked": {
+      "SPEC.md and SPEC_impl.md": "Searched rehearsal/release-test/step terms; no acceptance of a mismatched marker found or needed for source refutation.",
+      "TODO.md Planned": "Empty.",
+      "plans/queue": "tmux-drop-from-tooling:57-60 calls for updating this marker with the rename, but REPORTS.md:31 marks the plan landed; not future-fix cover.",
+      "BUGS.md": "No matching known bug.",
+      "INDEX.md and queue": "No exact rehearsal-marker item in the full index; nearby brick-tool records differ.",
+      "TRIAGE_OUTCOMES.md": "No matching renamed-step decision in the claim-specific searches.",
+      "FILTER.md": "Not used; direct source refutation."
+    },
+    "exact_cover_quotes": [],
+    "missing_premise": null,
+    "original_stronger_consequence": "A mismatch in the renamed guard would make rehearsal unavailable. Literal presence does not prove future workflow semantics, complete target coverage or actual test execution.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Source-refute this literal-mismatch candidate only. No publication route or end-user harm is established."
+  },
+  {
+    "key": "g198/l1",
+    "latest_line": 10,
+    "recommendation": "out-of-range",
+    "bucket": "other",
+    "underlying_key": "mac-brick-idle-restart-confirmation-wording",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The wording ambiguity and relevant idle-restart policy both exist at the exclusive review base. Neither in-range rewrite adds the alleged confirmation requirement to the surviving host path. This attribution result does not refute the possible wording/test-oracle defect.",
+    "checks": [
+      "6e423e30068b62c6cfa276c6d720ee35bb70387a:releasing/mac-vm-test/guest_workflow.py:190-198 already contains fail-on-step-failure, the new answer 48 and the host path's ordinary Restart and its ordinary confirmation.",
+      "Exclusive-base SPEC.md:1880-1886 already says working confirms and idle/waiting/unknown restart without asking.",
+      "git log over the full exclusive-base..00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db range for guest_workflow.py, checkpoint_contract.py and guest_tester.py lists only f560058d and 6f1a3614. The full base-to-tip guest_workflow.py diff preserves the host path's relevant semantics.",
+      "f560058da19e02716e6f943883a9508b447aff4e:guest_workflow.py:189-205 and 6f1a36144ede6f87c33c0bfedd871c208cc930d4:guest_workflow.py:183-196 retain the phrase. Paths in these two references are releasing/mac-vm-test/.",
+      "6f1:crates/farhelm-ui/src/session_view.rs:190-200,2178-2187 implements conditional confirmation. 6f1:releasing/mac-vm-test/RECIPE.md:114-121 requires Restart without a dialog mandate; guest_tester.py:287-330 and checkpoint_contract.py:60-87 add no confirmation-image gate. No native tester behavior was observed."
+    ],
+    "coverage_checked": {
+      "SPEC.md": "Current Lifecycle operations :1927-1955 preserves conditional confirmation. Correct product behavior does not cover a misleading test instruction.",
+      "SPEC_impl.md": "Searched relevant Restart/confirmation and brick terms; no acceptance of mandatory nonexistent tester dialogs found.",
+      "TODO.md Planned": "Empty.",
+      "plans/queue": "Relevant tmux plans are landed and do not settle native-model interpretation of this phrase.",
+      "BUGS.md": "No exact match.",
+      "INDEX.md and queue": "No exact idle-Restart instruction item found in the full index. Other confirmation and release-tool items have different triggers.",
+      "TRIAGE_OUTCOMES.md": "Claim-specific searches found no exact wording decision; separate window-check and oracle decisions do not cover this.",
+      "FILTER.md": "Not used; full-range attribution is the proposed exclusion."
+    },
+    "exact_cover_quotes": [],
+    "missing_premise": "Actual false failure still needs a retained native tester turn that refuses an otherwise successful idle restart solely because no dialog appeared. Source cannot settle model interpretation.",
+    "original_stronger_consequence": "A correct idle-session restart could be reported as a failed macOS release check if the tester treats ordinary confirmation as a mandatory dialog. The lead was investigated, then revised into a scope-drop proposal; that proposal does not mean the wording concern was disproved.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Exclude only from this pinned change-review range because the entire relevant ambiguity predates its exclusive base. Keep the unresolved interpretation and original consequence in the parent record."
+  },
+  {
+    "key": "g198/c3",
+    "latest_line": 9,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "mac-brick-intermediate-gui-kind-check-removal",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "At the named intermediate revision, deleting unavailable GUI kind/band observations does not delete the examined managed terminal acceptance premises.",
+    "checks": [
+      "f560058da19e02716e6f943883a9508b447aff4e:releasing/mac-vm-test/checkpoint_contract.py:62-109 retains new-session kind/host agreement, survival, generation, capture, new-host and old-host checks.",
+      "Same revision guest_tester.py:287-291,326-334 actually invokes require_old_session and require_agent_terminal on pass; these are enforced validators rather than unused helpers.",
+      "Same revision guest_operations.py:674-793 takes the process/session samples and comparisons independently. These references are under releasing/mac-vm-test/.",
+      "Pinned git grep finds no terminal_kind, TerminalKind or migration reference in crates/farhelm-ui/src/session_view.rs. Pinned SPEC.md:3002-3015 explicitly retires old terminals and their migration surface.",
+      "Later 6f1 deliberately removes the stored-kind branches and changes fixture support, so this conclusion is specific to f560 and the managed executor. No run was performed."
+    ],
+    "coverage_checked": {
+      "SPEC.md and SPEC_impl.md": "Current terminal experience and Ending the old private tmux server accept legacy-terminal retirement; they do not themselves prove tester coverage.",
+      "TODO.md Planned": "Empty.",
+      "plans/queue": "tmux-end-old-terminals criterion 9 authorizes removing hidden UI reads with the product display. REPORTS.md:29 marks it landed; intent context, not pending-work cover.",
+      "BUGS.md": "No exact match.",
+      "INDEX.md and queue": "Full index contains no remaining hidden-terminal-kind-details item. Nearby release-oracle records are different; no extension identified.",
+      "TRIAGE_OUTCOMES.md": "No exact decision covering removal of these managed acceptance premises.",
+      "FILTER.md": "Not used; pinned enforcement refutes the named weakening."
+    },
+    "exact_cover_quotes": [],
+    "missing_premise": null,
+    "original_stronger_consequence": "Removing GUI kind and migration-band observations could have allowed a broken terminal transition to pass. The check refutes that specific managed-oracle weakening, not all possible release false passes. An old tmux fixture still cannot survive intentional retirement at f560. Plain instructions rely on the tester's independent observations.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Propose closing this narrow source-refuted candidate. Do not reuse the conclusion for the later terminal-host-only support limitation or as proof of historical upgrade compatibility."
+  },
+  {
+    "key": "g199/c1",
+    "latest_line": 8,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "mac-brick-removed-new-session-sample-survival-premise",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The old-session comparison takes its own current samples and reads the retained old baseline. It does not depend on the deleted new-session sample.",
+    "checks": [
+      "6f1a36144ede6f87c33c0bfedd871c208cc930d4:releasing/mac-vm-test/guest_operations.py:699-729 samples current hosts/session rows and compares old identities; :731-750 compares the final sample with that same pre-Restart sample.",
+      "Same file :222-226,258-274,620-638 retains pass-scoped digest-bound baseline receipts across Operations instances; :293-319 prevents replay of survival and latches failures.",
+      "Same revision test_guest_operations.py:831-846 models distinct checkpoint attempts; :868-895 checks host/child/generation replacements and final host conditions. :871-874 specifically passes with the unrelated new session absent.",
+      "Same revision checkpoint_contract.py:60-87 enforces the surviving invariant, and brick_test.py:224-243 schedules each old-session check after the matching host's new-session check. These references are under releasing/mac-vm-test/. Source only."
+    ],
+    "coverage_checked": {
+      "SPEC.md and SPEC_impl.md": "Searched survival, old-session and terminal-host terms; the product preserves host terminals, but source rather than product correctness refutes this test-premise concern.",
+      "TODO.md Planned": "Empty.",
+      "plans/queue": "Landed tmux-tooling plan supplies context only; no unlanded exact fix found.",
+      "BUGS.md": "No exact match.",
+      "INDEX.md and queue": "No exact removed-sample item in the full index. Read nearby old-process, installer-prerequisite, brick-budget and native-app-binding items; their premises differ.",
+      "TRIAGE_OUTCOMES.md": "Separate old-process/installer oracle decisions do not cover this survival-sample claim.",
+      "FILTER.md": "Not used; direct caller/data-lifetime source check."
+    },
+    "exact_cover_quotes": [],
+    "missing_premise": null,
+    "original_stronger_consequence": "Deleting the new-session sample might let the release gate accept a replaced old session. Refutation is limited to the examined survival/restart inputs; it does not certify all oracle premises or live execution.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Close the narrow removed-input hypothesis as source-refuted. It is distinct from g198/c3, which concerns earlier GUI observations and retained stored-kind checks."
+  },
+  {
+    "key": "g199/c2",
+    "latest_line": 10,
+    "recommendation": "duplicate",
+    "bucket": "other",
+    "underlying_key": "mac-brick-terminal-host-only-baseline",
+    "aliases": ["g198/c1"],
+    "target_queue_file": null,
+    "why": "This is the test-side view of g198/c1's exact support narrowing. Preserve its additional fail-closed test evidence with that record; do not decide the canonical record's proposed contract-based dismissal by deduplication.",
+    "checks": [
+      "6f1a36144ede6f87c33c0bfedd871c208cc930d4:releasing/mac-vm-test/test_guest_operations.py:939-961 refuses zero hosts, multiple hosts and childless hosts; :963-977 refuses earlier retained no-host baselines.",
+      "Pinned git grep for previous_can_create_hosts and require_agent_terminal under releasing/mac-vm-test returns no matches, so no checked caller retains either removed symbol.",
+      "Same revision BRICK-TEST.md:420-422,440-441 explicitly excludes no-host fixtures and delegates old-terminal shutdown coverage. Separate supervisor Rust tests and product retirement correctness were not examined or run."
+    ],
+    "coverage_checked": {
+      "SPEC.md and SPEC_impl.md": "Accept legacy-terminal retirement, but do not explicitly specify historical brick-baseline support. Same ambiguity as g198/c1.",
+      "TODO.md Planned": "Empty.",
+      "plans/queue": "tmux-drop-from-tooling criterion 5/Decisions explicitly authorizes the removal; REPORTS.md:31 says landed, so not pending-plan cover.",
+      "BUGS.md": "No exact match.",
+      "INDEX.md and queue": "No current exact queue item. Exact named-record alias is g198/c1.",
+      "TRIAGE_OUTCOMES.md": "No exact baseline-support decision found.",
+      "FILTER.md": "No filter used."
+    },
+    "exact_cover_quotes": [
+      "6f1:BRICK-TEST.md:421-422: a previous stable that runs the session anywhere else cannot be tested this way."
+    ],
+    "missing_premise": "Parent's disposition of the explicit accepted support limitation, as described under g198/c1.",
+    "original_stronger_consequence": "Deleting tmux and source-layout tests could silently remove promised release coverage. Removal is explicit and replacement fixtures fail closed, but the lost historical-fixture coverage is real. No catastrophic tooling or user-work consequence was demonstrated.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Reconcile as one root with g198/c1, retaining the test-side evidence. The original contract-acceptance drop remains a proposal, not an approved parent outcome."
+  },
+  {
+    "key": "g199/c3",
+    "latest_line": 9,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "mac-brick-remote-new-session-lifetime-instruction",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "Both delivered instruction envelopes retain the new remote session for Remove and Uninstall. The relaxed local-session lifetime does not remove that remote premise.",
+    "checks": [
+      "6f1a36144ede6f87c33c0bfedd871c208cc930d4:releasing/mac-vm-test/guest_workflow.py:335-343,444-454 retains the remote keep-running instruction; local :327-334,438-443 leaves the old session untouched without needing the unrelated new local session.",
+      "Same revision test_guest_workflow.py:123-138 checks both envelopes and requires the keep-running phrase exactly for remote. Its class documentation :60-66 limits this to instruction delivery.",
+      "Same revision brick_test.py:239-241,807-810 carries remote-supervisor-agent, remote-old-session, Remove and Uninstall in order. checkpoint_contract.py:263-298 requires Remove to recover the same sessions, then stops both before Uninstall. :146-169 separately validates managed resources/data; session behavior remains a UI observation.",
+      "BRICK-TEST.md:413-414 and RECIPE.md:124-135 retain the remote lifetime requirement. All unqualified paths above are under releasing/mac-vm-test/. No model-following or runtime behavior was observed."
+    ],
+    "coverage_checked": {
+      "SPEC.md and SPEC_impl.md": "Searched relevant remote-session/Remove/Uninstall and brick terms; no acceptance of dropping the test premise found or needed for refutation.",
+      "TODO.md Planned": "Empty.",
+      "plans/queue": "No unlanded plan covering this exact instruction-removal hypothesis; landed tmux-tooling plan is context.",
+      "BUGS.md": "No exact match.",
+      "INDEX.md and queue": "Full index and nearby release-tool records show no alias for this remote instruction premise. Mac-uninstall-live-host-premise is a different native Rust fixture boundary.",
+      "TRIAGE_OUTCOMES.md": "No exact remote lifetime instruction decision found.",
+      "FILTER.md": "Not used."
+    },
+    "exact_cover_quotes": [],
+    "missing_premise": null,
+    "original_stronger_consequence": "Relaxing new-session instructions might remove the running remote session required to judge host Remove and Uninstall. Only instruction delivery and later caller order are established; live adherence is not certified.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Close the specific deleted-lifetime-instruction hypothesis as source-refuted, without certifying the runtime release gate."
+  },
+  {
+    "key": "g199/c4",
+    "latest_line": 11,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "mac-brick-test-class-rename-stale-selector",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "No repository selector of either old class name remains in the checked release-test tooling. The classes retain unittest discovery shape.",
+    "checks": [
+      "Pinned git grep at 6f1a36144ede6f87c33c0bfedd871c208cc930d4 for TerminalTransitionTests, TerminalTransitionInstructionsTests, OldSessionTests and OldSessionInstructionsTests under releasing/mac-vm-test, scripts, .github, .agents/validation.md and .agents/run-all-tests.md returns only the two new class definitions.",
+      "Pinned test_guest_operations.py:756 and test_guest_workflow.py:60 derive from unittest.TestCase and retain test_ methods. Both paths are under releasing/mac-vm-test/. No discovery command was executed."
+    ],
+    "coverage_checked": {
+      "SPEC.md and SPEC_impl.md": "No test-class selector contract found in claim-specific searches.",
+      "TODO.md Planned": "Empty.",
+      "plans/queue": "No old/new-class-name or exact stale-selector match.",
+      "BUGS.md": "No exact match.",
+      "INDEX.md and queue": "No exact stale-selector item in the full index.",
+      "TRIAGE_OUTCOMES.md": "No exact class-rename decision found.",
+      "FILTER.md": "Not used; no stale source caller found."
+    },
+    "exact_cover_quotes": [],
+    "missing_premise": "Private external selectors are outside the available evidence; no affected one was identified.",
+    "original_stronger_consequence": "Renaming the classes might lose or fail release-test execution through stale class selectors. Refutation covers only the searched repository tooling, not private external commands.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Preserve the rejected-discovery candidate as source-refuted for checked repository callers."
+  },
+  {
+    "key": "g199/c5",
+    "latest_line": 12,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "mac-brick-remote-host-return-value-cleanup-ownership",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The unittest cleanup retains the process object before the launch helper returns. Removing the caller's local binding does not remove cleanup ownership.",
+    "checks": [
+      "6f1a36144ede6f87c33c0bfedd871c208cc930d4:releasing/mac-vm-test/test_guest_operations.py:1104-1106 registers self.stop_host with the exact Popen object before readiness checks at :1107-1109 and return.",
+      "Same file :1159 discards only the returned pair; :1111-1117 closes host stdin, waits with a ten-second bound and closes stdout. Child-owning script :1096-1103 closes child stdin and waits when host stdin ends.",
+      "This establishes source-level ownership only. Unrelated existing teardown-failure handling and actual process cleanup were not certified or executed."
+    ],
+    "coverage_checked": {
+      "SPEC.md and SPEC_impl.md": "No contract requiring a local binding for this maintainer fixture; no exact coverage match found.",
+      "TODO.md Planned": "Empty.",
+      "plans/queue": "No start_host/stop_host or exact discarded-return ownership cover.",
+      "BUGS.md": "No exact match.",
+      "INDEX.md and queue": "Full index contains other fixture lifetime gaps, but none has this helper's already-registered cleanup and removed local binding as its trigger.",
+      "TRIAGE_OUTCOMES.md": "No exact ownership decision found.",
+      "FILTER.md": "Not used; direct source ownership refutation."
+    },
+    "exact_cover_quotes": [],
+    "missing_premise": null,
+    "original_stronger_consequence": "Discarding the second remote-host return could lose ownership of a live fixture process or its pipes. These are owned maintainer-test resources; no catastrophic or user-owned-work loss was established.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Preserve this rejected-discovery candidate as refuted only for the removed-binding hypothesis."
+  },
+  {
+    "key": "g199/c6",
+    "latest_line": 13,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "mac-brick-generation-negative-case-refusal-isolation",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The changed fixtures distinguish pre-comparison generation movement from post-Restart generation/host failures, and their asserted messages distinguish the examined refusal paths.",
+    "checks": [
+      "6f1a36144ede6f87c33c0bfedd871c208cc930d4:releasing/mac-vm-test/test_guest_operations.py:883-888 keeps host/child identity but changes pre-comparison generation, asserts session_survived false and host_survived true, then requires did not survive.",
+      "Same file :889-895 keeps survival generation valid and separately varies leaked old host, missing new host and unchanged final generation, expecting different error fragments. The unchanged-generation case includes exactly one new host and no old host; host-specific cases use a later generation.",
+      "Helpers :796-807 and :831-846 supply nonempty captured conversation and independently staged samples. Positive case :868-870 must pass. checkpoint_contract.py:75-87 checks survival, generation/capture, appeared-host count and old-host absence in that order. All paths are under releasing/mac-vm-test/. No execution or mutation experiment was performed."
+    ],
+    "coverage_checked": {
+      "SPEC.md and SPEC_impl.md": "Product lifecycle/host-survival contracts are context; product correctness was not used to dismiss this oracle concern.",
+      "TODO.md Planned": "Empty.",
+      "plans/queue": "No unlanded plan covering these exact changed generation cases.",
+      "BUGS.md": "No exact match.",
+      "INDEX.md and queue": "Read old-process-regression-misses-cli-premise.md and installer-prerequisite-test-conflates-two-guards.md in full. They concern different fixtures and omitted competing prerequisites; neither is an alias or cover for these generation cases.",
+      "TRIAGE_OUTCOMES.md": "The corresponding active old-process and installer-prerequisite decisions at :208-254 are separate and do not settle these cases.",
+      "FILTER.md": "Not used; examined test-oracle premise is present."
+    },
+    "exact_cover_quotes": [],
+    "missing_premise": null,
+    "original_stronger_consequence": "Negative tests might pass on a competing refusal and miss regression of the new generation contract. Refutation is limited to the changed generation/host cases and does not claim every malformed receipt is tested or that a live gate passed.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Preserve the rejected-discovery candidate as source-refuted for the named refusal-isolation concern."
+  }
+]

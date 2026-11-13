@@ -1,0 +1,62 @@
+[
+  {
+    "key": "g185/c1",
+    "latest_line": 5,
+    "recommendation": "retain-verified",
+    "bucket": "other",
+    "underlying_key": "events-test-cross-realm-array-example-reference",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The reviewed patch replaces an accurate example reference with a file that does not demonstrate the claimed technique. This is an in-scope source-comment error, with misleading navigation for maintainers and no established product failure.",
+    "checks": [
+      "f560058da19e02716e6f943883a9508b447aff4e:crates/farhelm-ui/js-tests/events.test.js:140-150 explicitly says paste-sanitizer.test.js uses Array.from for the same cross-realm workaround; the patch changes only the referenced filename at line 145.",
+      "Read complete f560058da19e02716e6f943883a9508b447aff4e:crates/farhelm-ui/js-tests/paste-sanitizer.test.js:1-60. Its VM test compares typeof and a primitive string; it contains no Array.from or sandbox-array structural comparison.",
+      "f560058da19e02716e6f943883a9508b447aff4e^:crates/farhelm-ui/js-tests/term-bytes.test.js:108-116 explains cross-realm Uint8Array prototypes and uses Array.from, establishing that the filename replacement introduced the error.",
+      "Explicit ancestor checks place f560058da19e02716e6f943883a9508b447aff4e after the review base and before the review tip. No runtime test or reproduction was run."
+    ],
+    "coverage_checked": [
+      "SPEC.md and SPEC_impl.md: searched cross-realm, Array.from, paste-sanitizer, term-bytes and related shortcut/terminal-input terms; no accepted rule covers a false test-example reference.",
+      "TODO.md: Planned is empty at lines 25-26.",
+      "plans/queue: searched the actual filenames, cross-realm and Array.from; none match. Read tmux-drop-from-docs.md acceptance criteria 3 and 5 in full: its sweep addresses tmux/xterm comparisons and related complexity, not this now sanitizer-named cross-realm reference. The broader sweep does not explicitly remove this cause. tmux-end-old-terminals.md criteria 4-5 describe the already implemented removal, not an unlanded repair for the false reference.",
+      "BUGS.md and active TRIAGE_OUTCOMES.md: searched the actual filenames and cross-realm/Array.from terms; no match. The archive was not read.",
+      "Read review_feedback_queue/INDEX.md in full and searched queue files for cross-realm, Array.from, paste-sanitizer and term-bytes. The only Array.from hit concerns sandbox shard allocation and is unrelated. No same-root queue alias found.",
+      "FILTER.md: no filter covers an ordinary persistent false source-comment reference. The initial severity/actionability omission is not a listed filter."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": null,
+    "original_stronger_consequence": "No stronger consequence was asserted. Initial line 1 proposed omitting the misleading example because it changed no runtime contract and the local explanation was self-contained. Lines 3 and 5 explicitly supersede that proposed omission; the established consequence remains misleading maintainer navigation, without a security or user-work-loss route.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Record an other-priority documentation-correctness finding. The source establishes the false example and its introduction within the range. No exact coverage or filter applies; runtime correctness does not refute the comment defect."
+  },
+  {
+    "key": "g185/c2",
+    "latest_line": 4,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "removed-xterm-shortcut-selector-excludes-live-terminal-input",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The specific proposed input-target mismatch is source-refuted: both narrowed selectors still match the actual terminal keyboard textarea. No shortcut regression is established. This proposes a disposition only; the original possible forwarding consequence remains preserved for the parent's drop check.",
+    "checks": [
+      "f560058da19e02716e6f943883a9508b447aff4e:crates/farhelm-ui/assets/session-action-shortcuts.js:21-28 removes only the xterm selector and retains closest('.grid-terminal-input'); lines 38-54 install window capture, prevent default and stop propagation before clicking the existing guarded action.",
+      "f560058da19e02716e6f943883a9508b447aff4e:crates/farhelm-ui/assets/template-shortcuts.js:127-143 retains matches('.grid-terminal-input'); lines 199-282 install window capture and stopImmediatePropagation for consumed keys. A real terminal textarea is itself the event target and needs no editable-descendant closest match.",
+      "f560058da19e02716e6f943883a9508b447aff4e:crates/farhelm-ui/assets/grid-terminal.js:364-388 creates a textarea with class grid-terminal-input; lines 1511-1534 attach its keydown and typed-input paths, and lines 1871-1872 focus that same textarea.",
+      "f560058da19e02716e6f943883a9508b447aff4e:crates/farhelm-ui/assets/terminal.js:3387-3393 creates the grid surface; lines 4311-4318 call window.farhelmGridTerminal.create. crates/farhelm-ui/src/lib.rs:1742-1762 embeds and installs the two checked shortcut assets.",
+      "Explicit ancestor checks place the selector patch within the review range. These are source checks only, with no claimed browser pass or runtime observation."
+    ],
+    "coverage_checked": [
+      "SPEC.md:1230-1285 and 3357-3376 require terminal-focused template/session shortcuts to consume their keys while ordinary editors and visible modals retain ownership. They support the intended boundary; they do not accept forwarding into a terminal program.",
+      "SPEC_impl.md:1614-1658 describes capture listeners consuming the terminal input proxy before the terminal. This agrees with checked source, without establishing an exception for failed interception.",
+      "TODO.md: Planned is empty at lines 25-26.",
+      "plans/queue: searches for shortcut, terminal-input and selector terms found no unlanded repair for this exact route. Read tmux-end-old-terminals.md acceptance criteria 4-5: it explicitly removes dual selectors and mounts the grid unconditionally, explaining the patch's intent, not accepting a regression. The tooling/docs plans address their respective tmux removal scopes, not loss of shortcut interception.",
+      "BUGS.md and active TRIAGE_OUTCOMES.md: no exact trigger/consequence/scope match. Other shortcut decisions concern stale labels, batch snapshots or auth-remount state, not the actual grid input class. The archive was not read.",
+      "Read review_feedback_queue/INDEX.md in full and searched queue files for the actual class names, asset names and selector/shortcut combinations. No same-root item found.",
+      "FILTER.md: no filter is needed or proposed; the basis is the retained selector matching the actual DOM."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": "The suspected regression requires a shipped terminal keyboard target excluded by the retained selector. Checked source instead creates, focuses and listens on the matching grid-terminal-input textarea.",
+    "original_stronger_consequence": "Lines 2 and 4 considered Delete or template-sequence keystrokes being forwarded into the terminal program after selector narrowing, hypothetically high for material UX. No actual program-input sequence, wrong-target deletion, security effect or loss of user-owned work was established. Both records propose source refutation; neither claims an accepted drop.",
+    "needs_independent_drop_check": true,
+    "proposed_basis": "Propose refuting only the removed-selector/live-target mismatch. Other is the bookkeeping bucket because no adverse consequence is established; the original suspected shortcut regression would be high if shown. Obtain the parent's independent drop check because the dismissed route concerns unintended input into a user's running program and could involve user-owned work. This consultation does not authorize that drop."
+  }
+]

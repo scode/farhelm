@@ -1,0 +1,889 @@
+{
+  "group": {
+    "id": "g098",
+    "domain": "supervisor-terminal-host-lifecycle",
+    "purpose": "supervisor-terminal-host-lifecycle: crates/farhelm-supervisor/src/service/core/tests/host_terminals.rs, crates/farhelm-supervisor/src/hosts/stop.rs, crates/farhelm-supervisor/src/hosts/terminal.rs, crates/farhelm-supervisor/src/hosts/terminal/test_host.rs, crates/farhelm-supervisor/src/hosts/terminal/tests.rs, crates/farhelm-supervisor/src/launch.rs, crates/farhelm-supervisor/src/procs.rs, crates/farhelm-supervisor/src/scope.rs, crates/farhelm-supervisor/src/service/core/host_handover.rs, crates/farhelm-supervisor/src/service/core/host_launch.rs, crates/farhelm-supervisor/src/service/core/host_reclaim.rs, crates/farhelm-supervisor/src/hosts/spawn.rs, crates/farhelm-supervisor/src/hosts/mod.rs; phases complete small per-commit changes",
+    "interfaces": [
+      "g001",
+      "g005",
+      "g006",
+      "g007",
+      "g008",
+      "g009",
+      "g010",
+      "g011",
+      "g012",
+      "g097",
+      "g099",
+      "g100",
+      "g101",
+      "g102",
+      "g103",
+      "g104",
+      "g105",
+      "g106",
+      "g107",
+      "g108",
+      "g109",
+      "g110",
+      "g111",
+      "g112",
+      "g113",
+      "g114",
+      "g115",
+      "g116",
+      "g159",
+      "g160",
+      "g161",
+      "g162",
+      "g163",
+      "g164",
+      "g165",
+      "g166",
+      "g167",
+      "g168",
+      "g169",
+      "g170",
+      "g171",
+      "g172",
+      "g173"
+    ],
+    "sources": [
+      {
+        "path": "[private-run]/prep/parts/00869-000.patch",
+        "ranges": [
+          [
+            1,
+            81
+          ]
+        ],
+        "original_path": "crates/farhelm-supervisor/src/service/core/tests/host_terminals.rs",
+        "commit": "dbfc69751215dbf15e1d31d5bed73c3754c4ebc4",
+        "notes": "patch header; patch character offsets [0,4031)",
+        "lines": 81,
+        "bytes": 4031,
+        "start": 0,
+        "end": 4031,
+        "original": "[private-run]/prep/originals/00869.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/00911-000.patch",
+        "ranges": [
+          [
+            1,
+            23
+          ]
+        ],
+        "original_path": "crates/farhelm-supervisor/src/hosts/stop.rs",
+        "commit": "1ed482dde220452e424973faf38a5e1318986333",
+        "notes": "patch header; patch character offsets [0,1454)",
+        "lines": 23,
+        "bytes": 1454,
+        "start": 0,
+        "end": 1454,
+        "original": "[private-run]/prep/originals/00911.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/00912-000.patch",
+        "ranges": [
+          [
+            1,
+            288
+          ]
+        ],
+        "original_path": "crates/farhelm-supervisor/src/hosts/terminal.rs",
+        "commit": "1ed482dde220452e424973faf38a5e1318986333",
+        "notes": "patch header; patch character offsets [0,15224)",
+        "lines": 288,
+        "bytes": 15224,
+        "start": 0,
+        "end": 15224,
+        "original": "[private-run]/prep/originals/00912.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/00913-000.patch",
+        "ranges": [
+          [
+            1,
+            33
+          ]
+        ],
+        "original_path": "crates/farhelm-supervisor/src/hosts/terminal/test_host.rs",
+        "commit": "1ed482dde220452e424973faf38a5e1318986333",
+        "notes": "patch header; patch character offsets [0,1437)",
+        "lines": 33,
+        "bytes": 1437,
+        "start": 0,
+        "end": 1437,
+        "original": "[private-run]/prep/originals/00913.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/00914-000.patch",
+        "ranges": [
+          [
+            1,
+            109
+          ]
+        ],
+        "original_path": "crates/farhelm-supervisor/src/hosts/terminal/tests.rs",
+        "commit": "1ed482dde220452e424973faf38a5e1318986333",
+        "notes": "patch header; patch character offsets [0,4327)",
+        "lines": 109,
+        "bytes": 4327,
+        "start": 0,
+        "end": 4327,
+        "original": "[private-run]/prep/originals/00914.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/00915-000.patch",
+        "ranges": [
+          [
+            1,
+            167
+          ]
+        ],
+        "original_path": "crates/farhelm-supervisor/src/launch.rs",
+        "commit": "1ed482dde220452e424973faf38a5e1318986333",
+        "notes": "patch header; patch character offsets [0,10155)",
+        "lines": 167,
+        "bytes": 10183,
+        "start": 0,
+        "end": 10155,
+        "original": "[private-run]/prep/originals/00915.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/00918-000.patch",
+        "ranges": [
+          [
+            1,
+            58
+          ]
+        ],
+        "original_path": "crates/farhelm-supervisor/src/procs.rs",
+        "commit": "1ed482dde220452e424973faf38a5e1318986333",
+        "notes": "patch header; patch character offsets [0,3390)",
+        "lines": 58,
+        "bytes": 3390,
+        "start": 0,
+        "end": 3390,
+        "original": "[private-run]/prep/originals/00918.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/00920-000.patch",
+        "ranges": [
+          [
+            1,
+            102
+          ]
+        ],
+        "original_path": "crates/farhelm-supervisor/src/scope.rs",
+        "commit": "1ed482dde220452e424973faf38a5e1318986333",
+        "notes": "patch header; patch character offsets [0,6209)",
+        "lines": 102,
+        "bytes": 6223,
+        "start": 0,
+        "end": 6209,
+        "original": "[private-run]/prep/originals/00920.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/00924-000.patch",
+        "ranges": [
+          [
+            1,
+            127
+          ]
+        ],
+        "original_path": "crates/farhelm-supervisor/src/service/core/host_handover.rs",
+        "commit": "1ed482dde220452e424973faf38a5e1318986333",
+        "notes": "patch header; patch character offsets [0,6610)",
+        "lines": 127,
+        "bytes": 6610,
+        "start": 0,
+        "end": 6610,
+        "original": "[private-run]/prep/originals/00924.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/00925-000.patch",
+        "ranges": [
+          [
+            1,
+            89
+          ]
+        ],
+        "original_path": "crates/farhelm-supervisor/src/service/core/host_launch.rs",
+        "commit": "1ed482dde220452e424973faf38a5e1318986333",
+        "notes": "patch header; patch character offsets [0,4251)",
+        "lines": 89,
+        "bytes": 4251,
+        "start": 0,
+        "end": 4251,
+        "original": "[private-run]/prep/originals/00925.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/00926-000.patch",
+        "ranges": [
+          [
+            1,
+            32
+          ]
+        ],
+        "original_path": "crates/farhelm-supervisor/src/service/core/host_reclaim.rs",
+        "commit": "1ed482dde220452e424973faf38a5e1318986333",
+        "notes": "patch header; patch character offsets [0,1393)",
+        "lines": 32,
+        "bytes": 1393,
+        "start": 0,
+        "end": 1393,
+        "original": "[private-run]/prep/originals/00926.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/01045-000.patch",
+        "ranges": [
+          [
+            1,
+            29
+          ]
+        ],
+        "original_path": "crates/farhelm-supervisor/src/hosts/terminal.rs",
+        "commit": "f560058da19e02716e6f943883a9508b447aff4e",
+        "notes": "patch header; patch character offsets [0,1191)",
+        "lines": 29,
+        "bytes": 1191,
+        "start": 0,
+        "end": 1191,
+        "original": "[private-run]/prep/originals/01045.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/01279-000.patch",
+        "ranges": [
+          [
+            1,
+            19
+          ]
+        ],
+        "original_path": "crates/farhelm-supervisor/src/hosts/spawn.rs",
+        "commit": "500548b9253b07a26fd03119679184b69544e31d",
+        "notes": "patch header; patch character offsets [0,1159)",
+        "lines": 19,
+        "bytes": 1159,
+        "start": 0,
+        "end": 1159,
+        "original": "[private-run]/prep/originals/01279.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/01535-000.patch",
+        "ranges": [
+          [
+            1,
+            20
+          ]
+        ],
+        "original_path": "crates/farhelm-supervisor/src/hosts/mod.rs",
+        "commit": "08399d092d20815ced6619c26df2391944ae2b4a",
+        "notes": "patch header; patch character offsets [0,1136)",
+        "lines": 20,
+        "bytes": 1136,
+        "start": 0,
+        "end": 1136,
+        "original": "[private-run]/prep/originals/01535.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/01536-000.patch",
+        "ranges": [
+          [
+            1,
+            17
+          ]
+        ],
+        "original_path": "crates/farhelm-supervisor/src/hosts/terminal.rs",
+        "commit": "08399d092d20815ced6619c26df2391944ae2b4a",
+        "notes": "patch header; patch character offsets [0,997)",
+        "lines": 17,
+        "bytes": 997,
+        "start": 0,
+        "end": 997,
+        "original": "[private-run]/prep/originals/01536.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/01537-000.patch",
+        "ranges": [
+          [
+            1,
+            12
+          ]
+        ],
+        "original_path": "crates/farhelm-supervisor/src/hosts/terminal/test_host.rs",
+        "commit": "08399d092d20815ced6619c26df2391944ae2b4a",
+        "notes": "patch header; patch character offsets [0,831)",
+        "lines": 12,
+        "bytes": 831,
+        "start": 0,
+        "end": 831,
+        "original": "[private-run]/prep/originals/01537.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/01598-000.patch",
+        "ranges": [
+          [
+            1,
+            20
+          ]
+        ],
+        "original_path": "crates/farhelm-supervisor/src/launch.rs",
+        "commit": "4b489b4f2eeade14f119b186ecb16eeaaf027021",
+        "notes": "patch header; patch character offsets [0,1154)",
+        "lines": 20,
+        "bytes": 1154,
+        "start": 0,
+        "end": 1154,
+        "original": "[private-run]/prep/originals/01598.patch"
+      }
+    ],
+    "lines": 1226,
+    "bytes": 64991
+  },
+  "records": [
+    {
+      "key": "g098/c1",
+      "owner": "g098",
+      "id": "c1",
+      "domain": "supervisor-terminal-host-lifecycle",
+      "purpose": "supervisor-terminal-host-lifecycle: crates/farhelm-supervisor/src/service/core/tests/host_terminals.rs, crates/farhelm-supervisor/src/hosts/stop.rs, crates/farhelm-supervisor/src/hosts/terminal.rs, crates/farhelm-supervisor/src/hosts/terminal/test_host.rs, crates/farhelm-supervisor/src/hosts/terminal/tests.rs, crates/farhelm-supervisor/src/launch.rs, crates/farhelm-supervisor/src/procs.rs, crates/farhelm-supervisor/src/scope.rs, crates/farhelm-supervisor/src/service/core/host_handover.rs, crates/farhelm-supervisor/src/service/core/host_launch.rs, crates/farhelm-supervisor/src/service/core/host_reclaim.rs, crates/farhelm-supervisor/src/hosts/spawn.rs, crates/farhelm-supervisor/src/hosts/mod.rs; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 1,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c1",
+            "state": "open",
+            "summary": "moved host probes preserve identity and final-output boundaries",
+            "location": "crates/farhelm-supervisor/src/hosts/terminal.rs:2571",
+            "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. TLDR: considered whether moving lifecycle decisions from the terminal wrapper could signal a reused process or classify a failed launch before final output arrived. Source checks: parent service/terminals.rs:170-239 and new hosts/terminal.rs:713-860,2554-2617 preserve the host branch: the probe uses the pinned child identity; sweep_root rechecks live_root and rejects a mismatched pid or unreadable host; holds_final_state waits for processed exit evidence with the same watch/timeout loop. Contract: SPEC_impl.md Terminal host, terminal switch points, requires pinned roots and exit-record processing before terminal-based classification. Suggested bucket: highest if the hypothetical reused-process kill existed; no defect established. Could-be-highest: yes, considered unintended process termination. Confidence: confirmed source equivalence for the moved helpers; no execution. proposed_drop: source refutation, the host logic is preserved rather than reading a fresh identity from a bare pid. possible_cover: none. Caveat: callers still need review; this record closes only the helper-move concern."
+          }
+        },
+        {
+          "line": 5,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c1",
+            "state": "open",
+            "summary": "moved host probes preserve identity and final-output boundaries",
+            "location": "crates/farhelm-supervisor/src/hosts/terminal.rs:2571",
+            "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. TLDR: considered whether moving lifecycle decisions from the terminal wrapper could signal a reused process or classify a failed launch before final output arrived. Source checks: parent service/terminals.rs:170-239 and new hosts/terminal.rs:713-860,2554-2617 preserve the host branch: the probe uses the pinned child identity; sweep_root rechecks live_root and rejects a mismatched pid or unreadable host; holds_final_state waits for processed exit evidence with the same watch/timeout loop. Caller checks completed: Stop at service/handlers.rs:861-915 probes and captures the pinned root before durable I/O, refusing unreadability; dead-terminal inference at 1009-1040 awaits final state and defers inference on timeout. Restart at service/core.rs:12380-12415 and tab reap at 14126-14142 use the same Running-pid/sweep_root boundary. Contract: SPEC_impl.md Terminal host, terminal switch points, requires pinned roots and exit-record processing before terminal-based classification. Suggested bucket: highest if the hypothetical reused-process kill existed; no defect established. Could-be-highest: yes, considered unintended process termination. Confidence: confirmed source equivalence and checked callers; no execution. proposed_drop: source refutation, the host logic is preserved rather than reading a fresh identity from a bare pid. possible_cover: none. Caveat: this establishes the reviewed helper and caller contracts, not every possible lifecycle interleaving."
+          }
+        },
+        {
+          "line": 7,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c1",
+            "state": "open",
+            "summary": "moved host probes preserve identity and final-output boundaries",
+            "location": "crates/farhelm-supervisor/src/hosts/terminal.rs:2571",
+            "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. TLDR: considered whether moving lifecycle decisions from the terminal wrapper could signal a reused process, losing user-owned work, or durably classify a failed launch before its final output arrived. Original potential process-loss consequence is preserved for independent drop checking; no shipped route to such a kill was established in this move. Source checks: parent service/terminals.rs:170-239 and new hosts/terminal.rs:713-860,2554-2617 preserve the host branch. probe uses the adoption-pinned child identity; sweep_root rechecks live_root, rejects a different pid or unreadable host, and returns the existing start token rather than capturing a new identity from the probe's bare pid. Initial caller checks: Stop at service/handlers.rs:861-915 captures that tuple before durable I/O; Restart at service/core.rs:12380-12415 and tab reap at 14126-14142 use the Running-pid/sweep_root boundary. Repair-turn synthesis checked the downstream boundary: service/sweep.rs:1432-1439 passes each carried tuple to validate_root_identity; 1574-1623 compares its expected start token with the current process and rejects changed/missing identity, propagating unreadability. Delete's separate path at service/teardown.rs:320-345 uses pinned_child_root instead of this helper, and service/session_hosts.rs:510-547 pins recorded-host roots over the connection and refuses an unpinned running child. These checks bound the refutation to root construction and admission, not every signal or descendant-selection mechanism. Final-output synthesis: holds_final_state waits for processed exit evidence with the same watch/timeout loop as the old wrapper; handlers.rs:1009-1058 gates wrapper_failure_detail with final_state && dead and records a plain exit when the record has not arrived. launch_artifacts.rs:60-76 independently checks processed-exit evidence before appending screen text. Contract: SPEC_impl.md Terminal host, terminal switch points and Launch failure classification, requires pinned roots and processed exit records before terminal-based launch inference. Suggested bucket: highest if the hypothetical reused-process kill existed; other for incomplete launch-error diagnostics; no defect established. Could-be-highest: yes, unintended termination of another user-owned process was the original concern. Confidence: confirmed source-based refutation for the helper move and inspected caller/downstream boundaries; no execution. proposed_drop: source refutation, the host identity tuple survives the move and is revalidated before root admission, while final-output inference retains its processed-exit gate. possible_cover: parent reports g101/c2 independently checks preserved pinned identities; no coverage files consulted. Caveat: this is not a repository-wide proof against process loss, a proof of all lifecycle races, or validation of every later descendant signal. The original potential highest concern remains explicit for independent review."
+          }
+        }
+      ],
+      "latest": {
+        "line": 7,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c1",
+          "state": "open",
+          "summary": "moved host probes preserve identity and final-output boundaries",
+          "location": "crates/farhelm-supervisor/src/hosts/terminal.rs:2571",
+          "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. TLDR: considered whether moving lifecycle decisions from the terminal wrapper could signal a reused process, losing user-owned work, or durably classify a failed launch before its final output arrived. Original potential process-loss consequence is preserved for independent drop checking; no shipped route to such a kill was established in this move. Source checks: parent service/terminals.rs:170-239 and new hosts/terminal.rs:713-860,2554-2617 preserve the host branch. probe uses the adoption-pinned child identity; sweep_root rechecks live_root, rejects a different pid or unreadable host, and returns the existing start token rather than capturing a new identity from the probe's bare pid. Initial caller checks: Stop at service/handlers.rs:861-915 captures that tuple before durable I/O; Restart at service/core.rs:12380-12415 and tab reap at 14126-14142 use the Running-pid/sweep_root boundary. Repair-turn synthesis checked the downstream boundary: service/sweep.rs:1432-1439 passes each carried tuple to validate_root_identity; 1574-1623 compares its expected start token with the current process and rejects changed/missing identity, propagating unreadability. Delete's separate path at service/teardown.rs:320-345 uses pinned_child_root instead of this helper, and service/session_hosts.rs:510-547 pins recorded-host roots over the connection and refuses an unpinned running child. These checks bound the refutation to root construction and admission, not every signal or descendant-selection mechanism. Final-output synthesis: holds_final_state waits for processed exit evidence with the same watch/timeout loop as the old wrapper; handlers.rs:1009-1058 gates wrapper_failure_detail with final_state && dead and records a plain exit when the record has not arrived. launch_artifacts.rs:60-76 independently checks processed-exit evidence before appending screen text. Contract: SPEC_impl.md Terminal host, terminal switch points and Launch failure classification, requires pinned roots and processed exit records before terminal-based launch inference. Suggested bucket: highest if the hypothetical reused-process kill existed; other for incomplete launch-error diagnostics; no defect established. Could-be-highest: yes, unintended termination of another user-owned process was the original concern. Confidence: confirmed source-based refutation for the helper move and inspected caller/downstream boundaries; no execution. proposed_drop: source refutation, the host identity tuple survives the move and is revalidated before root admission, while final-output inference retains its processed-exit gate. possible_cover: parent reports g101/c2 independently checks preserved pinned identities; no coverage files consulted. Caveat: this is not a repository-wide proof against process loss, a proof of all lifecycle races, or validation of every later descendant signal. The original potential highest concern remains explicit for independent review."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g098/findings.jsonl",
+        "id": "c1",
+        "line": 7,
+        "disposition": "under-investigation",
+        "group": "g098-c1",
+        "reason": "Record durably acknowledged; parent source/contract validation, cross-group synthesis, coverage/filter matching and any independent drop check remain pending. This preserves the claim and uncertainty without accepting, dropping or lowering it."
+      },
+      "accepted_parent_decision": null,
+      "returned_claim_checks": [
+        {
+          "batch": "claims-064",
+          "key": "g098/c1",
+          "latest_line": 7,
+          "recommendation": "refuted",
+          "bucket": "other",
+          "underlying_key": "moved-host-lifecycle-probe-pinned-root-final-state-hypothesis",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The helper move preserves pinned child identity and final-output gates in the inspected callers and downstream root admission. It does not establish the original hypothetical recycled-process kill or premature durable launch classification.",
+          "checks": [
+            "1ed482dde220452e424973faf38a5e1318986333^:service/terminals.rs:170-239 carries the pinned host root and processed-exit wait. New hosts/terminal.rs:737-751,818-860,2571-2612 preserves those decisions and never captures a replacement start token from the probe's bare pid.",
+            "1ed482dde220452e424973faf38a5e1318986333:service/handlers.rs:865-909 captures/refuses the root before durable I/O; service/core.rs:12381-12397 and :14128-14142 use the same probe/sweep_root boundary for Restart/tab reap.",
+            "Same revision:service/sweep.rs:1432-1439 revalidates carried tuples; :1574-1623 rejects changed/missing identities and propagates unreadability. This checks root admission, not every later signal or descendant mechanism.",
+            "Same revision:handlers.rs:1009-1053 gates wrapper_failure_detail on final_state && dead and otherwise records plain exit; launch_artifacts.rs:59-76 independently requires processed dead evidence before screen excerpts. No runtime observations."
+          ],
+          "coverage_checked": [
+            "Current SPEC_impl.md:2134-2150 and Launch failure classification :2603-2635 require pinned roots/processed exit evidence; SPEC.md terminal/lifecycle behavior does not accept the hypothetical wrong-process kill.",
+            "Searched both specifications, empty TODO Planned, plans/queue, BUGS.md, INDEX/matching pinned-root/probe/final-state terms, and active TRIAGE_OUTCOMES.md. No exact remaining defect/coverage item found. g101/c2 is only parent-reported overlap and was not supplied for exact alias checking.",
+            "No FILTER applied; this is a bounded source refutation, not a general PID-race acceptance."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": "A shipped route from this move that discards the adoption-pinned start token or bypasses processed-exit evidence would reopen the original concern. No such route was established.",
+          "original_stronger_consequence": "The helper move might signal a reused user process, losing work, or durably classify launch failure before final output. Preserve the potential highest process-loss consequence for independent drop checking; incomplete diagnostics alone would be other.",
+          "needs_independent_drop_check": true,
+          "proposed_basis": "Narrow source refutation of the helper move, checked lifecycle callers and root-admission/final-screen boundaries; no blanket lifecycle or signal-race proof."
+        }
+      ],
+      "parent_proposals": [
+        {
+          "artifact": "parent-flagged-judgments-064.json",
+          "key": "g098/c1",
+          "proposal": "claim-checks/claims-064/result.json",
+          "parent_proposal": "source-refuted-moved-terminal-probe-loses-pinned-root-or-final-output-gate",
+          "final_independent_gate": "required-before-original-highest-process-loss-drop",
+          "reason": "Full064 moved probe preserves adoption-pinned tuple rather than recapturing new start from barePID; Stop/Restart/tabreap carry through downstream root revalidation rejecting changed/unreadable identities. Final error detail requires processed dead/finalstate, separate artifact excerpt gate retained. Refute named helper-move root-admission/classification loss, not every later signal/descendant/race. Preserve reused-user-process work loss and incomplete-diagnostic distinction for gate; reported101c2 overlap not automatic alias."
+        }
+      ],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": true,
+        "provisional_bucket": "highest",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "moved-host-lifecycle-probe-pinned-root-final-state-hypothesis",
+        "destination": null
+      }
+    },
+    {
+      "key": "g098/c2",
+      "owner": "g098",
+      "id": "c2",
+      "domain": "supervisor-terminal-host-lifecycle",
+      "purpose": "supervisor-terminal-host-lifecycle: crates/farhelm-supervisor/src/service/core/tests/host_terminals.rs, crates/farhelm-supervisor/src/hosts/stop.rs, crates/farhelm-supervisor/src/hosts/terminal.rs, crates/farhelm-supervisor/src/hosts/terminal/test_host.rs, crates/farhelm-supervisor/src/hosts/terminal/tests.rs, crates/farhelm-supervisor/src/launch.rs, crates/farhelm-supervisor/src/procs.rs, crates/farhelm-supervisor/src/scope.rs, crates/farhelm-supervisor/src/service/core/host_handover.rs, crates/farhelm-supervisor/src/service/core/host_launch.rs, crates/farhelm-supervisor/src/service/core/host_reclaim.rs, crates/farhelm-supervisor/src/hosts/spawn.rs, crates/farhelm-supervisor/src/hosts/mod.rs; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 2,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c2",
+            "state": "open",
+            "summary": "removed stop notification belonged only to retired tmux seed path",
+            "location": "crates/farhelm-supervisor/src/service/core/host_handover.rs:311",
+            "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. TLDR: considered whether removing the orderly-stop notification strands a restart or an encoder during shutdown. Source checks: git grep over the parent found stop_began's sole waiting consumer in host_restart.rs:905-930, selecting against the tmux history-seed future; that retired branch explicitly logs reading the tmux pane's history. The new revision has no stop_began references. Host restart module docs and restart_seed at host_restart.rs:400-417 delegate encoding to the held host runtime; checkpoint_hosts_for_exit_with_slots at host_handover.rs:300-345 still sets stopping under the map lock and aborts or closes every gathered runtime. Contract: SPEC_impl.md Terminal host, Across supervisor restarts and Restarting a host agent, assigns cancellation to the host runtime. Suggested bucket: other for the suspected shutdown stall; no defect established. Could-be-highest: no established loss-of-work route in this concern. Confidence: confirmed source-based removal of an obsolete consumer; no execution. proposed_drop: source refutation, the notifier's only consumer was removed with the tmux seed path, and host cancellation is owned by its runtime. possible_cover: none. Caveat: this does not prove every shutdown timing interleaving; it rejects the missing-notification hypothesis."
+          }
+        },
+        {
+          "line": 6,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c2",
+            "state": "open",
+            "summary": "removed stop notification belonged only to retired tmux seed path",
+            "location": "crates/farhelm-supervisor/src/service/core/host_handover.rs:311",
+            "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. TLDR: considered whether removing the orderly-stop notification strands a restart or its encoder during shutdown. Original suspected consequence remains a shutdown stall; no process-loss route was established for this concern. Source checks from the initial pass: the parent's sole waiting stop_began consumer was host_restart.rs:905-930, selecting against the removed tmux history-seed future. Coverage-repair synthesis followed the surviving host path into its implementation: hosts/terminal.rs:2414-2420 abort sets the runtime's shared encode-cancel flag and aborts the task; history_seed at 2443-2451 sends a Seed request and awaits its oneshot, so a dropped runtime releases the waiter. seed_now at 3733-3765 passes that same cancel flag into history_seed_until on the blocking pool, counts the encode with RunningEncode, and restores the emulator on ordinary completion. Runtime::drop at 3020-3026 sets the same cancel flag even when the task is dropped by runtime shutdown. host_restart.rs:418-478 keeps the old runtime on the session map while awaiting the seed, and a missing seed while stopping refuses the restart before generation claim; core.rs:12483-12492 requests this seed before spawning the destructive relaunch task. host_handover.rs:300-345 gathers under the session-map lock, sets stopping and aborts short-tail runtimes; its checkpoint tasks abort their runtime after the checkpoint, and close_all covers every gathered runtime. Contract: SPEC_impl.md Terminal host, Across supervisor restarts and Restarting a host agent, assigns encode cancellation to that runtime. Suggested bucket: other for the suspected stall; no defect established. Could-be-highest: no established loss-of-work route in this concern. Confidence: confirmed source-based cancellation path; no execution or timing measurement. proposed_drop: source refutation, the removed notifier served only the retired tmux seed path; the surviving host seed receives cancellation through its runtime and oneshot ownership. possible_cover: none. Caveat: bounded to notification removal and the inspected seed/abort/drop path; this is not a proof of every shutdown interleaving or a measured cancellation latency."
+          }
+        }
+      ],
+      "latest": {
+        "line": 6,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c2",
+          "state": "open",
+          "summary": "removed stop notification belonged only to retired tmux seed path",
+          "location": "crates/farhelm-supervisor/src/service/core/host_handover.rs:311",
+          "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. TLDR: considered whether removing the orderly-stop notification strands a restart or its encoder during shutdown. Original suspected consequence remains a shutdown stall; no process-loss route was established for this concern. Source checks from the initial pass: the parent's sole waiting stop_began consumer was host_restart.rs:905-930, selecting against the removed tmux history-seed future. Coverage-repair synthesis followed the surviving host path into its implementation: hosts/terminal.rs:2414-2420 abort sets the runtime's shared encode-cancel flag and aborts the task; history_seed at 2443-2451 sends a Seed request and awaits its oneshot, so a dropped runtime releases the waiter. seed_now at 3733-3765 passes that same cancel flag into history_seed_until on the blocking pool, counts the encode with RunningEncode, and restores the emulator on ordinary completion. Runtime::drop at 3020-3026 sets the same cancel flag even when the task is dropped by runtime shutdown. host_restart.rs:418-478 keeps the old runtime on the session map while awaiting the seed, and a missing seed while stopping refuses the restart before generation claim; core.rs:12483-12492 requests this seed before spawning the destructive relaunch task. host_handover.rs:300-345 gathers under the session-map lock, sets stopping and aborts short-tail runtimes; its checkpoint tasks abort their runtime after the checkpoint, and close_all covers every gathered runtime. Contract: SPEC_impl.md Terminal host, Across supervisor restarts and Restarting a host agent, assigns encode cancellation to that runtime. Suggested bucket: other for the suspected stall; no defect established. Could-be-highest: no established loss-of-work route in this concern. Confidence: confirmed source-based cancellation path; no execution or timing measurement. proposed_drop: source refutation, the removed notifier served only the retired tmux seed path; the surviving host seed receives cancellation through its runtime and oneshot ownership. possible_cover: none. Caveat: bounded to notification removal and the inspected seed/abort/drop path; this is not a proof of every shutdown interleaving or a measured cancellation latency."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g098/findings.jsonl",
+        "id": "c2",
+        "line": 6,
+        "disposition": "excluded",
+        "group": "removed-tmux-seed-stop-notification-hypothesis",
+        "reason": "Parent explicitly accepted named refuted proposal from claims-064 after inspecting it. The removed notifier's only waiting consumer belonged to the removed tmux seed path. Host encodes are cancelled through runtime ownership. Keep this conclusion narrow: runtime drop is not a universal proof that every possible outstanding control reply settles, as an existing queue item explains. Refute only the missing-notifier hypothesis; preserve the existing queue item's distinct restart-seed stall and avoid claiming every dropped runtime releases every waiter. Checked source/results: [\"1ed482dde220452e424973faf38a5e1318986333^:git grep stop_began found the declaration/initializer, the handover notify, and the sole awaited consumer in host_restart.rs:905-927 selecting against tmux seeding.\",\"1ed482dde220452e424973faf38a5e1318986333:hosts/terminal.rs:2414-2420 aborts the task and sets encode cancellation; :3020-3025 sets cancellation on Runtime drop; :3733-3766 passes it into the blocking history encoder and counts the encode.\",\"Same revision:host_restart.rs:400-478 reads from the old runtime still on the map and refuses a missing seed while stopping. core.rs:12486-12498 awaits that seed before destructive relaunch work. host_handover.rs:296-370 sets stopping under the map lock, gathers hosts, aborts short tails and aborts checkpointed runtimes.\",\"Same revision:terminal.rs:2443-2450 sends Control::Seed then directly awaits its oneshot. Ordinary request ownership supports cancellation; it does not refute the separately queued late-reserved-send lifetime. No latency measurements or tests.\"] Current coverage/results: [\"Current SPEC_impl.md:2270-2345 Restarting a host agent and :2403-2462 Across supervisor restarts assign cancellation to runtime ownership; SPEC.md has no acceptance of an indefinite accepted-Restart stall found.\",\"Read review_feedback_queue/retired-runtime-retains-restart-seed-reply.md in full. It establishes a different bounded-mpsc reserved-send race that can strand history_seed after retirement. Its trigger is not removal of stop_began, so it is neither an exact alias nor evidence that this notifier is still needed.\",\"Searched empty TODO Planned, plans/queue, BUGS.md, INDEX and active TRIAGE_OUTCOMES.md for stop notification, host seed cancellation and shutdown stalls; no exact additional cover. No FILTER applied.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Removing orderly-stop notification might strand a Restart or encoder during shutdown. Original concern was a stall; no process-loss route was established. The latest source-based cancellation claim must not erase the separate queued control-channel lifetime defect.\"; null."
+      },
+      "accepted_parent_decision": {
+        "key": "g098/c2",
+        "line": 6,
+        "disposition": "excluded",
+        "group": "removed-tmux-seed-stop-notification-hypothesis",
+        "bucket": "other",
+        "recording": "refuted",
+        "queue_target_candidate": null,
+        "needs_independent_drop_check": false,
+        "reason": "Parent explicitly accepted named refuted proposal from claims-064 after inspecting it. The removed notifier's only waiting consumer belonged to the removed tmux seed path. Host encodes are cancelled through runtime ownership. Keep this conclusion narrow: runtime drop is not a universal proof that every possible outstanding control reply settles, as an existing queue item explains. Refute only the missing-notifier hypothesis; preserve the existing queue item's distinct restart-seed stall and avoid claiming every dropped runtime releases every waiter. Checked source/results: [\"1ed482dde220452e424973faf38a5e1318986333^:git grep stop_began found the declaration/initializer, the handover notify, and the sole awaited consumer in host_restart.rs:905-927 selecting against tmux seeding.\",\"1ed482dde220452e424973faf38a5e1318986333:hosts/terminal.rs:2414-2420 aborts the task and sets encode cancellation; :3020-3025 sets cancellation on Runtime drop; :3733-3766 passes it into the blocking history encoder and counts the encode.\",\"Same revision:host_restart.rs:400-478 reads from the old runtime still on the map and refuses a missing seed while stopping. core.rs:12486-12498 awaits that seed before destructive relaunch work. host_handover.rs:296-370 sets stopping under the map lock, gathers hosts, aborts short tails and aborts checkpointed runtimes.\",\"Same revision:terminal.rs:2443-2450 sends Control::Seed then directly awaits its oneshot. Ordinary request ownership supports cancellation; it does not refute the separately queued late-reserved-send lifetime. No latency measurements or tests.\"] Current coverage/results: [\"Current SPEC_impl.md:2270-2345 Restarting a host agent and :2403-2462 Across supervisor restarts assign cancellation to runtime ownership; SPEC.md has no acceptance of an indefinite accepted-Restart stall found.\",\"Read review_feedback_queue/retired-runtime-retains-restart-seed-reply.md in full. It establishes a different bounded-mpsc reserved-send race that can strand history_seed after retirement. Its trigger is not removal of stop_began, so it is neither an exact alias nor evidence that this notifier is still needed.\",\"Searched empty TODO Planned, plans/queue, BUGS.md, INDEX and active TRIAGE_OUTCOMES.md for stop notification, host seed cancellation and shutdown stalls; no exact additional cover. No FILTER applied.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Removing orderly-stop notification might strand a Restart or encoder during shutdown. Original concern was a stall; no process-loss route was established. The latest source-based cancellation claim must not erase the separate queued control-channel lifetime defect.\"; null."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-064",
+          "key": "g098/c2",
+          "latest_line": 6,
+          "recommendation": "refuted",
+          "bucket": "other",
+          "underlying_key": "removed-tmux-seed-stop-notification-hypothesis",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The removed notifier's only waiting consumer belonged to the removed tmux seed path. Host encodes are cancelled through runtime ownership. Keep this conclusion narrow: runtime drop is not a universal proof that every possible outstanding control reply settles, as an existing queue item explains.",
+          "checks": [
+            "1ed482dde220452e424973faf38a5e1318986333^:git grep stop_began found the declaration/initializer, the handover notify, and the sole awaited consumer in host_restart.rs:905-927 selecting against tmux seeding.",
+            "1ed482dde220452e424973faf38a5e1318986333:hosts/terminal.rs:2414-2420 aborts the task and sets encode cancellation; :3020-3025 sets cancellation on Runtime drop; :3733-3766 passes it into the blocking history encoder and counts the encode.",
+            "Same revision:host_restart.rs:400-478 reads from the old runtime still on the map and refuses a missing seed while stopping. core.rs:12486-12498 awaits that seed before destructive relaunch work. host_handover.rs:296-370 sets stopping under the map lock, gathers hosts, aborts short tails and aborts checkpointed runtimes.",
+            "Same revision:terminal.rs:2443-2450 sends Control::Seed then directly awaits its oneshot. Ordinary request ownership supports cancellation; it does not refute the separately queued late-reserved-send lifetime. No latency measurements or tests."
+          ],
+          "coverage_checked": [
+            "Current SPEC_impl.md:2270-2345 Restarting a host agent and :2403-2462 Across supervisor restarts assign cancellation to runtime ownership; SPEC.md has no acceptance of an indefinite accepted-Restart stall found.",
+            "Read review_feedback_queue/retired-runtime-retains-restart-seed-reply.md in full. It establishes a different bounded-mpsc reserved-send race that can strand history_seed after retirement. Its trigger is not removal of stop_began, so it is neither an exact alias nor evidence that this notifier is still needed.",
+            "Searched empty TODO Planned, plans/queue, BUGS.md, INDEX and active TRIAGE_OUTCOMES.md for stop notification, host seed cancellation and shutdown stalls; no exact additional cover. No FILTER applied."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": null,
+          "original_stronger_consequence": "Removing orderly-stop notification might strand a Restart or encoder during shutdown. Original concern was a stall; no process-loss route was established. The latest source-based cancellation claim must not erase the separate queued control-channel lifetime defect.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Refute only the missing-notifier hypothesis; preserve the existing queue item's distinct restart-seed stall and avoid claiming every dropped runtime releases every waiter.",
+          "new_interface_evidence": "The reviewed revision's history_seed at terminal.rs:2443-2450 still directly awaits a bounded-channel Control::Seed reply. The current queue's retained-runtime late-send caveat applies to any broad assertion that runtime drop necessarily releases this waiter; it does not make removed stop_began a surviving consumer."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "removed-tmux-seed-stop-notification-hypothesis",
+        "destination": null
+      }
+    },
+    {
+      "key": "g098/c3",
+      "owner": "g098",
+      "id": "c3",
+      "domain": "supervisor-terminal-host-lifecycle",
+      "purpose": "supervisor-terminal-host-lifecycle: crates/farhelm-supervisor/src/service/core/tests/host_terminals.rs, crates/farhelm-supervisor/src/hosts/stop.rs, crates/farhelm-supervisor/src/hosts/terminal.rs, crates/farhelm-supervisor/src/hosts/terminal/test_host.rs, crates/farhelm-supervisor/src/hosts/terminal/tests.rs, crates/farhelm-supervisor/src/launch.rs, crates/farhelm-supervisor/src/procs.rs, crates/farhelm-supervisor/src/scope.rs, crates/farhelm-supervisor/src/service/core/host_handover.rs, crates/farhelm-supervisor/src/service/core/host_launch.rs, crates/farhelm-supervisor/src/service/core/host_reclaim.rs, crates/farhelm-supervisor/src/hosts/spawn.rs, crates/farhelm-supervisor/src/hosts/mod.rs; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 3,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c3",
+            "state": "open",
+            "summary": "empty input marker cannot reach new substring wait",
+            "location": "crates/farhelm-supervisor/src/hosts/terminal/test_host.rs:159",
+            "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. TLDR: considered whether the new test helper could time out on an empty expected substring or falsely establish input delivery. Source checks: received_contains uses windows(needle.len().max(1)), so it intentionally avoids windows(0)'s panic but would return false for an empty needle. git grep found one caller, handlers.rs:10690 in type_and_see_received; its pre-action assertion at 10675 rejects a marker already in received bytes, which also rejects an empty marker. It requires this attachment's ReplayComplete and checks peer liveness before sending; the oracle reads acknowledged bytes and is bounded by BUSY_HOST_WAIT. Suggested bucket: other if reachable; no defect established. Could-be-highest: no, this is test-only input observation. Confidence: confirmed from source; no execution. proposed_drop: source refutation, the only caller cannot reach the wait with an empty marker and uses a unique post-replay marker. possible_cover: none. Caveat: no general empty-needle contract is promised for this private test helper."
+          }
+        }
+      ],
+      "latest": {
+        "line": 3,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c3",
+          "state": "open",
+          "summary": "empty input marker cannot reach new substring wait",
+          "location": "crates/farhelm-supervisor/src/hosts/terminal/test_host.rs:159",
+          "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. TLDR: considered whether the new test helper could time out on an empty expected substring or falsely establish input delivery. Source checks: received_contains uses windows(needle.len().max(1)), so it intentionally avoids windows(0)'s panic but would return false for an empty needle. git grep found one caller, handlers.rs:10690 in type_and_see_received; its pre-action assertion at 10675 rejects a marker already in received bytes, which also rejects an empty marker. It requires this attachment's ReplayComplete and checks peer liveness before sending; the oracle reads acknowledged bytes and is bounded by BUSY_HOST_WAIT. Suggested bucket: other if reachable; no defect established. Could-be-highest: no, this is test-only input observation. Confidence: confirmed from source; no execution. proposed_drop: source refutation, the only caller cannot reach the wait with an empty marker and uses a unique post-replay marker. possible_cover: none. Caveat: no general empty-needle contract is promised for this private test helper."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g098/findings.jsonl",
+        "id": "c3",
+        "line": 3,
+        "disposition": "excluded",
+        "group": "test-host-empty-input-marker-wait-hypothesis",
+        "reason": "Parent explicitly accepted named refuted proposal from claims-064 after inspecting it. The private helper would not match an empty needle, but its sole caller rejects one before typing or waiting. The caller also establishes unique post-replay input, so preexisting bytes cannot satisfy this named observation. Source refutation by sole-caller preconditions, without inventing a public empty-needle contract. Checked source/results: [\"1ed482dde220452e424973faf38a5e1318986333:hosts/terminal/test_host.rs:159-174 uses windows(needle.len().max(1)) under a timeout and returns the final contains predicate.\",\"Same revision:git grep received_contains finds only its definition/docs and handlers.rs:10690 as a call. handlers.rs:10669-10694 requires ReplayComplete and peer liveness, asserts prior received text does not contain the marker, writes it, then checks acknowledged bytes. Any string contains the empty string, so the precondition rejects an empty marker before the wait.\",\"This is source inspection of the test oracle, not inferred test quality from production correctness; no test executed.\"] Current coverage/results: [\"Searched SPEC.md and SPEC_impl.md for marker/input/replay/test-host contracts; no general empty-needle promise for this private helper found.\",\"Searched empty TODO Planned, plans/queue, BUGS.md, INDEX/matching empty-marker/received_contains/input-oracle terms, and active TRIAGE_OUTCOMES.md. No exact cover or alias found.\",\"No FILTER applied.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"The new test helper could time out on empty input or falsely establish input delivery. Maintainer-test observation only, with no user-work/security consequence.\"; null."
+      },
+      "accepted_parent_decision": {
+        "key": "g098/c3",
+        "line": 3,
+        "disposition": "excluded",
+        "group": "test-host-empty-input-marker-wait-hypothesis",
+        "bucket": "other",
+        "recording": "refuted",
+        "queue_target_candidate": null,
+        "needs_independent_drop_check": false,
+        "reason": "Parent explicitly accepted named refuted proposal from claims-064 after inspecting it. The private helper would not match an empty needle, but its sole caller rejects one before typing or waiting. The caller also establishes unique post-replay input, so preexisting bytes cannot satisfy this named observation. Source refutation by sole-caller preconditions, without inventing a public empty-needle contract. Checked source/results: [\"1ed482dde220452e424973faf38a5e1318986333:hosts/terminal/test_host.rs:159-174 uses windows(needle.len().max(1)) under a timeout and returns the final contains predicate.\",\"Same revision:git grep received_contains finds only its definition/docs and handlers.rs:10690 as a call. handlers.rs:10669-10694 requires ReplayComplete and peer liveness, asserts prior received text does not contain the marker, writes it, then checks acknowledged bytes. Any string contains the empty string, so the precondition rejects an empty marker before the wait.\",\"This is source inspection of the test oracle, not inferred test quality from production correctness; no test executed.\"] Current coverage/results: [\"Searched SPEC.md and SPEC_impl.md for marker/input/replay/test-host contracts; no general empty-needle promise for this private helper found.\",\"Searched empty TODO Planned, plans/queue, BUGS.md, INDEX/matching empty-marker/received_contains/input-oracle terms, and active TRIAGE_OUTCOMES.md. No exact cover or alias found.\",\"No FILTER applied.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"The new test helper could time out on empty input or falsely establish input delivery. Maintainer-test observation only, with no user-work/security consequence.\"; null."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-064",
+          "key": "g098/c3",
+          "latest_line": 3,
+          "recommendation": "refuted",
+          "bucket": "other",
+          "underlying_key": "test-host-empty-input-marker-wait-hypothesis",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The private helper would not match an empty needle, but its sole caller rejects one before typing or waiting. The caller also establishes unique post-replay input, so preexisting bytes cannot satisfy this named observation.",
+          "checks": [
+            "1ed482dde220452e424973faf38a5e1318986333:hosts/terminal/test_host.rs:159-174 uses windows(needle.len().max(1)) under a timeout and returns the final contains predicate.",
+            "Same revision:git grep received_contains finds only its definition/docs and handlers.rs:10690 as a call. handlers.rs:10669-10694 requires ReplayComplete and peer liveness, asserts prior received text does not contain the marker, writes it, then checks acknowledged bytes. Any string contains the empty string, so the precondition rejects an empty marker before the wait.",
+            "This is source inspection of the test oracle, not inferred test quality from production correctness; no test executed."
+          ],
+          "coverage_checked": [
+            "Searched SPEC.md and SPEC_impl.md for marker/input/replay/test-host contracts; no general empty-needle promise for this private helper found.",
+            "Searched empty TODO Planned, plans/queue, BUGS.md, INDEX/matching empty-marker/received_contains/input-oracle terms, and active TRIAGE_OUTCOMES.md. No exact cover or alias found.",
+            "No FILTER applied."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": null,
+          "original_stronger_consequence": "The new test helper could time out on empty input or falsely establish input delivery. Maintainer-test observation only, with no user-work/security consequence.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Source refutation by sole-caller preconditions, without inventing a public empty-needle contract."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "test-host-empty-input-marker-wait-hypothesis",
+        "destination": null
+      }
+    },
+    {
+      "key": "g098/c4",
+      "owner": "g098",
+      "id": "c4",
+      "domain": "supervisor-terminal-host-lifecycle",
+      "purpose": "supervisor-terminal-host-lifecycle: crates/farhelm-supervisor/src/service/core/tests/host_terminals.rs, crates/farhelm-supervisor/src/hosts/stop.rs, crates/farhelm-supervisor/src/hosts/terminal.rs, crates/farhelm-supervisor/src/hosts/terminal/test_host.rs, crates/farhelm-supervisor/src/hosts/terminal/tests.rs, crates/farhelm-supervisor/src/launch.rs, crates/farhelm-supervisor/src/procs.rs, crates/farhelm-supervisor/src/scope.rs, crates/farhelm-supervisor/src/service/core/host_handover.rs, crates/farhelm-supervisor/src/service/core/host_launch.rs, crates/farhelm-supervisor/src/service/core/host_reclaim.rs, crates/farhelm-supervisor/src/hosts/spawn.rs, crates/farhelm-supervisor/src/hosts/mod.rs; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 4,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c4",
+            "state": "open",
+            "summary": "wire-kind helpers disappear with the protocol fields they supplied",
+            "location": "crates/farhelm-supervisor/src/hosts/terminal.rs:2636",
+            "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e. TLDR: considered whether removing terminal-kind reply helpers makes tabs disappear from clients that expect a kind. Source checks: the assigned deletion removes wire_kind and tab_info together; at this revision HostTab::tab_info in service/core/host_tabs.rs:167-173 constructs the new id-only reply, and farhelm-proto/src/lib.rs has protocol version 77 and an id-only TabInfo. git grep found no remaining wire_kind consumers in the inspected protocol/status/tab interface. Suggested bucket: high if same-version clients silently lost tabs; no defect established. Could-be-highest: no established destructive route. Confidence: confirmed source-based coordinated interface removal; no execution. proposed_drop: source refutation, the helper was removed alongside its output fields with a protocol-version change, not silently omitted from the older reply contract. possible_cover: none. Caveat: broader protocol compatibility is outside this assigned helper deletion; this check does not claim review of all transport changes."
+          }
+        }
+      ],
+      "latest": {
+        "line": 4,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c4",
+          "state": "open",
+          "summary": "wire-kind helpers disappear with the protocol fields they supplied",
+          "location": "crates/farhelm-supervisor/src/hosts/terminal.rs:2636",
+          "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e. TLDR: considered whether removing terminal-kind reply helpers makes tabs disappear from clients that expect a kind. Source checks: the assigned deletion removes wire_kind and tab_info together; at this revision HostTab::tab_info in service/core/host_tabs.rs:167-173 constructs the new id-only reply, and farhelm-proto/src/lib.rs has protocol version 77 and an id-only TabInfo. git grep found no remaining wire_kind consumers in the inspected protocol/status/tab interface. Suggested bucket: high if same-version clients silently lost tabs; no defect established. Could-be-highest: no established destructive route. Confidence: confirmed source-based coordinated interface removal; no execution. proposed_drop: source refutation, the helper was removed alongside its output fields with a protocol-version change, not silently omitted from the older reply contract. possible_cover: none. Caveat: broader protocol compatibility is outside this assigned helper deletion; this check does not claim review of all transport changes."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g098/findings.jsonl",
+        "id": "c4",
+        "line": 4,
+        "disposition": "excluded",
+        "group": "removed-wire-terminal-kind-tab-loss-hypothesis",
+        "reason": "Parent explicitly accepted named refuted proposal from claims-064 after inspecting it. Terminal-kind helpers disappear together with the protocol fields and consumers that used them. The inspected new tab reply remains populated by id; no same-version lost-tab route was established. Source refutation limited to coordinated helper/field/consumer removal and id-only tab replies. Checked source/results: [\"f560058da19e02716e6f943883a9508b447aff4e:hosts/terminal.rs diff removes wire_kind and its id-plus-kind tab_info helper together.\",\"Same revision:service/core/host_tabs.rs:167-173 constructs TabInfo with the tab's id. farhelm-proto/src/lib.rs:255 declares protocol 77 and :1685-1695 defines id-only TabInfo.\",\"Same revision:git grep wire_kind over supervisor/ui/proto finds no remaining consumer. This verifies the named helper/protocol coordination, not every transport compatibility path. No runtime observation.\"] Current coverage/results: [\"Current SPEC_impl.md:2937-2951 explicitly explains protocol 77's removal of byte streams and terminal-kind fields and the hello mismatch refusal. SPEC.md's terminal contract now describes one terminal kind.\",\"Searched empty TODO Planned, plans/queue, BUGS.md, INDEX/matching wire_kind/TabInfo/terminal-kind/tab-loss terms, and active TRIAGE_OUTCOMES.md. tmux-end-old-terminals.md:119-129 calls for the coordinated protocol change; later tooling/docs plans remove residual descriptions, not a remaining same-version tab-loss cause. No exact bug/queue/ledger cover found.\",\"No FILTER applied; no defective trigger was established.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Removing kind replies might make tabs disappear for same-version clients, potentially high UX degradation. No destructive or highest route was claimed.\"; \"A same-version shipped client still requiring kind for admission/display despite the coordinated removal would be needed for the original high tab-loss consequence; none was established.\"."
+      },
+      "accepted_parent_decision": {
+        "key": "g098/c4",
+        "line": 4,
+        "disposition": "excluded",
+        "group": "removed-wire-terminal-kind-tab-loss-hypothesis",
+        "bucket": "other",
+        "recording": "refuted",
+        "queue_target_candidate": null,
+        "needs_independent_drop_check": false,
+        "reason": "Parent explicitly accepted named refuted proposal from claims-064 after inspecting it. Terminal-kind helpers disappear together with the protocol fields and consumers that used them. The inspected new tab reply remains populated by id; no same-version lost-tab route was established. Source refutation limited to coordinated helper/field/consumer removal and id-only tab replies. Checked source/results: [\"f560058da19e02716e6f943883a9508b447aff4e:hosts/terminal.rs diff removes wire_kind and its id-plus-kind tab_info helper together.\",\"Same revision:service/core/host_tabs.rs:167-173 constructs TabInfo with the tab's id. farhelm-proto/src/lib.rs:255 declares protocol 77 and :1685-1695 defines id-only TabInfo.\",\"Same revision:git grep wire_kind over supervisor/ui/proto finds no remaining consumer. This verifies the named helper/protocol coordination, not every transport compatibility path. No runtime observation.\"] Current coverage/results: [\"Current SPEC_impl.md:2937-2951 explicitly explains protocol 77's removal of byte streams and terminal-kind fields and the hello mismatch refusal. SPEC.md's terminal contract now describes one terminal kind.\",\"Searched empty TODO Planned, plans/queue, BUGS.md, INDEX/matching wire_kind/TabInfo/terminal-kind/tab-loss terms, and active TRIAGE_OUTCOMES.md. tmux-end-old-terminals.md:119-129 calls for the coordinated protocol change; later tooling/docs plans remove residual descriptions, not a remaining same-version tab-loss cause. No exact bug/queue/ledger cover found.\",\"No FILTER applied; no defective trigger was established.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Removing kind replies might make tabs disappear for same-version clients, potentially high UX degradation. No destructive or highest route was claimed.\"; \"A same-version shipped client still requiring kind for admission/display despite the coordinated removal would be needed for the original high tab-loss consequence; none was established.\"."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-064",
+          "key": "g098/c4",
+          "latest_line": 4,
+          "recommendation": "refuted",
+          "bucket": "other",
+          "underlying_key": "removed-wire-terminal-kind-tab-loss-hypothesis",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "Terminal-kind helpers disappear together with the protocol fields and consumers that used them. The inspected new tab reply remains populated by id; no same-version lost-tab route was established.",
+          "checks": [
+            "f560058da19e02716e6f943883a9508b447aff4e:hosts/terminal.rs diff removes wire_kind and its id-plus-kind tab_info helper together.",
+            "Same revision:service/core/host_tabs.rs:167-173 constructs TabInfo with the tab's id. farhelm-proto/src/lib.rs:255 declares protocol 77 and :1685-1695 defines id-only TabInfo.",
+            "Same revision:git grep wire_kind over supervisor/ui/proto finds no remaining consumer. This verifies the named helper/protocol coordination, not every transport compatibility path. No runtime observation."
+          ],
+          "coverage_checked": [
+            "Current SPEC_impl.md:2937-2951 explicitly explains protocol 77's removal of byte streams and terminal-kind fields and the hello mismatch refusal. SPEC.md's terminal contract now describes one terminal kind.",
+            "Searched empty TODO Planned, plans/queue, BUGS.md, INDEX/matching wire_kind/TabInfo/terminal-kind/tab-loss terms, and active TRIAGE_OUTCOMES.md. tmux-end-old-terminals.md:119-129 calls for the coordinated protocol change; later tooling/docs plans remove residual descriptions, not a remaining same-version tab-loss cause. No exact bug/queue/ledger cover found.",
+            "No FILTER applied; no defective trigger was established."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": "A same-version shipped client still requiring kind for admission/display despite the coordinated removal would be needed for the original high tab-loss consequence; none was established.",
+          "original_stronger_consequence": "Removing kind replies might make tabs disappear for same-version clients, potentially high UX degradation. No destructive or highest route was claimed.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Source refutation limited to coordinated helper/field/consumer removal and id-only tab replies."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "high",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "removed-wire-terminal-kind-tab-loss-hypothesis",
+        "destination": null
+      }
+    },
+    {
+      "key": "g098/l1",
+      "owner": "g098",
+      "id": "l1",
+      "domain": "supervisor-terminal-host-lifecycle",
+      "purpose": "supervisor-terminal-host-lifecycle: crates/farhelm-supervisor/src/service/core/tests/host_terminals.rs, crates/farhelm-supervisor/src/hosts/stop.rs, crates/farhelm-supervisor/src/hosts/terminal.rs, crates/farhelm-supervisor/src/hosts/terminal/test_host.rs, crates/farhelm-supervisor/src/hosts/terminal/tests.rs, crates/farhelm-supervisor/src/launch.rs, crates/farhelm-supervisor/src/procs.rs, crates/farhelm-supervisor/src/scope.rs, crates/farhelm-supervisor/src/service/core/host_handover.rs, crates/farhelm-supervisor/src/service/core/host_launch.rs, crates/farhelm-supervisor/src/service/core/host_reclaim.rs, crates/farhelm-supervisor/src/hosts/spawn.rs, crates/farhelm-supervisor/src/hosts/mod.rs; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 8,
+          "event": {
+            "version": 1,
+            "kind": "lead",
+            "id": "l1",
+            "state": "open",
+            "summary": "rewritten marker-inheritance comments may incorrectly put session markers on host processes",
+            "location": "crates/farhelm-supervisor/src/launch.rs:113",
+            "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. TLDR: the rewritten explanation says a nested supervisor's terminal hosts inherit the outer tab marker, whereas the host-start contract says the host itself has an empty environment and only its child gets session variables. If literal, this misstates the host-versus-child ownership boundary used by Stop cleanup; correct production behavior would not refute that documentation defect. Source basis: assigned launch.rs patch replaces tmux server with terminal hosts in the inheritance narrative near 113 and in the exec comment near 1230. Previously read SPEC_impl.md Terminal host, Starting a host, explicitly assigns empty host environment and child-only spec environment; host_launch.rs describes hosts outside the launch scope. Need check actual spawn environment, child environment transport, exact rewritten wording, immediate parent/range attribution and later repair before resolving. Suggested bucket: other for developer documentation correctness if confirmed. Could-be-highest: no established security or user-work-loss route from the wording; no unsafe production signaling alleged. Confidence: concrete source lead, not yet settled; no execution. proposed_drop: false pending source/wording checks. possible_cover: none in supplied neighboring records. Exact missing premise: whether terminal hosts in the comment explicitly means the host processes or is defined locally as the whole child-side launch environment, and whether an in-range later edit qualifies the wording."
+          }
+        },
+        {
+          "line": 9,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "l1",
+            "state": "open",
+            "summary": "marker-inheritance documentation wrongly puts tab markers on terminal hosts",
+            "location": "crates/farhelm-supervisor/src/launch.rs:113",
+            "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. TLDR: the revised cleanup explanation tells future maintainers that terminal-host processes inherit a parent session's tab marker. They do not: the host's empty environment is the boundary that keeps Stop's marker sweep from killing the terminal process and losing its retained screen. The child receives environment entries in its launch spec instead. This is a documentation defect; no unsafe production signaling is alleged. Source: launch.rs:110-118 now says 'A supervisor running inside somebody's tab inherits that tab's FARHELM_TAB_ID, its terminal hosts inherit it, and every INNER agent it launches inherits it too' (backticks omitted here only). The parent patch explicitly replaces tmux server with terminal hosts in this sentence. hosts/spawn.rs:19-24 explains that the host's own environment is empty specifically to keep session markers and credentials off it, and the host start at :353 calls env_clear. ChildSpec.env at :117 is separately serialized at :508 onward; the child environment is not the host process environment. Correct nearby TAB_ID_ENV_VAR docs at launch.rs:85-89 expressly call it the terminal host's child environment, so they expose rather than repair the contradictory inheritance narrative. The related inline comment at launch.rs:1227-1232 uses the broader 'passes ... through its own terminal hosts' wording; fix that explanation together if needed to distinguish spec transport from process-environment inheritance. Suggested fix: describe the supervisor composing the child's environment from its own base and transporting it in the spec, while keeping the host itself marker-free; retain the actual reason the agent shim scrubs an outer tab marker. Contract: SPEC_impl.md Terminal host, Starting a host, states an empty host environment keeps session markers and credentials off the host, and the child's environment travels only in the spec. Suggested bucket: other (incorrect developer-facing ownership/cleanup explanation). Could-be-highest: no established security or user-work-loss route from this wording; host termination/lost retained output describes why the real invariant matters, not an alleged runtime defect. Confidence: confirmed by pinned comment and source, no execution. proposed_drop: false. possible_cover: none in supplied neighboring findings. Caveats: marker scrubbing and positive agent selection may be correct production behavior; that does not refute the false host-inheritance statement. Whole-range/later-edit status is being checked next; this charter includes the recorded intermediate commit."
+          }
+        },
+        {
+          "line": 10,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "l1",
+            "state": "open",
+            "summary": "marker-inheritance documentation wrongly puts tab markers on terminal hosts",
+            "location": "crates/farhelm-supervisor/src/launch.rs:113",
+            "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333; persistence checked through pinned tip 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db. TLDR: the revised cleanup explanation tells future maintainers that terminal-host processes inherit a parent session's tab marker. They do not: the host's empty environment keeps Stop's marker sweep from killing the terminal process and losing its retained screen. The child receives environment entries in its launch spec instead. This is a documentation defect; no unsafe production signaling is alleged. Source: launch.rs:110-118 now says a nested supervisor inherits the outer FARHELM_TAB_ID and 'its terminal hosts inherit it'. The assigned patch explicitly replaces tmux server with terminal hosts there. hosts/spawn.rs:19-24 says nothing of the supervisor's environment reaches the host process, specifically to keep markers and credentials off it; the start at :350-359 calls env_clear. host_launch.rs:490-495 composes the child's environment from std::env::vars_os(), :496-498 explicitly says the host never receives it in its own environment, and :508-518 places it in ChildSpec. Correct nearby TAB_ID_ENV_VAR docs at launch.rs:85-89 call it the terminal host's child environment, exposing the contradictory inheritance narrative. The inline comment at launch.rs:1227-1232 also describes passage 'through its own terminal hosts'; it can be clarified alongside the unambiguously incorrect host-inheritance sentence, but no separate issue is counted for that broader wording. Fix direction: describe the supervisor composing the child's environment from its base and transporting it in the spec, while keeping the host itself marker-free; retain the actual reason the agent shim scrubs an outer tab marker. Contract: SPEC_impl.md Terminal host, Starting a host, states an empty host environment keeps session markers and credentials off the host, and the child's environment travels only in the spec. Attribution over the whole range: base 6e423e30068b62c6cfa276c6d720ee35bb70387a describes tmux-server inheritance, not terminal-host inheritance; this assigned commit makes the incorrect substitution. The complete launch.rs diff from this revision through tip changes other comments/test wording only; the tip still contains the same terminal-host inheritance sentence at :113-114. No later-repair premise remains unresolved. Suggested bucket: other (incorrect developer-facing ownership/cleanup explanation). Could-be-highest: no established security or user-work-loss route from the wording; host termination/lost retained output explains why the real invariant matters, not an alleged runtime defect. Confidence: confirmed by pinned source, parent/base attribution and tip comparison; no execution. proposed_drop: false. possible_cover: none in supplied neighboring findings. Caveats: production marker scrubbing and positive agent selection may be correct and are not the subject of this finding. Their correctness does not refute the false documentation statement. Lead l1 resolved to this finding; no remaining open source premise."
+          }
+        }
+      ],
+      "latest": {
+        "line": 10,
+        "event": {
+          "version": 1,
+          "kind": "finding",
+          "id": "l1",
+          "state": "open",
+          "summary": "marker-inheritance documentation wrongly puts tab markers on terminal hosts",
+          "location": "crates/farhelm-supervisor/src/launch.rs:113",
+          "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333; persistence checked through pinned tip 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db. TLDR: the revised cleanup explanation tells future maintainers that terminal-host processes inherit a parent session's tab marker. They do not: the host's empty environment keeps Stop's marker sweep from killing the terminal process and losing its retained screen. The child receives environment entries in its launch spec instead. This is a documentation defect; no unsafe production signaling is alleged. Source: launch.rs:110-118 now says a nested supervisor inherits the outer FARHELM_TAB_ID and 'its terminal hosts inherit it'. The assigned patch explicitly replaces tmux server with terminal hosts there. hosts/spawn.rs:19-24 says nothing of the supervisor's environment reaches the host process, specifically to keep markers and credentials off it; the start at :350-359 calls env_clear. host_launch.rs:490-495 composes the child's environment from std::env::vars_os(), :496-498 explicitly says the host never receives it in its own environment, and :508-518 places it in ChildSpec. Correct nearby TAB_ID_ENV_VAR docs at launch.rs:85-89 call it the terminal host's child environment, exposing the contradictory inheritance narrative. The inline comment at launch.rs:1227-1232 also describes passage 'through its own terminal hosts'; it can be clarified alongside the unambiguously incorrect host-inheritance sentence, but no separate issue is counted for that broader wording. Fix direction: describe the supervisor composing the child's environment from its base and transporting it in the spec, while keeping the host itself marker-free; retain the actual reason the agent shim scrubs an outer tab marker. Contract: SPEC_impl.md Terminal host, Starting a host, states an empty host environment keeps session markers and credentials off the host, and the child's environment travels only in the spec. Attribution over the whole range: base 6e423e30068b62c6cfa276c6d720ee35bb70387a describes tmux-server inheritance, not terminal-host inheritance; this assigned commit makes the incorrect substitution. The complete launch.rs diff from this revision through tip changes other comments/test wording only; the tip still contains the same terminal-host inheritance sentence at :113-114. No later-repair premise remains unresolved. Suggested bucket: other (incorrect developer-facing ownership/cleanup explanation). Could-be-highest: no established security or user-work-loss route from the wording; host termination/lost retained output explains why the real invariant matters, not an alleged runtime defect. Confidence: confirmed by pinned source, parent/base attribution and tip comparison; no execution. proposed_drop: false. possible_cover: none in supplied neighboring findings. Caveats: production marker scrubbing and positive agent selection may be correct and are not the subject of this finding. Their correctness does not refute the false documentation statement. Lead l1 resolved to this finding; no remaining open source premise."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g098/findings.jsonl",
+        "id": "l1",
+        "line": 10,
+        "disposition": "verified",
+        "group": "launch-comment-terminal-host-inherits-tab-marker",
+        "reason": "Parent explicitly accepted named retain-verified proposal from claims-065 after inspecting it. The changed comment expressly assigns inherited markers to host processes, contradicting the empty host environment. This is a comment defect, not an unsafe production sweep claim. Retain the incorrect process-environment statement, with the broader through-hosts wording as nearby clarification rather than another finding. Checked source/results: [\"1ed482dde220452e424973faf38a5e1318986333:crates/farhelm-supervisor/src/launch.rs:110-118 says its terminal hosts inherit FARHELM_TAB_ID; the same sentence survives at 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db:113-114.\",\"1ed482d:crates/farhelm-supervisor/src/hosts/spawn.rs:19-24 documents the empty host environment; :350-359 actually calls env_clear. service/core/host_launch.rs:490-518 composes and serializes the child environment separately.\",\"Exclusive base 6e423e3:launch.rs:110-118 describes tmux-server inheritance instead. The terminal-host substitution is in range. Nearby child-environment documentation at launch.rs:85-89 exposes rather than repairs the contradiction. No runtime execution.\"] Current coverage/results: [\"SPEC.md and SPEC_impl.md searched for markers, inheritance, host environment and cleanup. Current SPEC_impl.md:1916-1921 explicitly keeps markers off hosts; Creating agents in hosts at :2178-2200 distinguishes host from child. Neither accepts false documentation.\",\"TODO.md Planned is empty (:25-26). BUGS.md contains only the unrelated SSH output-holder install hang. No matching active TRIAGE_OUTCOMES.md item found.\",\"plans/queue searched for the actual inheritance claim. tmux-drop-from-docs has broad comment cleanup criteria, but plans/REPORTS.md:32 records it landed; it supplies no unlanded coverage. INDEX.md read in bounded chunks and searched; no same-root queue item found.\",\"FILTER.md does not cover persistent developer-facing ownership documentation.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Host termination and loss of its retained screen explain why the real marker-free invariant matters. No history event alleges that the comment currently causes unsafe signaling or work loss.\"; null."
+      },
+      "accepted_parent_decision": {
+        "key": "g098/l1",
+        "line": 10,
+        "disposition": "verified",
+        "group": "launch-comment-terminal-host-inherits-tab-marker",
+        "bucket": "other",
+        "recording": "retain-verified",
+        "queue_target_candidate": null,
+        "needs_independent_drop_check": false,
+        "reason": "Parent explicitly accepted named retain-verified proposal from claims-065 after inspecting it. The changed comment expressly assigns inherited markers to host processes, contradicting the empty host environment. This is a comment defect, not an unsafe production sweep claim. Retain the incorrect process-environment statement, with the broader through-hosts wording as nearby clarification rather than another finding. Checked source/results: [\"1ed482dde220452e424973faf38a5e1318986333:crates/farhelm-supervisor/src/launch.rs:110-118 says its terminal hosts inherit FARHELM_TAB_ID; the same sentence survives at 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db:113-114.\",\"1ed482d:crates/farhelm-supervisor/src/hosts/spawn.rs:19-24 documents the empty host environment; :350-359 actually calls env_clear. service/core/host_launch.rs:490-518 composes and serializes the child environment separately.\",\"Exclusive base 6e423e3:launch.rs:110-118 describes tmux-server inheritance instead. The terminal-host substitution is in range. Nearby child-environment documentation at launch.rs:85-89 exposes rather than repairs the contradiction. No runtime execution.\"] Current coverage/results: [\"SPEC.md and SPEC_impl.md searched for markers, inheritance, host environment and cleanup. Current SPEC_impl.md:1916-1921 explicitly keeps markers off hosts; Creating agents in hosts at :2178-2200 distinguishes host from child. Neither accepts false documentation.\",\"TODO.md Planned is empty (:25-26). BUGS.md contains only the unrelated SSH output-holder install hang. No matching active TRIAGE_OUTCOMES.md item found.\",\"plans/queue searched for the actual inheritance claim. tmux-drop-from-docs has broad comment cleanup criteria, but plans/REPORTS.md:32 records it landed; it supplies no unlanded coverage. INDEX.md read in bounded chunks and searched; no same-root queue item found.\",\"FILTER.md does not cover persistent developer-facing ownership documentation.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Host termination and loss of its retained screen explain why the real marker-free invariant matters. No history event alleges that the comment currently causes unsafe signaling or work loss.\"; null."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-065",
+          "key": "g098/l1",
+          "latest_line": 10,
+          "recommendation": "retain-verified",
+          "bucket": "other",
+          "underlying_key": "launch-comment-terminal-host-inherits-tab-marker",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The changed comment expressly assigns inherited markers to host processes, contradicting the empty host environment. This is a comment defect, not an unsafe production sweep claim.",
+          "checks": [
+            "1ed482dde220452e424973faf38a5e1318986333:crates/farhelm-supervisor/src/launch.rs:110-118 says its terminal hosts inherit FARHELM_TAB_ID; the same sentence survives at 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db:113-114.",
+            "1ed482d:crates/farhelm-supervisor/src/hosts/spawn.rs:19-24 documents the empty host environment; :350-359 actually calls env_clear. service/core/host_launch.rs:490-518 composes and serializes the child environment separately.",
+            "Exclusive base 6e423e3:launch.rs:110-118 describes tmux-server inheritance instead. The terminal-host substitution is in range. Nearby child-environment documentation at launch.rs:85-89 exposes rather than repairs the contradiction. No runtime execution."
+          ],
+          "coverage_checked": [
+            "SPEC.md and SPEC_impl.md searched for markers, inheritance, host environment and cleanup. Current SPEC_impl.md:1916-1921 explicitly keeps markers off hosts; Creating agents in hosts at :2178-2200 distinguishes host from child. Neither accepts false documentation.",
+            "TODO.md Planned is empty (:25-26). BUGS.md contains only the unrelated SSH output-holder install hang. No matching active TRIAGE_OUTCOMES.md item found.",
+            "plans/queue searched for the actual inheritance claim. tmux-drop-from-docs has broad comment cleanup criteria, but plans/REPORTS.md:32 records it landed; it supplies no unlanded coverage. INDEX.md read in bounded chunks and searched; no same-root queue item found.",
+            "FILTER.md does not cover persistent developer-facing ownership documentation."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": null,
+          "original_stronger_consequence": "Host termination and loss of its retained screen explain why the real marker-free invariant matters. No history event alleges that the comment currently causes unsafe signaling or work loss.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Retain the incorrect process-environment statement, with the broader through-hosts wording as nearby clarification rather than another finding."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": true,
+        "clearly_refuted_candidate": false,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Source-confirmed by an existing parent decision; not runtime reproduced",
+        "deduplication_key": "launch-comment-terminal-host-inherits-tab-marker",
+        "destination": "trailing-launch-comment-terminal-host-inherits-tab-marker.md"
+      }
+    }
+  ],
+  "replies": [
+    {
+      "turn": 1,
+      "reply": "Initial review complete: all 17 assigned patches read and analyzed. No reportable findings or unresolved leads. Recorded source-refuted candidates c1–c4, including a revision to c1.\n\n[Findings log]([private-run]/g098/findings.jsonl) and [progress]([private-run]/g098/progress.md) updated. No tests or reproductions run; no unread assigned scope."
+    },
+    {
+      "turn": 2,
+      "reply": "Coverage repaired: all 1,226 lines across 17 sources delivered in 18 direct evidence packets. Nothing remains unread.\n\nSynthesis found no new defect or unresolved lead. Revised c1 and c2 with downstream identity, final-output, and cancellation checks; preserved c1’s potential process-loss concern and bounded refutation. Log and progress updated. No execution performed."
+    },
+    {
+      "turn": 3,
+      "reply": "Discovery pass 1 found one new documentation defect: l1 incorrectly says terminal hosts inherit the outer tab marker. Source confirms an empty host environment and child-only spec transport.\n\n- Checks: neighboring records, assigned helper/caller boundaries, whole-range attribution, pinned-tip persistence.\n- New verified IDs: l1.\n- New unverified IDs: none.\n- Open leads: none.\n\nFindings log and progress updated. No execution performed."
+    },
+    {
+      "turn": 4,
+      "reply": "Discovery pass 2 found nothing new.\n\n- Checked updated neighbor records, shutdown publication, re-adoption identity, reclaim exclusions, reload fixture ownership, and child-environment composition.\n- New verified IDs: none.\n- New unverified IDs: none.\n- Open leads: none.\n\nProgress updated; findings unchanged. No execution performed."
+    }
+  ],
+  "progress": "Group g098: supervisor-terminal-host-lifecycle.\n\nInitial review turn 1 complete. Discovery-pass count: 0; no later synthesis or discovery turn performed. Read the brief fully and only the commits field of inventory.json. All 17 assigned patch files (1,226 lines) delivered through evidence read, with the 288-line packet split into 1-180 and 181-288. No unread assigned scope.\n\nSource and contract analysis used each recorded patch revision. Read pinned lifecycle and terminal-experience product contracts, Terminal host and Launch failure classification implementation contracts, GUI answer-binding rule, the priority buckets and feedback template. Compared the pre-removal wrapper with the moved host helpers and read Stop, Restart and tab-reap callers. Checked the reload test against its stand-in child and reload reconciliation; the table test against each adapter state; reclaimed held sockets and re-adoption handle identity; protocol field removal against the id-only tab reply and version 77; launch and fixture comment edits against their surrounding source. Comment-only patches did not introduce executable changes. MAX_DIMENSION remains 10,000 at the clamp change.\n\nInterface assumptions checked: probe liveness and processed-exit evidence intentionally differ; roots retain adoption-time process identity and are rechecked; Stop leaves the host alive; final-screen inference waits for processed exit evidence; runtime identity, not socket-name equality, guards re-adoption; held startup placeholders keep their socket out of reclaim; host seed cancellation belongs to the runtime, whereas the removed notification served the retired tmux seed path. Reload clears a stop request for a child reported alive but preserves it during replay after reaping. Wire kinds disappear with their fields and protocol change.\n\nDurable log: c1-c4 are source-refuted candidates (c1 revised after caller checks); no reportable findings, no unresolved leads. New verified findings this pass: none. New unverified findings this pass: none. Considered candidates: c1 pinned root/final-state move, c2 removed shutdown notification, c3 empty substring marker, c4 wire-kind helper removal. The c1 possible process-loss consequence is explicit for the parent's independent drop audit. No coverage sources or excluded inventory metadata consulted.\n\nNo tests, builds or reproductions run: source-only review was requested. No checkout files changed, no helper agents spawned, no live install or unrelated processes touched. All created artifacts stayed in this private group directory. One rejected record invocation used unsupported state closed; it appended nothing and was immediately retried with state open. One broad context-search result and one batched context result were clipped; conclusions use subsequent narrow source reads. The terminal-host contract tail was reread as bounded packets after an initial 204-line context read. No assigned evidence read was clipped.\n\nNext action: return to caller for the separately requested synthesis turn. Do not treat this initial-pass completion as final multi-turn review completion. Preserve all log events.\n\nTurn 2: coverage repair and caller-boundary synthesis authorized by parent. Corrected brief reread fully. Prior wrapped shell results earned zero mandatory evidence lines; replaying all 1,226 lines as direct stdout packets. Preserve c1-c4 and five existing events. No open leads. Discovery-pass count remains 0. No new source findings yet; next read all 17 assigned sources through corrected manifest, then synthesize identity/final-state/cancellation boundaries.\n\nTurn 2 completed: coverage repair plus explicitly requested later-turn synthesis. All 17 mandatory sources / 1,226 lines redelivered through the corrected manifest in 18 separate shell tool calls with direct stdout (00912 split at 180/181); no packet exceeded 200 lines or 24 KB, and none was clipped. The old first-turn delivery claim did not establish evidence credit; this turn repairs that delivery. No unread assigned ranges remain. Source bytes/hashes were unchanged, as the parent stated.\n\nSynthesis result: no new reportable finding or unresolved lead. c1 revised to follow carried (pid, start) roots through downstream admission at service/sweep.rs:1432-1439 and 1574-1623, distinguish Delete's separate pinned-root path, and include the independent processed-exit check before an error excerpt. Its original possible process-loss consequence remains explicit for independent checking; the refutation applies only to inspected helper/caller/root-admission boundaries. Parent-supplied g101/c2 corroboration is recorded as possible_cover without reading coverage sources. c2 revised after following history_seed's control/oneshot ownership through seed_now, shared cancellation, Runtime::drop and the pre-generation seed wait. The runtime cancellation check establishes the source path, not a measured latency or all shutdown interleavings. Existing c3/c4 are unchanged.\n\nDelta this turn: revised c1 and c2; no new IDs, verified findings or unverified findings. Durable log now has seven append-only events. No open leads. Total review turns: 2 (initial; repair+synthesis). Discovery-pass count: 0. No tests, builds or reproductions run, because this remains source-only. No checkout writes, helper agents or live-install actions. Next action: return delta and repaired coverage status to parent; await its next pass instruction.\n\nTurn 3: separate discovery pass 1 starting. Existing c1-c4 and seven events preserved. Read discovery-neighbours in bounded chunks first, then search assigned group beyond known candidates. No named pending cross-group questions. No runtime tests or reproductions. No open leads at entry.\n\nTurn 3 complete: separate discovery pass 1. Read all 638 lines of discovery-neighbours.json in bounded chunks before the new source search. Those records served novelty/interface context only; no prohibited coverage files were opened. No named pending synthesis questions were supplied. Existing c1-c4 and their consequences/proposed-drop bases remain unchanged.\n\nNew source search covered the assigned marker-environment documentation, child-spec construction and host environment boundary; the fixed-state test helper's construction and call sites; retry launch-evidence classification; and the live-child reload fixture's setup. New verified source finding l1: the assigned launch.rs rewrite says terminal hosts inherit the outer FARHELM_TAB_ID, contradicting the actual empty host environment. Followed host_child_env from the supervisor base to ChildSpec and env_clear on the first stage. Compared the whole range's base and all later launch.rs changes through pinned tip: the base described tmux-server inheritance; the assigned rewrite introduced terminal-host inheritance, and the sentence persists at tip. The production boundary remains correct; the finding concerns the distinct false documentation, with bucket other and no alleged security/work-loss route. The marker-passage inline comment can be clarified with the same cause but is not counted separately.\n\nOther checked boundaries produced no additional concrete finding: fixed_for_test remains test-only, uses ended's closed request channels and caught_up=false, and its found consumers use fixed status/observation fixtures; host_launch_evidence treats a published host as Present and otherwise requires recorded-start/socket evidence, refusing unreadable or wrong-tag answers. These were source/contract checks, not execution. No substantive unresolved premise remains from this pass.\n\nDelta: new ID l1, appended first as lead, then as finding, then revised with resolved whole-range/tip attribution. New verified IDs: l1. New unverified-after-investigation IDs: none. Remaining lead IDs: none. New finding found: yes, developer-documentation correctness only. Ten append-only events now retained. Total review turns: 3; discovery-pass count: 1. No unread assigned mandatory source ranges; delivery repair from turn 2 remains applicable because bytes/hashes are unchanged. No tests, builds, reproductions, checkout modifications, subagents or live-install actions. Next: return the discovery result to parent; a new substantive discovery requires the separately requested next pass rather than another pass inside this turn.\n\nTurn 4: separate discovery pass 2 starting. Preserve c1-c4 and l1 with complete append-only history. Read refreshed discovery-neighbours in bounded chunks before source search. No pending cross-group questions; no open leads. No execution requested.\n\nTurn 4 complete: separate discovery pass 2, empty result. Existing c1-c4 and l1 remain unchanged; all consequences and proposed-drop bases preserved. No named pending interface questions were supplied.\n\nRefreshed-neighbour reading: reused the full earlier neighbor records already delivered in turn 3, reconstructed those exact chunk contents from this group's own turn3 command outputs, and compared each owner/record object with the current discovery-neighbours.json. The old reconstructed JSON needed only its final root closing brace restored after the last delivered chunk; no record content was invented. Read the complete owner/id/summary inventory and all 41 new or revised records from neighbours.delta.json in bounded owner groups. The one tool-result clip was confined to part of the g109/c2 object header; that full object was redelivered separately. Unchanged records reuse the complete previous reading. These context comparisons claim no mandatory source credit and consult no prohibited coverage sources. neighbours.latest-read.json now preserves this exact current context for later reuse.\n\nNew source checks/results, at recorded revisions: host_handover.rs:448-544 retains the under-map publication fence, stops new runtimes after stopping is set and gathers both mapped and restarting tab runtimes; HostTerminal equality at terminal.rs:1467-1473 remains Arc runtime identity for deduplication/re-adoption. holds_retried at host_handover.rs:1564-1570 requires generation, exact runtime and no stop. host_reclaim.rs:477-570 retains conservative directory/store gates and excludes every held agent/tab socket, including restarting tabs, from orphan work. The live-child reload test at dbfc host_terminals.rs:1832-1858 creates its supervisor before starting its sole discoverable host, inserts StopRequested and requires durable Running after reload; TestHostSpec's default has no exited status and its start path owns the stand-in child, so this new fixture does not have the neighboring competing-origin-runtime setup. host_launch.rs:117-160 still removes the named terminal/socket-activation variables after overlaying launch_env and separately composes the child spec. Other assigned patch behavior and comment changes were reconsidered against the prior complete source/contract context; no distinct concrete lead emerged. These are source results, not runtime observations or proof of every possible lifecycle interleaving.\n\nKnown neighboring excerpt-provenance, obsolete-container prose, fixture lifetime, startup guard and diagnostic-pointer records were used only for interface/novelty context. No new copy of those issues was created, and the final-output ordering checks in c1 were not expanded into a claim about inherited-cell provenance. No production-correctness argument was used to dismiss a distinct test or documentation defect.\n\nDelta this turn: no events appended, no IDs revised. New verified IDs: none. New unverified-after-investigation IDs: none. Remaining lead IDs: none. Anything new found: no. Findings log remains ten append-only events. Total review turns: 4; discovery-pass count: 2. Mandatory assigned source coverage remains complete from turn 2, unchanged bytes/hashes; no unread assigned ranges. No runtime tests, builds, reproductions, checkout modifications, helper agents or live-install actions. Next: return the empty discovery result to parent and await its next instruction.\n"
+}

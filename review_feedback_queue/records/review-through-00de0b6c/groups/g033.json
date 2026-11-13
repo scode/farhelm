@@ -1,0 +1,540 @@
+{
+  "group": {
+    "id": "g033",
+    "domain": "gui-shell-integration",
+    "purpose": "gui-shell-integration: crates/farhelm-ui/src/lib.rs, crates/farhelm-ui/src/migration.rs; phases complete small per-commit changes",
+    "interfaces": [
+      "g009",
+      "g010",
+      "g011",
+      "g032",
+      "g034"
+    ],
+    "sources": [
+      {
+        "path": "[private-run]/prep/parts/01108-000.patch",
+        "ranges": [
+          [
+            1,
+            382
+          ]
+        ],
+        "original_path": "crates/farhelm-ui/src/lib.rs",
+        "commit": "f560058da19e02716e6f943883a9508b447aff4e",
+        "notes": "patch header; patch character offsets [0,22875)",
+        "lines": 382,
+        "bytes": 22913,
+        "start": 0,
+        "end": 22875,
+        "original": "[private-run]/prep/originals/01108.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/01115-000.patch",
+        "ranges": [
+          [
+            1,
+            920
+          ]
+        ],
+        "original_path": "crates/farhelm-ui/src/migration.rs",
+        "commit": "f560058da19e02716e6f943883a9508b447aff4e",
+        "notes": "patch header; patch character offsets [0,41992)",
+        "lines": 920,
+        "bytes": 42005,
+        "start": 0,
+        "end": 41992,
+        "original": "[private-run]/prep/originals/01115.patch"
+      }
+    ],
+    "lines": 1302,
+    "bytes": 64918
+  },
+  "records": [
+    {
+      "key": "g033/r1",
+      "owner": "g033",
+      "id": "r1",
+      "domain": "gui-shell-integration",
+      "purpose": "gui-shell-integration: crates/farhelm-ui/src/lib.rs, crates/farhelm-ui/src/migration.rs; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 1,
+          "event": {
+            "version": 1,
+            "kind": "lead",
+            "id": "r1",
+            "state": "open",
+            "summary": "Check whether removal of migration UI can hide surviving old terminals",
+            "location": "crates/farhelm-ui/src/lib.rs:175",
+            "detail": "# Check whether removal of migration UI can hide surviving old terminals\n\nReviewed commit: f560058da19e02716e6f943883a9508b447aff4e\n\n## TLDR\n\nThe session no longer warns about old terminals. Check whether an older remote supervisor can still expose one to this UI, or whether startup cleanup and protocol admission make that impossible.\n\n## Details\n\nThe assigned patch removes the migration module, Session.agent_terminal and Session.supervisor_creates_host_terminals, and all of migration.rs. SPEC.md, Terminal experience, lines 3002-3015 says every terminal is new and this release ends the private tmux server at startup. SPEC_impl.md lines 2794-2831 documents cleanup before reload, including accepted failures and possible surviving processes. The missing check is the actual protocol-version gate and cleanup integration at the reviewed revision. Suggested bucket: high for a hidden migration state if reachable; could-be-highest: yes if this conceals a still-running agent and Restart creates concurrent writers, but that route is not established. Confidence: unresolved lead; source-only. Proposed_drop: false pending investigation. Possible_cover: none; no coverage sources consulted. No runtime behavior observed. Next source checks: current protocol constant/handshake and supervisor cleanup call before reload, then session-view callsite removal and replacement notice."
+          }
+        },
+        {
+          "line": 2,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "r1",
+            "state": "open",
+            "summary": "Migration warning removal covers explicitly accepted cleanup failures",
+            "location": "crates/farhelm-ui/src/lib.rs:175",
+            "detail": "# Migration warning removal covers explicitly accepted cleanup failures\n\nReviewed commit: f560058da19e02716e6f943883a9508b447aff4e\n\n## TLDR\n\nIf an update cannot end an old terminal's processes, the session is still presented as ended and no longer has the migration banner. Restart can then create another agent beside the survivor. The specification explicitly accepts that result; this record is proposed for dropping and requires the caller's independent check because concurrent agents could damage user-owned work.\n\n## Details\n\nRevision of r1 after source investigation. The assigned lib.rs patch removes mod migration and Session's two terminal-kind fields; migration.rs and its warning are deleted. The hypothesized route through an older remote supervisor is refuted: farhelm-proto/src/lib.rs:255 sets protocol 77, farhelm-proto/src/io.rs:587-660 refuses any differing hello version, and farhelm-helm/src/client.rs:1755-1759 applies that handshake before creating the client. At this revision the current supervisor ends the private server before reloading sessions (farhelm-supervisor/src/service/core.rs:6142-6185); reload sweeps before committing converted outcomes (:7045-7050), then records OldTerminalEnded and resolves old warnings (:7077-7090, core/old_terminals.rs:513-548). No remaining migration component/callsite occurs in session_view.rs. Ordinary old-terminal warning removal is therefore consistent with the replacement.\n\nThe cleanup-failure route is explicitly accepted. SPEC.md, Terminal experience, lines 3011-3015: \"A failure to end the server or to stop what ran there is logged and never stops the supervisor from starting; those sessions are treated as ended all the same, accepting that a Restart could then start a second agent beside one still running.\" SPEC_impl.md, Terminal substrate: private tmux server, lines 2827-2831: \"A failure anywhere is logged and never fatal (the maintainer chose to start anyway and treat old sessions as ended, accepting that a Restart could then start a second agent beside one still running)\". The original concern was hidden migration state and possible duplicate agents; the old-peer route is refuted, while the failure route remains but is a named acceptance, not a newly claimed cleanup defect.\n\nSuggested bucket: highest if judged a defect, because concurrent agents can act on user-owned work; the precise damage from concurrent agents has not been executed or demonstrated. Could-be-highest: yes; not lowered for rarity. Confidence: confirmed source/contract acceptance of duplicate-agent risk, no runtime observation. Proposed_drop: specification explicitly accepts the startup failure and second-agent result, quoted above; independent check requested under the charter. Possible_cover: none; no coverage sources consulted. Scope caveat: startup cleanup is context for the assigned GUI deletion, not independently reviewed for unrelated defects."
+          }
+        },
+        {
+          "line": 5,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "r1",
+            "state": "open",
+            "summary": "Migration warning removal covers explicitly accepted cleanup failures",
+            "location": "crates/farhelm-ui/src/lib.rs:175",
+            "detail": "# Migration warning removal covers explicitly accepted cleanup failures\n\nReviewed commit: f560058da19e02716e6f943883a9508b447aff4e\n\n## TLDR\n\nIf an update cannot end an old terminal's processes, the session is still presented as ended and no longer has the migration banner. Restart can then create another agent beside the survivor. The specification explicitly accepts that result. Proposed drop, for independent check because duplicate agents could affect user-owned work.\n\n## Details\n\nRevision of r1 clarifies the bucket: the original concern included possible damage from concurrent agents, but actual work loss is not established. Suggested bucket: high for the established duplicate-agent/incorrect-ended-state consequence, if treated as a defect. Could-be-highest: yes; what would move it to highest is an established shipped route from the duplicate agents to lost user-owned work, rather than merely the possibility of both writing files. Rarity is not the reason for the bucket.\n\nThe assigned lib.rs patch removes mod migration and Session's two terminal-kind fields; migration.rs and its warning are deleted. An older remote supervisor continuing to serve old terminals is refuted: farhelm-proto/src/lib.rs:255 sets protocol 77; farhelm-proto/src/io.rs:587-660 refuses a differing hello version; farhelm-helm/src/client.rs:1755-1759 applies that handshake before creating its client. The current supervisor ends the private server before reload (farhelm-supervisor/src/service/core.rs:6142-6185), sweeps before committing converted outcomes (:7045-7050), then records OldTerminalEnded and resolves old warnings (:7077-7090, core/old_terminals.rs:513-548). A pinned search across UI src found no migration module calls or remaining terminal-kind fields. Session view uses the replacement interrupted-session surface. SPEC.md Status :2804-2814 replaces the old warning with a durable ended-terminal notice.\n\nThe surviving-process route is explicitly accepted. SPEC.md, Terminal experience, :3011-3015: \"A failure to end the server or to stop what ran there is logged and never stops the supervisor from starting; those sessions are treated as ended all the same, accepting that a Restart could then start a second agent beside one still running.\" SPEC_impl.md, Terminal substrate: private tmux server, :2827-2831: \"A failure anywhere is logged and never fatal (the maintainer chose to start anyway and treat old sessions as ended, accepting that a Restart could then start a second agent beside one still running)\". The original possible consequence is preserved: no migration warning for surviving processes, and potential concurrent agents acting on the same work. This is an implication of the assigned GUI removal under the replacement contract, not an independent claim that cleanup was newly broken here.\n\nConfidence: confirmed source/contract acceptance of duplicate-agent risk; no runtime execution or observed work loss. Proposed_drop: the specification explicitly accepts cleanup failure followed by a second agent, quoted above; caller's independent check required by the charter. Possible_cover: none; no coverage sources consulted. No unresolved source premise remains for the acceptance disposition; the broader loss-of-work route was not established."
+          }
+        },
+        {
+          "line": 7,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "r1",
+            "state": "open",
+            "summary": "Cleanup-failure state is accepted, but GUI deletion may not cause its concealment",
+            "location": "crates/farhelm-ui/src/lib.rs:175",
+            "detail": "# Cleanup-failure state is accepted, but GUI deletion may not cause its concealment\n\nReviewed commit: f560058da19e02716e6f943883a9508b447aff4e\n\n## TLDR\n\nThe migration can leave an old agent alive after failed cleanup while calling it ended; Restart can create another agent beside it. That remains retained for independent checking. Synthesis identifies an attribution limit: the deleted banner already excluded ended agents, so keeping that banner may not disclose the survivor either.\n\n## Details\n\nRevision of r1 upon synthesis of the delivered migration deletion with startup conversion. The deleted migration_case (migration.rs parent lines 105-126, delivered patch 01115-000.patch lines 111-132) first requires supervisor_creates_host_terminals and a non-stale session, then shows OldAgent only when agent_terminal is Tmux AND status.has_ended() is false. The startup context previously checked converts the affected agent to Interrupted and drops old tabs. Therefore removal of this banner is not yet established as the cause of the concealed survivor; even its old predicate would reject an Interrupted agent. Next source check will confirm exact parent lines and reload's projection of old tabs and agent kind. This narrows attribution, not the original consequence: possible concurrent agents acting on the same work remains retained.\n\nCross-group input g004/f1 event line 2 concerns a later commit, 78e9d68a95119db8452ee139efde13d38546f648, restoring a general update-survival assurance despite deliberate successful old-terminal termination. Its trigger is an update with successful one-time termination and a general promise that sessions survive it. r1's trigger is failed cleanup followed by an ended-state claim and optional Restart while the original process survives. The shared migration is not evidence of equivalence; no deduplication proposed.\n\nSuggested bucket: high for established duplicate-agent/incorrect-ended-state behavior if retained as a defect; could-be-highest: yes, work loss through concurrent agents remains possible but unestablished. This is a proposed source-based classification only; parent has accepted no lowering. Confidence: source supports startup conversion and the old banner predicate; attribution check in progress, no runtime execution. Proposed_drop: still proposed, not accepted. Specification acceptance remains SPEC.md :3011-3015: \"A failure to end the server or to stop what ran there is logged and never stops the supervisor from starting; those sessions are treated as ended all the same, accepting that a Restart could then start a second agent beside one still running.\" SPEC_impl.md :2827-2831 similarly says: \"A failure anywhere is logged and never fatal (the maintainer chose to start anyway and treat old sessions as ended, accepting that a Restart could then start a second agent beside one still running)\". Both exact acceptance text and the new attribution limit require independent checking. Possible_cover: g004/f1 is related context, not equivalent coverage; no coverage sources searched."
+          }
+        },
+        {
+          "line": 8,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "r1",
+            "state": "open",
+            "summary": "Cleanup-failure risk predates the removed GUI warning",
+            "location": "crates/farhelm-ui/src/lib.rs:175",
+            "detail": "# Cleanup-failure risk predates the removed GUI warning\n\nReviewed commit: f560058da19e02716e6f943883a9508b447aff4e\n\n## TLDR\n\nAn update whose cleanup fails can leave the old agent alive while presenting its session as ended. Restart can then create a second agent beside it. Synthesis confirms that deleting the migration banner did not remove a warning for that surviving process: the old banner already received no old terminal to describe. The original risk remains retained for the caller's independent exclusion and consequence check.\n\n## Details\n\nRevision of r1 closes the readily checkable GUI-attribution premise with source refutation, rather than relying solely on specification acceptance. Before this commit, migration.rs:99-117 required agent_terminal == Tmux and !status.has_ended() for the agent warning, or a Tmux-kind tab for the tab warning. farhelm-proto/src/lib.rs in the parent :925-935 explicitly counts Interrupted as ended. More decisively, the parent's service/status.rs:379-388 already reports tabs only from listed_host_tabs and agent_terminal from entry.terminal, not the stored row's kind. Its :431-445 reports the new-terminal switch true, but that cannot overcome absent terminal evidence. At the reviewed revision service/core.rs:6675-6680 never looks up a Tmux row's address and supplies no found terminal; :6808-6822 proposes TerminalEnded for live old rows; :7110-7111 builds the entry with that absent terminal and committed outcome. This old-terminal retirement and terminal-less publication was already present in the parent, as checked directly in the parent's core.rs and status.rs. Current :7148 and :7247 populate host_tabs from adopted terminal hosts, while core/host_tabs.rs:270-275 lists only those host runtimes. Thus keeping the deleted GUI module and fields would not reveal an old survivor after failed cleanup. This refutes attribution of the hidden survivor to this assigned GUI deletion; it does not refute the surviving-process/second-agent consequence itself. No new in-scope defect is established.\n\nThe previous current-supervisor boundary checks still apply: protocol 77 at farhelm-proto/src/lib.rs:255 and exact-version admission at io.rs:587-660, used at farhelm-helm/src/client.rs:1755-1759, exclude an older serving supervisor. Startup cleanup precedes reload at supervisor service/core.rs:6142-6185; sweep precedes committed conversion at :7045-7050; ended notices and old-warning resolution follow at :7077-7090 and core/old_terminals.rs:513-548. The replacement Restart tooltip explicitly says interrupted by a host reboot or Farhelm update (UI session_view.rs:3512-3513). None claims that this GUI removal itself verifies process death.\n\nSpecification-based proposed exclusion also remains retained for independent checking. SPEC.md, Terminal experience, :3011-3015: \"A failure to end the server or to stop what ran there is logged and never stops the supervisor from starting; those sessions are treated as ended all the same, accepting that a Restart could then start a second agent beside one still running.\" SPEC_impl.md, Terminal substrate: private tmux server, :2827-2831: \"A failure anywhere is logged and never fatal (the maintainer chose to start anyway and treat old sessions as ended, accepting that a Restart could then start a second agent beside one still running)\". Proposed_drop: (1) source refutes attribution to the assigned warning removal, and independently (2) the specification expressly accepts cleanup failure and the second-agent result. Neither exclusion has been accepted by the parent; this record stays a finding for that independent decision.\n\nCross-group g004/f1, latest event line 2, reviews 78e9d68a95119db8452ee139efde13d38546f648 and a general update-survival assurance despite successful deliberate termination during this migration. That trigger and consequence differ: g004 concerns a promise of survival followed by intended termination; r1 concerns a failed termination, an ended-state claim despite a survivor, and possible duplicate agents after Restart. No deduplication or transfer of its finding to this GUI change is proposed. Possible_cover: g004/f1 is related context, not equivalent coverage; no coverage sources searched.\n\nSuggested bucket remains proposed high for established incorrect-ended-state/duplicate-agent behavior if retained as a defect; could-be-highest: yes. Preserve the original possible harm: concurrent agents can act on the same user-owned work. A shipped route to actual work loss was not established or executed; the parent has accepted no consequence lowering, and rarity is not a reason to lower it. Confidence: confirmed source refutation of GUI causation and explicit contract acceptance of the underlying cleanup-failure result. No runtime observation or reproduction. No unresolved readily checkable source premise remains; independent exclusion and consequence decisions remain the caller's."
+          }
+        },
+        {
+          "line": 9,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "r1",
+            "state": "open",
+            "summary": "Cleanup-failure risk predates the removed GUI warning",
+            "location": "crates/farhelm-ui/src/lib.rs:175",
+            "detail": "# Cleanup-failure risk predates the removed GUI warning\n\nReviewed commit: f560058da19e02716e6f943883a9508b447aff4e\n\n## TLDR\n\nFailed update cleanup can leave an old agent alive while presenting its session as ended; Restart can create a second agent beside it. The removed migration banner already received no old terminal to describe. This consequence and both proposed exclusion grounds remain retained for independent checking.\n\n## Details\n\nDiscovery-input synthesis revision of r1. New neighbor g032/l5 describes a distinct confirmed route to loss of user-owned processes: a Running Restart question stays open, later renders Interrupted with \"nothing left to stop\", then its answer authorizes a Restart that reaps surviving old-agent work. That record establishes a highest-impact misleading-confirmation route in status.rs/session_view.rs at dbfc69751215dbf15e1d31d5bed73c3754c4ebc4. It is not refuted by accepted imperfect startup cleanup and is not proposed for dropping here. My r1 exclusion applies only to attributing concealment to the assigned migration-banner deletion and the separately accepted cleanup-failure/duplicate-agent behavior. It does not exclude or lower g032/l5's destructive-consent consequence. No merge of those findings is proposed merely because both start with surviving old processes.\n\nSource attribution remains checked: parent migration.rs:99-117 requires agent_terminal == Tmux and !status.has_ended(), or a Tmux-kind tab. Parent proto lib.rs:925-935 counts Interrupted as ended. Parent service/status.rs:379-388 derives agent_terminal from entry.terminal and lists only host tabs; :431-445's true new-terminal switch does not change the absent evidence. Parent core.rs:6675-6679 already supplies no found terminal for Tmux rows. Current core.rs:6675-6680 retains that rule, :6808-6822 proposes TerminalEnded, :7110-7111 constructs absent-terminal entries with committed outcomes, :7148/:7247 supplies adopted host tabs, and core/host_tabs.rs:270-275 lists only those runtimes. Thus retaining the deleted module/fields would not disclose the survivor. Original consequence is preserved: the UI's ended-state claim may conceal living work and Restart can introduce concurrent agents acting on that work, but this assigned deletion is not established as its cause.\n\nBoundary checks remain: protocol 77 and exact-version admission (proto lib.rs:255, io.rs:587-660; helm client.rs:1755-1759) exclude older serving supervisors. Startup cleanup precedes reload (supervisor core.rs:6142-6185), sweep precedes committed conversion (:7045-7050), notices and old-warning resolution follow (:7077-7090; core/old_terminals.rs:513-548). These do not establish process death after failure.\n\nExact specification acceptance for independent checking: SPEC.md, Terminal experience, :3011-3015: \"A failure to end the server or to stop what ran there is logged and never stops the supervisor from starting; those sessions are treated as ended all the same, accepting that a Restart could then start a second agent beside one still running.\" SPEC_impl.md, Terminal substrate: private tmux server, :2827-2831: \"A failure anywhere is logged and never fatal (the maintainer chose to start anyway and treat old sessions as ended, accepting that a Restart could then start a second agent beside one still running)\". Proposed_drop: source refutes attribution to the assigned banner deletion; independently, these specifications accept cleanup failure and a second agent. Neither proposed exclusion is accepted by the parent. Keep r1 as a finding pending independent decision.\n\nSuggested bucket remains proposed high for incorrect-ended-state/duplicate-agent behavior if judged a defect, with could-be-highest: yes. Preserve potential work loss from concurrent agents, which is not established on r1's own duplicate-agent route. The newly supplied g032/l5 route does establish a separate surviving-process loss consequence and remains highest in that owner's record; no consequence lowering is assumed or proposed for it. Confidence: confirmed source refutation of banner causation and explicit contract acceptance of duplicate-agent behavior; no execution. g004/f1 remains distinct: general survival assurance followed by intended successful termination at 78e9d68a95119db8452ee139efde13d38546f648, rather than failed cleanup and surviving agents. Possible_cover: related caller-supplied g004/f1 and g032/l5 only, not equivalent coverage. No coverage sources searched. No unresolved source premise for this disposition; independent exclusion/consequence decisions remain pending."
+          }
+        },
+        {
+          "line": 11,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "r1",
+            "state": "open",
+            "summary": "Cleanup-failure risk predates the removed GUI warning",
+            "location": "crates/farhelm-ui/src/lib.rs:175",
+            "detail": "# Cleanup-failure risk predates the removed GUI warning\n\nReviewed commit: f560058da19e02716e6f943883a9508b447aff4e\n\n## TLDR\n\nFailed update cleanup can leave an old agent alive while presenting its session as ended; Restart can create a second agent beside it. The removed migration banner already received no old terminal to describe. This consequence and both proposed exclusion grounds remain retained for independent checking.\n\n## Details\n\nDiscovery-input synthesis revision of r1. New neighbor g032/l5 describes a distinct confirmed route to loss of user-owned processes: a Running Restart question stays open, later renders Interrupted with \"nothing left to stop\", then its answer authorizes a Restart that reaps surviving old-agent work. That record establishes a highest-impact misleading-confirmation route in status.rs/session_view.rs at dbfc69751215dbf15e1d31d5bed73c3754c4ebc4. It is not refuted by accepted imperfect startup cleanup and is not proposed for dropping here. My r1 exclusion applies only to attributing concealment to the assigned migration-banner deletion and the separately accepted cleanup-failure/duplicate-agent behavior. It does not exclude or lower g032/l5's destructive-consent consequence. No merge of those findings is proposed merely because both start with surviving old processes.\n\nSource attribution remains checked: parent migration.rs:99-117 requires agent_terminal == Tmux and !status.has_ended(), or a Tmux-kind tab. Parent proto lib.rs:925-935 counts Interrupted as ended. Parent service/status.rs:379-388 derives agent_terminal from entry.terminal and lists only host tabs; :431-445's true new-terminal switch does not change the absent evidence. Parent core.rs:6675-6679 already supplies no found terminal for Tmux rows. Current core.rs:6675-6680 retains that rule, :6808-6822 proposes TerminalEnded, :7110-7111 constructs absent-terminal entries with committed outcomes, :7148/:7247 supplies adopted host tabs, and core/host_tabs.rs:270-275 lists only those runtimes. Thus retaining the deleted module/fields would not disclose the survivor. Original consequence is preserved: the UI's ended-state claim may conceal living work and Restart can introduce concurrent agents acting on that work, but this assigned deletion is not established as its cause.\n\nBoundary checks remain: protocol 77 and exact-version admission (proto lib.rs:255, io.rs:587-660; helm client.rs:1755-1759) exclude older serving supervisors. Startup cleanup precedes reload (supervisor core.rs:6142-6185), sweep precedes committed conversion (:7045-7050), notices and old-warning resolution follow (:7077-7090; core/old_terminals.rs:513-548). These do not establish process death after failure.\n\nExact specification acceptance for independent checking: SPEC.md, Terminal experience, :3011-3015: \"A failure to end the server or to stop what ran there is logged and never stops the supervisor from starting; those sessions are treated as ended all the same, accepting that a Restart could then start a second agent beside one still running.\" SPEC_impl.md, Terminal substrate: private tmux server, :2827-2831: \"A failure anywhere is logged and never fatal (the maintainer chose to start anyway and treat old sessions as ended, accepting that a Restart could then start a second agent beside one still running)\". Proposed_drop: source refutes attribution to the assigned banner deletion; independently, these specifications accept cleanup failure and a second agent. Neither proposed exclusion is accepted by the parent. Keep r1 as a finding pending independent decision.\n\nSuggested bucket remains proposed high for incorrect-ended-state/duplicate-agent behavior if judged a defect, with could-be-highest: yes. Preserve potential work loss from concurrent agents, which is not established on r1's own duplicate-agent route. The newly supplied g032/l5 route does establish a separate surviving-process loss consequence and remains highest in that owner's record; no consequence lowering is assumed or proposed for it. Confidence: confirmed source refutation of banner causation and explicit contract acceptance of duplicate-agent behavior; no execution. g004/f1 remains distinct: general survival assurance followed by intended successful termination at 78e9d68a95119db8452ee139efde13d38546f648, rather than failed cleanup and surviving agents. Possible_cover: related caller-supplied g004/f1 and g032/l5 only, not equivalent coverage. No coverage sources searched. No unresolved source premise for this disposition; independent exclusion/consequence decisions remain pending.\n\nRange-attribution check during discovery: git log over exclusive 6e423e30068b62c6cfa276c6d720ee35bb70387a through f560058da19e02716e6f943883a9508b447aff4e for migration.rs and service/core/old_terminals.rs identifies dbfc69751215dbf15e1d31d5bed73c3754c4ebc4 as the earlier old-terminal-ending change and f560058da19e02716e6f943883a9508b447aff4e as the later GUI removal. Therefore this risk predates the assigned GUI deletion, but does not predate the full pinned review range. No range-wide pre-existence exclusion is claimed. The earlier startup/confirmation change remains covered by its owners, including supplied g032/l5; independent checks of r1 and its proposed exclusions remain pending."
+          }
+        }
+      ],
+      "latest": {
+        "line": 11,
+        "event": {
+          "version": 1,
+          "kind": "finding",
+          "id": "r1",
+          "state": "open",
+          "summary": "Cleanup-failure risk predates the removed GUI warning",
+          "location": "crates/farhelm-ui/src/lib.rs:175",
+          "detail": "# Cleanup-failure risk predates the removed GUI warning\n\nReviewed commit: f560058da19e02716e6f943883a9508b447aff4e\n\n## TLDR\n\nFailed update cleanup can leave an old agent alive while presenting its session as ended; Restart can create a second agent beside it. The removed migration banner already received no old terminal to describe. This consequence and both proposed exclusion grounds remain retained for independent checking.\n\n## Details\n\nDiscovery-input synthesis revision of r1. New neighbor g032/l5 describes a distinct confirmed route to loss of user-owned processes: a Running Restart question stays open, later renders Interrupted with \"nothing left to stop\", then its answer authorizes a Restart that reaps surviving old-agent work. That record establishes a highest-impact misleading-confirmation route in status.rs/session_view.rs at dbfc69751215dbf15e1d31d5bed73c3754c4ebc4. It is not refuted by accepted imperfect startup cleanup and is not proposed for dropping here. My r1 exclusion applies only to attributing concealment to the assigned migration-banner deletion and the separately accepted cleanup-failure/duplicate-agent behavior. It does not exclude or lower g032/l5's destructive-consent consequence. No merge of those findings is proposed merely because both start with surviving old processes.\n\nSource attribution remains checked: parent migration.rs:99-117 requires agent_terminal == Tmux and !status.has_ended(), or a Tmux-kind tab. Parent proto lib.rs:925-935 counts Interrupted as ended. Parent service/status.rs:379-388 derives agent_terminal from entry.terminal and lists only host tabs; :431-445's true new-terminal switch does not change the absent evidence. Parent core.rs:6675-6679 already supplies no found terminal for Tmux rows. Current core.rs:6675-6680 retains that rule, :6808-6822 proposes TerminalEnded, :7110-7111 constructs absent-terminal entries with committed outcomes, :7148/:7247 supplies adopted host tabs, and core/host_tabs.rs:270-275 lists only those runtimes. Thus retaining the deleted module/fields would not disclose the survivor. Original consequence is preserved: the UI's ended-state claim may conceal living work and Restart can introduce concurrent agents acting on that work, but this assigned deletion is not established as its cause.\n\nBoundary checks remain: protocol 77 and exact-version admission (proto lib.rs:255, io.rs:587-660; helm client.rs:1755-1759) exclude older serving supervisors. Startup cleanup precedes reload (supervisor core.rs:6142-6185), sweep precedes committed conversion (:7045-7050), notices and old-warning resolution follow (:7077-7090; core/old_terminals.rs:513-548). These do not establish process death after failure.\n\nExact specification acceptance for independent checking: SPEC.md, Terminal experience, :3011-3015: \"A failure to end the server or to stop what ran there is logged and never stops the supervisor from starting; those sessions are treated as ended all the same, accepting that a Restart could then start a second agent beside one still running.\" SPEC_impl.md, Terminal substrate: private tmux server, :2827-2831: \"A failure anywhere is logged and never fatal (the maintainer chose to start anyway and treat old sessions as ended, accepting that a Restart could then start a second agent beside one still running)\". Proposed_drop: source refutes attribution to the assigned banner deletion; independently, these specifications accept cleanup failure and a second agent. Neither proposed exclusion is accepted by the parent. Keep r1 as a finding pending independent decision.\n\nSuggested bucket remains proposed high for incorrect-ended-state/duplicate-agent behavior if judged a defect, with could-be-highest: yes. Preserve potential work loss from concurrent agents, which is not established on r1's own duplicate-agent route. The newly supplied g032/l5 route does establish a separate surviving-process loss consequence and remains highest in that owner's record; no consequence lowering is assumed or proposed for it. Confidence: confirmed source refutation of banner causation and explicit contract acceptance of duplicate-agent behavior; no execution. g004/f1 remains distinct: general survival assurance followed by intended successful termination at 78e9d68a95119db8452ee139efde13d38546f648, rather than failed cleanup and surviving agents. Possible_cover: related caller-supplied g004/f1 and g032/l5 only, not equivalent coverage. No coverage sources searched. No unresolved source premise for this disposition; independent exclusion/consequence decisions remain pending.\n\nRange-attribution check during discovery: git log over exclusive 6e423e30068b62c6cfa276c6d720ee35bb70387a through f560058da19e02716e6f943883a9508b447aff4e for migration.rs and service/core/old_terminals.rs identifies dbfc69751215dbf15e1d31d5bed73c3754c4ebc4 as the earlier old-terminal-ending change and f560058da19e02716e6f943883a9508b447aff4e as the later GUI removal. Therefore this risk predates the assigned GUI deletion, but does not predate the full pinned review range. No range-wide pre-existence exclusion is claimed. The earlier startup/confirmation change remains covered by its owners, including supplied g032/l5; independent checks of r1 and its proposed exclusions remain pending."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g033/findings.jsonl",
+        "id": "r1",
+        "line": 11,
+        "disposition": "under-investigation",
+        "group": "g033-r1",
+        "reason": "Record durably acknowledged; parent source/contract validation, cross-group synthesis, coverage/filter matching and any independent drop check remain pending. This preserves the claim and uncertainty without accepting, dropping or lowering it."
+      },
+      "accepted_parent_decision": null,
+      "returned_claim_checks": [
+        {
+          "batch": "claims-019",
+          "key": "g033/r1",
+          "latest_line": 11,
+          "recommendation": "covered",
+          "bucket": "high",
+          "underlying_key": "old-terminal-cleanup-failure-publishes-ended-state-and-allows-restart",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The full-range cleanup-failure behavior is real but expressly accepted by both current specifications. Separately, removing the GUI migration banner did not newly conceal these survivors because its prior predicate and projection already excluded them. Neither conclusion excludes the distinct misleading confirmation in g032/l5. This proposed omission and consequence classification require independent checking.",
+          "checks": [
+            "At f560058da19e02716e6f943883a9508b447aff4e parent, migration.rs:99-117 requires Tmux and !status.has_ended() for the agent banner, or a Tmux-kind visible tab. service/status.rs:384-388 reports only listed host tabs and derives agent kind from entry.terminal.",
+            "At f560058da19e02716e6f943883a9508b447aff4e, service/core.rs:6675-6679 supplies no terminal for Tmux rows; :7045-7050 sweeps before committing converted outcomes, and :7077-7090 records ended notices/resolves old warnings. A failed sweep does not establish process death. Retaining the deleted banner would not reveal a terminal-less Interrupted survivor.",
+            "At that revision proto/lib.rs:255 sets protocol 77; proto/io.rs:629-643 admits only exact protocol equality, excluding the hypothesized older serving supervisor. This does not eliminate current-supervisor cleanup failures.",
+            "Pinned git log over exclusive 6e423e30068b62c6cfa276c6d720ee35bb70387a through f560058da19e02716e6f943883a9508b447aff4e identifies dbfc69751215dbf15e1d31d5bed73c3754c4ebc4 as startup ending and f560058d as GUI removal. Therefore failure risk predates the assigned GUI patch, not the full review range. Do not call it out-of-range.",
+            "Source establishes incorrect-ended-state/possible second-agent behavior under failed cleanup. Actual loss of work from concurrent agents was not established or executed; high is proposed for that established consequence, with the original possible highest harm preserved."
+          ],
+          "coverage_checked": {
+            "specifications": "Searched and read SPEC.md:2997-3010 and SPEC_impl.md:2781-2823. Both explicitly accept failed cleanup, treating sessions as ended and possible second agents. This exactly matches r1's trigger/consequence/scope, not g032/l5's later misleading warning.",
+            "TODO_Planned": "Empty at TODO.md:23-25. Eventual removal of startup shutdown is not Planned exact repair coverage.",
+            "plans_queue": "tmux-end-old-terminals.md records the same conversion design but is landed per plans/REPORTS.md:29. No unlanded plan found that changes the accepted cleanup-failure result.",
+            "BUGS": "Read BUGS.md; no separate matching entry; specification acceptance supplies the proposed coverage.",
+            "queue": "INDEX.md has no exact r1 item. Existing late terminal-host adoption and restart-recovery items concern different terminal substrates or later states. g032/l5 is distinct and must not be deduplicated here.",
+            "active_triage": "Searched TRIAGE_OUTCOMES.md for migration banner, startup old-terminal failure and second agents; no exact active decision.",
+            "filter": "Upgrade-plus-rare-condition filter may independently apply, but is unnecessary to the proposed exact specification coverage and was not used to expand it."
+          },
+          "exact_cover_quotes": [
+            "SPEC.md:3008-3010: 'A failure to end the server or to stop what ran there is logged and never stops the supervisor from starting; those sessions are treated as ended all the same, accepting that a Restart could then start a second agent beside one still running.'",
+            "SPEC_impl.md:2819-2821: 'A failure anywhere is logged and never fatal (the maintainer chose to start anyway and treat old sessions as ended, accepting that a Restart could then start a second agent beside one still running)'."
+          ],
+          "missing_premise": "A shipped route from duplicate agents to actual user-work loss is unestablished. That missing stronger consequence does not itself justify dropping the established behavior; exact specification acceptance is the proposed omission basis.",
+          "original_stronger_consequence": "Failed cleanup can conceal living work behind an ended-state claim; Restart can create concurrent agents acting on the same user-owned work, potentially damaging it. Earlier history proposed highest, later high; neither lowering nor omission has been accepted by the parent. g032/l5 separately establishes a process-loss confirmation route and remains distinct.",
+          "needs_independent_drop_check": true,
+          "proposed_basis": "Independent check: (1) exact specification acceptance of ended state and a second agent after failed cleanup; (2) narrowly refuted attribution to the GUI banner deletion; (3) proposed high rather than highest because actual duplicate-agent work loss is not established. Do not erase in-range introduction at dbfc6975 or collapse the distinct supplied g004/f1 update-survival promise or g032/l5 confirmation."
+        }
+      ],
+      "parent_proposals": [
+        {
+          "artifact": "parent-flagged-judgments-019.json",
+          "key": "g033/r1",
+          "proposal": "claim-checks/claims-019/result.json",
+          "parent_proposal": "exact-spec-accepted-old-cleanup-ended-state-and-second-agent",
+          "final_independent_gate": "required-before-possible-highest-drop-or-lowering",
+          "reason": "Full019 andparentactualSPEC2985-3020/impl2770-2830 explicitlyacceptfailedoldcleanup,endedstateandRestartsecondagent; exacttrigger/consequence/scope. Inrangeintroduceddbfc,notoutofrangejustpredatesf560UIbannerremoval. Oldbannerpredicatealreadyexcludedterminal-lessInterruptedsurvivor,protocolfenceonlyoldernativepeerNOTcurrentcleanupfailures. Originalpossibleduplicateagentworkdamageremainsunestablishedbutkeptforgate, basisdropisexactspecacceptancenotmissingstrongerharmalone. Distinct032l5falsewarningand004f1updatesurvivalpromisenotcoveredbythisacceptance."
+        }
+      ],
+      "collection": {
+        "retain": true,
+        "clearly_refuted_candidate": false,
+        "needs_unfinished_gate": true,
+        "provisional_bucket": "highest",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "old-terminal-cleanup-failure-publishes-ended-state-and-allows-restart",
+        "destination": "trailing-old-terminal-cleanup-failure-publishes-ended-state-and-allows-restart.md"
+      }
+    },
+    {
+      "key": "g033/r2",
+      "owner": "g033",
+      "id": "r2",
+      "domain": "gui-shell-integration",
+      "purpose": "gui-shell-integration: crates/farhelm-ui/src/lib.rs, crates/farhelm-ui/src/migration.rs; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 3,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "r2",
+            "state": "open",
+            "summary": "Removed assets do not leave terminal mounting waiting for an absent helper",
+            "location": "crates/farhelm-ui/src/lib.rs:1914",
+            "detail": "# Removed assets do not leave terminal mounting waiting for an absent helper\n\nReviewed commit: f560058da19e02716e6f943883a9508b447aff4e\n\n## TLDR\n\nChecked whether the removed terminal scripts leave sessions permanently connecting. The shipped mounting gate requires the replacement helpers, and the page still registers all of them. No defect found on this route.\n\n## Details\n\nThe assigned lib.rs patch removes xterm.js/add-on registration, term-bytes.js and shift-enter-key.js and adds paste-sanitizer.js. At the reviewed revision lib.rs:1446-1500 declares the paste sanitizer, clipboard helpers, terminal links/files, all five grid helpers and terminal.js; AppBody at :1914-1933 renders these scripts on both builds. terminal.js:3191-3226 waits for farhelmPasteSanitizer, theme, clipboard names/copy/writer, tooltip, terminal links/files, all five grid globals, fonts and the target element before mounting. The tooltip is separately declared for App at lib.rs:1531 and therefore not removed with xterm. paste-sanitizer.js:18-42 publishes the named global, preserving the paste sanitizing operation. A pinned git grep over UI assets and src found no remaining farhelmTermBytes, farhelmShiftEnter, window.Terminal or removed add-on-global references. SPEC_impl.md, Terminal widget: the grid island, :1506-1520 requires static assets and readiness for fonts/scripts; :1837-1845 says grid mounts for every terminal before the socket exists. Source refutes the missing-prerequisite suspicion; registration order is deliberately not relied on. Suggested bucket: high if an absent prerequisite blocked all sessions, but none established. Could-be-highest: no; this candidate concerns terminal availability, not loss of the running processes. Confidence: confirmed source analysis, no runtime execution. Proposed_drop: refuted by the declarations, script mounts and readiness gate cited above. Possible_cover: none; no coverage sources consulted."
+          }
+        },
+        {
+          "line": 6,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "r2",
+            "state": "open",
+            "summary": "Removed assets do not leave terminal mounting waiting for an absent helper",
+            "location": "crates/farhelm-ui/src/lib.rs:1914",
+            "detail": "# Removed assets do not leave terminal mounting waiting for an absent helper\n\nReviewed commit: f560058da19e02716e6f943883a9508b447aff4e\n\n## TLDR\n\nChecked whether removed scripts leave sessions permanently connecting. Every helper the terminal mounting gate requires is still registered, including the replacement paste sanitizer. No defect found on this route.\n\n## Details\n\nRevision corrects the tooltip declaration reference and adds its actual render sites. The assigned lib.rs patch removes xterm.js/add-on registration, term-bytes.js and shift-enter-key.js and adds paste-sanitizer.js. lib.rs:1446-1500 declares the sanitizer, clipboard helpers, terminal links/files, five grid helpers and terminal.js; AppBody :1914-1933 renders them on both builds. terminal.js:3191-3226 gates on farhelmPasteSanitizer, theme, clipboard names/copy/writer, tooltip, links/files, every grid global, fonts and target element. TOOLTIP_JS is declared at lib.rs:1518 and rendered by App in both build branches at :1608 and :1617. paste-sanitizer.js:18-42 publishes the required global and sanitizing operation. A pinned git grep across UI assets and src found no farhelmTermBytes, farhelmShiftEnter, window.Terminal or removed add-on-global references. The macro's generated inventory keeps web/desktop asset declarations aligned. SPEC_impl.md, Terminal widget: the grid island, :1506-1520 requires static assets and script/font readiness; :1837-1845 says every terminal mounts the grid before its socket exists. Registration order is not relied on.\n\nSuggested bucket: high if an absent prerequisite blocked all sessions; none established. Could-be-highest: no; terminal availability is the considered consequence, not loss of processes. Confidence: confirmed source analysis; no runtime execution. Proposed_drop: refuted by script declarations, render sites and the matching readiness gate. Possible_cover: none; no coverage sources consulted. All material checks support the same refutation; no unresolved lead remains."
+          }
+        }
+      ],
+      "latest": {
+        "line": 6,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "r2",
+          "state": "open",
+          "summary": "Removed assets do not leave terminal mounting waiting for an absent helper",
+          "location": "crates/farhelm-ui/src/lib.rs:1914",
+          "detail": "# Removed assets do not leave terminal mounting waiting for an absent helper\n\nReviewed commit: f560058da19e02716e6f943883a9508b447aff4e\n\n## TLDR\n\nChecked whether removed scripts leave sessions permanently connecting. Every helper the terminal mounting gate requires is still registered, including the replacement paste sanitizer. No defect found on this route.\n\n## Details\n\nRevision corrects the tooltip declaration reference and adds its actual render sites. The assigned lib.rs patch removes xterm.js/add-on registration, term-bytes.js and shift-enter-key.js and adds paste-sanitizer.js. lib.rs:1446-1500 declares the sanitizer, clipboard helpers, terminal links/files, five grid helpers and terminal.js; AppBody :1914-1933 renders them on both builds. terminal.js:3191-3226 gates on farhelmPasteSanitizer, theme, clipboard names/copy/writer, tooltip, links/files, every grid global, fonts and target element. TOOLTIP_JS is declared at lib.rs:1518 and rendered by App in both build branches at :1608 and :1617. paste-sanitizer.js:18-42 publishes the required global and sanitizing operation. A pinned git grep across UI assets and src found no farhelmTermBytes, farhelmShiftEnter, window.Terminal or removed add-on-global references. The macro's generated inventory keeps web/desktop asset declarations aligned. SPEC_impl.md, Terminal widget: the grid island, :1506-1520 requires static assets and script/font readiness; :1837-1845 says every terminal mounts the grid before its socket exists. Registration order is not relied on.\n\nSuggested bucket: high if an absent prerequisite blocked all sessions; none established. Could-be-highest: no; terminal availability is the considered consequence, not loss of processes. Confidence: confirmed source analysis; no runtime execution. Proposed_drop: refuted by script declarations, render sites and the matching readiness gate. Possible_cover: none; no coverage sources consulted. All material checks support the same refutation; no unresolved lead remains."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g033/findings.jsonl",
+        "id": "r2",
+        "line": 6,
+        "disposition": "excluded",
+        "group": "ui-xterm-removal-terminal-helper-readiness",
+        "reason": "Parent explicitly accepted named refuted proposal from claims-020 after inspecting it. The removed scripts are not prerequisites of the replacement mounting path. Every named helper in its readiness gate still has a declaration and render site. This refutes the specific absent-helper removal regression by source; it does not establish successful runtime mounting. Propose dismissal of the narrowly stated absent-helper removal regression on the matching declarations, render sites and readiness gate. This is a proposal for the parent, not a recording decision. Checked source/results: [\"f560058da19e02716e6f943883a9508b447aff4e is inside the supplied review range (git rev-list membership checked).\",\"f560058da19e02716e6f943883a9508b447aff4e:crates/farhelm-ui/assets/terminal.js:3191-3226 gates on paste sanitizer, theme, clipboard names/copy/writer, tooltip, terminal links/files, all five grid globals, settled font and target element. It does not wait for the deleted helpers.\",\"Same revision:crates/farhelm-ui/src/lib.rs:1440-1496 declares those assets; :1914-1926 renders them. TOOLTIP_JS is declared at :1518 and rendered in the desktop and web App branches at :1608 and :1617. APP_CSS and the fonts remain declared at :1395-1437,1527-1530.\",\"Same revision:crates/farhelm-ui/assets/paste-sanitizer.js:18-42 exports window.farhelmPasteSanitizer. Pinned git grep found no farhelmTermBytes, farhelmShiftEnter or window.Terminal references. FitAddon matches are historical comments, not runtime globals.\",\"The first history entry's tooltip declaration location was corrected in the latest entry; :1518 is the verified location. No runtime tests, builds or reproductions were performed.\"] Current coverage/results: [\"Current SPEC.md terminal experience (:2855 onward) requires a usable terminal; SPEC_impl.md:1692-1768 and The grid client (:1835-1886) describe bundled-script/font readiness and mounting every terminal before its socket. These are matching contracts, not acceptance of a missing prerequisite.\",\"TODO.md Planned is empty (:25-27). BUGS.md has only the provisioning SSH-helper hang, not terminal asset readiness. Searches of active TRIAGE_OUTCOMES.md found no matching asset/helper removal disposition; the archive was not read.\",\"plans/queue searches found tmux-end-old-terminals criterion 4, but plans/REPORTS.md:29 records that plan landed. The other tmux removal plans also landed (:30-32); no unlanded repair for this trigger/consequence was found.\",\"INDEX.md and matching queue text were searched for helpers, scripts, assets, mounts, paste-sanitizer and xterm. held-font-test-lacks-mount-attempt-witness.md was read: it concerns a test's missing mount-attempt witness, not absent production scripts. No exact coverage or useful extension was found.\",\"FILTER.md read in full. No filter supplies the basis: the suspicion was ordinary terminal unavailability after an asset deletion, not a qualifying rare diagnostic or recoverable timing case.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Removed scripts could leave sessions permanently connecting; that would be high if established. Both history entries explicitly exclude process loss and propose source refutation. The latest entry corrects a reference rather than withdrawing an established failure.\"; \"A deleted helper still required by a shipped mounting path was not found. Asset loading and actual browser execution were not tested.\"."
+      },
+      "accepted_parent_decision": {
+        "key": "g033/r2",
+        "line": 6,
+        "disposition": "excluded",
+        "group": "ui-xterm-removal-terminal-helper-readiness",
+        "bucket": "other",
+        "recording": "refuted",
+        "queue_target_candidate": null,
+        "needs_independent_drop_check": false,
+        "reason": "Parent explicitly accepted named refuted proposal from claims-020 after inspecting it. The removed scripts are not prerequisites of the replacement mounting path. Every named helper in its readiness gate still has a declaration and render site. This refutes the specific absent-helper removal regression by source; it does not establish successful runtime mounting. Propose dismissal of the narrowly stated absent-helper removal regression on the matching declarations, render sites and readiness gate. This is a proposal for the parent, not a recording decision. Checked source/results: [\"f560058da19e02716e6f943883a9508b447aff4e is inside the supplied review range (git rev-list membership checked).\",\"f560058da19e02716e6f943883a9508b447aff4e:crates/farhelm-ui/assets/terminal.js:3191-3226 gates on paste sanitizer, theme, clipboard names/copy/writer, tooltip, terminal links/files, all five grid globals, settled font and target element. It does not wait for the deleted helpers.\",\"Same revision:crates/farhelm-ui/src/lib.rs:1440-1496 declares those assets; :1914-1926 renders them. TOOLTIP_JS is declared at :1518 and rendered in the desktop and web App branches at :1608 and :1617. APP_CSS and the fonts remain declared at :1395-1437,1527-1530.\",\"Same revision:crates/farhelm-ui/assets/paste-sanitizer.js:18-42 exports window.farhelmPasteSanitizer. Pinned git grep found no farhelmTermBytes, farhelmShiftEnter or window.Terminal references. FitAddon matches are historical comments, not runtime globals.\",\"The first history entry's tooltip declaration location was corrected in the latest entry; :1518 is the verified location. No runtime tests, builds or reproductions were performed.\"] Current coverage/results: [\"Current SPEC.md terminal experience (:2855 onward) requires a usable terminal; SPEC_impl.md:1692-1768 and The grid client (:1835-1886) describe bundled-script/font readiness and mounting every terminal before its socket. These are matching contracts, not acceptance of a missing prerequisite.\",\"TODO.md Planned is empty (:25-27). BUGS.md has only the provisioning SSH-helper hang, not terminal asset readiness. Searches of active TRIAGE_OUTCOMES.md found no matching asset/helper removal disposition; the archive was not read.\",\"plans/queue searches found tmux-end-old-terminals criterion 4, but plans/REPORTS.md:29 records that plan landed. The other tmux removal plans also landed (:30-32); no unlanded repair for this trigger/consequence was found.\",\"INDEX.md and matching queue text were searched for helpers, scripts, assets, mounts, paste-sanitizer and xterm. held-font-test-lacks-mount-attempt-witness.md was read: it concerns a test's missing mount-attempt witness, not absent production scripts. No exact coverage or useful extension was found.\",\"FILTER.md read in full. No filter supplies the basis: the suspicion was ordinary terminal unavailability after an asset deletion, not a qualifying rare diagnostic or recoverable timing case.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Removed scripts could leave sessions permanently connecting; that would be high if established. Both history entries explicitly exclude process loss and propose source refutation. The latest entry corrects a reference rather than withdrawing an established failure.\"; \"A deleted helper still required by a shipped mounting path was not found. Asset loading and actual browser execution were not tested.\"."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-020",
+          "key": "g033/r2",
+          "latest_line": 6,
+          "recommendation": "refuted",
+          "bucket": "other",
+          "underlying_key": "ui-xterm-removal-terminal-helper-readiness",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The removed scripts are not prerequisites of the replacement mounting path. Every named helper in its readiness gate still has a declaration and render site. This refutes the specific absent-helper removal regression by source; it does not establish successful runtime mounting.",
+          "checks": [
+            "f560058da19e02716e6f943883a9508b447aff4e is inside the supplied review range (git rev-list membership checked).",
+            "f560058da19e02716e6f943883a9508b447aff4e:crates/farhelm-ui/assets/terminal.js:3191-3226 gates on paste sanitizer, theme, clipboard names/copy/writer, tooltip, terminal links/files, all five grid globals, settled font and target element. It does not wait for the deleted helpers.",
+            "Same revision:crates/farhelm-ui/src/lib.rs:1440-1496 declares those assets; :1914-1926 renders them. TOOLTIP_JS is declared at :1518 and rendered in the desktop and web App branches at :1608 and :1617. APP_CSS and the fonts remain declared at :1395-1437,1527-1530.",
+            "Same revision:crates/farhelm-ui/assets/paste-sanitizer.js:18-42 exports window.farhelmPasteSanitizer. Pinned git grep found no farhelmTermBytes, farhelmShiftEnter or window.Terminal references. FitAddon matches are historical comments, not runtime globals.",
+            "The first history entry's tooltip declaration location was corrected in the latest entry; :1518 is the verified location. No runtime tests, builds or reproductions were performed."
+          ],
+          "coverage_checked": [
+            "Current SPEC.md terminal experience (:2855 onward) requires a usable terminal; SPEC_impl.md:1692-1768 and The grid client (:1835-1886) describe bundled-script/font readiness and mounting every terminal before its socket. These are matching contracts, not acceptance of a missing prerequisite.",
+            "TODO.md Planned is empty (:25-27). BUGS.md has only the provisioning SSH-helper hang, not terminal asset readiness. Searches of active TRIAGE_OUTCOMES.md found no matching asset/helper removal disposition; the archive was not read.",
+            "plans/queue searches found tmux-end-old-terminals criterion 4, but plans/REPORTS.md:29 records that plan landed. The other tmux removal plans also landed (:30-32); no unlanded repair for this trigger/consequence was found.",
+            "INDEX.md and matching queue text were searched for helpers, scripts, assets, mounts, paste-sanitizer and xterm. held-font-test-lacks-mount-attempt-witness.md was read: it concerns a test's missing mount-attempt witness, not absent production scripts. No exact coverage or useful extension was found.",
+            "FILTER.md read in full. No filter supplies the basis: the suspicion was ordinary terminal unavailability after an asset deletion, not a qualifying rare diagnostic or recoverable timing case."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": "A deleted helper still required by a shipped mounting path was not found. Asset loading and actual browser execution were not tested.",
+          "original_stronger_consequence": "Removed scripts could leave sessions permanently connecting; that would be high if established. Both history entries explicitly exclude process loss and propose source refutation. The latest entry corrects a reference rather than withdrawing an established failure.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Propose dismissal of the narrowly stated absent-helper removal regression on the matching declarations, render sites and readiness gate. This is a proposal for the parent, not a recording decision."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "high",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "ui-xterm-removal-terminal-helper-readiness",
+        "destination": null
+      }
+    },
+    {
+      "key": "g033/r3",
+      "owner": "g033",
+      "id": "r3",
+      "domain": "gui-shell-integration",
+      "purpose": "gui-shell-integration: crates/farhelm-ui/src/lib.rs, crates/farhelm-ui/src/migration.rs; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 4,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "r3",
+            "state": "open",
+            "summary": "Removing vendored notices does not remove the notice for retained grid ports",
+            "location": "crates/farhelm-ui/src/lib.rs:1484",
+            "detail": "# Removing vendored notices does not remove the notice for retained grid ports\n\nReviewed commit: f560058da19e02716e6f943883a9508b447aff4e\n\n## TLDR\n\nThe page removes xterm.js and its bundled license assets, but keeps a separate shipped notice for the code copied into Farhelm's grid renderer. No missing notice found in the assigned asset declarations.\n\n## Details\n\nThe deleted xterm/add-on asset declarations were for the removed bundles. lib.rs:1484-1498 retains #[used] GRID_PORTED_CODE_LICENSES inside declare_assets!, whose all_assets inventory (:1337-1359) includes every declaration on both builds. The retained assets/grid-ported-code-LICENSES.txt explicitly covers the grid client and supervisor encoder, carries the xterm.js, addon-fit, addon-web-links and Visual Studio Code texts, and documents its inclusion as this asset. The font notices are also still retained at lib.rs:1412-1437. This refutes the concern that deleting the original vendor notice declarations strips the notice for code that still ships. No distributed binary was built or inspected, and no broader licensing audit is claimed. Suggested bucket: other. Could-be-highest: no. Confidence: confirmed source analysis. Proposed_drop: refuted by the retained separate notice and generated asset inventory. Possible_cover: none; no coverage sources consulted."
+          }
+        }
+      ],
+      "latest": {
+        "line": 4,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "r3",
+          "state": "open",
+          "summary": "Removing vendored notices does not remove the notice for retained grid ports",
+          "location": "crates/farhelm-ui/src/lib.rs:1484",
+          "detail": "# Removing vendored notices does not remove the notice for retained grid ports\n\nReviewed commit: f560058da19e02716e6f943883a9508b447aff4e\n\n## TLDR\n\nThe page removes xterm.js and its bundled license assets, but keeps a separate shipped notice for the code copied into Farhelm's grid renderer. No missing notice found in the assigned asset declarations.\n\n## Details\n\nThe deleted xterm/add-on asset declarations were for the removed bundles. lib.rs:1484-1498 retains #[used] GRID_PORTED_CODE_LICENSES inside declare_assets!, whose all_assets inventory (:1337-1359) includes every declaration on both builds. The retained assets/grid-ported-code-LICENSES.txt explicitly covers the grid client and supervisor encoder, carries the xterm.js, addon-fit, addon-web-links and Visual Studio Code texts, and documents its inclusion as this asset. The font notices are also still retained at lib.rs:1412-1437. This refutes the concern that deleting the original vendor notice declarations strips the notice for code that still ships. No distributed binary was built or inspected, and no broader licensing audit is claimed. Suggested bucket: other. Could-be-highest: no. Confidence: confirmed source analysis. Proposed_drop: refuted by the retained separate notice and generated asset inventory. Possible_cover: none; no coverage sources consulted."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g033/findings.jsonl",
+        "id": "r3",
+        "line": 4,
+        "disposition": "excluded",
+        "group": "ui-xterm-removal-retained-grid-port-notice",
+        "reason": "Parent explicitly accepted named refuted proposal from claims-020 after inspecting it. Removing the deleted vendor bundles' notice declarations does not remove the separately declared notice for retained ports. The claim is refuted at the source asset-declaration boundary; distributed binaries were not inspected and this is not a broader licensing audit. Propose dismissal only of the claimed removed notice declaration for retained grid ports. Preserve the explicit no-binary-inspection and no-general-licensing-audit caveats. Checked source/results: [\"f560058da19e02716e6f943883a9508b447aff4e is inside the supplied review range (git rev-list membership checked).\",\"Same revision:crates/farhelm-ui/src/lib.rs:1484-1495 retains #[used] GRID_PORTED_CODE_LICENSES pointing to /assets/grid-ported-code-LICENSES.txt with its stable basename. declare_assets! generates all_assets from every declaration at :1337-1359; the font notices remain at :1412-1437.\",\"Same revision:crates/farhelm-ui/assets/grid-ported-code-LICENSES.txt:1-40 identifies the grid client and supervisor encoder ports and the notice's distribution through the asset bundle. :48-145 contains separate xterm, addon-fit, addon-web-links and Visual Studio Code notice texts.\",\"No binary build, archive inspection or runtime execution was performed. The source facts refute the deletion-of-declaration concern without proving all packaging paths.\"] Current coverage/results: [\"SPEC.md and SPEC_impl.md were searched for xterm, licenses, notices and assets. Current SPEC_impl.md:1692-1700 requires static assets and retained port attribution; it does not accept omission of a required notice.\",\"TODO.md Planned is empty (:25-27). BUGS.md and active TRIAGE_OUTCOMES.md contain no matching retained-port notice omission. The archive was not read.\",\"plans/queue/tmux-end-old-terminals.md criterion 4 explicitly retains grid-ported-code-LICENSES.txt. plans/REPORTS.md:29 records that plan as landed; it is context rather than an unlanded repair. No matching unlanded plan was found.\",\"INDEX.md and queue text searches for license, notice, ported code, xterm and grid assets found no exact queued item or extension for this claimed omission.\",\"FILTER.md read in full; none of its complete boundaries matches this notice-deletion suspicion.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"The concern was that removing xterm/add-on notice assets removes attribution for code that still ships. The sole history entry refutes that route, suggests other, and makes no security or user-work-loss claim.\"; \"The separate grid-port notice would have to be removed or excluded by the assigned deletion. It remains declared; actual binary inclusion was not independently checked.\"."
+      },
+      "accepted_parent_decision": {
+        "key": "g033/r3",
+        "line": 4,
+        "disposition": "excluded",
+        "group": "ui-xterm-removal-retained-grid-port-notice",
+        "bucket": "other",
+        "recording": "refuted",
+        "queue_target_candidate": null,
+        "needs_independent_drop_check": false,
+        "reason": "Parent explicitly accepted named refuted proposal from claims-020 after inspecting it. Removing the deleted vendor bundles' notice declarations does not remove the separately declared notice for retained ports. The claim is refuted at the source asset-declaration boundary; distributed binaries were not inspected and this is not a broader licensing audit. Propose dismissal only of the claimed removed notice declaration for retained grid ports. Preserve the explicit no-binary-inspection and no-general-licensing-audit caveats. Checked source/results: [\"f560058da19e02716e6f943883a9508b447aff4e is inside the supplied review range (git rev-list membership checked).\",\"Same revision:crates/farhelm-ui/src/lib.rs:1484-1495 retains #[used] GRID_PORTED_CODE_LICENSES pointing to /assets/grid-ported-code-LICENSES.txt with its stable basename. declare_assets! generates all_assets from every declaration at :1337-1359; the font notices remain at :1412-1437.\",\"Same revision:crates/farhelm-ui/assets/grid-ported-code-LICENSES.txt:1-40 identifies the grid client and supervisor encoder ports and the notice's distribution through the asset bundle. :48-145 contains separate xterm, addon-fit, addon-web-links and Visual Studio Code notice texts.\",\"No binary build, archive inspection or runtime execution was performed. The source facts refute the deletion-of-declaration concern without proving all packaging paths.\"] Current coverage/results: [\"SPEC.md and SPEC_impl.md were searched for xterm, licenses, notices and assets. Current SPEC_impl.md:1692-1700 requires static assets and retained port attribution; it does not accept omission of a required notice.\",\"TODO.md Planned is empty (:25-27). BUGS.md and active TRIAGE_OUTCOMES.md contain no matching retained-port notice omission. The archive was not read.\",\"plans/queue/tmux-end-old-terminals.md criterion 4 explicitly retains grid-ported-code-LICENSES.txt. plans/REPORTS.md:29 records that plan as landed; it is context rather than an unlanded repair. No matching unlanded plan was found.\",\"INDEX.md and queue text searches for license, notice, ported code, xterm and grid assets found no exact queued item or extension for this claimed omission.\",\"FILTER.md read in full; none of its complete boundaries matches this notice-deletion suspicion.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"The concern was that removing xterm/add-on notice assets removes attribution for code that still ships. The sole history entry refutes that route, suggests other, and makes no security or user-work-loss claim.\"; \"The separate grid-port notice would have to be removed or excluded by the assigned deletion. It remains declared; actual binary inclusion was not independently checked.\"."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-020",
+          "key": "g033/r3",
+          "latest_line": 4,
+          "recommendation": "refuted",
+          "bucket": "other",
+          "underlying_key": "ui-xterm-removal-retained-grid-port-notice",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "Removing the deleted vendor bundles' notice declarations does not remove the separately declared notice for retained ports. The claim is refuted at the source asset-declaration boundary; distributed binaries were not inspected and this is not a broader licensing audit.",
+          "checks": [
+            "f560058da19e02716e6f943883a9508b447aff4e is inside the supplied review range (git rev-list membership checked).",
+            "Same revision:crates/farhelm-ui/src/lib.rs:1484-1495 retains #[used] GRID_PORTED_CODE_LICENSES pointing to /assets/grid-ported-code-LICENSES.txt with its stable basename. declare_assets! generates all_assets from every declaration at :1337-1359; the font notices remain at :1412-1437.",
+            "Same revision:crates/farhelm-ui/assets/grid-ported-code-LICENSES.txt:1-40 identifies the grid client and supervisor encoder ports and the notice's distribution through the asset bundle. :48-145 contains separate xterm, addon-fit, addon-web-links and Visual Studio Code notice texts.",
+            "No binary build, archive inspection or runtime execution was performed. The source facts refute the deletion-of-declaration concern without proving all packaging paths."
+          ],
+          "coverage_checked": [
+            "SPEC.md and SPEC_impl.md were searched for xterm, licenses, notices and assets. Current SPEC_impl.md:1692-1700 requires static assets and retained port attribution; it does not accept omission of a required notice.",
+            "TODO.md Planned is empty (:25-27). BUGS.md and active TRIAGE_OUTCOMES.md contain no matching retained-port notice omission. The archive was not read.",
+            "plans/queue/tmux-end-old-terminals.md criterion 4 explicitly retains grid-ported-code-LICENSES.txt. plans/REPORTS.md:29 records that plan as landed; it is context rather than an unlanded repair. No matching unlanded plan was found.",
+            "INDEX.md and queue text searches for license, notice, ported code, xterm and grid assets found no exact queued item or extension for this claimed omission.",
+            "FILTER.md read in full; none of its complete boundaries matches this notice-deletion suspicion."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": "The separate grid-port notice would have to be removed or excluded by the assigned deletion. It remains declared; actual binary inclusion was not independently checked.",
+          "original_stronger_consequence": "The concern was that removing xterm/add-on notice assets removes attribution for code that still ships. The sole history entry refutes that route, suggests other, and makes no security or user-work-loss claim.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Propose dismissal only of the claimed removed notice declaration for retained grid ports. Preserve the explicit no-binary-inspection and no-general-licensing-audit caveats."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "ui-xterm-removal-retained-grid-port-notice",
+        "destination": null
+      }
+    },
+    {
+      "key": "g033/r4",
+      "owner": "g033",
+      "id": "r4",
+      "domain": "gui-shell-integration",
+      "purpose": "gui-shell-integration: crates/farhelm-ui/src/lib.rs, crates/farhelm-ui/src/migration.rs; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 10,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "r4",
+            "state": "open",
+            "summary": "Removing the xterm stylesheet leaves the grid's structural styles registered",
+            "location": "crates/farhelm-ui/src/lib.rs:1914",
+            "detail": "# Removing the xterm stylesheet leaves the grid's structural styles registered\n\nReviewed commit: f560058da19e02716e6f943883a9508b447aff4e\n\n## TLDR\n\nChecked whether removing the old terminal stylesheet exposes the hidden keyboard field or breaks the grid's layout. The grid uses its own classes and retained application stylesheet rules; no defect found on this removal route.\n\n## Details\n\nThe assigned AppBody patch removes VENDOR_XTERM_CSS. At this revision grid-terminal.js:341-388 builds grid-terminal, grid-terminal-screen, selection/link layers, cursor, scrollbar/slider, exit, grid-terminal-input and measure nodes. app.css:8628-8830 supplies the grid's own container, rows, overlays, scrollbar, cursor, exit, hidden textarea and measurement rules. In particular grid-terminal-input is still absolutely positioned offscreen with zero width/height, no border/padding/margin, opacity zero and no resizing (:8791 onward); measure nodes are independently hidden. The removed parent's assets/vendor/xterm.css:36-130 styles .xterm and xterm-specific descendant classes, rather than these grid classes. The retained APP_CSS asset declaration remains in lib.rs alongside the static head appearance asset. These source facts refute the concrete CSS-removal concern; no rendering was executed or visually inspected. Suggested bucket: high if keyboard/layout broke commonly, but no such route established. Could-be-highest: no. Confidence: confirmed source refutation of the removed stylesheet being required for these grid structures. Proposed_drop: source refutation, not specification acceptance. Possible_cover: none; prohibited coverage sources were not consulted. Scope is only the assigned stylesheet registration removal and its immediate structural consumers, not an overall UI styling review."
+          }
+        }
+      ],
+      "latest": {
+        "line": 10,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "r4",
+          "state": "open",
+          "summary": "Removing the xterm stylesheet leaves the grid's structural styles registered",
+          "location": "crates/farhelm-ui/src/lib.rs:1914",
+          "detail": "# Removing the xterm stylesheet leaves the grid's structural styles registered\n\nReviewed commit: f560058da19e02716e6f943883a9508b447aff4e\n\n## TLDR\n\nChecked whether removing the old terminal stylesheet exposes the hidden keyboard field or breaks the grid's layout. The grid uses its own classes and retained application stylesheet rules; no defect found on this removal route.\n\n## Details\n\nThe assigned AppBody patch removes VENDOR_XTERM_CSS. At this revision grid-terminal.js:341-388 builds grid-terminal, grid-terminal-screen, selection/link layers, cursor, scrollbar/slider, exit, grid-terminal-input and measure nodes. app.css:8628-8830 supplies the grid's own container, rows, overlays, scrollbar, cursor, exit, hidden textarea and measurement rules. In particular grid-terminal-input is still absolutely positioned offscreen with zero width/height, no border/padding/margin, opacity zero and no resizing (:8791 onward); measure nodes are independently hidden. The removed parent's assets/vendor/xterm.css:36-130 styles .xterm and xterm-specific descendant classes, rather than these grid classes. The retained APP_CSS asset declaration remains in lib.rs alongside the static head appearance asset. These source facts refute the concrete CSS-removal concern; no rendering was executed or visually inspected. Suggested bucket: high if keyboard/layout broke commonly, but no such route established. Could-be-highest: no. Confidence: confirmed source refutation of the removed stylesheet being required for these grid structures. Proposed_drop: source refutation, not specification acceptance. Possible_cover: none; prohibited coverage sources were not consulted. Scope is only the assigned stylesheet registration removal and its immediate structural consumers, not an overall UI styling review."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g033/findings.jsonl",
+        "id": "r4",
+        "line": 10,
+        "disposition": "excluded",
+        "group": "ui-xterm-stylesheet-removal-grid-structural-css",
+        "reason": "Parent explicitly accepted named refuted proposal from claims-020 after inspecting it. The grid's DOM classes are styled by the retained application CSS. The removed xterm stylesheet targets different classes, so its removal does not establish the claimed hidden-input or structural-layout failure. Propose dismissal of the narrowly stated xterm-stylesheet dependency on the independent class names, retained APP_CSS registration and matching grid rules. Checked source/results: [\"f560058da19e02716e6f943883a9508b447aff4e is inside the supplied review range (git rev-list membership checked).\",\"Same revision:crates/farhelm-ui/assets/grid-terminal.js:341-388 creates grid-terminal, screen, selection/link overlays, cursor, scrollbar/slider, exit, input and measurement nodes with grid-terminal class names.\",\"Same revision:crates/farhelm-ui/assets/app.css:8628-8825 supplies their structural rules. :8791-8805 keeps the keyboard textarea offscreen, zero-sized, transparent and non-resizable; :8811-8825 independently hides measurement nodes.\",\"Same revision:crates/farhelm-ui/src/lib.rs:1527-1530 retains APP_CSS as a static head asset. Parent 1ed482dde220452e424973faf38a5e1318986333:crates/farhelm-ui/assets/vendor/xterm.css:38-136 targets .xterm and xterm-specific descendant classes, rather than the grid classes.\",\"This checks only the removed stylesheet registration and immediate grid structural consumers. No visual rendering, browser reproduction or overall styling audit was performed.\"] Current coverage/results: [\"Both specifications were searched for xterm, stylesheet, grid layout, input and assets. SPEC.md Terminal experience requires fidelity; current SPEC_impl.md:1692-1705,1835-1886 describes the independent grid renderer and fit. No acceptance of broken structural styles was found.\",\"TODO.md Planned is empty (:25-27). BUGS.md and active TRIAGE_OUTCOMES.md have no matching removed-stylesheet consequence; the archive was not read.\",\"plans/queue/tmux-end-old-terminals.md criterion 4 removes xterm CSS while retaining the grid. That plan is landed according to plans/REPORTS.md:29; no unlanded plan specifically repairs the asserted consequence.\",\"INDEX.md and queue text were searched for stylesheet, textarea, CSS, xterm and grid. Other CSS geometry and fit findings do not assert this stylesheet-removal trigger or the claimed hidden-input failure. No exact coverage or extension found.\",\"FILTER.md read in full. The ordinary layout/keyboard failure suspected here does not fit one of its complete boundaries.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"The removed stylesheet could expose the hidden keyboard field or break grid layout; common keyboard/layout breakage would be high. The record reports no established route and explicitly proposes source refutation, with no highest consequence.\"; \"A required grid structural rule supplied only by the removed stylesheet was not found. Actual rendering was not observed.\"."
+      },
+      "accepted_parent_decision": {
+        "key": "g033/r4",
+        "line": 10,
+        "disposition": "excluded",
+        "group": "ui-xterm-stylesheet-removal-grid-structural-css",
+        "bucket": "other",
+        "recording": "refuted",
+        "queue_target_candidate": null,
+        "needs_independent_drop_check": false,
+        "reason": "Parent explicitly accepted named refuted proposal from claims-020 after inspecting it. The grid's DOM classes are styled by the retained application CSS. The removed xterm stylesheet targets different classes, so its removal does not establish the claimed hidden-input or structural-layout failure. Propose dismissal of the narrowly stated xterm-stylesheet dependency on the independent class names, retained APP_CSS registration and matching grid rules. Checked source/results: [\"f560058da19e02716e6f943883a9508b447aff4e is inside the supplied review range (git rev-list membership checked).\",\"Same revision:crates/farhelm-ui/assets/grid-terminal.js:341-388 creates grid-terminal, screen, selection/link overlays, cursor, scrollbar/slider, exit, input and measurement nodes with grid-terminal class names.\",\"Same revision:crates/farhelm-ui/assets/app.css:8628-8825 supplies their structural rules. :8791-8805 keeps the keyboard textarea offscreen, zero-sized, transparent and non-resizable; :8811-8825 independently hides measurement nodes.\",\"Same revision:crates/farhelm-ui/src/lib.rs:1527-1530 retains APP_CSS as a static head asset. Parent 1ed482dde220452e424973faf38a5e1318986333:crates/farhelm-ui/assets/vendor/xterm.css:38-136 targets .xterm and xterm-specific descendant classes, rather than the grid classes.\",\"This checks only the removed stylesheet registration and immediate grid structural consumers. No visual rendering, browser reproduction or overall styling audit was performed.\"] Current coverage/results: [\"Both specifications were searched for xterm, stylesheet, grid layout, input and assets. SPEC.md Terminal experience requires fidelity; current SPEC_impl.md:1692-1705,1835-1886 describes the independent grid renderer and fit. No acceptance of broken structural styles was found.\",\"TODO.md Planned is empty (:25-27). BUGS.md and active TRIAGE_OUTCOMES.md have no matching removed-stylesheet consequence; the archive was not read.\",\"plans/queue/tmux-end-old-terminals.md criterion 4 removes xterm CSS while retaining the grid. That plan is landed according to plans/REPORTS.md:29; no unlanded plan specifically repairs the asserted consequence.\",\"INDEX.md and queue text were searched for stylesheet, textarea, CSS, xterm and grid. Other CSS geometry and fit findings do not assert this stylesheet-removal trigger or the claimed hidden-input failure. No exact coverage or extension found.\",\"FILTER.md read in full. The ordinary layout/keyboard failure suspected here does not fit one of its complete boundaries.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"The removed stylesheet could expose the hidden keyboard field or break grid layout; common keyboard/layout breakage would be high. The record reports no established route and explicitly proposes source refutation, with no highest consequence.\"; \"A required grid structural rule supplied only by the removed stylesheet was not found. Actual rendering was not observed.\"."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-020",
+          "key": "g033/r4",
+          "latest_line": 10,
+          "recommendation": "refuted",
+          "bucket": "other",
+          "underlying_key": "ui-xterm-stylesheet-removal-grid-structural-css",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The grid's DOM classes are styled by the retained application CSS. The removed xterm stylesheet targets different classes, so its removal does not establish the claimed hidden-input or structural-layout failure.",
+          "checks": [
+            "f560058da19e02716e6f943883a9508b447aff4e is inside the supplied review range (git rev-list membership checked).",
+            "Same revision:crates/farhelm-ui/assets/grid-terminal.js:341-388 creates grid-terminal, screen, selection/link overlays, cursor, scrollbar/slider, exit, input and measurement nodes with grid-terminal class names.",
+            "Same revision:crates/farhelm-ui/assets/app.css:8628-8825 supplies their structural rules. :8791-8805 keeps the keyboard textarea offscreen, zero-sized, transparent and non-resizable; :8811-8825 independently hides measurement nodes.",
+            "Same revision:crates/farhelm-ui/src/lib.rs:1527-1530 retains APP_CSS as a static head asset. Parent 1ed482dde220452e424973faf38a5e1318986333:crates/farhelm-ui/assets/vendor/xterm.css:38-136 targets .xterm and xterm-specific descendant classes, rather than the grid classes.",
+            "This checks only the removed stylesheet registration and immediate grid structural consumers. No visual rendering, browser reproduction or overall styling audit was performed."
+          ],
+          "coverage_checked": [
+            "Both specifications were searched for xterm, stylesheet, grid layout, input and assets. SPEC.md Terminal experience requires fidelity; current SPEC_impl.md:1692-1705,1835-1886 describes the independent grid renderer and fit. No acceptance of broken structural styles was found.",
+            "TODO.md Planned is empty (:25-27). BUGS.md and active TRIAGE_OUTCOMES.md have no matching removed-stylesheet consequence; the archive was not read.",
+            "plans/queue/tmux-end-old-terminals.md criterion 4 removes xterm CSS while retaining the grid. That plan is landed according to plans/REPORTS.md:29; no unlanded plan specifically repairs the asserted consequence.",
+            "INDEX.md and queue text were searched for stylesheet, textarea, CSS, xterm and grid. Other CSS geometry and fit findings do not assert this stylesheet-removal trigger or the claimed hidden-input failure. No exact coverage or extension found.",
+            "FILTER.md read in full. The ordinary layout/keyboard failure suspected here does not fit one of its complete boundaries."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": "A required grid structural rule supplied only by the removed stylesheet was not found. Actual rendering was not observed.",
+          "original_stronger_consequence": "The removed stylesheet could expose the hidden keyboard field or break grid layout; common keyboard/layout breakage would be high. The record reports no established route and explicitly proposes source refutation, with no highest consequence.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Propose dismissal of the narrowly stated xterm-stylesheet dependency on the independent class names, retained APP_CSS registration and matching grid rules."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "high",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "ui-xterm-stylesheet-removal-grid-structural-css",
+        "destination": null
+      }
+    }
+  ],
+  "replies": [
+    {
+      "turn": 1,
+      "reply": "Initial pass complete. Both assigned patches and governing contracts read.\n\n- `r1`: specification-accepted cleanup risk, recorded with `proposed_drop` for independent checking.\n- `r2`, `r3`: refuted candidates.\n- No open leads or new verified defects. No runtime execution.\n\n[Findings log]([private-run]/g033/findings.jsonl) and [progress]([private-run]/g033/progress.md) are saved.\n\nThe supplied manifest has off-by-one endpoints. Evidence reads used `manifest-corrected.json`; all actual patch text was delivered. Parent audit must reconcile those ranges before later-turn synthesis."
+    },
+    {
+      "turn": 2,
+      "reply": "Revised `r1`: source confirms the old banner already excluded retired agents, so its deletion does not cause the hidden-survivor state. Retained the original cleanup-failure risk and proposed exclusions for independent checking.\n\nDistinguished `r1` from `g004/f1`: failed cleanup and possible duplicate agents versus intended termination despite an update-survival assurance.\n\nNo new findings. Unresolved leads: none."
+    },
+    {
+      "turn": 3,
+      "reply": "Discovery pass 1 complete. No new defects found.\n\nChecked changed declarations, stylesheet consumers, fixture assertions, shortcut documentation and full-range attribution.\n\n- Revised `r1` to distinguish neighboring findings and clarify range attribution; exclusions remain pending.\n- Added `r4`, a refuted stylesheet-dependency candidate.\n- New verified IDs: none.\n- New unverified IDs: none.\n- Open leads: none.\n\nProgress and findings log updated. No runtime execution."
+    }
+  ],
+  "progress": "# g033 — gui-shell-integration\n\nInitial review turn 1 finished. Awaiting parent audit and a separate synthesis prompt. Discovery passes: 0.\n\nReviewed revision: f560058da19e02716e6f943883a9508b447aff4e. Read the full supplied brief and complete inventory commits field only. No excluded coverage metadata or queue contents consulted.\n\nRead both complete assigned patch contents through evidence packets: 01108-000.patch lines 1–382 and 01115-000.patch lines 1–920. The supplied manifest is invalid: each range ends one line past the actual file. The first supplied evidence command failed with Invalid source range. Original manifest preserved. Private manifest-corrected.json has the same paths and hashes with corrected endpoints; all seven patch packets use that copy. No real source text remains unread. Nonexistent lines 383 and 921 cannot be delivered. Parent must reconcile the original manifest before its audit.\n\nRead pinned governing contracts through evidence packets using private immutable SPEC snapshots: SPEC.md Status 2651–2854 and Terminal experience 2855–3177; SPEC_impl.md Terminal widget: the grid island and The grid client 1504–1887, Terminal substrate: private tmux server 2784–2895, Answers bind to what was drawn 1069–1100, and Version and skew 8268–8348. Read priority buckets and feedback-file format. The brief carries the test-review checklist; assigned tests are deleted migration tests and field-only fixture changes.\n\nContext checks: protocol 77 and exact-version handshake; supervisor startup ending before reload, sweep/transition/notification order; migration and terminal-kind references absent across UI src; Session HTTP mirror and remaining serde fields; script declarations/render sites against terminal.js mount gate; paste sanitizer global; tooltip rendered by App for both builds; generated asset inventory and retained grid/font notices. Source was read at the assigned revision. No runtime tests, builds or reproductions; no checkout files changed or live install/process actions taken.\n\nDurable records: r1 began as a lead and is now a finding with proposed_drop based on exact specification acceptance of surviving old processes and possible duplicate agents after cleanup failure. Could-be-highest remains explicit; actual loss of work is not established, so its established consequence is high if judged a defect. It needs the caller's independent drop check. r2 is a refuted missing-script/mount-prerequisite candidate; latest revision corrects the tooltip reference. r3 is a refuted missing-license-asset candidate. No open leads. No new verified defect or finding retained as unverified after investigation in this initial pass. Recorded r1 is confirmed accepted behavior awaiting disposition, not observed loss.\n\nInterfaces: g009/g010/g011 own renderer/transport changes used as context; g032/g034 own neighboring GUI changes. The shell registers the globals terminal.js actually waits for. Current supervisor cleanup and exact protocol compatibility justify removing mixed-kind UI under the stated contract. The replacement notice is retained in supervisor storage and generic UI notifications, outside migration.rs. No cross-group findings supplied yet.\n\nNext action: parent audits delivery against corrected endpoints, independently checks r1's proposed drop, and sends this same reviewer a later-turn synthesis prompt with interface input. This turn does not count as synthesis or discovery.\n\n## Later-turn synthesis — turn 2\n\nFinished synthesis after the caller reported canonical delivery audit complete: all 1,302 assigned lines, zero missing, unfinished or unrecognized records. Corrected-manifest packets match unchanged snapshots. The historical clipped packet earned no credit and was independently covered. Prior manifest blockage is resolved for this review. No unread assigned scope. Discovery-pass count remains 0; synthesis is not a discovery turn.\n\nCross-group input read: g004/findings.jsonl event line 2 (g004/f1), general update-survival assurance at later commit 78e9d68a95119db8452ee139efde13d38546f648. Distinct trigger/consequence: successful intended termination despite a survival assurance versus r1's failed termination followed by an ended claim and possible duplicate agents. No deduplication proposed.\n\nRevised r1 twice this turn under its original ID. Source checks establish that the deleted banner would already have been silent after startup retirement: parent migration.rs:99–117 rejects an ended agent or absent Tmux evidence; parent proto lib.rs:925–935 counts Interrupted as ended; parent service/status.rs:379–388 derives terminal kind from entry.terminal and lists only host tabs; parent core.rs:6675–6679 already supplies no terminal for an old row. Current reload retains that rule and publishes converted outcomes, terminal-less entries and adopted host tabs. The GUI callsite deletion removes only migration band/details labeling; its removal does not cause the survivor to become hidden. This is a new source-refutation ground for proposed exclusion in addition to exact specification acceptance. Original cleanup-failure consequence and possible work-loss risk remain explicit. r1 stays a finding with proposed_drop for independent checking; no parent exclusion or bucket lowering assumed.\n\nr2/r3 refutations remain narrowly scoped and unchanged: matching registrations/render sites for terminal mount prerequisites; retained notice declaration for grid ports. No dependency audit, licensing audit or new coverage claim beyond those premises. No new finding IDs, no new verified defect, no uncertainty retained as unverified after investigation, no unresolved leads. The only pending judgments are independent r1 exclusion/consequence checking and proposed candidate dispositions. No runtime tests, builds or reproductions; no checkout modifications.\n\nNext: parent judges revised r1, reconciles interface input, then sends a separate discovery turn. All substantive synthesis checks are settled from source; no further source premise is pending.\n\n## Discovery — turn 3, pass 1\n\nFinished the separate discovery pass after verified delivery and later-turn synthesis. Read all 68 lines / 17,282 bytes of discovery-neighbours.json before searching. Supplied neighboring records were g010/f1 and g032/l3, c4, l5; other named neighbors supplied no findings. Named pending questions were empty.\n\nSynthesized the new interface input before discovery: r1 revised to distinguish g032/l5's established misleading destructive-confirmation route from r1's GUI-banner attribution and accepted duplicate-agent premise. Accepted imperfect startup cleanup does not refute g032/l5. r1 remains open as a finding with all exclusion/consequence decisions pending; no parent dropping or lowering assumed. A second r1 revision records the pinned-range attribution check: dbfc69751215dbf15e1d31d5bed73c3754c4ebc4 introduced old-terminal ending within the reviewed range, before assigned GUI removal f560058da19e02716e6f943883a9508b447aff4e. No claim that the risk predates the full review range.\n\nNew search checks: reread every assigned lib.rs hunk in two bounded source reads, including the declaration and render deletions, HTTP mirror removal, changed comments and test fixture changes. Checked removed stylesheet registration against grid DOM class creation and retained structural CSS, including hidden keyboard input, measures, scrollbar and cursor. Recorded r4 immediately as a source-refuted stylesheet dependency candidate. Revisited the macro-generated asset inventory's scan oracle only as immediate context for changed declarations; no new test-oracle defect found. Checked changed fixture assertions for activity fallback, unseen output and tab construction: removed terminal-kind data is not their asserted premise, and assertions remain discriminating. Checked modified shortcut docstrings against their same inline capture registrations and hook ordering; no new behavioral/contract mismatch found. The retired migration module contains only the now-removed band, terminal-kind labels and their tests; its relevant removal/replacement contracts were already synthesized. No unrelated retired-code defect search or expansion into renderer, dependency, licensing, test-suite or confirmation review.\n\nResult: credible empty discovery for new defects. New verified finding IDs: none. New unverified-after-investigation finding IDs: none. New refuted candidate: r4. Revised existing finding: r1, preserving original consequences and proposed exclusion bases while clarifying neighbor boundaries and full-range attribution. Remaining open leads: none. All assigned source remains read and audit-verified; no unread scope. No runtime tests, builds, reproductions or live-install actions; checkout untouched.\n\nDiscovery passes completed: 1. Last pass found no new verified or unverified defect. Caller still owns independent adjudication of r1 and every proposed candidate exclusion. Next action: parent audits/judges turn delta; further review is needed only if it supplies new concrete cross-group input or questions.\n"
+}

@@ -1,0 +1,697 @@
+{
+  "group": {
+    "id": "g138",
+    "domain": "rust-session-agent-regressions",
+    "purpose": "rust-session-agent-regressions: crates/farhelm/tests/e2e/containerized_sessions.rs, crates/farhelm/tests/e2e/real_agent_capture.rs, crates/farhelm/tests/e2e/create_idempotency.rs, crates/farhelm/tests/e2e/launch_sentinel_error_status.rs, crates/farhelm/tests/e2e/file_downloads.rs; phases +async fn retired_session_refuses_terminal_and_lifecycle_use() {",
+    "interfaces": [
+      "g003",
+      "g005",
+      "g006",
+      "g009",
+      "g010",
+      "g011",
+      "g137",
+      "g139",
+      "g142",
+      "g143",
+      "g144",
+      "g145",
+      "g146"
+    ],
+    "sources": [
+      {
+        "path": "[private-run]/prep/parts/00322-001.patch",
+        "ranges": [
+          [
+            1,
+            215
+          ]
+        ],
+        "original_path": "crates/farhelm/tests/e2e/containerized_sessions.rs",
+        "commit": "04d85f0c98a9b635709d00b056719a0baa7fd3fc",
+        "notes": "+async fn retired_session_refuses_terminal_and_lifecycle_use() {; patch character offsets [57974,66588)",
+        "lines": 215,
+        "bytes": 8614,
+        "start": 57974,
+        "end": 66588,
+        "original": "[private-run]/prep/originals/00322.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/00749-000.patch",
+        "ranges": [
+          [
+            1,
+            1029
+          ]
+        ],
+        "original_path": "crates/farhelm/tests/e2e/real_agent_capture.rs",
+        "commit": "70bc66a9f285cc2a9984924f389834d118b7cfdc",
+        "notes": "patch header; patch character offsets [0,51062)",
+        "lines": 1029,
+        "bytes": 51113,
+        "start": 0,
+        "end": 51062,
+        "original": "[private-run]/prep/originals/00749.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/00784-000.patch",
+        "ranges": [
+          [
+            1,
+            37
+          ]
+        ],
+        "original_path": "crates/farhelm/tests/e2e/create_idempotency.rs",
+        "commit": "647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513",
+        "notes": "patch header; patch character offsets [0,1841)",
+        "lines": 37,
+        "bytes": 1843,
+        "start": 0,
+        "end": 1841,
+        "original": "[private-run]/prep/originals/00784.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/00791-000.patch",
+        "ranges": [
+          [
+            1,
+            74
+          ]
+        ],
+        "original_path": "crates/farhelm/tests/e2e/launch_sentinel_error_status.rs",
+        "commit": "647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513",
+        "notes": "patch header; patch character offsets [0,3485)",
+        "lines": 74,
+        "bytes": 3485,
+        "start": 0,
+        "end": 3485,
+        "original": "[private-run]/prep/originals/00791.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/01126-000.patch",
+        "ranges": [
+          [
+            1,
+            12
+          ]
+        ],
+        "original_path": "crates/farhelm/tests/e2e/file_downloads.rs",
+        "commit": "f560058da19e02716e6f943883a9508b447aff4e",
+        "notes": "patch header; patch character offsets [0,465)",
+        "lines": 12,
+        "bytes": 465,
+        "start": 0,
+        "end": 465,
+        "original": "[private-run]/prep/originals/01126.patch"
+      }
+    ],
+    "lines": 1367,
+    "bytes": 65520
+  },
+  "records": [
+    {
+      "key": "g138/c1",
+      "owner": "g138",
+      "id": "c1",
+      "domain": "rust-session-agent-regressions",
+      "purpose": "rust-session-agent-regressions: crates/farhelm/tests/e2e/containerized_sessions.rs, crates/farhelm/tests/e2e/real_agent_capture.rs, crates/farhelm/tests/e2e/create_idempotency.rs, crates/farhelm/tests/e2e/launch_sentinel_error_status.rs, crates/farhelm/tests/e2e/file_downloads.rs; phases +async fn retired_session_refuses_terminal_and_lifecycle_use() {",
+      "history": [
+        {
+          "line": 1,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c1",
+            "state": "open",
+            "summary": "Removal of tests that launch legacy containers follows retirement",
+            "location": "crates/farhelm/tests/e2e/containerized_sessions.rs:135",
+            "detail": "Reviewed commit: 04d85f0c98a9b635709d00b056719a0baa7fd3fc\n\n## TLDR\nThe removed tests exercised container launches that this revision deliberately stops supporting; their removal is not itself a regression.\n\n## Details\nAssigned patch 00322-001 removes the real Podman terminal-host launch/Stop/Delete test and adds refusal tests for persisted retired sessions. The fixture at containerized_sessions.rs:43-105 creates an ordinary session, replaces its stored launch with legacy image_file configuration, restarts the supervisor, and asserts the stored old launch was loaded. The new refusal tests check the retired error, not merely any error. SPEC.md:4816-4823 at this revision says exactly: ‘The earlier experimental model, whose supervisor stayed outside the container and bind-mounted a host checkout, is retired. Existing sessions support Delete only. Opening terminals or tabs, exec, Stop, Restart, Clone, Replace and Replace with are refused. Delete retains the legacy container-removal path and confirms absence. Missing Podman counts as nothing left to remove.’ This explicitly accepts removing support for the old launch route. Suggested bucket: other for the considered coverage concern; confidence: confirmed by source and specification, no execution. proposed_drop: specification acceptance quoted above. Could-be-highest: no established shipped security or loss-of-work route from removing unsupported-launch coverage; deletion's retained cleanup contract still needs separate source inspection. possible_cover: none; coverage sources not searched."
+          }
+        },
+        {
+          "line": 5,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c1",
+            "state": "open",
+            "summary": "Removal of tests that launch legacy containers follows retirement",
+            "location": "crates/farhelm/tests/e2e/containerized_sessions.rs:135",
+            "detail": "Reviewed commit: 04d85f0c98a9b635709d00b056719a0baa7fd3fc\n\n## TLDR\nThe removed tests exercised container launches that this revision deliberately stops supporting; their removal is not itself a regression.\n\n## Details\nAssigned patch 00322-001 removes the real Podman terminal-host launch/Stop/Delete test and adds refusal tests for persisted retired sessions. The fixture at containerized_sessions.rs:43-105 creates an ordinary session, replaces its stored launch with legacy image_file configuration, restarts the supervisor, and asserts the stored old launch was loaded. The new refusal tests check the retired error, not merely any error. SPEC.md:4816-4823 at this revision says exactly: ‘The earlier experimental model, whose supervisor stayed outside the container and bind-mounted a host checkout, is retired. Existing sessions support Delete only. Opening terminals or tabs, exec, Stop, Restart, Clone, Replace and Replace with are refused. Delete retains the legacy container-removal path and confirms absence. Missing Podman counts as nothing left to remove.’ This explicitly accepts removing support for the old launch route. Suggested bucket: other for the considered coverage concern; confidence: confirmed by source and specification, no execution. proposed_drop: specification acceptance quoted above. Could-be-highest: no established shipped security or loss-of-work route from removing unsupported-launch coverage; deletion's retained cleanup contract still needs separate source inspection. possible_cover: none; coverage sources not searched.\\n\\nFollow-up source check: the empty-container E2E fixture alone cannot distinguish an omitted engine call, but container.rs:271-293 has a fake-engine matrix for exists exit statuses 0, 1 and 125 and asserts success only for confirmed absence (1), retaining the initialization fence otherwise. service/teardown.rs:533-577 derives the cleanup coordinates from the stored launch and awaits revoke/remove with propagated errors before subsequent teardown and row removal. This settles the separate cleanup-contract check named above. These are source observations, not executed tests."
+          }
+        },
+        {
+          "line": 10,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c1",
+            "state": "open",
+            "summary": "Removal of tests that launch legacy containers follows retirement",
+            "location": "crates/farhelm/tests/e2e/containerized_sessions.rs:135",
+            "detail": "Reviewed commit: 04d85f0c98a9b635709d00b056719a0baa7fd3fc\n\n## TLDR\nThe removed tests exercised container launches that this revision deliberately stops supporting; their removal is not itself a regression.\n\n## Details\nAssigned patch 00322-001 removes the real Podman terminal-host launch/Stop/Delete test and adds refusal tests for persisted retired sessions. The fixture at containerized_sessions.rs:43-105 creates an ordinary session, replaces its stored launch with legacy image_file configuration, restarts the supervisor, and asserts the stored old launch was loaded. The new refusal tests check the retired error, not merely any error. SPEC.md:4816-4823 at this revision says exactly: ‘The earlier experimental model, whose supervisor stayed outside the container and bind-mounted a host checkout, is retired. Existing sessions support Delete only. Opening terminals or tabs, exec, Stop, Restart, Clone, Replace and Replace with are refused. Delete retains the legacy container-removal path and confirms absence. Missing Podman counts as nothing left to remove.’ This explicitly accepts removing support for the old launch route. Suggested bucket: other for the considered coverage concern; confidence: confirmed by source and specification, no execution. proposed_drop: specification acceptance quoted above. Could-be-highest: no established shipped security or loss-of-work route from removing unsupported-launch coverage; deletion's retained cleanup contract still needs separate source inspection. possible_cover: none; coverage sources not searched.\\n\\nFollow-up source check: the empty-container E2E fixture alone cannot distinguish an omitted engine call, but container.rs:271-293 has a fake-engine matrix for exists exit statuses 0, 1 and 125 and asserts success only for confirmed absence (1), retaining the initialization fence otherwise. service/teardown.rs:533-577 derives the cleanup coordinates from the stored launch and awaits revoke/remove with propagated errors before subsequent teardown and row removal. This settles the separate cleanup-contract check named above. These are source observations, not executed tests.\n\nDiscovery-neighbour correction: supplied g137/f1 establishes a distinct retained-Delete test-oracle gap. My earlier follow-up that the fake-engine exit-status matrix settles the deletion coverage concern was too broad: its code=1 fixture is already absent, ignores whether rm was invoked, and current production correctness does not replace an existing-object removal assertion. Preserve c1 proposed-drop reasoning only for retired positive launch/Stop coverage, not retained Delete removal coverage. The exact removal-test concern is already recorded by g137/f1 in supplied interface context, so do not duplicate it under a new ID here. possible_cover for the retained Delete coverage concern: g137/f1, supplied neighbour record, not a prohibited coverage search. No parent drop accepted. The proposed drop for unsupported positive-launch coverage does not erase this independent test-only issue; original consequences remain in prior events."
+          }
+        }
+      ],
+      "latest": {
+        "line": 10,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c1",
+          "state": "open",
+          "summary": "Removal of tests that launch legacy containers follows retirement",
+          "location": "crates/farhelm/tests/e2e/containerized_sessions.rs:135",
+          "detail": "Reviewed commit: 04d85f0c98a9b635709d00b056719a0baa7fd3fc\n\n## TLDR\nThe removed tests exercised container launches that this revision deliberately stops supporting; their removal is not itself a regression.\n\n## Details\nAssigned patch 00322-001 removes the real Podman terminal-host launch/Stop/Delete test and adds refusal tests for persisted retired sessions. The fixture at containerized_sessions.rs:43-105 creates an ordinary session, replaces its stored launch with legacy image_file configuration, restarts the supervisor, and asserts the stored old launch was loaded. The new refusal tests check the retired error, not merely any error. SPEC.md:4816-4823 at this revision says exactly: ‘The earlier experimental model, whose supervisor stayed outside the container and bind-mounted a host checkout, is retired. Existing sessions support Delete only. Opening terminals or tabs, exec, Stop, Restart, Clone, Replace and Replace with are refused. Delete retains the legacy container-removal path and confirms absence. Missing Podman counts as nothing left to remove.’ This explicitly accepts removing support for the old launch route. Suggested bucket: other for the considered coverage concern; confidence: confirmed by source and specification, no execution. proposed_drop: specification acceptance quoted above. Could-be-highest: no established shipped security or loss-of-work route from removing unsupported-launch coverage; deletion's retained cleanup contract still needs separate source inspection. possible_cover: none; coverage sources not searched.\\n\\nFollow-up source check: the empty-container E2E fixture alone cannot distinguish an omitted engine call, but container.rs:271-293 has a fake-engine matrix for exists exit statuses 0, 1 and 125 and asserts success only for confirmed absence (1), retaining the initialization fence otherwise. service/teardown.rs:533-577 derives the cleanup coordinates from the stored launch and awaits revoke/remove with propagated errors before subsequent teardown and row removal. This settles the separate cleanup-contract check named above. These are source observations, not executed tests.\n\nDiscovery-neighbour correction: supplied g137/f1 establishes a distinct retained-Delete test-oracle gap. My earlier follow-up that the fake-engine exit-status matrix settles the deletion coverage concern was too broad: its code=1 fixture is already absent, ignores whether rm was invoked, and current production correctness does not replace an existing-object removal assertion. Preserve c1 proposed-drop reasoning only for retired positive launch/Stop coverage, not retained Delete removal coverage. The exact removal-test concern is already recorded by g137/f1 in supplied interface context, so do not duplicate it under a new ID here. possible_cover for the retained Delete coverage concern: g137/f1, supplied neighbour record, not a prohibited coverage search. No parent drop accepted. The proposed drop for unsupported positive-launch coverage does not erase this independent test-only issue; original consequences remain in prior events."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g138/findings.jsonl",
+        "id": "c1",
+        "line": 10,
+        "disposition": "under-investigation",
+        "group": "g138-c1",
+        "reason": "Record durably acknowledged; parent source/contract validation, cross-group synthesis, coverage/filter matching and any independent drop check remain pending. This preserves the claim and uncertainty without accepting, dropping or lowering it."
+      },
+      "accepted_parent_decision": null,
+      "returned_claim_checks": [
+        {
+          "batch": "claims-087",
+          "key": "g138/c1",
+          "latest_line": 10,
+          "recommendation": "covered",
+          "bucket": "other",
+          "underlying_key": "retired-container-positive-path-test-removal",
+          "aliases": [
+            "g137/c1"
+          ],
+          "target_queue_file": null,
+          "why": "Same narrow retirement acceptance as g137/c1. The history's claim that the fake-engine matrix settled Delete coverage was expressly corrected; it must not dispose of g137/f1.",
+          "checks": [
+            "04d85f0c98a9b635709d00b056719a0baa7fd3fc:SPEC.md:4816-4823 retires positive launch/Stop support but keeps Delete; SPEC_impl.md:8647-8656 retains removal and confirmed absence.",
+            "At that revision containerized_sessions.rs:45-105 seeds an old stored launch without a Podman object, :135-208 checks retired errors and :215-227 checks deletion of that absent-object fixture.",
+            "container.rs:274-293 fixes the exists result independently of rm. service/teardown.rs:533-577 proves production cleanup dispatch/order, not a test that detects omitting removal. The latest correction is supported."
+          ],
+          "coverage_checked": {
+            "SPEC.md": "Current Retired containerized sessions :4892-4900 explicitly accepts removing positive paths; no acceptance for the independent Delete oracle gap.",
+            "SPEC_impl.md": "Current Rootless Podman sessions :8312-8326 contains the same conditional retirement rule and retained removal contract.",
+            "TODO.md Planned": "Empty; no coverage.",
+            "plans/queue": "Matching podman-environments retirement work is landed per plans/REPORTS.md:21, not an unlanded promise to restore this oracle.",
+            "BUGS.md": "No exact acceptance.",
+            "INDEX.md and queue": "No exact legacy retirement/retained Delete oracle item found. Existing template replacement test finding is distinct.",
+            "TRIAGE_OUTCOMES.md": "No exact matching decision found; archive not read.",
+            "FILTER.md": "No filter applied."
+          },
+          "exact_cover_quotes": [
+            "SPEC.md, Retired containerized sessions: 'Existing sessions support Delete only. Opening terminals or tabs, exec, Stop, Restart, Clone, Replace and Replace with are refused.'",
+            "SPEC_impl.md, Rootless Podman sessions: 'Retain only the legacy `podman rm -f` removal, confirmed-absence check and lock/ticket handling still required to serialize deletion with an already-started creator.'"
+          ],
+          "missing_premise": "No demonstrated shipped security or loss-of-work route from positive-path test retirement. All refusal paths and real-engine cleanup are not certified here.",
+          "original_stronger_consequence": "The record initially considered removing launch/Stop/Delete tests together and later claimed focused tests settled cleanup. Its final correction preserves the distinct lost Delete oracle as g137/f1; the alias g137/c1 also preserves the conditional host-file/credential-exposure concern.",
+          "needs_independent_drop_check": true,
+          "proposed_basis": "Accept only obsolete positive-launch/Stop test retirement. Do not treat the earlier broad cleanup conclusion as current or as a parent-accepted drop."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": true,
+        "clearly_refuted_candidate": false,
+        "needs_unfinished_gate": true,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "retired-container-positive-path-test-removal",
+        "destination": "trailing-retired-container-positive-path-test-removal.md"
+      }
+    },
+    {
+      "key": "g138/c2",
+      "owner": "g138",
+      "id": "c2",
+      "domain": "rust-session-agent-regressions",
+      "purpose": "rust-session-agent-regressions: crates/farhelm/tests/e2e/containerized_sessions.rs, crates/farhelm/tests/e2e/real_agent_capture.rs, crates/farhelm/tests/e2e/create_idempotency.rs, crates/farhelm/tests/e2e/launch_sentinel_error_status.rs, crates/farhelm/tests/e2e/file_downloads.rs; phases +async fn retired_session_refuses_terminal_and_lifecycle_use() {",
+      "history": [
+        {
+          "line": 2,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c2",
+            "state": "open",
+            "summary": "Terminal-host migration retains panic-time cleanup",
+            "location": "crates/farhelm/tests/e2e/real_agent_capture.rs:449",
+            "detail": "Reviewed commit: 70bc66a9f285cc2a9984924f389834d118b7cfdc\n\n## TLDR\nReplacing tmux guards with terminal hosts does not by itself leave these real vendor agents running after a test panic.\n\n## Details\nConsidered whether removing TmuxServerGuard caused orphaned real agents when assertions fail before explicit teardown. In real_agent_capture.rs:449 onward the work TestDir is declared before the supervisor state TestDir, so unwind drops state first. At this revision crates/farhelm-teststate/src/lib.rs:794-817 shows TestDir::drop calls end_hosts, which runs stop_hosts_within and keeps the state directory if cleanup cannot be confirmed. harness.rs:1139-1179 documents and stores the same guard in Harness before the semaphore permit. Explicit successful teardown uses end_all_terminals (harness.rs:2368-2382), asserting all owned hosts ended. The plain-command callback audit declares Harness after its probe/work directories, preserving the same order. Suggested bucket: other; confidence: confirmed source analysis, no execution. proposed_drop: source refutation; the state directory owns cleanup even during unwind. Could-be-highest: no; this concern is confined to opt-in maintainer tests and no catastrophic route is established. possible_cover: none; coverage sources not searched. Caveat: this establishes the cleanup mechanism and declaration order, not an observed successful cleanup on every OS or under every failure."
+          }
+        },
+        {
+          "line": 7,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c2",
+            "state": "open",
+            "summary": "Terminal-host migration retains panic-time cleanup",
+            "location": "crates/farhelm/tests/e2e/real_agent_capture.rs:449",
+            "detail": "Reviewed commit: 70bc66a9f285cc2a9984924f389834d118b7cfdc\n\n## TLDR\nReplacing tmux guards with terminal hosts does not by itself leave these real vendor agents running after a test panic.\n\n## Details\nConsidered whether removing TmuxServerGuard caused orphaned real agents when assertions fail before explicit teardown. In real_agent_capture.rs:449 onward the work TestDir is declared before the supervisor state TestDir, so unwind drops state first. At this revision crates/farhelm-teststate/src/lib.rs:794-817 shows TestDir::drop calls end_hosts, which runs stop_hosts_within and keeps the state directory if cleanup cannot be confirmed. harness.rs:1139-1179 documents and stores the same guard in Harness before the semaphore permit. Explicit successful teardown uses end_all_terminals (harness.rs:2368-2382), asserting all owned hosts ended. The plain-command callback audit declares Harness after its probe/work directories, preserving the same order. Suggested bucket: other; confidence: confirmed source analysis, no execution. proposed_drop: source refutation; the state directory owns cleanup even during unwind. Could-be-highest: no; this concern is confined to opt-in maintainer tests and no catastrophic route is established. possible_cover: none; coverage sources not searched. Caveat: this establishes the cleanup mechanism and declaration order, not an observed successful cleanup on every OS or under every failure.\n\nSynthesis clarification: declaration order establishes a cleanup attempt before work removal, not unconditional host death. The three serving-supervisor audits declare slot, work, then state (:448-454, :633-639, :777-784), so normal unwind drops the state guard before work and slot. The standalone callback audit declares its Harness after state/work (:997-999), and Harness stores its state guard before its semaphore permit. Explicit successful teardown awaits end_all_terminals before removing either directory (:596-603, :749-757, :969-976, :1153-1157). TestDir retains only its own state directory when host cleanup is unconfirmed; work can still be removed and the slot released during unwind. Thus the candidate refutes absence of a panic-time cleanup mechanism, not every orphan or unavailable-host outcome. No such outcome was observed. No parent drop is accepted; independent review remains pending."
+          }
+        },
+        {
+          "line": 9,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c2",
+            "state": "open",
+            "summary": "Terminal-host migration retains panic-time cleanup",
+            "location": "crates/farhelm/tests/e2e/real_agent_capture.rs:449",
+            "detail": "Reviewed commit: 70bc66a9f285cc2a9984924f389834d118b7cfdc\n\n## TLDR\nReplacing tmux guards with terminal hosts does not by itself leave these real vendor agents running after a test panic.\n\n## Details\nConsidered whether removing TmuxServerGuard caused orphaned real agents when assertions fail before explicit teardown. In real_agent_capture.rs:449 onward the work TestDir is declared before the supervisor state TestDir, so unwind drops state first. At this revision crates/farhelm-teststate/src/lib.rs:794-817 shows TestDir::drop calls end_hosts, which runs stop_hosts_within and keeps the state directory if cleanup cannot be confirmed. harness.rs:1139-1179 documents and stores the same guard in Harness before the semaphore permit. Explicit successful teardown uses end_all_terminals (harness.rs:2368-2382), asserting all owned hosts ended. The plain-command callback audit declares Harness after its probe/work directories, preserving the same order. Suggested bucket: other; confidence: confirmed source analysis, no execution. proposed_drop: source refutation; the state directory owns cleanup even during unwind. Could-be-highest: no; this concern is confined to opt-in maintainer tests and no catastrophic route is established. possible_cover: none; coverage sources not searched. Caveat: this establishes the cleanup mechanism and declaration order, not an observed successful cleanup on every OS or under every failure.\n\nSynthesis clarification: declaration order establishes a cleanup attempt before work removal, not unconditional host death. The three serving-supervisor audits declare slot, work, then state (:448-454, :633-639, :777-784), so normal unwind drops the state guard before work and slot. The standalone callback audit declares its Harness after state/work (:997-999), and Harness stores its state guard before its semaphore permit. Explicit successful teardown awaits end_all_terminals before removing either directory (:596-603, :749-757, :969-976, :1153-1157). TestDir retains only its own state directory when host cleanup is unconfirmed; work can still be removed and the slot released during unwind. Thus the candidate refutes absence of a panic-time cleanup mechanism, not every orphan or unavailable-host outcome. No such outcome was observed. No parent drop is accepted; independent review remains pending.\n\nCompleted synthesis checks: hook_identity.rs:240-263 confirms successful ServeTask::stop awaits cancellation, while Drop only requests cancellation. The panic-time host cleanup does not require that accept-loop Arc to have fully dropped: farhelm-teststate/src/hosts.rs:133-159 takes over the host connection, sends Shutdown, and requires connection end plus socket disappearance (or an already Gone host). Its full scan at :107-130 treats unreadable scope, exhausted budget and unconfirmed hosts as failure, causing TestDir retention. Explicit end_all_terminals calls the supervisor stop helper; hosts/stop.rs:209-218 requires a complete scan and only Stopped outcomes, not merely an accepted shutdown request. This supports the normal-success ordering and bounded panic-time cleanup attempt despite lingering supervisor references. It does not prove complete vendor subprocess-tree termination in execution. Parent-provided g137 independently confirms the related sentinel shutdown is ended/Gone without writing a session outcome; no outcome mutation is needed for these tests final cleanup. No new source defect established."
+          }
+        }
+      ],
+      "latest": {
+        "line": 9,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c2",
+          "state": "open",
+          "summary": "Terminal-host migration retains panic-time cleanup",
+          "location": "crates/farhelm/tests/e2e/real_agent_capture.rs:449",
+          "detail": "Reviewed commit: 70bc66a9f285cc2a9984924f389834d118b7cfdc\n\n## TLDR\nReplacing tmux guards with terminal hosts does not by itself leave these real vendor agents running after a test panic.\n\n## Details\nConsidered whether removing TmuxServerGuard caused orphaned real agents when assertions fail before explicit teardown. In real_agent_capture.rs:449 onward the work TestDir is declared before the supervisor state TestDir, so unwind drops state first. At this revision crates/farhelm-teststate/src/lib.rs:794-817 shows TestDir::drop calls end_hosts, which runs stop_hosts_within and keeps the state directory if cleanup cannot be confirmed. harness.rs:1139-1179 documents and stores the same guard in Harness before the semaphore permit. Explicit successful teardown uses end_all_terminals (harness.rs:2368-2382), asserting all owned hosts ended. The plain-command callback audit declares Harness after its probe/work directories, preserving the same order. Suggested bucket: other; confidence: confirmed source analysis, no execution. proposed_drop: source refutation; the state directory owns cleanup even during unwind. Could-be-highest: no; this concern is confined to opt-in maintainer tests and no catastrophic route is established. possible_cover: none; coverage sources not searched. Caveat: this establishes the cleanup mechanism and declaration order, not an observed successful cleanup on every OS or under every failure.\n\nSynthesis clarification: declaration order establishes a cleanup attempt before work removal, not unconditional host death. The three serving-supervisor audits declare slot, work, then state (:448-454, :633-639, :777-784), so normal unwind drops the state guard before work and slot. The standalone callback audit declares its Harness after state/work (:997-999), and Harness stores its state guard before its semaphore permit. Explicit successful teardown awaits end_all_terminals before removing either directory (:596-603, :749-757, :969-976, :1153-1157). TestDir retains only its own state directory when host cleanup is unconfirmed; work can still be removed and the slot released during unwind. Thus the candidate refutes absence of a panic-time cleanup mechanism, not every orphan or unavailable-host outcome. No such outcome was observed. No parent drop is accepted; independent review remains pending.\n\nCompleted synthesis checks: hook_identity.rs:240-263 confirms successful ServeTask::stop awaits cancellation, while Drop only requests cancellation. The panic-time host cleanup does not require that accept-loop Arc to have fully dropped: farhelm-teststate/src/hosts.rs:133-159 takes over the host connection, sends Shutdown, and requires connection end plus socket disappearance (or an already Gone host). Its full scan at :107-130 treats unreadable scope, exhausted budget and unconfirmed hosts as failure, causing TestDir retention. Explicit end_all_terminals calls the supervisor stop helper; hosts/stop.rs:209-218 requires a complete scan and only Stopped outcomes, not merely an accepted shutdown request. This supports the normal-success ordering and bounded panic-time cleanup attempt despite lingering supervisor references. It does not prove complete vendor subprocess-tree termination in execution. Parent-provided g137 independently confirms the related sentinel shutdown is ended/Gone without writing a session outcome; no outcome mutation is needed for these tests final cleanup. No new source defect established."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g138/findings.jsonl",
+        "id": "c2",
+        "line": 9,
+        "disposition": "excluded",
+        "group": "real-agent-capture-panic-cleanup-owner-retained",
+        "reason": "Parent explicitly accepted named refuted proposal from claims-087 after inspecting it. The migration retains a bounded panic-time cleanup mechanism and correct declaration order. This refutes absence of a cleanup guard, not every possible surviving subprocess or unavailable-host outcome. Refute only missing panic-time cleanup mechanism. Preserve the recorded failure-path limitations instead of claiming hosts invariably end. Checked source/results: [\"70bc66a9f285cc2a9984924f389834d118b7cfdc:crates/farhelm/tests/e2e/real_agent_capture.rs:448-454, :633-639 and :777-784 declare work before state; :992-999 declares Harness after work/probe state. Normal unwind therefore reaches the terminal-host owner before work removal and permit release.\",\"At that revision harness.rs:1139-1173 stores TestDir before its permit; farhelm-teststate/src/lib.rs:794-818 attempts host end and retains its state directory if unconfirmed. hosts.rs:107-165 requires confirmed end/Gone and socket disappearance, with bounded scans.\",\"real_agent_capture.rs:596-603 explicitly awaits end_all_terminals before removing state/work and releasing the slot. harness.rs:2368-2382 asserts all_stopped. hook_identity.rs:240-263 awaits ServeTask cancellation on explicit stop, while Drop only requests cancellation.\",\"The panic-time TestDir helper can take over the host connection even if a supervisor reference lingers. Retention protects only its state directory; work can still be removed and the slot released after an unconfirmed attempt. No subprocess-tree termination was observed.\"] Current coverage/results: {\"SPEC.md\":\"Durability and resume :3436-3456 explains that supervisor death does not end sessions; no acceptance of orphaned vendor fixtures.\",\"SPEC_impl.md\":\"Terminal host/current test substrate :2159-2177 supplies context, not an exemption from cleanup.\",\"TODO.md Planned\":\"Empty; no coverage.\",\"plans/queue\":\"tmux-end-old-terminals mentions porting real_agent_capture but is landed per plans/REPORTS.md:29. No unlanded panic-cleanup fix found.\",\"BUGS.md\":\"No matching cleanup mechanism defect.\",\"INDEX.md and queue\":\"No exact real_agent_capture/TestDir panic item found. mac-fixture-cleanup-stop-budget.md concerns remote cleanup's outer deadline, not absence of this owner.\",\"TRIAGE_OUTCOMES.md\":\"No matching decision found; archive not read.\",\"FILTER.md\":\"No filter used.\"} Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Removing TmuxServerGuard might leave real vendor agents alive after a panic. The history later narrowed this to refuting absence of a mechanism, acknowledging unconfirmed cleanup can retain only state while work/permit drop. Harm is confined to opt-in maintainer tests; no catastrophic route established.\"; \"No observed orphan or failed cleanup. Source establishes an attempt and normal-success ordering, not unconditional vendor process-tree death on every OS/failure.\"."
+      },
+      "accepted_parent_decision": {
+        "key": "g138/c2",
+        "line": 9,
+        "disposition": "excluded",
+        "group": "real-agent-capture-panic-cleanup-owner-retained",
+        "bucket": "other",
+        "recording": "refuted",
+        "queue_target_candidate": null,
+        "needs_independent_drop_check": false,
+        "reason": "Parent explicitly accepted named refuted proposal from claims-087 after inspecting it. The migration retains a bounded panic-time cleanup mechanism and correct declaration order. This refutes absence of a cleanup guard, not every possible surviving subprocess or unavailable-host outcome. Refute only missing panic-time cleanup mechanism. Preserve the recorded failure-path limitations instead of claiming hosts invariably end. Checked source/results: [\"70bc66a9f285cc2a9984924f389834d118b7cfdc:crates/farhelm/tests/e2e/real_agent_capture.rs:448-454, :633-639 and :777-784 declare work before state; :992-999 declares Harness after work/probe state. Normal unwind therefore reaches the terminal-host owner before work removal and permit release.\",\"At that revision harness.rs:1139-1173 stores TestDir before its permit; farhelm-teststate/src/lib.rs:794-818 attempts host end and retains its state directory if unconfirmed. hosts.rs:107-165 requires confirmed end/Gone and socket disappearance, with bounded scans.\",\"real_agent_capture.rs:596-603 explicitly awaits end_all_terminals before removing state/work and releasing the slot. harness.rs:2368-2382 asserts all_stopped. hook_identity.rs:240-263 awaits ServeTask cancellation on explicit stop, while Drop only requests cancellation.\",\"The panic-time TestDir helper can take over the host connection even if a supervisor reference lingers. Retention protects only its state directory; work can still be removed and the slot released after an unconfirmed attempt. No subprocess-tree termination was observed.\"] Current coverage/results: {\"SPEC.md\":\"Durability and resume :3436-3456 explains that supervisor death does not end sessions; no acceptance of orphaned vendor fixtures.\",\"SPEC_impl.md\":\"Terminal host/current test substrate :2159-2177 supplies context, not an exemption from cleanup.\",\"TODO.md Planned\":\"Empty; no coverage.\",\"plans/queue\":\"tmux-end-old-terminals mentions porting real_agent_capture but is landed per plans/REPORTS.md:29. No unlanded panic-cleanup fix found.\",\"BUGS.md\":\"No matching cleanup mechanism defect.\",\"INDEX.md and queue\":\"No exact real_agent_capture/TestDir panic item found. mac-fixture-cleanup-stop-budget.md concerns remote cleanup's outer deadline, not absence of this owner.\",\"TRIAGE_OUTCOMES.md\":\"No matching decision found; archive not read.\",\"FILTER.md\":\"No filter used.\"} Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Removing TmuxServerGuard might leave real vendor agents alive after a panic. The history later narrowed this to refuting absence of a mechanism, acknowledging unconfirmed cleanup can retain only state while work/permit drop. Harm is confined to opt-in maintainer tests; no catastrophic route established.\"; \"No observed orphan or failed cleanup. Source establishes an attempt and normal-success ordering, not unconditional vendor process-tree death on every OS/failure.\"."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-087",
+          "key": "g138/c2",
+          "latest_line": 9,
+          "recommendation": "refuted",
+          "bucket": "other",
+          "underlying_key": "real-agent-capture-panic-cleanup-owner-retained",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The migration retains a bounded panic-time cleanup mechanism and correct declaration order. This refutes absence of a cleanup guard, not every possible surviving subprocess or unavailable-host outcome.",
+          "checks": [
+            "70bc66a9f285cc2a9984924f389834d118b7cfdc:crates/farhelm/tests/e2e/real_agent_capture.rs:448-454, :633-639 and :777-784 declare work before state; :992-999 declares Harness after work/probe state. Normal unwind therefore reaches the terminal-host owner before work removal and permit release.",
+            "At that revision harness.rs:1139-1173 stores TestDir before its permit; farhelm-teststate/src/lib.rs:794-818 attempts host end and retains its state directory if unconfirmed. hosts.rs:107-165 requires confirmed end/Gone and socket disappearance, with bounded scans.",
+            "real_agent_capture.rs:596-603 explicitly awaits end_all_terminals before removing state/work and releasing the slot. harness.rs:2368-2382 asserts all_stopped. hook_identity.rs:240-263 awaits ServeTask cancellation on explicit stop, while Drop only requests cancellation.",
+            "The panic-time TestDir helper can take over the host connection even if a supervisor reference lingers. Retention protects only its state directory; work can still be removed and the slot released after an unconfirmed attempt. No subprocess-tree termination was observed."
+          ],
+          "coverage_checked": {
+            "SPEC.md": "Durability and resume :3436-3456 explains that supervisor death does not end sessions; no acceptance of orphaned vendor fixtures.",
+            "SPEC_impl.md": "Terminal host/current test substrate :2159-2177 supplies context, not an exemption from cleanup.",
+            "TODO.md Planned": "Empty; no coverage.",
+            "plans/queue": "tmux-end-old-terminals mentions porting real_agent_capture but is landed per plans/REPORTS.md:29. No unlanded panic-cleanup fix found.",
+            "BUGS.md": "No matching cleanup mechanism defect.",
+            "INDEX.md and queue": "No exact real_agent_capture/TestDir panic item found. mac-fixture-cleanup-stop-budget.md concerns remote cleanup's outer deadline, not absence of this owner.",
+            "TRIAGE_OUTCOMES.md": "No matching decision found; archive not read.",
+            "FILTER.md": "No filter used."
+          },
+          "exact_cover_quotes": [],
+          "missing_premise": "No observed orphan or failed cleanup. Source establishes an attempt and normal-success ordering, not unconditional vendor process-tree death on every OS/failure.",
+          "original_stronger_consequence": "Removing TmuxServerGuard might leave real vendor agents alive after a panic. The history later narrowed this to refuting absence of a mechanism, acknowledging unconfirmed cleanup can retain only state while work/permit drop. Harm is confined to opt-in maintainer tests; no catastrophic route established.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Refute only missing panic-time cleanup mechanism. Preserve the recorded failure-path limitations instead of claiming hosts invariably end."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "real-agent-capture-panic-cleanup-owner-retained",
+        "destination": null
+      }
+    },
+    {
+      "key": "g138/c3",
+      "owner": "g138",
+      "id": "c3",
+      "domain": "rust-session-agent-regressions",
+      "purpose": "rust-session-agent-regressions: crates/farhelm/tests/e2e/containerized_sessions.rs, crates/farhelm/tests/e2e/real_agent_capture.rs, crates/farhelm/tests/e2e/create_idempotency.rs, crates/farhelm/tests/e2e/launch_sentinel_error_status.rs, crates/farhelm/tests/e2e/file_downloads.rs; phases +async fn retired_session_refuses_terminal_and_lifecycle_use() {",
+      "history": [
+        {
+          "line": 3,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c3",
+            "state": "open",
+            "summary": "Removed tmux chdir test does not remove the current launch guard",
+            "location": "crates/farhelm/tests/e2e/launch_sentinel_error_status.rs:31",
+            "detail": "Reviewed commit: 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513\n\n## TLDR\nThe removed test guarded against an agent accidentally running in another folder. Current launches refuse an inaccessible folder before executing the agent, so the removed tmux fallback scenario does not establish a current bug.\n\n## Details\nThe deleted create_records_error_when_the_session_directory_cannot_be_entered fixture deliberately used the old-terminal constructor: tmux could fall back to HOME and the launch shim had to record Error. SPEC_impl.md:2015-2034 at this revision states ‘Every create starts its agent in a host, every new tab opens in one, and a Restart moves an agent out of tmux into one’. In crates/terminal-host/src/spawn.rs:577-581 the child calls chdir(prepared.cwd), calls fail(error_fd) on error, and only then execve; fail at :548-553 writes errno and exits. Thus current create cannot execute in a fallback folder through this path. SPEC.md:3761-3763 says ‘there is no launch without a working directory.’ The test's old retained-session/Error expectation is not the new host's pre-exec refusal contract. Suggested bucket: other for the considered test-removal concern; confidence: confirmed source analysis, no execution. proposed_drop: source refutation through unconditional host creation and fail-before-exec. Could-be-highest: the original hypothetical agent-in-wrong-folder consequence could damage user work, but no shipped route remains established by this removed case. This candidate is logged for the caller's independent drop check. possible_cover: none; coverage sources not searched. Caveat: no claim that every cwd identity or permission race is covered; this is restricted to the deleted test's fallback path."
+          }
+        }
+      ],
+      "latest": {
+        "line": 3,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c3",
+          "state": "open",
+          "summary": "Removed tmux chdir test does not remove the current launch guard",
+          "location": "crates/farhelm/tests/e2e/launch_sentinel_error_status.rs:31",
+          "detail": "Reviewed commit: 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513\n\n## TLDR\nThe removed test guarded against an agent accidentally running in another folder. Current launches refuse an inaccessible folder before executing the agent, so the removed tmux fallback scenario does not establish a current bug.\n\n## Details\nThe deleted create_records_error_when_the_session_directory_cannot_be_entered fixture deliberately used the old-terminal constructor: tmux could fall back to HOME and the launch shim had to record Error. SPEC_impl.md:2015-2034 at this revision states ‘Every create starts its agent in a host, every new tab opens in one, and a Restart moves an agent out of tmux into one’. In crates/terminal-host/src/spawn.rs:577-581 the child calls chdir(prepared.cwd), calls fail(error_fd) on error, and only then execve; fail at :548-553 writes errno and exits. Thus current create cannot execute in a fallback folder through this path. SPEC.md:3761-3763 says ‘there is no launch without a working directory.’ The test's old retained-session/Error expectation is not the new host's pre-exec refusal contract. Suggested bucket: other for the considered test-removal concern; confidence: confirmed source analysis, no execution. proposed_drop: source refutation through unconditional host creation and fail-before-exec. Could-be-highest: the original hypothetical agent-in-wrong-folder consequence could damage user work, but no shipped route remains established by this removed case. This candidate is logged for the caller's independent drop check. possible_cover: none; coverage sources not searched. Caveat: no claim that every cwd identity or permission race is covered; this is restricted to the deleted test's fallback path."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g138/findings.jsonl",
+        "id": "c3",
+        "line": 3,
+        "disposition": "under-investigation",
+        "group": "g138-c3",
+        "reason": "Record durably acknowledged; parent source/contract validation, cross-group synthesis, coverage/filter matching and any independent drop check remain pending. This preserves the claim and uncertainty without accepting, dropping or lowering it."
+      },
+      "accepted_parent_decision": null,
+      "returned_claim_checks": [
+        {
+          "batch": "claims-087",
+          "key": "g138/c3",
+          "latest_line": 3,
+          "recommendation": "refuted",
+          "bucket": "other",
+          "underlying_key": "removed-tmux-cwd-fallback-route-no-longer-created",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The removed test deliberately selected the old tmux constructor. Current create starts a host whose child exits on chdir failure before exec, so the old HOME fallback route is not established for current creates.",
+          "checks": [
+            "647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513 diff for crates/farhelm/tests/e2e/launch_sentinel_error_status.rs removes create_records_error_when_the_session_directory_cannot_be_entered, which explicitly called harness_believing_boot_tmux and asserted its marker executable never ran in the fallback folder.",
+            "At that revision crates/terminal-host/src/spawn.rs:548-553 writes errno then exits; :577-581 calls chdir, fails before execve on error. SPEC_impl.md:2024-2034 states every create starts its agent in a host.",
+            "Current SPEC_impl.md:2173-2177 documents a separate known difference: denied-directory create is refused at host start rather than recorded as the launch error. That is not a route to executing in another folder."
+          ],
+          "coverage_checked": {
+            "SPEC.md": "Current :3725-3727 requires a working directory for every launch; it does not accept execution in a fallback directory.",
+            "SPEC_impl.md": "Current Terminal host :1891-1906 requires host creates; :2173-2177 preserves the narrower refusal/error-classification known gap. No wrong-folder acceptance found.",
+            "TODO.md Planned": "Empty; no coverage.",
+            "plans/queue": "No unlanded denied-directory/fallback test work found; tmux-end-old-terminals is landed per plans/REPORTS.md:29.",
+            "BUGS.md": "No matching wrong-folder behavior.",
+            "INDEX.md and queue": "No exact deleted cwd-fallback test item found. agent-screen-refusal-missing-path.md was read: invalid-UTF-8 capture diagnostic, a different trigger and consequence.",
+            "TRIAGE_OUTCOMES.md": "Read matching folder-refusal-classifier entry :137 onward: a UI diagnostic matching path text, not execution in a fallback folder; no exact coverage. Archive not read.",
+            "FILTER.md": "No filter used; a potential wrong-folder user-work consequence would be outside ordinary diagnostic filters."
+          },
+          "exact_cover_quotes": [],
+          "missing_premise": "No current shipped create route executing after a failed chdir has been shown. This does not certify every cwd identity or permission race, nor claim equivalent denied-directory regression coverage remains.",
+          "original_stronger_consequence": "An agent running in a fallback folder could damage unrelated user work. The removed old-terminal fixture guarded that route; its current reachability is not established.",
+          "needs_independent_drop_check": true,
+          "proposed_basis": "Source refutes this deleted fixture's tmux HOME-fallback route for current host creates. Independent check is still required before disposing of the potentially highest hypothesis."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": true,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "removed-tmux-cwd-fallback-route-no-longer-created",
+        "destination": null
+      }
+    },
+    {
+      "key": "g138/c4",
+      "owner": "g138",
+      "id": "c4",
+      "domain": "rust-session-agent-regressions",
+      "purpose": "rust-session-agent-regressions: crates/farhelm/tests/e2e/containerized_sessions.rs, crates/farhelm/tests/e2e/real_agent_capture.rs, crates/farhelm/tests/e2e/create_idempotency.rs, crates/farhelm/tests/e2e/launch_sentinel_error_status.rs, crates/farhelm/tests/e2e/file_downloads.rs; phases +async fn retired_session_refuses_terminal_and_lifecycle_use() {",
+      "history": [
+        {
+          "line": 4,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c4",
+            "state": "open",
+            "summary": "A permissive reset-view check cannot alone pass the identity audit",
+            "location": "crates/farhelm/tests/e2e/real_agent_capture.rs:920",
+            "detail": "Reviewed commit: 70bc66a9f285cc2a9984924f389834d118b7cfdc\n\n## TLDR\nThe new screen-reset fallback is weaker than an exact closing notice, but it is followed by an independent check that the next prompt selects a different resumable conversation. It does not by itself let broken conversation capture pass.\n\n## Details\nConsidered whether view_reset (real_agent_capture.rs:920-927, header present while the old answer and /new are absent) can misidentify a transient redraw as a completed /new. The helper reads the visible screen, not history: hosts/terminal.rs:2213-2223 and farhelm-terminal-emulator/src/emulator.rs:265-275 establish that contract. The actual test first requires the old answer via submit_prompt (:824-826), waits for the command popup, then after its reset wait asserts the old identity is retained and submits a distinct second prompt (:941-944). wait_for_reported_identity(:260-280), called with Some(&first), requires a different stored identity, a Resume offer, and the hook log's acknowledgement of the reported runtime. Thus a mistaken early reset observation alone is insufficient for success; failed command execution is caught by the independent identity assertion. StreamText is capped at 1 MiB and used for an exact old-identity notice, not row counts. Suggested bucket: other; confidence: confirmed source analysis of the assertions, no vendor execution. proposed_drop: source refutation of a false-pass route. Could-be-highest: no established security or lost-work route; the considered consequence is a weakened opt-in test oracle. possible_cover: none; coverage sources not searched. Caveat: this does not establish that every transient vendor redraw is handled without a test failure; that would require vendor execution, which was not requested."
+          }
+        },
+        {
+          "line": 6,
+          "event": {
+            "version": 1,
+            "kind": "lead",
+            "id": "c4",
+            "state": "open",
+            "summary": "A permissive reset-view check cannot alone pass the identity audit",
+            "location": "crates/farhelm/tests/e2e/real_agent_capture.rs:920",
+            "detail": "Reviewed commit: 70bc66a9f285cc2a9984924f389834d118b7cfdc\n\n## TLDR\nThe new screen-reset fallback is weaker than an exact closing notice, but it is followed by an independent check that the next prompt selects a different resumable conversation. It does not by itself let broken conversation capture pass.\n\n## Details\nConsidered whether view_reset (real_agent_capture.rs:920-927, header present while the old answer and /new are absent) can misidentify a transient redraw as a completed /new. The helper reads the visible screen, not history: hosts/terminal.rs:2213-2223 and farhelm-terminal-emulator/src/emulator.rs:265-275 establish that contract. The actual test first requires the old answer via submit_prompt (:824-826), waits for the command popup, then after its reset wait asserts the old identity is retained and submits a distinct second prompt (:941-944). wait_for_reported_identity(:260-280), called with Some(&first), requires a different stored identity, a Resume offer, and the hook log's acknowledgement of the reported runtime. Thus a mistaken early reset observation alone is insufficient for success; failed command execution is caught by the independent identity assertion. StreamText is capped at 1 MiB and used for an exact old-identity notice, not row counts. Suggested bucket: other; confidence: confirmed source analysis of the assertions, no vendor execution. proposed_drop: source refutation of a false-pass route. Could-be-highest: no established security or lost-work route; the considered consequence is a weakened opt-in test oracle. possible_cover: none; coverage sources not searched. Caveat: this does not establish that every transient vendor redraw is handled without a test failure; that would require vendor execution, which was not requested.\n\nSynthesis check in progress: the later helper compares complete stored locator strings, whereas Resume may use a separate persistent thread ID. Need to check whether a changed locator alone necessarily means a changed persistent Resume target. Until that premise is settled, the earlier claim of a different resumable conversation is too broad. Source checks so far: real_agent_capture.rs:942-954 uses Some(&first) for wait_for_reported_identity and then validates resumed argv against the renewed locator; hook_acked at :327-335 matches runtime ID, not persistent thread ID. Original considered consequence remains a false pass of the opt-in identity audit. Suggested bucket remains other; could-be-highest remains no established shipped loss-of-work route. proposed_drop is pending source resolution of this premise; confidence: uninvestigated synthesis lead. No runtime observation."
+          }
+        },
+        {
+          "line": 8,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c4",
+            "state": "open",
+            "summary": "Reset audit checks changed locator, not explicitly changed Resume target",
+            "location": "crates/farhelm/tests/e2e/real_agent_capture.rs:920",
+            "detail": "Reviewed commit: 70bc66a9f285cc2a9984924f389834d118b7cfdc\n\n## TLDR\nThe new screen-reset fallback is weaker than an exact closing notice, but it is followed by an independent check that the next prompt selects a different resumable conversation. It does not by itself let broken conversation capture pass.\n\n## Details\nConsidered whether view_reset (real_agent_capture.rs:920-927, header present while the old answer and /new are absent) can misidentify a transient redraw as a completed /new. The helper reads the visible screen, not history: hosts/terminal.rs:2213-2223 and farhelm-terminal-emulator/src/emulator.rs:265-275 establish that contract. The actual test first requires the old answer via submit_prompt (:824-826), waits for the command popup, then after its reset wait asserts the old identity is retained and submits a distinct second prompt (:941-944). wait_for_reported_identity(:260-280), called with Some(&first), requires a different stored identity, a Resume offer, and the hook log's acknowledgement of the reported runtime. Thus a mistaken early reset observation alone is insufficient for success; failed command execution is caught by the independent identity assertion. StreamText is capped at 1 MiB and used for an exact old-identity notice, not row counts. Suggested bucket: other; confidence: confirmed source analysis of the assertions, no vendor execution. proposed_drop: source refutation of a false-pass route. Could-be-highest: no established security or lost-work route; the considered consequence is a weakened opt-in test oracle. possible_cover: none; coverage sources not searched. Caveat: this does not establish that every transient vendor redraw is handled without a test failure; that would require vendor execution, which was not requested.\n\nSynthesis check in progress: the later helper compares complete stored locator strings, whereas Resume may use a separate persistent thread ID. Need to check whether a changed locator alone necessarily means a changed persistent Resume target. Until that premise is settled, the earlier claim of a different resumable conversation is too broad. Source checks so far: real_agent_capture.rs:942-954 uses Some(&first) for wait_for_reported_identity and then validates resumed argv against the renewed locator; hook_acked at :327-335 matches runtime ID, not persistent thread ID. Original considered consequence remains a false pass of the opt-in identity audit. Suggested bucket remains other; could-be-highest remains no established shipped loss-of-work route. proposed_drop is pending source resolution of this premise; confidence: uninvestigated synthesis lead. No runtime observation.\n\nSynthesis resolution (supersedes the earlier broad false-pass refutation): a changed locator is NOT a source-level proof of a different persistent Resume target. CodexLocator at agent_kind/codex.rs:40-50 stores runtime_session_id, session_file, thread_id and readiness separately. verify at :145-170 matches the reported runtime and preserves an already established thread only when supplied; report admission at service/core/vendor/codex.rs:216-229 carries the previous thread expectation only for identical runtime/path. A different runtime or path can therefore produce a different locator with the same persistent thread if the reported root metadata says so. The test does not compare resume_identity(first) with resume_identity(renewed). Checking the parent revision found the exact same locator comparison at real_agent_capture.rs:237-240 and the same post-/new checks at :890-912; this limitation is not introduced by the assigned migration patch. The added permissive view reset still cannot bypass an entirely unchanged locator: the distinct prompt answer, changed acknowledged/resumable locator and argv checks remain required. No reviewed source establishes that this vendor emits a changed runtime/path for the same persistent target during a failed /new; no runtime/vendor behavior was tested. A reportable newly introduced false-pass route would need that vendor transition or another concrete changed-patch route. Closing this investigation as a candidate, not a finding or open lead. Confidence: confirmed assertion/source limits; vendor transition unverified after source investigation because vendor implementation/behavior is outside assigned source. proposed_drop: no established introduced regression; keep the precise limitation for independent caller assessment. Suggested bucket: other, confined to opt-in test coverage; could-be-highest: no established shipped security or lost-work route. No parent drop accepted."
+          }
+        },
+        {
+          "line": 11,
+          "event": {
+            "version": 1,
+            "kind": "lead",
+            "id": "c4",
+            "state": "open",
+            "summary": "Reset audit checks changed locator, not explicitly changed Resume target",
+            "location": "crates/farhelm/tests/e2e/real_agent_capture.rs:920",
+            "detail": "Reviewed commit: 70bc66a9f285cc2a9984924f389834d118b7cfdc\n\n## TLDR\nThe new screen-reset fallback is weaker than an exact closing notice, but it is followed by an independent check that the next prompt selects a different resumable conversation. It does not by itself let broken conversation capture pass.\n\n## Details\nConsidered whether view_reset (real_agent_capture.rs:920-927, header present while the old answer and /new are absent) can misidentify a transient redraw as a completed /new. The helper reads the visible screen, not history: hosts/terminal.rs:2213-2223 and farhelm-terminal-emulator/src/emulator.rs:265-275 establish that contract. The actual test first requires the old answer via submit_prompt (:824-826), waits for the command popup, then after its reset wait asserts the old identity is retained and submits a distinct second prompt (:941-944). wait_for_reported_identity(:260-280), called with Some(&first), requires a different stored identity, a Resume offer, and the hook log's acknowledgement of the reported runtime. Thus a mistaken early reset observation alone is insufficient for success; failed command execution is caught by the independent identity assertion. StreamText is capped at 1 MiB and used for an exact old-identity notice, not row counts. Suggested bucket: other; confidence: confirmed source analysis of the assertions, no vendor execution. proposed_drop: source refutation of a false-pass route. Could-be-highest: no established security or lost-work route; the considered consequence is a weakened opt-in test oracle. possible_cover: none; coverage sources not searched. Caveat: this does not establish that every transient vendor redraw is handled without a test failure; that would require vendor execution, which was not requested.\n\nSynthesis check in progress: the later helper compares complete stored locator strings, whereas Resume may use a separate persistent thread ID. Need to check whether a changed locator alone necessarily means a changed persistent Resume target. Until that premise is settled, the earlier claim of a different resumable conversation is too broad. Source checks so far: real_agent_capture.rs:942-954 uses Some(&first) for wait_for_reported_identity and then validates resumed argv against the renewed locator; hook_acked at :327-335 matches runtime ID, not persistent thread ID. Original considered consequence remains a false pass of the opt-in identity audit. Suggested bucket remains other; could-be-highest remains no established shipped loss-of-work route. proposed_drop is pending source resolution of this premise; confidence: uninvestigated synthesis lead. No runtime observation.\n\nSynthesis resolution (supersedes the earlier broad false-pass refutation): a changed locator is NOT a source-level proof of a different persistent Resume target. CodexLocator at agent_kind/codex.rs:40-50 stores runtime_session_id, session_file, thread_id and readiness separately. verify at :145-170 matches the reported runtime and preserves an already established thread only when supplied; report admission at service/core/vendor/codex.rs:216-229 carries the previous thread expectation only for identical runtime/path. A different runtime or path can therefore produce a different locator with the same persistent thread if the reported root metadata says so. The test does not compare resume_identity(first) with resume_identity(renewed). Checking the parent revision found the exact same locator comparison at real_agent_capture.rs:237-240 and the same post-/new checks at :890-912; this limitation is not introduced by the assigned migration patch. The added permissive view reset still cannot bypass an entirely unchanged locator: the distinct prompt answer, changed acknowledged/resumable locator and argv checks remain required. No reviewed source establishes that this vendor emits a changed runtime/path for the same persistent target during a failed /new; no runtime/vendor behavior was tested. A reportable newly introduced false-pass route would need that vendor transition or another concrete changed-patch route. Closing this investigation as a candidate, not a finding or open lead. Confidence: confirmed assertion/source limits; vendor transition unverified after source investigation because vendor implementation/behavior is outside assigned source. proposed_drop: no established introduced regression; keep the precise limitation for independent caller assessment. Suggested bucket: other, confined to opt-in test coverage; could-be-highest: no established shipped security or lost-work route. No parent drop accepted.\n\nDiscovery/full-range attribution: checked exclusive base 6e423e30068b62c6cfa276c6d720ee35bb70387a, not merely the migration parent. Base real_agent_capture.rs:237-240 already compares whole locator strings; :890-911 already has the same changed-capture, Resume-argv and startup-log checks. The only in-range file commits are 70bc66a9f285cc2a9984924f389834d118b7cfdc, 1ed482dde220452e424973faf38a5e1318986333 and d751ff1633bb479c7bf53920f2e4ea4ba932a1c2; later changes remove a recorder argument and replace suite_timeouts with defaults. No in-range CodexLocator source changes were found. However base :859-875 required an exact old-target closing notice, while 70bc66a9 adds view_reset. Thus predating the range establishes the weak identity comparison, but does NOT alone refute a newly combined false-pass exposure when the closing oracle becomes permissive. Reopening c4 as a lead to check official accessible Codex sources for /new reset, runtime/path changes and persistent thread identity. Earlier proposed-drop bases and original test-oracle consequence remain preserved but not accepted. Missing concrete premise: a Codex transition that passes reset and changed-locator checks without changing the persistent Resume target. No vendor runtime/reproduction requested or performed."
+          }
+        },
+        {
+          "line": 12,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c4",
+            "state": "open",
+            "summary": "Reset audit checks changed locator, not explicitly changed Resume target",
+            "location": "crates/farhelm/tests/e2e/real_agent_capture.rs:920",
+            "detail": "Reviewed commit: 70bc66a9f285cc2a9984924f389834d118b7cfdc\n\n## TLDR\nThe new screen-reset fallback is weaker than an exact closing notice, but it is followed by an independent check that the next prompt selects a different resumable conversation. It does not by itself let broken conversation capture pass.\n\n## Details\nConsidered whether view_reset (real_agent_capture.rs:920-927, header present while the old answer and /new are absent) can misidentify a transient redraw as a completed /new. The helper reads the visible screen, not history: hosts/terminal.rs:2213-2223 and farhelm-terminal-emulator/src/emulator.rs:265-275 establish that contract. The actual test first requires the old answer via submit_prompt (:824-826), waits for the command popup, then after its reset wait asserts the old identity is retained and submits a distinct second prompt (:941-944). wait_for_reported_identity(:260-280), called with Some(&first), requires a different stored identity, a Resume offer, and the hook log's acknowledgement of the reported runtime. Thus a mistaken early reset observation alone is insufficient for success; failed command execution is caught by the independent identity assertion. StreamText is capped at 1 MiB and used for an exact old-identity notice, not row counts. Suggested bucket: other; confidence: confirmed source analysis of the assertions, no vendor execution. proposed_drop: source refutation of a false-pass route. Could-be-highest: no established security or lost-work route; the considered consequence is a weakened opt-in test oracle. possible_cover: none; coverage sources not searched. Caveat: this does not establish that every transient vendor redraw is handled without a test failure; that would require vendor execution, which was not requested.\n\nSynthesis check in progress: the later helper compares complete stored locator strings, whereas Resume may use a separate persistent thread ID. Need to check whether a changed locator alone necessarily means a changed persistent Resume target. Until that premise is settled, the earlier claim of a different resumable conversation is too broad. Source checks so far: real_agent_capture.rs:942-954 uses Some(&first) for wait_for_reported_identity and then validates resumed argv against the renewed locator; hook_acked at :327-335 matches runtime ID, not persistent thread ID. Original considered consequence remains a false pass of the opt-in identity audit. Suggested bucket remains other; could-be-highest remains no established shipped loss-of-work route. proposed_drop is pending source resolution of this premise; confidence: uninvestigated synthesis lead. No runtime observation.\n\nSynthesis resolution (supersedes the earlier broad false-pass refutation): a changed locator is NOT a source-level proof of a different persistent Resume target. CodexLocator at agent_kind/codex.rs:40-50 stores runtime_session_id, session_file, thread_id and readiness separately. verify at :145-170 matches the reported runtime and preserves an already established thread only when supplied; report admission at service/core/vendor/codex.rs:216-229 carries the previous thread expectation only for identical runtime/path. A different runtime or path can therefore produce a different locator with the same persistent thread if the reported root metadata says so. The test does not compare resume_identity(first) with resume_identity(renewed). Checking the parent revision found the exact same locator comparison at real_agent_capture.rs:237-240 and the same post-/new checks at :890-912; this limitation is not introduced by the assigned migration patch. The added permissive view reset still cannot bypass an entirely unchanged locator: the distinct prompt answer, changed acknowledged/resumable locator and argv checks remain required. No reviewed source establishes that this vendor emits a changed runtime/path for the same persistent target during a failed /new; no runtime/vendor behavior was tested. A reportable newly introduced false-pass route would need that vendor transition or another concrete changed-patch route. Closing this investigation as a candidate, not a finding or open lead. Confidence: confirmed assertion/source limits; vendor transition unverified after source investigation because vendor implementation/behavior is outside assigned source. proposed_drop: no established introduced regression; keep the precise limitation for independent caller assessment. Suggested bucket: other, confined to opt-in test coverage; could-be-highest: no established shipped security or lost-work route. No parent drop accepted.\n\nDiscovery/full-range attribution: checked exclusive base 6e423e30068b62c6cfa276c6d720ee35bb70387a, not merely the migration parent. Base real_agent_capture.rs:237-240 already compares whole locator strings; :890-911 already has the same changed-capture, Resume-argv and startup-log checks. The only in-range file commits are 70bc66a9f285cc2a9984924f389834d118b7cfdc, 1ed482dde220452e424973faf38a5e1318986333 and d751ff1633bb479c7bf53920f2e4ea4ba932a1c2; later changes remove a recorder argument and replace suite_timeouts with defaults. No in-range CodexLocator source changes were found. However base :859-875 required an exact old-target closing notice, while 70bc66a9 adds view_reset. Thus predating the range establishes the weak identity comparison, but does NOT alone refute a newly combined false-pass exposure when the closing oracle becomes permissive. Reopening c4 as a lead to check official accessible Codex sources for /new reset, runtime/path changes and persistent thread identity. Earlier proposed-drop bases and original test-oracle consequence remain preserved but not accepted. Missing concrete premise: a Codex transition that passes reset and changed-locator checks without changing the persistent Resume target. No vendor runtime/reproduction requested or performed.\n\nOfficial-source resolution of bounded c4 concern: fetched OpenAI Codex tag rust-v0.167.0 directly from https://raw.githubusercontent.com/openai/codex/rust-v0.167.0/ (saved cited files privately as codex-0167-*.rs). tui/src/app/event_dispatch.rs:212-221 routes NewSession to start_fresh_session. app/session_lifecycle.rs:1001-1081 starts a new thread and adopts it only on success; read-default errors leave the prior session and show an error. core/src/session/session.rs:938-1001 assigns a newly generated thread ID for New/Cleared/Forked, reuses an ID only for Resumed, and sets the fresh root session_id equal to that thread ID. core/src/hook_runtime.rs:159-163 reports sess.session_id() and that sessions hook transcript path; rollout/src/recorder.rs:929-972 writes session_id plus id=conversation_id to the new root header and derives its path from conversation_id. Thus the concrete suggested vendor transition—new runtime/path on ordinary failed /new while retaining the same persistent root target—is not produced by the checked ordinary fresh-root path. A premature reset observation followed by a prompt in the unchanged old root leaves the same canonical locator and fails the existing changed-locator wait; successful /new starts the new root target. Changing only the transcript path for the same thread is possible for separate operations such as thread/revert (recorder.rs:101-104 documents that path override), but the reviewed test sends /new then its distinct prompt, not that operation. No source route from those test inputs to revert was identified. Current official documentation (https://learn.chatgpt.com/docs/developer-commands?surface=cli, Start a new chat with /new; Clear the terminal and start a new chat with /clear) likewise describes fresh chat creation, distinguishing Ctrl+L as view-only; this current documentation is corroboration, not historical-version proof. Source checks establish the bounded source refutation at vendor tag 0.167.0, not execution on the installed vendor. The pre-existing missing explicit persistent-ID assertion remains an accurately documented test limitation, but no new combined false-pass route is established. Restore kind candidate with proposed_drop: bounded source refutation above, pending independent caller check. Confidence: confirmed source-level control flow and assertion limits; no runtime or vendor turns. Could-be-highest: no established security or lost-work route; original test-oracle consequence is preserved. No open source premise remains for the bounded ordinary /new sequence."
+          }
+        }
+      ],
+      "latest": {
+        "line": 12,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c4",
+          "state": "open",
+          "summary": "Reset audit checks changed locator, not explicitly changed Resume target",
+          "location": "crates/farhelm/tests/e2e/real_agent_capture.rs:920",
+          "detail": "Reviewed commit: 70bc66a9f285cc2a9984924f389834d118b7cfdc\n\n## TLDR\nThe new screen-reset fallback is weaker than an exact closing notice, but it is followed by an independent check that the next prompt selects a different resumable conversation. It does not by itself let broken conversation capture pass.\n\n## Details\nConsidered whether view_reset (real_agent_capture.rs:920-927, header present while the old answer and /new are absent) can misidentify a transient redraw as a completed /new. The helper reads the visible screen, not history: hosts/terminal.rs:2213-2223 and farhelm-terminal-emulator/src/emulator.rs:265-275 establish that contract. The actual test first requires the old answer via submit_prompt (:824-826), waits for the command popup, then after its reset wait asserts the old identity is retained and submits a distinct second prompt (:941-944). wait_for_reported_identity(:260-280), called with Some(&first), requires a different stored identity, a Resume offer, and the hook log's acknowledgement of the reported runtime. Thus a mistaken early reset observation alone is insufficient for success; failed command execution is caught by the independent identity assertion. StreamText is capped at 1 MiB and used for an exact old-identity notice, not row counts. Suggested bucket: other; confidence: confirmed source analysis of the assertions, no vendor execution. proposed_drop: source refutation of a false-pass route. Could-be-highest: no established security or lost-work route; the considered consequence is a weakened opt-in test oracle. possible_cover: none; coverage sources not searched. Caveat: this does not establish that every transient vendor redraw is handled without a test failure; that would require vendor execution, which was not requested.\n\nSynthesis check in progress: the later helper compares complete stored locator strings, whereas Resume may use a separate persistent thread ID. Need to check whether a changed locator alone necessarily means a changed persistent Resume target. Until that premise is settled, the earlier claim of a different resumable conversation is too broad. Source checks so far: real_agent_capture.rs:942-954 uses Some(&first) for wait_for_reported_identity and then validates resumed argv against the renewed locator; hook_acked at :327-335 matches runtime ID, not persistent thread ID. Original considered consequence remains a false pass of the opt-in identity audit. Suggested bucket remains other; could-be-highest remains no established shipped loss-of-work route. proposed_drop is pending source resolution of this premise; confidence: uninvestigated synthesis lead. No runtime observation.\n\nSynthesis resolution (supersedes the earlier broad false-pass refutation): a changed locator is NOT a source-level proof of a different persistent Resume target. CodexLocator at agent_kind/codex.rs:40-50 stores runtime_session_id, session_file, thread_id and readiness separately. verify at :145-170 matches the reported runtime and preserves an already established thread only when supplied; report admission at service/core/vendor/codex.rs:216-229 carries the previous thread expectation only for identical runtime/path. A different runtime or path can therefore produce a different locator with the same persistent thread if the reported root metadata says so. The test does not compare resume_identity(first) with resume_identity(renewed). Checking the parent revision found the exact same locator comparison at real_agent_capture.rs:237-240 and the same post-/new checks at :890-912; this limitation is not introduced by the assigned migration patch. The added permissive view reset still cannot bypass an entirely unchanged locator: the distinct prompt answer, changed acknowledged/resumable locator and argv checks remain required. No reviewed source establishes that this vendor emits a changed runtime/path for the same persistent target during a failed /new; no runtime/vendor behavior was tested. A reportable newly introduced false-pass route would need that vendor transition or another concrete changed-patch route. Closing this investigation as a candidate, not a finding or open lead. Confidence: confirmed assertion/source limits; vendor transition unverified after source investigation because vendor implementation/behavior is outside assigned source. proposed_drop: no established introduced regression; keep the precise limitation for independent caller assessment. Suggested bucket: other, confined to opt-in test coverage; could-be-highest: no established shipped security or lost-work route. No parent drop accepted.\n\nDiscovery/full-range attribution: checked exclusive base 6e423e30068b62c6cfa276c6d720ee35bb70387a, not merely the migration parent. Base real_agent_capture.rs:237-240 already compares whole locator strings; :890-911 already has the same changed-capture, Resume-argv and startup-log checks. The only in-range file commits are 70bc66a9f285cc2a9984924f389834d118b7cfdc, 1ed482dde220452e424973faf38a5e1318986333 and d751ff1633bb479c7bf53920f2e4ea4ba932a1c2; later changes remove a recorder argument and replace suite_timeouts with defaults. No in-range CodexLocator source changes were found. However base :859-875 required an exact old-target closing notice, while 70bc66a9 adds view_reset. Thus predating the range establishes the weak identity comparison, but does NOT alone refute a newly combined false-pass exposure when the closing oracle becomes permissive. Reopening c4 as a lead to check official accessible Codex sources for /new reset, runtime/path changes and persistent thread identity. Earlier proposed-drop bases and original test-oracle consequence remain preserved but not accepted. Missing concrete premise: a Codex transition that passes reset and changed-locator checks without changing the persistent Resume target. No vendor runtime/reproduction requested or performed.\n\nOfficial-source resolution of bounded c4 concern: fetched OpenAI Codex tag rust-v0.167.0 directly from https://raw.githubusercontent.com/openai/codex/rust-v0.167.0/ (saved cited files privately as codex-0167-*.rs). tui/src/app/event_dispatch.rs:212-221 routes NewSession to start_fresh_session. app/session_lifecycle.rs:1001-1081 starts a new thread and adopts it only on success; read-default errors leave the prior session and show an error. core/src/session/session.rs:938-1001 assigns a newly generated thread ID for New/Cleared/Forked, reuses an ID only for Resumed, and sets the fresh root session_id equal to that thread ID. core/src/hook_runtime.rs:159-163 reports sess.session_id() and that sessions hook transcript path; rollout/src/recorder.rs:929-972 writes session_id plus id=conversation_id to the new root header and derives its path from conversation_id. Thus the concrete suggested vendor transition—new runtime/path on ordinary failed /new while retaining the same persistent root target—is not produced by the checked ordinary fresh-root path. A premature reset observation followed by a prompt in the unchanged old root leaves the same canonical locator and fails the existing changed-locator wait; successful /new starts the new root target. Changing only the transcript path for the same thread is possible for separate operations such as thread/revert (recorder.rs:101-104 documents that path override), but the reviewed test sends /new then its distinct prompt, not that operation. No source route from those test inputs to revert was identified. Current official documentation (https://learn.chatgpt.com/docs/developer-commands?surface=cli, Start a new chat with /new; Clear the terminal and start a new chat with /clear) likewise describes fresh chat creation, distinguishing Ctrl+L as view-only; this current documentation is corroboration, not historical-version proof. Source checks establish the bounded source refutation at vendor tag 0.167.0, not execution on the installed vendor. The pre-existing missing explicit persistent-ID assertion remains an accurately documented test limitation, but no new combined false-pass route is established. Restore kind candidate with proposed_drop: bounded source refutation above, pending independent caller check. Confidence: confirmed source-level control flow and assertion limits; no runtime or vendor turns. Could-be-highest: no established security or lost-work route; original test-oracle consequence is preserved. No open source premise remains for the bounded ordinary /new sequence."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g138/findings.jsonl",
+        "id": "c4",
+        "line": 12,
+        "disposition": "excluded",
+        "group": "real-codex-new-audit-reset-versus-persistent-id",
+        "reason": "Parent explicitly accepted named refuted proposal from claims-088 after inspecting it. The bounded ordinary /new false-pass route is source-refuted for Codex rust-v0.167.0. The missing explicit persistent-ID inequality remains a real assertion limitation, but it predates the range and does not by itself establish a new false pass. This is a test-oracle claim, not a shipped wrong-Resume claim. Refute only the concrete ordinary /new false-pass route at checked vendor tag 0.167.0; preserve the pre-existing missing direct persistent-ID comparison and all version/runtime caveats. Do not characterize whole-locator inequality as a general guarantee. Checked source/results: [\"70bc66a9:crates/farhelm/tests/e2e/real_agent_capture.rs:260-280 compares complete locator strings and requires Resume plus acknowledged runtime; :920-954 adds the permissive view reset, then retains the old identity until a distinct prompt and waits for a changed locator. It does not directly compare the two persistent resume IDs.\",\"6e423e30068b62c6cfa276c6d720ee35bb70387a:real_agent_capture.rs:237-240,859-911 already has locator comparison and post-prompt checks, but requires an exact closing notice. Therefore pre-existing weak comparison alone cannot refute the combined concern; the vendor transition must be checked.\",\"70bc66a9:crates/farhelm-supervisor/src/agent_kind/codex.rs:40-50,145-170 separates runtime, path and persistent thread. A different locator is not generally proof of a different persistent thread.\",\"Directly read official github.com/openai/codex rust-v0.167.0 codex-rs/tui/src/app/event_dispatch.rs:212-221 and app/session_lifecycle.rs:1001-1084: NewSession starts a fresh thread and adopts it only on success; read-default failure returns with the old session.\",\"Directly read the same official tag codex-rs/core/src/session/session.rs:938-1001, core/src/hook_runtime.rs:159-163 and rollout/src/recorder.rs:929-978: fresh root session ID equals its new thread ID, the hook reports that runtime and transcript, and the root header records session_id plus conversation_id. The proposed new-runtime/path-with-old-root transition is absent from this ordinary fresh-root path. No runtime execution or installed-version claim.\",\"Full-range file log contains migration 70bc66a9 and mechanical 1ed482dd/d751ff16; no later persistent-ID inequality was identified. The vendor source result is bounded to the checked tag and ordinary /new inputs, not arbitrary revert or vendor defects.\"] Current coverage/results: {\"SPEC.md\":\"3560-3584 requires persistent thread identity and exact Resume; it does not accept a false-pass audit.\",\"SPEC_impl.md\":\"4349-4379 documents separate runtime/thread binding and real-agent clear coverage; no exemption for the proposed false pass.\",\"TODO.md Planned\":\"25-27 is empty.\",\"plans/queue\":\"Searched /new, real-agent, locator, capture and identity terms. tmux-end-old-terminals.md:130-134,188-192 ports and runs audits; its already-landed implementation does not supply coverage for a false-pass defect.\",\"BUGS.md\":\"Only the unrelated provisioning ssh-helper pipe hang is recorded.\",\"INDEX.md and matching queue files\":\"Capture and identity matches concern report pinning or failed capture-tool cleanup. capture-failed-stop-erases-recovery.md was read; its failed-stop recovery deletion is a different cause and consequence.\",\"TRIAGE_OUTCOMES.md\":\"Searched actual /new, locator and real-agent terms; no matching audit-oracle decision.\",\"FILTER.md\":\"No filter applied; this disposition relies on bounded source refutation.\"} Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Original concern: permissive reset recognition could let the opt-in identity audit pass without actually switching conversations. The first broad refutation was withdrawn after discovering locator inequality is weaker than persistent-ID inequality; the final narrower vendor-source refutation supersedes it. No shipped work-loss route was claimed or demonstrated.\"; \"A concrete transition from the tested ordinary /new plus next prompt to a changed ready locator for the same persistent root would reopen the concern. The checked vendor path does not provide it; arbitrary vendor behaviors remain outside this bounded conclusion.\"."
+      },
+      "accepted_parent_decision": {
+        "key": "g138/c4",
+        "line": 12,
+        "disposition": "excluded",
+        "group": "real-codex-new-audit-reset-versus-persistent-id",
+        "bucket": "other",
+        "recording": "refuted",
+        "queue_target_candidate": null,
+        "needs_independent_drop_check": false,
+        "reason": "Parent explicitly accepted named refuted proposal from claims-088 after inspecting it. The bounded ordinary /new false-pass route is source-refuted for Codex rust-v0.167.0. The missing explicit persistent-ID inequality remains a real assertion limitation, but it predates the range and does not by itself establish a new false pass. This is a test-oracle claim, not a shipped wrong-Resume claim. Refute only the concrete ordinary /new false-pass route at checked vendor tag 0.167.0; preserve the pre-existing missing direct persistent-ID comparison and all version/runtime caveats. Do not characterize whole-locator inequality as a general guarantee. Checked source/results: [\"70bc66a9:crates/farhelm/tests/e2e/real_agent_capture.rs:260-280 compares complete locator strings and requires Resume plus acknowledged runtime; :920-954 adds the permissive view reset, then retains the old identity until a distinct prompt and waits for a changed locator. It does not directly compare the two persistent resume IDs.\",\"6e423e30068b62c6cfa276c6d720ee35bb70387a:real_agent_capture.rs:237-240,859-911 already has locator comparison and post-prompt checks, but requires an exact closing notice. Therefore pre-existing weak comparison alone cannot refute the combined concern; the vendor transition must be checked.\",\"70bc66a9:crates/farhelm-supervisor/src/agent_kind/codex.rs:40-50,145-170 separates runtime, path and persistent thread. A different locator is not generally proof of a different persistent thread.\",\"Directly read official github.com/openai/codex rust-v0.167.0 codex-rs/tui/src/app/event_dispatch.rs:212-221 and app/session_lifecycle.rs:1001-1084: NewSession starts a fresh thread and adopts it only on success; read-default failure returns with the old session.\",\"Directly read the same official tag codex-rs/core/src/session/session.rs:938-1001, core/src/hook_runtime.rs:159-163 and rollout/src/recorder.rs:929-978: fresh root session ID equals its new thread ID, the hook reports that runtime and transcript, and the root header records session_id plus conversation_id. The proposed new-runtime/path-with-old-root transition is absent from this ordinary fresh-root path. No runtime execution or installed-version claim.\",\"Full-range file log contains migration 70bc66a9 and mechanical 1ed482dd/d751ff16; no later persistent-ID inequality was identified. The vendor source result is bounded to the checked tag and ordinary /new inputs, not arbitrary revert or vendor defects.\"] Current coverage/results: {\"SPEC.md\":\"3560-3584 requires persistent thread identity and exact Resume; it does not accept a false-pass audit.\",\"SPEC_impl.md\":\"4349-4379 documents separate runtime/thread binding and real-agent clear coverage; no exemption for the proposed false pass.\",\"TODO.md Planned\":\"25-27 is empty.\",\"plans/queue\":\"Searched /new, real-agent, locator, capture and identity terms. tmux-end-old-terminals.md:130-134,188-192 ports and runs audits; its already-landed implementation does not supply coverage for a false-pass defect.\",\"BUGS.md\":\"Only the unrelated provisioning ssh-helper pipe hang is recorded.\",\"INDEX.md and matching queue files\":\"Capture and identity matches concern report pinning or failed capture-tool cleanup. capture-failed-stop-erases-recovery.md was read; its failed-stop recovery deletion is a different cause and consequence.\",\"TRIAGE_OUTCOMES.md\":\"Searched actual /new, locator and real-agent terms; no matching audit-oracle decision.\",\"FILTER.md\":\"No filter applied; this disposition relies on bounded source refutation.\"} Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Original concern: permissive reset recognition could let the opt-in identity audit pass without actually switching conversations. The first broad refutation was withdrawn after discovering locator inequality is weaker than persistent-ID inequality; the final narrower vendor-source refutation supersedes it. No shipped work-loss route was claimed or demonstrated.\"; \"A concrete transition from the tested ordinary /new plus next prompt to a changed ready locator for the same persistent root would reopen the concern. The checked vendor path does not provide it; arbitrary vendor behaviors remain outside this bounded conclusion.\"."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-088",
+          "key": "g138/c4",
+          "latest_line": 12,
+          "recommendation": "refuted",
+          "bucket": "other",
+          "underlying_key": "real-codex-new-audit-reset-versus-persistent-id",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The bounded ordinary /new false-pass route is source-refuted for Codex rust-v0.167.0. The missing explicit persistent-ID inequality remains a real assertion limitation, but it predates the range and does not by itself establish a new false pass. This is a test-oracle claim, not a shipped wrong-Resume claim.",
+          "checks": [
+            "70bc66a9:crates/farhelm/tests/e2e/real_agent_capture.rs:260-280 compares complete locator strings and requires Resume plus acknowledged runtime; :920-954 adds the permissive view reset, then retains the old identity until a distinct prompt and waits for a changed locator. It does not directly compare the two persistent resume IDs.",
+            "6e423e30068b62c6cfa276c6d720ee35bb70387a:real_agent_capture.rs:237-240,859-911 already has locator comparison and post-prompt checks, but requires an exact closing notice. Therefore pre-existing weak comparison alone cannot refute the combined concern; the vendor transition must be checked.",
+            "70bc66a9:crates/farhelm-supervisor/src/agent_kind/codex.rs:40-50,145-170 separates runtime, path and persistent thread. A different locator is not generally proof of a different persistent thread.",
+            "Directly read official github.com/openai/codex rust-v0.167.0 codex-rs/tui/src/app/event_dispatch.rs:212-221 and app/session_lifecycle.rs:1001-1084: NewSession starts a fresh thread and adopts it only on success; read-default failure returns with the old session.",
+            "Directly read the same official tag codex-rs/core/src/session/session.rs:938-1001, core/src/hook_runtime.rs:159-163 and rollout/src/recorder.rs:929-978: fresh root session ID equals its new thread ID, the hook reports that runtime and transcript, and the root header records session_id plus conversation_id. The proposed new-runtime/path-with-old-root transition is absent from this ordinary fresh-root path. No runtime execution or installed-version claim.",
+            "Full-range file log contains migration 70bc66a9 and mechanical 1ed482dd/d751ff16; no later persistent-ID inequality was identified. The vendor source result is bounded to the checked tag and ordinary /new inputs, not arbitrary revert or vendor defects."
+          ],
+          "coverage_checked": {
+            "SPEC.md": "3560-3584 requires persistent thread identity and exact Resume; it does not accept a false-pass audit.",
+            "SPEC_impl.md": "4349-4379 documents separate runtime/thread binding and real-agent clear coverage; no exemption for the proposed false pass.",
+            "TODO.md Planned": "25-27 is empty.",
+            "plans/queue": "Searched /new, real-agent, locator, capture and identity terms. tmux-end-old-terminals.md:130-134,188-192 ports and runs audits; its already-landed implementation does not supply coverage for a false-pass defect.",
+            "BUGS.md": "Only the unrelated provisioning ssh-helper pipe hang is recorded.",
+            "INDEX.md and matching queue files": "Capture and identity matches concern report pinning or failed capture-tool cleanup. capture-failed-stop-erases-recovery.md was read; its failed-stop recovery deletion is a different cause and consequence.",
+            "TRIAGE_OUTCOMES.md": "Searched actual /new, locator and real-agent terms; no matching audit-oracle decision.",
+            "FILTER.md": "No filter applied; this disposition relies on bounded source refutation."
+          },
+          "exact_cover_quotes": [],
+          "missing_premise": "A concrete transition from the tested ordinary /new plus next prompt to a changed ready locator for the same persistent root would reopen the concern. The checked vendor path does not provide it; arbitrary vendor behaviors remain outside this bounded conclusion.",
+          "original_stronger_consequence": "Original concern: permissive reset recognition could let the opt-in identity audit pass without actually switching conversations. The first broad refutation was withdrawn after discovering locator inequality is weaker than persistent-ID inequality; the final narrower vendor-source refutation supersedes it. No shipped work-loss route was claimed or demonstrated.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Refute only the concrete ordinary /new false-pass route at checked vendor tag 0.167.0; preserve the pre-existing missing direct persistent-ID comparison and all version/runtime caveats. Do not characterize whole-locator inequality as a general guarantee."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "real-codex-new-audit-reset-versus-persistent-id",
+        "destination": null
+      }
+    },
+    {
+      "key": "g138/c5",
+      "owner": "g138",
+      "id": "c5",
+      "domain": "rust-session-agent-regressions",
+      "purpose": "rust-session-agent-regressions: crates/farhelm/tests/e2e/containerized_sessions.rs, crates/farhelm/tests/e2e/real_agent_capture.rs, crates/farhelm/tests/e2e/create_idempotency.rs, crates/farhelm/tests/e2e/launch_sentinel_error_status.rs, crates/farhelm/tests/e2e/file_downloads.rs; phases +async fn retired_session_refuses_terminal_and_lifecycle_use() {",
+      "history": [
+        {
+          "line": 13,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c5",
+            "state": "open",
+            "summary": "Relative PATH executable resolution is not introduced by trusted Codex setup",
+            "location": "crates/farhelm/tests/e2e/real_agent_capture.rs:1290",
+            "detail": "Reviewed commit: 70bc66a9f285cc2a9984924f389834d118b7cfdc\n\n## TLDR\nConsidered whether the new Codex invocation fails when PATH finds Codex through a relative directory, because the test launches from a different temporary folder. The old fixture already had the same limitation.\n\n## Details\nwhich_binary at reviewed :1316-1325 joins each PATH entry without canonicalizing it, and trusted_codex :1290-1302 places that result directly in the command launched under the private work directory. A relative entry could therefore resolve differently in the launched child. The parent fixture at :1247-1257 likewise resolves real_codex using the same helper and embeds that candidate directly in an exec command in its synthetic-home shim; the child starts in the same separate private work directory. Full-range file history contains only migration 70bc66a9f285cc2a9984924f389834d118b7cfdc and later mechanical 1ed482dde220452e424973faf38a5e1318986333/d751ff1633bb479c7bf53920f2e4ea4ba932a1c2, so this is not a newly introduced relative-resolution failure. Suggested bucket: other, opt-in fixture portability. Confidence: source-confirmed path handling and attribution; no execution, no claim about installed PATH. proposed_drop: no introduced change in the considered behavior. Could-be-highest: false; no security, user-work-loss or catastrophic maintainer-tooling route. possible_cover: none known; prohibited coverage sources not searched. Material caveat: this is not a claim that relative PATH entries work; only that the assigned rewrite did not create their failure mechanism."
+          }
+        }
+      ],
+      "latest": {
+        "line": 13,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c5",
+          "state": "open",
+          "summary": "Relative PATH executable resolution is not introduced by trusted Codex setup",
+          "location": "crates/farhelm/tests/e2e/real_agent_capture.rs:1290",
+          "detail": "Reviewed commit: 70bc66a9f285cc2a9984924f389834d118b7cfdc\n\n## TLDR\nConsidered whether the new Codex invocation fails when PATH finds Codex through a relative directory, because the test launches from a different temporary folder. The old fixture already had the same limitation.\n\n## Details\nwhich_binary at reviewed :1316-1325 joins each PATH entry without canonicalizing it, and trusted_codex :1290-1302 places that result directly in the command launched under the private work directory. A relative entry could therefore resolve differently in the launched child. The parent fixture at :1247-1257 likewise resolves real_codex using the same helper and embeds that candidate directly in an exec command in its synthetic-home shim; the child starts in the same separate private work directory. Full-range file history contains only migration 70bc66a9f285cc2a9984924f389834d118b7cfdc and later mechanical 1ed482dde220452e424973faf38a5e1318986333/d751ff1633bb479c7bf53920f2e4ea4ba932a1c2, so this is not a newly introduced relative-resolution failure. Suggested bucket: other, opt-in fixture portability. Confidence: source-confirmed path handling and attribution; no execution, no claim about installed PATH. proposed_drop: no introduced change in the considered behavior. Could-be-highest: false; no security, user-work-loss or catastrophic maintainer-tooling route. possible_cover: none known; prohibited coverage sources not searched. Material caveat: this is not a claim that relative PATH entries work; only that the assigned rewrite did not create their failure mechanism."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g138/findings.jsonl",
+        "id": "c5",
+        "line": 13,
+        "disposition": "excluded",
+        "group": "real-codex-fixture-relative-path-resolution",
+        "reason": "Parent explicitly accepted named out-of-range proposal from claims-088 after inspecting it. The relative PATH limitation exists at the exclusive base. The rewrite retains the same uncanonicalized executable and separate child work directory; it does not introduce this failure mechanism. Exclude this unchanged, pre-base failure mechanism from this review range. This does not establish that relative PATH entries work. Checked source/results: [\"70bc66a9:real_agent_capture.rs:1290-1302,1316-1325 embeds the candidate found by joining PATH entries, without canonicalization.\",\"6e423e30068b62c6cfa276c6d720ee35bb70387a:real_agent_capture.rs:1247-1281 likewise embeds which_binary's uncanonicalized result in the private shim executed from the test work directory.\",\"Full-range git log for this file lists only 70bc66a9, 1ed482dd and d751ff16. Reviewed base and migration show the same mechanism. No runtime test or installed-PATH assumption.\"] Current coverage/results: {\"SPEC.md and SPEC_impl.md\":\"Searched relative PATH, executable resolution and real-agent terms; launch working-directory rules and Testing real-vendor notes do not accept or plan this fixture portability limitation.\",\"TODO.md Planned\":\"25-27 is empty.\",\"plans/queue\":\"Relative PATH and real-agent matches do not name this executable-resolution limitation. mac-system-stat.md concerns remote macOS stat selection, a different path and effect.\",\"BUGS.md\":\"No fixture PATH item.\",\"INDEX.md and queue\":\"No matching relative-PATH real-Codex fixture item found.\",\"TRIAGE_OUTCOMES.md\":\"No matching fixture-path decision found.\",\"FILTER.md\":\"Not applied; attribution, not rarity, is the basis.\"} Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Opt-in Codex fixture may fail when a relative PATH entry is interpreted from the child work directory. This limitation is preserved, not denied. No security, user-work-loss or catastrophic tooling consequence was claimed.\"; null."
+      },
+      "accepted_parent_decision": {
+        "key": "g138/c5",
+        "line": 13,
+        "disposition": "excluded",
+        "group": "real-codex-fixture-relative-path-resolution",
+        "bucket": "other",
+        "recording": "out-of-range",
+        "queue_target_candidate": null,
+        "needs_independent_drop_check": false,
+        "reason": "Parent explicitly accepted named out-of-range proposal from claims-088 after inspecting it. The relative PATH limitation exists at the exclusive base. The rewrite retains the same uncanonicalized executable and separate child work directory; it does not introduce this failure mechanism. Exclude this unchanged, pre-base failure mechanism from this review range. This does not establish that relative PATH entries work. Checked source/results: [\"70bc66a9:real_agent_capture.rs:1290-1302,1316-1325 embeds the candidate found by joining PATH entries, without canonicalization.\",\"6e423e30068b62c6cfa276c6d720ee35bb70387a:real_agent_capture.rs:1247-1281 likewise embeds which_binary's uncanonicalized result in the private shim executed from the test work directory.\",\"Full-range git log for this file lists only 70bc66a9, 1ed482dd and d751ff16. Reviewed base and migration show the same mechanism. No runtime test or installed-PATH assumption.\"] Current coverage/results: {\"SPEC.md and SPEC_impl.md\":\"Searched relative PATH, executable resolution and real-agent terms; launch working-directory rules and Testing real-vendor notes do not accept or plan this fixture portability limitation.\",\"TODO.md Planned\":\"25-27 is empty.\",\"plans/queue\":\"Relative PATH and real-agent matches do not name this executable-resolution limitation. mac-system-stat.md concerns remote macOS stat selection, a different path and effect.\",\"BUGS.md\":\"No fixture PATH item.\",\"INDEX.md and queue\":\"No matching relative-PATH real-Codex fixture item found.\",\"TRIAGE_OUTCOMES.md\":\"No matching fixture-path decision found.\",\"FILTER.md\":\"Not applied; attribution, not rarity, is the basis.\"} Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Opt-in Codex fixture may fail when a relative PATH entry is interpreted from the child work directory. This limitation is preserved, not denied. No security, user-work-loss or catastrophic tooling consequence was claimed.\"; null."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-088",
+          "key": "g138/c5",
+          "latest_line": 13,
+          "recommendation": "out-of-range",
+          "bucket": "other",
+          "underlying_key": "real-codex-fixture-relative-path-resolution",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The relative PATH limitation exists at the exclusive base. The rewrite retains the same uncanonicalized executable and separate child work directory; it does not introduce this failure mechanism.",
+          "checks": [
+            "70bc66a9:real_agent_capture.rs:1290-1302,1316-1325 embeds the candidate found by joining PATH entries, without canonicalization.",
+            "6e423e30068b62c6cfa276c6d720ee35bb70387a:real_agent_capture.rs:1247-1281 likewise embeds which_binary's uncanonicalized result in the private shim executed from the test work directory.",
+            "Full-range git log for this file lists only 70bc66a9, 1ed482dd and d751ff16. Reviewed base and migration show the same mechanism. No runtime test or installed-PATH assumption."
+          ],
+          "coverage_checked": {
+            "SPEC.md and SPEC_impl.md": "Searched relative PATH, executable resolution and real-agent terms; launch working-directory rules and Testing real-vendor notes do not accept or plan this fixture portability limitation.",
+            "TODO.md Planned": "25-27 is empty.",
+            "plans/queue": "Relative PATH and real-agent matches do not name this executable-resolution limitation. mac-system-stat.md concerns remote macOS stat selection, a different path and effect.",
+            "BUGS.md": "No fixture PATH item.",
+            "INDEX.md and queue": "No matching relative-PATH real-Codex fixture item found.",
+            "TRIAGE_OUTCOMES.md": "No matching fixture-path decision found.",
+            "FILTER.md": "Not applied; attribution, not rarity, is the basis."
+          },
+          "exact_cover_quotes": [],
+          "missing_premise": null,
+          "original_stronger_consequence": "Opt-in Codex fixture may fail when a relative PATH entry is interpreted from the child work directory. This limitation is preserved, not denied. No security, user-work-loss or catastrophic tooling consequence was claimed.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Exclude this unchanged, pre-base failure mechanism from this review range. This does not establish that relative PATH entries work."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": false,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "real-codex-fixture-relative-path-resolution",
+        "destination": null
+      }
+    }
+  ],
+  "replies": [
+    {
+      "turn": 1,
+      "reply": "Initial review complete: all 1,367 assigned patch lines and the complete commits field read.\n\nNo reportable findings or open leads. Four considered candidates are recorded in `g138/findings.jsonl`; progress is updated.\n\nSource and contract analysis only. No tests, reproductions, or checkout changes."
+    },
+    {
+      "turn": 2,
+      "reply": "Revised c2 to distinguish cleanup ordering and attempts from guaranteed panic-time success.\n\nRevised c4: changed locator does not prove changed persistent Resume target. That assertion gap predates the patch; closed the temporary lead as a candidate.\n\nNo new findings. Unresolved lead IDs: none. No runtime tests performed."
+    },
+    {
+      "turn": 3,
+      "reply": "Discovery pass complete. Checked full-range attribution, [Codex 0.167.0 source](https://github.com/openai/codex/blob/rust-v0.167.0/codex-rs/core/src/session/session.rs), input routing, capture bounds, and caller checks.\n\nRevised c1/c4; added c5 as a source-refuted candidate. New verified findings: none. New unverified findings: none. Open leads: none.\n\nNo new reportable issue found. No runtime execution."
+    }
+  ],
+  "progress": "g138: initialized, awaiting initial source review.\nGroup: g138 (rust-session-agent-regressions).\nTurn: initial review, 1. Discovery passes: 0.\nState: verified findings.jsonl exists; read full brief and complete inventory commits field only. No source packets read yet.\nScope: five assigned patches, including every intermediate change at its recorded revision. Source-only; no runtime tests or reproductions.\nInterfaces: session retirement, real-agent capture and harness readiness, create idempotency, launch sentinel error status, file downloads. Contracts and callers still to inspect.\nNext: read mandatory packets, governing specification sections, then validate concrete leads through source.\nNew verified/unverified IDs: none. Unread: all assigned source packets and governing specification sections.\nInitial review completed (turn 1). Discovery passes: 0; no later synthesis/discovery pass performed in this turn.\nCoverage: all 1,367 assigned patch lines read through evidence packets (00322-001: 1-215; 00749-000: 1-1029; 00784-000: 1-37; 00791-000: 1-74; 01126-000: 1-12). Complete inventory commits field read; excluded coverage metadata and prohibited queue/coverage files were not read. Unread assigned scope: none.\nContracts checked at pinned revisions: retired container sessions, per-session conversation capture and process pins, GUI answers binding (no assigned GUI handler), unconditional terminal-host creation and pre-exec cwd refusal, create retry durability, grid-only protocol 77 and transport framing, real-agent/testing constraints.\nInterface results: retired fixture asserts restart loaded legacy intent and specific retired refusal. Cleanup awaits legacy engine absence confirmation; focused unit fixtures distinguish absent/live/storage-error results. Real-agent screen reads the supervisor's visible emulator, stream recording is bounded and used only for historical notices, and the later acknowledged changed identity independently fences the /new audit. TestDir owns panic-time host cleanup before work removal/slot release. Supervisor handoff retains ownership-drain checks; the removed terminal-kind seam no longer exists. Download channel refusal remains asserted after grid-field removal.\nDurable IDs: c1 (revised with cleanup checks), c2, c3, c4, all candidates with proposed-drop source/contract basis. No reportable findings, no unverified findings, and no open leads. c3 explicitly preserves the considered wrong-folder/lost-work consequence and why no current route is established; caller owns independent drop review.\nValidation: source and contract analysis only; no runtime tests, builds, or reproductions. No checkout files changed; git status --short was empty.\nNext action: return to caller for its separately requested synthesis turn. No additional initial-review source work remains.\nSynthesis turn 2 completed. Discovery passes: 0. No new findings or unread assigned scope.\nRevised c2 twice: distinguished guaranteed cleanup ordering/attempt from unconditional success during panic; checked ServeTask cancellation, TestDir bounded complete-scan protocol cleanup, and explicit all_stopped success criteria. Unconfirmed panic cleanup retains state but may still remove work and release the slot; runtime vendor-tree termination is not claimed.\nRevised c4 to a temporary lead, then back to candidate after source checks: locator inequality is not persistent-thread inequality. Parent revision has the same comparison and assertions. The migration still catches an unchanged acknowledged capture, but the stronger claim that every changed locator proves a new persistent Resume target is withdrawn. No source-supported newly introduced vendor transition established; this is a documented limitation, with no open investigative lead.\nc1 unchanged: parent supplies independent confirmation that retained legacy Delete propagates absence errors; own initial source check already established that path. c3 unchanged: preserve only the fail-before-exec proof for the removed fallback test and its original potential user-work damage for independent drop review. No claim about all cwd identity races. No parent drop accepted.\nNew verified/unverified findings: none. Unresolved lead IDs: none. All candidates remain available for independent caller decisions. No runtime tests, builds or reproductions; source conclusions only.\nNext: return this turn's delta to the caller; no further synthesis work remains for this requested pass.\nDiscovery turn 3 completed. Discovery-pass count: 1. Read discovery-neighbours.json completely in bounded ranges 1-65, 66-117, 118-168 after the initial oversized read was clipped; no missing neighbour context remains.\nPending synthesis resolved before new search: c4 now has exclusive-base and complete in-range file attribution, with no CodexLocator implementation change in the range. A new permissive view check can combine with an older weak identity comparison, so immediate-parent predating alone was explicitly withdrawn as sufficient refutation. Fetched official OpenAI Codex rust-v0.167.0 source and traced NewSession -> start_fresh_session -> new root ID -> root hook session_id/header persistent ID. Ordinary failed /new keeps the old root; successful /new generates a new root ID. No same-target changed-locator transition from the reviewed test inputs was established. c4 returned from temporary lead to candidate with that bounded source basis. No runtime/vendor turns or reproductions.\nNeighbour correction: revised c1 to acknowledge g137/f1's distinct retained-Delete removal-oracle finding; current production removal and a fixed absent-state fake engine do not refute that coverage defect. Do not duplicate the supplied neighbour finding. No parent drop accepted.\nSeparate new search: rechecked StreamText cap/byte handling, screen-vs-stream uses, literal grid input conversion and message routing, trust invocation quoting/path resolution, callback-audit turn/clear assertions, handoff ownership-drain checks, and reused-download-channel admission after grid-field removal. Grid Text preserves its input bytes; channel occupancy refusal precedes terminal lookup; changed handoff retains ownership assertion. No new reportable defect established.\nNew ID c5: candidate for relative PATH resolution, source-refuted as newly introduced (old synthetic shim embedded the same unresolved candidate in the separately started child). Original consequence and proposed-drop basis recorded immediately. New verified finding IDs: none. New unverified-after-investigation finding IDs: none. Open lead IDs: none. New reportable issues found this pass: no.\nAll assigned mandatory scope remains read; no additional scope claimed from clipped broad context diff. Only private group artifacts changed. Cited official source snapshots remain in this group directory for caller inspection. Next: return delta to caller; requested discovery pass is finished.\n"
+}

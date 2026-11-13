@@ -1,0 +1,734 @@
+{
+  "group": {
+    "id": "g074",
+    "domain": "helm-terminal-routing",
+    "purpose": "helm-terminal-routing: crates/farhelm-helm/src/units.rs, crates/farhelm-helm/src/downloads.rs, crates/farhelm-helm/src/terminal.rs, crates/farhelm-helm/src/tunnels.rs, crates/farhelm-helm/src/uploads.rs, crates/farhelm-helm/src/client.rs, crates/farhelm-helm/src/client/tcp_relays.rs, crates/farhelm-helm/src/clipboard.rs; phases @@ -7781,7 +7459,6 @@ mod tests { | -    async fn an_unasked_grid_stream_is_refused_and_released() {",
+    "interfaces": [
+      "g004",
+      "g005",
+      "g009",
+      "g010",
+      "g011",
+      "g012",
+      "g052",
+      "g053",
+      "g054",
+      "g075",
+      "g076",
+      "g117",
+      "g118",
+      "g119",
+      "g120",
+      "g121"
+    ],
+    "sources": [
+      {
+        "path": "[private-run]/prep/parts/00161-000.patch",
+        "ranges": [
+          [
+            1,
+            215
+          ]
+        ],
+        "original_path": "crates/farhelm-helm/src/units.rs",
+        "commit": "04ffdbb35773cef36e73eb798c005ddbeb9a9de6",
+        "notes": "patch header; patch character offsets [0,8585)",
+        "lines": 215,
+        "bytes": 8589,
+        "start": 0,
+        "end": 8585,
+        "original": "[private-run]/prep/originals/00161.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/00282-000.patch",
+        "ranges": [
+          [
+            1,
+            31
+          ]
+        ],
+        "original_path": "crates/farhelm-helm/src/downloads.rs",
+        "commit": "04d85f0c98a9b635709d00b056719a0baa7fd3fc",
+        "notes": "patch header; patch character offsets [0,1398)",
+        "lines": 31,
+        "bytes": 1398,
+        "start": 0,
+        "end": 1398,
+        "original": "[private-run]/prep/originals/00282.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/00285-000.patch",
+        "ranges": [
+          [
+            1,
+            22
+          ]
+        ],
+        "original_path": "crates/farhelm-helm/src/terminal.rs",
+        "commit": "04d85f0c98a9b635709d00b056719a0baa7fd3fc",
+        "notes": "patch header; patch character offsets [0,1290)",
+        "lines": 22,
+        "bytes": 1290,
+        "start": 0,
+        "end": 1290,
+        "original": "[private-run]/prep/originals/00285.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/00286-000.patch",
+        "ranges": [
+          [
+            1,
+            22
+          ]
+        ],
+        "original_path": "crates/farhelm-helm/src/tunnels.rs",
+        "commit": "04d85f0c98a9b635709d00b056719a0baa7fd3fc",
+        "notes": "patch header; patch character offsets [0,1293)",
+        "lines": 22,
+        "bytes": 1293,
+        "start": 0,
+        "end": 1293,
+        "original": "[private-run]/prep/originals/00286.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/00287-000.patch",
+        "ranges": [
+          [
+            1,
+            22
+          ]
+        ],
+        "original_path": "crates/farhelm-helm/src/uploads.rs",
+        "commit": "04d85f0c98a9b635709d00b056719a0baa7fd3fc",
+        "notes": "patch header; patch character offsets [0,981)",
+        "lines": 22,
+        "bytes": 981,
+        "start": 0,
+        "end": 981,
+        "original": "[private-run]/prep/originals/00287.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/00587-000.patch",
+        "ranges": [
+          [
+            1,
+            30
+          ]
+        ],
+        "original_path": "crates/farhelm-helm/src/downloads.rs",
+        "commit": "6d610d435dd12bbe8458b1a31b0988d95ff7338c",
+        "notes": "patch header; patch character offsets [0,1065)",
+        "lines": 30,
+        "bytes": 1065,
+        "start": 0,
+        "end": 1065,
+        "original": "[private-run]/prep/originals/00587.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/00674-000.patch",
+        "ranges": [
+          [
+            1,
+            98
+          ]
+        ],
+        "original_path": "crates/farhelm-helm/src/client.rs",
+        "commit": "47f33bbdbd5ff4a6e437e97a800f9083be43096e",
+        "notes": "patch header; patch character offsets [0,3676)",
+        "lines": 98,
+        "bytes": 3676,
+        "start": 0,
+        "end": 3676,
+        "original": "[private-run]/prep/originals/00674.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/00675-000.patch",
+        "ranges": [
+          [
+            1,
+            44
+          ]
+        ],
+        "original_path": "crates/farhelm-helm/src/client/tcp_relays.rs",
+        "commit": "47f33bbdbd5ff4a6e437e97a800f9083be43096e",
+        "notes": "patch header; patch character offsets [0,1568)",
+        "lines": 44,
+        "bytes": 1568,
+        "start": 0,
+        "end": 1568,
+        "original": "[private-run]/prep/originals/00675.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/00692-000.patch",
+        "ranges": [
+          [
+            1,
+            42
+          ]
+        ],
+        "original_path": "crates/farhelm-helm/src/client.rs",
+        "commit": "222bf6253bcd168db04bcbb1df20180c88306998",
+        "notes": "patch header; patch character offsets [0,1652)",
+        "lines": 42,
+        "bytes": 1652,
+        "start": 0,
+        "end": 1652,
+        "original": "[private-run]/prep/originals/00692.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/01028-001.patch",
+        "ranges": [
+          [
+            1,
+            8
+          ]
+        ],
+        "original_path": "crates/farhelm-helm/src/client.rs",
+        "commit": "f560058da19e02716e6f943883a9508b447aff4e",
+        "notes": "@@ -7781,7 +7459,6 @@ mod tests {; patch character offsets [59779,60045)",
+        "lines": 8,
+        "bytes": 266,
+        "start": 59779,
+        "end": 60045,
+        "original": "[private-run]/prep/originals/01028.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/01029-000.patch",
+        "ranges": [
+          [
+            1,
+            87
+          ]
+        ],
+        "original_path": "crates/farhelm-helm/src/clipboard.rs",
+        "commit": "f560058da19e02716e6f943883a9508b447aff4e",
+        "notes": "patch header; patch character offsets [0,4496)",
+        "lines": 87,
+        "bytes": 4502,
+        "start": 0,
+        "end": 4496,
+        "original": "[private-run]/prep/originals/01029.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/01039-001.patch",
+        "ranges": [
+          [
+            1,
+            392
+          ]
+        ],
+        "original_path": "crates/farhelm-helm/src/terminal.rs",
+        "commit": "f560058da19e02716e6f943883a9508b447aff4e",
+        "notes": "-    async fn an_unasked_grid_stream_is_refused_and_released() {; patch character offsets [57101,75788)",
+        "lines": 392,
+        "bytes": 18687,
+        "start": 57101,
+        "end": 75788,
+        "original": "[private-run]/prep/originals/01039.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/01233-000.patch",
+        "ranges": [
+          [
+            1,
+            346
+          ]
+        ],
+        "original_path": "crates/farhelm-helm/src/units.rs",
+        "commit": "17a3fe858c5511a24b7403af15dd41c93bf69fd7",
+        "notes": "patch header; patch character offsets [0,16626)",
+        "lines": 346,
+        "bytes": 16642,
+        "start": 0,
+        "end": 16626,
+        "original": "[private-run]/prep/originals/01233.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/01526-000.patch",
+        "ranges": [
+          [
+            1,
+            21
+          ]
+        ],
+        "original_path": "crates/farhelm-helm/src/units.rs",
+        "commit": "08399d092d20815ced6619c26df2391944ae2b4a",
+        "notes": "patch header; patch character offsets [0,1269)",
+        "lines": 21,
+        "bytes": 1269,
+        "start": 0,
+        "end": 1269,
+        "original": "[private-run]/prep/originals/01526.patch"
+      }
+    ],
+    "lines": 1380,
+    "bytes": 62878
+  },
+  "records": [
+    {
+      "key": "g074/c1",
+      "owner": "g074",
+      "id": "c1",
+      "domain": "helm-terminal-routing",
+      "purpose": "helm-terminal-routing: crates/farhelm-helm/src/units.rs, crates/farhelm-helm/src/downloads.rs, crates/farhelm-helm/src/terminal.rs, crates/farhelm-helm/src/tunnels.rs, crates/farhelm-helm/src/uploads.rs, crates/farhelm-helm/src/client.rs, crates/farhelm-helm/src/client/tcp_relays.rs, crates/farhelm-helm/src/clipboard.rs; phases @@ -7781,7 +7459,6 @@ mod tests { | -    async fn an_unasked_grid_stream_is_refused_and_released() {",
+      "history": [
+        {
+          "line": 1,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c1",
+            "state": "open",
+            "summary": "Removed stream negotiation leaves old pages requiring reload",
+            "location": "crates/farhelm-helm/src/terminal.rs:1739",
+            "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e. TLDR: A page left open across the grid-only upgrade can draw grid records as terminal text until reloaded. Source: assigned 01039-001.patch removes capability-negotiation tests and stream notices; SPEC_impl.md:3009-3030 explicitly defines protocol 77 and this compatibility boundary. Exact acceptance: 'A page loaded from the previous helm and left open across the update must be reloaded; nothing keeps it working.' It further says: 'Keeping the stream notice for such pages was considered and not done: a reload is the whole remedy.' Contract and source agree: the changed tests now exercise a single grid wire format, not a missing optional capability. Suggested bucket: other; could-be-highest: no established security or work-loss route (malformed old-page input ends the attachment under this contract). Confidence: confirmed from source and specification, no execution. proposed_drop: explicit specification acceptance quoted above. possible_cover: none; no coverage sources searched. Caveat: this decision concerns removed negotiation and changed tests only, not the entire terminal migration owned by other groups."
+          }
+        }
+      ],
+      "latest": {
+        "line": 1,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c1",
+          "state": "open",
+          "summary": "Removed stream negotiation leaves old pages requiring reload",
+          "location": "crates/farhelm-helm/src/terminal.rs:1739",
+          "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e. TLDR: A page left open across the grid-only upgrade can draw grid records as terminal text until reloaded. Source: assigned 01039-001.patch removes capability-negotiation tests and stream notices; SPEC_impl.md:3009-3030 explicitly defines protocol 77 and this compatibility boundary. Exact acceptance: 'A page loaded from the previous helm and left open across the update must be reloaded; nothing keeps it working.' It further says: 'Keeping the stream notice for such pages was considered and not done: a reload is the whole remedy.' Contract and source agree: the changed tests now exercise a single grid wire format, not a missing optional capability. Suggested bucket: other; could-be-highest: no established security or work-loss route (malformed old-page input ends the attachment under this contract). Confidence: confirmed from source and specification, no execution. proposed_drop: explicit specification acceptance quoted above. possible_cover: none; no coverage sources searched. Caveat: this decision concerns removed negotiation and changed tests only, not the entire terminal migration owned by other groups."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g074/findings.jsonl",
+        "id": "c1",
+        "line": 1,
+        "disposition": "excluded",
+        "group": "grid-only-upgrade-stale-browser-needs-reload",
+        "reason": "Parent explicitly accepted named covered proposal from claims-048 after inspecting it. The old-page misdrawing and attachment refusal are explicitly accepted, with reload as the remedy. This does not cover current-page routing or ending old tmux processes. Exact specification acceptance, limited to pages loaded from the preceding helm. Product UX would be high if unaccepted; the original record suggested other, but rarity is not the basis. Checked source/results: [\"f560058da19e02716e6f943883a9508b447aff4e SPEC_impl.md:3009-3054 describes protocol 77, old-page misdrawing, malformed input ending the attachment, and helm-owned grid flow.\",\"At that hash terminal.rs:762-798 forwards binary input via send_grid_input and ignores obsolete page controls; client.rs:4016-4069 unconditionally registers grid accounting and starts flow. terminal.js:3387-3428 constructs the grid before the socket, and :4152-4165 feeds binary output to it.\",\"This hash is inside the supplied review range. No runtime observation was made.\"] Current coverage/results: [\"Current SPEC_impl.md:2937-2955 explicitly accepts this exact previous-page trigger and reload consequence. SPEC.md terminal/upgrade searches supply no contradictory current-page promise.\",\"TODO.md Planned:25-26 is empty. plans/queue searches found tmux-end-old-terminals.md:119-129 requiring the removal, not an unlanded repair of old pages. BUGS.md contains only the distinct provisioning SSH-helper hang.\",\"INDEX.md, matching queue-text searches and active TRIAGE_OUTCOMES.md contain no same trigger/consequence/scope item. FILTER.md is unnecessary; no broad upgrade filter is claimed.\"] Exact cited cover: [\"SPEC_impl.md:2949-2950: A page loaded from the previous helm and left open across the update must be reloaded; nothing keeps it working.\",\"SPEC_impl.md:2955: malformed input. Keeping the stream notice for such pages was considered and not done: a reload is the whole remedy.\"] Original stronger consequence and missing premise remain preserved: \"Old pages can draw grid records as terminal text until reload; sibling records also preserve typing ending that viewer attachment. No agent/process termination or security consequence was established.\"; null."
+      },
+      "accepted_parent_decision": {
+        "key": "g074/c1",
+        "line": 1,
+        "disposition": "excluded",
+        "group": "grid-only-upgrade-stale-browser-needs-reload",
+        "bucket": "high",
+        "recording": "covered",
+        "queue_target_candidate": null,
+        "needs_independent_drop_check": false,
+        "reason": "Parent explicitly accepted named covered proposal from claims-048 after inspecting it. The old-page misdrawing and attachment refusal are explicitly accepted, with reload as the remedy. This does not cover current-page routing or ending old tmux processes. Exact specification acceptance, limited to pages loaded from the preceding helm. Product UX would be high if unaccepted; the original record suggested other, but rarity is not the basis. Checked source/results: [\"f560058da19e02716e6f943883a9508b447aff4e SPEC_impl.md:3009-3054 describes protocol 77, old-page misdrawing, malformed input ending the attachment, and helm-owned grid flow.\",\"At that hash terminal.rs:762-798 forwards binary input via send_grid_input and ignores obsolete page controls; client.rs:4016-4069 unconditionally registers grid accounting and starts flow. terminal.js:3387-3428 constructs the grid before the socket, and :4152-4165 feeds binary output to it.\",\"This hash is inside the supplied review range. No runtime observation was made.\"] Current coverage/results: [\"Current SPEC_impl.md:2937-2955 explicitly accepts this exact previous-page trigger and reload consequence. SPEC.md terminal/upgrade searches supply no contradictory current-page promise.\",\"TODO.md Planned:25-26 is empty. plans/queue searches found tmux-end-old-terminals.md:119-129 requiring the removal, not an unlanded repair of old pages. BUGS.md contains only the distinct provisioning SSH-helper hang.\",\"INDEX.md, matching queue-text searches and active TRIAGE_OUTCOMES.md contain no same trigger/consequence/scope item. FILTER.md is unnecessary; no broad upgrade filter is claimed.\"] Exact cited cover: [\"SPEC_impl.md:2949-2950: A page loaded from the previous helm and left open across the update must be reloaded; nothing keeps it working.\",\"SPEC_impl.md:2955: malformed input. Keeping the stream notice for such pages was considered and not done: a reload is the whole remedy.\"] Original stronger consequence and missing premise remain preserved: \"Old pages can draw grid records as terminal text until reload; sibling records also preserve typing ending that viewer attachment. No agent/process termination or security consequence was established.\"; null."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-048",
+          "key": "g074/c1",
+          "latest_line": 1,
+          "recommendation": "covered",
+          "bucket": "high",
+          "underlying_key": "grid-only-upgrade-stale-browser-needs-reload",
+          "aliases": [
+            "g075/c1",
+            "g076/c1"
+          ],
+          "target_queue_file": null,
+          "why": "The old-page misdrawing and attachment refusal are explicitly accepted, with reload as the remedy. This does not cover current-page routing or ending old tmux processes.",
+          "checks": [
+            "f560058da19e02716e6f943883a9508b447aff4e SPEC_impl.md:3009-3054 describes protocol 77, old-page misdrawing, malformed input ending the attachment, and helm-owned grid flow.",
+            "At that hash terminal.rs:762-798 forwards binary input via send_grid_input and ignores obsolete page controls; client.rs:4016-4069 unconditionally registers grid accounting and starts flow. terminal.js:3387-3428 constructs the grid before the socket, and :4152-4165 feeds binary output to it.",
+            "This hash is inside the supplied review range. No runtime observation was made."
+          ],
+          "coverage_checked": [
+            "Current SPEC_impl.md:2937-2955 explicitly accepts this exact previous-page trigger and reload consequence. SPEC.md terminal/upgrade searches supply no contradictory current-page promise.",
+            "TODO.md Planned:25-26 is empty. plans/queue searches found tmux-end-old-terminals.md:119-129 requiring the removal, not an unlanded repair of old pages. BUGS.md contains only the distinct provisioning SSH-helper hang.",
+            "INDEX.md, matching queue-text searches and active TRIAGE_OUTCOMES.md contain no same trigger/consequence/scope item. FILTER.md is unnecessary; no broad upgrade filter is claimed."
+          ],
+          "exact_cover_quotes": [
+            "SPEC_impl.md:2949-2950: A page loaded from the previous helm and left open across the update must be reloaded; nothing keeps it working.",
+            "SPEC_impl.md:2955: malformed input. Keeping the stream notice for such pages was considered and not done: a reload is the whole remedy."
+          ],
+          "missing_premise": null,
+          "original_stronger_consequence": "Old pages can draw grid records as terminal text until reload; sibling records also preserve typing ending that viewer attachment. No agent/process termination or security consequence was established.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Exact specification acceptance, limited to pages loaded from the preceding helm. Product UX would be high if unaccepted; the original record suggested other, but rarity is not the basis."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": false,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "high",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "grid-only-upgrade-stale-browser-needs-reload",
+        "destination": null
+      }
+    },
+    {
+      "key": "g074/l1",
+      "owner": "g074",
+      "id": "l1",
+      "domain": "helm-terminal-routing",
+      "purpose": "helm-terminal-routing: crates/farhelm-helm/src/units.rs, crates/farhelm-helm/src/downloads.rs, crates/farhelm-helm/src/terminal.rs, crates/farhelm-helm/src/tunnels.rs, crates/farhelm-helm/src/uploads.rs, crates/farhelm-helm/src/client.rs, crates/farhelm-helm/src/client/tcp_relays.rs, crates/farhelm-helm/src/clipboard.rs; phases @@ -7781,7 +7459,6 @@ mod tests { | -    async fn an_unasked_grid_stream_is_refused_and_released() {",
+      "history": [
+        {
+          "line": 2,
+          "event": {
+            "version": 1,
+            "kind": "lead",
+            "id": "l1",
+            "state": "open",
+            "summary": "Check fallback decoder against systemctl's actual literal grammar",
+            "location": "crates/farhelm-helm/src/units.rs:664",
+            "detail": "Reviewed commit: 04ffdbb35773cef36e73eb798c005ddbeb9a9de6. TLDR: If systemctl emits shell literals outside this decoder's finite grammar, container probing could refuse the host or copy the wrong proxy value when busctl is unavailable. Source: units.rs:557-570 parses each assignment and decode_manager_value (664 onward) handles whole raw/single/double/ANSI-C quoted values, not concatenated shell words. Caller podman_probe.rs:337-371 falls back from busctl and decodes all entries before selecting proxy variables. SPEC_impl.md:6561-6565 requires deterministic proxy inheritance from the place host's user-manager environment. Suggested bucket: other pending establishing an actual emitted value and consequence; could-be-highest: no established route, and no shell evaluation occurs. Confidence: unresolved lead, not a reported bug. Checks made: read full assigned decoder patch and fallback caller; exact missing premise is the actual shell-literal output grammar of supported systemctl versions. Next check: primary systemd source for show-environment and its quoting helper; it can settle whether concatenated literals or other unsupported forms are produced. proposed_drop: false while investigating. possible_cover: none; no coverage sources searched. No execution or reproduction performed."
+          }
+        },
+        {
+          "line": 3,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "l1",
+            "state": "open",
+            "summary": "Fallback decoder covers the checked systemctl literal grammar",
+            "location": "crates/farhelm-helm/src/units.rs:664",
+            "detail": "Reviewed commit: 04ffdbb35773cef36e73eb798c005ddbeb9a9de6. TLDR considered: a wrong fallback parse could make containers unusable or copy the wrong proxy value when busctl is unavailable. Checks and results: read the assigned full decoder patch and podman_probe.rs:337-371; checked primary systemd v239 systemctl.c:5127-5140 and escape.c:432-474, plus v252 and v255 systemctl-set-environment.c:42-54 and v255 escape.c:440-518 / escape.h:13-26. show-environment quotes only the value using ESCAPE_POSIX/SHELL_ESCAPE_POSIX. It emits a raw whole value or one whole ANSI-C quoted value, not concatenated shell words. v239 escapes apostrophes/backslashes and tabs/newlines; the newer helper also C-escapes control bytes and keeps valid UTF-8. The decoder covers these produced forms. Primary refs: https://github.com/systemd/systemd/blob/v239/src/systemctl/systemctl.c#L5127-L5140 ; https://github.com/systemd/systemd/blob/v239/src/basic/escape.c#L432-L474 ; https://github.com/systemd/systemd/blob/v255/src/basic/escape.c#L440-L518 ; https://github.com/systemd/systemd/blob/v255/src/systemctl/systemctl-set-environment.c#L42-L54 . SPEC_impl.md:6561-6565 requires deterministic proxy inheritance. Suggested bucket: other for the considered failure; could-be-highest: no security or work-loss route established, parsing never evaluates shell text. Confidence: confirmed refutation of the suspected grammar mismatch for these versions, source-only; not a claim to exhaustively validate all historical systemd versions. proposed_drop: source refutation above; no emitted unsupported literal was found. possible_cover: none. Lead closed to candidate; no unresolved premise remains for the specific concatenation/escaping suspicion."
+          }
+        }
+      ],
+      "latest": {
+        "line": 3,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "l1",
+          "state": "open",
+          "summary": "Fallback decoder covers the checked systemctl literal grammar",
+          "location": "crates/farhelm-helm/src/units.rs:664",
+          "detail": "Reviewed commit: 04ffdbb35773cef36e73eb798c005ddbeb9a9de6. TLDR considered: a wrong fallback parse could make containers unusable or copy the wrong proxy value when busctl is unavailable. Checks and results: read the assigned full decoder patch and podman_probe.rs:337-371; checked primary systemd v239 systemctl.c:5127-5140 and escape.c:432-474, plus v252 and v255 systemctl-set-environment.c:42-54 and v255 escape.c:440-518 / escape.h:13-26. show-environment quotes only the value using ESCAPE_POSIX/SHELL_ESCAPE_POSIX. It emits a raw whole value or one whole ANSI-C quoted value, not concatenated shell words. v239 escapes apostrophes/backslashes and tabs/newlines; the newer helper also C-escapes control bytes and keeps valid UTF-8. The decoder covers these produced forms. Primary refs: https://github.com/systemd/systemd/blob/v239/src/systemctl/systemctl.c#L5127-L5140 ; https://github.com/systemd/systemd/blob/v239/src/basic/escape.c#L432-L474 ; https://github.com/systemd/systemd/blob/v255/src/basic/escape.c#L440-L518 ; https://github.com/systemd/systemd/blob/v255/src/systemctl/systemctl-set-environment.c#L42-L54 . SPEC_impl.md:6561-6565 requires deterministic proxy inheritance. Suggested bucket: other for the considered failure; could-be-highest: no security or work-loss route established, parsing never evaluates shell text. Confidence: confirmed refutation of the suspected grammar mismatch for these versions, source-only; not a claim to exhaustively validate all historical systemd versions. proposed_drop: source refutation above; no emitted unsupported literal was found. possible_cover: none. Lead closed to candidate; no unresolved premise remains for the specific concatenation/escaping suspicion."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g074/findings.jsonl",
+        "id": "l1",
+        "line": 3,
+        "disposition": "excluded",
+        "group": "systemctl-environment-literal-decoder-grammar-suspicion",
+        "reason": "Parent explicitly accepted named refuted proposal from claims-048 after inspecting it. The checked systemctl quoting helpers produce whole raw or ANSI-C quoted values. The decoder handles those forms; the suspected concatenated-shell-word mismatch has no producer in the checked sources. Source refutation of the actual investigated literal-grammar suspicion, preserving its version limit. Checked source/results: [\"04ffdbb35773cef36e73eb798c005ddbeb9a9de6 units.rs:557-570 splits assignments, and :664-778 decodes whole quoted literals, standard C escapes and octal/hex bytes without evaluation.\",\"Primary systemd v255 systemctl-set-environment.c:41-54 uses shell_maybe_quote on the value with SHELL_ESCAPE_POSIX. https://github.com/systemd/systemd/blob/v255/src/systemctl/systemctl-set-environment.c#L41-L54\",\"Primary v255 escape.c:440-518 and v239 escape.c:432-474 construct one complete quoted value, with no concatenated words. The checked escapes match the decoder. https://github.com/systemd/systemd/blob/v255/src/basic/escape.c#L440-L518 and https://github.com/systemd/systemd/blob/v239/src/basic/escape.c#L432-L474\",\"This refutes the named concatenation/escaping suspicion for checked helper versions, not every historical systemctl version. No runtime parse or host probe was run.\"] Current coverage/results: [\"SPEC.md:4877-4880 and SPEC_impl.md:6082-6085 require deterministic host-manager proxy inheritance; neither accepts wrong parsing.\",\"TODO.md Planned is empty. plans/queue/podman-environments.md:242-245 describes inheritance, without a separate decoder-repair acceptance. BUGS.md has no matching issue.\",\"Searched INDEX.md, queue files and active TRIAGE_OUTCOMES.md for show-environment, decode_manager_value and proxy parsing; no exact matching queue/decision. No FILTER.md boundary is used.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"A wrong fallback parse could refuse container probing or copy the wrong proxy value when busctl is unavailable. No shell evaluation, credential disclosure or user-work loss route was established.\"; \"A supported systemctl release emitting an unsupported literal would reopen this bounded refutation; none was shown. Exhaustive validation of historical releases is not claimed.\"."
+      },
+      "accepted_parent_decision": {
+        "key": "g074/l1",
+        "line": 3,
+        "disposition": "excluded",
+        "group": "systemctl-environment-literal-decoder-grammar-suspicion",
+        "bucket": "other",
+        "recording": "refuted",
+        "queue_target_candidate": null,
+        "needs_independent_drop_check": false,
+        "reason": "Parent explicitly accepted named refuted proposal from claims-048 after inspecting it. The checked systemctl quoting helpers produce whole raw or ANSI-C quoted values. The decoder handles those forms; the suspected concatenated-shell-word mismatch has no producer in the checked sources. Source refutation of the actual investigated literal-grammar suspicion, preserving its version limit. Checked source/results: [\"04ffdbb35773cef36e73eb798c005ddbeb9a9de6 units.rs:557-570 splits assignments, and :664-778 decodes whole quoted literals, standard C escapes and octal/hex bytes without evaluation.\",\"Primary systemd v255 systemctl-set-environment.c:41-54 uses shell_maybe_quote on the value with SHELL_ESCAPE_POSIX. https://github.com/systemd/systemd/blob/v255/src/systemctl/systemctl-set-environment.c#L41-L54\",\"Primary v255 escape.c:440-518 and v239 escape.c:432-474 construct one complete quoted value, with no concatenated words. The checked escapes match the decoder. https://github.com/systemd/systemd/blob/v255/src/basic/escape.c#L440-L518 and https://github.com/systemd/systemd/blob/v239/src/basic/escape.c#L432-L474\",\"This refutes the named concatenation/escaping suspicion for checked helper versions, not every historical systemctl version. No runtime parse or host probe was run.\"] Current coverage/results: [\"SPEC.md:4877-4880 and SPEC_impl.md:6082-6085 require deterministic host-manager proxy inheritance; neither accepts wrong parsing.\",\"TODO.md Planned is empty. plans/queue/podman-environments.md:242-245 describes inheritance, without a separate decoder-repair acceptance. BUGS.md has no matching issue.\",\"Searched INDEX.md, queue files and active TRIAGE_OUTCOMES.md for show-environment, decode_manager_value and proxy parsing; no exact matching queue/decision. No FILTER.md boundary is used.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"A wrong fallback parse could refuse container probing or copy the wrong proxy value when busctl is unavailable. No shell evaluation, credential disclosure or user-work loss route was established.\"; \"A supported systemctl release emitting an unsupported literal would reopen this bounded refutation; none was shown. Exhaustive validation of historical releases is not claimed.\"."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-048",
+          "key": "g074/l1",
+          "latest_line": 3,
+          "recommendation": "refuted",
+          "bucket": "other",
+          "underlying_key": "systemctl-environment-literal-decoder-grammar-suspicion",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The checked systemctl quoting helpers produce whole raw or ANSI-C quoted values. The decoder handles those forms; the suspected concatenated-shell-word mismatch has no producer in the checked sources.",
+          "checks": [
+            "04ffdbb35773cef36e73eb798c005ddbeb9a9de6 units.rs:557-570 splits assignments, and :664-778 decodes whole quoted literals, standard C escapes and octal/hex bytes without evaluation.",
+            "Primary systemd v255 systemctl-set-environment.c:41-54 uses shell_maybe_quote on the value with SHELL_ESCAPE_POSIX. https://github.com/systemd/systemd/blob/v255/src/systemctl/systemctl-set-environment.c#L41-L54",
+            "Primary v255 escape.c:440-518 and v239 escape.c:432-474 construct one complete quoted value, with no concatenated words. The checked escapes match the decoder. https://github.com/systemd/systemd/blob/v255/src/basic/escape.c#L440-L518 and https://github.com/systemd/systemd/blob/v239/src/basic/escape.c#L432-L474",
+            "This refutes the named concatenation/escaping suspicion for checked helper versions, not every historical systemctl version. No runtime parse or host probe was run."
+          ],
+          "coverage_checked": [
+            "SPEC.md:4877-4880 and SPEC_impl.md:6082-6085 require deterministic host-manager proxy inheritance; neither accepts wrong parsing.",
+            "TODO.md Planned is empty. plans/queue/podman-environments.md:242-245 describes inheritance, without a separate decoder-repair acceptance. BUGS.md has no matching issue.",
+            "Searched INDEX.md, queue files and active TRIAGE_OUTCOMES.md for show-environment, decode_manager_value and proxy parsing; no exact matching queue/decision. No FILTER.md boundary is used."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": "A supported systemctl release emitting an unsupported literal would reopen this bounded refutation; none was shown. Exhaustive validation of historical releases is not claimed.",
+          "original_stronger_consequence": "A wrong fallback parse could refuse container probing or copy the wrong proxy value when busctl is unavailable. No shell evaluation, credential disclosure or user-work loss route was established.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Source refutation of the actual investigated literal-grammar suspicion, preserving its version limit."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "systemctl-environment-literal-decoder-grammar-suspicion",
+        "destination": null
+      }
+    },
+    {
+      "key": "g074/l2",
+      "owner": "g074",
+      "id": "l2",
+      "domain": "helm-terminal-routing",
+      "purpose": "helm-terminal-routing: crates/farhelm-helm/src/units.rs, crates/farhelm-helm/src/downloads.rs, crates/farhelm-helm/src/terminal.rs, crates/farhelm-helm/src/tunnels.rs, crates/farhelm-helm/src/uploads.rs, crates/farhelm-helm/src/client.rs, crates/farhelm-helm/src/client/tcp_relays.rs, crates/farhelm-helm/src/clipboard.rs; phases @@ -7781,7 +7459,6 @@ mod tests { | -    async fn an_unasked_grid_stream_is_refused_and_released() {",
+      "history": [
+        {
+          "line": 4,
+          "event": {
+            "version": 1,
+            "kind": "lead",
+            "id": "l2",
+            "state": "open",
+            "summary": "Retired-session TCP admission may rely only on the durable cache",
+            "location": "crates/farhelm-helm/src/tunnels.rs:361",
+            "detail": "Reviewed commit: 04d85f0c98a9b635709d00b056719a0baa7fd3fc. TLDR suspected: a retired container session may still open a tunnel to its former outside host when there is no durable cached payload. Source basis: tunnels.rs:303 and 361 now use route_active_session; sessions.rs:4527-4550 routes normally then refuses only from store.cached_session. resolve_owner:935-960 allows membership via status.live_sessions when no cache exists. Download, attach, and upload supervisor paths have require_active_launch, but a targeted check of service/tcp_relays.rs found only store membership at 278-279, no require_active_launch call. Missing premise: whether a shipped connected status can retain a retired live session without a durable cached payload, and whether the TCP route is genuinely the terminal tunnel endpoint in that case. Next: read tcp_relays.rs admission and identity-less listing publication/caller contracts. Suggested bucket: other until material consequence established; could-be-highest: potentially accesses outside-host services instead of the retired container, but no security impact or shipped route yet established. Confidence: unresolved lead, source-only; no runtime execution or reproduction. proposed_drop: false pending investigation. possible_cover: none; no coverage sources searched."
+          }
+        },
+        {
+          "line": 5,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "l2",
+            "state": "open",
+            "summary": "Retired-session TCP cache gap has no established shipped route",
+            "location": "crates/farhelm-helm/src/tunnels.rs:361",
+            "detail": "Reviewed commit: 04d85f0c98a9b635709d00b056719a0baa7fd3fc. TLDR considered: a retired container session without a durable cached payload could still open a tunnel on its former outside host. Source checks: sessions.rs:904-960 admits membership from a cache key or identity-less status.live_sessions; route_active_session:4527-4550 examines only the durable decoded payload. store.rs:9719 onward returns None for missing/corrupt/mismatched payload. Supervisor service/tcp_relays.rs:264-286 checks only that a row exists before connecting loopback, unlike the checked file/terminal/upload paths. Thus the API-level gap is real for a constructed identity-less peer or damaged cache. Investigation of manager.rs:4366 onward establishes why this does not yield a shown normal shipped route: 'NOT an old supervisor: one predating PLAN_M6.md item 2 speaks an older protocol version and is refused at the hello gate long before this, so what actually lands here is a construction with no standing to mint one (a test peer, an embedded supervisor built without a state directory to claim from).' The manager's ordinary identity-bearing path caches the complete typed listing before it becomes visible (refresh code 4893-4990), and route membership without such a listing refuses. No shipped cause of a retired row's cache payload becoming corrupt or mismatched was established. SPEC.md:4816-4823 says existing retired sessions support Delete only. Suggested bucket: other for an API/constructed-peer contract gap, with no material user consequence established. could-be-highest: considered outside-host service access, but neither an unintended security boundary crossing nor a shipped route is established; full-authority desktop tunnel calls and existing consent are still required. Confidence: source-confirmed checks and absence of established production premise, not an execution observation. proposed_drop: no established shipped trigger; identity-less routing is explicitly limited by the cited source to embedded/test constructions, and cache corruption is only hypothetical. possible_cover: none; no coverage sources searched. Lead closed to candidate; the precise premise that would reopen it is a supported production path that exposes a retired session without its decodable durable cache payload. A source caller or retained production cache evidence would settle that premise; no reproduction was made."
+          }
+        },
+        {
+          "line": 6,
+          "event": {
+            "version": 1,
+            "kind": "lead",
+            "id": "l2",
+            "state": "open",
+            "summary": "Recheck retirement contract independently of ordinary route reachability",
+            "location": "crates/farhelm-helm/src/tunnels.rs:361",
+            "detail": "Reviewed commit: 04d85f0c98a9b635709d00b056719a0baa7fd3fc. TLDR suspected remains unchanged: without a decodable durable cache payload, a retired container session may authorize a TCP tunnel on its former outside host. This revision reopens the contract assessment rather than treating absence of an ordinary producer as compliance. Prior source checks established a real API gap: route_active_session checks only cached payload, identity-less live membership can route without it, and supervisor TCP admission checks row existence only. The source limitation on identity-less production peers and absence of an identified cache-corruption producer bound the production claim but do not themselves refute the Delete-only contract. A targeted pinned-spec search now located SPEC_impl.md:8647-8649 ('A retired session supports Delete only. Refuse all other lifecycle, terminal and exec paths, including plain Replace.'); read its complete governing section and TCP relay contract next to determine whether independent supervisor refusal is explicitly required. Suggested bucket: other for the established constructed API gap; could-be-highest: preserve the original possible outside-host service access concern for independent assessment, with no established shipped security route. Confidence: confirmed API-level source gap, unresolved contract scope and ordinary production premise; no execution. proposed_drop: false pending this synthesis check; no parent drop accepted. possible_cover: none. Missing premises: endpoint-specific retirement obligation, and a concrete supported ordinary route exposing a retired row without usable durable cache. No producer is assumed."
+          }
+        },
+        {
+          "line": 7,
+          "event": {
+            "version": 1,
+            "kind": "lead",
+            "id": "l2",
+            "state": "open",
+            "summary": "Claimless construction is an additional identity-less premise to check",
+            "location": "crates/farhelm-helm/src/tunnels.rs:361",
+            "detail": "Reviewed commit: 04d85f0c98a9b635709d00b056719a0baa7fd3fc. TLDR suspected remains retired-container TCP access to the outside host if cache retirement admission is bypassed. New source result: supervisor service/core.rs:4985-5000 documents a claimless construction (a losing handoff racer or corrupted-lock edge case) that only reads host identity and can legitimately retain None on a fresh install; constructor references at 6587-6590 confirm that branch. This is broader than the manager comment previously cited, so that comment alone is not a proof that all identity-less peers are test-only. Next readily checkable premise: whether a claimless None-identity construction can serve at all and can contain an existing retired container session; fresh install and legacy row may be mutually exclusive. Contract result already checked: SPEC_impl.md Rootless Podman sessions:8642-8657 requires Delete-only retirement globally but does not explicitly assign a retirement check to every supervisor endpoint. Its TCP relay channels section:3520-3581 explicitly says the supervisor checks session existence and loopback; no independent per-endpoint retirement requirement appears there. This does not establish end-to-end compliance for cache-less calls. Suggested bucket: other for source-confirmed API-level gap; could-be-highest: original potential outside-host service access concern retained, no shipped security route established. Confidence: unresolved ordinary-route premise; source-only, no reproduction or execution. proposed_drop: false while checking this construction. possible_cover: none. Missing evidence: reachable serving path with both None identity and a stored retired row, or a supported cause of a retired row's durable cache becoming undecodable."
+          }
+        },
+        {
+          "line": 8,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "l2",
+            "state": "open",
+            "summary": "Bounded refutation of ordinary retired-session TCP cache bypass",
+            "location": "crates/farhelm-helm/src/tunnels.rs:361",
+            "detail": "Reviewed commit: 04d85f0c98a9b635709d00b056719a0baa7fd3fc. TLDR considered, preserved: a retired container session lacking a decodable durable cache payload can authorize a TCP tunnel on its former outside host instead of being Delete-only. The constructed API gap remains real: sessions.rs:4527-4550 checks only store.cached_session after route_session, store.rs:9719-9795 returns None for bad/missing payload while raw paired membership still routes, and supervisor service/tcp_relays.rs:264-286 checks only row existence before dialing loopback. client/tcp_relays.rs:327-369 confirms this is the BeginTcpRelay path used by tunnels.rs:303,361. No live-state/view/attachment guard is substituted for that distinct TCP boundary.\n\nContract check: the complete pinned SPEC_impl.md Rootless Podman sessions section (8642-8657) says 'A retired session supports Delete only. Refuse all other lifecycle, terminal and exec paths, including plain Replace.' This is a global retirement requirement. It does not explicitly prescribe an independent retirement check at each supervisor endpoint. The complete TCP relay channels section (3520-3581) instead says 'The supervisor checks session existence and confines the target to literal loopback' and requires each accepted socket to resolve the coherent route again. Neither text explicitly accepts a cache-less retired TCP call; absence of a known producer is not proof of global contract compliance. The route's source doc (sessions.rs:4525-4526) also says the cache is only a negative fence and the supervisor checks its stored launch, which TCP does not do.\n\nOrdinary-route investigation and bounded refutation: manager.rs:4893-5040 publishes identity-bearing lists through the durable typed cache; failed cache writes retain the previous cache and publish no live fallback. resolve_owner:935-960 refuses missing raw membership for those hosts. The claimless construction noted at supervisor service/core.rs:4985-5000,6528-6591 can indeed hold None identity, correcting the prior overly broad reliance on the manager's test/embedded comment. However serve:8483-8506 refuses it before binding: ownership must exist and begin_serving must succeed. An owning construction calls ensure_host_identity before serve. A repository-wide source search of handle_connection callers finds the sole production call in the guarded serve accept loop (core.rs:8723); other direct callers are tests. Thus that concrete None-identity construction supplies no ordinary serving route. No shipped cause of a retired row's durable payload becoming malformed/mismatched was established; the spec deliberately preserves routing under pre-existing corruption (SPEC_impl.md:5993 onward), so such corruption would expose the known API gap but is not invented as a normal producer.\n\nSuggested bucket: other for the established constructed/API contract gap; no material production failure established. Could-be-highest: YES, retain the original potential outside-host service access/security-boundary concern for independent check; neither the ordinary shipped trigger nor actual security impact is established. Existing full-authority desktop access and tunnel consent still apply. Confidence: confirmed source-level gap and bounded source refutation of the checked ordinary None-identity route; remaining production premise unverified after investigation, no execution or reproduction. proposed_drop: bounded ordinary-route refutation only, not an assertion that the API gap complies with Delete-only retirement; parent has accepted no drop. possible_cover: none, no queue/coverage sources searched. Exact missing premise: a supported caller or retained production state with a retired supervisor row that routes while its durable cache payload is unusable, or a contract explicitly requiring refusal even for constructed full-authority API callers. Accessible constructor/serve/cache/relay source cannot establish the former or the latter. A concrete shipped producer/cache incident or maintainer clarification of that API contract would settle it. Lead is investigated and returned as a candidate for independent assessment, with original consequence preserved."
+          }
+        }
+      ],
+      "latest": {
+        "line": 8,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "l2",
+          "state": "open",
+          "summary": "Bounded refutation of ordinary retired-session TCP cache bypass",
+          "location": "crates/farhelm-helm/src/tunnels.rs:361",
+          "detail": "Reviewed commit: 04d85f0c98a9b635709d00b056719a0baa7fd3fc. TLDR considered, preserved: a retired container session lacking a decodable durable cache payload can authorize a TCP tunnel on its former outside host instead of being Delete-only. The constructed API gap remains real: sessions.rs:4527-4550 checks only store.cached_session after route_session, store.rs:9719-9795 returns None for bad/missing payload while raw paired membership still routes, and supervisor service/tcp_relays.rs:264-286 checks only row existence before dialing loopback. client/tcp_relays.rs:327-369 confirms this is the BeginTcpRelay path used by tunnels.rs:303,361. No live-state/view/attachment guard is substituted for that distinct TCP boundary.\n\nContract check: the complete pinned SPEC_impl.md Rootless Podman sessions section (8642-8657) says 'A retired session supports Delete only. Refuse all other lifecycle, terminal and exec paths, including plain Replace.' This is a global retirement requirement. It does not explicitly prescribe an independent retirement check at each supervisor endpoint. The complete TCP relay channels section (3520-3581) instead says 'The supervisor checks session existence and confines the target to literal loopback' and requires each accepted socket to resolve the coherent route again. Neither text explicitly accepts a cache-less retired TCP call; absence of a known producer is not proof of global contract compliance. The route's source doc (sessions.rs:4525-4526) also says the cache is only a negative fence and the supervisor checks its stored launch, which TCP does not do.\n\nOrdinary-route investigation and bounded refutation: manager.rs:4893-5040 publishes identity-bearing lists through the durable typed cache; failed cache writes retain the previous cache and publish no live fallback. resolve_owner:935-960 refuses missing raw membership for those hosts. The claimless construction noted at supervisor service/core.rs:4985-5000,6528-6591 can indeed hold None identity, correcting the prior overly broad reliance on the manager's test/embedded comment. However serve:8483-8506 refuses it before binding: ownership must exist and begin_serving must succeed. An owning construction calls ensure_host_identity before serve. A repository-wide source search of handle_connection callers finds the sole production call in the guarded serve accept loop (core.rs:8723); other direct callers are tests. Thus that concrete None-identity construction supplies no ordinary serving route. No shipped cause of a retired row's durable payload becoming malformed/mismatched was established; the spec deliberately preserves routing under pre-existing corruption (SPEC_impl.md:5993 onward), so such corruption would expose the known API gap but is not invented as a normal producer.\n\nSuggested bucket: other for the established constructed/API contract gap; no material production failure established. Could-be-highest: YES, retain the original potential outside-host service access/security-boundary concern for independent check; neither the ordinary shipped trigger nor actual security impact is established. Existing full-authority desktop access and tunnel consent still apply. Confidence: confirmed source-level gap and bounded source refutation of the checked ordinary None-identity route; remaining production premise unverified after investigation, no execution or reproduction. proposed_drop: bounded ordinary-route refutation only, not an assertion that the API gap complies with Delete-only retirement; parent has accepted no drop. possible_cover: none, no queue/coverage sources searched. Exact missing premise: a supported caller or retained production state with a retired supervisor row that routes while its durable cache payload is unusable, or a contract explicitly requiring refusal even for constructed full-authority API callers. Accessible constructor/serve/cache/relay source cannot establish the former or the latter. A concrete shipped producer/cache incident or maintainer clarification of that API contract would settle it. Lead is investigated and returned as a candidate for independent assessment, with original consequence preserved."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g074/findings.jsonl",
+        "id": "l2",
+        "line": 8,
+        "disposition": "under-investigation",
+        "group": "g074-l2",
+        "reason": "Record durably acknowledged; parent source/contract validation, cross-group synthesis, coverage/filter matching and any independent drop check remain pending. This preserves the claim and uncertainty without accepting, dropping or lowering it."
+      },
+      "accepted_parent_decision": null,
+      "returned_claim_checks": [
+        {
+          "batch": "claims-048",
+          "key": "g074/l2",
+          "latest_line": 8,
+          "recommendation": "retain-unverified",
+          "bucket": "other",
+          "underlying_key": "retired-session-tcp-relay-cache-only-admission",
+          "aliases": [],
+          "target_queue_file": "review_feedback_queue/retired-session-tcp-cache-admission.md",
+          "why": "The cache-only retirement fence and existence-only supervisor TCP admission establish a conditional gap. The checked claimless supervisor cannot serve, but that bounded ordinary-route refutation does not settle the global Delete-only contract or remove the corrupt-cache case.",
+          "checks": [
+            "04d85f0c98a9b635709d00b056719a0baa7fd3fc sessions.rs:904-960 routes raw cache membership or identity-less live membership; :4525-4550 checks retirement only when cached_session returns a decoded payload.",
+            "At that hash store.rs:9719-9795 returns None for missing, malformed, mismatched or unaddressable display payload while has_cached_session queries raw membership independently.",
+            "tunnels.rs:303 and :361 use route_active_session for accepting sockets and opening tunnels. service/tcp_relays.rs:264-286 checks only row existence before connect_loopback; it does not inspect retired launch state.",
+            "manager.rs:4893-5040 publishes identity-bearing lists through the durable cache and clears rather than substitutes live fallback on failed writes. service/core.rs:8483-8506 requires ownership.begin_serving before binding. The checked claimless construction therefore supplies no serving route.",
+            "Pinned SPEC_impl.md:8642-8657 requires Delete-only retirement, but its TCP contract assigns existence and loopback checks without separately spelling out per-endpoint retirement. The inaccurate sessions.rs claim that the supervisor checks its stored launch remains relevant to this TCP path.",
+            "All conclusions are conditional/source-derived. No shipped cache-damage producer, observed incident, runtime reproduction or security crossing was established."
+          ],
+          "coverage_checked": [
+            "Current SPEC.md:4892-4899 and SPEC_impl.md:8312-8327 require Delete-only retirement; they do not accept this bypass. SPEC_impl.md:3039-3100 specifies full-authority loopback relay admission and consent, and :5323-5326 / :5510-5514 deliberately preserve routing under undecodable display payloads. That corruption behavior supplies context, not retirement-bypass acceptance.",
+            "TODO.md Planned is empty. plans/queue/podman-environments.md:284-295 reiterates Delete-only retirement; no searched unlanded plan specifically repairs the cache-only TCP boundary. BUGS.md does not cover it.",
+            "INDEX.md, matching queue-file searches and active TRIAGE_OUTCOMES.md have no same cache/retirement/TCP trigger and consequence. FILTER.md upgrade-plus-rare excludes security/trust-boundary consequences and cannot settle this unresolved concern."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": "A supported production caller/state exposing a retired supervisor row while its durable payload is unusable, or clarification that Delete-only refusal must also hold for the constructed full-authority API call. The checked None-identity constructor cannot serve. Actual outside-host security impact beyond already granted desktop tunnel authority also remains unestablished.",
+          "original_stronger_consequence": "A retired container session without a decodable durable cache could authorize a TCP tunnel on its former outside host, potentially exposing services across the retired-container boundary. History first proposed no shipped route, reopened the contract question, corrected the overly broad test-only identity-less explanation, then bounded the refutation to the checked claimless serving path. None of those revisions establishes global compliance or retracts the conditional API gap.",
+          "needs_independent_drop_check": true,
+          "proposed_basis": "Retain the genuinely investigated missing-premise claim. Other reflects the established constructed/API consequence only; any dismissal or acceptance of the earlier security-consequence lowering requires the independent drop check."
+        }
+      ],
+      "parent_proposals": [
+        {
+          "artifact": "parent-flagged-judgments-048.json",
+          "key": "g074/l2",
+          "proposal": "claim-checks/claims-048/result.json",
+          "parent_proposal": "retain-investigated-cache-only-retired-TCP-gap-with-priority-gate",
+          "final_independent_gate": "required-before-original-security-drop-or-lowering",
+          "reason": "Parent read full048. Raw durable membership can route when display payload is undecodable, while retirement checks only decoded cache and supervisor TCP checks existence/loopback, not retired launch. Same current code falsely says supervisor checks stored launch. Identity-bearing ordinary refresh caches durable state; tested identity-less constructor cannot acquire serving ownership, so that specific route is refuted, not global compliance. Investigation leaves a supported corruption/state producer or full-authority API contract scope unresolved, with no observed runtime incident/security crossing. Retain UAI rather than claim source-confirmed production bypass; proposed other reflects only constructed API consequence, original outside-host service exposure/retired-boundary security remains for fresh priority gate. No exact cover/filter; Delete-only versus existing full-authority tunnel consent needs triage if unresolved."
+        }
+      ],
+      "collection": {
+        "retain": true,
+        "clearly_refuted_candidate": false,
+        "needs_unfinished_gate": true,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "retired-session-tcp-relay-cache-only-admission",
+        "destination": "trailing-retired-session-tcp-relay-cache-only-admission.md"
+      }
+    },
+    {
+      "key": "g074/l3",
+      "owner": "g074",
+      "id": "l3",
+      "domain": "helm-terminal-routing",
+      "purpose": "helm-terminal-routing: crates/farhelm-helm/src/units.rs, crates/farhelm-helm/src/downloads.rs, crates/farhelm-helm/src/terminal.rs, crates/farhelm-helm/src/tunnels.rs, crates/farhelm-helm/src/uploads.rs, crates/farhelm-helm/src/client.rs, crates/farhelm-helm/src/client/tcp_relays.rs, crates/farhelm-helm/src/clipboard.rs; phases @@ -7781,7 +7459,6 @@ mod tests { | -    async fn an_unasked_grid_stream_is_refused_and_released() {",
+      "history": [
+        {
+          "line": 9,
+          "event": {
+            "version": 1,
+            "kind": "lead",
+            "id": "l3",
+            "state": "open",
+            "summary": "Check clipboard cap against the surviving grid message bound",
+            "location": "crates/farhelm-helm/src/clipboard.rs:61",
+            "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e. TLDR suspected: the new clipboard route documentation and regression test assume an 8 MiB program clipboard write can reach the page; if the surviving grid transport's 1 MiB per-message limit also applies to clipboard control messages, those writes are lost before the raised native cap matters. Source basis: assigned clipboard.rs patch sets MAX_TEXT_BYTES to GRID_MAX_CLIPBOARD_BYTES (8 MiB) and says every program write a terminal can deliver reaches the native clipboard; pinned SPEC_impl.md Grid streams states attachment frames up to the grid 1 MiB bound. Missing premise: whether the grid maximum exempts or separately frames clipboard messages, or bounds only row-bearing messages. Next check: pinned grid constants/encoder, supervisor clipboard forwarder, and helm per-attachment frame admission. Suggested bucket: other for possible incorrect explanation/test premise pending establishing actual user-visible transfer loss. Could-be-highest: no established security or work-loss route; clipboard contents are expressly outside user-owned-work loss in the priority rules. Confidence: unresolved lead from concrete bound interaction, not a finding; no runtime tests/reproductions. proposed_drop: false pending source check. possible_cover: none; supplied neighbour context contained no matching clipboard-bound record and prohibited coverage sources were not searched."
+          }
+        },
+        {
+          "line": 10,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "l3",
+            "state": "open",
+            "summary": "Clipboard writes are split below the grid frame bound and reassembled",
+            "location": "crates/farhelm-helm/src/clipboard.rs:61",
+            "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e. TLDR considered: an 8 MiB program clipboard write might be dropped by the surviving 1 MiB grid message limit before it reaches the enlarged native route. Source investigation refutes that interaction. The complete relevant grid clipboard format paragraph, crates/farhelm-proto/src/grid.rs:226-236, explicitly says a write longer than one message is split into contiguous parts, at most GRID_MAX_CLIPBOARD_PART_BYTES of text and within GRID_MAX_MESSAGE once encoded; only the whole write has the 8 MiB cap. Constants at :413,459,463 distinguish 1 MiB encoded frame, 512 KiB raw part, and 8 MiB total. Supervisor grid_output.rs:946-981 implements both part constraints, counting escaped JSON size and cutting at character boundaries; service/grid_stream.rs:786-790 appends every part and sends them in order. The helm gauge's 1 MiB frame admission (client.rs:837-844) therefore admits each encoded part independently. UI grid-model.js:1042-1065 checks 512 KiB per part and 8 MiB across parts, collects text and publishes it only on last; grid-terminal.js:1982-1983 forwards that completed text to onClipboard. The assigned clipboard.rs test starts at this completed-text boundary, so its direct route POST is a valid test of the route cap; it need not itself exercise the separate splitting protocol. rest_harness.rs:829-833 uses the real build_router and middleware, not a cap-bypassing test handler. Suggested bucket: other for the considered cap/test-premise issue. Could-be-highest: no; no security or user-owned-work-loss consequence established, and the priority rules exclude clipboard content itself. Confidence: confirmed source/contract refutation, no runtime observations or reproductions. proposed_drop: source-refuted bound mismatch; 8 MiB is a whole-write bound while 1 MiB is per encoded part, with checked splitting and reassembly. possible_cover: none; supplied interface context was read only for novelty and prohibited coverage sources were not searched. Lead closed to candidate; no missing premise remains for this specific interaction."
+          }
+        }
+      ],
+      "latest": {
+        "line": 10,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "l3",
+          "state": "open",
+          "summary": "Clipboard writes are split below the grid frame bound and reassembled",
+          "location": "crates/farhelm-helm/src/clipboard.rs:61",
+          "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e. TLDR considered: an 8 MiB program clipboard write might be dropped by the surviving 1 MiB grid message limit before it reaches the enlarged native route. Source investigation refutes that interaction. The complete relevant grid clipboard format paragraph, crates/farhelm-proto/src/grid.rs:226-236, explicitly says a write longer than one message is split into contiguous parts, at most GRID_MAX_CLIPBOARD_PART_BYTES of text and within GRID_MAX_MESSAGE once encoded; only the whole write has the 8 MiB cap. Constants at :413,459,463 distinguish 1 MiB encoded frame, 512 KiB raw part, and 8 MiB total. Supervisor grid_output.rs:946-981 implements both part constraints, counting escaped JSON size and cutting at character boundaries; service/grid_stream.rs:786-790 appends every part and sends them in order. The helm gauge's 1 MiB frame admission (client.rs:837-844) therefore admits each encoded part independently. UI grid-model.js:1042-1065 checks 512 KiB per part and 8 MiB across parts, collects text and publishes it only on last; grid-terminal.js:1982-1983 forwards that completed text to onClipboard. The assigned clipboard.rs test starts at this completed-text boundary, so its direct route POST is a valid test of the route cap; it need not itself exercise the separate splitting protocol. rest_harness.rs:829-833 uses the real build_router and middleware, not a cap-bypassing test handler. Suggested bucket: other for the considered cap/test-premise issue. Could-be-highest: no; no security or user-owned-work-loss consequence established, and the priority rules exclude clipboard content itself. Confidence: confirmed source/contract refutation, no runtime observations or reproductions. proposed_drop: source-refuted bound mismatch; 8 MiB is a whole-write bound while 1 MiB is per encoded part, with checked splitting and reassembly. possible_cover: none; supplied interface context was read only for novelty and prohibited coverage sources were not searched. Lead closed to candidate; no missing premise remains for this specific interaction."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g074/findings.jsonl",
+        "id": "l3",
+        "line": 10,
+        "disposition": "excluded",
+        "group": "clipboard-whole-write-versus-grid-part-bound-suspicion",
+        "reason": "Parent explicitly accepted named refuted proposal from claims-048 after inspecting it. Eight MiB limits the whole clipboard write; one MiB limits each encoded part. Source implements splitting and reassembly, so the named transport-cap interaction is refuted. Source-refuted bound mismatch; separate transport-part and completed-write limits are implemented. Checked source/results: [\"f560058da19e02716e6f943883a9508b447aff4e proto/grid.rs:226-236 and :413,459,463 distinguish encoded message, raw part and whole-write limits.\",\"At that hash grid_output.rs:946-981 splits on UTF-8 character boundaries while accounting for escaped JSON size; service/grid_stream.rs:786-791 appends and sends the parts in order.\",\"grid-model.js:1042-1065 checks per-part and cumulative bounds and publishes only on last. client.rs:837-849 admits frames individually, and clipboard.rs:61-80 applies the eight-MiB bound to the completed write.\",\"The direct native-route test addresses that completed-text boundary. This is source evidence, not a claim that the tests were run.\"] Current coverage/results: [\"SPEC.md:3053-3073 requires best-effort clipboard writes and excludes clipboard reads. SPEC_impl.md Grid streams specifies the encoded-frame cap; the protocol format clarifies multipart writes. Best effort alone is not used to excuse a cap defect.\",\"TODO.md Planned is empty; tmux-end-old-terminals.md:119-124 calls for aligning the native cap, not accepting dropped parts. No matching BUGS.md or active TRIAGE_OUTCOMES.md decision.\",\"INDEX.md and matching queue file clipboard-notice-drain-lacks-per-turn-work-bound.md concern a synchronous supervisor notice-drain work bound, a different trigger/root cause. No exact alias or useful extension for this refuted cap suspicion. FILTER.md is not used.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"An eight-MiB program clipboard write could have been lost at the one-MiB grid boundary before reaching the raised native cap. Clipboard content itself is excluded from user-owned-work loss by the priority rules; no other harm was established.\"; null."
+      },
+      "accepted_parent_decision": {
+        "key": "g074/l3",
+        "line": 10,
+        "disposition": "excluded",
+        "group": "clipboard-whole-write-versus-grid-part-bound-suspicion",
+        "bucket": "other",
+        "recording": "refuted",
+        "queue_target_candidate": null,
+        "needs_independent_drop_check": false,
+        "reason": "Parent explicitly accepted named refuted proposal from claims-048 after inspecting it. Eight MiB limits the whole clipboard write; one MiB limits each encoded part. Source implements splitting and reassembly, so the named transport-cap interaction is refuted. Source-refuted bound mismatch; separate transport-part and completed-write limits are implemented. Checked source/results: [\"f560058da19e02716e6f943883a9508b447aff4e proto/grid.rs:226-236 and :413,459,463 distinguish encoded message, raw part and whole-write limits.\",\"At that hash grid_output.rs:946-981 splits on UTF-8 character boundaries while accounting for escaped JSON size; service/grid_stream.rs:786-791 appends and sends the parts in order.\",\"grid-model.js:1042-1065 checks per-part and cumulative bounds and publishes only on last. client.rs:837-849 admits frames individually, and clipboard.rs:61-80 applies the eight-MiB bound to the completed write.\",\"The direct native-route test addresses that completed-text boundary. This is source evidence, not a claim that the tests were run.\"] Current coverage/results: [\"SPEC.md:3053-3073 requires best-effort clipboard writes and excludes clipboard reads. SPEC_impl.md Grid streams specifies the encoded-frame cap; the protocol format clarifies multipart writes. Best effort alone is not used to excuse a cap defect.\",\"TODO.md Planned is empty; tmux-end-old-terminals.md:119-124 calls for aligning the native cap, not accepting dropped parts. No matching BUGS.md or active TRIAGE_OUTCOMES.md decision.\",\"INDEX.md and matching queue file clipboard-notice-drain-lacks-per-turn-work-bound.md concern a synchronous supervisor notice-drain work bound, a different trigger/root cause. No exact alias or useful extension for this refuted cap suspicion. FILTER.md is not used.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"An eight-MiB program clipboard write could have been lost at the one-MiB grid boundary before reaching the raised native cap. Clipboard content itself is excluded from user-owned-work loss by the priority rules; no other harm was established.\"; null."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-048",
+          "key": "g074/l3",
+          "latest_line": 10,
+          "recommendation": "refuted",
+          "bucket": "other",
+          "underlying_key": "clipboard-whole-write-versus-grid-part-bound-suspicion",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "Eight MiB limits the whole clipboard write; one MiB limits each encoded part. Source implements splitting and reassembly, so the named transport-cap interaction is refuted.",
+          "checks": [
+            "f560058da19e02716e6f943883a9508b447aff4e proto/grid.rs:226-236 and :413,459,463 distinguish encoded message, raw part and whole-write limits.",
+            "At that hash grid_output.rs:946-981 splits on UTF-8 character boundaries while accounting for escaped JSON size; service/grid_stream.rs:786-791 appends and sends the parts in order.",
+            "grid-model.js:1042-1065 checks per-part and cumulative bounds and publishes only on last. client.rs:837-849 admits frames individually, and clipboard.rs:61-80 applies the eight-MiB bound to the completed write.",
+            "The direct native-route test addresses that completed-text boundary. This is source evidence, not a claim that the tests were run."
+          ],
+          "coverage_checked": [
+            "SPEC.md:3053-3073 requires best-effort clipboard writes and excludes clipboard reads. SPEC_impl.md Grid streams specifies the encoded-frame cap; the protocol format clarifies multipart writes. Best effort alone is not used to excuse a cap defect.",
+            "TODO.md Planned is empty; tmux-end-old-terminals.md:119-124 calls for aligning the native cap, not accepting dropped parts. No matching BUGS.md or active TRIAGE_OUTCOMES.md decision.",
+            "INDEX.md and matching queue file clipboard-notice-drain-lacks-per-turn-work-bound.md concern a synchronous supervisor notice-drain work bound, a different trigger/root cause. No exact alias or useful extension for this refuted cap suspicion. FILTER.md is not used."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": null,
+          "original_stronger_consequence": "An eight-MiB program clipboard write could have been lost at the one-MiB grid boundary before reaching the raised native cap. Clipboard content itself is excluded from user-owned-work loss by the priority rules; no other harm was established.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Source-refuted bound mismatch; separate transport-part and completed-write limits are implemented."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "clipboard-whole-write-versus-grid-part-bound-suspicion",
+        "destination": null
+      }
+    }
+  ],
+  "replies": [
+    {
+      "turn": 1,
+      "reply": "Initial review complete: all 14 assigned patches, 1,380 lines reviewed.\n\nNo confirmed findings. Recorded candidates `c1`, `l1`, and `l2`; no open leads. `l2` preserves a source-level TCP admission gap without an established shipped trigger for caller assessment.\n\nUpdated `findings.jsonl` and `progress.md`. No reproductions, runtime tests, or checkout changes."
+    },
+    {
+      "turn": 2,
+      "reply": "Revised `l2`: the constructed TCP gap remains real, but the checked identity-less production route is blocked before serving. No explicit per-endpoint retirement requirement was found.\n\nPreserved the potentially highest concern and missing production/cache premise for independent assessment. No new findings.\n\nUnresolved premise: `l2`. No open lead-kind records."
+    },
+    {
+      "turn": 3,
+      "reply": "Discovery pass complete. No new issue found.\n\nChecked clipboard transport/reassembly, the route test’s body-limit coverage, parser callers, unit rendering and reply correlation. New lead `l3` was source-refuted and closed to a candidate.\n\nNew verified findings: none. New unverified findings: none. Open leads: none. Progress updated; no runtime execution."
+    }
+  ],
+  "progress": "Group: g074 (helm-terminal-routing)\nState: initial review complete; awaiting caller's later-turn instructions.\nTurn type/count: initial / 1. Discovery-pass count: 0 (no synthesis or discovery pass performed).\nCoverage: all 14 assigned patch parts, 1,380 lines, delivered through the evidence read command in packets of at most 200 lines. Complete inventory commits field read; excluded metadata and queue/coverage sources not read. Unread assigned scope: none.\n\nDurable record: findings.jsonl has c1 and revisions of l1 and l2 from leads to candidates. No confirmed findings; no open leads. New verified finding IDs this pass: none. New unverified finding IDs this pass: none. Proposed drops: c1 (explicit old-page compatibility acceptance), l1 (systemctl grammar refuted), l2 (no established shipped cache-less retired-session TCP route; exact missing production premise retained for caller review).\n\nInterface assumptions and source checks:\n- 04ffdbb35773cef36e73eb798c005ddbeb9a9de6: exact environment parser and its Podman probe caller; SPEC.md Container sessions and SPEC_impl.md Podman places, creation and images. Source-only comparison to systemd v239/v252/v255 quoting, URLs in l1. Empty assignments remain exact for proxies while ordinary get retains empty-as-absent behavior.\n- 04d85f0c98a9b635709d00b056719a0baa7fd3fc: terminal/file/upload/tunnel routes use the entry/session pair. The helm cache is a negative retirement fence. Supervisor file reads, attachment resolution and uploads independently check the live stored launch. TCP admission checks membership only; l2 preserves the constructed-peer gap and the manager's source limitation on identity-less production premises.\n- 6d610d435dd12bbe8458b1a31b0988d95ff7338c: default raster extensions and final-extension tests agree with the pinned download/opening specification and shared parser; SVG and executable final suffixes remain refused by default.\n- 47f33bbdbd5ff4a6e437e97a800f9083be43096e / 222bf6253bcd168db04bcbb1df20180c88306998: listing seal field is carried without creating authority in the client. Reviewed environment deletion caller's disposable-host recheck, provisioning lock and timeout; reply demultiplexer includes SessionDeletedOrSealed. No GUI handlers changed in assigned parts; read Answers bind to what was drawn.\n- f560058da19e02716e6f943883a9508b447aff4e: changed grid/heartbeat/flow tests preserve their distinguishing oracles; protocol 77 eliminates negotiation by contract. Clipboard body cap follows 8 MiB text with worst-case JSON escaping, remains device-authenticated, and native writes retain their four-permit bound. New test exercises the real route body limit and observes sink delivery. Applied supplied test-authoring checklist to changed tests.\n- 17a3fe858c5511a24b7403af15dd41c93bf69fd7 / 08399d092d20815ced6619c26df2391944ae2b4a: unit render inputs, PATH, escaping expectations and template agree with pinned terminal-substrate/provisioning contracts. KillMode=process and marker scrubbing remain intact; final assigned change updates the old-terminal explanation only.\n\nValidation: source/contract review only, no runtime tests, builds, reproductions or live-install actions. No checkout files changed.\nNext action: caller-owned synthesis/drop assessment in a later turn; do not restart or extend this pass without its instructions.\n\nSynthesis turn 2 complete\nTurn type/count: synthesis / 2 total turns (initial 1, synthesis 1). Discovery-pass count: 0.\nUnread assigned scope: none. No mandatory delivery rereads needed; parent audited delivery and the five original events.\nNew verified/unverified finding IDs this turn: none. Revised ID: l2 (two investigation lead revisions, then a bounded-refutation candidate revision). c1 and l1 unchanged. No parent drop accepted.\n\nl2 checks/results: read complete pinned Rootless Podman sessions and TCP relay contracts. Retirement is globally Delete-only; these sections do not explicitly require independent retirement checks at each supervisor endpoint, and do not explicitly accept cache-less retired TCP calls. The real API-level TCP gap remains distinct from guarded view/attachment paths. Read supervisor identity construction and serve ownership checks, plus all repository handle_connection call sites. Corrected the earlier overly broad reliance on the manager's identity-less/test comment: claimless production construction can hold None identity, but serve refuses it before socket binding; an owning construction mints/reads a durable identity first. Failed cache writes for identity-bearing hosts publish no in-memory listing fallback. Thus the checked ordinary None-identity route is refuted; no producer of unusable retired cache payload was invented. The original potentially highest outside-host service consequence and exact unverified production/cache premise remain in l2 for independent assessment. Latest l2 event is a candidate, not an open uninvestigated lead.\n\nCross-batch checks: at 17a3fe858c5511a24b7403af15dd41c93bf69fd7 and 08399d092d20815ced6619c26df2391944ae2b4a, service/core/host_launch.rs removes FARHELM_TMUX even when an old rendered unit or launch environment supplies it; unit-template changes do not leak that obsolete variable to terminals. At 222bf6253bcd168db04bcbb1df20180c88306998, the listing seal is actionable only for a session-owned machine-deleting host, and manager.status supplies no client once the seal is recorded, preserving the ordinary terminal/file/tunnel refusal boundary. Rechecked the exact parser's consumer uses get_exact for selected proxy names; no new interaction defect found. Wrong guessed file paths in context commands were resolved with git ls-tree/source search; no source evidence is claimed from those failures.\n\nRecording incident: the first attempt to record the final l2 revision failed JSON validation because its detail had literal paragraph newlines. Escaped those newlines, validated JSON, and reran the prescribed record command successfully before any further source analysis. The failed invocation added no event.\n\nValidation: source/contract analysis only. No tests, builds, reproductions, live-install actions or checkout changes. Next action: await caller's later discovery or independent-drop assessment. Unresolved investigated premise: l2's ordinary production/cache producer (retained in candidate detail); open lead-kind records: none.\n\nDiscovery turn 3 started\nTurn type/count: discovery / 3 total turns. Discovery-pass count: 1 (in progress).\nRead all 174 lines of discovery-neighbours.json in two bounded context reads; no named pending synthesis questions supplied. Existing findings/candidate history remains in context. Next: a new assigned-scope search for distinct parser, unit-template, protocol-adapter and changed-test defects, avoiding known candidates and supplied interface findings. Source-only; no runtime tests or reproductions.\n\nDiscovery turn 3 complete\nTurn type/count: discovery / 3 total turns (initial 1, synthesis 1, discovery 1). Discovery-pass count: 1 complete.\nResult: no new verified finding and no new unverified-after-investigation finding. New record ID l3 was logged immediately as a concrete bound-interaction lead, investigated through sender/relay/receiver contracts and source, then closed to a source-refuted candidate. No previously recorded ID was revised. Parent has accepted no drop or lowering.\n\nUseful discovery checks/results:\n- Clipboard cap versus transport: the 8 MiB whole-write bound is distinct from the 512 KiB text-part and 1 MiB encoded-message bounds. Read pinned grid.rs format paragraph and constants, grid_output::clipboard_messages character/escaped-size splitting, grid_stream forwarding, helm gauge admission, UI grid-model reassembly and grid-terminal callback dispatch. A large completed write can reach the route without violating the per-frame bound; l3 holds precise refs. No missing premise remains for this interaction.\n- New clipboard test oracle: rest_harness::router calls the real build_router with middleware and its synthetic authenticated device secret; idle_helm_with_clipboard_sink only injects the observable native sink. The largest-write test therefore exercises the real route body cap rather than bypassing it. Its intended boundary starts after grid-part reassembly.\n- Environment parser: re-read complete decoder and assigned exact-value test, then existing empty/missing/duplicate-name tests and all parser construction call sites. Ordinary get still collapses empty values for existing consumers; the new proxy consumer selects get_exact. No changed caller was shown to depend on the old internal empty-value representation, and no new parser finding arose.\n- Unit rendering/tests: inspected the surviving systemd escaping/template functions and changed bare-program and special-path tests at 17a3fe858c5511a24b7403af15dd41c93bf69fd7. The bare-program test now actually supplies a bare program and asserts no current-directory PATH component; full template expectations still preserve marker scrubbing and KillMode. No new assigned-patch defect found.\n- Protocol adapters: re-read the new list seal projection and deletion request's shared correlation/transport-error path. Added fields are carried without replacing req_id correlation or typed supervisor errors. No distinct adapter defect found. Changed terminal selector/lease tests still compare the exact combined request fields under protocol 77; no duplicate of the supplied g076 timeout-oracle issue was pursued.\n\nInterface novelty: all supplied neighbour records were read first; no named pending synthesis questions existed. Their known retirement, wording, stream-flow and timeout-oracle issues were not re-reported. A guessed UI source path failed and was resolved using git ls-tree to the actual assets paths; no evidence is claimed from the failed read.\n\nOpen lead-kind IDs: none. Existing unresolved investigated premise remains l2's production/cache route in its candidate detail; no changes to that assessment this turn. Unread assigned scope: none. No runtime tests, reproductions, builds, live-install actions or checkout mutations. Next: await caller instructions.\n"
+}

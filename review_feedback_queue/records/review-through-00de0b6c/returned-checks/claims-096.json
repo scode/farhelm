@@ -1,0 +1,537 @@
+[
+  {
+    "key": "g149/l1",
+    "latest_line": 11,
+    "recommendation": "retain-verified",
+    "bucket": "other",
+    "underlying_key": "old-terminal-startup-filesystem-cleanup-outside-deadline",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The cleanup awaits are outside the declared startup deadline. Retain the narrow enforcement discrepancy; ordinary session count is not a demonstrated large-directory trigger, and no measured Update delay is established.",
+    "checks": [
+      "00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db:crates/farhelm-supervisor/src/service/core/old_terminals.rs:160-183,244-250,350-356,423-449: end_server directly awaits remove_server_files, whose directory enumeration and unlink loop have no deadline. spent is accounted only after it returns.",
+      "git diff dbfc69751215dbf15e1d31d5bed73c3754c4ebc4..00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db for old_terminals.rs changes only a specification-heading link; the introduced implementation survives.",
+      "Initial socket-hang suspicion was withdrawn after the reviewer checked pinned nonblocking Tokio/mio behavior. This consultation did not independently reread registry sources; the retained finding concerns filesystem cleanup only."
+    ],
+    "coverage_checked": [
+      {
+        "source": "SPEC.md and SPEC_impl.md",
+        "result": "SPEC_impl.md:2781-2823 declares one 15-second budget. SPEC.md:4658-4675 explicitly accepts host-local filesystem errors/hangs, so that subset cannot establish an uncovered runtime bug. It does not expressly accept healthy directory enumeration exceeding the declared budget."
+      },
+      {
+        "source": "TODO.md:25-26",
+        "result": "Planned bucket is empty. The phase-3 removal idea at 225-232 is in Mid term, not Planned, and does not cover these findings."
+      },
+      {
+        "source": "plans/queue",
+        "result": "Searched named behavior and symbols. No matching unlanded corrective plan. Relevant tmux-end-old-terminals, tmux-drop-from-docs and environment-agent-operations plans are already landed per plans/REPORTS.md:28-32, despite retained queue files."
+      },
+      {
+        "source": "BUGS.md",
+        "result": "Read fully; sole accepted ssh-output-pipe hang is unrelated."
+      },
+      {
+        "source": "review_feedback_queue/INDEX.md and matching files",
+        "result": "Searched actual mechanisms, symbols and consequences. No exact existing item or useful same-root extension found. tab-reap-deadline-excludes-listing-request.md was read; its test polling helper is distinct from production startup cleanup."
+      },
+      {
+        "source": "TRIAGE_OUTCOMES.md",
+        "result": "Searched actual mechanisms and consequences; no matching active decision. Archive not read."
+      },
+      {
+        "source": "review_feedback_queue/FILTER.md",
+        "result": "Read fully. No whole-boundary filter match used."
+      }
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": "A supported healthy state-directory workload that materially exceeds the startup budget is unestablished. No typical delay, filesystem completion bound, or session-count scaling is claimed.",
+    "original_stronger_consequence": "Original suspicion: an unresponsive old tmux server could hang connect and delay Update; the socket route was source-refuted. Latest consequence is a structural filesystem-deadline gap with conditional host-return delay.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Record only the missing enforcement of the explicit finite startup budget, preserving the healthy-filesystem acceptance and absent runtime premise. Do not assert a reproduced hang or count ordinary sessions as root-directory debris."
+  },
+  {
+    "key": "g149/c1",
+    "latest_line": 15,
+    "recommendation": "covered",
+    "bucket": "high",
+    "underlying_key": "old-terminal-retirement-startup-continues-after-failed-kill",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "Both specifications expressly accept startup continuing after failed old-terminal termination, including the possibility of Restart beside a surviving agent. Any drop or consequence lowering needs a separate independent check.",
+    "checks": [
+      "00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db:crates/farhelm-supervisor/src/service/core/old_terminals.rs:251-284,300-356: termination/sweep failures log and do not veto conversion.",
+      "00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db:crates/farhelm-supervisor/src/service/core.rs:12417-12442: Restart performs a fresh AgentOnly sweep using the recorded scope and ScopeKillFailure::Refuse before relaunch. Failed startup cleanup alone therefore does not establish an ordinary duplicate execution.",
+      "old_terminals.rs survives from dbfc69751215dbf15e1d31d5bed73c3754c4ebc4 to reviewed tip except a documentation link."
+    ],
+    "coverage_checked": [
+      {
+        "source": "SPEC.md and SPEC_impl.md",
+        "result": "Exact startup-failure policy is accepted at SPEC.md:2998-3011 and SPEC_impl.md:2815-2823. This does not accept a later Delete acting beyond its confirmation, stale PID ownership, or wrong-target cleanup."
+      },
+      {
+        "source": "TODO.md:25-26",
+        "result": "Planned bucket is empty. The phase-3 removal idea at 225-232 is in Mid term, not Planned, and does not cover these findings."
+      },
+      {
+        "source": "plans/queue",
+        "result": "Searched named behavior and symbols. No matching unlanded corrective plan. Relevant tmux-end-old-terminals, tmux-drop-from-docs and environment-agent-operations plans are already landed per plans/REPORTS.md:28-32, despite retained queue files."
+      },
+      {
+        "source": "BUGS.md",
+        "result": "Read fully; sole accepted ssh-output-pipe hang is unrelated."
+      },
+      {
+        "source": "review_feedback_queue/INDEX.md and matching files",
+        "result": "Searched actual mechanisms, symbols and consequences. No exact existing item or useful same-root extension found. tab-reap-deadline-excludes-listing-request.md was read; its test polling helper is distinct from production startup cleanup."
+      },
+      {
+        "source": "TRIAGE_OUTCOMES.md",
+        "result": "Searched actual mechanisms and consequences; no matching active decision. Archive not read."
+      },
+      {
+        "source": "review_feedback_queue/FILTER.md",
+        "result": "Read fully. No whole-boundary filter match used."
+      }
+    ],
+    "exact_cover_quotes": [
+      {
+        "source": "SPEC.md:3008-3010",
+        "quote": "A failure to end the server or to stop what ran there is logged and never stops the supervisor from starting; those sessions are treated as ended all the same, accepting that a Restart could then start a second agent beside one still running."
+      },
+      {
+        "source": "SPEC_impl.md:2819-2821",
+        "quote": "A failure anywhere is logged and never fatal (the maintainer chose to start anyway and treat old sessions as ended, accepting that a Restart could then start a second agent beside one still running)"
+      }
+    ],
+    "missing_premise": "Ordinary duplicate execution still requires survivors to evade the fresh refusing Restart sweep; subsequent overwrite/loss of user work is not established.",
+    "original_stronger_consequence": "Duplicate active agents could overwrite user-owned work. Later synthesis found the fresh Restart sweep and made that route conditional; this is not an accepted lowering.",
+    "needs_independent_drop_check": true,
+    "proposed_basis": "Propose coverage only for startup's documented continuation and residual agents. Send the original possible work-loss consequence and refinement through the independent drop/lowering check. Supplied histories mention g109/g112 overlap but exact keys/claims are unavailable here, so no external alias is asserted."
+  },
+  {
+    "key": "g149/l2",
+    "latest_line": 14,
+    "recommendation": "retain-verified",
+    "bucket": "other",
+    "underlying_key": "migrated-seal-constraint-test-accepts-duplicate-metadata-key",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The migrated-schema assertion can remain green without the seal CHECK because its id=0 INSERT still violates the pre-existing primary key. This is a test oracle defect; current production constraints are correct.",
+    "checks": [
+      "47f33bbdbd5ff4a6e437e97a800f9083be43096e:crates/farhelm-supervisor/src/store.rs:7888,7937-7940 adds the invalid-seal INSERT to both migrated/fresh branches and accepts any error.",
+      "00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db:crates/farhelm-supervisor/src/store.rs:2133-2140 unconditionally initializes metadata id=0 even with no sessions; 7893-7896 plants and migrates the empty v1 fixture; 7942-7945 retains the generic expect_err.",
+      "Tip store.rs:3250-3264 opens via schema application and reservation retention; 6494-6514 modifies reservations only. A fresh metadata table need not contain id=0. columns_of cannot inspect CHECKs and meta_ddl.contains(\"CHECK\") accepts the separate id CHECK.",
+      "SQLite's first error on today's correct schema need not be PRIMARY KEY. The counterfactual missing seal CHECK still leaves a competing failure, which is sufficient to establish the test gap without execution."
+    ],
+    "coverage_checked": [
+      {
+        "source": "SPEC.md and SPEC_impl.md",
+        "result": "Environment seal storage is required by SPEC_impl.md:6127-6135; neither specification accepts a test that cannot detect loss of its migrated CHECK. No matching coverage item was found."
+      },
+      {
+        "source": "TODO.md:25-26",
+        "result": "Planned bucket is empty. The phase-3 removal idea at 225-232 is in Mid term, not Planned, and does not cover these findings."
+      },
+      {
+        "source": "plans/queue",
+        "result": "Searched named behavior and symbols. No matching unlanded corrective plan. Relevant tmux-end-old-terminals, tmux-drop-from-docs and environment-agent-operations plans are already landed per plans/REPORTS.md:28-32, despite retained queue files."
+      },
+      {
+        "source": "BUGS.md",
+        "result": "Read fully; sole accepted ssh-output-pipe hang is unrelated."
+      },
+      {
+        "source": "review_feedback_queue/INDEX.md and matching files",
+        "result": "Searched actual mechanisms, symbols and consequences. No exact existing item or useful same-root extension found. tab-reap-deadline-excludes-listing-request.md was read; its test polling helper is distinct from production startup cleanup."
+      },
+      {
+        "source": "TRIAGE_OUTCOMES.md",
+        "result": "Searched actual mechanisms and consequences; no matching active decision. Archive not read."
+      },
+      {
+        "source": "review_feedback_queue/FILTER.md",
+        "result": "Read fully. No whole-boundary filter match used."
+      }
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": "No production invalid-seal acceptance, corruption, security failure or user-work loss is claimed; no mutation experiment was run.",
+    "original_stronger_consequence": "The new migration test may miss a missing seal-value constraint on upgraded installations. This remains the same narrow test consequence.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Retain as other. Exercise an UPDATE of a known valid metadata row, or remove the row before the invalid INSERT, and distinguish the relevant CHECK failure."
+  },
+  {
+    "key": "g149/c2",
+    "latest_line": 16,
+    "recommendation": "covered",
+    "bucket": "high",
+    "underlying_key": "old-terminal-startup-cannot-discover-all-legacy-tab-identities",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The specifications explicitly leave unattributable old tab processes for session Delete. This covers startup discovery limitations only and requires an independent check before dropping the possible work-loss concern.",
+    "checks": [
+      "00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db:crates/farhelm-supervisor/src/service/core/old_terminals.rs:321-328 builds sessions from converted agents and tab-marked snapshot panes; 369-402 discovers scope-derived tab IDs only for those sessions and excludes host-record tabs.",
+      "Tip old_terminals.rs:353-356 bounds the sweep and continues after timeout. No pane inventory plus an already-ended old agent supplies no additional session/tab ID through this startup path.",
+      "The full diff since dbfc69751215dbf15e1d31d5bed73c3754c4ebc4 changes only the module's spec link; residual discovery policy persists."
+    ],
+    "coverage_checked": [
+      {
+        "source": "SPEC.md and SPEC_impl.md",
+        "result": "SPEC.md:3004-3008 and SPEC_impl.md:2805-2816 accept precisely these undiscoverable old-tab survivors pending Delete. No acceptance of later false Delete success or destruction beyond consent follows from that text."
+      },
+      {
+        "source": "TODO.md:25-26",
+        "result": "Planned bucket is empty. The phase-3 removal idea at 225-232 is in Mid term, not Planned, and does not cover these findings."
+      },
+      {
+        "source": "plans/queue",
+        "result": "Searched named behavior and symbols. No matching unlanded corrective plan. Relevant tmux-end-old-terminals, tmux-drop-from-docs and environment-agent-operations plans are already landed per plans/REPORTS.md:28-32, despite retained queue files."
+      },
+      {
+        "source": "BUGS.md",
+        "result": "Read fully; sole accepted ssh-output-pipe hang is unrelated."
+      },
+      {
+        "source": "review_feedback_queue/INDEX.md and matching files",
+        "result": "Searched actual mechanisms, symbols and consequences. No exact existing item or useful same-root extension found. tab-reap-deadline-excludes-listing-request.md was read; its test polling helper is distinct from production startup cleanup."
+      },
+      {
+        "source": "TRIAGE_OUTCOMES.md",
+        "result": "Searched actual mechanisms and consequences; no matching active decision. Archive not read."
+      },
+      {
+        "source": "review_feedback_queue/FILTER.md",
+        "result": "Read fully. No whole-boundary filter match used."
+      }
+    ],
+    "exact_cover_quotes": [
+      {
+        "source": "SPEC_impl.md:2810-2814",
+        "quote": "what cannot be attributed to an old tab is left for the session's Delete, which sweeps the whole session. Once the server is gone, an old tab is found only through the scope units of a session whose agent this start converted, so a scoped tab of any other session (its agent already ended, or in a terminal host), an unscoped tab, and one whose shell's environment macOS hides wait for that Delete."
+      },
+      {
+        "source": "SPEC.md:3005-3007",
+        "quote": "for a tab wherever its id can be found; what cannot be attributed to an old tab is left for the session's Delete, which stops everything of the session."
+      }
+    ],
+    "missing_premise": "A surviving process subsequently overwriting user files is not established. The established residual process can persist until Delete; the startup limitation is explicitly accepted.",
+    "original_stronger_consequence": "Unwanted old-tab work can persist after upgrade and could later overwrite user-owned files. Do not replace that conditional stronger concern with a rarity dismissal.",
+    "needs_independent_drop_check": true,
+    "proposed_basis": "Propose exact startup-discovery coverage, subject to independent drop check. Do not deduplicate separate later Delete-consent or stale-PID wrong-target claims mentioned in this history; they have different defects and are outside this named batch."
+  },
+  {
+    "key": "g149/l3",
+    "latest_line": 18,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "sealed-create-refusal-reservation-codec-asymmetry",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The encoder/decoder asymmetry is real, but the suspected shipped unreadable-reservation route is refuted: the seal gate returns before refused-create persistence. Retain that distinction in the parent's disposition.",
+    "checks": [
+      "00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db:crates/farhelm-supervisor/src/store.rs:1069-1092 encodes Sealed as sealed, explicitly says it is never written today, and lacks the inverse decoder arm.",
+      "Tip service/core.rs:8730-8765 calls refuse_when_sealed before validation/persistence for unkeyed and keyed launches; a keyed historical Answer can return before that gate. 8799-8803 records validation refusals only after the seal gate.",
+      "47f33bbdbd5ff4a6e437e97a800f9083be43096e adds the defensive encoding, not a current persisted sealed-create failure."
+    ],
+    "coverage_checked": [
+      {
+        "source": "SPEC.md and SPEC_impl.md",
+        "result": "SPEC_impl.md:6127-6135 explicitly says a sealed refusal records nothing and describes the same create gate. No matching queue, active outcome or unlanded corrective plan found."
+      },
+      {
+        "source": "TODO.md:25-26",
+        "result": "Planned bucket is empty. The phase-3 removal idea at 225-232 is in Mid term, not Planned, and does not cover these findings."
+      },
+      {
+        "source": "plans/queue",
+        "result": "Searched named behavior and symbols. No matching unlanded corrective plan. Relevant tmux-end-old-terminals, tmux-drop-from-docs and environment-agent-operations plans are already landed per plans/REPORTS.md:28-32, despite retained queue files."
+      },
+      {
+        "source": "BUGS.md",
+        "result": "Read fully; sole accepted ssh-output-pipe hang is unrelated."
+      },
+      {
+        "source": "review_feedback_queue/INDEX.md and matching files",
+        "result": "Searched actual mechanisms, symbols and consequences. No exact existing item or useful same-root extension found. tab-reap-deadline-excludes-listing-request.md was read; its test polling helper is distinct from production startup cleanup."
+      },
+      {
+        "source": "TRIAGE_OUTCOMES.md",
+        "result": "Searched actual mechanisms and consequences; no matching active decision. Archive not read."
+      },
+      {
+        "source": "review_feedback_queue/FILTER.md",
+        "result": "Read fully. No whole-boundary filter match used."
+      }
+    ],
+    "exact_cover_quotes": [
+      {
+        "source": "SPEC_impl.md:6127-6129",
+        "quote": "a sealed refusal records nothing, so `create_unaccepted`, which needs a durable refusal record, stays false"
+      }
+    ],
+    "missing_premise": "A shipped caller writing Sealed through failed-reservation persistence was not found. A future/direct generic store caller could expose the asymmetry; that is not the original shipped route.",
+    "original_stronger_consequence": "A sealed supervisor might persist an unreadable create-retry reservation and lose retry behavior. Source checks withdraw that current shipped consequence, while preserving the private inverse-contract inconsistency.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Propose refutation of the shipped create/replay failure only. Do not state the decoder has a sealed arm or that its inverse docstring is literally correct. The parent may retain a narrow internal consistency/documentation cleanup."
+  },
+  {
+    "key": "g150/c1",
+    "latest_line": 4,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "old-terminal-warning-resolver-removal-superseded-by-global-startup-resolution",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The removed resolver's retired sampling caller is superseded by an exact-kind global startup update. It does not erase the newer ended notices or unrelated notification kinds.",
+    "checks": [
+      "1ed482dde220452e424973faf38a5e1318986333:crates/farhelm-supervisor/src/store.rs:5773-5795 updates only WHERE kind = ?1 AND resolved_at IS NULL; service/core/old_terminals.rs:525-547 calls it with OldTerminal only.",
+      "Same revision service/notifications.rs:117-129 excludes both old-terminal kinds from Resume resolution; 151-164 assigns distinct old_terminal and old_terminal_ended strings.",
+      "Same revision service/core.rs:7065-7090 calls record_ended even with no converted rows. old_terminals.rs logs notice-write/update failures and continues. Thus an unsuccessful global update may persist until a later startup; a committed conversion followed by a failed notice insertion is not necessarily retried."
+    ],
+    "coverage_checked": [
+      {
+        "source": "SPEC.md and SPEC_impl.md",
+        "result": "SPEC.md:2804-2814 and SPEC_impl.md:5682-5689 require global old-warning resolution and persistent ended notices. SPEC_impl.md:2815-2820 explicitly accepts the short post-conversion notice window and nonfatal failures."
+      },
+      {
+        "source": "TODO.md:25-26",
+        "result": "Planned bucket is empty. The phase-3 removal idea at 225-232 is in Mid term, not Planned, and does not cover these findings."
+      },
+      {
+        "source": "plans/queue",
+        "result": "Searched named behavior and symbols. No matching unlanded corrective plan. Relevant tmux-end-old-terminals, tmux-drop-from-docs and environment-agent-operations plans are already landed per plans/REPORTS.md:28-32, despite retained queue files."
+      },
+      {
+        "source": "BUGS.md",
+        "result": "Read fully; sole accepted ssh-output-pipe hang is unrelated."
+      },
+      {
+        "source": "review_feedback_queue/INDEX.md and matching files",
+        "result": "Searched actual mechanisms, symbols and consequences. No exact existing item or useful same-root extension found. tab-reap-deadline-excludes-listing-request.md was read; its test polling helper is distinct from production startup cleanup."
+      },
+      {
+        "source": "TRIAGE_OUTCOMES.md",
+        "result": "Searched actual mechanisms and consequences; no matching active decision. Archive not read."
+      },
+      {
+        "source": "review_feedback_queue/FILTER.md",
+        "result": "Read fully. No whole-boundary filter match used."
+      }
+    ],
+    "exact_cover_quotes": [
+      {
+        "source": "SPEC_impl.md:5684-5688",
+        "quote": "every supervisor start now resolves every unresolved row of it in one update fenced by neither session, generation nor conversation"
+      },
+      {
+        "source": "SPEC.md:2812-2814",
+        "quote": "Nothing resolves the notice: it stays unresolved, and unread until the user reads it, across later supervisor starts, until it is cleared."
+      }
+    ],
+    "missing_premise": null,
+    "original_stronger_consequence": "Obsolete warnings might survive or newer ended notices/unrelated problems might be accidentally resolved. Exact-key source checks refute normal-path misresolution; accepted write-failure caveats remain.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Propose source refutation of a regression caused by removing the per-session resolver, preserving the documented failure windows. Parent-reported g129/c3 overlap was not supplied as a named record, so no exact external alias is asserted."
+  },
+  {
+    "key": "g150/c2",
+    "latest_line": 2,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "terminal-host-signal-exit-code-documentation",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The changed documentation correctly describes the adapter: signal termination has no integer exit code.",
+    "checks": [
+      "1ed482dde220452e424973faf38a5e1318986333:crates/farhelm-supervisor/src/store.rs:190-193 says None covers signal death or no surviving terminal.",
+      "Same revision crates/farhelm-supervisor/src/hosts/terminal.rs:854-889 documents signal deaths and maps ChildExit::Code(code) to Some(code), ChildExit::Signal(_) to None.",
+      "store.rs diff from 1ed482dde220452e424973faf38a5e1318986333 to reviewed tip touches only two unrelated comments."
+    ],
+    "coverage_checked": [
+      {
+        "source": "SPEC.md and SPEC_impl.md",
+        "result": "SPEC.md:2664-2675 requires known exit codes or explicit unknown, never guesses. No governing specification contradicts the adapter's signal mapping, and no matching coverage item was found."
+      },
+      {
+        "source": "TODO.md:25-26",
+        "result": "Planned bucket is empty. The phase-3 removal idea at 225-232 is in Mid term, not Planned, and does not cover these findings."
+      },
+      {
+        "source": "plans/queue",
+        "result": "Searched named behavior and symbols. No matching unlanded corrective plan. Relevant tmux-end-old-terminals, tmux-drop-from-docs and environment-agent-operations plans are already landed per plans/REPORTS.md:28-32, despite retained queue files."
+      },
+      {
+        "source": "BUGS.md",
+        "result": "Read fully; sole accepted ssh-output-pipe hang is unrelated."
+      },
+      {
+        "source": "review_feedback_queue/INDEX.md and matching files",
+        "result": "Searched actual mechanisms, symbols and consequences. No exact existing item or useful same-root extension found. tab-reap-deadline-excludes-listing-request.md was read; its test polling helper is distinct from production startup cleanup."
+      },
+      {
+        "source": "TRIAGE_OUTCOMES.md",
+        "result": "Searched actual mechanisms and consequences; no matching active decision. Archive not read."
+      },
+      {
+        "source": "review_feedback_queue/FILTER.md",
+        "result": "Read fully. No whole-boundary filter match used."
+      }
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": null,
+    "original_stronger_consequence": "Suspected documentation mismatch: signal deaths might be synthesized as 128+signal while the store comment says None. Source directly refutes that premise.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Propose source refutation of this wording defect only; no independent audit of terminal-host exit handling or runtime reproduction was performed."
+  },
+  {
+    "key": "g150/c3",
+    "latest_line": 5,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "pre-host-launch-provenance-and-hook-write-ordering",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The actual host launch awaits preparation, including provenance and hook-policy write attempts, before starting the host. The suspected ordering race is not present.",
+    "checks": [
+      "1ed482dde220452e424973faf38a5e1318986333:crates/farhelm-supervisor/src/service/core/host_launch.rs:451-473 awaits prepare_launch and propagates failure; start_host appears later at 537.",
+      "Same revision service/core.rs:14548-14600 awaits record_launch_provenance and record_launch_hooked before returning PreparedLaunch; vendor/omp.rs:44-56 awaits the provenance store write.",
+      "Write failures remain best effort and log; the ordering does not guarantee successful durable recording under a failed database call. The changed store comments at 1443,1484,5610-5623 concern that ordering."
+    ],
+    "coverage_checked": [
+      {
+        "source": "SPEC.md and SPEC_impl.md",
+        "result": "SPEC_impl.md:4456-4465 explicitly places OMP provenance pre-spawn after spec publication and before any terminal-host child. No specification accepts a normal-path reverse ordering, and source does not have it. No matching queue item found."
+      },
+      {
+        "source": "TODO.md:25-26",
+        "result": "Planned bucket is empty. The phase-3 removal idea at 225-232 is in Mid term, not Planned, and does not cover these findings."
+      },
+      {
+        "source": "plans/queue",
+        "result": "Searched named behavior and symbols. No matching unlanded corrective plan. Relevant tmux-end-old-terminals, tmux-drop-from-docs and environment-agent-operations plans are already landed per plans/REPORTS.md:28-32, despite retained queue files."
+      },
+      {
+        "source": "BUGS.md",
+        "result": "Read fully; sole accepted ssh-output-pipe hang is unrelated."
+      },
+      {
+        "source": "review_feedback_queue/INDEX.md and matching files",
+        "result": "Searched actual mechanisms, symbols and consequences. No exact existing item or useful same-root extension found. tab-reap-deadline-excludes-listing-request.md was read; its test polling helper is distinct from production startup cleanup."
+      },
+      {
+        "source": "TRIAGE_OUTCOMES.md",
+        "result": "Searched actual mechanisms and consequences; no matching active decision. Archive not read."
+      },
+      {
+        "source": "review_feedback_queue/FILTER.md",
+        "result": "Read fully. No whole-boundary filter match used."
+      }
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": "No host-start-before-write-attempt route or lost conversation was demonstrated. Best-effort write failure is a separate, expressly documented limitation.",
+    "original_stronger_consequence": "An early conversation report might outrun its launch metadata, potentially losing capture. The alleged ordering premise is source-refuted; no runtime loss was observed.",
+    "needs_independent_drop_check": true,
+    "proposed_basis": "Propose source refutation of the assigned comment-ordering concern. Because its initial report/capture concern can touch user conversation work, include this refutation in the parent's independent drop register rather than accepting a silent consequence lowering."
+  },
+  {
+    "key": "g150/l1",
+    "latest_line": 8,
+    "recommendation": "retain-verified",
+    "bucket": "other",
+    "underlying_key": "outcome-backfill-comment-falsely-promises-live-probe-after-legacy-retirement",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The migration rationale promises live-terminal reconciliation for rows that the current reload deliberately never probes. Correct retirement behavior does not make that source comment accurate.",
+    "checks": [
+      "1ed482dde220452e424973faf38a5e1318986333:crates/farhelm-supervisor/src/store.rs:1824-1853 and tip same lines backfill all v1 outcomes to launching and claim the first reload reconciles against each live terminal.",
+      "00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db:store.rs:2493-2508 gives all pre-32 rows terminal_kind DEFAULT tmux, so this backfill's rows are legacy-kind rows.",
+      "1ed482dde220452e424973faf38a5e1318986333:service/core.rs:6675-6679 maps Tmux to None without lookup; 6805-6822 applies TerminalEnded and continues before host reconciliation.",
+      "Exclusive base 6e423e30068b62c6cfa276c6d720ee35bb70387a:store.rs:1795-1797 described live tmux probes and service/core.rs:7182-7225 actually performed them. In-range retirement dbfc69751215dbf15e1d31d5bed73c3754c4ebc4 removed those lookups; the assigned 1ed482dd rewrite preserves the misleading claim. Its later tip diff changes only two unrelated comments."
+    ],
+    "coverage_checked": [
+      {
+        "source": "SPEC.md and SPEC_impl.md",
+        "result": "SPEC_impl.md:2798-2804 accurately specifies legacy no-lookup conversion; SPEC.md:2998-3011 specifies retirement. Neither accepts false migration rationale. tmux-drop-from-docs plan's broad comment sweep is already landed per plans/REPORTS.md:32, so it is not unlanded coverage."
+      },
+      {
+        "source": "TODO.md:25-26",
+        "result": "Planned bucket is empty. The phase-3 removal idea at 225-232 is in Mid term, not Planned, and does not cover these findings."
+      },
+      {
+        "source": "plans/queue",
+        "result": "Searched named behavior and symbols. No matching unlanded corrective plan. Relevant tmux-end-old-terminals, tmux-drop-from-docs and environment-agent-operations plans are already landed per plans/REPORTS.md:28-32, despite retained queue files."
+      },
+      {
+        "source": "BUGS.md",
+        "result": "Read fully; sole accepted ssh-output-pipe hang is unrelated."
+      },
+      {
+        "source": "review_feedback_queue/INDEX.md and matching files",
+        "result": "Searched actual mechanisms, symbols and consequences. No exact existing item or useful same-root extension found. tab-reap-deadline-excludes-listing-request.md was read; its test polling helper is distinct from production startup cleanup."
+      },
+      {
+        "source": "TRIAGE_OUTCOMES.md",
+        "result": "Searched actual mechanisms and consequences; no matching active decision. Archive not read."
+      },
+      {
+        "source": "review_feedback_queue/FILTER.md",
+        "result": "Read fully. No whole-boundary filter match used."
+      }
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": null,
+    "original_stronger_consequence": "Misleading migration invariant/rationale for maintainers; no runtime defect, migration-default change, or security/data-loss route was claimed.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Retain as other source-documentation correctness. Explain conservative historical backfill plus current terminal retirement; do not change the default or retirement behavior."
+  },
+  {
+    "key": "g150/l2",
+    "latest_line": 10,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "retired-raw-session-existence-helper-not-required-by-host-delete",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "Removing tmux discovery's raw existence calls does not establish a new malformed-row Delete failure. Host teardown uses the already-held entry and session identity without re-decoding the database row; absence from the in-memory map already blocked Delete before the range.",
+    "checks": [
+      "1ed482dde220452e424973faf38a5e1318986333:store.rs:4790-4815 retains raw EXISTS; git grep in that revision finds only its definition.",
+      "Same revision service/teardown.rs:320-369 obtains the held child's root and session_hosts(session_id, held runtime, tabs, budget); service/session_hosts.rs:225-241 accepts identity/runtime information without decoding a StoredSession.",
+      "Same revision service/handlers.rs:1241-1252 requires an in-memory entry. Exclusive base 6e423e30068b62c6cfa276c6d720ee35bb70387a:service/handlers.rs:1301-1312 has the same lookup/NotFound gate.",
+      "Same revision store.rs:6376-6391 propagates row decode failure in load_all, so this check establishes no general corrupt-database recovery guarantee. The old helper comment's broad recovery rationale predates this patch; its changed wording switches tmux discovery to terminal hosts."
+    ],
+    "coverage_checked": [
+      {
+        "source": "SPEC.md and SPEC_impl.md",
+        "result": "SPEC_impl.md:2357-2402 addresses safe host teardown and refusal for unreadable host records, rather than a new arbitrary corrupted-session recovery promise. No matching current queue item, Planned task, active outcome or unlanded corrective plan was found."
+      },
+      {
+        "source": "TODO.md:25-26",
+        "result": "Planned bucket is empty. The phase-3 removal idea at 225-232 is in Mid term, not Planned, and does not cover these findings."
+      },
+      {
+        "source": "plans/queue",
+        "result": "Searched named behavior and symbols. No matching unlanded corrective plan. Relevant tmux-end-old-terminals, tmux-drop-from-docs and environment-agent-operations plans are already landed per plans/REPORTS.md:28-32, despite retained queue files."
+      },
+      {
+        "source": "BUGS.md",
+        "result": "Read fully; sole accepted ssh-output-pipe hang is unrelated."
+      },
+      {
+        "source": "review_feedback_queue/INDEX.md and matching files",
+        "result": "Searched actual mechanisms, symbols and consequences. No exact existing item or useful same-root extension found. tab-reap-deadline-excludes-listing-request.md was read; its test polling helper is distinct from production startup cleanup."
+      },
+      {
+        "source": "TRIAGE_OUTCOMES.md",
+        "result": "Searched actual mechanisms and consequences; no matching active decision. Archive not read."
+      },
+      {
+        "source": "review_feedback_queue/FILTER.md",
+        "result": "Read fully. No whole-boundary filter match used."
+      }
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": "No in-range route was shown where deleting an already-loaded session newly decodes its damaged outcome/template. Missing-map Delete failure predates the exclusive base.",
+    "original_stronger_consequence": "A malformed session could become undeletable and retain running terminal hosts. The latest record withdraws this as a new regression, without claiming all malformed databases are recoverable.",
+    "needs_independent_drop_check": true,
+    "proposed_basis": "Propose source refutation of the new runtime regression and out-of-range attribution for the missing-map variant. Because the original concern involves retained user processes and cleanup authority, obtain the independent drop check. Do not claim the unused helper is Delete's current discovery mechanism."
+  }
+]

@@ -1,0 +1,65 @@
+[
+  {
+    "key": "g078/c3",
+    "latest_line": 9,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "environment-delete-zero-remaining-kept-notice",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The zero-count formatting branch exists, but the inspected shipped producer supplies a positive count only. The claimed misleading zero-count completion has no established production route. This agrees with the latest proposed refutation, narrowly; no runtime observation was made.",
+    "checks": [
+      "At 2ef10815f12ed719ab6c51c6e3ac6fcd3f8bc1fa, crates/farhelm-ui/src/environment_ui.rs:194-203 accepts zero defensively; git grep identifies list/view.rs:981-990 as the only non-test caller. It requires Session scope and Some(environment_remaining).",
+      "At that revision, crates/farhelm-helm/src/sessions/sandbox.rs:241-261 supplies Some(remaining) only for SealOutcome::Deleted; NotFound and Sealed return the count-less default. service/handlers.rs:1515-1545 constructs Deleted only from SealCount::Others. store.rs:5965-5985 returns Others only for SQL COUNT(*) > 0; zero seals instead. Conversion saturates oversized positive counts rather than wrapping to zero.",
+      "At that revision, list/view.rs:523-540,592-612,2473-2476,3004-3012 retires a same-host count on count-less success/Gone and retires it on an accepted Hosts read showing deletion/absence. Pending/failed reads do not retire it; another host's result does not prove this host's membership.",
+      "At review tip 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db, environment_ui.rs:194-203 is unchanged and store.rs:5970-5990 retains the positive-only Others branch. The reviewed introducing commit is within the pinned range (both ancestry checks exited zero). No runtime tests or reproductions ran."
+    ],
+    "coverage_checked": [
+      "Current SPEC.md Sandbox sessions, including :1509-1547, and SPEC_impl.md Environment ownership and refusal / Environment Delete and the seal (:6093-6150), require the supervisor's count and final-session seal. They do not accept a reachable zero-count kept result.",
+      "SPEC.md:1528-1529 explicitly accepts the separate transient positive-count result when two windows delete the last two sessions. This covers only that historical expansion, not zero-count reachability or the distinct c2 retained-warning wording issue.",
+      "TODO.md Planned (:25-26) is empty. plans/queue/INDEX.md contains no unlanded entries. Historical environment-agent-operations.md:492-560 describes the already landed count/seal behavior and is not an unlanded fix covering a remaining defect.",
+      "BUGS.md contains only the local ssh-helper output-pipe hang, unrelated to this claim. Searches of current INDEX.md, queue Markdown and active TRIAGE_OUTCOMES.md for zero/remaining/stays/environment-delete warning terms found no exact trigger/consequence/scope match. No archive was read.",
+      "FILTER.md read in full. No filter is needed for the source refutation. The rare-diagnostic filter is not asserted as a blanket acceptance of an arbitrary malformed peer or future caller."
+    ],
+    "exact_cover_quotes": [
+      {
+        "source": "SPEC.md:1528-1529 at recording-time main 24bc058066fd57848e788b465719b0e6da2f98f7",
+        "quote": "Two windows deleting a sandbox's last two sessions at once can briefly show \"the sandbox stays\" in one window just before the other window's Delete seals it; the list then shows the truth.",
+        "scope": "Only the separate concurrent positive-count snapshot; not coverage of a reachable zero-count result."
+      }
+    ],
+    "missing_premise": "A shipped producer of Deleted { remaining: 0 }, or another real caller supplying zero. No backend retention/destruction error or loss-of-work route was established. Hypothetical malformed peer replies and future callers remain outside the narrow refutation.",
+    "original_stronger_consequence": "The original candidate considered misleading completion text implying an empty environment had been retained contrary to the last-session rule. Every history entry classified this as informational and stated no established security or user-work-loss route. Later entries separately considered briefly stale positive counts and preserved c2 as distinct.",
+    "needs_independent_drop_check": true,
+    "proposed_basis": "Propose source refutation only for production reachability of the zero-count stays notice. Keep the whole history and caveats in the parent's disposition. Flag conservatively for independent checking because the discussion concerns the result of deletion of user-owned work; this consultation authorizes no drop."
+  },
+  {
+    "key": "g078/c4",
+    "latest_line": 10,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "environment-delete-row-warning-ellipsis-clipping",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "Source refutes the particular allegation that the row's title ellipsis/shrink rules truncate the longer environment consequence. The consequence has its own nonshrinking element within a vertically scrollable panel. This does not establish arbitrary viewport or native geometry safety.",
+    "checks": [
+      "At 2ef10815f12ed719ab6c51c6e3ac6fcd3f8bc1fa, environment_ui.rs:164-170 supplies normal breakable warning prose naming all sessions/processes/files/checkouts/unpushed changes and sandbox snapshots, including unlisted sessions.",
+      "At that revision, crates/farhelm-ui/src/list/row.rs:2462-2485 renders the consequence separately before PeerTitle.confirm-title. assets/app.css:3442-3457 gives confirm-consequence flex-shrink:0 and confines overflow:hidden/text-overflow:ellipsis/white-space:nowrap to confirm-title. The menu is a column (:3009-3010), with gap/padding but no truncation added by .menu-prompt (:3168-3171).",
+      "At that revision, app.css:2988-3027 uses border-box sizing, a viewport-relative maximum height and overflow-y:auto; the flyout override :3093-3100 preserves overflow-y:auto and inherited maximum height. These are source facts, not a measured assertion that every possible box is reachable.",
+      "Header context is app.css:2278-2318, not list/view.rs:2278-2318: the header wraps and gives its consequence a full line with normal whitespace. session_view.rs:2763-2775 renders the environment consequence separately. The source supports the report's limited header contrast, not certification of all header geometry.",
+      "At tip 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db, app.css:3090-3097,3439-3454 preserves the same flyout scrolling and consequence/title distinction. The reviewed commit lies inside the pinned range. No visual execution, runtime reproduction or test ran."
+    ],
+    "coverage_checked": [
+      "Current SPEC.md Sandbox sessions (:1531-1547), and SPEC_impl.md GUI: Dioxus / Answers bind to what was drawn (:1040-1104) plus Environment ownership and refusal / Environment Delete and the seal (:6093-6150), require the destructive scope to be disclosed. They do not accept clipping that makes required consent unreachable.",
+      "TODO.md Planned is empty; plans/queue/INDEX.md has no unlanded plans. Historical environment-agent-operations.md:541-560 requires both-outcomes and whole-environment warnings; it is already landed and does not cover an outstanding clipping issue.",
+      "BUGS.md has no related layout acceptance. Searches of current INDEX.md and queue files found adjacent native-confirmation-reopen-paint-order-source-gap.md, pinned-host-dialog-chrome-can-hide-content.md and header-confirmation-lowers-link-refusal.md; all three were read in full. They concern an unmeasured reopening, Host Settings footer clipping, and lowered refusal text respectively, not truncation of this row consequence. No exact alias or useful extension is established.",
+      "Active TRIAGE_OUTCOMES.md searches found no exact match. The nearby trash-alias-refresh-skips-movement-pause decision concerns a different pointer/movement route, not this text layout. No archive was read.",
+      "FILTER.md Dialog explanations out of view but reachable by scrolling could cover a proven small-window/large-content scroll-only case, but this claim originally alleged unseen, clipped destructive scope. No full filter match is asserted, and no filter is the proposed basis."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": "A supported rendered layout in which the required warning becomes unreachable or hidden while the confirming answer remains usable. Source rules refute the named title-ellipsis/shrink route; arbitrary viewport/header geometry and keyboard/screen-reader reachability were not visually tested.",
+    "original_stronger_consequence": "The candidate considered destructive consent omitting unseen sessions or files through newly clipped warning text, potentially highest if a shipped clipping route exists. The latest record proposes only a source-limited refutation and explicitly preserves c2's separate factual-wording finding.",
+    "needs_independent_drop_check": true,
+    "proposed_basis": "Propose refutation of the row-warning title-ellipsis/shrink premise only, subject to the independent drop check because the original consequence involved destruction beyond disclosed consent. Do not expand this to arbitrary viewport/header geometry or use it to lower/drop c2."
+  }
+]

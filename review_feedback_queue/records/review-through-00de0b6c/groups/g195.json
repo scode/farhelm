@@ -1,0 +1,318 @@
+{
+  "group": {
+    "id": "g195",
+    "domain": "retired-xterm-vendor",
+    "purpose": "retired-xterm-vendor: crates/farhelm-ui/assets/vendor/xterm.js; phases webpack module 8286: Property 8286 | bundle wrapper method setIfNotSet: MethodDefinition setIfNotSet | bundle wrapper method dispose: MethodDefinition dispose",
+    "interfaces": [
+      "g009",
+      "g010",
+      "g011",
+      "g061",
+      "g062",
+      "g063",
+      "g079",
+      "g080",
+      "g081",
+      "g082",
+      "g083",
+      "g084",
+      "g135",
+      "g136",
+      "g186",
+      "g187",
+      "g188",
+      "g189",
+      "g190",
+      "g191",
+      "g192",
+      "g193",
+      "g194",
+      "g196",
+      "g197"
+    ],
+    "sources": [
+      {
+        "path": "[private-run]/prep/parts/01085-024.patch",
+        "ranges": [
+          [
+            1,
+            1
+          ]
+        ],
+        "original_path": "crates/farhelm-ui/assets/vendor/xterm.js",
+        "commit": "f560058da19e02716e6f943883a9508b447aff4e",
+        "notes": "webpack module 8286: Property 8286; patch character offsets [368575,388452)",
+        "lines": 1,
+        "bytes": 19877,
+        "start": 368575,
+        "end": 388452,
+        "original": "[private-run]/prep/originals/01085.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/01085-025.patch",
+        "ranges": [
+          [
+            1,
+            1
+          ]
+        ],
+        "original_path": "crates/farhelm-ui/assets/vendor/xterm.js",
+        "commit": "f560058da19e02716e6f943883a9508b447aff4e",
+        "notes": "bundle wrapper method setIfNotSet: MethodDefinition setIfNotSet; patch character offsets [388452,399529)",
+        "lines": 1,
+        "bytes": 11077,
+        "start": 388452,
+        "end": 399529,
+        "original": "[private-run]/prep/originals/01085.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/01085-026.patch",
+        "ranges": [
+          [
+            1,
+            1
+          ]
+        ],
+        "original_path": "crates/farhelm-ui/assets/vendor/xterm.js",
+        "commit": "f560058da19e02716e6f943883a9508b447aff4e",
+        "notes": "bundle wrapper method dispose: MethodDefinition dispose; patch character offsets [399529,419370)",
+        "lines": 1,
+        "bytes": 19841,
+        "start": 399529,
+        "end": 419370,
+        "original": "[private-run]/prep/originals/01085.patch"
+      }
+    ],
+    "lines": 3,
+    "bytes": 50795
+  },
+  "records": [
+    {
+      "key": "g195/c1",
+      "owner": "g195",
+      "id": "c1",
+      "domain": "retired-xterm-vendor",
+      "purpose": "retired-xterm-vendor: crates/farhelm-ui/assets/vendor/xterm.js; phases webpack module 8286: Property 8286 | bundle wrapper method setIfNotSet: MethodDefinition setIfNotSet | bundle wrapper method dispose: MethodDefinition dispose",
+      "history": [
+        {
+          "line": 1,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c1",
+            "state": "open",
+            "summary": "Retired bundle helpers leave no retained page dependency",
+            "location": "crates/farhelm-ui/assets/vendor/xterm.js:1",
+            "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e. TLDR: considered whether removing the assigned xterm internal event, collection, scheduling and cancellation helpers leaves a broken terminal mount. Source checks refute this dependency concern: all three assigned packets (01085-024.patch, 01085-025.patch, 01085-026.patch, line 1 each) are portions of the deleted webpack bundle; lib.rs's asset declaration diff removes VENDOR_XTERM_JS and the other xterm assets together, while retained lib.rs:1360-1490 declares the grid assets. terminal.js:3212-3216 gates on farhelmGridModel, farhelmGridStyle, farhelmGridInput, farhelmGridBuffer and farhelmGridTerminal; terminal.js:4313 constructs farhelmGridTerminal. A git grep at the reviewed revision over crates/farhelm-ui for VENDOR_XTERM, VENDOR_FIT, window.Terminal, new Terminal(, vendor/xterm, TimeoutTimer, CancellationTokenSource, ThrottledWorker and .Widget returned no matches (exit 1). Contract: SPEC_impl.md:1504-1514 states every terminal is interpreted by the supervisor and the browser draws a grid stream, and :1835-1845 identifies the grid assets and terminal.js mount boundary. Suggested bucket: high if the dependency existed, because terminals could not mount; no established loss-of-work or security consequence. Could-be-highest: false. Confidence: confirmed source refutation of this dependency concern, not an execution observation or a claim that the full replacement is defect-free. proposed_drop: the removed bundle's private helpers have no retained callers in the page, which mounts the independent grid implementation. possible_cover: none. Caveat: neighboring groups own replacement behavior beyond the removed helper dependency boundary."
+          }
+        },
+        {
+          "line": 2,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c1",
+            "state": "open",
+            "summary": "Retired bundle helpers leave no retained page dependency",
+            "location": "crates/farhelm-ui/assets/vendor/xterm.js:1",
+            "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e. TLDR: considered whether removing the assigned xterm internal event, collection, scheduling and cancellation helpers leaves a broken terminal mount. Source checks refute this dependency concern: all three assigned packets (01085-024.patch, 01085-025.patch, 01085-026.patch, line 1 each) are portions of the deleted webpack bundle; lib.rs's asset declaration diff removes VENDOR_XTERM_JS and the other xterm assets together, while retained lib.rs:1479-1483 declares the grid assets and :1921-1925 loads them. terminal.js:3212-3216 gates on farhelmGridModel, farhelmGridStyle, farhelmGridInput, farhelmGridBuffer and farhelmGridTerminal; terminal.js:4313 constructs farhelmGridTerminal. A git grep at the reviewed revision over crates/farhelm-ui for VENDOR_XTERM, VENDOR_FIT, window.Terminal, new Terminal(, vendor/xterm, TimeoutTimer, CancellationTokenSource, ThrottledWorker and .Widget returned no matches (exit 1). A further search over crates, scripts and .github for vendor/xterm, window.Terminal, VENDOR_XTERM, TimeoutTimer, CancellationTokenSource and ThrottledWorker also returned no matches. The replacement owns cleanup independently: terminal.js:4760-4829 cancels pending mounts, disconnects observers, removes listeners, invalidates deferred work, closes the socket and disposes or freezes the grid. grid-terminal.js:2109-2140 cancels animation/drain work and scrollbar timers, closes its message channel, ends gestures, nulls callbacks and removes its element; :1754-1758 removes document gesture listeners. Contract: SPEC_impl.md:1504-1514 states every terminal is interpreted by the supervisor and the browser draws a grid stream, and :1835-1845 identifies the grid assets and terminal.js mount boundary. Suggested bucket: high if the dependency existed, because terminals could not mount; no established loss-of-work or security consequence. Could-be-highest: false. Confidence: confirmed source refutation of this dependency concern, not an execution observation or a claim that the full replacement is defect-free. proposed_drop: the removed bundle's private helpers have no retained callers in the page, which mounts the independent grid implementation. possible_cover: none. Caveat: neighboring groups own replacement behavior beyond the removed helper dependency boundary."
+          }
+        },
+        {
+          "line": 3,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c1",
+            "state": "open",
+            "summary": "Retired bundle helpers leave no retained page dependency",
+            "location": "crates/farhelm-ui/assets/vendor/xterm.js:1",
+            "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e. TLDR: considered whether deleting the assigned xterm event, collection, scheduling and cancellation helpers breaks terminal mounts or leaves their cleanup dependent on missing code. Suggested bucket: high if the dependency existed, because terminal mounts could fail; no established loss-of-work or security consequence. Could-be-highest: false. Confidence: confirmed source refutation, not behavior observed in execution. proposed_drop: the helpers are private to a fully deleted bundle, and the page's remaining terminal mounts and teardown use the independent grid implementation. possible_cover: none. Details: assigned packets 01085-024, 01085-025 and 01085-026 are consecutive regions of the same deleted bundle line, including TimeoutTimer split across the first two packets and CancellationTokenSource split across the last two; the deletion is atomic rather than a surviving half-definition. git diff --summary confirms delete mode for the entire asset. The parent bundle's final 6500 bytes show the private webpack loader resolving module exports internally and returning a public export object populated with Terminal only; no assigned helper is separately installed on the page. The original consumers found in the parent revision are terminal.js:3588 (window.Terminal readiness), :3900 (constructor), lib.rs:1387-1389 and :2060-2062 (asset declarations and load), and terminal-files.test.js:418-419 (direct require and constructor). Source at the reviewed revision removes the xterm readiness and constructor, mounts farhelmGridTerminal at terminal.js:4313, loads the grid assets at lib.rs:1921-1925, and deletes the test that directly required the retired bundle in the same commit. Searches at the reviewed revision over crates/farhelm-ui for those asset/global/helper names returned no matches; a further search over crates, scripts and .github for vendor/xterm, window.Terminal, VENDOR_XTERM, TimeoutTimer, CancellationTokenSource and ThrottledWorker also returned none. Earlier source checks establish independent cleanup at terminal.js:4760-4829 and grid-terminal.js:2109-2140, including document gesture listener removal at :1754-1758. Governing contract: SPEC_impl.md:1504-1514 makes every terminal a supervisor-interpreted grid stream and :1835-1845 assigns mounts to terminal.js and the grid assets. Synthesis resolves the previously implicit assumption that these helpers were bundle-private and that direct non-page consumers were retired together. All conclusions are source-based; no runtime tests or reproductions were performed. Caveat: this refutes the missing-helper dependency concern only; the neighboring groups own replacement behavior beyond this group's deletion boundary."
+          }
+        }
+      ],
+      "latest": {
+        "line": 3,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c1",
+          "state": "open",
+          "summary": "Retired bundle helpers leave no retained page dependency",
+          "location": "crates/farhelm-ui/assets/vendor/xterm.js:1",
+          "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e. TLDR: considered whether deleting the assigned xterm event, collection, scheduling and cancellation helpers breaks terminal mounts or leaves their cleanup dependent on missing code. Suggested bucket: high if the dependency existed, because terminal mounts could fail; no established loss-of-work or security consequence. Could-be-highest: false. Confidence: confirmed source refutation, not behavior observed in execution. proposed_drop: the helpers are private to a fully deleted bundle, and the page's remaining terminal mounts and teardown use the independent grid implementation. possible_cover: none. Details: assigned packets 01085-024, 01085-025 and 01085-026 are consecutive regions of the same deleted bundle line, including TimeoutTimer split across the first two packets and CancellationTokenSource split across the last two; the deletion is atomic rather than a surviving half-definition. git diff --summary confirms delete mode for the entire asset. The parent bundle's final 6500 bytes show the private webpack loader resolving module exports internally and returning a public export object populated with Terminal only; no assigned helper is separately installed on the page. The original consumers found in the parent revision are terminal.js:3588 (window.Terminal readiness), :3900 (constructor), lib.rs:1387-1389 and :2060-2062 (asset declarations and load), and terminal-files.test.js:418-419 (direct require and constructor). Source at the reviewed revision removes the xterm readiness and constructor, mounts farhelmGridTerminal at terminal.js:4313, loads the grid assets at lib.rs:1921-1925, and deletes the test that directly required the retired bundle in the same commit. Searches at the reviewed revision over crates/farhelm-ui for those asset/global/helper names returned no matches; a further search over crates, scripts and .github for vendor/xterm, window.Terminal, VENDOR_XTERM, TimeoutTimer, CancellationTokenSource and ThrottledWorker also returned none. Earlier source checks establish independent cleanup at terminal.js:4760-4829 and grid-terminal.js:2109-2140, including document gesture listener removal at :1754-1758. Governing contract: SPEC_impl.md:1504-1514 makes every terminal a supervisor-interpreted grid stream and :1835-1845 assigns mounts to terminal.js and the grid assets. Synthesis resolves the previously implicit assumption that these helpers were bundle-private and that direct non-page consumers were retired together. All conclusions are source-based; no runtime tests or reproductions were performed. Caveat: this refutes the missing-helper dependency concern only; the neighboring groups own replacement behavior beyond this group's deletion boundary."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g195/findings.jsonl",
+        "id": "c1",
+        "line": 3,
+        "disposition": "excluded",
+        "group": "xterm-removal-retained-private-utility-consumer",
+        "reason": "Parent explicitly accepted named refuted proposal from claims-121 after inspecting it. The entire vendor asset is deleted atomically, while current mounts and normal teardown use the retained grid. No remaining private-utility consumer was identified. Source-refute only the missing-private-helper dependency; same named root as g194/c2 and g196/c1. Checked source/results: [\"All three history events read, including the initial mount concern, cleanup extension and final atomic/private-module qualification. No withdrawal or accepted parent drop appears.\",\"git diff --summary f560058^ f560058 reports delete mode for assets/vendor/xterm.js. There is no surviving half of TimeoutTimer or CancellationTokenSource in that asset.\",\"f560058da19e02716e6f943883a9508b447aff4e:lib.rs:1479-1483,1921-1926 loads grid assets; terminal.js:3203-3222 waits on grid globals and :3387-3394/:4313 builds the independent grid.\",\"Pinned grep for vendor/Terminal/event/cancellation/scheduling helper names across UI/helm/desktop/scripts/.github returned no matches. terminal.js:4761-4832 and grid-terminal.js:2109-2140 establish independent normal cleanup. No runtime tests or artifact builds.\"] Current coverage/results: [\"SPEC_impl.md Terminal widget/The grid client and SPEC.md Terminal experience describe the replacement ownership; neither accepts missing helpers.\",\"TODO.md Planned empty, BUGS.md unrelated. Full INDEX plus queue/active-ledger searches found no exact private-helper removal item. No unlanded plans/queue repair of this hypothetical dependency found; tmux docs audit is behavior-preserving. FILTER.md checked, no filter used.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Terminal mounts fail or cleanup depends on deleted private utilities; high if established. Original no-security/no-work-loss assessment remains a statement about this narrow dependency concern only.\"; \"No retained helper caller. This is not comprehensive replacement-renderer or failed-constructor certification, and does not dismiss g193/c3's incompatible old-page route.\"."
+      },
+      "accepted_parent_decision": {
+        "key": "g195/c1",
+        "line": 3,
+        "disposition": "excluded",
+        "group": "xterm-removal-retained-private-utility-consumer",
+        "bucket": "other",
+        "recording": "refuted",
+        "queue_target_candidate": null,
+        "needs_independent_drop_check": false,
+        "reason": "Parent explicitly accepted named refuted proposal from claims-121 after inspecting it. The entire vendor asset is deleted atomically, while current mounts and normal teardown use the retained grid. No remaining private-utility consumer was identified. Source-refute only the missing-private-helper dependency; same named root as g194/c2 and g196/c1. Checked source/results: [\"All three history events read, including the initial mount concern, cleanup extension and final atomic/private-module qualification. No withdrawal or accepted parent drop appears.\",\"git diff --summary f560058^ f560058 reports delete mode for assets/vendor/xterm.js. There is no surviving half of TimeoutTimer or CancellationTokenSource in that asset.\",\"f560058da19e02716e6f943883a9508b447aff4e:lib.rs:1479-1483,1921-1926 loads grid assets; terminal.js:3203-3222 waits on grid globals and :3387-3394/:4313 builds the independent grid.\",\"Pinned grep for vendor/Terminal/event/cancellation/scheduling helper names across UI/helm/desktop/scripts/.github returned no matches. terminal.js:4761-4832 and grid-terminal.js:2109-2140 establish independent normal cleanup. No runtime tests or artifact builds.\"] Current coverage/results: [\"SPEC_impl.md Terminal widget/The grid client and SPEC.md Terminal experience describe the replacement ownership; neither accepts missing helpers.\",\"TODO.md Planned empty, BUGS.md unrelated. Full INDEX plus queue/active-ledger searches found no exact private-helper removal item. No unlanded plans/queue repair of this hypothetical dependency found; tmux docs audit is behavior-preserving. FILTER.md checked, no filter used.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Terminal mounts fail or cleanup depends on deleted private utilities; high if established. Original no-security/no-work-loss assessment remains a statement about this narrow dependency concern only.\"; \"No retained helper caller. This is not comprehensive replacement-renderer or failed-constructor certification, and does not dismiss g193/c3's incompatible old-page route.\"."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-121",
+          "key": "g195/c1",
+          "latest_line": 3,
+          "recommendation": "refuted",
+          "bucket": "other",
+          "underlying_key": "xterm-removal-retained-private-utility-consumer",
+          "aliases": [
+            "g194/c2",
+            "g196/c1"
+          ],
+          "target_queue_file": null,
+          "why": "The entire vendor asset is deleted atomically, while current mounts and normal teardown use the retained grid. No remaining private-utility consumer was identified.",
+          "checks": [
+            "All three history events read, including the initial mount concern, cleanup extension and final atomic/private-module qualification. No withdrawal or accepted parent drop appears.",
+            "git diff --summary f560058^ f560058 reports delete mode for assets/vendor/xterm.js. There is no surviving half of TimeoutTimer or CancellationTokenSource in that asset.",
+            "f560058da19e02716e6f943883a9508b447aff4e:lib.rs:1479-1483,1921-1926 loads grid assets; terminal.js:3203-3222 waits on grid globals and :3387-3394/:4313 builds the independent grid.",
+            "Pinned grep for vendor/Terminal/event/cancellation/scheduling helper names across UI/helm/desktop/scripts/.github returned no matches. terminal.js:4761-4832 and grid-terminal.js:2109-2140 establish independent normal cleanup. No runtime tests or artifact builds."
+          ],
+          "coverage_checked": [
+            "SPEC_impl.md Terminal widget/The grid client and SPEC.md Terminal experience describe the replacement ownership; neither accepts missing helpers.",
+            "TODO.md Planned empty, BUGS.md unrelated. Full INDEX plus queue/active-ledger searches found no exact private-helper removal item. No unlanded plans/queue repair of this hypothetical dependency found; tmux docs audit is behavior-preserving. FILTER.md checked, no filter used."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": "No retained helper caller. This is not comprehensive replacement-renderer or failed-constructor certification, and does not dismiss g193/c3's incompatible old-page route.",
+          "original_stronger_consequence": "Terminal mounts fail or cleanup depends on deleted private utilities; high if established. Original no-security/no-work-loss assessment remains a statement about this narrow dependency concern only.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Source-refute only the missing-private-helper dependency; same named root as g194/c2 and g196/c1."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "high",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "xterm-removal-retained-private-utility-consumer",
+        "destination": null
+      }
+    },
+    {
+      "key": "g195/c2",
+      "owner": "g195",
+      "id": "c2",
+      "domain": "retired-xterm-vendor",
+      "purpose": "retired-xterm-vendor: crates/farhelm-ui/assets/vendor/xterm.js; phases webpack module 8286: Property 8286 | bundle wrapper method setIfNotSet: MethodDefinition setIfNotSet | bundle wrapper method dispose: MethodDefinition dispose",
+      "history": [
+        {
+          "line": 4,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c2",
+            "state": "open",
+            "summary": "Removal retains attribution for surviving ports",
+            "location": "crates/farhelm-ui/assets/vendor/xterm.js:1",
+            "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e. TLDR: checked whether deleting the assigned Visual Studio Code-derived utility regions and their bundle notices also removes attribution needed by surviving ports. The source refutes that removal concern: the separate grid-ported-code-LICENSES.txt remains, including the xterm notices and Visual Studio Code notice at lines 121-146, and lib.rs:1491-1495 still declares it as a retained asset. Exact source basis: the retained notice says 'Copyright (c) 2015 - present Microsoft Corporation'; its permission text includes 'The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.' lib.rs declares static GRID_PORTED_CODE_LICENSES: Asset with asset!(\"/assets/grid-ported-code-LICENSES.txt\", AssetOptions::builder().with_hash_suffix(false)). THIRD_PARTY_NOTICES.md:19-46 continues to identify the surviving ports and their separate notices; the diff removes only the explanation for the deleted vendored bundles and preserves that separate attribution. Suggested bucket: other if the attribution had been lost; no established user-work-loss or security route. Could-be-highest: false. Confidence: confirmed source refutation of missing attribution caused by this deletion; no built artifact was inspected and no runtime behavior was observed. proposed_drop: the independently retained notice file and asset declaration refute the suspected removal of attribution for surviving ports. possible_cover: none. Caveat: this check addresses attribution retention at the assigned removal boundary, not a general license audit or a claim about every distributed artifact."
+          }
+        }
+      ],
+      "latest": {
+        "line": 4,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c2",
+          "state": "open",
+          "summary": "Removal retains attribution for surviving ports",
+          "location": "crates/farhelm-ui/assets/vendor/xterm.js:1",
+          "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e. TLDR: checked whether deleting the assigned Visual Studio Code-derived utility regions and their bundle notices also removes attribution needed by surviving ports. The source refutes that removal concern: the separate grid-ported-code-LICENSES.txt remains, including the xterm notices and Visual Studio Code notice at lines 121-146, and lib.rs:1491-1495 still declares it as a retained asset. Exact source basis: the retained notice says 'Copyright (c) 2015 - present Microsoft Corporation'; its permission text includes 'The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.' lib.rs declares static GRID_PORTED_CODE_LICENSES: Asset with asset!(\"/assets/grid-ported-code-LICENSES.txt\", AssetOptions::builder().with_hash_suffix(false)). THIRD_PARTY_NOTICES.md:19-46 continues to identify the surviving ports and their separate notices; the diff removes only the explanation for the deleted vendored bundles and preserves that separate attribution. Suggested bucket: other if the attribution had been lost; no established user-work-loss or security route. Could-be-highest: false. Confidence: confirmed source refutation of missing attribution caused by this deletion; no built artifact was inspected and no runtime behavior was observed. proposed_drop: the independently retained notice file and asset declaration refute the suspected removal of attribution for surviving ports. possible_cover: none. Caveat: this check addresses attribution retention at the assigned removal boundary, not a general license audit or a claim about every distributed artifact."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g195/findings.jsonl",
+        "id": "c2",
+        "line": 4,
+        "disposition": "excluded",
+        "group": "xterm-removal-retained-port-attribution",
+        "reason": "Parent explicitly accepted named refuted proposal from claims-121 after inspecting it. The separate port-notice file and retained asset declaration survive removal of the vendor bundle. Source does not support the alleged loss of Visual Studio Code or xterm port attribution. Source-refute the named attribution-removal hypothesis; same root as g193/c4, preserving the artifact caveat. Checked source/results: [\"Entire supplied history read; one line-4 source-refuted candidate, no withdrawal.\",\"f560058da19e02716e6f943883a9508b447aff4e:grid-ported-code-LICENSES.txt read completely, including Microsoft copyright and complete MIT permission at :121-146, plus xterm and both addon notices.\",\"f560058:lib.rs:1491-1495 keeps #[used] GRID_PORTED_CODE_LICENSES as an unhashed asset; THIRD_PARTY_NOTICES.md:19-45 identifies the same ports and their standalone notices. No built distribution inspected.\"] Current coverage/results: [\"SPEC_impl.md:1692-1700 preserves port attribution; SPEC.md contains no acceptance of omission. TODO.md Planned empty; BUGS.md unrelated.\",\"Full INDEX and queue/active-ledger searches found no exact missing-port-notice item. plans/queue/tmux-drop-from-docs.md:31-48,68-75 explicitly preserves these notices and comments, supplying preservation context rather than a planned repair. FILTER.md has no matching license/attribution filter.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Hypothetical loss of required attribution for surviving Visual Studio Code-derived utilities and xterm ports. No security/work-loss route or withdrawal claimed.\"; \"Actual distribution contents not inspected; source retention is established.\"."
+      },
+      "accepted_parent_decision": {
+        "key": "g195/c2",
+        "line": 4,
+        "disposition": "excluded",
+        "group": "xterm-removal-retained-port-attribution",
+        "bucket": "other",
+        "recording": "refuted",
+        "queue_target_candidate": null,
+        "needs_independent_drop_check": false,
+        "reason": "Parent explicitly accepted named refuted proposal from claims-121 after inspecting it. The separate port-notice file and retained asset declaration survive removal of the vendor bundle. Source does not support the alleged loss of Visual Studio Code or xterm port attribution. Source-refute the named attribution-removal hypothesis; same root as g193/c4, preserving the artifact caveat. Checked source/results: [\"Entire supplied history read; one line-4 source-refuted candidate, no withdrawal.\",\"f560058da19e02716e6f943883a9508b447aff4e:grid-ported-code-LICENSES.txt read completely, including Microsoft copyright and complete MIT permission at :121-146, plus xterm and both addon notices.\",\"f560058:lib.rs:1491-1495 keeps #[used] GRID_PORTED_CODE_LICENSES as an unhashed asset; THIRD_PARTY_NOTICES.md:19-45 identifies the same ports and their standalone notices. No built distribution inspected.\"] Current coverage/results: [\"SPEC_impl.md:1692-1700 preserves port attribution; SPEC.md contains no acceptance of omission. TODO.md Planned empty; BUGS.md unrelated.\",\"Full INDEX and queue/active-ledger searches found no exact missing-port-notice item. plans/queue/tmux-drop-from-docs.md:31-48,68-75 explicitly preserves these notices and comments, supplying preservation context rather than a planned repair. FILTER.md has no matching license/attribution filter.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Hypothetical loss of required attribution for surviving Visual Studio Code-derived utilities and xterm ports. No security/work-loss route or withdrawal claimed.\"; \"Actual distribution contents not inspected; source retention is established.\"."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-121",
+          "key": "g195/c2",
+          "latest_line": 4,
+          "recommendation": "refuted",
+          "bucket": "other",
+          "underlying_key": "xterm-removal-retained-port-attribution",
+          "aliases": [
+            "g193/c4"
+          ],
+          "target_queue_file": null,
+          "why": "The separate port-notice file and retained asset declaration survive removal of the vendor bundle. Source does not support the alleged loss of Visual Studio Code or xterm port attribution.",
+          "checks": [
+            "Entire supplied history read; one line-4 source-refuted candidate, no withdrawal.",
+            "f560058da19e02716e6f943883a9508b447aff4e:grid-ported-code-LICENSES.txt read completely, including Microsoft copyright and complete MIT permission at :121-146, plus xterm and both addon notices.",
+            "f560058:lib.rs:1491-1495 keeps #[used] GRID_PORTED_CODE_LICENSES as an unhashed asset; THIRD_PARTY_NOTICES.md:19-45 identifies the same ports and their standalone notices. No built distribution inspected."
+          ],
+          "coverage_checked": [
+            "SPEC_impl.md:1692-1700 preserves port attribution; SPEC.md contains no acceptance of omission. TODO.md Planned empty; BUGS.md unrelated.",
+            "Full INDEX and queue/active-ledger searches found no exact missing-port-notice item. plans/queue/tmux-drop-from-docs.md:31-48,68-75 explicitly preserves these notices and comments, supplying preservation context rather than a planned repair. FILTER.md has no matching license/attribution filter."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": "Actual distribution contents not inspected; source retention is established.",
+          "original_stronger_consequence": "Hypothetical loss of required attribution for surviving Visual Studio Code-derived utilities and xterm ports. No security/work-loss route or withdrawal claimed.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Source-refute the named attribution-removal hypothesis; same root as g193/c4, preserving the artifact caveat."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "xterm-removal-retained-port-attribution",
+        "destination": null
+      }
+    }
+  ],
+  "replies": [
+    {
+      "turn": 1,
+      "reply": "Initial review complete. All three assigned packets were read; no assigned scope remains unread.\n\nNo reportable findings or open leads. Candidate `c1` records the source-refuted dependency concern. Findings log and progress are updated. No runtime tests or reproductions were performed."
+    },
+    {
+      "turn": 2,
+      "reply": "Revised `c1`: confirmed atomic bundle deletion, private helper exports, and retirement of direct consumers in the same commit. Additional dependency searches found no remaining callers.\n\nNo new findings. Unresolved lead IDs: none. Progress log updated; conclusions remain source-based."
+    },
+    {
+      "turn": 3,
+      "reply": "Discovery pass 1 complete. Checked removed helpers for load-time effects and verified retained attribution through the pinned tip.\n\nNo new reportable defects found. Recorded refuted candidate `c2`.\n\n- New verified findings: none.\n- New unverified findings: none.\n- Open leads: none.\n\nProgress updated. Source analysis only; no runtime execution."
+    }
+  ],
+  "progress": "g195 — retired-xterm-vendor\n\nInitial review turn 1 complete; later-turn synthesis turn 2 complete; discovery turn 3 complete. Discovery-pass count: 1.\nThe findings log exists and was empty at startup. Read the complete brief and the inventory's commits field only.\nRead the governing review instructions and machine rules; no checkout changes or runtime execution are authorized.\n\nScope: f560058da19e02716e6f943883a9508b447aff4e deletes xterm.js. Read all assigned patch packets 01085-024, 01085-025, and 01085-026 through the evidence command, line 1 in each, 50,795 bytes total. No assigned material remains unread. The path history across the complete pinned review range contains only this deletion commit.\n\nInterface assumption: neighboring groups own other parts of the removed library and replacement implementations. This group checks the assigned removed module's implications and only the necessary replacement context.\nRead governing contracts at the reviewed revision: SPEC.md:2855-3177 (Terminal experience); SPEC_impl.md:1504-1887 (Terminal widget and The grid client), and :1069-1105 (Answers bind to what was drawn and neighboring prompt mechanics).\n\nContext checked at the reviewed revision: lib.rs asset declaration diff through patch line 300, lib.rs:1905-1937 and :2070-2185; terminal.js:3191-3260, :4290-4370 and :4749-4849; grid-terminal.js:1728-1762 and :2090-2145. Also inspected searches for mount/cleanup paths and loaded grid assets. Read the parent bundle's first 450 characters per line to identify its UMD wrapper. A broad xterm provenance search was clipped; reran the relevant executable-dependency search narrowly and received no matches. Do not treat the unread provenance matches as reviewed source.\n\nResult: no reportable findings. Candidate c1 records and then strengthens the source refutation of a retained dependency on the removed helpers. No security or loss-of-work route was identified for that candidate. The retained page mounts grid assets and independently owns their teardown.\nNew verified finding IDs: none. New unverified finding IDs: none. Candidate IDs: c1. Open leads: none.\nNo tests, builds, reproductions or checkout mutations performed. Source conclusions only.\nSynthesis checks: confirmed the three packets are consecutive pieces of one fully deleted bundle, so the split TimeoutTimer and CancellationTokenSource definitions do not leave partial definitions in shipped code. Inspected the parent bundle's last 6500 bytes: the webpack loader remains private and its final export object exposes Terminal, not the assigned helpers. Parent-revision dependency searches identified the actual original readiness gate and constructor, asset declarations/loads and a direct test require. Read terminal.js at the parent revision :3565-3618 and :3880-3930, and the complete terminal-files.test.js diff; those consumers are retired or switched in the same commit. A further dependency search at the reviewed revision over e2e, packaging and website found no matches.\n\nRevised c1 under its original ID with the cross-packet and caller evidence. Original possible consequence (terminal mounts fail, high) is preserved. No new verified or unverified findings. No unresolved lead IDs. No assigned scope unread. Interface assumptions are now checked at the bundle export and direct consumer boundaries; neighboring groups still own the replacement's detailed behavior. All conclusions remain source-based.\nDiscovery turn 3: read discovery-neighbours.json in full, lines 1-160, 161-200 and 201-246. No named pending questions were supplied. Synthesis of that input: g196/l1 and g082/c2 concern old already-loaded pages reinterpreting paste input; g083/c5 preserves that consequence rather than accepting the reload wording as a drop. c1 only refutes a missing-helper dependency in the new page and does not cover, refute or lower that old-page input route. The failed-mount fixture findings and primary-selection guidance finding also concern distinct replacement contracts, not c1's dependency question. No new local IDs result from reading those already-known interface findings.\n\nSeparate discovery checks: revisited the assigned sections' event registration, timer creation, idle-callback selection, error-handler initialization and window binding for removal-sensitive load-time effects. Their listener registration and scheduling are in callable methods/constructors, the window reference is a private module export, and idle-callback availability selects private implementations; no separate globally installed behavior was identified within these sections. No independent retired-helper defects were pursued. Checked the source retention of the separately shipped notices against removal of the original bundle attribution: read THIRD_PARTY_NOTICES.md:1-85, grid-ported-code-LICENSES.txt:1-146 and lib.rs:1484-1503, plus the deletion commit's notice diffs. Candidate c2 records the source-refuted attribution-loss concern immediately after settlement. A diff through pinned tip confirms the retained notice files and asset declaration were not subsequently removed; the only lib.rs changes there concern unrelated tmux probe declarations. Full pinned-range numstat remains 0 additions and 2 deleted lines for the retired bundle, consistent with the previously checked one-commit path history.\n\nDiscovery result: no new reportable defect. New verified finding IDs: none. New unverified-after-investigation IDs: none. New candidate ID: c2 (source-refuted attribution removal). Existing c1 is unchanged. Remaining lead IDs: none. No assigned scope unread. No tests, reproductions, builds, live-install actions, prohibited coverage searches or checkout changes performed.\nNext action: return discovery results to the caller.\n"
+}

@@ -1,0 +1,91 @@
+[
+  {
+    "key": "g071/c1",
+    "latest_line": 13,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "installer-tmux-removal-stale-exact-output-expectations",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "Refuted only as the original script/test mismatch claim. The same commit changes both plain and PTY expected reports. Matching those expectations does not establish correct advice for every selected older release; retain that separate issue through g071/f5 and g072/c1.",
+    "checks": [
+      "17a3fe858c5511a24b7403af15dd41c93bf69fd7:scripts/install.sh:1242-1263 removes tmux reporting and prints unconditional fresh-install launch advice.",
+      "At that same revision scripts/test-install-sh.sh:1875-1910 expects the unconditional fresh report, and :2015-2027 expects the same PTY report without the old warning. The companion diff removes the old floor/absent/old variants and Homebrew hyperlink assertions. Thus obsolete exact-output expectations are not left behind.",
+      "Path-limited history after 17a3fe85 through 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db is empty; comparing these two paths with recording main 24bc058066fd57848e788b465719b0e6da2f98f7 also gives no diff. No runtime test was run."
+    ],
+    "coverage_checked": [
+      "Current SPEC.md Installation and updates (:681-827), Supported user environments (:5247-5258), and SPEC_impl.md Native app packaging / Side-by-side versions (:7193-7535) searched and relevant sections read. These do not turn matching output into proof of older-target correctness.",
+      "TODO.md Planned (:25-26) is empty. Installer simplification (:740-755) is Maybe later, not coverage of a stale test expectation.",
+      "plans/queue searched for installer, tmux, prerequisites and selected-target terms. The matching tmux removal plans are recorded as landed at plans/REPORTS.md:29-32. No unlanded plan states work fixing stale exact-output expectations.",
+      "BUGS.md read: only the SSH-helper transfer hang, unrelated. INDEX.md read in full and matching installer prerequisite/recovery files read; they concern distinct guards or stale locks. Active TRIAGE_OUTCOMES.md matching sections (:231-251, :347-372, :793-913) concern those distinct issues and pre-0.31.1 installers. No exact queue or ledger coverage found; archive not read.",
+      "FILTER.md read in full. No filter is needed for this direct source refutation."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": null,
+    "original_stronger_consequence": "Original line 1 considered installer acceptance tests retaining obsolete tmux-warning wording. It alleged no security or user-work-loss route. Latest line 13 preserves this narrow refutation and explicitly excludes the selected-older-target advice issue. References to other IDs' process-loss concerns do not withdraw or lower those other claims here.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Source refutation confined to outdated companion expectations; no standalone broader correctness verdict and no parent drop inferred."
+  },
+  {
+    "key": "g071/f5",
+    "latest_line": 14,
+    "recommendation": "retain-verified",
+    "bucket": "other",
+    "underlying_key": "selected-above-handoff-floor-legacy-target-missing-tmux-launch-advice",
+    "aliases": ["g072/c1"],
+    "target_queue_file": null,
+    "why": "The conditional source route is established: the newest script can install v0.35.0 itself and advise opening it without its tmux prerequisite; a fresh desktop start then refuses when usable tmux is absent. Retain the source-confirmed guidance issue with the explicit acceptance ambiguity below. This is avoidable failed launch and missing advance advice, not failed installation, missing later diagnostics, bricking or work loss.",
+    "checks": [
+      "17a3fe858c5511a24b7403af15dd41c93bf69fd7:scripts/install.sh:91-101 defines HANDOFF_FLOOR=0.31.1-dev.0 for locked-install capability. :817-819 and :881-884 select FARHELM_VERSION; :936-971 delegates only below-floor targets. 0.35.0 is above that floor.",
+      "Reviewed install.sh:1091-1119 validates version, icon and side-by-side marker; :1172-1202 invokes the selected CLI with its handover flags; :1213-1228 accepts its install-result; :1250-1251 prints Open Farhelm unconditionally for fresh installs. The reviewed diff deletes the predecessor's prerequisite warning and Homebrew remedy, establishing in-range introduction.",
+      "Local v0.35.0 resolves ee6957b5f0aa10bd4d36834f633b122cf2ec4695; Cargo.toml:86 declares 0.35.0. Its desktop/bundle.rs:350 has the required marker; packaging/farhelm-desktop/dist.toml declares version 0.35.0 and Farhelm.icns, and dist-workspace.toml:229 names the Apple-silicon target. main.rs:1505,1511-1533 supports the selected CLI and fresh-run flags; :1544-1584 implements the expected result shape. Targeted installation-module search finds no tmux replacement warning.",
+      "At ee6957b5, desktop.rs:835-848 chooses Spawn for absent supervisor/no owner; :548-553 checks prerequisites; :1205-1214 invokes tmux preflight. desktop/tmux_preflight.rs:148-169 classifies missing executable/below-floor tmux as refusal and :342-378 calls refuse_and_exit. :271-306 supplies diagnosis and Homebrew remedy; desktop.rs:1772-1802 prints it, requests native Mac alert/Console output, and exits 1. Its original installer :1285-1317 warns before fresh launch when tmux is unusable.",
+      "No installer/test-path commit follows 17a3fe85 through endpoint 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db; those paths also have no diff against recording main 24bc058066fd57848e788b465719b0e6da2f98f7. No download, installed run, startup refusal or runtime test was observed."
+    ],
+    "coverage_checked": [
+      "Current SPEC.md:681-827 explicitly permits FARHELM_VERSION (:694-700) and describes below-floor handoff (:812-814). SPEC_impl.md:7193-7535 ties handoff to locked-work capability (:7317-7332), not tmux dependency. Neither excludes the named fresh above-floor target.",
+      "Acceptance ambiguity preserved: current SPEC.md:5257-5258 says 'Farhelm neither requires nor looks for one on any machine.' At reviewed 17a3fe85, SPEC_impl.md:2786-2792 explicitly says 'Neither the desktop app nor `farhelm helm setup` requires, looks for or names a tmux, and neither does the installer.' These are stronger than merely saying the new binary needs no tmux. They may intentionally rule out installer prerequisite advice altogether, but do not expressly discuss choosing a still-tmux-dependent older binary or accepting its avoidable failed launch. Current packaging/selected-version contracts retain that selection. Do not silently resolve this scope ambiguity as either exact acceptance or a nonexistent policy.",
+      "TODO.md Planned (:25-26) empty. Maybe later rollback (:712-720) concerns database downgrade safety; installer simplification (:740-755) concerns transactional mechanics. Neither covers this prerequisite report.",
+      "plans/queue searched for installer, tmux, prerequisite, FARHELM_VERSION and selected/older-target terms. tmux-drop-from-install.md:63-66 expressly says 'The installer gives no tmux advice' and deletes matching cases; :180-191 permits retaining genuinely needed tmux-shaped behavior with explanation. This broad instruction is relevant intent, not ignored. It is already landed (plans/REPORTS.md:30), so it is not unlanded work that will fix this issue, and it does not explicitly discuss the above-floor older-target counterexample. The other matching removal plans are also landed (:29-32); remaining matched provisioning/sandbox plans do not prescribe an older-target report remedy.",
+      "BUGS.md read: only SSH transfer hang, no prerequisite-advice acceptance. INDEX.md read in full and exact-term queue search finds no older-selected-target tmux advice item. installer-rerun-advice-omits-stale-lock-prerequisite.md is a different stale-lock recovery promise; installer-prerequisite-test-conflates-two-guards.md is a different Mac-VM setup oracle. older-handoff-reports-success-for-directory-program.md concerns a malformed destination and v0.27.0, not a prerequisite warning. No exact coverage or useful extension to those existing files.",
+      "Active TRIAGE_OUTCOMES.md searched and matching sections read: :231-251 is the independent VM-guard test; :347-372 is CLI expectation parsing; :793-913 discards old-generation installer problems, expressly prior to 0.31.1. This case uses modern reporting and v0.35.0, so that decision does not exactly cover it. Archive not read.",
+      "FILTER.md read in full. Rare diagnostic filter (:28-42) needs a rare timing/fault/unshipped-input trigger, not merely explicit older-version selection on a Mac without tmux; neither rarity nor retry self-correction is established. Older-release upgrade filter needs carried-across state plus another rare condition; the counterexample is a fresh install. No full filter boundary matches."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": "No missing source premise for the conditional advice/refusal route. Successful retrieval of the release's matching assets and otherwise ordinary installation prerequisites are assumed; those assets were not downloaded. Whether the broad no-tmux installer policy intentionally accepts omitting advice for selected legacy binaries remains a product-contract interpretation, not a runtime premise.",
+    "original_stronger_consequence": "Line 11 suspected loss of prerequisite/remedy advice for selected older releases. Lines 12 and 14 confirm an avoidable refusal on launch while explicitly preserving the old app's later diagnosis/remedy. No original security, process-loss, file-corruption or other user-work-loss consequence was alleged for f5. c1's exact-output refutation and other IDs' potentially highest consequences remain separate.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Retain one conditional source-confirmed OTHER record, carrying the conflicting breadth of no-tmux wording for triage. Consolidate the named same-root g072/c1 without losing its selected-older-target regression-test responsibility. Do not use universal old-target handoff or current-release no-tmux capability as a complete refutation.",
+    "new_interface_evidence": "The corrected histories quote current-release no-tmux capability and below-floor handoff, but reviewed SPEC_impl.md:2788-2789 additionally says the installer itself neither requires, looks for nor names tmux. Landed tmux-drop-from-install.md:63-66 explicitly prohibits tmux advice. Both are concrete possible acceptance context whose selected-older-target scope remains ambiguous."
+  },
+  {
+    "key": "g072/c1",
+    "latest_line": 16,
+    "recommendation": "duplicate",
+    "bucket": "other",
+    "underlying_key": "selected-above-handoff-floor-legacy-target-missing-tmux-launch-advice",
+    "aliases": ["g071/f5"],
+    "target_queue_file": null,
+    "why": "Same underlying older-target report omission as g071/f5, with a useful test-coverage extension to retain in the consolidated record. Duplicate means combine the two named records; it does not accept the earlier withdrawal/refutation, dismiss the underlying issue, or discard the test responsibility.",
+    "checks": [
+      "At 17a3fe858c5511a24b7403af15dd41c93bf69fd7, install.sh:91-101,936-971 hands off only targets below 0.31.1-dev.0, whereas :1172-1202 directly invokes the selected capable CLI and :1250-1251 prints unconditional fresh-launch advice. v0.35.0 at ee6957b5f0aa10bd4d36834f633b122cf2ec4695 is above that floor; main.rs:1511-1584 supports the handover and result format, desktop/bundle.rs:350 supplies the side-by-side marker, and the desktop package declares the icon. These settle the earlier universal-handoff inference against the named counterexample.",
+      "At ee6957b5, desktop.rs:835-848 and :548-553 reach check_prerequisites on fresh startup; :1205-1214 invokes tmux preflight; desktop/tmux_preflight.rs:148-169,342-378 refuses absent/below-floor tmux. Its :271-306 diagnosis/remedy and desktop.rs:1772-1802 native alert request remain available. The old installer :1285-1317 previously warned before opening.",
+      "Useful extension: the reviewed test-install-sh.sh diff removes floor/absent/old report variants and all run_tmux_case boundaries. Replacement :1875-1910 uses generic 1.2.3/1.2.4 fixtures and unconditional report expectations; :2015-2027 similarly checks generic PTY output. The predecessor also used generic versions: no explicit selected-older-target fixture is shown to have existed and been removed. What changed is removal of tmux-environment warning checks without adding a version-sensitive older-target case. This is useful regression responsibility for the production issue, not a demonstrated runtime false pass or a separately established wrong current-release oracle. Restoring unconditional tmux requirements for the current release would be wrong.",
+      "The installer and test companion output agree, preserving g071/c1's narrow refutation. No further path change through pinned endpoint or recording main repairs the older-target issue. No runtime tests, mutation tests, downloads or installations ran."
+    ],
+    "coverage_checked": [
+      "Both current specifications searched and governing sections read: SPEC.md:681-827 permits selected releases, limits legacy handoff to below-floor releases and says fresh installs are never below the upgrade floor; SPEC_impl.md:7193-7535 describes the capability-based handoff and selected CLI. Current SPEC.md:5247-5258 says Farhelm neither requires nor looks for tmux on any machine. Historical reviewed SPEC_impl.md:2786-2792 explicitly extends no requiring/looking/naming tmux to the installer. Preserve ambiguity over whether that broad rule intentionally accepts misleading advice for a still-dependent selected binary; no exact older-target consequence acceptance found.",
+      "TODO.md Planned (:25-26) is empty. Its Maybe later rollback (:712-720) and installer simplification (:740-755) are different causes and consequences.",
+      "plans/queue searched. tmux-drop-from-install.md:63-66 expressly removes installer advice and its matching tests; :180-191 addresses genuinely needed residual behavior. It and the other matching tmux-removal plans are already landed (plans/REPORTS.md:29-32), so no unlanded fix covers this case. Treat that unconditional wording as relevant competing intent, not proof that the target no longer needs tmux.",
+      "BUGS.md read and INDEX.md read in full; targeted queue searches find no exact selected-older-target guidance item. The read installer-prerequisite-test-conflates-two-guards.md is a VM-setup test, installer-rerun-advice-omits-stale-lock-prerequisite.md is stale-lock recovery, and older-handoff-reports-success-for-directory-program.md is malformed-destination success; none shares this root. g071/f5 is the only exact named alias; add the test extension there rather than extending those existing queue files.",
+      "Active TRIAGE_OUTCOMES.md searched and matching sections read (:231-251,347-372,793-913). The pre-0.31.1 installer discard does not cover modern reporting for v0.35.0. No decision specifically accepts the selected-target warning omission. Archive not read.",
+      "FILTER.md read in full. No full match: explicit version selection and missing tmux establish neither a rare diagnostic trigger nor carried-across upgrade state plus another rare condition. The test scope is not itself a filter."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": "No missing source premise for the conditional report/refusal mechanism or removed oracle cases. Asset availability and execution remain unobserved. The only substantive unresolved question is the intended breadth of the no-tmux installer policy when FARHELM_VERSION selects a legacy target.",
+    "original_stronger_consequence": "Original line 1 considered claiming a fresh installation can launch despite a missing prerequisite, then proposed a current-release specification refutation. Line 10 extended the handoff floor to all supported tmux-dependent targets; lines 13-16 reopen and correct that inference using v0.35.0. Preserve both earlier proposed-drop bases narrowly: the new release needs no tmux, and below-floor targets delegate. Latest line 16 retains missing advance guidance and avoidable startup refusal, plus selected-older-target test coverage. No security or user-owned-work-loss consequence was alleged; later app diagnostics remain available.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Consolidate exact same root with retained g071/f5, explicitly carrying the independent test-responsibility extension and the specification/plan acceptance ambiguity. No new separate finding, parent decision or accepted earlier drop is inferred.",
+    "new_interface_evidence": "Reviewed SPEC_impl.md:2788-2789 explicitly applies no requiring/looking/naming tmux to the installer, beyond the current-release app capability quote retained in this history. Landed plan criterion 4 also explicitly removes all tmux advice and matching tests. Their scope for selected legacy binaries needs preserving in the final record."
+  }
+]

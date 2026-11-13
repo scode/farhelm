@@ -1,0 +1,1037 @@
+{
+  "group": {
+    "id": "g087",
+    "domain": "gui-environment-launcher",
+    "purpose": "gui-environment-launcher: crates/farhelm-ui/src/list/create_form.rs, crates/farhelm-ui/src/list/create_form/draft.rs; phases complete small per-commit changes",
+    "interfaces": [
+      "g001",
+      "g004",
+      "g009",
+      "g010",
+      "g011",
+      "g022",
+      "g023",
+      "g024",
+      "g025",
+      "g026",
+      "g027",
+      "g028",
+      "g029",
+      "g052",
+      "g053",
+      "g054",
+      "g055",
+      "g056",
+      "g057",
+      "g058",
+      "g059",
+      "g060",
+      "g085",
+      "g086"
+    ],
+    "sources": [
+      {
+        "path": "[private-run]/prep/parts/00314-000.patch",
+        "ranges": [
+          [
+            1,
+            333
+          ]
+        ],
+        "original_path": "crates/farhelm-ui/src/list/create_form.rs",
+        "commit": "04d85f0c98a9b635709d00b056719a0baa7fd3fc",
+        "notes": "patch header; patch character offsets [0,15246)",
+        "lines": 333,
+        "bytes": 15249,
+        "start": 0,
+        "end": 15246,
+        "original": "[private-run]/prep/originals/00314.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/00315-000.patch",
+        "ranges": [
+          [
+            1,
+            354
+          ]
+        ],
+        "original_path": "crates/farhelm-ui/src/list/create_form/draft.rs",
+        "commit": "04d85f0c98a9b635709d00b056719a0baa7fd3fc",
+        "notes": "patch header; patch character offsets [0,15674)",
+        "lines": 354,
+        "bytes": 15674,
+        "start": 0,
+        "end": 15674,
+        "original": "[private-run]/prep/originals/00315.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/00613-000.patch",
+        "ranges": [
+          [
+            1,
+            26
+          ]
+        ],
+        "original_path": "crates/farhelm-ui/src/list/create_form.rs",
+        "commit": "428badadfec337d5185af0d9bfeb02aad9a7b812",
+        "notes": "patch header; patch character offsets [0,1596)",
+        "lines": 26,
+        "bytes": 1596,
+        "start": 0,
+        "end": 1596,
+        "original": "[private-run]/prep/originals/00613.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/00619-000.patch",
+        "ranges": [
+          [
+            1,
+            269
+          ]
+        ],
+        "original_path": "crates/farhelm-ui/src/list/create_form.rs",
+        "commit": "533169cf19571d34af3a8497eaceb8d2d7b7c852",
+        "notes": "patch header; patch character offsets [0,13466)",
+        "lines": 269,
+        "bytes": 13466,
+        "start": 0,
+        "end": 13466,
+        "original": "[private-run]/prep/originals/00619.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/00713-000.patch",
+        "ranges": [
+          [
+            1,
+            13
+          ]
+        ],
+        "original_path": "crates/farhelm-ui/src/list/create_form.rs",
+        "commit": "2ef10815f12ed719ab6c51c6e3ac6fcd3f8bc1fa",
+        "notes": "patch header; patch character offsets [0,1531)",
+        "lines": 13,
+        "bytes": 1533,
+        "start": 0,
+        "end": 1531,
+        "original": "[private-run]/prep/originals/00713.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/01111-000.patch",
+        "ranges": [
+          [
+            1,
+            25
+          ]
+        ],
+        "original_path": "crates/farhelm-ui/src/list/create_form.rs",
+        "commit": "f560058da19e02716e6f943883a9508b447aff4e",
+        "notes": "patch header; patch character offsets [0,1197)",
+        "lines": 25,
+        "bytes": 1197,
+        "start": 0,
+        "end": 1197,
+        "original": "[private-run]/prep/originals/01111.patch"
+      }
+    ],
+    "lines": 1020,
+    "bytes": 48715
+  },
+  "records": [
+    {
+      "key": "g087/c1",
+      "owner": "g087",
+      "id": "c1",
+      "domain": "gui-environment-launcher",
+      "purpose": "gui-environment-launcher: crates/farhelm-ui/src/list/create_form.rs, crates/farhelm-ui/src/list/create_form/draft.rs; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 1,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c1",
+            "state": "open",
+            "summary": "The wake timer bounds only the connection state at its expiry",
+            "location": "crates/farhelm-ui/src/list/create_form.rs:7502",
+            "detail": "Reviewed commit: 533169cf19571d34af3a8497eaceb8d2d7b7c852. TLDR: A connection that becomes pending again after the wake timer has expired can leave the launch waiting without another 60-second limit. Considered whether the one-shot timer violates the promised bounded wake. Source: create_form.rs:7490-7522 starts one timer per woken_connection_wait value, checks the currently parked stamp, and does not rearm when connection state changes; :7530-7592 retains the continuation while awaiting_woken_connection is true. Contract: SPEC_impl.md:210-215 explicitly says, \"The limit is checked when its 60 seconds run out: a press still waiting for a connection then is discarded, even one that saw the host connect and lost it again before that point, while a host that shows a connection pending again only after that point is not bounded by it.\" Suggested bucket: other if the contract were different; no established security or loss-of-work route. Could-be-highest: false. Confidence: confirmed from source, no execution. proposed_drop: explicit specification acceptance, exact text quoted above. possible_cover: none; coverage sources not searched. Caveat: this records the one-shot boundary only; it does not establish that a particular later reconnection remains pending indefinitely. No reproduction was performed."
+          }
+        },
+        {
+          "line": 10,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c1",
+            "state": "open",
+            "summary": "The one-shot wake limit checks connection state only at its expiry",
+            "location": "crates/farhelm-ui/src/list/create_form.rs:7502",
+            "detail": "Reviewed commit: 533169cf19571d34af3a8497eaceb8d2d7b7c852; persistence checked through f560058da19e02716e6f943883a9508b447aff4e. TLDR: Original consequence retained: a connection becoming pending again after the 60-second timer fires receives no renewed connection limit and can keep a launch waiting; a concrete indefinite later-connection route has not been established. create_form.rs:7490-7522 starts one timer per woken_connection_wait and checks only the parked stamp at expiry. :7530-7592 waits on the connection before preview dispatch. Exact acceptance at SPEC_impl.md:210-215: 'The limit is checked when its 60 seconds run out: a press still waiting for a connection then is discarded, even one that saw the host connect and lost it again before that point, while a host that shows a connection pending again only after that point is not bounded by it.' Suggested bucket: no defect under that explicit contract; the original record suggested other for a counterfactual contract mismatch. An established indefinitely blocked launch/token could materially degrade the window and would warrant reconsidering high rather than minimizing that consequence. Could-be-highest: false; no security or loss-of-work route established. Confidence: confirmed source/contract analysis, no execution. proposed_drop: explicit specification acceptance quoted above, still a proposal; no parent drop accepted. possible_cover: none; coverage sources not searched. Synthesis checks: the complete later form diff leaves this timer and continuation rule intact. At f560058d:7461-7490 discard takes the parked slot before returning its draft, and :7510-7521 calls that discard only if the matching wait generation still owns a guard. :7530-7592 spends the pending slot before submit. Thus a timeout of a still-waiting connection cannot later create from that discarded slot. The earlier 428badadfec337d5185af0d9bfeb02aad9a7b812 reveal fix handles an error-free internal continuation refusal, whereas the timer discard sets an actual error and uses the existing error-driven reveal; these are separate return paths, not evidence that the timer retries or rearms. Caveat: this does not certify all host-reader progress or bound the later preview; the specification expressly excludes the preview from this timer."
+          }
+        }
+      ],
+      "latest": {
+        "line": 10,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c1",
+          "state": "open",
+          "summary": "The one-shot wake limit checks connection state only at its expiry",
+          "location": "crates/farhelm-ui/src/list/create_form.rs:7502",
+          "detail": "Reviewed commit: 533169cf19571d34af3a8497eaceb8d2d7b7c852; persistence checked through f560058da19e02716e6f943883a9508b447aff4e. TLDR: Original consequence retained: a connection becoming pending again after the 60-second timer fires receives no renewed connection limit and can keep a launch waiting; a concrete indefinite later-connection route has not been established. create_form.rs:7490-7522 starts one timer per woken_connection_wait and checks only the parked stamp at expiry. :7530-7592 waits on the connection before preview dispatch. Exact acceptance at SPEC_impl.md:210-215: 'The limit is checked when its 60 seconds run out: a press still waiting for a connection then is discarded, even one that saw the host connect and lost it again before that point, while a host that shows a connection pending again only after that point is not bounded by it.' Suggested bucket: no defect under that explicit contract; the original record suggested other for a counterfactual contract mismatch. An established indefinitely blocked launch/token could materially degrade the window and would warrant reconsidering high rather than minimizing that consequence. Could-be-highest: false; no security or loss-of-work route established. Confidence: confirmed source/contract analysis, no execution. proposed_drop: explicit specification acceptance quoted above, still a proposal; no parent drop accepted. possible_cover: none; coverage sources not searched. Synthesis checks: the complete later form diff leaves this timer and continuation rule intact. At f560058d:7461-7490 discard takes the parked slot before returning its draft, and :7510-7521 calls that discard only if the matching wait generation still owns a guard. :7530-7592 spends the pending slot before submit. Thus a timeout of a still-waiting connection cannot later create from that discarded slot. The earlier 428badadfec337d5185af0d9bfeb02aad9a7b812 reveal fix handles an error-free internal continuation refusal, whereas the timer discard sets an actual error and uses the existing error-driven reveal; these are separate return paths, not evidence that the timer retries or rearms. Caveat: this does not certify all host-reader progress or bound the later preview; the specification expressly excludes the preview from this timer."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g087/findings.jsonl",
+        "id": "c1",
+        "line": 10,
+        "disposition": "excluded",
+        "group": "woken-launch-one-shot-expiry-state-boundary",
+        "reason": "Parent explicitly accepted named covered proposal from claims-056 after inspecting it. The one-shot timer's scope exactly matches explicit current specification acceptance. A connection that becomes pending only after expiry gets no renewed bound; no concrete indefinite later-connection route was established. Exact specification acceptance of the one-shot boundary, not a claim that indefinite waiting has been observed or that every continuation progresses. Checked source/results: [\"533169cf19571d34af3a8497eaceb8d2d7b7c852:create_form.rs:7490-7522 schedules one timer per woken_connection_wait and inspects the matching parked press only at expiry. :7530-7592 waits on its current connection/preview and spends pending state before submitting.\",\"SPEC_impl.md:210-215 states this exact after-expiry exception, distinguishing connection wait from checkout-preview time. No runtime observation or indefinitely blocked production route.\"] Current coverage/results: [\"Current SPEC_impl.md:210-215 exactly accepts the boundary; SPEC.md Creation requires bounded initial connection wait. plans/queue/wake-launch-stuck.md:51-69,95-120 describes the implemented single-timer boundary, not a separate repair.\",\"Planned empty; BUGS.md unrelated; active ledger and INDEX searched for one-shot wake/post-expiry pending consequence, no distinct exact item. FILTER.md not needed.\"] Exact cited cover: [{\"source\":\"SPEC_impl.md:210-215, GUI: Dioxus\",\"quote\":\"The limit is checked when its 60 seconds run out: a press still waiting for a connection then is discarded, even one that saw the host connect and lost it again before that point, while a host that shows a connection pending again only after that point is not bounded by it.\"}] Original stronger consequence and missing premise remain preserved: \"A connection returning to pending after the one-shot expiry can keep the launch waiting with no renewed 60-second bound. A still-waiting press discarded at expiry cannot later create from that spent slot. This check does not bound later preview preparation or certify host-reader progress.\"; \"An actual indefinitely pending later connection and resulting persistent token blockage were not established. That stronger availability consequence could merit high; it is not disproved by the timer's narrow accepted scope.\"."
+      },
+      "accepted_parent_decision": {
+        "key": "g087/c1",
+        "line": 10,
+        "disposition": "excluded",
+        "group": "woken-launch-one-shot-expiry-state-boundary",
+        "bucket": "other",
+        "recording": "covered",
+        "queue_target_candidate": null,
+        "needs_independent_drop_check": false,
+        "reason": "Parent explicitly accepted named covered proposal from claims-056 after inspecting it. The one-shot timer's scope exactly matches explicit current specification acceptance. A connection that becomes pending only after expiry gets no renewed bound; no concrete indefinite later-connection route was established. Exact specification acceptance of the one-shot boundary, not a claim that indefinite waiting has been observed or that every continuation progresses. Checked source/results: [\"533169cf19571d34af3a8497eaceb8d2d7b7c852:create_form.rs:7490-7522 schedules one timer per woken_connection_wait and inspects the matching parked press only at expiry. :7530-7592 waits on its current connection/preview and spends pending state before submitting.\",\"SPEC_impl.md:210-215 states this exact after-expiry exception, distinguishing connection wait from checkout-preview time. No runtime observation or indefinitely blocked production route.\"] Current coverage/results: [\"Current SPEC_impl.md:210-215 exactly accepts the boundary; SPEC.md Creation requires bounded initial connection wait. plans/queue/wake-launch-stuck.md:51-69,95-120 describes the implemented single-timer boundary, not a separate repair.\",\"Planned empty; BUGS.md unrelated; active ledger and INDEX searched for one-shot wake/post-expiry pending consequence, no distinct exact item. FILTER.md not needed.\"] Exact cited cover: [{\"source\":\"SPEC_impl.md:210-215, GUI: Dioxus\",\"quote\":\"The limit is checked when its 60 seconds run out: a press still waiting for a connection then is discarded, even one that saw the host connect and lost it again before that point, while a host that shows a connection pending again only after that point is not bounded by it.\"}] Original stronger consequence and missing premise remain preserved: \"A connection returning to pending after the one-shot expiry can keep the launch waiting with no renewed 60-second bound. A still-waiting press discarded at expiry cannot later create from that spent slot. This check does not bound later preview preparation or certify host-reader progress.\"; \"An actual indefinitely pending later connection and resulting persistent token blockage were not established. That stronger availability consequence could merit high; it is not disproved by the timer's narrow accepted scope.\"."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-056",
+          "key": "g087/c1",
+          "latest_line": 10,
+          "recommendation": "covered",
+          "bucket": "other",
+          "underlying_key": "woken-launch-one-shot-expiry-state-boundary",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The one-shot timer's scope exactly matches explicit current specification acceptance. A connection that becomes pending only after expiry gets no renewed bound; no concrete indefinite later-connection route was established.",
+          "checks": [
+            "533169cf19571d34af3a8497eaceb8d2d7b7c852:create_form.rs:7490-7522 schedules one timer per woken_connection_wait and inspects the matching parked press only at expiry. :7530-7592 waits on its current connection/preview and spends pending state before submitting.",
+            "SPEC_impl.md:210-215 states this exact after-expiry exception, distinguishing connection wait from checkout-preview time. No runtime observation or indefinitely blocked production route."
+          ],
+          "coverage_checked": [
+            "Current SPEC_impl.md:210-215 exactly accepts the boundary; SPEC.md Creation requires bounded initial connection wait. plans/queue/wake-launch-stuck.md:51-69,95-120 describes the implemented single-timer boundary, not a separate repair.",
+            "Planned empty; BUGS.md unrelated; active ledger and INDEX searched for one-shot wake/post-expiry pending consequence, no distinct exact item. FILTER.md not needed."
+          ],
+          "exact_cover_quotes": [
+            {
+              "source": "SPEC_impl.md:210-215, GUI: Dioxus",
+              "quote": "The limit is checked when its 60 seconds run out: a press still waiting for a connection then is discarded, even one that saw the host connect and lost it again before that point, while a host that shows a connection pending again only after that point is not bounded by it."
+            }
+          ],
+          "missing_premise": "An actual indefinitely pending later connection and resulting persistent token blockage were not established. That stronger availability consequence could merit high; it is not disproved by the timer's narrow accepted scope.",
+          "original_stronger_consequence": "A connection returning to pending after the one-shot expiry can keep the launch waiting with no renewed 60-second bound. A still-waiting press discarded at expiry cannot later create from that spent slot. This check does not bound later preview preparation or certify host-reader progress.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Exact specification acceptance of the one-shot boundary, not a claim that indefinite waiting has been observed or that every continuation progresses."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": false,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "woken-launch-one-shot-expiry-state-boundary",
+        "destination": null
+      }
+    },
+    {
+      "key": "g087/c2",
+      "owner": "g087",
+      "id": "c2",
+      "domain": "gui-environment-launcher",
+      "purpose": "gui-environment-launcher: crates/farhelm-ui/src/list/create_form.rs, crates/farhelm-ui/src/list/create_form/draft.rs; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 2,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c2",
+            "state": "open",
+            "summary": "Retiring the container controls does not silently remove stored isolation",
+            "location": "crates/farhelm-ui/src/list/create_form/draft.rs:230",
+            "detail": "Reviewed commit: 04d85f0c98a9b635709d00b056719a0baa7fd3fc. TLDR: Considered whether removing the old container editor and destination eligibility checks lets a stored isolated setup launch directly on its host. That security consequence is not supported by the new source. Details: draft.rs:230-232 refuses any active Agent draft containing the retired configuration, :747-750 prevents structured_selection from projecting it as a launch, :1966-1977 refuses direct recent activation before draft/history changes, and :2651-2659 refuses recent search activation before destination adoption. create_form.rs:5864-5868 and :6832-6836 recheck container_refusal before launch preparation and after key minting. Template replay at create_form.rs:818-899 goes through farhelm-proto/src/launcher.rs:667-669, which returns RETIRED_CONTAINER_REASON for a stored container object. The raw configuration remains in the compatibility projection rather than becoming None. Contract: SPEC.md, Retired containerized sessions (:4816-4823), says stored choices still load but use drops or refuses the retired choice with an explanation and cannot create another old-style session. Suggested bucket if the suspected route existed: highest/security. Could-be-highest: true (loss of intended isolation), but the route is refuted by the explicit refusal and unprojectable structured selection. Confidence: confirmed from source, no execution. proposed_drop: source refutation; the suspected ordinary-host launch path is blocked at both draft projection and submit, and old template objects fail the shared template fold. possible_cover: none; coverage sources not searched. Caveat: dormant Agent configuration does not block the explicitly selected Command tab, consistent with the independent retained field groups; no claim is made about unrelated command-launch safety."
+          }
+        },
+        {
+          "line": 9,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c2",
+            "state": "open",
+            "summary": "Retired container objects are refused; modern environment targets are separate",
+            "location": "crates/farhelm-ui/src/list/create_form/draft.rs:230",
+            "detail": "Reviewed commit: 04d85f0c98a9b635709d00b056719a0baa7fd3fc. TLDR: The original suspected security consequence was a stored container-isolated setup silently launching directly on its host after removal of its editor. This remains refuted for retired ContainerConfig objects, and does not refute modern environment placement problems such as l1. Source: draft.rs:230-232 refuses active Agent drafts carrying container; :747-750 returns None for their structured_selection; :1966-1977 refuses direct recent activation before history/draft writes, and :2651-2659 refuses search recent activation before destination adoption. create_form.rs:5864-5868 and :6832-6836 check the refusal before launch and after key mint. Templates pass through the whole-fold check at create_form.rs:818-899; farhelm-proto/src/launcher.rs:667-669 rejects Some(Some(container)) with RETIRED_CONTAINER_REASON. The raw container is retained in editing_selection, preserving compatibility fingerprints. Contract, exact text at SPEC.md:4818-4823: 'The earlier experimental model, whose supervisor stayed outside the container and bind-mounted a host checkout, is retired.' Also: 'Templates, recent setups and history with that choice still load. Using them drops or refuses the retired choice with an explanation and cannot create another old-style session.' Suggested bucket for the original silent-isolation-removal claim: highest/security. Could-be-highest: true, original consequence preserved; explicit source refusals refute that route. Confidence: confirmed source analysis, no execution. proposed_drop: source refutation limited to retired container objects; no parent drop accepted. possible_cover: none for this candidate; the caller's g085/l2 and g086 report concerns modern entry.target, recorded separately in l1. Synthesis evidence: draft.rs is the identical blob 20ee6a92d0f51111336e6457d1fed7cd96229020 at all five assigned commits; the form's relevant retired-choice checks remain unchanged through f560058da19e02716e6f943883a9508b447aff4e. Caveats: Command is a separate explicitly selected draft group, so dormant Agent configuration is not a guard on arbitrary commands. Modern entry.target carries provider/place intent and normally has selection.container == None; the retired-object checks therefore do not prevent l1's modern recent mutation and do not certify all placement transitions as correct."
+          }
+        }
+      ],
+      "latest": {
+        "line": 9,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c2",
+          "state": "open",
+          "summary": "Retired container objects are refused; modern environment targets are separate",
+          "location": "crates/farhelm-ui/src/list/create_form/draft.rs:230",
+          "detail": "Reviewed commit: 04d85f0c98a9b635709d00b056719a0baa7fd3fc. TLDR: The original suspected security consequence was a stored container-isolated setup silently launching directly on its host after removal of its editor. This remains refuted for retired ContainerConfig objects, and does not refute modern environment placement problems such as l1. Source: draft.rs:230-232 refuses active Agent drafts carrying container; :747-750 returns None for their structured_selection; :1966-1977 refuses direct recent activation before history/draft writes, and :2651-2659 refuses search recent activation before destination adoption. create_form.rs:5864-5868 and :6832-6836 check the refusal before launch and after key mint. Templates pass through the whole-fold check at create_form.rs:818-899; farhelm-proto/src/launcher.rs:667-669 rejects Some(Some(container)) with RETIRED_CONTAINER_REASON. The raw container is retained in editing_selection, preserving compatibility fingerprints. Contract, exact text at SPEC.md:4818-4823: 'The earlier experimental model, whose supervisor stayed outside the container and bind-mounted a host checkout, is retired.' Also: 'Templates, recent setups and history with that choice still load. Using them drops or refuses the retired choice with an explanation and cannot create another old-style session.' Suggested bucket for the original silent-isolation-removal claim: highest/security. Could-be-highest: true, original consequence preserved; explicit source refusals refute that route. Confidence: confirmed source analysis, no execution. proposed_drop: source refutation limited to retired container objects; no parent drop accepted. possible_cover: none for this candidate; the caller's g085/l2 and g086 report concerns modern entry.target, recorded separately in l1. Synthesis evidence: draft.rs is the identical blob 20ee6a92d0f51111336e6457d1fed7cd96229020 at all five assigned commits; the form's relevant retired-choice checks remain unchanged through f560058da19e02716e6f943883a9508b447aff4e. Caveats: Command is a separate explicitly selected draft group, so dormant Agent configuration is not a guard on arbitrary commands. Modern entry.target carries provider/place intent and normally has selection.container == None; the retired-object checks therefore do not prevent l1's modern recent mutation and do not certify all placement transitions as correct."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g087/findings.jsonl",
+        "id": "c2",
+        "line": 9,
+        "disposition": "under-investigation",
+        "group": "g087-c2",
+        "reason": "Record durably acknowledged; parent source/contract validation, cross-group synthesis, coverage/filter matching and any independent drop check remain pending. This preserves the claim and uncertainty without accepting, dropping or lowering it."
+      },
+      "accepted_parent_decision": null,
+      "returned_claim_checks": [
+        {
+          "batch": "claims-056",
+          "key": "g087/c2",
+          "latest_line": 9,
+          "recommendation": "refuted",
+          "bucket": "highest",
+          "underlying_key": "retired-container-object-cannot-become-unisolated-agent-launch",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "Stored retired container objects are refused rather than silently converted into ordinary host Agent launches. This narrow refutation says nothing about modern environment target placement, whose field differs from the retired container object.",
+          "checks": [
+            "04d85f0c98a9b635709d00b056719a0baa7fd3fc:draft.rs:230-232 refuses the active Agent container config; :747-750 makes structured_selection unavailable; raw config remains retained for editing/fingerprints.",
+            "04d85f0c:create_form.rs:5864-5868 checks container_refusal before launch. proto launcher.rs:667-669 refuses a template containing the retired container object before fold mutation. The supplied direct/search Recent refusal references are consistent with this same field check.",
+            "At 00de0b6c:draft.rs:1966-1977 the legacy Recent object is refused before writes, but modern entry.target still applies, explaining why g086/l2 survives. No launch or isolation experiment."
+          ],
+          "coverage_checked": [
+            "04d85f0c:SPEC.md:4816-4823 and current SPEC.md:4893-4899 retire the supervisor-outside model and require explained drop/refusal. SPEC_impl.md:8312-8326 preserves decoding but forbids new old-style creation.",
+            "Planned empty; BUGS.md unrelated; plans/queue/podman-environments.md:15-19,60-70 records the hard cut, not a missing repair. Active ledger/INDEX searches supplied no exact independent silent-isolation-loss item. FILTER.md cannot dismiss security loss."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": "No active Agent path dropping a retired ContainerConfig while proceeding directly on its host was shown. Explicit Command selection is a separate retained field group, not evidence of silent Agent fallback.",
+          "original_stronger_consequence": "A stored container-isolated setup might silently launch directly on the host after removal of its editor, losing intended isolation. Preserve this highest/security allegation for independent drop review. Modern environment targets normally have selection.container == None and are outside this refutation.",
+          "needs_independent_drop_check": true,
+          "proposed_basis": "Source refutation limited to retired container-object isolation fallback; highest preserves the original alleged consequence pending independent agreement."
+        }
+      ],
+      "parent_proposals": [
+        {
+          "artifact": "parent-flagged-judgments-056.json",
+          "key": "g087/c2",
+          "proposal": "claim-checks/claims-056/result.json",
+          "parent_proposal": "source-refuted-retired-container-object-silent-unisolated-Agent-launch",
+          "final_independent_gate": "required-before-highest-isolation-drop",
+          "reason": "Full056 retained Agent ContainerConfig causes container_refusal/structured_selectionNone, launch checks before execution, template fold rejects before mutation, legacy Recent refuses before writes. Modern entry.target differs and does not invalidate retained Replace Recent bug. Refute active Agent old-object silent host fallback only, not explicit Command group or all modern environment placement. Preserve original security allegation and decoded raw object limits for fresh gate; retirement rule supports refusal not arbitrary isolation loss."
+        }
+      ],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": true,
+        "provisional_bucket": "highest",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "retired-container-object-cannot-become-unisolated-agent-launch",
+        "destination": null
+      }
+    },
+    {
+      "key": "g087/c3",
+      "owner": "g087",
+      "id": "c3",
+      "domain": "gui-environment-launcher",
+      "purpose": "gui-environment-launcher: crates/farhelm-ui/src/list/create_form.rs, crates/farhelm-ui/src/list/create_form/draft.rs; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 3,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c3",
+            "state": "open",
+            "summary": "Restart completion still settles after replacing the outcome with a boolean",
+            "location": "crates/farhelm-ui/src/list/create_form.rs:6577",
+            "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e. TLDR: Considered whether the form loses restart result information needed to restore the session after changing bridge.finish(RestartOutcome::of(&result)) to bridge.finish(result.is_ok()). Details: create_form.rs:6554-6620 still reports a non-YOLO failure through bridge.error, calls bridge.finish before waiting for modal return, and handles success, the YOLO question, deadlines and other refusals from the original result afterward. The same commit changes list/view.rs RestartBridge.after and finish to bool; the removed RestartOutcome contained only succeeded plus the retired terminal-kind field. session_ops.rs:190-196 still advances the lifecycle revision and stores restart_succeeded; list/view.rs:3636-3648 clears source pending/progress and releases restart_claim on completion. The discarded field selected the old xterm versus grid renderer, which this commit removes across the page/protocol; there is no remaining launch-result semantic in that field. Suggested bucket if settlement were lost: high/material UX. Could-be-highest: false; no security or loss-of-work consequence established. Confidence: confirmed source analysis, no execution. proposed_drop: source refutation; failure diagnostics and original result handling remain intact, and the receiving bridge changes to the same boolean contract. possible_cover: none; coverage sources not searched. Caveat: this checks the assigned form's bridge adaptation and necessary receiver context, not the full renderer migration assigned to other groups."
+          }
+        },
+        {
+          "line": 6,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c3",
+            "state": "open",
+            "summary": "Restart bool bridge adaptation does not discard a needed result field",
+            "location": "crates/farhelm-ui/src/list/create_form.rs:6577",
+            "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e. TLDR: The assigned form call changes RestartOutcome::of(&result) to result.is_ok(); that adaptation itself does not discard a remaining reply field needed by its receiver. This is not a conclusion that retained-success retirement is correct. Original considered consequence preserved: restart completion could lose information needed to restore the session, a high/material UX issue. Source basis: create_form.rs:6554-6620 still sends non-YOLO errors to bridge.error, finishes the bridge before modal return, and subsequently handles the original success/refusal result. list/view.rs changes RestartBridge.after and finish to bool; the deleted RestartOutcome held only succeeded and the retired terminal-kind field. session_ops.rs:190-196 still increments the lifecycle revision and stores success, while list/view.rs:3636-3648 clears pending/progress and releases the restart claim. Those facts establish delivery and settlement only. They do not prove that a listing cannot retire a successful outcome too early, or that a subsequently mounted view sees the proper retained success. The caller explicitly identifies independent retained-success retirement claims in g037/g038/g089; this candidate neither refutes nor drops them, and their full claims were not supplied here. Suggested bucket: high/material UX for the original suspected restoration failure. Could-be-highest: false for this adaptation; no security or loss-of-work route established. Confidence: confirmed source analysis of the adaptation, no execution. proposed_drop: source refutation limited to loss of information caused by this single form-call type adaptation; no parent drop has been accepted. possible_cover: caller identifies g037/g038/g089 for independent retirement concerns, without a detailed shared claim; coverage sources not searched. Caveat: the prior c3 record's statement that completion still settles is limited to reaching the receiver and releasing the shared claim. Receiver retirement correctness remains outside that refutation and must be judged independently."
+          }
+        }
+      ],
+      "latest": {
+        "line": 6,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c3",
+          "state": "open",
+          "summary": "Restart bool bridge adaptation does not discard a needed result field",
+          "location": "crates/farhelm-ui/src/list/create_form.rs:6577",
+          "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e. TLDR: The assigned form call changes RestartOutcome::of(&result) to result.is_ok(); that adaptation itself does not discard a remaining reply field needed by its receiver. This is not a conclusion that retained-success retirement is correct. Original considered consequence preserved: restart completion could lose information needed to restore the session, a high/material UX issue. Source basis: create_form.rs:6554-6620 still sends non-YOLO errors to bridge.error, finishes the bridge before modal return, and subsequently handles the original success/refusal result. list/view.rs changes RestartBridge.after and finish to bool; the deleted RestartOutcome held only succeeded and the retired terminal-kind field. session_ops.rs:190-196 still increments the lifecycle revision and stores success, while list/view.rs:3636-3648 clears pending/progress and releases the restart claim. Those facts establish delivery and settlement only. They do not prove that a listing cannot retire a successful outcome too early, or that a subsequently mounted view sees the proper retained success. The caller explicitly identifies independent retained-success retirement claims in g037/g038/g089; this candidate neither refutes nor drops them, and their full claims were not supplied here. Suggested bucket: high/material UX for the original suspected restoration failure. Could-be-highest: false for this adaptation; no security or loss-of-work route established. Confidence: confirmed source analysis of the adaptation, no execution. proposed_drop: source refutation limited to loss of information caused by this single form-call type adaptation; no parent drop has been accepted. possible_cover: caller identifies g037/g038/g089 for independent retirement concerns, without a detailed shared claim; coverage sources not searched. Caveat: the prior c3 record's statement that completion still settles is limited to reaching the receiver and releasing the shared claim. Receiver retirement correctness remains outside that refutation and must be judged independently."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g087/findings.jsonl",
+        "id": "c3",
+        "line": 6,
+        "disposition": "excluded",
+        "group": "restart-form-bool-bridge-preserves-needed-completion-information",
+        "reason": "Parent explicitly accepted named refuted proposal from claims-056 after inspecting it. Changing this form call to a success boolean does not discard a remaining result field required by the receiver. It preserves error reporting, delivery and settlement. Retained-success retirement correctness is a separate question and is not refuted. Narrow source refutation of result-information loss caused by this one form-call type adaptation; preserve independent retained-success concerns. Checked source/results: [\"f560058da19e02716e6f943883a9508b447aff4e:create_form.rs:6554-6620 sends non-YOLO errors to bridge.error, calls bridge.finish(result.is_ok()) before modal return, and still handles the original result for success/YOLO/refusal.\",\"f560058d^:list/view.rs:275-296 shows RestartOutcome held only succeeded and agent_terminal. f560058d:list/view.rs:257-282 changes both receiver/finish to bool; :3636-3648 clears pending/progress, records outcome and releases restart_claim. session_ops.rs:190-196 increments lifecycle revision and stores success. No execution.\"] Current coverage/results: [\"SPEC.md lifecycle and SPEC_impl.md GUI closing-boundary/retained-outcome rules require settlement independent of the form. These source checks establish that delivery, not correctness of later retirement.\",\"Planned empty; BUGS.md unrelated; plans and active ledger searched for boolean bridge field loss; no exact item. Read retained-restart-hides-reboot-card.md: different retained-outcome lifecycle concern, not this adaptation. Other parent-mentioned g037/g038/g089 records were not supplied or judged. FILTER.md unnecessary.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Restart completion could lose information needed to restore the session, materially degrading recovery. Earlier wording that completion 'still settles' is limited to reaching its receiver and releasing the shared claim; it does not certify retained-success retirement or the entire renderer migration.\"; \"No needed non-retired result field lost by the bool adaptation was identified. Early retirement of successful outcomes or subsequent mount seeding requires its own assessment.\"."
+      },
+      "accepted_parent_decision": {
+        "key": "g087/c3",
+        "line": 6,
+        "disposition": "excluded",
+        "group": "restart-form-bool-bridge-preserves-needed-completion-information",
+        "bucket": "high",
+        "recording": "refuted",
+        "queue_target_candidate": null,
+        "needs_independent_drop_check": false,
+        "reason": "Parent explicitly accepted named refuted proposal from claims-056 after inspecting it. Changing this form call to a success boolean does not discard a remaining result field required by the receiver. It preserves error reporting, delivery and settlement. Retained-success retirement correctness is a separate question and is not refuted. Narrow source refutation of result-information loss caused by this one form-call type adaptation; preserve independent retained-success concerns. Checked source/results: [\"f560058da19e02716e6f943883a9508b447aff4e:create_form.rs:6554-6620 sends non-YOLO errors to bridge.error, calls bridge.finish(result.is_ok()) before modal return, and still handles the original result for success/YOLO/refusal.\",\"f560058d^:list/view.rs:275-296 shows RestartOutcome held only succeeded and agent_terminal. f560058d:list/view.rs:257-282 changes both receiver/finish to bool; :3636-3648 clears pending/progress, records outcome and releases restart_claim. session_ops.rs:190-196 increments lifecycle revision and stores success. No execution.\"] Current coverage/results: [\"SPEC.md lifecycle and SPEC_impl.md GUI closing-boundary/retained-outcome rules require settlement independent of the form. These source checks establish that delivery, not correctness of later retirement.\",\"Planned empty; BUGS.md unrelated; plans and active ledger searched for boolean bridge field loss; no exact item. Read retained-restart-hides-reboot-card.md: different retained-outcome lifecycle concern, not this adaptation. Other parent-mentioned g037/g038/g089 records were not supplied or judged. FILTER.md unnecessary.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Restart completion could lose information needed to restore the session, materially degrading recovery. Earlier wording that completion 'still settles' is limited to reaching its receiver and releasing the shared claim; it does not certify retained-success retirement or the entire renderer migration.\"; \"No needed non-retired result field lost by the bool adaptation was identified. Early retirement of successful outcomes or subsequent mount seeding requires its own assessment.\"."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-056",
+          "key": "g087/c3",
+          "latest_line": 6,
+          "recommendation": "refuted",
+          "bucket": "high",
+          "underlying_key": "restart-form-bool-bridge-preserves-needed-completion-information",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "Changing this form call to a success boolean does not discard a remaining result field required by the receiver. It preserves error reporting, delivery and settlement. Retained-success retirement correctness is a separate question and is not refuted.",
+          "checks": [
+            "f560058da19e02716e6f943883a9508b447aff4e:create_form.rs:6554-6620 sends non-YOLO errors to bridge.error, calls bridge.finish(result.is_ok()) before modal return, and still handles the original result for success/YOLO/refusal.",
+            "f560058d^:list/view.rs:275-296 shows RestartOutcome held only succeeded and agent_terminal. f560058d:list/view.rs:257-282 changes both receiver/finish to bool; :3636-3648 clears pending/progress, records outcome and releases restart_claim. session_ops.rs:190-196 increments lifecycle revision and stores success. No execution."
+          ],
+          "coverage_checked": [
+            "SPEC.md lifecycle and SPEC_impl.md GUI closing-boundary/retained-outcome rules require settlement independent of the form. These source checks establish that delivery, not correctness of later retirement.",
+            "Planned empty; BUGS.md unrelated; plans and active ledger searched for boolean bridge field loss; no exact item. Read retained-restart-hides-reboot-card.md: different retained-outcome lifecycle concern, not this adaptation. Other parent-mentioned g037/g038/g089 records were not supplied or judged. FILTER.md unnecessary."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": "No needed non-retired result field lost by the bool adaptation was identified. Early retirement of successful outcomes or subsequent mount seeding requires its own assessment.",
+          "original_stronger_consequence": "Restart completion could lose information needed to restore the session, materially degrading recovery. Earlier wording that completion 'still settles' is limited to reaching its receiver and releasing the shared claim; it does not certify retained-success retirement or the entire renderer migration.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Narrow source refutation of result-information loss caused by this one form-call type adaptation; preserve independent retained-success concerns."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "high",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "restart-form-bool-bridge-preserves-needed-completion-information",
+        "destination": null
+      }
+    },
+    {
+      "key": "g087/c4",
+      "owner": "g087",
+      "id": "c4",
+      "domain": "gui-environment-launcher",
+      "purpose": "gui-environment-launcher: crates/farhelm-ui/src/list/create_form.rs, crates/farhelm-ui/src/list/create_form/draft.rs; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 4,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c4",
+            "state": "open",
+            "summary": "Sandbox confirmation wording matches the last-session deletion contract",
+            "location": "crates/farhelm-ui/src/list/create_form.rs:9254",
+            "detail": "Reviewed commit: 2ef10815f12ed719ab6c51c6e3ac6fcd3f8bc1fa. TLDR: Checked whether changing the launch warning to say deleting the last session destroys the sandbox understates destructive behavior, and whether its confirmation can launch a different current draft. The warning matches the governing sandbox-session contract. Details: SPEC.md:1499-1544 describes supervisor-counted last-session deletion, a separately warned whole-sandbox fallback, and no automatic escalation from a partial bulk failure. SPEC_impl.md:6597-6656 specifies DeleteSessionOrSeal, the durable seal, provider destruction only after Sealed, and the distinct warned whole-environment path. The warning does not promise that last-session deletion is the only way to destroy a sandbox. The Create and launch handler at create_form.rs:9263-9266 captures the rendered snapshot, and submit checks sandbox_consent against the complete current LaunchDraft at :5998-5999 before using that consent. A different draft therefore gets a new question rather than inheriting the answered draft's consent. Suggested bucket if the suspected destructive understatement existed: highest/loss of work. Could-be-highest: true, but no destructive route beyond the stated confirmation is established by the assigned wording change; source contracts refute the suspected last-session mismatch. Confidence: confirmed source/contract analysis, no execution. proposed_drop: source refutation; last-session semantics and separately warned whole-sandbox deletion are explicit, and the launch consent is snapshot-equality bound. possible_cover: none; coverage sources not searched. Caveat: this checks the assigned warning and its launch-consent caller, not every provider deletion implementation; the confirmation's plain Signal is not itself ConfirmSlot, but absence of that type alone does not establish retargeted launch behavior because the full draft equality check is present."
+          }
+        },
+        {
+          "line": 11,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c4",
+            "state": "open",
+            "summary": "Changed sandbox warning follows the deletion contract at its revision",
+            "location": "crates/farhelm-ui/src/list/create_form.rs:9254",
+            "detail": "Reviewed commit: 2ef10815f12ed719ab6c51c6e3ac6fcd3f8bc1fa. TLDR: Original potentially highest concern preserved: a launch warning understating later sandbox destruction could cause loss of files, processes or unpushed work. The assigned wording instead follows the changed contract at this exact revision: deleting its last session removes the environment; deleting a non-final session follows a session-only path, while whole-environment fallback has a separate destructive confirmation. Source/spec basis: create_form.rs:9254 changes 'Delete irreversibly removes the whole sandbox' to 'Deleting its last session irreversibly removes the sandbox'. SPEC.md, Sandbox sessions, at this revision says '**Delete removes the sandbox together with its last session.**' and, for an unavailable supervisor, 'Delete does not guess and never resumes the sandbox: it offers the whole-sandbox Delete instead, whose confirmation warns that every session, process, file, checkout, unpushed change and snapshot in the sandbox will be removed'. SPEC_impl.md:6597-6656 specifies supervisor-counted DeleteSessionOrSeal, durable finality, provider destruction after Sealed and the separately warned whole-environment path. Synthesis compared the earlier actual revision 04d85f0c98a9b635709d00b056719a0baa7fd3fc: its SPEC.md, Sandbox sessions, still says '**Delete always destroys the whole sandbox**', and its form still carries the old whole-sandbox warning. The new last-session wording is therefore not being applied retrospectively to that older behavior. Suggested bucket for the original destructive-understatement claim: highest/loss of work. Could-be-highest: true; no such understatement is established for this assigned change at its own revision. Confidence: confirmed comparison of source wording and governing contracts, no execution or end-to-end provider-deletion validation. proposed_drop: the changed warning agrees with the same revision's contract and preserves the fact of irreversible destruction; no parent drop accepted. possible_cover: none; coverage sources not searched. Confirmation caveat: the Create and launch handler at :9263-9266 captures its rendered LaunchDraft, and :5998-5999 requires full draft equality before reusing that consent, refuting the narrow claim that a different-valued current draft automatically inherits it. That equality is not a ConfirmSlot opening token, does not prove generation-safe cancellation or same-valued reopening, and does not freeze an independently changing recipe catalog. This candidate does not refute such independent confirmation-lifecycle claims. The text also does not say last-session deletion is the only way to destroy an environment; explicit whole-environment Delete remains separately warned."
+          }
+        }
+      ],
+      "latest": {
+        "line": 11,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c4",
+          "state": "open",
+          "summary": "Changed sandbox warning follows the deletion contract at its revision",
+          "location": "crates/farhelm-ui/src/list/create_form.rs:9254",
+          "detail": "Reviewed commit: 2ef10815f12ed719ab6c51c6e3ac6fcd3f8bc1fa. TLDR: Original potentially highest concern preserved: a launch warning understating later sandbox destruction could cause loss of files, processes or unpushed work. The assigned wording instead follows the changed contract at this exact revision: deleting its last session removes the environment; deleting a non-final session follows a session-only path, while whole-environment fallback has a separate destructive confirmation. Source/spec basis: create_form.rs:9254 changes 'Delete irreversibly removes the whole sandbox' to 'Deleting its last session irreversibly removes the sandbox'. SPEC.md, Sandbox sessions, at this revision says '**Delete removes the sandbox together with its last session.**' and, for an unavailable supervisor, 'Delete does not guess and never resumes the sandbox: it offers the whole-sandbox Delete instead, whose confirmation warns that every session, process, file, checkout, unpushed change and snapshot in the sandbox will be removed'. SPEC_impl.md:6597-6656 specifies supervisor-counted DeleteSessionOrSeal, durable finality, provider destruction after Sealed and the separately warned whole-environment path. Synthesis compared the earlier actual revision 04d85f0c98a9b635709d00b056719a0baa7fd3fc: its SPEC.md, Sandbox sessions, still says '**Delete always destroys the whole sandbox**', and its form still carries the old whole-sandbox warning. The new last-session wording is therefore not being applied retrospectively to that older behavior. Suggested bucket for the original destructive-understatement claim: highest/loss of work. Could-be-highest: true; no such understatement is established for this assigned change at its own revision. Confidence: confirmed comparison of source wording and governing contracts, no execution or end-to-end provider-deletion validation. proposed_drop: the changed warning agrees with the same revision's contract and preserves the fact of irreversible destruction; no parent drop accepted. possible_cover: none; coverage sources not searched. Confirmation caveat: the Create and launch handler at :9263-9266 captures its rendered LaunchDraft, and :5998-5999 requires full draft equality before reusing that consent, refuting the narrow claim that a different-valued current draft automatically inherits it. That equality is not a ConfirmSlot opening token, does not prove generation-safe cancellation or same-valued reopening, and does not freeze an independently changing recipe catalog. This candidate does not refute such independent confirmation-lifecycle claims. The text also does not say last-session deletion is the only way to destroy an environment; explicit whole-environment Delete remains separately warned."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g087/findings.jsonl",
+        "id": "c4",
+        "line": 11,
+        "disposition": "under-investigation",
+        "group": "g087-c4",
+        "reason": "Record durably acknowledged; parent source/contract validation, cross-group synthesis, coverage/filter matching and any independent drop check remain pending. This preserves the claim and uncertainty without accepting, dropping or lowering it."
+      },
+      "accepted_parent_decision": null,
+      "returned_claim_checks": [
+        {
+          "batch": "claims-056",
+          "key": "g087/c4",
+          "latest_line": 11,
+          "recommendation": "refuted",
+          "bucket": "highest",
+          "underlying_key": "sandbox-launch-warning-last-session-revision-alignment",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The changed warning describes last-session destruction under the same revision's changed deletion contract. Non-final session deletion and separately confirmed whole-environment fallback do not contradict its wording. Narrow consent equality prevents a different-valued draft from inheriting the captured draft's consent, without proving opening-generation safety.",
+          "checks": [
+            "2ef10815f12ed719ab6c51c6e3ac6fcd3f8bc1fa:create_form.rs:9244-9269 states that deleting the last session removes the sandbox, processes, files and snapshots; Confirm captures snapshot. Submission at :5998-5999 requires complete LaunchDraft equality for consent.",
+            "2ef10815:SPEC.md Sandbox sessions:1499-1548 requires supervisor-counted last-session sealing and separately warned whole-sandbox Delete when the supervisor cannot answer. Current SPEC_impl.md:6609-6622 retains that split. The earlier 04d85f0c contract and warning were whole-sandbox wording; the later wording is not evidence about that older behavior. No end-to-end provider deletion check."
+          ],
+          "coverage_checked": [
+            "Read same-revision Sandbox sessions deletion section plus current SPEC.md:1509-1548 and SPEC_impl.md:6584-6632: no warning/last-session contract mismatch.",
+            "Planned empty; BUGS.md unrelated; plans and active ledger searched for this last-session warning consequence. INDEX's sandbox-launch-question-lacks-opening-token.md was read: it records a distinct confirmation-opening defect and must remain independent. It is neither refuted by draft equality nor exact coverage for a wording mismatch. FILTER.md cannot dismiss destructive under-warning."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": "No destruction beyond the changed warning's stated same-revision semantics was shown. Draft equality does not establish generation-safe cancellation, same-valued reopening safety, or a frozen recipe catalog.",
+          "original_stronger_consequence": "An understated launch warning might cause loss of files, processes or unpushed work. Preserve that highest allegation for independent drop review. The text does not say last-session deletion is the only destruction route; whole-environment Delete remains separately warned. This assessment does not refute independent confirmation-lifecycle defects.",
+          "needs_independent_drop_check": true,
+          "proposed_basis": "Narrow source/contract refutation of changed last-session wording understating that revision's deletion behavior; independent review still required for the original work-loss allegation."
+        }
+      ],
+      "parent_proposals": [
+        {
+          "artifact": "parent-flagged-judgments-056.json",
+          "key": "g087/c4",
+          "proposal": "claim-checks/claims-056/result.json",
+          "parent_proposal": "source-contract-refuted-same-revision-last-session-launch-warning-understatement",
+          "final_independent_gate": "required-before-highest-destructive-warning-drop",
+          "reason": "Full056 changed launch warning matches same2ef last-session seal/count contract and separately warned Whole fallback; do not judge it by earlier whole-only semantics. Captured full LaunchDraft equality binds different-valued draft consent, not same-valued opening generations, frozen recipe catalog or Cancel ownership. Existing sandbox-launch-question-lacks-opening-token remains separate. Refute named wording mismatch only, no end-to-end provider certificate; preserve file/process/unpushed-work consequence for independent gate."
+        }
+      ],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": true,
+        "provisional_bucket": "highest",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "sandbox-launch-warning-last-session-revision-alignment",
+        "destination": null
+      }
+    },
+    {
+      "key": "g087/l1",
+      "owner": "g087",
+      "id": "l1",
+      "domain": "gui-environment-launcher",
+      "purpose": "gui-environment-launcher: crates/farhelm-ui/src/list/create_form.rs, crates/farhelm-ui/src/list/create_form/draft.rs; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 5,
+          "event": {
+            "version": 1,
+            "kind": "lead",
+            "id": "l1",
+            "state": "open",
+            "summary": "Environment recent setup can strand Replace with on a forbidden new-environment target",
+            "location": "crates/farhelm-ui/src/list/create_form/draft.rs:1966",
+            "detail": "Reviewed commit under investigation: 04d85f0c98a9b635709d00b056719a0baa7fd3fc and subsequent assigned form revisions. TLDR: The caller reports that environment recent setups are offered in Replace with, apply a new-environment target, and then cannot launch because Replace with keeps the source environment and disables placement changes. This is separate from retired container isolation in c2. Suggested bucket: high/material UX if the offered action strands the workflow; no established security or loss-of-work route. Could-be-highest: false on the reported route because source-host guards prevent replacing into the wrong environment. Confidence: source checks pending this synthesis turn; caller report is not execution evidence. proposed_drop: false. possible_cover: caller identifies g085/l2 and g086 initial reply as related reports; no coverage sources searched. Next checks: inspect both direct and search recent activation, host_fixed behavior and reset/placement controls at the actual revisions; determine whether a reachable recovery changes the consequence. Missing premise: whether the UI actually admits the new target during Replace with and whether its user controls can clear it. No reproduction requested or performed."
+          }
+        },
+        {
+          "line": 7,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "l1",
+            "state": "open",
+            "summary": "Environment recents put Replace with into a placement it cannot submit",
+            "location": "crates/farhelm-ui/src/list/create_form/draft.rs:2001",
+            "detail": "Reviewed commit: 04d85f0c98a9b635709d00b056719a0baa7fd3fc. TLDR: Replace with offers a recent setup for a new disposable environment, accepts it into the form, then refuses to replace because this operation must stay in the source environment. Its placement picker is disabled, and Reset choices does not clear that placement. The user must recover through another applicable setup or cancel/reopen instead of using the offered setup normally. Source-confirmed route: create_form.rs:1478-1489 and :4296-4304 merge helm-wide environment history without a host_fixed filter; :4336-4343 ranks that history and :8089-8110 offers recents for every non-Restart form, including Replace with. draft.rs:1950-1963 blocks Restart only; :1966-1977 refuses retired ContainerConfig objects, which are distinct from modern environment entry.target; :2001-2005 selects entry.target and :2015 restores the launch. Search recents likewise select entry.target at :2817-2822 without a Replace-with/host_fixed refusal. Once target is Some, create_form.rs:5912-5919 explicitly refuses host_fixed submissions with 'Restart and Replace keep the existing environment'. PlacementPicker at :7351-7361 is disabled by busy || host_fixed. Reset choices at draft.rs:2258-2290 calls the agent-group reset, whose :1090-1100 clears retired container choice but retains target. Contract: SPEC.md, Sandbox sessions, says 'Restart, Restart with, Replace and Replace with stay in the existing sandbox.' Creation's recent setups rule says a recent row fills every saved choice and destination, with Enter launching through the ordinary path; invalid fixed-placement choices must instead be excluded or refused atomically. Suggested bucket: high/material UX, because an enabled ordinary setup action leaves a non-submittable draft with its normal placement correction disabled. Could-be-highest: false on the established route; the source-host guard prevents wrong-environment replacement and no data loss or isolation bypass is shown. Confidence: confirmed source/contract analysis, no execution. proposed_drop: false. possible_cover: caller supplied g085/l2 and g086 initial reply describing this same interaction; no coverage sources searched. Caveats: present at this reviewed revision; the specific introducing commit was not established from the assigned retirement patch, and this report must not attribute introduction to retirement merely because both share the form. Another ordinary recent or suitable template may recover the draft; cancellation/reopening also recovers it, so this is a workflow stall rather than an irreversible state. Original caller consequence retained and bounded: placement mutation is accepted, submit refuses, direct placement correction is disabled. Next source checks will verify persistence at subsequent assigned revisions and narrow any recovery assumptions."
+          }
+        },
+        {
+          "line": 8,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "l1",
+            "state": "open",
+            "summary": "Environment recents put Replace with into a placement it cannot submit",
+            "location": "crates/farhelm-ui/src/list/create_form/draft.rs:2005",
+            "detail": "Reviewed commits: 04d85f0c98a9b635709d00b056719a0baa7fd3fc, 428badadfec337d5185af0d9bfeb02aad9a7b812, 533169cf19571d34af3a8497eaceb8d2d7b7c852, 2ef10815f12ed719ab6c51c6e3ac6fcd3f8bc1fa, f560058da19e02716e6f943883a9508b447aff4e. TLDR: Replace with offers and accepts a new-environment recent setup but cannot submit it, because replacement must stay in its source environment. Its normal placement picker is disabled and Reset choices does not clear the offending placement. Source at 04d85f0c: create_form.rs:1478-1489 and :4296-4304 merge environment history without host_fixed filtering; :4336-4343 ranks it and :8089-8110 displays it in non-Restart forms. draft.rs:1950-1963 rejects Restart only, :1966-1977 rejects retired ContainerConfig only, and :2005 selects modern entry.target. Search does the same at :2818-2823. create_form.rs:5912-5919 refuses any Some target when host_fixed, with 'Restart and Replace keep the existing environment'; :7351-7361 disables PlacementPicker for host_fixed. draft.rs:2258-2290 calls the :1090-1100 agent reset, which preserves target. Source reconciliation :2880-2954 seeds source placement only for a new prefill generation, so an ordinary render does not undo the accepted bad recent. Persistence checks: git rev-parse proves draft.rs has identical blob 20ee6a92d0f51111336e6457d1fed7cd96229020 at all five reviewed commits; the complete create_form.rs diff from 04d85f0c to f560058d leaves those history, recent, placement and host_fixed branches unchanged (the latter is still visible at f560058d:5965-5970). Contract at 04d85f0c SPEC.md, Sandbox sessions: 'Restart, Restart with, Replace and Replace with stay in the existing sandbox.' The following sentence says recents restore recipe/place for a fresh environment. The mismatch is admitting that fresh-environment intent into a fixed-source operation. Suggested bucket: high/material UX. Could-be-highest: false for the established route: the host_fixed submit refusal prevents wrong-environment replacement; no data-loss or isolation-bypass path is established. Confidence: confirmed source/contract analysis, no execution. proposed_drop: false. possible_cover: caller supplied g085/l2 and g086 initial reply describing the same interaction; no coverage sources searched. Recovery caveats: an applicable ordinary recent or template, or a source-host search action where that host is offered, can clear the target; cancellation/reopening also recovers. The picker and Reset remain ineffective for this specific target correction. Thus the supported consequence is an offered workflow that stalls, not permanent inability to replace. Introduction caveat: this is present at the five reviewed revisions, but these assigned patches do not establish which earlier commit introduced it. All readily checkable source premises for the reported route are resolved; no reproduction was performed."
+          }
+        },
+        {
+          "line": 12,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "l1",
+            "state": "open",
+            "summary": "Environment recents put Replace with into a placement it cannot submit",
+            "location": "crates/farhelm-ui/src/list/create_form/draft.rs:2005",
+            "detail": "Reviewed commits: 04d85f0c98a9b635709d00b056719a0baa7fd3fc, 428badadfec337d5185af0d9bfeb02aad9a7b812, 533169cf19571d34af3a8497eaceb8d2d7b7c852, 2ef10815f12ed719ab6c51c6e3ac6fcd3f8bc1fa, f560058da19e02716e6f943883a9508b447aff4e. TLDR: Replace with offers and accepts a recent setup for a new environment, then cannot submit it because replacement must stay in its source environment. The placement picker is disabled, and Reset choices does not clear the new-environment placement. Source at 04d85f0c: create_form.rs:1478-1489 and :4296-4304 merge environment history without host_fixed filtering; :4336-4343 ranks it and :8089-8110 displays it in non-Restart forms. draft.rs:1950-1963 rejects Restart only; :1966-1977 rejects retired ContainerConfig, not modern entry.target. :2005 and search :2818-2823 select that modern target. create_form.rs:5912-5919 refuses any Some target when host_fixed with 'Restart and Replace keep the existing environment'; :7351-7361 disables PlacementPicker for host_fixed. draft.rs:2258-2290 calls the :1090-1100 agent reset, which preserves target. Source reconciliation :2880-2954 reseeds placement only on a new prefill generation. Persistence: draft.rs has identical blob 20ee6a92d0f51111336e6457d1fed7cd96229020 at all five reviewed commits, and the complete later form diff leaves these history, recent, placement and host_fixed branches unchanged; f560058d:5965-5970 still carries the refusal. Exact contract at 04d85f0c SPEC.md, Sandbox sessions: 'Restart, Restart with, Replace and Replace with stay in the existing sandbox.' Next: 'Recent setups restore the recipe and place, obtaining a fresh environment.' The defect is admitting that fresh-environment intent into a fixed-source operation. Suggested bucket: high/material UX. Could-be-highest: false on the established route; the fixed-source submit guard prevents wrong-environment replacement and no loss-of-work or isolation-bypass route is shown. Confidence: confirmed source/contract analysis, no execution. proposed_drop: false. possible_cover: caller supplied g085/l2 and g086 initial reply describing this interaction; no coverage sources searched. Original supported consequence is preserved: accepted placement mutation strands the ordinary launch path while its placement picker and Reset cannot correct it. Recovery is possible: draft.rs:2002-2005 or :2819-2823 clears target for an offered ordinary recent, and the Host search branch :2700-2715 clears recipe/target where the source host is offered. Cancellation/reopening always remains available. No assertion is made that a compatible template can clear target; that recovery was not established. Thus this is a workflow stall, not permanent inability to replace. Introduction caveat: present at the reviewed revisions; the assigned retirement patch does not establish the earlier introducing commit. All readily checkable premises for this reported route are resolved. No reproduction performed."
+          }
+        },
+        {
+          "line": 13,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "l1",
+            "state": "open",
+            "summary": "Environment recents put Replace with into a placement it cannot submit",
+            "location": "crates/farhelm-ui/src/list/create_form/draft.rs:2005",
+            "detail": "Introducing reviewed revision resolved: 350a4b33b6d4476f4a78e43cea124bc2b828f462, within exclusive 6e423e30068b62c6cfa276c6d720ee35bb70387a through inclusive 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db. Source also checked at assigned revisions 04d85f0c98a9b635709d00b056719a0baa7fd3fc, 428badadfec337d5185af0d9bfeb02aad9a7b812, 533169cf19571d34af3a8497eaceb8d2d7b7c852, 2ef10815f12ed719ab6c51c6e3ac6fcd3f8bc1fa and f560058da19e02716e6f943883a9508b447aff4e. TLDR: Replace with offers and accepts a recent setup for a new environment, then cannot submit it because replacement must stay on its source. Placement picker is disabled and Reset choices retains that placement. Attribution checks: full bounded-range -G history for entry.target, environment_history and fixed-environment refusal identifies 350a4b33 as the sole matching pre-retirement change. The exclusive base has recipe-based fixed-host refusal at create_form.rs:5819-5822 but no environment-history feed/merge and no Recent target assignment. At 350a4b33^ draft.rs:1952-2004 both direct and search recents preserve current recipe and do not set entry.target. The 350a4b33 patch newly bypasses ordinary-install Recent admission when entry.target is Some, merges environment history, and calls draft.select_target(entry.target.clone()) in both direct (:2017-2021) and search (:2825-2830) activation without a Replace/host_fixed gate. The same commit retains the fixed-host submit refusal (:5991-5998) and disables the placement picker for host_fixed (:7456). Thus this is an in-range newly reachable interaction, not a pre-range defect, and is not introduced by the unrelated later container-retirement patch. Source route at 04d85f0c: create_form.rs:1478-1489,4296-4304 merges environment history, :4336-4343 ranks it and :8089-8110 offers it outside Restart. draft.rs:1950-1963 rejects Restart only, :1966-1977 rejects retired ContainerConfig only, :2005 and :2818-2823 select modern target. create_form.rs:5912-5919 refuses target Some when host_fixed; :7351-7361 disables the picker. draft reset :2258-2290 and :1090-1100 preserves target; source reconciliation :2880-2954 reseeds it only on a new prefill generation. Identical draft blob 20ee6a92d0f51111336e6457d1fed7cd96229020 at all five assigned revisions and complete later form diff prove persistence across them. Contract: SPEC.md Sandbox sessions at 04d85f0c says exactly 'Restart, Restart with, Replace and Replace with stay in the existing sandbox.' It also says 'Recent setups restore the recipe and place, obtaining a fresh environment.' Creation refuses held-host template changes atomically; the analogous Recent admits incompatible fresh-environment intent before refusing launch. Suggested bucket: high/material UX, unchanged. Could-be-highest: false on the established route; submit protects the source, with no shown wrong-environment replacement, security or loss-of-work consequence. Confidence: confirmed source/contract and range-attribution analysis, no execution. proposed_drop: false; no parent lowering/drop accepted. possible_cover: supplied g085/l2 and g086/l2 describe the same cause and introducing revision; retain for parent consolidation, not new discovery credit. Recovery caveats preserved: an offered ordinary Recent can clear target subject to original-installation admission/effective-host matching; source-host search can clear it where the ordinary source host is offered; session-owned hosts are omitted from that search. Templates are not a generally established repair. Cancel/reopen reliably reseeds. Original consequence remains a workflow stall, not permanent inability to replace or loss of user-owned work. Missing introducing-revision premise is now resolved; no unresolved lead remains. No reproductions or live-install actions."
+          }
+        }
+      ],
+      "latest": {
+        "line": 13,
+        "event": {
+          "version": 1,
+          "kind": "finding",
+          "id": "l1",
+          "state": "open",
+          "summary": "Environment recents put Replace with into a placement it cannot submit",
+          "location": "crates/farhelm-ui/src/list/create_form/draft.rs:2005",
+          "detail": "Introducing reviewed revision resolved: 350a4b33b6d4476f4a78e43cea124bc2b828f462, within exclusive 6e423e30068b62c6cfa276c6d720ee35bb70387a through inclusive 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db. Source also checked at assigned revisions 04d85f0c98a9b635709d00b056719a0baa7fd3fc, 428badadfec337d5185af0d9bfeb02aad9a7b812, 533169cf19571d34af3a8497eaceb8d2d7b7c852, 2ef10815f12ed719ab6c51c6e3ac6fcd3f8bc1fa and f560058da19e02716e6f943883a9508b447aff4e. TLDR: Replace with offers and accepts a recent setup for a new environment, then cannot submit it because replacement must stay on its source. Placement picker is disabled and Reset choices retains that placement. Attribution checks: full bounded-range -G history for entry.target, environment_history and fixed-environment refusal identifies 350a4b33 as the sole matching pre-retirement change. The exclusive base has recipe-based fixed-host refusal at create_form.rs:5819-5822 but no environment-history feed/merge and no Recent target assignment. At 350a4b33^ draft.rs:1952-2004 both direct and search recents preserve current recipe and do not set entry.target. The 350a4b33 patch newly bypasses ordinary-install Recent admission when entry.target is Some, merges environment history, and calls draft.select_target(entry.target.clone()) in both direct (:2017-2021) and search (:2825-2830) activation without a Replace/host_fixed gate. The same commit retains the fixed-host submit refusal (:5991-5998) and disables the placement picker for host_fixed (:7456). Thus this is an in-range newly reachable interaction, not a pre-range defect, and is not introduced by the unrelated later container-retirement patch. Source route at 04d85f0c: create_form.rs:1478-1489,4296-4304 merges environment history, :4336-4343 ranks it and :8089-8110 offers it outside Restart. draft.rs:1950-1963 rejects Restart only, :1966-1977 rejects retired ContainerConfig only, :2005 and :2818-2823 select modern target. create_form.rs:5912-5919 refuses target Some when host_fixed; :7351-7361 disables the picker. draft reset :2258-2290 and :1090-1100 preserves target; source reconciliation :2880-2954 reseeds it only on a new prefill generation. Identical draft blob 20ee6a92d0f51111336e6457d1fed7cd96229020 at all five assigned revisions and complete later form diff prove persistence across them. Contract: SPEC.md Sandbox sessions at 04d85f0c says exactly 'Restart, Restart with, Replace and Replace with stay in the existing sandbox.' It also says 'Recent setups restore the recipe and place, obtaining a fresh environment.' Creation refuses held-host template changes atomically; the analogous Recent admits incompatible fresh-environment intent before refusing launch. Suggested bucket: high/material UX, unchanged. Could-be-highest: false on the established route; submit protects the source, with no shown wrong-environment replacement, security or loss-of-work consequence. Confidence: confirmed source/contract and range-attribution analysis, no execution. proposed_drop: false; no parent lowering/drop accepted. possible_cover: supplied g085/l2 and g086/l2 describe the same cause and introducing revision; retain for parent consolidation, not new discovery credit. Recovery caveats preserved: an offered ordinary Recent can clear target subject to original-installation admission/effective-host matching; source-host search can clear it where the ordinary source host is offered; session-owned hosts are omitted from that search. Templates are not a generally established repair. Cancel/reopen reliably reseeds. Original consequence remains a workflow stall, not permanent inability to replace or loss of user-owned work. Missing introducing-revision premise is now resolved; no unresolved lead remains. No reproductions or live-install actions."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g087/findings.jsonl",
+        "id": "l1",
+        "line": 13,
+        "disposition": "duplicate",
+        "group": "replace-with-environment-recent-bypasses-held-placement-admission",
+        "reason": "Parent read complete claims057 and compared retained g086/l2. Same newly introduced350a4b33 Recent acceptance mutates fixed-source Replace to fresh entry.target; host_fixed rejects submission and disables picker, Reset preserves placement. Retain all direct/search caller provenance, correction to original introduction attribution and ordinary-host/recent/cancel-reopen recovery limits under one high item. No create, source deletion or work-loss is sent; exact claims057 coverage found no acceptance/pending repair/filter. g085/l2 remains to reconcile separately."
+      },
+      "accepted_parent_decision": {
+        "key": "g087/l1",
+        "line": 13,
+        "disposition": "duplicate",
+        "group": "replace-with-environment-recent-bypasses-held-placement-admission",
+        "bucket": "high",
+        "recording": "retain-verified",
+        "needs_independent_drop_check": false,
+        "reason": "Parent read complete claims057 and compared retained g086/l2. Same newly introduced350a4b33 Recent acceptance mutates fixed-source Replace to fresh entry.target; host_fixed rejects submission and disables picker, Reset preserves placement. Retain all direct/search caller provenance, correction to original introduction attribution and ordinary-host/recent/cancel-reopen recovery limits under one high item. No create, source deletion or work-loss is sent; exact claims057 coverage found no acceptance/pending repair/filter. g085/l2 remains to reconcile separately."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-057",
+          "key": "g087/l1",
+          "latest_line": 13,
+          "recommendation": "retain-verified",
+          "bucket": "high",
+          "underlying_key": "environment-recent-retargets-fixed-source-replace",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "An offered environment Recent sets a fresh-environment target in Replace with, whose submission refuses that target and whose placement picker is disabled. Reset choices preserves it. This is an ordinary workflow stall, recoverable by cancel/reopen or an applicable ordinary-host choice, not permanent inability to replace. Confirmed by source; not reproduced.",
+          "checks": [
+            "350a4b33b6d4476f4a78e43cea124bc2b828f462, draft.rs patch at accept_recent and the Recent search branch: newly bypasses ordinary-history admission for entry.target Some and sets draft.select_target(entry.target.clone()); parent direct admission at 1952-1968 and search at 2772-2776 had no target assignment. Bounded-range -G entry.target|WOKEN_CONNECTION history identifies 350a4b33 and the separate timeout commit. The introduction is within the review range, not the later retirement patch.",
+            "350a4b33:create_form.rs:5991-5998 refuses any fresh target under host_fixed; :7449-7456 disables PlacementPicker for host_fixed. These constraints coexist with the new Recent application.",
+            "04d85f0c98a9b635709d00b056719a0baa7fd3fc:create_form.rs:1478-1490,4296-4304 merges environment history without a fixed-source filter; :4336-4343 ranks recents; :8089-8119 offers enabled recents outside Restart and explicitly supplies Replace semantics.",
+            "04d85f0c:draft.rs:1958-1963 rejects Restart only; :1966-1974 rejects retired ContainerConfig, not modern environment targets; :2001-2015 and :2818-2825 accept modern entry.target. create_form.rs:5912-5919 refuses submission; :7353-7360 disables direct placement correction.",
+            "04d85f0c:draft.rs:2258-2290 calls :1090-1100 reset_choices, which preserves placement; :2880-2884,2931-2938 reseeds source placement only for a new prefill generation. Ordinary renders do not repair the accepted target. Ordinary recents can clear target at :2002-2005 subject to admission. Cancel/reopen reseeds. Compatible templates are not established as a general repair.",
+            "git diff 04d85f0c..00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db -- crates/farhelm-ui/src/list/create_form/draft.rs is empty: these owner operations persist through the inclusive tip. Historical SPEC.md:1480-1484 requires Restart/Replace to stay in the source sandbox while recents describe fresh environments."
+          ],
+          "coverage_checked": [
+            "Recording-time main 24bc058066fd57848e788b465719b0e6da2f98f7: SPEC.md:1290-1301,1492-1499,2012-2025 and SPEC_impl.md:6010-6024,6618-6635 require full Recent intent and fixed-source Replace; none accepts applying an unusable fresh target to Replace with.",
+            "TODO.md:25-27 Planned is empty. The recipe-recents convenience entry elsewhere in TODO is neither Planned coverage nor acceptance of this interaction.",
+            "Searched plans/queue for recent/Replace/fixed placement/environment intent. Matching podman-environments and sandbox-sessions describe fresh recipe recents and same-environment Replace, without an explicit correction for this admission gap. plans/REPORTS.md:7,21 confirms both plans already landed, so they are not unlanded-plan coverage.",
+            "BUGS.md read in full: only SSH transfer hang, unrelated.",
+            "INDEX.md searched for recent/environment/Replace/fixed placement/host_fixed; no exact trigger/consequence/scope item. Recent-description and other launcher findings concern different causes. Active TRIAGE_OUTCOMES.md searches find no decision for this Recent-to-fixed-Replace interaction; the preparation-alert entry at 1648-1663 concerns styling only. Archive not read.",
+            "FILTER.md read in full: deterministic offered action is not a rare self-correcting glitch or sub-second input race. No entire filter boundary matches."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": "No missing source premise for the bounded stall. Actual frequency and rendered runtime behavior were not measured. Supplied history names g085/l2 and g086/l2 as same-root reports; those records are outside this batch and were not independently checked.",
+          "original_stronger_consequence": "Initial lead: a new-environment Recent strands Replace with because submission is forbidden and placement changes disabled. Later records preserve accepted mutation, refusal, ineffective picker and Reset, while bounding recovery: another admissible ordinary Recent or offered source-host search can clear it; cancel/reopen reliably repairs it. No established wrong-environment replacement, security effect or loss of user-owned work; the submit guard blocks that route.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Record the source-confirmed stall at high, attributing introduction to 350a4b33. Parent may consolidate cross-batch reports using the underlying key; do not attribute it to retirement or claim permanent loss."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": true,
+        "clearly_refuted_candidate": false,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "high",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "replace-with-environment-recent-bypasses-held-placement-admission",
+        "destination": "trailing-replace-with-environment-recent-bypasses-held-placement-admission.md"
+      }
+    },
+    {
+      "key": "g087/l2",
+      "owner": "g087",
+      "id": "l2",
+      "domain": "gui-environment-launcher",
+      "purpose": "gui-environment-launcher: crates/farhelm-ui/src/list/create_form.rs, crates/farhelm-ui/src/list/create_form/draft.rs; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 14,
+          "event": {
+            "version": 1,
+            "kind": "lead",
+            "id": "l2",
+            "state": "open",
+            "summary": "Wake timeout may reopen the launcher after the user moved on",
+            "location": "crates/farhelm-ui/src/list/create_form.rs:7519",
+            "detail": "Reviewed commit under investigation: 533169cf19571d34af3a8497eaceb8d2d7b7c852. TLDR: The new connection timeout calls discard_guarded_preparation, which appears to return the failed hidden launcher automatically without checking the user's intervening input, potentially taking focus from the session they moved to. Source basis already read: :7490-7522 invokes discard on expiry, :7461-7488 returns through return_prepared_composer, and that helper calls admit_composer_return(opening, None). The parked stamp carries press_baseline, but the failure-return helper does not take it. Suggested bucket if established: high/material UX from unexpected modal/focus interruption. Could-be-highest: false on this current route; no harmful action or loss-of-work sequence established. Confidence: concrete source lead, source/contract and attribution checks pending; not runtime-observed. proposed_drop: false. possible_cover: supplied g001/f1 concerns queued host-add focus, not this timer failure-return; c1 covers the one-shot limit, not return admission. Required checks: read complete admission helper, reveal/isolation effects and actual pinned specification to see whether an activity gate or notice handoff intervenes; determine whether the newly introduced timer route is inside range or merely a pre-existing externally covered consequence. Missing premise: whether another owner prevents the automatic modal return or focus when the window's press count changed. No reproduction requested or performed."
+          }
+        },
+        {
+          "line": 15,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "l2",
+            "state": "open",
+            "summary": "Wake timeout automatically reopens the launcher after the user moves on",
+            "location": "crates/farhelm-ui/src/list/create_form.rs:7519",
+            "detail": "Reviewed commit: 533169cf19571d34af3a8497eaceb8d2d7b7c852. TLDR: After starting a launch that wakes a host, the user can switch sessions and continue working. If the window's host list has not caught up after the new 60-second limit, the failed launcher automatically returns as a modal over that work instead of quietly offering its error in a notice. Source route: create_form.rs:7490-7522 introduces the timer and calls discard_guarded_preparation on expiry. :7461-7488 consumes the pending stamp, sets its error, and starts return_prepared_composer. The helper :2124-2135 calls admit_composer_return(opening, None), then clears resuming_host; it passes no pending.press_baseline. The admission helper :2054-2117 treats its optional baseline as naming-only: None installs no activity listener and does not compare window.__farhelmLaunchActivity. It waits only for another modal/admitted host result to leave and for the opening to match, then sets aria-modal=true. The original lead's focus concern is preserved: :5605-5641 restores modal isolation and requests the form's focus on the reveal; the exact focus script is being checked separately, but modal reservation already shows input interruption. Contract: SPEC.md:1341-1345 says 'A failure, unknown outcome or follow-up question restores the same launcher with its draft and ordinary retry rules if the user has not moved on since submitting it. Otherwise a notice offers it, and the launcher returns when the user opens that notice'. SPEC_impl.md:1181-1187 explicitly states 'a launcher owed back after the user moved on should wait behind a notice instead of returning by itself' and 'Treat the spec as the target when changing any of these paths.' That is an acknowledged implementation gap, not acceptance of the behavior. The new timer changes this path and adds an automatic post-wake failure trigger. Suggested bucket: high/material UX for unexpected modal/input interruption. Could-be-highest: false; no destructive action, security effect or loss-of-work route established. Confidence: confirmed source/contract analysis, no execution. proposed_drop: false. possible_cover: supplied g001/f1 is the separate queued host-add return route; its record explicitly distinguishes launcher return in the same documented gap. No supplied local/interface finding duplicates this timer return trigger. The general return helper existed earlier; attribution is to the new timeout caller, not invention of the underlying helper defect. Further bounded checks: inspect exact focus/visibility restoration and compare against exclusive base/parent to delimit the newly reachable trigger and any later repair. No reproduction or live-install action performed."
+          }
+        },
+        {
+          "line": 16,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "l2",
+            "state": "open",
+            "summary": "Wake timeout reopens and focuses the launcher after the user moves on",
+            "location": "crates/farhelm-ui/src/list/create_form.rs:7519",
+            "detail": "Reviewed introducing revision for this new trigger: 533169cf19571d34af3a8497eaceb8d2d7b7c852. TLDR: A user can start a fresh-checkout launch that wakes its host, switch sessions and resume typing, then have the failed launcher automatically cover that work and take keyboard focus when the window's host snapshot misses the new 60-second connection limit. The error should be offered in a notice after the user moved on. Source route: create_form.rs:6237-6263 captures press_baseline, pins the submitted host and releases launcher isolation; :6286-6297 parks the successfully woken press and arms the new timer. :7490-7522 calls discard_guarded_preparation when the same guard-bearing press still waits at expiry. :7461-7488 consumes that slot, sets the error and starts return_prepared_composer without passing the stamp's input baseline. :2124-2135 calls admit_composer_return(opening,None), then clears resuming_host. At :2054-2117 the baseline check and activity listener run only for a non-null naming baseline; the failure return checks opening identity and modal absence, not subsequent user input, before setting aria-modal=true. resuming_host clearing ends submitted_wait (:3488-3492); error-driven reveal clears hidden quick presentation (:5595-5603); :5608-5641 restores the revealed modal. restore_composer_modal at :2175-2193 tests only whether focus is already inside that dialog; active focus in another session therefore triggers its surface_script. modal_dialog.rs:376-377 and :415-426 resolve the search input and call focus({preventScroll:true}) directly, with no activity/external-focus veto. This settles the original lead's focus premise, beyond merely reserving modality. No alternate notice handoff or parent-owned activity gate occurs in this source route. Contract, exact pinned SPEC.md:1341-1345: 'A failure, unknown outcome or follow-up question restores the same launcher with its draft and ordinary retry rules if the user has not moved on since submitting it. Otherwise a notice offers it, and the launcher returns when the user opens that notice'. Keyboard focus :3226: 'Once the user has moved on, the result moves no focus, opens no dialog and switches no session.' SPEC_impl.md:1181-1187 acknowledges 'a launcher owed back after the user moved on should wait behind a notice instead of returning by itself' and instructs 'Treat the spec as the target when changing any of these paths.' This is an acknowledged implementation gap, not acceptance of the mismatch. The new Creation wording saying the timeout returns with its draft supplies no explicit moved-on exception. Suggested bucket: high/material UX from an asynchronous modal and redirected typing; no mutation is claimed. Could-be-highest: false; no destructive action, security effect or loss-of-work route established. Confidence: confirmed source/contract analysis, not runtime observed. proposed_drop: false; no parent drop/lowering accepted. possible_cover: supplied g001/f1 is a separate queued host-add focus defect; it quotes the same documented gap but does not report this launcher-timeout route. Attribution limits: the unguarded general return helper predates the exclusive base (base create_form.rs:1950-2014 already has naming-only activity checks and failure returns); do not claim this commit introduced all launcher return theft. Its actual newly added timer reaches that helper from the previously parked connection wait even with unchanged draft/authority. Full range -G history identifies only 533169cf for WOKEN_CONNECTION/these helper changes; its parent has no timer between discard and pending-submit effects. The complete form diff from 533169cf to inclusive 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db changes only restart result typing, sandbox warning and a test fixture; it leaves this timeout/return/focus route unchanged. Caveats: the window must still await its woken connection at timeout; another modal delays the unwanted return until it closes, and a genuinely retired opening prevents it. Cancellation or successful continuation consumes the slot first and is outside the route. No runtime tests, reproduction or live-install actions. All readily checkable source premises resolved; no unresolved lead remains for this ID."
+          }
+        }
+      ],
+      "latest": {
+        "line": 16,
+        "event": {
+          "version": 1,
+          "kind": "finding",
+          "id": "l2",
+          "state": "open",
+          "summary": "Wake timeout reopens and focuses the launcher after the user moves on",
+          "location": "crates/farhelm-ui/src/list/create_form.rs:7519",
+          "detail": "Reviewed introducing revision for this new trigger: 533169cf19571d34af3a8497eaceb8d2d7b7c852. TLDR: A user can start a fresh-checkout launch that wakes its host, switch sessions and resume typing, then have the failed launcher automatically cover that work and take keyboard focus when the window's host snapshot misses the new 60-second connection limit. The error should be offered in a notice after the user moved on. Source route: create_form.rs:6237-6263 captures press_baseline, pins the submitted host and releases launcher isolation; :6286-6297 parks the successfully woken press and arms the new timer. :7490-7522 calls discard_guarded_preparation when the same guard-bearing press still waits at expiry. :7461-7488 consumes that slot, sets the error and starts return_prepared_composer without passing the stamp's input baseline. :2124-2135 calls admit_composer_return(opening,None), then clears resuming_host. At :2054-2117 the baseline check and activity listener run only for a non-null naming baseline; the failure return checks opening identity and modal absence, not subsequent user input, before setting aria-modal=true. resuming_host clearing ends submitted_wait (:3488-3492); error-driven reveal clears hidden quick presentation (:5595-5603); :5608-5641 restores the revealed modal. restore_composer_modal at :2175-2193 tests only whether focus is already inside that dialog; active focus in another session therefore triggers its surface_script. modal_dialog.rs:376-377 and :415-426 resolve the search input and call focus({preventScroll:true}) directly, with no activity/external-focus veto. This settles the original lead's focus premise, beyond merely reserving modality. No alternate notice handoff or parent-owned activity gate occurs in this source route. Contract, exact pinned SPEC.md:1341-1345: 'A failure, unknown outcome or follow-up question restores the same launcher with its draft and ordinary retry rules if the user has not moved on since submitting it. Otherwise a notice offers it, and the launcher returns when the user opens that notice'. Keyboard focus :3226: 'Once the user has moved on, the result moves no focus, opens no dialog and switches no session.' SPEC_impl.md:1181-1187 acknowledges 'a launcher owed back after the user moved on should wait behind a notice instead of returning by itself' and instructs 'Treat the spec as the target when changing any of these paths.' This is an acknowledged implementation gap, not acceptance of the mismatch. The new Creation wording saying the timeout returns with its draft supplies no explicit moved-on exception. Suggested bucket: high/material UX from an asynchronous modal and redirected typing; no mutation is claimed. Could-be-highest: false; no destructive action, security effect or loss-of-work route established. Confidence: confirmed source/contract analysis, not runtime observed. proposed_drop: false; no parent drop/lowering accepted. possible_cover: supplied g001/f1 is a separate queued host-add focus defect; it quotes the same documented gap but does not report this launcher-timeout route. Attribution limits: the unguarded general return helper predates the exclusive base (base create_form.rs:1950-2014 already has naming-only activity checks and failure returns); do not claim this commit introduced all launcher return theft. Its actual newly added timer reaches that helper from the previously parked connection wait even with unchanged draft/authority. Full range -G history identifies only 533169cf for WOKEN_CONNECTION/these helper changes; its parent has no timer between discard and pending-submit effects. The complete form diff from 533169cf to inclusive 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db changes only restart result typing, sandbox warning and a test fixture; it leaves this timeout/return/focus route unchanged. Caveats: the window must still await its woken connection at timeout; another modal delays the unwanted return until it closes, and a genuinely retired opening prevents it. Cancellation or successful continuation consumes the slot first and is outside the route. No runtime tests, reproduction or live-install actions. All readily checkable source premises resolved; no unresolved lead remains for this ID."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g087/findings.jsonl",
+        "id": "l2",
+        "line": 16,
+        "disposition": "verified",
+        "group": "failed-launch-reopens",
+        "reason": "Parent read complete claims057 and full existing moved-on-launch-return item. Newly introduced533169cf one-shot60s wake timer is a useful caller extension of the same existing naming-only activity admission defect. At7462-7487/7519 the failure return passes no pending.press_baseline;2071-2135 no-baseline admission and5595-5634 isolation/direct focus can reopen over later session typing. Preserve still-waiting matching press, consumed/cancelled/retired opening and later-modal caveats; no destructive follow-on or highest consequence. Extend existing high item with timer provenance rather than duplicate or dismiss useful new scope."
+      },
+      "accepted_parent_decision": {
+        "key": "g087/l2",
+        "line": 16,
+        "disposition": "verified",
+        "group": "failed-launch-reopens",
+        "bucket": "high",
+        "recording": "extend-existing",
+        "queue_target_candidate": "review_feedback_queue/moved-on-launch-return.md",
+        "needs_independent_drop_check": false,
+        "reason": "Parent read complete claims057 and full existing moved-on-launch-return item. Newly introduced533169cf one-shot60s wake timer is a useful caller extension of the same existing naming-only activity admission defect. At7462-7487/7519 the failure return passes no pending.press_baseline;2071-2135 no-baseline admission and5595-5634 isolation/direct focus can reopen over later session typing. Preserve still-waiting matching press, consumed/cancelled/retired opening and later-modal caveats; no destructive follow-on or highest consequence. Extend existing high item with timer provenance rather than duplicate or dismiss useful new scope."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-057",
+          "key": "g087/l2",
+          "latest_line": 16,
+          "recommendation": "duplicate",
+          "bucket": "high",
+          "underlying_key": "failed-launch-reopens",
+          "aliases": [
+            "review_feedback_queue/moved-on-launch-return.md"
+          ],
+          "target_queue_file": "review_feedback_queue/moved-on-launch-return.md",
+          "why": "The new wake timeout reaches the already queued failure-return admission defect. The existing item explicitly includes wake/preparation return, the same missing activity baseline, modal admission and focus consequence. Preserve the newly introduced timer as useful extension evidence in that item rather than a second root finding.",
+          "checks": [
+            "533169cf19571d34af3a8497eaceb8d2d7b7c852:create_form.rs:6240-6249 releases submitted launcher isolation; :6284-6297 parks the guard and arms woken_connection_wait. :7500-7522 times out the same still-waiting press and calls discard_guarded_preparation at :7519.",
+            "533169cf:create_form.rs:7462-7487 consumes the pending press, settles its source, sets the error and returns via return_prepared_composer without pending.press_baseline. :2124-2135 passes None to admit_composer_return. :2071-2117 compares activity and installs its listener only when the naming baseline is non-null, so later typing does not veto this failure return.",
+            "533169cf:create_form.rs:5595-5603 reveals errors; :5608-5634 restores modal isolation/focus after submitted waiting ends. :2175-2193 only exempts usable focus already inside the dialog. modal_dialog.rs:376-377,408-426 uses target_js with direct target.focus({preventScroll:true}); it does not apply the separate async focus guard.",
+            "533169cf:SPEC.md:1340-1350 combines the general moved-on notice requirement with the 60-second connection limit; :3221-3232 prohibits dialog/focus return after later input. SPEC_impl.md:1179-1187 calls launcher return an implementation gap and directs using the product spec as target. The timeout wording supplies no explicit exception.",
+            "Bounded-range -G history identifies 533169cf as the WOKEN_CONNECTION addition. The general failure-return helper predates this change; attribution is to a new timer caller. Complete create_form.rs diff from 533169cf to inclusive 00de0b6c changes Restart result typing, sandbox warning text and a fixture only, leaving this timer/admission/focus route intact.",
+            "Route remains conditional on the guard-bearing press still awaiting this window's connection snapshot at expiry. Successful continuation/cancellation consumes it first. Another modal delays return until it closes; a retired opening rejects it. No runtime observation or destructive follow-on input sequence was established."
+          ],
+          "coverage_checked": [
+            "Current SPEC.md:1340-1358,3222-3242 and SPEC_impl.md:1150-1192 do not accept the moved-on return; acknowledgment of implementation lag is not acceptance.",
+            "TODO.md Planned is empty. BUGS.md contains no launcher/focus root.",
+            "Searched plans/queue for wake/timeout/launcher return/focus. wake-launch-stuck's goal and acceptance criteria add the timeout, not moved-on activity admission; nonblocking-session-actions contains the earlier automatic Return policy. plans/REPORTS.md:16,23,27 confirms those matching plans landed. No unlanded stated work removes this cause.",
+            "INDEX.md:76-78 names moved-on-launch-return.md; read that file in full. Its Details explicitly cover wake/preparation return through the naming-only helper and restoring opening focus; this is exact same-root coverage, not the distinct host-add admission item suggested in the original history.",
+            "Active TRIAGE_OUTCOMES.md searches for moved-on return, launcher return/reopen, wake timeout and focus produced no decision covering this route. Archive not read.",
+            "FILTER.md: taking page modality and keyboard focus from another session is more than a brief wrong display, safe retry or diagnostic; no complete filter matches."
+          ],
+          "exact_cover_quotes": [
+            {
+              "source": "review_feedback_queue/moved-on-launch-return.md, TLDR",
+              "quote": "A failed launch or follow-up question can reopen the launcher and take the keyboard after the user has switched sessions or started typing elsewhere. It should wait behind a notice the user opens."
+            },
+            {
+              "source": "review_feedback_queue/moved-on-launch-return.md, Details",
+              "quote": "Failure and question paths pass `None`: ordinary create/Replace with at 7056-7090, sandbox create at 5955-5990, Restart with at 6417-6459, and wake/preparation return through 2004-2014 and 6145-6161."
+            }
+          ],
+          "missing_premise": "No missing source premise for unwanted automatic return/focus. No execution or destructive follow-on sequence is established; do not infer security or user-work loss from redirected typing alone.",
+          "original_stronger_consequence": "Lead alleged possible focus theft; later source checks established both modal reopening and direct focus transfer after switching sessions/typing. Keep that consequence. No original record established mutation, security, data loss or process loss, and no consequence was lowered out of highest.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Exact same underlying admission defect already queued at high. Extend moved-on-launch-return.md with 533169cf's timer trigger and its still-waiting-connection caveat. This is a consolidation proposal, not authorization to drop independently."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": true,
+        "clearly_refuted_candidate": false,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "high",
+        "confidence": "Source-confirmed by an existing parent decision; not runtime reproduced",
+        "deduplication_key": "failed-launch-reopens",
+        "destination": "moved-on-launch-return.md"
+      }
+    },
+    {
+      "key": "g087/c5",
+      "owner": "g087",
+      "id": "c5",
+      "domain": "gui-environment-launcher",
+      "purpose": "gui-environment-launcher: crates/farhelm-ui/src/list/create_form.rs, crates/farhelm-ui/src/list/create_form/draft.rs; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 17,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c5",
+            "state": "open",
+            "summary": "Retired Recent search refusal retains the ordinary history-promotion preamble",
+            "location": "crates/farhelm-ui/src/list/create_form/draft.rs:2380",
+            "detail": "Reviewed commit: 04d85f0c98a9b635709d00b056719a0baa7fd3fc. TLDR: Considered whether refusing a retired Recent through search still changes the selected setup or retry identity, because outer search acceptance promotes offered history before reaching the newly added refusal. Source: draft.rs:2340-2412 accept_search_result invalidates browse and calls choices.promote_history before apply_search_result; :2651-2659 then refuses a Recent carrying retired container intent with publish=false/changed=false and no Browse path. apply_edit at :1485-1507 writes the cloned draft only for publish and retires intent_key only for changed. Thus the preamble can refresh suggestion-history snapshots and invalidate an in-flight browse, but it does not publish the retired setup, adopt its historical destination, or clear the retry pair. The direct accept_recent comment at :1940-1943 specifically promises refusal before its history/draft writes and the direct implementation does so; it is not a claim that the independent search wrapper has no UI-completion preamble. The changed test asserts draft/key preservation and no history_activation_attempts increment, not an absence of all suggestion-refresh side effects. Suggested bucket for the considered narrower suggestion-side effect: other; no material incorrect setup or retry mutation established. Could-be-highest: false; no security or loss-of-work route. Confidence: confirmed source analysis, no execution. proposed_drop: source refutation of selected-setup/retry mutation; history suggestion promotion is not itself a demonstrated defect under the refusal contract. possible_cover: none in supplied neighbour projection; prohibited coverage sources not searched. Caveat: this does not claim browse invalidation/promotion is absent; it distinguishes those existing completion effects from the retired choice's forbidden destination/launch adoption. No test-oracle defect is claimed merely because production refuses correctly; the test's asserted contract was checked independently."
+          }
+        }
+      ],
+      "latest": {
+        "line": 17,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c5",
+          "state": "open",
+          "summary": "Retired Recent search refusal retains the ordinary history-promotion preamble",
+          "location": "crates/farhelm-ui/src/list/create_form/draft.rs:2380",
+          "detail": "Reviewed commit: 04d85f0c98a9b635709d00b056719a0baa7fd3fc. TLDR: Considered whether refusing a retired Recent through search still changes the selected setup or retry identity, because outer search acceptance promotes offered history before reaching the newly added refusal. Source: draft.rs:2340-2412 accept_search_result invalidates browse and calls choices.promote_history before apply_search_result; :2651-2659 then refuses a Recent carrying retired container intent with publish=false/changed=false and no Browse path. apply_edit at :1485-1507 writes the cloned draft only for publish and retires intent_key only for changed. Thus the preamble can refresh suggestion-history snapshots and invalidate an in-flight browse, but it does not publish the retired setup, adopt its historical destination, or clear the retry pair. The direct accept_recent comment at :1940-1943 specifically promises refusal before its history/draft writes and the direct implementation does so; it is not a claim that the independent search wrapper has no UI-completion preamble. The changed test asserts draft/key preservation and no history_activation_attempts increment, not an absence of all suggestion-refresh side effects. Suggested bucket for the considered narrower suggestion-side effect: other; no material incorrect setup or retry mutation established. Could-be-highest: false; no security or loss-of-work route. Confidence: confirmed source analysis, no execution. proposed_drop: source refutation of selected-setup/retry mutation; history suggestion promotion is not itself a demonstrated defect under the refusal contract. possible_cover: none in supplied neighbour projection; prohibited coverage sources not searched. Caveat: this does not claim browse invalidation/promotion is absent; it distinguishes those existing completion effects from the retired choice's forbidden destination/launch adoption. No test-oracle defect is claimed merely because production refuses correctly; the test's asserted contract was checked independently."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g087/findings.jsonl",
+        "id": "c5",
+        "line": 17,
+        "disposition": "under-investigation",
+        "group": "g087-c5",
+        "reason": "Record durably acknowledged; parent source/contract validation, cross-group synthesis, coverage/filter matching and any independent drop check remain pending. This preserves the claim and uncertainty without accepting, dropping or lowering it."
+      },
+      "accepted_parent_decision": null,
+      "returned_claim_checks": [
+        {
+          "batch": "claims-057",
+          "key": "g087/c5",
+          "latest_line": 17,
+          "recommendation": "refuted",
+          "bucket": "other",
+          "underlying_key": "retired-recent-search-draft-retry-mutation-refuted",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The search wrapper really promotes offered suggestion history and invalidates Browse before classifying the retired Recent, but the claimed selected-setup/destination/retry mutation does not follow: refusal returns publish=false and changed=false. The narrower suggestion refresh is not demonstrated to violate the stated refusal contract.",
+          "checks": [
+            "04d85f0c98a9b635709d00b056719a0baa7fd3fc:draft.rs:2343-2412 admits the ordinary operation then invalidates Browse and promotes history at 2378-2379 before apply_search_result. Those side effects are present and must not be erased from the disposition.",
+            "04d85f0c:draft.rs:2650-2656 recognizes retired container intent before ordinary history-destination admission and returns (None,false,false), preventing a Browse path or historical destination adoption. The wrapper maps these to publish=false,changed=false at :2397-2409.",
+            "04d85f0c:draft.rs:1480-1502 clones the draft and writes it only for facts.publish; intent_key is cleared only for facts.changed. Neither happens on this refusal. The direct-only comment :1939-1943 promises refusal before its own history/draft/retry changes; the direct check :1966-1974 precedes that path's history writes.",
+            "04d85f0c:draft.rs:8543-8616 asserts unchanged whole draft/key, no Browse path, refusal explanations and unchanged history_activation_attempts; it does not assert that outer suggestion-history promotion or Browse invalidation never occurs. Production refusal and the test's actual assertions were assessed separately. No runtime reproduction performed."
+          ],
+          "coverage_checked": [
+            "SPEC.md:4892-4899 and SPEC_impl.md:8312-8326 require decoding retained old setups and dropping/refusing retired container choices with explanation; no promise forbids every outer suggestion refresh. These sections do not accept adoption of forbidden destination/launch choices; source blocks that adoption.",
+            "TODO.md:25-27 Planned is empty. plans/queue retirement/history matches are podman-environments:284-295,454-455; plans/REPORTS.md:21 says it already landed. No unlanded plan was found for this exact search-wrapper mutation claim.",
+            "BUGS.md read in full has no related root. INDEX.md searched for retired/recent/history/retry/refusal and active TRIAGE_OUTCOMES.md searched for retired Recent, history mutation and retry; no exact coverage or decision found. Archive not read.",
+            "FILTER.md read in full; refutation is by source, not a rarity filter. The real suggestion-side effects were not omitted through a filter."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": "To retain a distinct defect for the real preamble, a violated contract or harmful consequence from refreshing suggestions/invalidating a browse would need to be established. None is established by this named record; no new search was undertaken.",
+          "original_stronger_consequence": "Considered forbidden selected setup, historical destination or retry-identity mutation on refused retired Recent. Source refutes those mutations, while retaining the actual suggestion-history promotion and Browse invalidation. The record expressly disclaims established security or loss of user work; conservative independent checking is still requested for the proposed refusal/ownership dismissal.",
+          "needs_independent_drop_check": true,
+          "proposed_basis": "Propose no queue item for the selected-setup/retry-mutation candidate: explicit publish/changed gates refute it. Preserve real outer preamble side effects and avoid claiming blanket atomic absence of all UI state changes. Parent should independently check this proposed dismissal because it concerns refused launch/destination and retry ownership."
+        }
+      ],
+      "parent_proposals": [
+        {
+          "artifact": "parent-flagged-judgments-057.json",
+          "key": "g087/c5",
+          "proposal": "claim-checks/claims-057/result.json",
+          "parent_proposal": "source-refuted-refused-retired-Recent-selected-draft-destination-or-retry-mutation",
+          "final_independent_gate": "required-by-conservative-refusal-authority-flag",
+          "reason": "Parent read full057. Search preamble really refreshes offered history/invalidates Browse before classification; do not deny those effects. Retired intent returns publish=false/changed=false before destination admission, so cloned draft/key never written/cleared and no Browse path adopted. Direct path's stronger comment applies to its own earlier rejection, not all wrapper side effects. Test independently checks actual whole draft/key/explanation/history-activation count, not global no-refresh behavior. No violated contract or concrete harm from narrower suggestion refresh shown. Refute selected setup/destination/retry change only, preserve real side effects and original refused-authority concern for fresh gate."
+        }
+      ],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": true,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "retired-recent-search-draft-retry-mutation-refuted",
+        "destination": null
+      }
+    },
+    {
+      "key": "g087/c6",
+      "owner": "g087",
+      "id": "c6",
+      "domain": "gui-environment-launcher",
+      "purpose": "gui-environment-launcher: crates/farhelm-ui/src/list/create_form.rs, crates/farhelm-ui/src/list/create_form/draft.rs; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 18,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c6",
+            "state": "open",
+            "summary": "Retired-Recent regression test distinguishes refusal from a busy-gate no-op",
+            "location": "crates/farhelm-ui/src/list/create_form/draft.rs:8548",
+            "detail": "Reviewed commit: 04d85f0c98a9b635709d00b056719a0baa7fd3fc. TLDR: Considered whether the new retired-Recent test could pass through an unrelated ordinary-operation busy refusal while never exercising its new guard. Its own setup and error assertions distinguish that mechanism. Source: seed_placement_command at draft.rs:4835-4843 asserts admission of each concrete command/prompt/conversation edit, establishing an editable fixture. Initial composer_reset_reason is 'old reset' (:3793), and use_final_context initializes the search template_error to None (:3943). The test :8548-8620 first checks direct refusal and requires composer_reset_reason to contain 'Delete only'; only the new retired-container branch at :1966-1977 supplies that reason in this call. It then requires the separate search template_error to contain 'Delete only'; the direct call did not seed that slot, and a busy apply_edit return cannot populate it. The before snapshot is an executable Command draft while the offered ordinary Recent would switch to Agent and restore choices if accepted; whole-draft and retry-pair equality therefore distinguish forbidden application, not merely an unchanged compatible setup. Suggested bucket for the considered test-oracle gap: other, but no defect established. Could-be-highest: false; this candidate concerns maintainer test sensitivity only. Confidence: confirmed fixture/assertion/source analysis, no execution. proposed_drop: source refutation of busy-no-op false pass; production correctness alone was not used as a test-quality proof. possible_cover: none in supplied interface projection; no prohibited coverage-source search. Caveat: this test checks owner-operation refusal and does not claim to validate every rendered control or the connection timer. No new test deficiency or product behavior is inferred from those deliberate bounds."
+          }
+        }
+      ],
+      "latest": {
+        "line": 18,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c6",
+          "state": "open",
+          "summary": "Retired-Recent regression test distinguishes refusal from a busy-gate no-op",
+          "location": "crates/farhelm-ui/src/list/create_form/draft.rs:8548",
+          "detail": "Reviewed commit: 04d85f0c98a9b635709d00b056719a0baa7fd3fc. TLDR: Considered whether the new retired-Recent test could pass through an unrelated ordinary-operation busy refusal while never exercising its new guard. Its own setup and error assertions distinguish that mechanism. Source: seed_placement_command at draft.rs:4835-4843 asserts admission of each concrete command/prompt/conversation edit, establishing an editable fixture. Initial composer_reset_reason is 'old reset' (:3793), and use_final_context initializes the search template_error to None (:3943). The test :8548-8620 first checks direct refusal and requires composer_reset_reason to contain 'Delete only'; only the new retired-container branch at :1966-1977 supplies that reason in this call. It then requires the separate search template_error to contain 'Delete only'; the direct call did not seed that slot, and a busy apply_edit return cannot populate it. The before snapshot is an executable Command draft while the offered ordinary Recent would switch to Agent and restore choices if accepted; whole-draft and retry-pair equality therefore distinguish forbidden application, not merely an unchanged compatible setup. Suggested bucket for the considered test-oracle gap: other, but no defect established. Could-be-highest: false; this candidate concerns maintainer test sensitivity only. Confidence: confirmed fixture/assertion/source analysis, no execution. proposed_drop: source refutation of busy-no-op false pass; production correctness alone was not used as a test-quality proof. possible_cover: none in supplied interface projection; no prohibited coverage-source search. Caveat: this test checks owner-operation refusal and does not claim to validate every rendered control or the connection timer. No new test deficiency or product behavior is inferred from those deliberate bounds."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g087/findings.jsonl",
+        "id": "c6",
+        "line": 18,
+        "disposition": "excluded",
+        "group": "retired-recent-test-busy-noop-false-pass-refuted",
+        "reason": "Parent explicitly accepted named refuted proposal from claims-057 after inspecting it. The regression cannot satisfy its assertions by silently taking only the busy no-op path. It requires newly populated, separate direct and search refusal messages, and the search call must return Some. The mutation snapshot is meaningfully different from the offered Agent Recent. Propose no finding for this specific test-oracle hypothesis. Do not substitute production correctness for test-quality evidence or generalize this narrow refutation to all coverage. Checked source/results: [\"04d85f0c98a9b635709d00b056719a0baa7fd3fc:draft.rs:4833-4842 seed_placement_command asserts admission of concrete Command, YOLO, prompt and conversation edits before the snapshot. The fixture starts composer_reset_reason='old reset' at :3793 and a separate search template_error=None at :3943.\",\"04d85f0c:draft.rs:8548-8587 seeds a command draft, records its retry pair, offers a retired Agent Recent, then requires unchanged draft/key and a direct error containing 'Delete only'. The branch at :1966-1974 sets that error; a busy refusal at :1491-1492 returns before the closure and cannot replace the initial 'old reset'.\",\"04d85f0c:draft.rs:8588-8616 requires accept_search_result(...).expect(...), no Browse path, a separately populated template_error containing 'Delete only', unchanged whole draft/key and history attempts. Busy returns None and cannot satisfy either expect or the initially empty error slot.\",\"The assertions therefore test actual refusal admission, not merely production safety or an unchanged compatible Agent draft. Their stated scope is owner-operation refusal, not every rendered control or wake timeout. No tests were executed.\"] Current coverage/results: [\"SPEC.md:4892-4899 and SPEC_impl.md:8312-8326 establish the intended refusal; the fixture and assertions independently establish test sensitivity to the proposed busy-no-op mechanism.\",\"TODO.md Planned is empty. Searched plans/queue for retired Recent/refusal tests and busy-gate coverage; matching retirement work in podman-environments already landed per plans/REPORTS.md:21, and no unlanded plan explicitly covers this alleged oracle gap.\",\"BUGS.md has no related root. INDEX.md and active TRIAGE_OUTCOMES.md searches for recent/retired/refusal/busy tests found no exact trigger/consequence/scope item. Archive not read.\",\"FILTER.md does not supply the basis; the named false-pass mechanism is source-refuted.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Considered maintainer regression-test false pass: unrelated busy refusal could leave snapshots equal without exercising the new retired-choice guard. Separate error initialization and assertions, plus the search Some requirement, refute it. No security or loss-of-work consequence was claimed.\"; \"None for rejecting the busy-no-op false-pass claim. Broader test coverage is outside this named candidate and was not assessed.\"."
+      },
+      "accepted_parent_decision": {
+        "key": "g087/c6",
+        "line": 18,
+        "disposition": "excluded",
+        "group": "retired-recent-test-busy-noop-false-pass-refuted",
+        "bucket": "other",
+        "recording": "refuted",
+        "queue_target_candidate": null,
+        "needs_independent_drop_check": false,
+        "reason": "Parent explicitly accepted named refuted proposal from claims-057 after inspecting it. The regression cannot satisfy its assertions by silently taking only the busy no-op path. It requires newly populated, separate direct and search refusal messages, and the search call must return Some. The mutation snapshot is meaningfully different from the offered Agent Recent. Propose no finding for this specific test-oracle hypothesis. Do not substitute production correctness for test-quality evidence or generalize this narrow refutation to all coverage. Checked source/results: [\"04d85f0c98a9b635709d00b056719a0baa7fd3fc:draft.rs:4833-4842 seed_placement_command asserts admission of concrete Command, YOLO, prompt and conversation edits before the snapshot. The fixture starts composer_reset_reason='old reset' at :3793 and a separate search template_error=None at :3943.\",\"04d85f0c:draft.rs:8548-8587 seeds a command draft, records its retry pair, offers a retired Agent Recent, then requires unchanged draft/key and a direct error containing 'Delete only'. The branch at :1966-1974 sets that error; a busy refusal at :1491-1492 returns before the closure and cannot replace the initial 'old reset'.\",\"04d85f0c:draft.rs:8588-8616 requires accept_search_result(...).expect(...), no Browse path, a separately populated template_error containing 'Delete only', unchanged whole draft/key and history attempts. Busy returns None and cannot satisfy either expect or the initially empty error slot.\",\"The assertions therefore test actual refusal admission, not merely production safety or an unchanged compatible Agent draft. Their stated scope is owner-operation refusal, not every rendered control or wake timeout. No tests were executed.\"] Current coverage/results: [\"SPEC.md:4892-4899 and SPEC_impl.md:8312-8326 establish the intended refusal; the fixture and assertions independently establish test sensitivity to the proposed busy-no-op mechanism.\",\"TODO.md Planned is empty. Searched plans/queue for retired Recent/refusal tests and busy-gate coverage; matching retirement work in podman-environments already landed per plans/REPORTS.md:21, and no unlanded plan explicitly covers this alleged oracle gap.\",\"BUGS.md has no related root. INDEX.md and active TRIAGE_OUTCOMES.md searches for recent/retired/refusal/busy tests found no exact trigger/consequence/scope item. Archive not read.\",\"FILTER.md does not supply the basis; the named false-pass mechanism is source-refuted.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Considered maintainer regression-test false pass: unrelated busy refusal could leave snapshots equal without exercising the new retired-choice guard. Separate error initialization and assertions, plus the search Some requirement, refute it. No security or loss-of-work consequence was claimed.\"; \"None for rejecting the busy-no-op false-pass claim. Broader test coverage is outside this named candidate and was not assessed.\"."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-057",
+          "key": "g087/c6",
+          "latest_line": 18,
+          "recommendation": "refuted",
+          "bucket": "other",
+          "underlying_key": "retired-recent-test-busy-noop-false-pass-refuted",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The regression cannot satisfy its assertions by silently taking only the busy no-op path. It requires newly populated, separate direct and search refusal messages, and the search call must return Some. The mutation snapshot is meaningfully different from the offered Agent Recent.",
+          "checks": [
+            "04d85f0c98a9b635709d00b056719a0baa7fd3fc:draft.rs:4833-4842 seed_placement_command asserts admission of concrete Command, YOLO, prompt and conversation edits before the snapshot. The fixture starts composer_reset_reason='old reset' at :3793 and a separate search template_error=None at :3943.",
+            "04d85f0c:draft.rs:8548-8587 seeds a command draft, records its retry pair, offers a retired Agent Recent, then requires unchanged draft/key and a direct error containing 'Delete only'. The branch at :1966-1974 sets that error; a busy refusal at :1491-1492 returns before the closure and cannot replace the initial 'old reset'.",
+            "04d85f0c:draft.rs:8588-8616 requires accept_search_result(...).expect(...), no Browse path, a separately populated template_error containing 'Delete only', unchanged whole draft/key and history attempts. Busy returns None and cannot satisfy either expect or the initially empty error slot.",
+            "The assertions therefore test actual refusal admission, not merely production safety or an unchanged compatible Agent draft. Their stated scope is owner-operation refusal, not every rendered control or wake timeout. No tests were executed."
+          ],
+          "coverage_checked": [
+            "SPEC.md:4892-4899 and SPEC_impl.md:8312-8326 establish the intended refusal; the fixture and assertions independently establish test sensitivity to the proposed busy-no-op mechanism.",
+            "TODO.md Planned is empty. Searched plans/queue for retired Recent/refusal tests and busy-gate coverage; matching retirement work in podman-environments already landed per plans/REPORTS.md:21, and no unlanded plan explicitly covers this alleged oracle gap.",
+            "BUGS.md has no related root. INDEX.md and active TRIAGE_OUTCOMES.md searches for recent/retired/refusal/busy tests found no exact trigger/consequence/scope item. Archive not read.",
+            "FILTER.md does not supply the basis; the named false-pass mechanism is source-refuted."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": "None for rejecting the busy-no-op false-pass claim. Broader test coverage is outside this named candidate and was not assessed.",
+          "original_stronger_consequence": "Considered maintainer regression-test false pass: unrelated busy refusal could leave snapshots equal without exercising the new retired-choice guard. Separate error initialization and assertions, plus the search Some requirement, refute it. No security or loss-of-work consequence was claimed.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Propose no finding for this specific test-oracle hypothesis. Do not substitute production correctness for test-quality evidence or generalize this narrow refutation to all coverage."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "retired-recent-test-busy-noop-false-pass-refuted",
+        "destination": null
+      }
+    }
+  ],
+  "replies": [
+    {
+      "turn": 1,
+      "reply": "Initial review complete: all six assigned patches reviewed, with no unread scope.\n\nNo substantive findings or unresolved leads. Four considered candidates and their rejection bases are recorded in findings.jsonl; progress.md is updated. Source and contract analysis only—no runtime tests or reproductions."
+    },
+    {
+      "turn": 2,
+      "reply": "- Confirmed **l1**: environment recents can stall Replace with. Present at all five reviewed revisions; introducing commit remains unattributed.\n- Revised **c1–c4**, preserving potential highest-impact claims and narrowing each refutation. **c3** does not settle the independent retained-success retirement claims.\n- Unresolved lead IDs: **none**. Source analysis only; log and progress updated."
+    },
+    {
+      "turn": 3,
+      "reply": "Discovery pass 1 complete. Checked range attribution, timeout return/focus handling, retired-choice admission, and changed test assertions.\n\n- New verified: **l2** — wake timeout can reopen and focus the launcher after the user moves on.\n- New unverified: **none**.\n- New candidate: **c5**, source-refuted.\n- Open leads: **none**.\n\nResolved l1’s introducing revision to `350a4b33`. **Something new was found.** Log and progress updated; source analysis only."
+    },
+    {
+      "turn": 4,
+      "reply": "Discovery pass 2 complete. Checked draft projection, refusal atomicity, continuation ownership, timer guards, restart handling, and changed test assertions.\n\n- New verified findings: **none**\n- New unverified findings: **none**\n- Open leads: **none**\n- Rejected candidate recorded: **c6**\n\n**No new substantive issue found.** Progress updated; source analysis only."
+    }
+  ],
+  "progress": "# g087 progress\n\nInitial review complete, turn 1. Discovery passes: 0. No later-turn synthesis or discovery protocol performed.\n\nRead the full brief and complete inventory commits field; excluded coverage metadata and prohibited queue/coverage sources were not read. All six assigned patch parts were delivered through the evidence reader in packets of at most 180 lines: 00314 (1-180, 181-333), 00315 (1-180, 181-354), 00613 (1-26), 00619 (1-180, 181-269), 00713 (1-13), and 01111 (1-25). Assigned scope: 1,020 lines, no unread or omitted material.\n\nChecked each change at its recorded revision, with surrounding form/draft source and governing pinned contracts. Read Creation and retired-container contracts at 04d85f0c98a9b635709d00b056719a0baa7fd3fc; the submitted-wake contract at 428badadfec337d5185af0d9bfeb02aad9a7b812; the 60-second contract and GUI/Tensorlake-host implementation paragraphs at 533169cf19571d34af3a8497eaceb8d2d7b7c852; sandbox-session and Environment Delete/seal contracts at 2ef10815f12ed719ab6c51c6e3ac6fcd3f8bc1fa; and completion/answer-binding implementation contracts at f560058da19e02716e6f943883a9508b447aff4e. Root End sentinel, priority buckets and feedback-file format were read. Changed tests were assessed against the brief's full checklist.\n\nDurable records appended: c1 (explicitly accepted one-shot connection-timer boundary), c2 (refuted silent retirement of stored isolation), c3 (refuted loss of restart settlement from the bool bridge), c4 (last-session warning and rendered-draft consent checks). No substantive verified or unverified findings this pass. No open leads. Candidates retain state open as the recorder requires; their details contain the proposed-drop basis. The first c1 record invocation rejected state closed; it was corrected to open and successfully recorded before any further source read. No record was deleted or replaced.\n\nInterface conclusions: retired container objects remain in editing fingerprints and cannot become structured launches; template application and recent activation refuse them. A wake continuation retains its captured opening, replacement guard, input baseline and operation/source guards; timer discard consumes the parked slot before returning the launcher. Error-free continuation refusals explicitly reveal only their still-current opening. The timer's late-reconnection boundary is accepted by SPEC_impl.md. Sandbox launch consent compares the rendered full draft to the current draft; warning semantics follow supervisor-owned finality and separately warned whole-environment deletion. Restart completion still settles the shared source before modal admission; the removed outcome field named the retired terminal kind.\n\nValidation: source and contract analysis only. No runtime test, build, reproduction, live-install operation or checkout mutation. No helper agents spawned. Parent owns coverage and any independent drop checks; c2 and c4 retain their considered highest-impact consequences explicitly.\n\nNext: await the caller's later-turn synthesis/discovery instruction. No additional initial-review work remains.\n\n## Synthesis turn 2\n\nCompleted the requested later-turn synthesis. Discovery passes remain 0. No assigned material unread. No runtime tests, builds, reproductions or checkout writes.\n\nNew verified ID this turn: l1, initially recorded immediately as the caller-supplied unresolved route, then promoted under that same ID to a source-confirmed high/material UX finding. It is the environment-recent / Replace-with fixed-placement stall also reported by the caller as g085/l2 and g086. All five assigned revisions have the same draft blob; the complete form diff preserves its relevant admission and refusal branches. The route does not establish wrong-environment replacement or loss of work: fixed-source admission blocks dispatch. Recovery scope was narrowed to source-established ordinary recent/source-host search routes where offered, plus cancel/reopen. The initial template-recovery suggestion was explicitly withdrawn as unestablished in the final l1 event. Introduction is not attributed to the retirement commit; the earlier introducing commit was not part of the supplied evidence for this interaction.\n\nRevised original IDs c1, c2, c3 and c4. c1 keeps the exact one-shot specification acceptance, records consume-before-return/dispatch and distinguishes error-driven timeout reveal from the earlier error-free refusal reveal. c2 preserves its original potentially highest silent-isolation-removal concern and the exact retirement contract while limiting its source refutation to old ContainerConfig objects; it does not refute modern target problems. c3 limits its refutation to the form/receiver boolean adaptation: re-read the f560058d RestartBridge and restart_after receiver, which retain the result boolean, shared finish boundary and claim release. This does not settle g037/g038/g089 retained-success retirement claims; those claims were not supplied in detail and remain the owning groups'/parent's judgment, not an open g087 source lead. c4 preserves its original potentially highest destructive-understatement concern, quotes the last-session and separately warned fallback contract, and compares the earlier actual whole-sandbox contract to avoid applying the new wording to the old revision. Its full-draft consent equality is explicitly not proof of ConfirmSlot generation safety or recipe-catalog immutability.\n\nNo original highest-impact consequence or proposed-drop basis was deleted. No parent drop accepted. No unverified findings or unresolved lead IDs remain in this group's log. Source conclusions only, not observed execution. Next: caller-directed discovery/synthesis as needed; the newly source-verified interaction requires a later pass under the brief's protocol rather than treating this same turn as that pass.\n\n## Discovery turn 3, pass 1\n\nRead the complete supplied discovery-neighbours.json (104,451 bytes) before source discovery, in eight bounded 14,000-byte dd packets. The preliminary 160-line read clipped because JSON detail lines are long; all bytes were then re-delivered in those smaller packets. This is context/novelty input only, not mandatory source credit. Reused the full local candidate/finding history; no prohibited coverage source was searched.\n\nResolved the pending range-attribution question before new discovery. Revised l1 under its original ID: bounded-range -G history, the exclusive base and 350a4b33's complete relevant draft patch prove that 350a4b33b6d4476f4a78e43cea124bc2b828f462 introduces environment-history Recent assignment with no fixed-host gate. Its parent and exclusive base have the fixed-host recipe refusal but no Recent target assignment or environment-history merge. Thus l1 is an in-range interaction and not introduced by the later retirement patch. This is attribution of a known finding, not new discovery credit; supplied g085/l2 and g086/l2 are the same cause. Original high consequence/recovery caveats/proposed_drop=false remain.\n\nNew source-verified finding: l2. Immediately recorded as a lead on noticing the timeout failure-return lacks the parked press baseline, then promoted and revised under the same ID after reading the complete modal admission helper, submission visibility state, reveal/isolation effect, exact focus-target lowering and governing Keyboard focus rules. The new 533169cf19571d34af3a8497eaceb8d2d7b7c852 timeout automatically returns and focuses the failed launcher after the user moved on. It reaches naming-only activity admission with None and later directly focuses search. Source-confirmed high/material UX; no security or loss-of-work consequence asserted. General unguarded return helper predates exclusive base; the new timeout trigger is introduced by 533169cf, whose parent has no timer in this pending-connection path. The complete later form diff through the pinned tip leaves this route unchanged. Exact contract and implementation-gap acknowledgment, attribution limits, delayed-by-other-modal caveat and original lead's now-settled focus premise are in l2. No runtime observation claimed.\n\nNew candidate c5 records the independently checked search-refusal preamble: suggestion-history promotion/browse invalidation precede retired-Recent refusal, but publish=false/changed=false prevents draft/destination/retry adoption. Compared test assertions and direct-versus-search comments independently; did not infer test correctness solely from production refusal. No selected-setup/retry defect established on that considered path.\n\nFinished the discovery pass after recording l2: rechecked remaining assigned retirement submit recheck, owner publication/key-retirement rules, search/template admission/refusal preambles, retired-Recent test assertions, timer predicate tests/comments, and error-free continuation opening ownership. Mounted owner versus revocation counter are explicitly separate form props; no further source-supported issue found in those checks. No missing assigned material or uninvestigated lead left.\n\nDiscovery result: new verified IDs [l2]; new unverified-after-investigation IDs []; new candidate IDs [c5]; revised known IDs [l1] for attribution; unresolved lead IDs []. Something new was found. Discovery count is now 1, total turns 3. All evidence is source/contract analysis; no runtime tests, reproductions, builds, live-install actions, helper agents or checkout mutations. No parent drop or lowering accepted. Next: a later caller-directed pass is required after this substantive new discovery; do not count work within this turn as that pass.\n\n## Discovery turn 4, pass 2\n\nRead the complete refreshed discovery-neighbours.json first: 194,650 bytes, 535 lines, delivered in fourteen bounded 14,000-byte packets (skip 0 through 13). No pending cross-group questions were supplied. Reused the complete prior local findings/candidate/withdrawal history. The refreshed projection is context/novelty input only and no prohibited coverage source was searched.\n\nCompleted a separate discovery pass beyond l1/l2 and c1-c5. Checks at the actual assigned revisions covered: Agent versus Command request projection and retired raw-container retention; catalog reconciliation versus reset/restore assignment; direct and search refusal publication/key-retirement rules; Save-as-template refusal versus dormant command fields; the post-key-mint container guard; guarded-submit identity/connection/naming comparisons; timer-generation and guard-bearing-slot expiry checks; error-free continuation's rendered-opening reveal and mounted-owner return; the f560058 restart error/success/YOLO dispatch after the boolean bridge; and changed test fixture premises/assertion sensitivity. Kept the known generic return/focus and modern environment Recent issues out of new-discovery counts.\n\nAppended c6 immediately on deciding the considered test busy-no-op concern was refuted. The test's seed helper asserts admitted ordinary edits; direct and search error slots begin with distinct non-retirement values; each call must write its own retirement reason, so an unrelated busy rejection cannot satisfy the assertions. Whole Command-to-Agent snapshot and retry-pair assertions provide an independent mutation oracle. This is a rejected candidate, not a new verified or unverified defect, and production correctness was not used to dismiss test quality.\n\nResult: new verified finding IDs []; new unverified-after-investigation IDs []; new candidate IDs [c6]; revised finding IDs []; unresolved lead IDs []. No new substantive issue found in discovery pass 2. No unread assigned material or unfinished source lead. Total turns 4, discovery count 2. Existing consequences and proposed-drop bases remain unchanged; no parent drop or lowering accepted. Source/contract analysis only; no runtime tests, reproductions, builds, live-install actions, helpers or checkout writes. Next: caller-directed synthesis/discovery if requested; this is an empty substantive-discovery result.\n"
+}

@@ -1,0 +1,425 @@
+{
+  "group": {
+    "id": "g152",
+    "domain": "rust-terminal-host-regressions",
+    "purpose": "rust-terminal-host-regressions: crates/farhelm/tests/e2e/host_migrations.rs, crates/farhelm/tests/e2e/host_relaunches.rs; phases -async fn a_moved_agent_outlives_its_tmux_session() {",
+    "interfaces": [
+      "g005",
+      "g006",
+      "g009",
+      "g010",
+      "g011",
+      "g144",
+      "g145",
+      "g146",
+      "g151",
+      "g153",
+      "g158",
+      "g159",
+      "g160",
+      "g161",
+      "g162",
+      "g163",
+      "g164",
+      "g165",
+      "g166",
+      "g167",
+      "g168",
+      "g169",
+      "g170",
+      "g171",
+      "g172",
+      "g173"
+    ],
+    "sources": [
+      {
+        "path": "[private-run]/prep/parts/00788-000.patch",
+        "ranges": [
+          [
+            1,
+            1350
+          ]
+        ],
+        "original_path": "crates/farhelm/tests/e2e/host_migrations.rs",
+        "commit": "647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513",
+        "notes": "patch header; patch character offsets [0,56651)",
+        "lines": 1350,
+        "bytes": 56651,
+        "start": 0,
+        "end": 56651,
+        "original": "[private-run]/prep/originals/00788.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/00788-001.patch",
+        "ranges": [
+          [
+            1,
+            201
+          ]
+        ],
+        "original_path": "crates/farhelm/tests/e2e/host_migrations.rs",
+        "commit": "647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513",
+        "notes": "-async fn a_moved_agent_outlives_its_tmux_session() {; patch character offsets [56651,64605)",
+        "lines": 201,
+        "bytes": 7954,
+        "start": 56651,
+        "end": 64605,
+        "original": "[private-run]/prep/originals/00788.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/01130-000.patch",
+        "ranges": [
+          [
+            1,
+            12
+          ]
+        ],
+        "original_path": "crates/farhelm/tests/e2e/host_relaunches.rs",
+        "commit": "f560058da19e02716e6f943883a9508b447aff4e",
+        "notes": "patch header; patch character offsets [0,561)",
+        "lines": 12,
+        "bytes": 561,
+        "start": 0,
+        "end": 561,
+        "original": "[private-run]/prep/originals/01130.patch"
+      }
+    ],
+    "lines": 1563,
+    "bytes": 65166
+  },
+  "records": [
+    {
+      "key": "g152/l1",
+      "owner": "g152",
+      "id": "l1",
+      "domain": "rust-terminal-host-regressions",
+      "purpose": "rust-terminal-host-regressions: crates/farhelm/tests/e2e/host_migrations.rs, crates/farhelm/tests/e2e/host_relaunches.rs; phases -async fn a_moved_agent_outlives_its_tmux_session() {",
+      "history": [
+        {
+          "line": 1,
+          "event": {
+            "version": 1,
+            "kind": "lead",
+            "id": "l1",
+            "state": "open",
+            "summary": "Migration integration coverage removed while migration still ships",
+            "location": "crates/farhelm/tests/e2e/host_migrations.rs:1 (deleted)",
+            "detail": "Reviewed commit: 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513. TLDR: This intermediate revision still moves existing tmux sessions into terminal hosts, but deletes the integration suite that checked history preservation, interrupted moves, mixed tabs and cleanup. Details: the complete deletion removes 1,545 original lines, including a_moved_agent_outlives_its_tmux_session at parent lines 1345 onward. SPEC_impl.md at the reviewed commit, Terminal host / Moving an old session into a host (2488-2558), still promises the migration and its failure recovery; the host_restart.rs patch removes only switch wording and unrelated launch_excerpt fields rather than that path. A targeted search of core/tests and host_relaunches.rs found no remaining tmux migration test. Suggested bucket: other (test coverage); could-be-highest: false, no shipped data-loss route established by deleting tests alone. Confidence: unverified after investigation so far; this is a coverage lead, not a confirmed runtime bug. Proposed_drop: false. Possible_cover: none; no queue coverage sources read. Missing premise: whether surviving tests exercise the migration and mixed-session contracts, and whether test removal creates a concrete actionable gap beyond intentionally retiring a fixture seam. Next source checks: inspect remaining tmux migration unit tests and migration-specific seed tests, plus explicit test-contract language. No execution or reproduction performed."
+          }
+        },
+        {
+          "line": 3,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "l1",
+            "state": "open",
+            "summary": "Keep migration regression coverage while migration still ships",
+            "location": "crates/farhelm/tests/e2e/host_migrations.rs:1 (deleted)",
+            "detail": "Reviewed commit: 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513. TLDR: The intermediate supervisor still upgrades existing tmux sessions into terminal hosts, but this change removes the integration tests checking that the move preserves history, recovers after interruption, and keeps an agent running when its last old tab closes. This is an established test-coverage regression, not an established runtime failure or data-loss bug. Details: deletion of the whole 1,545-line module removes an_old_session_restarts_into_a_host_with_its_history_and_tabs, failed-history-capture and interrupted-move regressions, and a_moved_agent_outlives_its_tmux_session (original parent lines 1345-1471; exact function begins at parent line 1345). At the reviewed commit SPEC_impl.md, Terminal host / Moving an old session into a host (2488-2558), still specifies: 'its liveness, Stop, Restart and Delete ask its host.' Its preceding paragraphs require reading history before removing the old window, refusal on failed history reads, and adoption after interrupted replacement. SPEC.md:3013-3042 still supports old terminals and mixed sessions. The implementation remains: service/core.rs:13054-13061 selects tmux_restart_seed for a tmux predecessor, and service/core/host_restart.rs:763 onward retains capture/seed logic; the host_restart patch primarily removes switch wording and launch_excerpt fields. The removed tests therefore protect still-shipped compatibility behavior at this recorded revision, even though the next series changes later retire it. Source checks: full assigned deletion read; full migration contract read; repository search for tmux_restart_seed, TmuxSeed, old_window, seed/tmux and mixed-session references found no replacement migration tests; core/tests/host_terminals.rs only tests host fixtures, representation mismatches and host relaunch behavior. The commit itself acknowledges adopted tmux tabs have no running-stack test. Suggested fix: retain a legacy-state fixture and migration/mixed-session regressions until the compatibility implementation is removed, without restoring a production tmux-create switch. Suggested bucket: other, because the established consequence is missing regression protection. Could-be-highest: false; no shipped route to losing work is established merely from deleting tests. Confidence: confirmed by source for coverage removal only; execution not performed. Proposed_drop: false. Possible_cover: none; no queue coverage sources read. Material caveat: intentional staged cleanup, and the later commits remove this compatibility path; do not present this as an endpoint runtime defect."
+          }
+        },
+        {
+          "line": 4,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "l1",
+            "state": "open",
+            "summary": "Keep migration regression coverage while migration still ships",
+            "location": "crates/farhelm/tests/e2e/host_migrations.rs:1345 (deleted)",
+            "detail": "Reviewed commit: 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513. TLDR: The intermediate supervisor still upgrades existing tmux sessions into terminal hosts, but this change removes the integration tests checking that the move preserves history, recovers after interruption, and keeps an agent running when its last old tab closes. This establishes lost regression protection, not a runtime failure or data-loss bug. Details: deletion of the 1,545-line module removes the happy-path migration, failed-history-capture and interrupted-move regressions, and a_moved_agent_outlives_its_tmux_session (parent lines 1345-1454, confirmed with numbered source). SPEC_impl.md:2488-2558, Terminal host / Moving an old session into a host, still promises the migration, preserving history before removing the old window, refusal on failed history reads, and adoption after interrupted replacement. It states: 'its liveness, Stop, Restart and Delete ask its host.' SPEC.md:3013-3042 still supports old terminals and mixed sessions; its full Lifecycle operations and Terminal experience sections were read. The shipped route remains in service/core.rs:13058-13063, which dispatches a tmux predecessor to tmux_restart_seed, and service/core/host_restart.rs:763 onward; the latter file's patch removes switch wording and launch_excerpt fields without retiring migration. Source checks: full assigned deletion; pinned contracts; repository search for tmux_restart_seed, TmuxSeed, old_window, seed/tmux and mixed-session references across supervisor and e2e source found no surviving test that executes the tmux-to-host transition. The remaining core/tests/host_terminals.rs:40-68 does test incomplete tab discovery for later host generations using a stand-in host with no tmux session; it does not migrate a session or close its last real old tab. The commit message explicitly acknowledges that adopted old tmux tabs have no running-stack test. Suggested fix: retain a legacy-state fixture and migration/mixed-session regressions until the compatibility implementation is removed, without restoring a production tmux-create switch. Suggested bucket: other, because missing regression protection is the only established consequence. Could-be-highest: false; no shipped route to losing work established from test deletion alone. Confidence: confirmed by source for coverage removal only. Proposed_drop: false. Possible_cover: none; queue coverage sources were not read. Caveats: intentional staged cleanup, with the compatibility path removed in later commits; this is an intermediate-revision coverage finding, not an endpoint runtime defect. No tests, builds or reproductions run."
+          }
+        },
+        {
+          "line": 6,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "l1",
+            "state": "open",
+            "summary": "Migration regression coverage was removed before its behavior retired",
+            "location": "crates/farhelm/tests/e2e/host_migrations.rs:1345 (deleted)",
+            "detail": "Reviewed commit: 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513. TLDR: At this intermediate revision the supervisor still moved existing tmux agents into terminal hosts, but deleting this suite removed its integration regression checks for preserving history, recovering interrupted moves, and keeping the migrated agent alive when its last old tab closed. The exact subject of those tests was subsequently retired before pinned tip 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db; this is not a current endpoint request to restore obsolete migration tests. Original defect preserved: the 1,545-line deletion removes happy-path migration, failed capture, interrupted move and mixed-tab regression protection while that implementation and contract still existed at 647f0227. In particular parent host_migrations.rs:1345-1454 checks a_moved_agent_outlives_its_tmux_session. SPEC_impl.md:2488-2558 still required migration, safe history copying, failed-read refusal, interrupted adoption and host-only lifecycle after losing the last tmux tab; its exact text includes 'its liveness, Stop, Restart and Delete ask its host.' SPEC.md:3013-3042 still supported mixed old and new terminals. service/core.rs:13058-13063 still dispatched a tmux predecessor to tmux_restart_seed, implemented in service/core/host_restart.rs:763 onward. Searches across supervisor/e2e source found no surviving test executing the actual transition. The remaining core/tests/host_terminals.rs:40-68 checks incomplete tab discovery using a stand-in host with no old tmux session, so it cannot replace this oracle. Sound-looking implementation alone does not refute that lost regression protection. Later resolution, established from source and changed contract: dbfc69751215dbf15e1d31d5bed73c3754c4ebc4 changes SPEC.md:3003-3019 to end old terminals at startup, close their tabs, mark live old agents interrupted and restart into empty terminals. Exact text at 3016: 'After an update to this release, Restart, Clone and Replace start such a session in a new, empty terminal.' Next commit 1ed482dde220452e424973faf38a5e1318986333 removes the migration implementation itself: host_restart.rs diff hunk -710,223/+484,12 deletes tmux_restart_seed, its pane-history capture, timeout retry, capture-size and seed-refusal path; hunk -593,33/+388,12 deletes the Replacing::TmuxWindow old-window-removal arm, and earlier hunks delete TmuxSeedFault, Replacing::TmuxWindow and From a tmux pane documentation. At pinned tip, SPEC_impl.md:2780-2823, Ending the old private tmux server, states at 2799-2801: 'The reload then takes every old-kind row as having no terminal, in any state, without looking its recorded pane id up' and converts live rows to interrupted. Actual tip startup source service/core.rs:6141-6149 invokes OldTerminals::end_private_server before reload. Endpoint search finds no tmux_restart_seed or Moving an old session into a host contract. Therefore the intermediate missing migration oracle remains a true historical coverage loss, but its exact behavior no longer ships at endpoint, so no endpoint migration-coverage fix is established. Suggested bucket: other (test regression protection only). Could-be-highest: false; no runtime data-loss or security route established. Confidence: confirmed by source for intermediate coverage loss and later subject retirement; no runtime observation. Proposed_drop: false; parent owns recording and coverage disposition, and no drop is treated as accepted. Possible_cover: none; other group names supplied by the parent are interface context only, not evidence of queue coverage. Checks: all 1,563 assigned mandatory lines redelivered in turn 2 as separate raw-stdout evidence packets <=200 lines and <24,000 encoded bytes; later commit diffs, complete endpoint retirement contract and startup call inspected. No tests, builds or reproductions run. No unresolved premise for this record's stated historical-only consequence."
+          }
+        }
+      ],
+      "latest": {
+        "line": 6,
+        "event": {
+          "version": 1,
+          "kind": "finding",
+          "id": "l1",
+          "state": "open",
+          "summary": "Migration regression coverage was removed before its behavior retired",
+          "location": "crates/farhelm/tests/e2e/host_migrations.rs:1345 (deleted)",
+          "detail": "Reviewed commit: 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513. TLDR: At this intermediate revision the supervisor still moved existing tmux agents into terminal hosts, but deleting this suite removed its integration regression checks for preserving history, recovering interrupted moves, and keeping the migrated agent alive when its last old tab closed. The exact subject of those tests was subsequently retired before pinned tip 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db; this is not a current endpoint request to restore obsolete migration tests. Original defect preserved: the 1,545-line deletion removes happy-path migration, failed capture, interrupted move and mixed-tab regression protection while that implementation and contract still existed at 647f0227. In particular parent host_migrations.rs:1345-1454 checks a_moved_agent_outlives_its_tmux_session. SPEC_impl.md:2488-2558 still required migration, safe history copying, failed-read refusal, interrupted adoption and host-only lifecycle after losing the last tmux tab; its exact text includes 'its liveness, Stop, Restart and Delete ask its host.' SPEC.md:3013-3042 still supported mixed old and new terminals. service/core.rs:13058-13063 still dispatched a tmux predecessor to tmux_restart_seed, implemented in service/core/host_restart.rs:763 onward. Searches across supervisor/e2e source found no surviving test executing the actual transition. The remaining core/tests/host_terminals.rs:40-68 checks incomplete tab discovery using a stand-in host with no old tmux session, so it cannot replace this oracle. Sound-looking implementation alone does not refute that lost regression protection. Later resolution, established from source and changed contract: dbfc69751215dbf15e1d31d5bed73c3754c4ebc4 changes SPEC.md:3003-3019 to end old terminals at startup, close their tabs, mark live old agents interrupted and restart into empty terminals. Exact text at 3016: 'After an update to this release, Restart, Clone and Replace start such a session in a new, empty terminal.' Next commit 1ed482dde220452e424973faf38a5e1318986333 removes the migration implementation itself: host_restart.rs diff hunk -710,223/+484,12 deletes tmux_restart_seed, its pane-history capture, timeout retry, capture-size and seed-refusal path; hunk -593,33/+388,12 deletes the Replacing::TmuxWindow old-window-removal arm, and earlier hunks delete TmuxSeedFault, Replacing::TmuxWindow and From a tmux pane documentation. At pinned tip, SPEC_impl.md:2780-2823, Ending the old private tmux server, states at 2799-2801: 'The reload then takes every old-kind row as having no terminal, in any state, without looking its recorded pane id up' and converts live rows to interrupted. Actual tip startup source service/core.rs:6141-6149 invokes OldTerminals::end_private_server before reload. Endpoint search finds no tmux_restart_seed or Moving an old session into a host contract. Therefore the intermediate missing migration oracle remains a true historical coverage loss, but its exact behavior no longer ships at endpoint, so no endpoint migration-coverage fix is established. Suggested bucket: other (test regression protection only). Could-be-highest: false; no runtime data-loss or security route established. Confidence: confirmed by source for intermediate coverage loss and later subject retirement; no runtime observation. Proposed_drop: false; parent owns recording and coverage disposition, and no drop is treated as accepted. Possible_cover: none; other group names supplied by the parent are interface context only, not evidence of queue coverage. Checks: all 1,563 assigned mandatory lines redelivered in turn 2 as separate raw-stdout evidence packets <=200 lines and <24,000 encoded bytes; later commit diffs, complete endpoint retirement contract and startup call inspected. No tests, builds or reproductions run. No unresolved premise for this record's stated historical-only consequence."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g152/findings.jsonl",
+        "id": "l1",
+        "line": 6,
+        "disposition": "under-investigation",
+        "group": "g152-l1",
+        "reason": "Record durably acknowledged; parent source/contract validation, cross-group synthesis, coverage/filter matching and any independent drop check remain pending. This preserves the claim and uncertainty without accepting, dropping or lowering it."
+      },
+      "accepted_parent_decision": null,
+      "returned_claim_checks": [
+        {
+          "batch": "claims-097",
+          "key": "g152/l1",
+          "latest_line": 6,
+          "recommendation": "needs-parent",
+          "bucket": "other",
+          "underlying_key": "647f022-old-to-host-migration-integration-oracle-deletion",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The migration suite was deleted while the intermediate revision still promised and implemented migration. That historical test gap is established, but the migration itself was retired within the review range. A current queue repair restoring it would be obsolete.",
+          "checks": [
+            "647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513 deletes all 1545 lines of host_migrations.rs. Its parent :1345-1454 tests a migrated agent surviving loss of the last old tab, later adoption and lifecycle controls; :1474-1545 tests ordinary creates beside an old source.",
+            "At 647f022, SPEC_impl.md:2488-2558 still promises history capture/refusal, interruption recovery and migrated-host lifecycle; core.rs:13058-13063 still dispatches old terminals to tmux_restart_seed.",
+            "Targeted search of remaining core/tests, host_relaunches and host_processes found no transition replacement; core/tests/host_terminals.rs:40-68 explicitly has no old tmux session and checks discovery completeness, not migration. This is scoped source evidence, not a runtime regression.",
+            "At tip 00de0b6, SPEC.md:2998-3010 and SPEC_impl.md:2780-2823 replace migration with startup termination and empty-terminal Restart. core.rs:6141-6149 performs termination before reload; tip source search finds no tmux_restart_seed. No runtime test or reproduction run."
+          ],
+          "coverage_checked": [
+            "Both current specifications expressly remove the old behavior. That resolves ongoing applicability without denying the intermediate deletion.",
+            "TODO Planned is empty. BUGS.md is unrelated SSH provisioning. Searches of active TRIAGE_OUTCOMES.md, INDEX and matching queue terms found no exact migration-suite deletion item.",
+            "Relevant tmux-removal plans are still readable under queue, but REPORTS.md:29-32 records them landed. They are not unlanded-plan coverage. FILTER.md does not cover this test gap."
+          ],
+          "exact_cover_quotes": [
+            "Current SPEC.md:3010: Restart, Clone and Replace start such a session in a new, empty terminal.",
+            "Current SPEC_impl.md:2799-2801: The reload then takes every old-kind row as having no terminal, in any state, without looking its recorded pane id up."
+          ],
+          "missing_premise": "None for historical missing regression protection. The parent must choose the disposition of a fully retired intermediate gap.",
+          "original_stronger_consequence": "Lost migration, history-preservation, interrupted-move and mixed-tab regression coverage while migration still shipped. No actual history loss, stopped agent or security defect was established. Later retirement is not equivalent test coverage and does not retroactively refute the deletion.",
+          "needs_independent_drop_check": true,
+          "proposed_basis": "Preserve the historical finding; do not infer a current migration fix. g151/l1 is a related extension about distinct real-process compatibility wiring, not an exact alias. g152/c2's old-source portion belongs here; its ordinary-create concern is independently refuted."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": true,
+        "clearly_refuted_candidate": false,
+        "needs_unfinished_gate": true,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "647f022-old-to-host-migration-integration-oracle-deletion",
+        "destination": "trailing-647f022-old-to-host-migration-integration-oracle-deletion.md"
+      }
+    },
+    {
+      "key": "g152/c1",
+      "owner": "g152",
+      "id": "c1",
+      "domain": "rust-terminal-host-regressions",
+      "purpose": "rust-terminal-host-regressions: crates/farhelm/tests/e2e/host_migrations.rs, crates/farhelm/tests/e2e/host_relaunches.rs; phases -async fn a_moved_agent_outlives_its_tmux_session() {",
+      "history": [
+        {
+          "line": 2,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c1",
+            "state": "open",
+            "summary": "Removing the viewer-stream argument preserves relaunch coverage",
+            "location": "crates/farhelm/tests/e2e/host_relaunches.rs:1552-1558",
+            "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e. TLDR: No issue established: the revised relaunch regression still attaches to the agent, checks a restart detaches its viewer, and decodes the replacement terminal's history and screen. Details: the assigned patch only removes ViewerStreams::BytesOrGrid from the attach_terminal call. At this revision crates/farhelm-helm/src/client.rs:3967-3976 defines the five-argument method and forwards the same terminal selector, lease and displacing policy. Its implementation at 4007-4074 always uses GRID_EVENT_QUEUE, constructs Attach without a stream discriminator, accepts Attached and starts grid flow. The changed test at host_relaunches.rs:1546-1599 still calls grid_until_caught_up (1498-1532), which decodes every data frame as GridOutput, checks the restart detach reason, checks socket replacement, waits for the resumed screen, and checks history plus absence of the old visible frame after reattachment. Thus removing the argument cannot silently select a byte stream or weaken those assertions at the reviewed revision. Suggested bucket: other if there were a test issue; could-be-highest: false. Confidence: confirmed by source only. Proposed_drop: no changed behavioral or test-contract defect; API migration matches the sole grid stream. Possible_cover: none. No tests or reproductions run. Governing restart contract is SPEC_impl.md, Terminal host / Restarting a host agent, especially its viewer-detach and reattach rule (2302 at this revision); its full subsection is being read as contract corroboration."
+          }
+        },
+        {
+          "line": 5,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c1",
+            "state": "open",
+            "summary": "Removing the viewer-stream argument preserves relaunch coverage",
+            "location": "crates/farhelm/tests/e2e/host_relaunches.rs:1552-1558",
+            "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e. TLDR: No issue established: the relaunch regression still attaches to the agent, checks a restart detaches its viewer, and checks the replacement terminal's history and screen. Details: the assigned patch removes only ViewerStreams::BytesOrGrid from attach_terminal. At this revision crates/farhelm-helm/src/client.rs:3967-3976 defines the matching five-argument method and forwards the same terminal selector, lease and displacing policy. At 4007-4074 it always uses GRID_EVENT_QUEUE, constructs Attach without a stream discriminator, accepts Attached and starts grid flow. The changed test at host_relaunches.rs:1546-1599 still uses grid_until_caught_up (1498-1532), decoding every data frame as GridOutput; it checks the restart detach reason, socket replacement, readiness of the resumed screen, kept history and absence of the old frame on the new stream. The governing full SPEC_impl.md Restarting a host agent subsection was read at this revision (2272-2349); at 2301-2302 it states: 'A viewer attached to the old host is detached before the relaunch (\"session restarted\") and attaches again to the new host's grid stream; nothing streams from the old host afterwards.' SPEC_impl.md:3010-3020, Grid streams, states: 'every attachment's data channel carries a grid stream, so Attach, Attached and the browser's socket say nothing about it' (code formatting omitted). The full SPEC.md Restart bullet at 1923-1959 also preserves history above a blank screen. Suggested bucket: other if there were a test issue. Could-be-highest: false. Confidence: confirmed by source. Proposed_drop: source refutation, not a spec exception: the API removed the argument universally and the test still verifies grid behavior with its actual decoder and assertions. Exact supporting contract text is quoted above. Possible_cover: none. No tests, builds or reproductions run. No remaining premise or unresolved lead for this candidate."
+          }
+        }
+      ],
+      "latest": {
+        "line": 5,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c1",
+          "state": "open",
+          "summary": "Removing the viewer-stream argument preserves relaunch coverage",
+          "location": "crates/farhelm/tests/e2e/host_relaunches.rs:1552-1558",
+          "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e. TLDR: No issue established: the relaunch regression still attaches to the agent, checks a restart detaches its viewer, and checks the replacement terminal's history and screen. Details: the assigned patch removes only ViewerStreams::BytesOrGrid from attach_terminal. At this revision crates/farhelm-helm/src/client.rs:3967-3976 defines the matching five-argument method and forwards the same terminal selector, lease and displacing policy. At 4007-4074 it always uses GRID_EVENT_QUEUE, constructs Attach without a stream discriminator, accepts Attached and starts grid flow. The changed test at host_relaunches.rs:1546-1599 still uses grid_until_caught_up (1498-1532), decoding every data frame as GridOutput; it checks the restart detach reason, socket replacement, readiness of the resumed screen, kept history and absence of the old frame on the new stream. The governing full SPEC_impl.md Restarting a host agent subsection was read at this revision (2272-2349); at 2301-2302 it states: 'A viewer attached to the old host is detached before the relaunch (\"session restarted\") and attaches again to the new host's grid stream; nothing streams from the old host afterwards.' SPEC_impl.md:3010-3020, Grid streams, states: 'every attachment's data channel carries a grid stream, so Attach, Attached and the browser's socket say nothing about it' (code formatting omitted). The full SPEC.md Restart bullet at 1923-1959 also preserves history above a blank screen. Suggested bucket: other if there were a test issue. Could-be-highest: false. Confidence: confirmed by source. Proposed_drop: source refutation, not a spec exception: the API removed the argument universally and the test still verifies grid behavior with its actual decoder and assertions. Exact supporting contract text is quoted above. Possible_cover: none. No tests, builds or reproductions run. No remaining premise or unresolved lead for this candidate."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g152/findings.jsonl",
+        "id": "c1",
+        "line": 5,
+        "disposition": "excluded",
+        "group": "f560058-grid-only-attach-removes-stream-discriminator",
+        "reason": "Parent explicitly accepted named refuted proposal from claims-097 after inspecting it. Removing the stream-selection argument follows a universal API/protocol change. The relaunch test still decodes grid data and checks replacement behavior. Source-refuted API-migration concern. g153/c2 shares the API transition but concerns a different helper/assertion; do not count it as separate evidence of a defect. Checked source/results: [\"f560058da19e02716e6f943883a9508b447aff4e client.rs:3967-3976 forwards terminal/lease/policy unchanged; :4007-4074 constructs the sole grid TermStream and starts grid flow after Attached.\",\"Same revision host_relaunches.rs:1498-1532 decodes GridOutput and waits for catch-up. :1546-1599 checks the old viewer's session-restarted detach, changed host socket, resumed screen and retained history without the old frame.\",\"This refutes silent fallback to a byte stream. It does not certify every restart assertion against unrelated timing defects. No execution performed.\"] Current coverage/results: [\"Reviewed SPEC_impl.md:2272-2347 includes the detached-old-viewer/new-grid contract; :3015-3017 declares grid-only attachments. Current Grid streams repeats it. SPEC.md Restart behavior was searched and remains history above a blank screen.\",\"Searched TODO Planned, plans/queue, BUGS.md, active ledger and INDEX/matching terms for removed stream-selector/relaunch coverage. No exact queue or decision coverage found; Planned is empty. The tmux plans have landed. No filter needed.\"] Exact cited cover: [\"f560058 SPEC_impl.md:3015-3017: every attachment's data channel carries a grid stream, so Attach, Attached and the browser's socket say nothing about it\"] Original stronger consequence and missing premise remain preserved: \"Removing ViewerStreams::BytesOrGrid might weaken relaunch coverage or silently choose bytes. The retained decoder/assertions and sole representation refute that concern.\"; null."
+      },
+      "accepted_parent_decision": {
+        "key": "g152/c1",
+        "line": 5,
+        "disposition": "excluded",
+        "group": "f560058-grid-only-attach-removes-stream-discriminator",
+        "bucket": "other",
+        "recording": "refuted",
+        "queue_target_candidate": null,
+        "needs_independent_drop_check": false,
+        "reason": "Parent explicitly accepted named refuted proposal from claims-097 after inspecting it. Removing the stream-selection argument follows a universal API/protocol change. The relaunch test still decodes grid data and checks replacement behavior. Source-refuted API-migration concern. g153/c2 shares the API transition but concerns a different helper/assertion; do not count it as separate evidence of a defect. Checked source/results: [\"f560058da19e02716e6f943883a9508b447aff4e client.rs:3967-3976 forwards terminal/lease/policy unchanged; :4007-4074 constructs the sole grid TermStream and starts grid flow after Attached.\",\"Same revision host_relaunches.rs:1498-1532 decodes GridOutput and waits for catch-up. :1546-1599 checks the old viewer's session-restarted detach, changed host socket, resumed screen and retained history without the old frame.\",\"This refutes silent fallback to a byte stream. It does not certify every restart assertion against unrelated timing defects. No execution performed.\"] Current coverage/results: [\"Reviewed SPEC_impl.md:2272-2347 includes the detached-old-viewer/new-grid contract; :3015-3017 declares grid-only attachments. Current Grid streams repeats it. SPEC.md Restart behavior was searched and remains history above a blank screen.\",\"Searched TODO Planned, plans/queue, BUGS.md, active ledger and INDEX/matching terms for removed stream-selector/relaunch coverage. No exact queue or decision coverage found; Planned is empty. The tmux plans have landed. No filter needed.\"] Exact cited cover: [\"f560058 SPEC_impl.md:3015-3017: every attachment's data channel carries a grid stream, so Attach, Attached and the browser's socket say nothing about it\"] Original stronger consequence and missing premise remain preserved: \"Removing ViewerStreams::BytesOrGrid might weaken relaunch coverage or silently choose bytes. The retained decoder/assertions and sole representation refute that concern.\"; null."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-097",
+          "key": "g152/c1",
+          "latest_line": 5,
+          "recommendation": "refuted",
+          "bucket": "other",
+          "underlying_key": "f560058-grid-only-attach-removes-stream-discriminator",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "Removing the stream-selection argument follows a universal API/protocol change. The relaunch test still decodes grid data and checks replacement behavior.",
+          "checks": [
+            "f560058da19e02716e6f943883a9508b447aff4e client.rs:3967-3976 forwards terminal/lease/policy unchanged; :4007-4074 constructs the sole grid TermStream and starts grid flow after Attached.",
+            "Same revision host_relaunches.rs:1498-1532 decodes GridOutput and waits for catch-up. :1546-1599 checks the old viewer's session-restarted detach, changed host socket, resumed screen and retained history without the old frame.",
+            "This refutes silent fallback to a byte stream. It does not certify every restart assertion against unrelated timing defects. No execution performed."
+          ],
+          "coverage_checked": [
+            "Reviewed SPEC_impl.md:2272-2347 includes the detached-old-viewer/new-grid contract; :3015-3017 declares grid-only attachments. Current Grid streams repeats it. SPEC.md Restart behavior was searched and remains history above a blank screen.",
+            "Searched TODO Planned, plans/queue, BUGS.md, active ledger and INDEX/matching terms for removed stream-selector/relaunch coverage. No exact queue or decision coverage found; Planned is empty. The tmux plans have landed. No filter needed."
+          ],
+          "exact_cover_quotes": [
+            "f560058 SPEC_impl.md:3015-3017: every attachment's data channel carries a grid stream, so Attach, Attached and the browser's socket say nothing about it"
+          ],
+          "missing_premise": null,
+          "original_stronger_consequence": "Removing ViewerStreams::BytesOrGrid might weaken relaunch coverage or silently choose bytes. The retained decoder/assertions and sole representation refute that concern.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Source-refuted API-migration concern. g153/c2 shares the API transition but concerns a different helper/assertion; do not count it as separate evidence of a defect."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "f560058-grid-only-attach-removes-stream-discriminator",
+        "destination": null
+      }
+    },
+    {
+      "key": "g152/c2",
+      "owner": "g152",
+      "id": "c2",
+      "domain": "rust-terminal-host-regressions",
+      "purpose": "rust-terminal-host-regressions: crates/farhelm/tests/e2e/host_migrations.rs, crates/farhelm/tests/e2e/host_relaunches.rs; phases -async fn a_moved_agent_outlives_its_tmux_session() {",
+      "history": [
+        {
+          "line": 7,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c2",
+            "state": "open",
+            "summary": "Deleted Clone/Replace test adds no distinct surviving create-oracle loss",
+            "location": "crates/farhelm/tests/e2e/host_migrations.rs:1474 (deleted)",
+            "detail": "Reviewed commit: 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513. Discovery pass 1 considered whether removing clone_and_replace_of_an_old_session_create_host_sessions also removes a surviving Clone/Replace terminal-host-create oracle, separate from known l1's old-terminal migration gap. TLDR: No additional defect established. The deleted test's distinguishing subject is an old tmux source staying in tmux after a create, and ending when deleted; ordinary host-backed creation keeps a direct real-process regression test. Source: deleted host_migrations.rs:1474-1545 calls create_session_with_extras twice using only old.session.launch and cwd, checks each new runtime is a host, checks the source remains a tmux row/pane after the first create, then checks deletion removes the old source and leaves the second runtime alive. It does not call a special Clone/Replace endpoint. Remaining host_creates.rs:241-288, a_create_starts_its_agent_in_a_terminal_host, actually creates through the supervisor, waits for screen readiness, asserts stored TerminalKind::Host and running outcome, verifies its recorded socket matches the published runtime and sole socket, verifies no tmux session exists, checks live listing and that Stop ends the child while leaving the host's final screen. Thus there is still an executed-path oracle for normal creates choosing hosts; source correctness alone is not the refutation. Exact governing SPEC.md Lifecycle operations at this revision states Clone starts 'a brand-new, independent create through the same form' and Replace 'creates a new session ... and then DELETES the source.' The removed test models those ordinary creates rather than extending create with source terminal kind. Its distinct old-source/mixed-runtime responsibility is preserved under existing l1 and retired later as that record details; this candidate does not refute or lower that original intermediate coverage loss. Suggested bucket: other for the considered test-only gap. Could-be-highest: false; no product data-loss, security or catastrophic tooling route established. Confidence: confirmed source analysis. proposed_drop: no additional finding beyond l1; retained real-host create assertions refute the narrower suspicion that deleting this test removes the sole host-create oracle. possible_cover: host_creates.rs:241-288 as directly inspected test source, not queue coverage. Caveat: no claim that this test covers every combined Clone/Replace contract or GUI flow; reviewing unrelated clone/replace behavior would exceed this assignment. No runtime test, build or reproduction performed."
+          }
+        }
+      ],
+      "latest": {
+        "line": 7,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c2",
+          "state": "open",
+          "summary": "Deleted Clone/Replace test adds no distinct surviving create-oracle loss",
+          "location": "crates/farhelm/tests/e2e/host_migrations.rs:1474 (deleted)",
+          "detail": "Reviewed commit: 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513. Discovery pass 1 considered whether removing clone_and_replace_of_an_old_session_create_host_sessions also removes a surviving Clone/Replace terminal-host-create oracle, separate from known l1's old-terminal migration gap. TLDR: No additional defect established. The deleted test's distinguishing subject is an old tmux source staying in tmux after a create, and ending when deleted; ordinary host-backed creation keeps a direct real-process regression test. Source: deleted host_migrations.rs:1474-1545 calls create_session_with_extras twice using only old.session.launch and cwd, checks each new runtime is a host, checks the source remains a tmux row/pane after the first create, then checks deletion removes the old source and leaves the second runtime alive. It does not call a special Clone/Replace endpoint. Remaining host_creates.rs:241-288, a_create_starts_its_agent_in_a_terminal_host, actually creates through the supervisor, waits for screen readiness, asserts stored TerminalKind::Host and running outcome, verifies its recorded socket matches the published runtime and sole socket, verifies no tmux session exists, checks live listing and that Stop ends the child while leaving the host's final screen. Thus there is still an executed-path oracle for normal creates choosing hosts; source correctness alone is not the refutation. Exact governing SPEC.md Lifecycle operations at this revision states Clone starts 'a brand-new, independent create through the same form' and Replace 'creates a new session ... and then DELETES the source.' The removed test models those ordinary creates rather than extending create with source terminal kind. Its distinct old-source/mixed-runtime responsibility is preserved under existing l1 and retired later as that record details; this candidate does not refute or lower that original intermediate coverage loss. Suggested bucket: other for the considered test-only gap. Could-be-highest: false; no product data-loss, security or catastrophic tooling route established. Confidence: confirmed source analysis. proposed_drop: no additional finding beyond l1; retained real-host create assertions refute the narrower suspicion that deleting this test removes the sole host-create oracle. possible_cover: host_creates.rs:241-288 as directly inspected test source, not queue coverage. Caveat: no claim that this test covers every combined Clone/Replace contract or GUI flow; reviewing unrelated clone/replace behavior would exceed this assignment. No runtime test, build or reproduction performed."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g152/findings.jsonl",
+        "id": "c2",
+        "line": 7,
+        "disposition": "excluded",
+        "group": "647f022-ordinary-host-create-oracle-survives-old-source-test-removal",
+        "reason": "Parent explicitly accepted named refuted proposal from claims-097 after inspecting it. No additional loss of the ordinary host-create oracle is established. The deleted test's distinct old-source/mixed-runtime assertions remain part of g152/l1's historical suite deletion. Refute only the additional generic-create finding, preserving all old-source/mixed-runtime coverage loss in g152/l1. Checked source/results: [\"647f022 parent host_migrations.rs:1474-1545 uses ordinary create_session_with_extras twice with the source launch/cwd, then explicitly deletes the source; it invokes no dedicated Clone/Replace endpoint.\",\"At 647f022, host_creates.rs:241-288 still checks created Host kind and Running outcome, socket/runtime identity, readiness, no tmux session, live listing and Stop preserving the host's final screen.\",\"This is a source check of executable regression assertions, not a claimed test execution. It establishes ordinary-create protection only, not full combined Clone/Replace or GUI coverage.\"] Current coverage/results: [\"Both specifications' lifecycle sections were searched: Clone/Replace use independent creation, and current old-terminal rules retire the old source. Nothing accepts losing a still-required generic create assertion.\",\"Searched TODO Planned, plans/queue, BUGS.md, queue INDEX/matching terms and active ledger for this exact deleted-oracle concern; no exact coverage. Planned is empty. Landed tmux plans are not unlanded coverage; FILTER.md is unnecessary.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Deleting clone_and_replace_of_an_old_session_create_host_sessions might also delete the sole surviving generic host-create oracle. That extra premise is refuted; the old-source deletion/liveness assertions are not refuted and remain under g152/l1.\"; null."
+      },
+      "accepted_parent_decision": {
+        "key": "g152/c2",
+        "line": 7,
+        "disposition": "excluded",
+        "group": "647f022-ordinary-host-create-oracle-survives-old-source-test-removal",
+        "bucket": "other",
+        "recording": "refuted",
+        "queue_target_candidate": null,
+        "needs_independent_drop_check": false,
+        "reason": "Parent explicitly accepted named refuted proposal from claims-097 after inspecting it. No additional loss of the ordinary host-create oracle is established. The deleted test's distinct old-source/mixed-runtime assertions remain part of g152/l1's historical suite deletion. Refute only the additional generic-create finding, preserving all old-source/mixed-runtime coverage loss in g152/l1. Checked source/results: [\"647f022 parent host_migrations.rs:1474-1545 uses ordinary create_session_with_extras twice with the source launch/cwd, then explicitly deletes the source; it invokes no dedicated Clone/Replace endpoint.\",\"At 647f022, host_creates.rs:241-288 still checks created Host kind and Running outcome, socket/runtime identity, readiness, no tmux session, live listing and Stop preserving the host's final screen.\",\"This is a source check of executable regression assertions, not a claimed test execution. It establishes ordinary-create protection only, not full combined Clone/Replace or GUI coverage.\"] Current coverage/results: [\"Both specifications' lifecycle sections were searched: Clone/Replace use independent creation, and current old-terminal rules retire the old source. Nothing accepts losing a still-required generic create assertion.\",\"Searched TODO Planned, plans/queue, BUGS.md, queue INDEX/matching terms and active ledger for this exact deleted-oracle concern; no exact coverage. Planned is empty. Landed tmux plans are not unlanded coverage; FILTER.md is unnecessary.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Deleting clone_and_replace_of_an_old_session_create_host_sessions might also delete the sole surviving generic host-create oracle. That extra premise is refuted; the old-source deletion/liveness assertions are not refuted and remain under g152/l1.\"; null."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-097",
+          "key": "g152/c2",
+          "latest_line": 7,
+          "recommendation": "refuted",
+          "bucket": "other",
+          "underlying_key": "647f022-ordinary-host-create-oracle-survives-old-source-test-removal",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "No additional loss of the ordinary host-create oracle is established. The deleted test's distinct old-source/mixed-runtime assertions remain part of g152/l1's historical suite deletion.",
+          "checks": [
+            "647f022 parent host_migrations.rs:1474-1545 uses ordinary create_session_with_extras twice with the source launch/cwd, then explicitly deletes the source; it invokes no dedicated Clone/Replace endpoint.",
+            "At 647f022, host_creates.rs:241-288 still checks created Host kind and Running outcome, socket/runtime identity, readiness, no tmux session, live listing and Stop preserving the host's final screen.",
+            "This is a source check of executable regression assertions, not a claimed test execution. It establishes ordinary-create protection only, not full combined Clone/Replace or GUI coverage."
+          ],
+          "coverage_checked": [
+            "Both specifications' lifecycle sections were searched: Clone/Replace use independent creation, and current old-terminal rules retire the old source. Nothing accepts losing a still-required generic create assertion.",
+            "Searched TODO Planned, plans/queue, BUGS.md, queue INDEX/matching terms and active ledger for this exact deleted-oracle concern; no exact coverage. Planned is empty. Landed tmux plans are not unlanded coverage; FILTER.md is unnecessary."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": null,
+          "original_stronger_consequence": "Deleting clone_and_replace_of_an_old_session_create_host_sessions might also delete the sole surviving generic host-create oracle. That extra premise is refuted; the old-source deletion/liveness assertions are not refuted and remain under g152/l1.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Refute only the additional generic-create finding, preserving all old-source/mixed-runtime coverage loss in g152/l1."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "647f022-ordinary-host-create-oracle-survives-old-source-test-removal",
+        "destination": null
+      }
+    }
+  ],
+  "replies": [
+    {
+      "turn": 1,
+      "reply": "Initial pass complete; all 1,563 assigned patch lines reviewed.\n\n- `l1`: `other` finding—migration integration coverage was removed while migration still shipped at that revision. No runtime failure established.\n- `c1`: rejected candidate—the attach-call change preserves grid-stream assertions.\n- No unresolved leads; no tests or reproductions run.\n\nRecords saved in [findings.jsonl]([private-run]/g152/findings.jsonl) and [progress.md]([private-run]/g152/progress.md)."
+    },
+    {
+      "turn": 2,
+      "reply": "Redelivered all 1,563 mandatory lines through the corrected manifest as separate raw-stdout packets. No unread ranges remain; parent audit certification is pending.\n\nRevised `l1` with exact later retirement evidence: the intermediate coverage loss remains recorded, but its tested migration behavior was removed before the pinned tip. No current endpoint repair claimed; disposition remains with the parent.\n\nNo new findings or unresolved leads. Progress updated; no execution performed."
+    },
+    {
+      "turn": 3,
+      "reply": "Discovery pass 1 complete. No new substantive issue found.\n\nChecked full-range file changes, deleted-fixture references, module wiring, retained create-test assertions, and attach ownership semantics.\n\n- New verified findings: none.\n- New candidate: `c2`, source-refuted; recorded immediately.\n- New unverified IDs: none.\n- Open leads: none.\n\nProgress updated. Source-only; no tests or reproductions run."
+    }
+  ],
+  "progress": "g152: turn 3 complete. Separate discovery pass 1 complete; no new substantive issue found.\nRead all 360 lines of discovery-neighbours.json in six bounded chunks after replacing an initially clipped combined read. Reused the full own six-event history before searching. No pending interface questions.\nExisting l1 consequence and endpoint-retirement evidence unchanged. Existing c1 source-refutation basis unchanged. No parent drops or lowerings assumed.\nNew verified ID: c2, a candidate/refutation of an additional surviving Clone/Replace host-create oracle loss; recorded immediately after the useful source check. New verified finding IDs: none. New unverified-after-investigation IDs: none. Open lead IDs: none.\nChecks: full pinned-range git log and diff for host_migrations.rs/host_relaunches.rs; deleted module consumers and fixture names searched across crates/scripts/.config at 647f0227 (no matches); e2e/main.rs confirms module removal preserves Linux gating and still wires host suites.\nAdditional removal responsibility checked: deleted old-source Clone/Replace test invokes ordinary create twice, while retained real-host host_creates.rs:241-288 checks readiness, stored host kind/address, sole socket, absence of tmux, live listing, child exit and final-screen retention. This is an actual surviving oracle for ordinary creates, without treating correct source as proof of test coverage; lost legacy-source behavior remains l1.\nRelaunch attribution checked against entire pinned range: behavior changes are removal of the retired OldWindowRemoval enum arm and the assigned stream argument; remaining edits are comments. Existing replay decoding/assertions remain. Direct pre/post-f560058d attach_terminal definitions preserve Agent selector, empty lease and if_unowned=false. Full Attach protocol field docs confirm empty lease singleton and explicit displacing semantics; stream discriminator removal does not change ownership.\nDiscovery result: empty for new findings. One new considered candidate c2; no unresolved premise. No need to widen beyond assigned deletion/call-change responsibilities.\nMandatory delivery and synthesis remain as verified by parent; no unread assigned scope. No tests, builds, reproductions, live-install actions or checkout changes.\nNext: return discovery delta and await parent direction.\n"
+}

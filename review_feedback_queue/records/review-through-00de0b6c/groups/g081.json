@@ -1,0 +1,816 @@
+{
+  "group": {
+    "id": "g081",
+    "domain": "terminal-view-rendering",
+    "purpose": "terminal-view-rendering: crates/farhelm-ui/assets/terminal.js; phases complete small per-commit changes",
+    "interfaces": [
+      "g009",
+      "g010",
+      "g011",
+      "g052",
+      "g053",
+      "g054",
+      "g079",
+      "g080",
+      "g082",
+      "g083",
+      "g088",
+      "g089",
+      "g117",
+      "g118",
+      "g119",
+      "g120",
+      "g121",
+      "g135",
+      "g136",
+      "g174",
+      "g175",
+      "g176",
+      "g177",
+      "g178",
+      "g179",
+      "g180",
+      "g181",
+      "g182",
+      "g184",
+      "g186",
+      "g187",
+      "g188",
+      "g189",
+      "g190",
+      "g191",
+      "g192",
+      "g193",
+      "g194",
+      "g195",
+      "g196",
+      "g197"
+    ],
+    "sources": [
+      {
+        "path": "[private-run]/prep/parts/01073-000.patch",
+        "ranges": [
+          [
+            1,
+            1039
+          ]
+        ],
+        "original_path": "crates/farhelm-ui/assets/terminal.js",
+        "commit": "f560058da19e02716e6f943883a9508b447aff4e",
+        "notes": "patch header; patch character offsets [0,58559)",
+        "lines": 1039,
+        "bytes": 58692,
+        "start": 0,
+        "end": 58559,
+        "original": "[private-run]/prep/originals/01073.patch"
+      }
+    ],
+    "lines": 1039,
+    "bytes": 58692
+  },
+  "records": [
+    {
+      "key": "g081/c1",
+      "owner": "g081",
+      "id": "c1",
+      "domain": "terminal-view-rendering",
+      "purpose": "terminal-view-rendering: crates/farhelm-ui/assets/terminal.js; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 1,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c1",
+            "state": "open",
+            "summary": "Frozen snapshots keep the text size from before a zoom",
+            "location": "crates/farhelm-ui/assets/terminal.js:2717",
+            "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e. TLDR: changing terminal text size does not resize a screen retained during reconnect or after takeover. Details: stepFontSize now calls grid.setFontSize only on islands; reconnect snapshots and tombstones live separately (terminal.js:1556–1637, 2717). This is explicitly accepted by SPEC_impl.md, Terminal widget: the grid island, lines 1566–1568: 'A screen held aside during a reconnect or kept after a takeover keeps its old size: it is frozen, with no program to tell.' Suggested bucket: other. Confidence: confirmed from source and specification, not execution. proposed_drop: explicit specification acceptance quoted above. possible_cover: none searched. Could-be-highest: no; display size only, with no established data-loss or security route."
+          }
+        }
+      ],
+      "latest": {
+        "line": 1,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c1",
+          "state": "open",
+          "summary": "Frozen snapshots keep the text size from before a zoom",
+          "location": "crates/farhelm-ui/assets/terminal.js:2717",
+          "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e. TLDR: changing terminal text size does not resize a screen retained during reconnect or after takeover. Details: stepFontSize now calls grid.setFontSize only on islands; reconnect snapshots and tombstones live separately (terminal.js:1556–1637, 2717). This is explicitly accepted by SPEC_impl.md, Terminal widget: the grid island, lines 1566–1568: 'A screen held aside during a reconnect or kept after a takeover keeps its old size: it is frozen, with no program to tell.' Suggested bucket: other. Confidence: confirmed from source and specification, not execution. proposed_drop: explicit specification acceptance quoted above. possible_cover: none searched. Could-be-highest: no; display size only, with no established data-loss or security route."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g081/findings.jsonl",
+        "id": "c1",
+        "line": 1,
+        "disposition": "excluded",
+        "group": "frozen-reconnect-takeover-screen-retains-old-font-size",
+        "reason": "Parent explicitly accepted named covered proposal from claims-052 after inspecting it. Changing text size affects live islands and leaves separately held frozen screens at their prior size. The implementation specification explicitly accepts that exact trigger, consequence and scope. Exact explicit specification acceptance, with no established or suspected security/work-loss route. Checked source/results: [\"f560058 terminal.js:2705-2717 changes only islands.values(); :1556-1565 retains a snapshot outside that set, :1607-1633 restores it as a tombstone, and :4819-4832 freezes/moves it and removes the island entry. grid-terminal.js:2080-2085 clears its program sinks.\"] Current coverage/results: [\"Current SPEC_impl.md:1546-1554 was read and exactly accepts held reconnect/takeover screens retaining size. SPEC.md:2877-2887 live terminal text-size promise was read together with that explicit qualification.\",\"TODO Planned and unlanded-plan index are empty; BUGS.md unrelated. Full queue INDEX.md plus frozen/font/held-size searches and active-ledger searches found no separate exact item. Detached-grid drag-guidance and guidance-gap-size records concern different live notices. No filter used.\"] Exact cited cover: [\"SPEC_impl.md:1551-1552: A screen held aside during a reconnect or kept after a takeover keeps its old size: it is frozen, with no program to tell.\"] Original stronger consequence and missing premise remain preserved: \"Retained reconnect/takeover screens do not follow a later text-size change; display-size convenience only.\"; null."
+      },
+      "accepted_parent_decision": {
+        "key": "g081/c1",
+        "line": 1,
+        "disposition": "excluded",
+        "group": "frozen-reconnect-takeover-screen-retains-old-font-size",
+        "bucket": "other",
+        "recording": "covered",
+        "queue_target_candidate": null,
+        "needs_independent_drop_check": false,
+        "reason": "Parent explicitly accepted named covered proposal from claims-052 after inspecting it. Changing text size affects live islands and leaves separately held frozen screens at their prior size. The implementation specification explicitly accepts that exact trigger, consequence and scope. Exact explicit specification acceptance, with no established or suspected security/work-loss route. Checked source/results: [\"f560058 terminal.js:2705-2717 changes only islands.values(); :1556-1565 retains a snapshot outside that set, :1607-1633 restores it as a tombstone, and :4819-4832 freezes/moves it and removes the island entry. grid-terminal.js:2080-2085 clears its program sinks.\"] Current coverage/results: [\"Current SPEC_impl.md:1546-1554 was read and exactly accepts held reconnect/takeover screens retaining size. SPEC.md:2877-2887 live terminal text-size promise was read together with that explicit qualification.\",\"TODO Planned and unlanded-plan index are empty; BUGS.md unrelated. Full queue INDEX.md plus frozen/font/held-size searches and active-ledger searches found no separate exact item. Detached-grid drag-guidance and guidance-gap-size records concern different live notices. No filter used.\"] Exact cited cover: [\"SPEC_impl.md:1551-1552: A screen held aside during a reconnect or kept after a takeover keeps its old size: it is frozen, with no program to tell.\"] Original stronger consequence and missing premise remain preserved: \"Retained reconnect/takeover screens do not follow a later text-size change; display-size convenience only.\"; null."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-052",
+          "key": "g081/c1",
+          "latest_line": 1,
+          "recommendation": "covered",
+          "bucket": "other",
+          "underlying_key": "frozen-reconnect-takeover-screen-retains-old-font-size",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "Changing text size affects live islands and leaves separately held frozen screens at their prior size. The implementation specification explicitly accepts that exact trigger, consequence and scope.",
+          "checks": [
+            "f560058 terminal.js:2705-2717 changes only islands.values(); :1556-1565 retains a snapshot outside that set, :1607-1633 restores it as a tombstone, and :4819-4832 freezes/moves it and removes the island entry. grid-terminal.js:2080-2085 clears its program sinks."
+          ],
+          "coverage_checked": [
+            "Current SPEC_impl.md:1546-1554 was read and exactly accepts held reconnect/takeover screens retaining size. SPEC.md:2877-2887 live terminal text-size promise was read together with that explicit qualification.",
+            "TODO Planned and unlanded-plan index are empty; BUGS.md unrelated. Full queue INDEX.md plus frozen/font/held-size searches and active-ledger searches found no separate exact item. Detached-grid drag-guidance and guidance-gap-size records concern different live notices. No filter used."
+          ],
+          "exact_cover_quotes": [
+            "SPEC_impl.md:1551-1552: A screen held aside during a reconnect or kept after a takeover keeps its old size: it is frozen, with no program to tell."
+          ],
+          "missing_premise": null,
+          "original_stronger_consequence": "Retained reconnect/takeover screens do not follow a later text-size change; display-size convenience only.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Exact explicit specification acceptance, with no established or suspected security/work-loss route."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": false,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "frozen-reconnect-takeover-screen-retains-old-font-size",
+        "destination": null
+      }
+    },
+    {
+      "key": "g081/l1",
+      "owner": "g081",
+      "id": "l1",
+      "domain": "terminal-view-rendering",
+      "purpose": "terminal-view-rendering: crates/farhelm-ui/assets/terminal.js; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 2,
+          "event": {
+            "version": 1,
+            "kind": "lead",
+            "id": "l1",
+            "state": "open",
+            "summary": "Check bounds replacing the deleted replay byte and frame limits",
+            "location": "crates/farhelm-ui/assets/terminal.js:496",
+            "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e. TLDR: the old replay byte/frame caps are removed; verify the replacement grid keeps bounded state while replay is hidden. Details: assigned patch removes REPLAY_BUFFER_LIMIT and REPLAY_CHUNK_LIMIT, and its new header says the grid format and component limits bound retained content. SPEC_impl.md, Terminal widget: the grid island, says the page applies every message and keeps the hello-announced history cap. Need inspect grid queue and model validation to establish that removed controls guarded only deleted byte accumulation. Suggested bucket: unassigned pending source check; resource-exhaustion consequence could be high, security route unestablished. Confidence: unresolved lead, no execution. proposed_drop: false. possible_cover: none searched. Could-be-highest: not ruled out until trust-boundary validation is checked. Next source checks: terminal.js receive/reveal path and grid-terminal.js/model queue and caps; no reproductions requested."
+          }
+        },
+        {
+          "line": 3,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "l1",
+            "state": "open",
+            "summary": "Deleted replay limits guarded only the removed byte-stream accumulator",
+            "location": "crates/farhelm-ui/assets/terminal.js:496",
+            "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e. TLDR: removing the replay byte/frame constants does not remove any limit from the surviving grid path. Details: source check against the parent revision terminal.js:5718–5764 shows if(grid) receiveGrid(bytes) and return at 5738–5741, before byte replayChunks accumulation and both deleted limit checks at 5742–5760. Parent receiveGrid at 6188–6200 explicitly did not count grid data against these limits. The new component uses the same grid receive path (terminal.js:4165 onward; createGridSurface:4294 onward), with no replayChunks accumulation. Thus the suspected new resource-exhaustion consequence has no changed causal route in the assigned deletion: both caps only bounded a retired byte implementation. This is a source refutation of the removal premise, not a proof that every grid decoder limit is correct. Suggested bucket: other; no established security or loss-of-work impact. Confidence: confirmed source comparison, no execution. proposed_drop: source refutation above. possible_cover: none searched. Could-be-highest: no established route from this deletion; the earlier trust-boundary concern was checked by tracing the pre-existing branch that bypassed these constants. Lead closed as candidate; no missing premise remains for this assigned change."
+          }
+        },
+        {
+          "line": 9,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "l1",
+            "state": "open",
+            "summary": "Deleted replay limits guarded only the removed byte-stream accumulator",
+            "location": "crates/farhelm-ui/assets/terminal.js:496",
+            "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e. TLDR: deleting the byte replay caps does not newly expose the grid path to unbounded hidden replay accumulation. Original suspected consequence preserved: a hostile or broken remote peer could exhaust page memory or leave it unusable; a security-impacting denial of service was not ruled out in the initial lead and remains a potentially-highest consequence for independent checking of this proposed refutation. Parent terminal.js:5738–5741 dispatched grid frames and returned before the deleted byte replayChunks accumulation and limits at 5742–5760. Parent receiveGrid:6188–6200 did not apply those limits to grid data. Current terminal.js:4466–4475 still hands frames to grid.receive and rearms only the idle timer. Synthesis checked grid-terminal.js:1973–1994: frames are decoded/applied immediately, but history may queue for sliced application; therefore the header's no-backlog explanation is not a claim that no history queue exists. grid-model.js:876–905 rejects malformed envelopes, does not enqueue empty appends, and trims real queued rows; 930–955 caps those rows at historyCap and discards superseded queue storage; 971–1007 validates retained rows on drain and caps applied history. The configured history cap and decoder dimensions/messages remain separate format bounds, not substitutes for every possible resource budget. No byte accumulation removed here ever guarded these grid allocations. Suggested bucket: other as refuted changed-route regression; original potentially security-impacting consequence retained. Confidence: confirmed source comparison, no execution. proposed_drop: source refutation only, not accepted by parent. possible_cover: none searched. Could-be-highest: yes for the original hypothetical hostile-peer resource-exhaustion consequence; no changed route established by deleting these byte-only guards. This is not a blanket safety finding for the grid decoder, maximum legal history sizes, browser WebSocket buffering or pre-existing queue costs. No unresolved premise remains about what the deleted guards protected. Parent reports g083 independently agrees on pre-grid dispatch ordering; this conclusion relies on this group's own source reads and does not certify g083 delivery."
+          }
+        }
+      ],
+      "latest": {
+        "line": 9,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "l1",
+          "state": "open",
+          "summary": "Deleted replay limits guarded only the removed byte-stream accumulator",
+          "location": "crates/farhelm-ui/assets/terminal.js:496",
+          "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e. TLDR: deleting the byte replay caps does not newly expose the grid path to unbounded hidden replay accumulation. Original suspected consequence preserved: a hostile or broken remote peer could exhaust page memory or leave it unusable; a security-impacting denial of service was not ruled out in the initial lead and remains a potentially-highest consequence for independent checking of this proposed refutation. Parent terminal.js:5738–5741 dispatched grid frames and returned before the deleted byte replayChunks accumulation and limits at 5742–5760. Parent receiveGrid:6188–6200 did not apply those limits to grid data. Current terminal.js:4466–4475 still hands frames to grid.receive and rearms only the idle timer. Synthesis checked grid-terminal.js:1973–1994: frames are decoded/applied immediately, but history may queue for sliced application; therefore the header's no-backlog explanation is not a claim that no history queue exists. grid-model.js:876–905 rejects malformed envelopes, does not enqueue empty appends, and trims real queued rows; 930–955 caps those rows at historyCap and discards superseded queue storage; 971–1007 validates retained rows on drain and caps applied history. The configured history cap and decoder dimensions/messages remain separate format bounds, not substitutes for every possible resource budget. No byte accumulation removed here ever guarded these grid allocations. Suggested bucket: other as refuted changed-route regression; original potentially security-impacting consequence retained. Confidence: confirmed source comparison, no execution. proposed_drop: source refutation only, not accepted by parent. possible_cover: none searched. Could-be-highest: yes for the original hypothetical hostile-peer resource-exhaustion consequence; no changed route established by deleting these byte-only guards. This is not a blanket safety finding for the grid decoder, maximum legal history sizes, browser WebSocket buffering or pre-existing queue costs. No unresolved premise remains about what the deleted guards protected. Parent reports g083 independently agrees on pre-grid dispatch ordering; this conclusion relies on this group's own source reads and does not certify g083 delivery."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g081/findings.jsonl",
+        "id": "l1",
+        "line": 9,
+        "disposition": "under-investigation",
+        "group": "g081-l1",
+        "reason": "Record durably acknowledged; parent source/contract validation, cross-group synthesis, coverage/filter matching and any independent drop check remain pending. This preserves the claim and uncertainty without accepting, dropping or lowering it."
+      },
+      "accepted_parent_decision": null,
+      "returned_claim_checks": [
+        {
+          "batch": "claims-052",
+          "key": "g081/l1",
+          "latest_line": 9,
+          "recommendation": "refuted",
+          "bucket": "other",
+          "underlying_key": "deleted-byte-replay-caps-never-guarded-grid-dispatch",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The deleted caps guarded only byte-renderer accumulation. Parent grid dispatch returned before that buffer and those checks. This refutes the changed causal route while preserving every broader grid-budget question.",
+          "checks": [
+            "f560058 parent terminal.js:5738-5741 dispatches grid then returns; :5742-5760 appends replayChunks and checks byte/frame limits only afterward. Parent receiveGrid:6188-6200 applies directly and rearms idle watchdog without those limits.",
+            "f560058 terminal.js:4466-4475 retains the same receiveGrid path. grid-terminal.js:1973-1994 decodes/applies each frame and may schedule sliced history; it does have a history backlog, so no claim of zero queue is made.",
+            "f560058 grid-model.js:876-905 validates history envelopes, skips empty append retention and trims queued real rows; :930-955 caps queued rows to historyCap and discards superseded queue storage. This is not certification of maximum legal histories, all decoder limits, WebSocket buffering or pre-existing resource costs."
+          ],
+          "coverage_checked": [
+            "Current SPEC.md Terminal experience slow-viewer/flow-control contract and SPEC_impl.md:1836-1870 grid ownership/sliced-history contract were read. They do not accept hostile-peer resource exhaustion; they explain distinct bounds.",
+            "TODO Planned and unlanded-plan index are empty; BUGS.md unrelated. Full queue INDEX.md plus replay-cap/byte-cap/backlog searches found no exact deleted-guard regression. extreme-history-numbering-hangs-selection.md describes a separate numbering/selection trigger. Active ledger has no exact cap-deletion decision. FILTER.md has no relevant security exception."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": "No removed byte cap previously constrained the grid allocation under concern. Independent grid resource weaknesses remain outside this bounded refutation.",
+          "original_stronger_consequence": "A hostile or broken remote peer might exhaust page memory or leave it unusable; the original trust-boundary denial-of-service hypothesis was potentially highest and must not be silently lowered away.",
+          "needs_independent_drop_check": true,
+          "proposed_basis": "Source-refuted changed-route security/resource regression; preserve original hostile-peer consequence and the limitations in the independent-drop register."
+        }
+      ],
+      "parent_proposals": [
+        {
+          "artifact": "parent-flagged-judgments-052.json",
+          "key": "g081/l1",
+          "proposal": "claim-checks/claims-052/result.json",
+          "parent_proposal": "source-refuted-deleted-byte-replay-caps-as-grid-dispatch-guard",
+          "final_independent_gate": "required-before-original-hostile-peer-security-drop",
+          "reason": "Full052 parent grid dispatch returns before byte replay accumulation/cap checks, and existing receiveGrid already applies without them. New grid path retains sliced-history backlog with real-row cap/superseded queue trimming, not zero buffering. Refute the changed causal route only, not maximum legal histories, decoder/resource budgets, WebSocket buffering or existing costs. Preserve hostile-peer page exhaustion/security consequence and limitations for fresh check; no malformed-input acceptance or generalized safety proof."
+        }
+      ],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": true,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "deleted-byte-replay-caps-never-guarded-grid-dispatch",
+        "destination": null
+      }
+    },
+    {
+      "key": "g081/c2",
+      "owner": "g081",
+      "id": "c2",
+      "domain": "terminal-view-rendering",
+      "purpose": "terminal-view-rendering: crates/farhelm-ui/assets/terminal.js; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 4,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c2",
+            "state": "open",
+            "summary": "Paste helper rename preserves the bracketed-paste protection",
+            "location": "crates/farhelm-ui/assets/terminal.js:1910",
+            "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e. TLDR: the renamed sanitizer does not weaken protection against an embedded end-of-paste marker turning the rest of a paste into typed commands. Details: terminal.js:1908–1912 calls farhelmPasteSanitizer.sanitizePastedText in the same insertion path. The complete new paste-sanitizer.js function has exactly the same text.replace(/\\x1b\\[201~|\\x1b/g, '') expression as the parent's term-bytes.js sanitizer; no semantic change. terminal.js:3203–3220 gates mounting on the new global, and createGridSurface:4354 supplies the same function for the grid's own paste handling. Suggested bucket: other (refuted regression). Confidence: confirmed source comparison, no execution. proposed_drop: source refutation; both old and new functions remove the embedded terminator and remaining ESC bytes identically. possible_cover: none searched. Could-be-highest: the suspected command-execution consequence could have been highest, but its premise (a weakened sanitizer or absent mount dependency) is refuted by identical source and explicit gate. This does not claim a general audit of all paste encoding."
+          }
+        },
+        {
+          "line": 8,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c2",
+            "state": "open",
+            "summary": "Paste helper rename preserves the bracketed-paste protection",
+            "location": "crates/farhelm-ui/assets/terminal.js:1910",
+            "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e. TLDR: the changed helper name does not let pasted text terminate its bracketed-paste frame and run the remainder as typed commands. Original potential consequence preserved: such a framing escape could execute commands and cause security compromise or loss of user-owned work, hence could be highest. Initial checks: new paste-sanitizer.js and parent term-bytes.js use the identical text.replace(/\\x1b\\[201~|\\x1b/g, '') expression; terminal.js:1908–1912 uses the renamed helper, 3203–3220 requires its global before mount, lib.rs:1445 and 1914 bundle/register it, and terminal.js:4354 passes it into grid paste handling. Synthesis check: supervisor grid_input.rs:223–250 wraps each multipart paste once using the mode captured at its start; PasteText at 570–655 independently applies the same ESC/end-marker filter across parts before line-ending conversion. This supports only the changed sanitizer/dependency route and does not certify every possible paste-input policy. Suggested bucket: other as refuted regression; underlying hypothetical security/loss-of-work consequence remains preserved for independent check. Confidence: confirmed from source, not runtime. proposed_drop: source refutation, not accepted by parent; unchanged browser sanitization remains wired and downstream encoding sanitizes too. possible_cover: none searched. Could-be-highest: yes for the original hypothetical command-execution consequence; its premise is refuted for this helper rename. No unresolved premise in the changed route."
+          }
+        },
+        {
+          "line": 13,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c2",
+            "state": "open",
+            "summary": "Paste helper rename preserves the bracketed-paste protection",
+            "location": "crates/farhelm-ui/assets/terminal.js:1910",
+            "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e. TLDR: renaming the sanitizer does not weaken framing for a paste entering the current grid page's paste path. Original potentially-highest consequence preserved: escaping a bracketed paste could execute commands and compromise credentials or user-owned work. Source refutation of this specific route remains identical old/new text.replace(/\\x1b\\[201~|\\x1b/g, '') in parent term-bytes.js/new paste-sanitizer.js; terminal.js:1908–1912 calls it, 3203–3220 gates mounting on its global, lib.rs:1445/1914 bundles it, and terminal.js:4354 passes it to grid paste handling. Supervisor grid_input.rs:223–250 captures paste mode at the first part; PasteText:570–655 filters ESC/end markers across parts. Discovery-neighbour synthesis explicitly limits this proposed drop: g196/l1 establishes a distinct old-page raw JSON input reinterpretation route after an update, where the old page's raw bytes are decoded as GridInput::Text and never pass through GridInput::Paste. Unchanged current-page sanitization does not refute that security finding, and this record makes no proposal to drop it or to accept old-page compatibility policy. The same limitation applies to other input-classification channels not using this helper. Suggested bucket: other as refuted helper-rename regression; original hypothetical command-execution consequence remains potentially highest for independent checking. Confidence: confirmed source-only for this helper route; neighbour supplied for distinct cross-version scope, not independently re-reviewed here. proposed_drop: unchanged source-refutation basis only, not accepted by parent. possible_cover: none searched; g196/l1 is distinct and not claimed coverage. Could-be-highest: yes for the original hypothetical security consequence; no new finding asserted by this record. No open premise remains about the renamed helper's wiring."
+          }
+        }
+      ],
+      "latest": {
+        "line": 13,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c2",
+          "state": "open",
+          "summary": "Paste helper rename preserves the bracketed-paste protection",
+          "location": "crates/farhelm-ui/assets/terminal.js:1910",
+          "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e. TLDR: renaming the sanitizer does not weaken framing for a paste entering the current grid page's paste path. Original potentially-highest consequence preserved: escaping a bracketed paste could execute commands and compromise credentials or user-owned work. Source refutation of this specific route remains identical old/new text.replace(/\\x1b\\[201~|\\x1b/g, '') in parent term-bytes.js/new paste-sanitizer.js; terminal.js:1908–1912 calls it, 3203–3220 gates mounting on its global, lib.rs:1445/1914 bundles it, and terminal.js:4354 passes it to grid paste handling. Supervisor grid_input.rs:223–250 captures paste mode at the first part; PasteText:570–655 filters ESC/end markers across parts. Discovery-neighbour synthesis explicitly limits this proposed drop: g196/l1 establishes a distinct old-page raw JSON input reinterpretation route after an update, where the old page's raw bytes are decoded as GridInput::Text and never pass through GridInput::Paste. Unchanged current-page sanitization does not refute that security finding, and this record makes no proposal to drop it or to accept old-page compatibility policy. The same limitation applies to other input-classification channels not using this helper. Suggested bucket: other as refuted helper-rename regression; original hypothetical command-execution consequence remains potentially highest for independent checking. Confidence: confirmed source-only for this helper route; neighbour supplied for distinct cross-version scope, not independently re-reviewed here. proposed_drop: unchanged source-refutation basis only, not accepted by parent. possible_cover: none searched; g196/l1 is distinct and not claimed coverage. Could-be-highest: yes for the original hypothetical security consequence; no new finding asserted by this record. No open premise remains about the renamed helper's wiring."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g081/findings.jsonl",
+        "id": "c2",
+        "line": 13,
+        "disposition": "under-investigation",
+        "group": "g081-c2",
+        "reason": "Record durably acknowledged; parent source/contract validation, cross-group synthesis, coverage/filter matching and any independent drop check remain pending. This preserves the claim and uncertainty without accepting, dropping or lowering it."
+      },
+      "accepted_parent_decision": null,
+      "returned_claim_checks": [
+        {
+          "batch": "claims-052",
+          "key": "g081/c2",
+          "latest_line": 13,
+          "recommendation": "refuted",
+          "bucket": "other",
+          "underlying_key": "paste-sanitizer-helper-rename-preserves-framing-filter-and-wiring",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The renamed helper uses the identical sanitizer, remains a mount dependency, and remains wired to both current-page paste paths. This says nothing about old pages whose bytes are reclassified as another input kind.",
+          "checks": [
+            "f560058 paste-sanitizer.js:26-28 and parent term-bytes.js:55-57 have identical text.replace(/\\x1b\\[201~|\\x1b/g, '') semantics. terminal.js:1908-1912 calls the renamed helper; :3203-3221 gates mounting; :4354 passes it to the grid. lib.rs diff registers/injects PASTE_SANITIZER_JS instead of TERM_BYTES_JS.",
+            "f560058 supervisor grid_input.rs:223-250 captures bracketed-paste mode at the first part and closes the frame after the last; PasteText:570-655 removes embedded end markers/ESC across parts before newline conversion.",
+            "Supplied g196/l1 concerns old-page raw JSON becoming GridInput::Text, bypassing GridInput::Paste. It is distinct, not refuted or accepted by this helper-rename check; no new review of that record was performed."
+          ],
+          "coverage_checked": [
+            "Current SPEC.md input/paste and trust sections and SPEC_impl.md grid JSON-input contract were searched/read where matching. No specification acceptance of a paste framing escape was found; unchanged sanitization is source refutation, not permission for command execution.",
+            "TODO Planned and unlanded-plan index empty; BUGS.md unrelated. Full queue INDEX.md plus sanitizer/end-marker/framing searches and active-ledger searches found no exact helper-rename item. Wrong-mode-after-recovery and input handoff filters have different triggers; no filter used."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": "No weakened sanitizer or absent current-page mount dependency is established. Cross-version/raw-text input classification remains a separate claim.",
+          "original_stronger_consequence": "An embedded bracketed-paste terminator could turn the rest of pasted text into executable commands, compromising credentials or user-owned work; potentially highest.",
+          "needs_independent_drop_check": true,
+          "proposed_basis": "Bounded source refutation of helper rename and wiring. Preserve the original security/work-loss hypothesis and the g196/l1 exclusion for independent checking."
+        }
+      ],
+      "parent_proposals": [
+        {
+          "artifact": "parent-flagged-judgments-052.json",
+          "key": "g081/c2",
+          "proposal": "claim-checks/claims-052/result.json",
+          "parent_proposal": "source-refuted-current-page-paste-sanitizer-rename-or-wiring-loss",
+          "final_independent_gate": "required-before-highest-command-input-drop",
+          "reason": "Full052 rename keeps identical end-marker/ESC filter, remains injected and required before mount, and both current page paste paths use it; supervisor Paste framing separately captures mode/filters across parts. Refute weakened sanitizer/helper wiring only. Old page rawJSON decoded as Text bypasses Paste and remains196 highest, not refuted by this proof. Preserve original embedded terminator→unwanted command/credentials/work consequence for gate; no global paste guarantee."
+        }
+      ],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": true,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "paste-sanitizer-helper-rename-preserves-framing-filter-and-wiring",
+        "destination": null
+      }
+    },
+    {
+      "key": "g081/c3",
+      "owner": "g081",
+      "id": "c3",
+      "domain": "terminal-view-rendering",
+      "purpose": "terminal-view-rendering: crates/farhelm-ui/assets/terminal.js; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 5,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c3",
+            "state": "open",
+            "summary": "Removing the xterm clipboard provider does not expose clipboard reads",
+            "location": "crates/farhelm-ui/assets/terminal.js:625",
+            "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e. TLDR: removal of the old clipboard-read refusal does not let terminal programs read the user's system clipboard. Details: assigned patch deletes the ClipboardAddon provider because its xterm consumer is removed. Surviving createGridSurface onClipboard at terminal.js:4319–4331 writes only, through enqueueClipboardWrite at 764–773 (native write or navigator.clipboard.writeText); grid programs receive no browser clipboard reader. The emulator fixes osc52: Osc52::OnlyCopy in crates/farhelm-terminal-emulator/src/emulator.rs:99–105, queries.rs:360–362 documents clipboard_load as unanswered, and effects.rs:185–192 discards any ClipboardLoad event. SPEC.md Terminal experience:3060–3064 requires that OSC 52 READ never receives contents; replacement satisfies it by refusing upstream. Suggested bucket: other, refuted security regression. Confidence: confirmed source analysis, no execution. proposed_drop: source refutation; deletion removes an unused byte renderer's provider while the grid has write-only callbacks and emulator-side read refusal. possible_cover: none searched. Could-be-highest: clipboard exfiltration would be highest, but source rules out its premise in the replacement path. Browser user-initiated paste remains intentional and is independent of program queries."
+          }
+        },
+        {
+          "line": 10,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c3",
+            "state": "open",
+            "summary": "Removing the xterm clipboard provider does not expose clipboard reads",
+            "location": "crates/farhelm-ui/assets/terminal.js:625",
+            "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e. TLDR: deleting the old renderer's clipboard-read refusal does not newly permit terminal programs to obtain system clipboard contents. Original potentially-highest consequence preserved: clipboard exfiltration could expose credentials or other private user data. Initial source checks: terminal.js:4319–4331 onClipboard only invokes writes through enqueueClipboardWrite:764–773, and the grid has no replacement browser clipboard query callback. Emulator configuration fixes osc52: Osc52::OnlyCopy (farhelm-terminal-emulator/src/emulator.rs:99–105); effects.rs:185–192 discards any ClipboardLoad event; queries.rs:360–362 documents unanswered clipboard loads. Synthesis resolved the configuration's actual meaning: vendor/alacritty_terminal/src/term/mod.rs:2209–2213 returns from clipboard_load unless the setting is OnlyPaste or CopyPaste, so OnlyCopy rejects before any ClipboardLoad callback is built/emitted at 2223–2229. SPEC.md Terminal experience requires reads never receive clipboard contents; the replacement refusal is upstream of the browser. This refutes only the changed deletion route and does not audit arbitrary user-initiated paste, clipboard writes, or unrelated read channels. Suggested bucket: other as refuted changed-route security regression; original highest-impact concern preserved. Confidence: confirmed source analysis, no execution. proposed_drop: source refutation, not accepted by parent. possible_cover: none searched. Could-be-highest: yes for the original clipboard-exfiltration hypothesis, whose premise is refuted for this replacement path. No readily checkable premise remains unresolved."
+          }
+        }
+      ],
+      "latest": {
+        "line": 10,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c3",
+          "state": "open",
+          "summary": "Removing the xterm clipboard provider does not expose clipboard reads",
+          "location": "crates/farhelm-ui/assets/terminal.js:625",
+          "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e. TLDR: deleting the old renderer's clipboard-read refusal does not newly permit terminal programs to obtain system clipboard contents. Original potentially-highest consequence preserved: clipboard exfiltration could expose credentials or other private user data. Initial source checks: terminal.js:4319–4331 onClipboard only invokes writes through enqueueClipboardWrite:764–773, and the grid has no replacement browser clipboard query callback. Emulator configuration fixes osc52: Osc52::OnlyCopy (farhelm-terminal-emulator/src/emulator.rs:99–105); effects.rs:185–192 discards any ClipboardLoad event; queries.rs:360–362 documents unanswered clipboard loads. Synthesis resolved the configuration's actual meaning: vendor/alacritty_terminal/src/term/mod.rs:2209–2213 returns from clipboard_load unless the setting is OnlyPaste or CopyPaste, so OnlyCopy rejects before any ClipboardLoad callback is built/emitted at 2223–2229. SPEC.md Terminal experience requires reads never receive clipboard contents; the replacement refusal is upstream of the browser. This refutes only the changed deletion route and does not audit arbitrary user-initiated paste, clipboard writes, or unrelated read channels. Suggested bucket: other as refuted changed-route security regression; original highest-impact concern preserved. Confidence: confirmed source analysis, no execution. proposed_drop: source refutation, not accepted by parent. possible_cover: none searched. Could-be-highest: yes for the original clipboard-exfiltration hypothesis, whose premise is refuted for this replacement path. No readily checkable premise remains unresolved."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g081/findings.jsonl",
+        "id": "c3",
+        "line": 10,
+        "disposition": "under-investigation",
+        "group": "g081-c3",
+        "reason": "Record durably acknowledged; parent source/contract validation, cross-group synthesis, coverage/filter matching and any independent drop check remain pending. This preserves the claim and uncertainty without accepting, dropping or lowering it."
+      },
+      "accepted_parent_decision": null,
+      "returned_claim_checks": [
+        {
+          "batch": "claims-052",
+          "key": "g081/c3",
+          "latest_line": 10,
+          "recommendation": "refuted",
+          "bucket": "other",
+          "underlying_key": "xterm-clipboard-provider-removal-keeps-osc52-read-refusal",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The grid's callbacks only write clipboard data, and its supervisor emulator rejects OSC 52 loads before emitting a read callback. Deleting the old renderer provider does not expose this read route.",
+          "checks": [
+            "f560058 terminal.js:4320-4334 wires onClipboard/onCopy to writes; enqueueClipboardWrite:764-773 calls native write or navigator.clipboard.writeText, never readText.",
+            "f560058 emulator.rs:99-105 sets Osc52::OnlyCopy; vendor/alacritty_terminal/src/term/mod.rs:2209-2213 returns unless OnlyPaste or CopyPaste, before constructing ClipboardLoad:2223-2229. effects.rs:183-191 also discards ClipboardLoad.",
+            "The conclusion excludes intentional user paste, clipboard writes and unrelated read channels. No execution or clipboard observation was performed."
+          ],
+          "coverage_checked": [
+            "Current SPEC.md:3053-3073 distinguishes authorized paste/write from forbidden program clipboard reads. SPEC_impl.md:1728-1745 explicitly requires unanswered OSC 52 reads and write-only native behavior.",
+            "TODO Planned and unlanded-plan index empty; BUGS.md unrelated. Full queue INDEX.md plus OSC52/read/exfiltration searches and active-ledger searches found no exact provider-removal disclosure item. Clipboard write-drain and best-effort failure cases do not cover exfiltration. No filter used."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": "No program-query path obtains browser/system clipboard contents through the replacement callback or emulator configuration.",
+          "original_stronger_consequence": "Program-initiated clipboard reads could exfiltrate credentials or other private user data; potentially highest security impact.",
+          "needs_independent_drop_check": true,
+          "proposed_basis": "Source-refuted changed deletion route. The specification forbids disclosure rather than accepting it; the implementation blocks the premise."
+        }
+      ],
+      "parent_proposals": [
+        {
+          "artifact": "parent-flagged-judgments-052.json",
+          "key": "g081/c3",
+          "proposal": "claim-checks/claims-052/result.json",
+          "parent_proposal": "source-refuted-removed-xterm-provider-enables-OSC52-clipboard-load",
+          "final_independent_gate": "required-before-highest-private-data-drop",
+          "reason": "Full052 grid callbacks only enqueue clipboard writes, emulator configuredOnlyCopy refuses load before emitting ClipboardLoad and effects also discards it. No program query obtains browser/system clipboard through replacement. Refute exact read channel, not intentional paste, clipboard writes or unrelated channels; preserve credential/private-data exfiltration hypothesis for gate. Specification forbids disclosure, not covers it as accepted."
+        }
+      ],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": true,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "xterm-clipboard-provider-removal-keeps-osc52-read-refusal",
+        "destination": null
+      }
+    },
+    {
+      "key": "g081/c4",
+      "owner": "g081",
+      "id": "c4",
+      "domain": "terminal-view-rendering",
+      "purpose": "terminal-view-rendering: crates/farhelm-ui/assets/terminal.js; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 6,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c4",
+            "state": "open",
+            "summary": "Frozen grid keeps selection copying without the deleted xterm listener",
+            "location": "crates/farhelm-ui/assets/terminal.js:1623",
+            "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e. TLDR: restoring a frozen grid after failed recovery still permits local selection copying and link use. Details: assigned deletion removes installSnapshotCopyOnSelect, which was only installed for an xterm snapshot; the parent's cancelReconnect used a no-op for grid snapshots. Current runReconnect:1556–1565 retains island.grid; unmount:4815–4829 freezes it instead of disposing it; grid-terminal.js:2080–2085 freeze nulls send/onResize and stops a held gesture but retains onCopy, links and pointer handlers. Its local forced/ordinary selection path at 1761–1808 and mouseup copy callback at 1667–1686 remain installed; dispose:2109–2140 alone clears these callbacks and links. Current cancelReconnect:1610–1637 restores the held element as a tombstone; buryTombstone:903–909 disposes it. Suggested bucket: other (refuted regression). Confidence: confirmed source analysis, no execution. proposed_drop: source refutation; the removed auxiliary listener belonged to the deleted renderer and the grid already owns the replacement behavior. possible_cover: none searched. Could-be-highest: no; considered consequence was failed clipboard selection/link convenience, with no established security or data-loss route. Program mouse mode still determines when a forcing modifier is needed; this review makes no claim that frozen snapshots reset that mode."
+          }
+        },
+        {
+          "line": 11,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c4",
+            "state": "open",
+            "summary": "Frozen grid keeps selection copying without the deleted xterm listener",
+            "location": "crates/farhelm-ui/assets/terminal.js:1623",
+            "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e. TLDR: removing the xterm-specific snapshot listener does not newly remove copying/link use from restored grid snapshots or reconnect a frozen snapshot to a replacement program. Initial source comparison: parent cancelReconnect:1925–1955 installed a no-op for grid snapshots and installSnapshotCopyOnSelect only for xterm; current runReconnect:1556–1565 retains island.grid, unmount:4815–4829 freezes/moves it, cancelReconnect:1610–1637 restores it as a tombstone, and buryTombstone:903–909 disposes it. Grid freeze:2080–2085 retains onCopy and links but clears send/onResize and stops any held gesture. Grid pointer handlers and mouseup copy at 1667–1686 and 1761–1808 remain; dispose:2109–2140 alone clears those callbacks and links. Synthesis checked grid-terminal.js:1472–1486: both raw sendMessage and sendUserInput explicitly reject frozen/no-send state, so surviving copy/link handlers do not carry program input into the new attachment. terminal.js:3769–3781 retires recovery's held screen only on a proved replacement reveal; source does not imply history drains are absent or every snapshot mode resets. Suggested bucket: other (original concern: lost selection-copy/link convenience, refuted for this deletion). Confidence: confirmed source analysis, no execution. proposed_drop: source refutation only, not accepted by parent. possible_cover: none searched. Could-be-highest: no established security/loss-of-work route in this removal; a frozen surface cannot send program input through these guards. Parent reports g079/c2 independently agrees frozen-grid ownership; this record is based on this group's source checks. c1's separately quoted frozen-font-size acceptance is unchanged. No unresolved lifetime premise in the changed route."
+          }
+        }
+      ],
+      "latest": {
+        "line": 11,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c4",
+          "state": "open",
+          "summary": "Frozen grid keeps selection copying without the deleted xterm listener",
+          "location": "crates/farhelm-ui/assets/terminal.js:1623",
+          "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e. TLDR: removing the xterm-specific snapshot listener does not newly remove copying/link use from restored grid snapshots or reconnect a frozen snapshot to a replacement program. Initial source comparison: parent cancelReconnect:1925–1955 installed a no-op for grid snapshots and installSnapshotCopyOnSelect only for xterm; current runReconnect:1556–1565 retains island.grid, unmount:4815–4829 freezes/moves it, cancelReconnect:1610–1637 restores it as a tombstone, and buryTombstone:903–909 disposes it. Grid freeze:2080–2085 retains onCopy and links but clears send/onResize and stops any held gesture. Grid pointer handlers and mouseup copy at 1667–1686 and 1761–1808 remain; dispose:2109–2140 alone clears those callbacks and links. Synthesis checked grid-terminal.js:1472–1486: both raw sendMessage and sendUserInput explicitly reject frozen/no-send state, so surviving copy/link handlers do not carry program input into the new attachment. terminal.js:3769–3781 retires recovery's held screen only on a proved replacement reveal; source does not imply history drains are absent or every snapshot mode resets. Suggested bucket: other (original concern: lost selection-copy/link convenience, refuted for this deletion). Confidence: confirmed source analysis, no execution. proposed_drop: source refutation only, not accepted by parent. possible_cover: none searched. Could-be-highest: no established security/loss-of-work route in this removal; a frozen surface cannot send program input through these guards. Parent reports g079/c2 independently agrees frozen-grid ownership; this record is based on this group's source checks. c1's separately quoted frozen-font-size acceptance is unchanged. No unresolved lifetime premise in the changed route."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g081/findings.jsonl",
+        "id": "c4",
+        "line": 11,
+        "disposition": "under-investigation",
+        "group": "g081-c4",
+        "reason": "Record durably acknowledged; parent source/contract validation, cross-group synthesis, coverage/filter matching and any independent drop check remain pending. This preserves the claim and uncertainty without accepting, dropping or lowering it."
+      },
+      "accepted_parent_decision": null,
+      "returned_claim_checks": [
+        {
+          "batch": "claims-052",
+          "key": "g081/c4",
+          "latest_line": 11,
+          "recommendation": "refuted",
+          "bucket": "other",
+          "underlying_key": "removed-xterm-snapshot-copy-listener-not-needed-by-frozen-grid",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The old auxiliary listener was only for xterm snapshots. The frozen grid keeps its local selection/link callbacks and cannot send program input through its cleared sinks.",
+          "checks": [
+            "f560058 parent terminal.js:1925-1955 installs installSnapshotCopyOnSelect only when !heldIsGrid; grids already get a no-op. Current :1556-1565 retains island.grid; :1607-1633 restores/disposes it; :4819-4832 freezes/moves it.",
+            "f560058 grid-terminal.js:2080-2085 preserves local callbacks while clearing send/onResize and stopping the gesture. :1666-1692 still copies completed local selections and admits link release; :1472-1486 rejects frozen/no-send program input; dispose:2109-2140 alone clears onCopy and link cleanup callbacks.",
+            "Retained program mouse mode can still require the forcing modifier. This does not certify all snapshot modes, history drain completion or every link policy."
+          ],
+          "coverage_checked": [
+            "Current SPEC.md:3011-3058 snapshot/recovery/local-copy contract and SPEC_impl.md:1765-1768, 3608-3610 held-grid link lifetime support retained local interaction, not its loss.",
+            "TODO Planned and unlanded-plan index empty; BUGS.md unrelated. Full queue INDEX.md plus frozen/snapshot/copy/listener searches and active-ledger searches found no exact removed-listener regression. detached-grid-retains-program-drag-guidance.md concerns stale guidance, not missing local copying or input leakage. No filter used."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": "No missing grid copy/link replacement or live-send route from the frozen component was established.",
+          "original_stronger_consequence": "Restored frozen screens might lose selection-copy/link convenience. The latest check also rules out carrying their input to a replacement through these sinks; no concrete security or work-loss route was established.",
+          "needs_independent_drop_check": true,
+          "proposed_basis": "Narrow source refutation. Conservatively include the frozen-input-to-replacement premise in independent checking because it concerns user input/work, while preserving the original convenience consequence."
+        }
+      ],
+      "parent_proposals": [
+        {
+          "artifact": "parent-flagged-judgments-052.json",
+          "key": "g081/c4",
+          "proposal": "claim-checks/claims-052/result.json",
+          "parent_proposal": "source-refuted-removed-xterm-snapshot-listener-needed-by-frozen-grid",
+          "final_independent_gate": "required-by-conservative-frozen-input-work-flag",
+          "reason": "Full052 old auxiliary listener explicitly not installed for held grids. Grid freeze keeps local copy/link callbacks while clearing program send/resize and gesture, only disposal clears local callbacks. Thus removed xterm listener does not remove grid copy or leak live input to replacement. Preserve program-mouse forcing-modifier condition and no universal mode/history-drain/link-policy proof. Original convenience loss and conservatively considered input-to-new-run premise remain for fresh check."
+        }
+      ],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": true,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "removed-xterm-snapshot-copy-listener-not-needed-by-frozen-grid",
+        "destination": null
+      }
+    },
+    {
+      "key": "g081/c5",
+      "owner": "g081",
+      "id": "c5",
+      "domain": "terminal-view-rendering",
+      "purpose": "terminal-view-rendering: crates/farhelm-ui/assets/terminal.js; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 7,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c5",
+            "state": "open",
+            "summary": "Reconnect no longer needs a newer terminal-kind projection",
+            "location": "crates/farhelm-ui/assets/terminal.js:1469",
+            "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e. TLDR: dropping the latest-spec lookup when recovery starts does not make recovery mount the retired renderer or the wrong terminal. Details: the removed lookup copied a newer spec of identical path/gen specifically to learn a changed terminal kind during Restart. Every mount now constructs a grid, and session_view.rs:1734–1778 no longer emits kind. Connection identity remains path/gen: terminal.js:2844–2867 discards controllers for departed or changed attachments, and 2913 onward refreshes controller.spec on subsequent sync before an expedited attempt. Focus is read through focusedEl and capability through syncedPolicy, not the captured spec; the remaining spec fields name stable pane elements, per-terminal paths, primary identity and a copy hint. An updated agent generation is a fresh attachment rather than an attempted surface conversion. Suggested bucket: other (refuted renderer/identity regression). Confidence: confirmed source analysis, no execution. proposed_drop: source refutation; obsolete kind projection is absent from both the spec producer and all mounting decisions, while identity changes still cancel recovery. possible_cover: none searched. Could-be-highest: no established wrong-target or data-loss route; this assessment concerns the specific deleted kind refresh, not every existing stale-view policy."
+          }
+        },
+        {
+          "line": 12,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c5",
+            "state": "open",
+            "summary": "Reconnect no longer needs a newer terminal-kind projection",
+            "location": "crates/farhelm-ui/assets/terminal.js:1469",
+            "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e. TLDR: removing the latest-spec lookup does not newly mount the retired renderer or choose a different terminal during recovery. Original concern retained: a stale reconnect spec could choose the wrong renderer/attachment; no shipped security or loss-of-work route was established. The deleted lookup only selected a newer spec with the same path/gen to discover a changed terminal kind. Every mount now constructs a grid; session_view.rs:1734–1778 no longer emits kind, keeps path and pathUnowned tied to session/tab/lease, gives the agent mount_generation and tabs gen=0. Synthesis checked the caller: session_view.rs:532–564 advances mount_generation after every new Restart completion revision, including a refused or unknown outcome that may have detached the viewer. terminal.js:2853–2867 compares path/gen across islands, pending mounts, reconnects and tombstones, discards changed identities before new mounts unless takeover deliberately preserves the detached screen. Surviving controllers receive controller.spec = spec at 2907 before any expedited recovery at 2911 (correcting the earlier loose 2913-onward citation). Focus and recovery capability remain page-current state rather than the stale captured kind. These checks refute the changed kind-refresh route only; they do not certify every pre-existing stale-listing or unavailable-host policy. Parent's g079/c1 interface check establishes retired experimental-container terminals are refused by both view and attachment admission, and new containers run ordinary supervisors inside the container; that supplied result closes the proposed hidden old-renderer exception without this group claiming to have reviewed those separate admission patches. Suggested bucket: other (refuted renderer/identity regression). Confidence: confirmed source analysis for local identity/caller route; container admission evidence supplied by parent, no execution. proposed_drop: source refutation only, not accepted by parent. possible_cover: none searched. Could-be-highest: no established wrong-target input or loss-of-work route from this deletion. No unresolved readily checkable premise remains in the changed path/gen route."
+          }
+        },
+        {
+          "line": 14,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c5",
+            "state": "open",
+            "summary": "Reconnect no longer needs a newer terminal-kind projection",
+            "location": "crates/farhelm-ui/assets/terminal.js:1469",
+            "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e. TLDR: deleting the lookup of a newer spec with identical path/gen does not select a retired renderer or a different terminal in the current grid page. Original concern retained: stale reconnect data might choose the wrong renderer/attachment; no security or work-loss route was established from this deletion. Source basis unchanged: session_view.rs:1734–1778 no longer emits kind and keeps terminal paths tied to session/tab/lease, agent gen to mount_generation and tab gen=0. terminal.js:2853–2867 discards changed path/gen identities before mounting, unless takeover deliberately preserves the detached screen; :2907 refreshes surviving controller.spec before expedited recovery at :2911. session_view.rs:532–564 advances generation for a new Restart completion revision. Discovery-neighbour synthesis qualifies that last premise: g088/l1 and g089/l1 show the completion success can be retired before the view consumes it, leaving terminal admission empty despite an incremented generation. The generation check here refutes only wrong reuse of an admitted attachment; it does not prove the terminal is admitted after every Restart. Likewise g196/l1's old-page unknown-kind/JSON route is not refuted by this current bundle always constructing a grid. Parent g079 admission checks still exclude retired experimental-container terminals and identify new containers as ordinary in-container supervisors, a separate source-supported interface result supplied by parent. Suggested bucket: other (refuted changed kind-refresh/identity route). Confidence: source-confirmed local identity path; neighbour findings attributed, no runtime observations. proposed_drop: original bounded source refutation only, not accepted by parent; no drop proposed for neighbour findings. possible_cover: none searched; named neighbour findings are distinct consequences, not coverage of this candidate. Could-be-highest: no established wrong-target input or data-loss route from this deletion; original concern preserved. No open premise remains in the specific path/gen comparison; this is not a general Restart-success or cross-version compatibility certification."
+          }
+        }
+      ],
+      "latest": {
+        "line": 14,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c5",
+          "state": "open",
+          "summary": "Reconnect no longer needs a newer terminal-kind projection",
+          "location": "crates/farhelm-ui/assets/terminal.js:1469",
+          "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e. TLDR: deleting the lookup of a newer spec with identical path/gen does not select a retired renderer or a different terminal in the current grid page. Original concern retained: stale reconnect data might choose the wrong renderer/attachment; no security or work-loss route was established from this deletion. Source basis unchanged: session_view.rs:1734–1778 no longer emits kind and keeps terminal paths tied to session/tab/lease, agent gen to mount_generation and tab gen=0. terminal.js:2853–2867 discards changed path/gen identities before mounting, unless takeover deliberately preserves the detached screen; :2907 refreshes surviving controller.spec before expedited recovery at :2911. session_view.rs:532–564 advances generation for a new Restart completion revision. Discovery-neighbour synthesis qualifies that last premise: g088/l1 and g089/l1 show the completion success can be retired before the view consumes it, leaving terminal admission empty despite an incremented generation. The generation check here refutes only wrong reuse of an admitted attachment; it does not prove the terminal is admitted after every Restart. Likewise g196/l1's old-page unknown-kind/JSON route is not refuted by this current bundle always constructing a grid. Parent g079 admission checks still exclude retired experimental-container terminals and identify new containers as ordinary in-container supervisors, a separate source-supported interface result supplied by parent. Suggested bucket: other (refuted changed kind-refresh/identity route). Confidence: source-confirmed local identity path; neighbour findings attributed, no runtime observations. proposed_drop: original bounded source refutation only, not accepted by parent; no drop proposed for neighbour findings. possible_cover: none searched; named neighbour findings are distinct consequences, not coverage of this candidate. Could-be-highest: no established wrong-target input or data-loss route from this deletion; original concern preserved. No open premise remains in the specific path/gen comparison; this is not a general Restart-success or cross-version compatibility certification."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g081/findings.jsonl",
+        "id": "c5",
+        "line": 14,
+        "disposition": "under-investigation",
+        "group": "g081-c5",
+        "reason": "Record durably acknowledged; parent source/contract validation, cross-group synthesis, coverage/filter matching and any independent drop check remain pending. This preserves the claim and uncertainty without accepting, dropping or lowering it."
+      },
+      "accepted_parent_decision": null,
+      "returned_claim_checks": [
+        {
+          "batch": "claims-052",
+          "key": "g081/c5",
+          "latest_line": 14,
+          "recommendation": "refuted",
+          "bucket": "other",
+          "underlying_key": "removed-reconnect-kind-refresh-cannot-change-current-grid-attachment-identity",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "Current mounts always construct a grid, their specs carry no kind, and path/gen changes retire old recovery controllers. Removing the same-identity kind refresh does not establish wrong attachment reuse. Admission after Restart and old-bundle compatibility remain distinct unresolved-neighbor scopes.",
+          "checks": [
+            "f560058 session_view.rs:1702-1780 contains no kind, builds session/tab/lease-specific paths, gives the agent mount_generation and tabs gen=0. terminal.js:3389-3393 constructs the grid before socket creation.",
+            "f560058 terminal.js:2853-2867 compares path/gen across islands, pending mounts, reconnects and tombstones and discards changed identities unless takeover deliberately preserves the detached screen. :2907 refreshes surviving controller.spec before :2911 expedited recovery. session_view.rs:532-564 advances generation for new Restart completion revisions.",
+            "The separate retired-container admission route was checked under g079/c1 and remains blocked. Supplied g088/l1/g089/l1 explain that completion success may retire before admission; supplied g196/l1 concerns an old page. Neither consequence is refuted by this current-bundle identity check."
+          ],
+          "coverage_checked": [
+            "Current SPEC.md terminal host/reconnect/takeover rules and SPEC_impl.md grid-client contract require correct attachment behavior; they do not accept wrong-target input or prove Restart admission. Retirement contract coverage is separately recorded under g079/c1.",
+            "TODO Planned and unlanded-plan index empty; BUGS.md unrelated. Full queue INDEX.md plus reconnect-kind/path-generation searches and active-ledger searches found no exact dropped-kind-refresh item. Existing Restart recovery records have different causes/scope. No filter used."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": "No wrong-target or wrong-renderer route from removal of the same-path/gen refresh is established. Do not turn this into a blanket certification of successful Restart or old-page compatibility.",
+          "original_stronger_consequence": "Stale reconnect data might select the wrong renderer or attachment; no actual wrong-target input, security compromise or user-work loss was established from this deletion.",
+          "needs_independent_drop_check": true,
+          "proposed_basis": "Bounded source refutation of the current grid page's kind-refresh/identity route. Conservatively register the possible wrong-target premise for independent checking. Related g079/c2 covers a different deletion and additionally retained-screen ownership, so no exact alias is asserted."
+        }
+      ],
+      "parent_proposals": [
+        {
+          "artifact": "parent-flagged-judgments-052.json",
+          "key": "g081/c5",
+          "proposal": "claim-checks/claims-052/result.json",
+          "parent_proposal": "source-refuted-current-grid-kind-refresh-attachment-identity-change",
+          "final_independent_gate": "required-by-conservative-wrong-target-input-flag",
+          "reason": "Full052 current mount specs have no kind and always construct grid; path/gen retires changed identities across live/pending/reconnect/tombstone, surviving controller spec updates before expedited recovery. Removed same-identity kind refresh therefore does not establish wrong renderer/attachment. Restart completion may retire before admission088/089 and old-bundle196 remain separate, not proved safe by generation. Preserve original possible wrong-target input/security/work premise for gate, no exact whole-record alias with broader079c2."
+        }
+      ],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": true,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "removed-reconnect-kind-refresh-cannot-change-current-grid-attachment-identity",
+        "destination": null
+      }
+    },
+    {
+      "key": "g081/c6",
+      "owner": "g081",
+      "id": "c6",
+      "domain": "terminal-view-rendering",
+      "purpose": "terminal-view-rendering: crates/farhelm-ui/assets/terminal.js; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 15,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c6",
+            "state": "open",
+            "summary": "Grid-only surface helpers still receive constructed island entries",
+            "location": "crates/farhelm-ui/assets/terminal.js:737",
+            "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e. Discovery-pass check considered whether removing surfaceElement/focusSurface/stepFontSize renderer branches or retired fields leaves an uninitialized grid or orphan caller, causing focus or text-size controls to throw and leave terminals unusable. Source refutation: terminal.js:737–743 reads island.grid only from mounted islands; focusSelected:2684–2688, size iteration:2715–2717 and sync focus:2896–2901 all look up islands. The only islands.set is at :4696, after successful construction; its entry explicitly includes grid at :4669–4671. Failure at :4698–4743 does not insert a partial island. Discovery git grep of the pinned terminal.js returned no remaining stopCopyOnSelect, snapshotIsGrid, snapshotLinkGesture, keepTerm, pauseMark, HIGH_WATER, REPLAY_BUFFER_LIMIT, REPLAY_CHUNK_LIMIT or farhelmTermBytes references, so the assigned deletions leave no stale accesses to those names. Tombstones dispose their stored surface at :903–908 rather than using the mounted-island helper. This refutes only the new grid-only dereference/orphan-field concern; it does not assert general constructor cleanup correctness or dismiss the distinct neighbour failed-mount test/getter defect. Suggested bucket: other as source-refuted concern; hypothetical missing-grid UI failure would be high if established. Confidence: confirmed source analysis, no execution. proposed_drop: source refutation above, not accepted by parent. possible_cover: none searched. Could-be-highest: no established security or loss-of-work route; considered consequence is focus/zoom failure. No unresolved premise remains."
+          }
+        }
+      ],
+      "latest": {
+        "line": 15,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c6",
+          "state": "open",
+          "summary": "Grid-only surface helpers still receive constructed island entries",
+          "location": "crates/farhelm-ui/assets/terminal.js:737",
+          "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e. Discovery-pass check considered whether removing surfaceElement/focusSurface/stepFontSize renderer branches or retired fields leaves an uninitialized grid or orphan caller, causing focus or text-size controls to throw and leave terminals unusable. Source refutation: terminal.js:737–743 reads island.grid only from mounted islands; focusSelected:2684–2688, size iteration:2715–2717 and sync focus:2896–2901 all look up islands. The only islands.set is at :4696, after successful construction; its entry explicitly includes grid at :4669–4671. Failure at :4698–4743 does not insert a partial island. Discovery git grep of the pinned terminal.js returned no remaining stopCopyOnSelect, snapshotIsGrid, snapshotLinkGesture, keepTerm, pauseMark, HIGH_WATER, REPLAY_BUFFER_LIMIT, REPLAY_CHUNK_LIMIT or farhelmTermBytes references, so the assigned deletions leave no stale accesses to those names. Tombstones dispose their stored surface at :903–908 rather than using the mounted-island helper. This refutes only the new grid-only dereference/orphan-field concern; it does not assert general constructor cleanup correctness or dismiss the distinct neighbour failed-mount test/getter defect. Suggested bucket: other as source-refuted concern; hypothetical missing-grid UI failure would be high if established. Confidence: confirmed source analysis, no execution. proposed_drop: source refutation above, not accepted by parent. possible_cover: none searched. Could-be-highest: no established security or loss-of-work route; considered consequence is focus/zoom failure. No unresolved premise remains."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g081/findings.jsonl",
+        "id": "c6",
+        "line": 15,
+        "disposition": "excluded",
+        "group": "grid-only-island-helper-partial-entry",
+        "reason": "Parent explicitly accepted named refuted proposal from claims-053 after inspecting it. The deletion does not expose these helpers to a partial island. This is a bounded refutation of missing-grid focus/zoom failure, not a constructor-cleanup certificate. Source-refute only removal-induced uninitialized-grid/orphan-field access. Do not generalize to all rollback behavior. Checked source/results: [\"f560058da19e02716e6f943883a9508b447aff4e:crates/farhelm-ui/assets/terminal.js:737-743,2684-2688,2715-2717,2896-2901: helpers operate on map entries; :4669-4696 creates the entry with grid and inserts only at the happy-path end; catch :4698-4743 inserts nothing.\",\"The same revision's only islands.set is :4696. Targeted search found none of stopCopyOnSelect, snapshotIsGrid, snapshotLinkGesture, keepTerm, pauseMark, HIGH_WATER, REPLAY_BUFFER_LIMIT, REPLAY_CHUNK_LIMIT or farhelmTermBytes. Tombstone :903-908 disposes its own surface.\"] Current coverage/results: [\"Both current specifications: SPEC.md Terminal experience text-size/fidelity rules and SPEC_impl.md Terminal widget/The grid client describe grid mounting and controls; no acceptance of broken helper access.\",\"TODO.md:25-27 Planned is empty; plans/queue searches found tmux removal plans, whose grid-only criteria do not accept helper failures or promise a separate repair.\",\"BUGS.md has only the unrelated SSH-transfer hang. Full INDEX.md and targeted active TRIAGE_OUTCOMES.md searches found no exact missing-grid helper claim. FILTER.md has no applicable full boundary; source refutation is the basis.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Focus or text-size controls could throw and leave terminals unusable (hypothetically high). No security or loss-of-work route was claimed. Failed-mount test/getter defects remain separate.\"; \"None for this narrow source refutation; no runtime behavior was observed.\"."
+      },
+      "accepted_parent_decision": {
+        "key": "g081/c6",
+        "line": 15,
+        "disposition": "excluded",
+        "group": "grid-only-island-helper-partial-entry",
+        "bucket": "other",
+        "recording": "refuted",
+        "queue_target_candidate": null,
+        "needs_independent_drop_check": false,
+        "reason": "Parent explicitly accepted named refuted proposal from claims-053 after inspecting it. The deletion does not expose these helpers to a partial island. This is a bounded refutation of missing-grid focus/zoom failure, not a constructor-cleanup certificate. Source-refute only removal-induced uninitialized-grid/orphan-field access. Do not generalize to all rollback behavior. Checked source/results: [\"f560058da19e02716e6f943883a9508b447aff4e:crates/farhelm-ui/assets/terminal.js:737-743,2684-2688,2715-2717,2896-2901: helpers operate on map entries; :4669-4696 creates the entry with grid and inserts only at the happy-path end; catch :4698-4743 inserts nothing.\",\"The same revision's only islands.set is :4696. Targeted search found none of stopCopyOnSelect, snapshotIsGrid, snapshotLinkGesture, keepTerm, pauseMark, HIGH_WATER, REPLAY_BUFFER_LIMIT, REPLAY_CHUNK_LIMIT or farhelmTermBytes. Tombstone :903-908 disposes its own surface.\"] Current coverage/results: [\"Both current specifications: SPEC.md Terminal experience text-size/fidelity rules and SPEC_impl.md Terminal widget/The grid client describe grid mounting and controls; no acceptance of broken helper access.\",\"TODO.md:25-27 Planned is empty; plans/queue searches found tmux removal plans, whose grid-only criteria do not accept helper failures or promise a separate repair.\",\"BUGS.md has only the unrelated SSH-transfer hang. Full INDEX.md and targeted active TRIAGE_OUTCOMES.md searches found no exact missing-grid helper claim. FILTER.md has no applicable full boundary; source refutation is the basis.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Focus or text-size controls could throw and leave terminals unusable (hypothetically high). No security or loss-of-work route was claimed. Failed-mount test/getter defects remain separate.\"; \"None for this narrow source refutation; no runtime behavior was observed.\"."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-053",
+          "key": "g081/c6",
+          "latest_line": 15,
+          "recommendation": "refuted",
+          "bucket": "other",
+          "underlying_key": "grid-only-island-helper-partial-entry",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The deletion does not expose these helpers to a partial island. This is a bounded refutation of missing-grid focus/zoom failure, not a constructor-cleanup certificate.",
+          "checks": [
+            "f560058da19e02716e6f943883a9508b447aff4e:crates/farhelm-ui/assets/terminal.js:737-743,2684-2688,2715-2717,2896-2901: helpers operate on map entries; :4669-4696 creates the entry with grid and inserts only at the happy-path end; catch :4698-4743 inserts nothing.",
+            "The same revision's only islands.set is :4696. Targeted search found none of stopCopyOnSelect, snapshotIsGrid, snapshotLinkGesture, keepTerm, pauseMark, HIGH_WATER, REPLAY_BUFFER_LIMIT, REPLAY_CHUNK_LIMIT or farhelmTermBytes. Tombstone :903-908 disposes its own surface."
+          ],
+          "coverage_checked": [
+            "Both current specifications: SPEC.md Terminal experience text-size/fidelity rules and SPEC_impl.md Terminal widget/The grid client describe grid mounting and controls; no acceptance of broken helper access.",
+            "TODO.md:25-27 Planned is empty; plans/queue searches found tmux removal plans, whose grid-only criteria do not accept helper failures or promise a separate repair.",
+            "BUGS.md has only the unrelated SSH-transfer hang. Full INDEX.md and targeted active TRIAGE_OUTCOMES.md searches found no exact missing-grid helper claim. FILTER.md has no applicable full boundary; source refutation is the basis."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": "None for this narrow source refutation; no runtime behavior was observed.",
+          "original_stronger_consequence": "Focus or text-size controls could throw and leave terminals unusable (hypothetically high). No security or loss-of-work route was claimed. Failed-mount test/getter defects remain separate.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Source-refute only removal-induced uninitialized-grid/orphan-field access. Do not generalize to all rollback behavior."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "grid-only-island-helper-partial-entry",
+        "destination": null
+      }
+    }
+  ],
+  "replies": [
+    {
+      "turn": 1,
+      "reply": "Initial pass complete. All 1,039 assigned patch lines reviewed.\n\nNo reportable findings or unresolved leads. Five candidates and lead l1’s resolution are recorded in findings.jsonl; coverage and interface checks are in progress.md.\n\nNo tests or reproductions run. Ready for the later synthesis turn."
+    },
+    {
+      "turn": 2,
+      "reply": "Revised l1 and c2–c5 with additional source checks and narrower refutations. Preserved potentially highest consequences in l1, c2, and c3 for independent checking.\n\nNo new findings. Unresolved lead IDs: none."
+    },
+    {
+      "turn": 3,
+      "reply": "Discovery pass complete; no new reportable defect found.\n\nChecked deleted-symbol callers, grid construction before publication, focus/zoom access, tombstone disposal, and replay ordering. Recorded refuted candidate c6; narrowed c2 and c5 using neighbour context.\n\nNew verified findings: none. New unverified findings: none. Open leads: none. No runtime execution."
+    }
+  ],
+  "progress": "# g081 progress\n\nInitial review, turn 1. Discovery passes: 0.\nScope: terminal-view-rendering, commit f560058da19e02716e6f943883a9508b447aff4e, terminal.js patch lines 1–1039.\nBrief and complete inventory commits field read. Findings log verified. No source read yet.\nNext: mandatory evidence packets, pinned governing specification sections, surrounding source and callers.\nInterface assumptions: terminal rendering, scroll anchoring, input and attachment lifecycle require checks against the Rust terminal component and terminal protocol.\nUnread: all assigned patch material. New verified IDs: none. New unverified IDs: none.\n\n## Initial pass complete\n\nTurn type/count: initial review / 1. Discovery-pass count: 0 (no later synthesis or discovery turn performed).\nAssigned patch fully delivered through evidence read packets: 1–180, 181–360, 361–540, 541–720, 721–900, 901–1039. No assigned patch material omitted or unread.\nReviewed revision: f560058da19e02716e6f943883a9508b447aff4e; parent used only to compare removed behavior and existing grid contracts.\nNew verified findings: none. New unverified findings: none. Candidates recorded: c1, c2, c3, c4, c5. Lead l1 revised to candidate after source refutation; no unresolved leads.\nNo tests, builds, reproductions, checkout mutations, live-install actions or helper agents.\n\nContracts read at reviewed revision: SPEC.md Terminal experience 2855–3177 and Attachments 3178–3214; SPEC_impl.md Terminal widget: the grid island and The grid client 1504–1887, The supervisor's terminal emulator 2671–2730, GUI Answers bind to what was drawn 1069–1098. Root AGENTS End sentinel present in injected instructions. Priority buckets and recording template read. Initial combined queue instruction read was clipped; Priority buckets was reread without clipping at lines 1–115. Brief fully read. Complete inventory commits field read, without excluded metadata.\n\nSource context read at reviewed revision: terminal.js 624–777, 940–1127, 1360–1658, 2800–2990, 3115–3240, 3930–4220, 4290–4435, 4740–4850; grid-terminal.js 1570–1845 and 2040–2144; paste-sanitizer.js complete; emulator effects.rs 150–205, queries.rs 320–375, emulator.rs config 98–110; session_view.rs spec construction 1734–1808 (targeted contextual search); lib.rs paste asset definition and registration (1441–1449, 1910–1919). Source searches located symbols and headers without reading queue coverage content.\nParent context: term-bytes.js complete; terminal.js replay limits search context 901–936, 5742–5778, receiveGrid 6188–6212; terminal.js 5695–5764 and 1920–1970.\n\nInterface conclusions: grid handles local copying and links throughout freeze, disposal releases them; paste sanitizer retains identical semantics and is a mount prerequisite; system-clipboard read refusal is enforced in the emulator and the surviving browser callbacks only write; deleted replay caps never applied to grid frames; connection identity remains path/gen, with sync discarding changed controllers and updating survivors. Frozen text size is explicitly accepted by specification. No changed GUI confirmation handler is present in this assigned patch segment.\nNext action: return to caller for later synthesis turn. This completes only g081's assigned initial pass, not other terminal.js segments or the whole commit. Parent owns coverage matching and any independent proposed-drop checks.\n\n## Synthesis turn complete\n\nTurn type/count: later-turn synthesis / 2. Discovery-pass count: 0. No separate discovery pass performed.\nRevisions appended under original IDs: l1, c2, c3, c4, c5. No new verified or unverified finding IDs. No unresolved lead IDs. c1 unchanged.\nNo parent drop accepted: all candidate proposed_drop bases remain recommendations, with the original potentially-highest consequences now explicit in l1, c2 and c3 for independent checking.\n\nAdditional source checks at f560058da19e02716e6f943883a9508b447aff4e:\n- terminal.js 3760–3930: reveal/catch-up interaction; 4460–4565: grid receive, protocol failure, send path; 2838–2868 and 2901–2936: identity cancellation and controller refresh.\n- grid-terminal.js 1860–2020: sliced history drain and receive. Combined tool output clipped its latter portion; 1944–2020 was reread separately without clipping. 1467–1501 and 2075–2096 targeted context confirmed send/frozen guards.\n- grid-model.js targeted symbol/limit search, then full 868–1012: accepted history row queue, empty append handling, trimming and retained-row drain.\n- grid_input.rs targeted paste search, followed by bounded exact reads 223–250 and 570–655: mode captured at first paste part, end marker filtering across parts, independent supervisor sanitization. The initial broad search output exceeded the desired context size; conclusions use the bounded rereads.\n- vendor/alacritty_terminal/src/term/mod.rs 2204–2245: OnlyCopy causes clipboard_load to return before event emission.\n- session_view.rs 510–565: Restart completion observer increments mount generation, including refused/unknown outcomes.\n\nInteraction results: grid history can queue despite the high-level no-byte-backlog explanation, but those allocations never traversed the deleted byte-only caps. Frozen snapshots keep local copy/link callbacks while both send entry points refuse frozen input. Replacement reveal, not marker receipt alone, retires held screens. Caller Restart revisions still force a new agent generation, and path/gen identity cancellation precedes controller refresh and any expedited attempt. The obsolete kind-refresh deletion has no demonstrated hidden container-renderer exception given parent's g079 admission checks. g083 agreement is corroborating information only; no claim is made that its delivery repair is complete.\n\nNo assigned material unread. No runtime execution, reproduction, checkout modification or nested agents. All conclusions are from source/contracts; parent-supplied interface results are attributed in c4/c5. Next action: return only this turn's deltas and unresolved lead IDs to caller.\n\n## Discovery pass 1 complete\n\nTurn type/count: separate discovery / 3. Discovery-pass count: 1.\nRead discovery-neighbours.json through its closing brace: 1–180, 181–240, 241–300, 301–360, 361–420, 421–481. This is contextual interface input, not mandatory source credit. No named pending questions were supplied.\nBefore new source search, synthesized neighbour distinctions into c2 and c5 under their original IDs: current-page sanitization does not refute legacy raw-JSON reinterpretation, and an incremented generation does not by itself prove terminal admission after Restart. Original consequences and proposed-drop bases retained; no parent drop accepted. Other neighbour findings address distinct tests, documentation, protocol or backend routes; none was claimed refuted by this group's production checks.\n\nNew discovery checks: searched the pinned terminal.js for all removed replay/provider/snapshot fields and constants; no orphan references remain (git grep status 1 was the expected no-match result). Traced every surfaceElement/focusSurface call and islands.set, inspected grid publication and failure rollback at 4655–4745, font-size/focus public entry points at 2650–2760, and tombstone disposal at 887–914. Recorded source-refuted candidate c6 immediately after the construction/lookup premise was settled. It is not a reportable defect.\nCompared terminal.js history over the whole pinned range: 04d85f0c98a9b635709d00b056719a0baa7fd3fc, 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513, 1ed482dde220452e424973faf38a5e1318986333 and f560058da19e02716e6f943883a9508b447aff4e are the path's in-range changes. Base-to-reviewed diff search used to check changed-hunk attribution, without expanding assignment to other patch segments.\nAdditional documentation/caller consistency check: terminal.js changed attach explanation at 80–145 agrees with sender ordering: grid_stream.rs 414–498 completes catch_up before live, emits hello/state/screen then history and replay marker; helm terminal.rs 690–714 forwards data and marker on the same event route. Read source preserves reset/eviction exceptions and separate client sliced-drain boundary; no new distinct documentation defect established in this assigned explanation. Initial targeted ReplayComplete search clipped unrelated matches; useful production ranges were reread in full at the exact bounded ranges above. No inference rests on clipped test output.\n\nResult: no new reportable defect found. New verified finding IDs: none. New unverified-after-investigation finding IDs: none. New candidate ID: c6. Revised existing IDs: c2, c5. Remaining lead IDs: none. All assigned source material remains read; no omitted assigned scope. No tests, builds, reproductions, live-install actions, checkout writes or helper agents. Ready to return discovery delta to parent.\n"
+}

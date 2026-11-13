@@ -1,0 +1,662 @@
+{
+  "group": {
+    "id": "g128",
+    "domain": "supervisor-stop-delete",
+    "purpose": "supervisor-stop-delete: crates/farhelm-supervisor/src/service/teardown.rs; phases complete small per-commit changes",
+    "interfaces": [
+      "g001",
+      "g007",
+      "g008",
+      "g009",
+      "g095",
+      "g096",
+      "g102",
+      "g103",
+      "g104",
+      "g105",
+      "g106",
+      "g107",
+      "g108",
+      "g109",
+      "g110",
+      "g111",
+      "g112",
+      "g113",
+      "g114",
+      "g115",
+      "g116",
+      "g127",
+      "g149",
+      "g159",
+      "g160",
+      "g161",
+      "g162",
+      "g163",
+      "g164",
+      "g165",
+      "g166",
+      "g167",
+      "g168",
+      "g169",
+      "g170",
+      "g171",
+      "g172",
+      "g173",
+      "g032"
+    ],
+    "sources": [
+      {
+        "path": "[private-run]/prep/parts/00943-000.patch",
+        "ranges": [
+          [
+            1,
+            1224
+          ]
+        ],
+        "original_path": "crates/farhelm-supervisor/src/service/teardown.rs",
+        "commit": "1ed482dde220452e424973faf38a5e1318986333",
+        "notes": "patch header; patch character offsets [0,59027)",
+        "lines": 1224,
+        "bytes": 59047,
+        "start": 0,
+        "end": 59027,
+        "original": "[private-run]/prep/originals/00943.patch"
+      }
+    ],
+    "lines": 1224,
+    "bytes": 59047
+  },
+  "records": [
+    {
+      "key": "g128/c1",
+      "owner": "g128",
+      "id": "c1",
+      "domain": "supervisor-stop-delete",
+      "purpose": "supervisor-stop-delete: crates/farhelm-supervisor/src/service/teardown.rs; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 1,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c1",
+            "state": "open",
+            "summary": "Sequential output-task joins do not deadlock Delete",
+            "location": "crates/farhelm-supervisor/src/service/teardown.rs:593-608",
+            "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. TLDR: considered whether deleting one session could stall terminal input for the whole host by waiting for an output task while holding the shared attachment lock. Details: teardown.rs:593-608 signals all extracted attachments before joining them. terminals.rs:478-482 only awaits the task. The replacement task, grid_stream.rs:937-963, races its entire streaming future against shutdown.changed(), then invokes the synchronous report_forwarder_end; its documented attachment-lock work runs separately (grid_stream.rs:917-925). A Delete-related natural stream verdict therefore does not keep this task waiting for the same lock or Delete completion. Source analysis supports dropping this concern; no execution performed. Suggested bucket if established: high/material UX. Confidence: confirmed source refutation for this deadlock route. proposed_drop: true, the task observes shutdown outside the stream future and does not await reporting. possible_cover: none; no coverage sources consulted. Could-be-highest: no established security or loss-of-work route; this considered route was a host-wide availability stall. Caveat: this does not claim all work polled inside GridStream is constant-time or audit every reporting task."
+          }
+        }
+      ],
+      "latest": {
+        "line": 1,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c1",
+          "state": "open",
+          "summary": "Sequential output-task joins do not deadlock Delete",
+          "location": "crates/farhelm-supervisor/src/service/teardown.rs:593-608",
+          "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. TLDR: considered whether deleting one session could stall terminal input for the whole host by waiting for an output task while holding the shared attachment lock. Details: teardown.rs:593-608 signals all extracted attachments before joining them. terminals.rs:478-482 only awaits the task. The replacement task, grid_stream.rs:937-963, races its entire streaming future against shutdown.changed(), then invokes the synchronous report_forwarder_end; its documented attachment-lock work runs separately (grid_stream.rs:917-925). A Delete-related natural stream verdict therefore does not keep this task waiting for the same lock or Delete completion. Source analysis supports dropping this concern; no execution performed. Suggested bucket if established: high/material UX. Confidence: confirmed source refutation for this deadlock route. proposed_drop: true, the task observes shutdown outside the stream future and does not await reporting. possible_cover: none; no coverage sources consulted. Could-be-highest: no established security or loss-of-work route; this considered route was a host-wide availability stall. Caveat: this does not claim all work polled inside GridStream is constant-time or audit every reporting task."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g128/findings.jsonl",
+        "id": "c1",
+        "line": 1,
+        "disposition": "excluded",
+        "group": "delete-attachment-lock-output-task-join-deadlock",
+        "reason": "Parent explicitly accepted named refuted proposal from claims-081 after inspecting it. Delete joins tasks under the map lock, but the output task's shutdown race wraps its whole stream and its verdict reporting does not await that map. The named cycle is absent. This does not establish constant-time work inside every stream poll. Narrow source refutation of the alleged attachment-lock/output-reporting wait cycle. Checked source/results: [\"1ed482dde220452e424973faf38a5e1318986333 teardown.rs:576-608 takes attachments, extracts the session's entries and signals every output before joining any task.\",\"Same revision terminals.rs:478-482 only awaits the task; grid_stream.rs:917-925 documents separately scheduled map work, and 937-963 races stream.run() against shutdown.changed() before synchronous report_forwarder_end.\",\"No runtime reproduction. The proposed refutation is limited to awaiting output reporting while holding its needed lock.\"] Current coverage/results: [\"Both specifications' attachment/lifecycle descriptions searched; they require responsive independent sessions and do not accept the alleged cycle.\",\"TODO.md Planned empty; BUGS.md unrelated local SSH hang. plans/queue, INDEX.md and active TRIAGE_OUTCOMES.md searches found no exact output-join cycle. delete-reader-notice-bypass.md was read and concerns direct input-reader notice ownership, explicitly separate from a refuted arbiter deadlock. No archive read.\",\"FILTER.md's hung-user-manager rule is not this trigger and was not applied.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"One Delete could stall terminal input for the whole host through the shared attachment lock; high/material availability if established. No security or loss-of-work route was claimed.\"; null."
+      },
+      "accepted_parent_decision": {
+        "key": "g128/c1",
+        "line": 1,
+        "disposition": "excluded",
+        "group": "delete-attachment-lock-output-task-join-deadlock",
+        "bucket": "other",
+        "recording": "refuted",
+        "queue_target_candidate": null,
+        "needs_independent_drop_check": false,
+        "reason": "Parent explicitly accepted named refuted proposal from claims-081 after inspecting it. Delete joins tasks under the map lock, but the output task's shutdown race wraps its whole stream and its verdict reporting does not await that map. The named cycle is absent. This does not establish constant-time work inside every stream poll. Narrow source refutation of the alleged attachment-lock/output-reporting wait cycle. Checked source/results: [\"1ed482dde220452e424973faf38a5e1318986333 teardown.rs:576-608 takes attachments, extracts the session's entries and signals every output before joining any task.\",\"Same revision terminals.rs:478-482 only awaits the task; grid_stream.rs:917-925 documents separately scheduled map work, and 937-963 races stream.run() against shutdown.changed() before synchronous report_forwarder_end.\",\"No runtime reproduction. The proposed refutation is limited to awaiting output reporting while holding its needed lock.\"] Current coverage/results: [\"Both specifications' attachment/lifecycle descriptions searched; they require responsive independent sessions and do not accept the alleged cycle.\",\"TODO.md Planned empty; BUGS.md unrelated local SSH hang. plans/queue, INDEX.md and active TRIAGE_OUTCOMES.md searches found no exact output-join cycle. delete-reader-notice-bypass.md was read and concerns direct input-reader notice ownership, explicitly separate from a refuted arbiter deadlock. No archive read.\",\"FILTER.md's hung-user-manager rule is not this trigger and was not applied.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"One Delete could stall terminal input for the whole host through the shared attachment lock; high/material availability if established. No security or loss-of-work route was claimed.\"; null."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-081",
+          "key": "g128/c1",
+          "latest_line": 1,
+          "recommendation": "refuted",
+          "bucket": "other",
+          "underlying_key": "delete-attachment-lock-output-task-join-deadlock",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "Delete joins tasks under the map lock, but the output task's shutdown race wraps its whole stream and its verdict reporting does not await that map. The named cycle is absent. This does not establish constant-time work inside every stream poll.",
+          "checks": [
+            "1ed482dde220452e424973faf38a5e1318986333 teardown.rs:576-608 takes attachments, extracts the session's entries and signals every output before joining any task.",
+            "Same revision terminals.rs:478-482 only awaits the task; grid_stream.rs:917-925 documents separately scheduled map work, and 937-963 races stream.run() against shutdown.changed() before synchronous report_forwarder_end.",
+            "No runtime reproduction. The proposed refutation is limited to awaiting output reporting while holding its needed lock."
+          ],
+          "coverage_checked": [
+            "Both specifications' attachment/lifecycle descriptions searched; they require responsive independent sessions and do not accept the alleged cycle.",
+            "TODO.md Planned empty; BUGS.md unrelated local SSH hang. plans/queue, INDEX.md and active TRIAGE_OUTCOMES.md searches found no exact output-join cycle. delete-reader-notice-bypass.md was read and concerns direct input-reader notice ownership, explicitly separate from a refuted arbiter deadlock. No archive read.",
+            "FILTER.md's hung-user-manager rule is not this trigger and was not applied."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": null,
+          "original_stronger_consequence": "One Delete could stall terminal input for the whole host through the shared attachment lock; high/material availability if established. No security or loss-of-work route was claimed.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Narrow source refutation of the alleged attachment-lock/output-reporting wait cycle."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "delete-attachment-lock-output-task-join-deadlock",
+        "destination": null
+      }
+    },
+    {
+      "key": "g128/l1",
+      "owner": "g128",
+      "id": "l1",
+      "domain": "supervisor-stop-delete",
+      "purpose": "supervisor-stop-delete: crates/farhelm-supervisor/src/service/teardown.rs; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 2,
+          "event": {
+            "version": 1,
+            "kind": "lead",
+            "id": "l1",
+            "state": "open",
+            "summary": "Check guarded Delete after legacy-server startup cleanup fails",
+            "location": "crates/farhelm-supervisor/src/service/teardown.rs:320-345",
+            "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. TLDR: an old terminal that survives the upgrade's startup cleanup may be displayed as interrupted; check whether a later Delete can kill a still-running agent without the live-agent warning. Source basis: the patch removes the tmux ownership/liveness probe and pane roots from teardown; core.rs:6675-6679 stops looking up all tmux rows, core.rs:6808-6820 converts running old rows to TerminalEnded, while core/old_terminals.rs:179-200 and 267-277 can leave the server alive on startup failures. teardown.rs:411-415 still mandates the whole-session marker sweep for a terminal-less entry. Checks made: read these source branches and SPEC_impl.md's full private-tmux section. Exact missing premise: the guarded Delete caller's handling of a terminal-less interrupted row and the sweep's authority to kill its marked survivors. Next check: inspect still_alive_for_delete and the Delete guard/caller; compare the failure route with SPEC_impl.md's explicit accepted startup residual. This is an open investigative lead, not a completed finding. Suggested bucket: highest if the missing route is established (processes stopped beyond the displayed destructive confirmation). Confidence: unverified, investigation pending. proposed_drop: false pending contract comparison. possible_cover: none; coverage sources not consulted. Could-be-highest: yes. No execution or reproduction performed."
+          }
+        },
+        {
+          "line": 3,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "l1",
+            "state": "open",
+            "summary": "A surviving old agent can be reaped by a guarded Delete after startup retirement fails",
+            "location": "crates/farhelm-supervisor/src/service/teardown.rs:320-345,411-415,531-540",
+            "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333.\n\nTLDR: if the upgrade cannot end an old terminal, Farhelm still treats its session as interrupted. A later Delete that did not warn about stopping a live agent can reap that surviving agent and its unsaved work. This follows from source; it was not reproduced.\n\nDetails: this patch removes the tmux-specific probe and live-pane roots in teardown.rs:320-345. The replacement startup path core/old_terminals.rs:179-200,267-277 can leave an old server alive after an ordinary connect/identity/termination failure; core.rs:6675-6679 nevertheless finds no terminal for every old-kind row, and core.rs:6808-6820 converts a formerly Running row to TerminalEnded/Interrupted. terminal_less_launch_may_be_live at core.rs:5197-5218 only guards LastOutcome::Launching, not Interrupted. still_alive_for_delete at core.rs:13312-13355 therefore finds no runtime to probe and no host launch records for an old tmux-only session; NothingAlive can pass. handlers.rs:1253-1279 calls that guard then teardown. teardown.rs:411-415 requires the portable sweep for the missing-terminal entry and :531-540 invokes WholeSession. sweep.rs:251-258,421-445 claims surviving processes carrying that session's marker, so on a later successful process-table read it can stop the old live agent. This route needs an old marked agent to survive the startup failure, then a user Delete from the interrupted display. It needs no second simultaneous fault and no pid reuse. Old-server startup failure is an explicitly accepted product residual, discussed below.\n\nContract and proposed drop: SPEC.md, Lifecycle operations, lines 2048-2061 says a destructive confirmation authorizes only its displayed state and a Delete whose prompt said nothing alive must refuse if the agent is running. However SPEC.md, Terminal experience, lines 3004-3016 explicitly says: 'A failure to end the server or to stop what ran there is logged and never stops the supervisor from starting; those sessions are treated as ended all the same, accepting that a Restart could then start a second agent beside one still running.' SPEC_impl.md, Terminal substrate: private tmux server, lines 2919-2924 likewise says: 'A failure anywhere is logged and never fatal (the maintainer chose to start anyway and treat old sessions as ended, accepting that a Restart could then start a second agent beside one still running)'. proposed_drop: the explicit instruction to treat these sessions as ended appears to accept this consequence of failed old-terminal retirement; retain this record for the independent highest-drop check because the text specifically names duplicate Restart rather than an unconfirmed later Delete. Do not infer that the general rare-fault exception alone authorizes it.\n\nSuggested bucket: highest/security or loss of work if retained, because the established route stops a live agent beyond what the ended-state Delete warned about, including unsaved agent work. Could-be-highest: yes. Confidence: confirmed source route conditional on the explicitly supported startup-failure state; whether its acceptance covers this Delete is a contract interpretation, not an unsettled source premise. possible_cover: none; no coverage sources consulted. Material caveats: legacy tmux sessions only; no issue established for ordinary terminal-host sessions. The upgrade deliberately tries to end old agents anyway; the concern is the later action's consent boundary after that end failed, not the authorized upgrade retirement itself. No runtime tests or reproductions performed."
+          }
+        },
+        {
+          "line": 4,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "l1",
+            "state": "open",
+            "summary": "A surviving old agent can be reaped by a guarded Delete after startup retirement fails",
+            "location": "crates/farhelm-supervisor/src/service/teardown.rs:320-345,411-415,531-540",
+            "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333.\n\nTLDR: if the upgrade's bounded cleanup leaves an old agent running, Farhelm still treats its session as interrupted. A later Delete that did not warn about stopping a live agent can reap that agent and its unsaved work. The source route is established; no execution performed.\n\nDetails: the patch removes the tmux-specific probe and live-pane roots from teardown.rs:320-345. Startup core/old_terminals.rs:179-200,267-277 can leave an old server alive after a connection/identity/termination failure. There IS also an agent sweep before conversion, so an early server failure alone is not sufficient: old_terminals.rs:290-357 attempts each converted agent's sweep, but gives all sweeps only what remains of the one startup budget (:351-355). If that budget runs out before a later session is reached, its surviving old agent is not settled. core.rs:7042-7050 nevertheless commits the conversions. core.rs:6675-6679 finds no terminal for every old-kind row, and :6808-6820 converts Running to TerminalEnded/Interrupted. Thus the required trigger is a surviving old agent whose startup cleanup was not completed, not merely any logged server failure. A slow or timed-out startup cleanup is enough; no second simultaneous fault or pid reuse is required.\n\nThe later route: terminal_less_launch_may_be_live at core.rs:5197-5218 guards only LastOutcome::Launching. still_alive_for_delete at core.rs:13312-13355 has no runtime to probe for the Interrupted old row and no host records for a tmux-only session, so NothingAlive can pass. handlers.rs:1253-1279 calls that guard then teardown. teardown.rs:411-415 mandates the portable sweep for this missing-terminal entry, and :531-540 invokes WholeSession. sweep.rs:251-258,421-445 selects the surviving old agent's session marker. When a later process walk succeeds it can stop the old live agent.\n\nContract: SPEC.md, Lifecycle operations, the destructive-confirmation paragraphs beginning at line 2048 require consent to the displayed state and refusal when an ended-state Delete would stop a live agent. proposed_drop: the explicitly accepted legacy-retirement exception appears to authorize treating this survivor as ended. Exact acceptance text: SPEC.md, Terminal experience, lines 3014-3016: 'A failure to end the server or to stop what ran there is logged and never stops the supervisor from starting; those sessions are treated as ended all the same, accepting that a Restart could then start a second agent beside one still running.' SPEC_impl.md, Terminal substrate: private tmux server, lines 2920-2921: 'A sweep that runs out of time leaves the rest for the session’s Restart or Delete: the conversion commits regardless.' (The source uses an ASCII apostrophe in session's.) Lines 2924-2926: 'A failure anywhere is logged and never fatal (the maintainer chose to start anyway and treat old sessions as ended, accepting that a Restart could then start a second agent beside one still running)'. Keep this finding for the required independent highest-drop check: the text explicitly leaves survivors for Delete and treats sessions as ended, but the named consequence is duplicate Restart, so the scope of acceptance needs independent interpretation. The generic rare-fault exception is not the drop basis.\n\nSuggested bucket if retained: highest/security or loss of work, because the established route stops a live agent beyond an ended-state Delete's warning, potentially losing unsaved work. Could-be-highest: yes. Confidence: confirmed source route conditional on a surviving agent after startup's explicit timeout/failure paths; contract acceptance is interpretive. possible_cover: none; coverage sources not consulted. Material caveats: legacy tmux sessions only. No issue established for ordinary terminal-host sessions. This concerns later consent after authorized upgrade retirement failed, not the intentional upgrade termination. No runtime tests or reproductions performed. This revision narrows the earlier record by accounting for the startup agent sweep; it preserves the original user-facing consequence."
+          }
+        },
+        {
+          "line": 6,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "l1",
+            "state": "open",
+            "summary": "A surviving old agent can be reaped by a guarded Delete after startup retirement fails",
+            "location": "crates/farhelm-supervisor/src/service/teardown.rs:320-345,411-415,531-540",
+            "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333.\n\nTLDR: when bounded upgrade cleanup leaves an old agent running, its session can appear interrupted with nothing alive. Delete can then stop that agent without warning, including its unsaved work. Source-supported conditional route; not observed during execution.\n\nDetails: retirement can leave the server alive (service/core/old_terminals.rs:179-200,267-277), and its additional agent sweep has only the remainder of one shared startup budget (:290-357, especially :351-355). A surviving agent whose cleanup is not reached before that budget expires is the premise; an arbitrary startup error is NOT enough. core.rs:7042-7050 commits conversions regardless, :6675-6679 finds no terminal for old tmux rows, and :6808-6820 converts Running to Interrupted. Newly checked caller metadata: service/status.rs:198-234 maps the terminal-less Interrupted row to wire Interrupted; :379-388 lists only host-tab cells and reports no agent-terminal kind for an entry without a runtime. For a tmux-only legacy row with no host tabs, the rendered row therefore has Interrupted and zero tabs. UI status.rs:387-389 explicitly says the reboot or update ended the agent; :409-433 maps an ended zero-tab display to NothingAlive. UI list/shared.rs:920-925 documents and checks that this state deletes at once, without a new killing warning. This strengthens the previously conditional display/guard link.\n\nAt the supervisor, core.rs:5197-5218 only treats terminal-less Launching as possibly live. still_alive_for_delete (:13312-13355) has no agent runtime to probe and settles only terminal-host records, not old tmux processes. session_hosts.rs:357-385 selects only files ending .host; its guard at :587-670 counts the hosts and host tabs supplied to it. For an ordinary old tmux-only row with no host records this is empty, so NothingAlive passes. handlers.rs:1253-1279 forwards the accepted guard into teardown. teardown.rs:411-415 forces portable cleanup, then :531-540 requests WholeSession; sweep.rs:251-258,421-445 selects a surviving agent carrying the session marker when a later process walk succeeds. The patch removed the tmux-specific probe/roots at teardown.rs:320-345. Host-record origin and legacy creation metadata are being checked further in this synthesis; no evidence so far that old tmux-only creation minted .host records.\n\nContract conflict: SPEC.md Lifecycle operations says an ended-state destructive action cannot stop a newly/already live agent without the matching warning. The precise legacy acceptance is SPEC_impl.md:2920-2921: \"A sweep that runs out of time leaves the rest for the session's Restart or Delete: the conversion commits regardless.\" SPEC.md:3014-3016 says failure to end the server or what ran there does not prevent startup and \"those sessions are treated as ended all the same, accepting that a Restart could then start a second agent beside one still running.\" SPEC_impl.md:2924-2926 repeats that accepted duplicate-Restart consequence. proposed_drop: pending independent check, the explicit leftover-for-Delete wording and instruction to treat sessions as ended could authorize this residual, but they do not explicitly waive the later Delete's destructive-consent guard. Preserve the highest claim; the parent has accepted no drop. This is distinct from accepted duplicate-agent Restart fallback and failed-clone spare cleanup.\n\nSuggested bucket if retained: highest/security or loss of work; stopping a live agent beyond the display's authority may lose unsaved work. Could-be-highest: yes. Confidence: source-confirmed conditional route, with the legacy no-host-record provenance being further checked; exception scope remains a contract interpretation. possible_cover: none beyond the caller's interface information (g109/g112 address duplicate-agent Restart; g111 addresses failed-clone private-spare sweep), which does not establish coverage of this Delete consequence. No coverage sources consulted. Caveats: old tmux-only sessions whose startup cleanup actually leaves an agent alive; not all startup failures and not ordinary host-terminal sessions. Intentional upgrade retirement itself is authorized; the concern is the later Delete after retirement failed. No tests or reproductions performed. Original consequence and both sides of the contract conflict are preserved."
+          }
+        },
+        {
+          "line": 7,
+          "event": {
+            "version": 1,
+            "kind": "lead",
+            "id": "l1",
+            "state": "open",
+            "summary": "Attribute the surviving-old-agent guarded Delete route to the retirement changes",
+            "location": "crates/farhelm-supervisor/src/service/teardown.rs:320-345,411-415,531-540",
+            "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. TLDR and strongest consequence preserved: a legacy agent surviving bounded startup cleanup can be displayed as Interrupted with zero tabs; Delete can then stop it and its unsaved work without a killing warning. Current source confirms the display/guard/sweep route (service/status.rs:198-234,379-388; UI status.rs:387-433; list/shared.rs:33-70; supervisor core.rs:5197-5218,13312-13355; teardown.rs:411-415,531-540). The helm also passes the supplied guard through sessions.rs:3631-3634,3710-3727.\n\nNew material lead: comparing the reviewed revision's parent shows core.rs at parent lines 6965-6969 already taking every TerminalKind::Tmux row as having no terminal. The parent also already has the old-terminal retirement machinery. Therefore the prior wording that this patch's removed teardown probe introduces the consent route may overattribute it: a terminal-less row never reached that probe even before this patch. Readily checkable remaining premise: compare the parent's still_alive_for_delete, process sweep and tmux cleanup branches, and identify the introducing retirement commit in the caller's supplied complete commit range. Do not drop the substantive route or infer unrelated coverage merely from preexistence in this particular patch.\n\nContract conflict remains: SPEC.md:2048-2056 explicitly forbids a Delete with no living-agent warning from stopping a live agent. SPEC_impl.md:2920-2921 explicitly says \"A sweep that runs out of time leaves the rest for the session's Restart or Delete: the conversion commits regardless.\" SPEC.md:3014-3016 and SPEC_impl.md:2924-2926 accept treating such sessions as ended and name duplicate-agent Restart. That wording is stronger than generic treated-ended wording but does not expressly say the later Delete may bypass destructive consent. proposed_drop: previously proposed legacy-exception interpretation is pending independent check; no parent drop accepted. The newly discovered attribution issue is a separate investigation, not a reduction in consequence. Suggested bucket if retained: highest/security or loss of work. Could-be-highest: yes. Confidence: source-confirmed conditional consequence; commit attribution and exact exception scope remain under investigation. possible_cover: caller says g109/g112 address duplicate-agent Restart and g111 failed-clone spare cleanup; none establishes coverage of this Delete consequence. No coverage sources searched. Caveats: ordinary legacy tmux-only session, no host records or host tabs; startup's agent sweep must actually leave the agent alive (not all startup failures do). No runtime execution or reproduction. Next check is source-only parent comparison."
+          }
+        },
+        {
+          "line": 8,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "l1",
+            "state": "open",
+            "summary": "A surviving old agent can be reaped by a guarded Delete after startup retirement fails",
+            "location": "crates/farhelm-supervisor/src/service/teardown.rs:411-415,531-540",
+            "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. Introducing retirement commit within the supplied range: dbfc69751215dbf15e1d31d5bed73c3754c4ebc4.\n\nTLDR: an old agent that survives the upgrade's bounded cleanup can appear interrupted with nothing alive. A later Delete can stop that agent without a warning, potentially losing its unsaved work. This is supported by source, not observed execution.\n\nStartup/survivor route: core/old_terminals.rs:162-167 counts time spent ending the server; :203-233 gives subtree discovery and server termination the same deadline; :267-277 can retain a surviving server after termination failure or timeout. Its agent cleanup (:290-357) does attempt every converted row, but :351-355 gives those sweeps only the unused part of the one startup budget, not a new budget per row. core.rs:7042-7050 commits conversions even if cleanup ran out of time. The necessary premise is an old marked agent actually left alive by that bounded cleanup; neither any logged startup failure nor any early server error implies a survivor. This state is explicitly contemplated by the specification. A later successful process read is sufficient for Delete to find that survivor; no pid reuse or second simultaneous rare fault is required.\n\nLegacy metadata/no-host-record premise now checked: store.rs:2493-2507 upgrades pre-host sessions by adding terminal_kind with default tmux, with no host-record creation. The ordinary untouched legacy row in this route never started a terminal host and has no host tabs. Real agent-host launch records are written only when starting a host (core/host_launch.rs:434-450,537-563), and host-tab records only when starting a tab host (core/host_tabs.rs:619-637). This is not an inference that every tmux-kind row lacks host records: a mixed session with later host tabs does not satisfy this narrower premise. session_hosts.rs:357-385 lists only .host files; :225-265 receives no agent runtime or host tabs for this legacy row, and :587-670 finds no host liveness to refuse on. Old tmux artifacts such as spec files do not qualify as .host records.\n\nInterrupted/NothingAlive/WholeSession route now checked through callers: core.rs:6675-6679 gives every old tmux row no terminal, :6808-6820 converts Running to Interrupted, and service/status.rs:198-234 emits Interrupted for that terminal-less row. service/status.rs:379-388 obtains tabs only from host-tab cells and reports no agent-terminal kind. UI status.rs:387-389 says the update ended the agent; :409-433 turns an ended, zero-tab display into NothingAlive. UI list/shared.rs:33-70 dispatches that row's Delete immediately without a killing confirmation. UI api.rs:4251-4256 encodes the guard, helm sessions.rs:3631-3634 decodes it and :3710-3727 forwards it unchanged. Supervisor handlers.rs:1253-1279 checks the guard under the lifecycle claim then calls teardown. core.rs:5197-5218 protects only terminal-less Launching, not Interrupted; :13312-13377 checks only the absent runtime and empty host inventory here, so NothingAlive passes. teardown.rs:411-415 requires the portable sweep and :531-540 requests WholeSession; sweep.rs:251-258,421-445 claims the surviving agent by its session marker and can kill it and its descendants.\n\nAttribution resolved: this consequence was already possible in the reviewed patch's parent. Parent core.rs:6965-6969 already discarded the old terminal lookup, and parent :13926-14043 had the same Launching-only agent guard plus host checks. Its additional tmux-tab query was not a safety backstop: startup unconditionally called tmux.no_server_after_startup after retirement, whatever happened (introduced in dbfc69751215dbf15e1d31d5bed73c3754c4ebc4, core.rs:6426-6438). Parent tmux.rs:3038-3042 marks the server absent; presence.rs:11-15 documents that queries then answer absent without invoking tmux. Parent teardown.rs:681-693 already requested WholeSession. Therefore do not attribute l1's introduction to deleting the teardown probe in 1ed482d: a terminal-less entry never reached that probe. It is an interaction of the earlier retirement policy with the retained guarded-delete cleanup, carried through this removal commit. Preserve it for the parent/cross-group contract judgment rather than falsely claiming a new bug in these particular removed lines.\n\nExact contract conflict: SPEC.md:2048 says \"a destructive confirmation authorizes only what the prompt the user answered said would happen.\" SPEC.md:2054-2056 says \"a Delete or Replace whose prompt said nothing was alive (or that asked nothing, because the session showed nothing alive) is refused if the agent or any terminal tab is running\". Strongest acceptance text, SPEC_impl.md:2920-2921: \"A sweep that runs out of time leaves the rest for the session's Restart or Delete: the conversion commits regardless.\" SPEC.md:3014-3016: \"A failure to end the server or to stop what ran there is logged and never stops the supervisor from starting; those sessions are treated as ended all the same, accepting that a Restart could then start a second agent beside one still running.\" SPEC_impl.md:2924-2926 repeats the latter policy.\n\nproposed_drop: the initial proposal remains the explicit legacy-retirement exception above, particularly the instruction leaving survivors for Delete. This is stronger than merely saying the display is stale. But leaving explicit cleanup available does not itself say its later destructive-consent guard may be bypassed; the named accepted live-agent consequence is duplicate Restart. The record therefore retains the highest claim and exact conflicting contracts for independent check. No parent drop accepted; neither this synthesis nor preexistence in the final removal patch resolves the independent acceptance question. The generic rare-fault exception is not the basis.\n\nSuggested bucket if retained: highest/security or loss of work (live agent stopped beyond ended-state Delete authority, potentially losing unsaved work). Could-be-highest: yes. Confidence: confirmed source route under the expressly contemplated survivor state; contract acceptance remains interpretive. possible_cover: caller reports g109/g112 accepted duplicate-agent Restart fallback and g111 failed-clone private-spare sweep; those are distinct consequences and do not establish coverage of this Delete consent issue. No prohibited coverage sources consulted. Material caveats: ordinary unchanged legacy tmux-only row, no host records/tabs, startup cleanup actually leaves its marked agent alive, then a later successful Delete sweep; not every startup failure and not ordinary terminal-host sessions. Intentional upgrade retirement was authorized; this concerns the later unconfirmed Delete after that retirement failed. All readily checkable source premises have been investigated. No remaining source lead. No execution, tests or reproductions performed. Original consequence is preserved; this revision closes the temporary attribution lead and corrects the earlier claim about which patch introduced it."
+          }
+        },
+        {
+          "line": 9,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "l1",
+            "state": "open",
+            "summary": "A surviving old agent can be reaped by a guarded Delete after startup retirement fails",
+            "location": "crates/farhelm-supervisor/src/service/teardown.rs:411-415,531-540",
+            "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333; retirement introduced within the reviewed range by dbfc69751215dbf15e1d31d5bed73c3754c4ebc4.\n\nTLDR: a legacy agent left alive by bounded upgrade cleanup can appear interrupted with nothing alive. A later Delete can stop it without a warning and potentially lose its unsaved work. Source-supported conditional route, not observed execution.\n\nComplete agent route preserved: old_terminals.rs:162-167 measures server-end time; :203-233 shares a deadline across subtree discovery and termination; :267-277 can leave the server alive after failure/timeout. Agent sweeps at :290-357 receive only the one budget's unused remainder (:351-355). The premise is an agent actually surviving that cleanup; an arbitrary early startup failure is insufficient. core.rs:7042-7050 nevertheless commits conversions; :6675-6679 gives old tmux rows no runtime, and :6808-6820 converts Running to Interrupted. store.rs:2493-2507 marks pre-host rows tmux without creating host records. For an untouched legacy row that never started a host or host tab, host-record writers (host_launch.rs:434-450,537-563; host_tabs.rs:619-637) have never run. Do not generalize no-host-records to all tmux-kind rows. session_hosts.rs:357-385 looks only at .host files and :225-265,:587-670 sees no host or host-tab liveness for that row. service/status.rs:198-234 emits Interrupted and :379-388 only lists host-tab cells. UI status.rs:387-389 says the update ended the agent, :409-433 derives NothingAlive, and list/shared.rs:33-70 dispatches immediately without a killing confirmation. api.rs:4251-4256 serializes it; helm sessions.rs:3631-3634,3710-3727 forwards it unchanged. Supervisor core.rs:5197-5218 protects only terminal-less Launching, and :13312-13377 probes only current/recorded hosts, so NothingAlive passes. handlers.rs:1253-1279 then runs teardown. teardown.rs:411-415 forces a sweep and :531-540 requests WholeSession; sweep.rs:251-258,421-445 selects the surviving marked agent when a later walk succeeds.\n\nAttribution remains corrected: this route already existed in 1ed482d's parent. Parent core.rs:6965-6969 has the terminal-less lookup, and :13926-14043 the same Launching-only agent check. Its nominal tmux tab query is not a backstop because retirement unconditionally calls no_server_after_startup (dbfc6975 core.rs:6426-6438). Parent tmux.rs:3038-3042 marks presence absent; presence.rs:11-15 documents query replies as absent without running tmux. Parent teardown.rs:681-693 already performs WholeSession. Thus removing the teardown probe did not introduce l1; the earlier retirement policy and guarded teardown interaction did. It still falls within the complete pinned range.\n\nRequired neighbour synthesis before discovery: g007/c4 is a complementary old-TAB consequence of the same authority mismatch, not a new g128 discovery. Exact neighbour record read in discovery-neighbours.json. Useful source premises independently checked: pre-retirement SPEC_impl.md:2956-2958 explicitly supported moving the agent to a host while leaving old tabs in tmux. At the reviewed revision old_terminals.rs:179-189 returns no pane inventory and leaves the server alone on non-absence connection errors. If the ended host agent contributes no converted old-agent row, :296-298 may return without any sweep; :321-328 derives eligible tab sessions only from converted rows and attributed panes. That old-tab scenario therefore needs neither l1's old-agent conversion nor budget exhaustion. A later-generation host's Delete retains full sweeping at teardown.rs:403-419 plus tab/launch glob discovery :431-449, consistent with g007's tab consequence. Both routes share an absence of legacy-survivor authority in NothingAlive and eventual WholeSession killing; a fix must preserve uncertainty/consent for BOTH an interrupted legacy agent and an ended host agent's surviving old tabs, without weakening cleanup. Keep g128/l1 and g007/c4 as original IDs with distinct prerequisites/consequences and shared fix-boundary alias information; do not silently merge or drop either. c2's refuted missing-cleanup concern does not refute g007's successful-but-unwarned cleanup concern.\n\nExact contract conflict preserved: SPEC.md:2048 says \"a destructive confirmation authorizes only what the prompt the user answered said would happen.\" At :2054-2056 a Delete that asked nothing because nothing appeared alive \"is refused if the agent or any terminal tab is running\". Strongest potential exception, SPEC_impl.md:2920-2921: \"A sweep that runs out of time leaves the rest for the session's Restart or Delete: the conversion commits regardless.\" SPEC.md:3012-3013 also says \"what cannot be attributed to an old tab is left for the session's Delete, which stops everything of the session.\" SPEC.md:3014-3016: \"A failure to end the server or to stop what ran there is logged and never stops the supervisor from starting; those sessions are treated as ended all the same, accepting that a Restart could then start a second agent beside one still running.\" SPEC_impl.md:2924-2926 repeats that policy.\n\nproposed_drop: the previously proposed explicit retirement exception, especially leftovers being assigned to Delete, remains pending independent acceptance-scope judgment. It accepts later cleanup more strongly than generic treated-ended wording; it does not expressly waive the later destructive-consent guard. Preserve the strongest claim and exact conflict. No parent drop/lowering accepted; duplicate-agent Restart acceptance does not settle unconfirmed Delete.\n\nSuggested bucket if retained: highest/security or loss of work, because a live agent can be stopped beyond the ended-state action's authority. Could-be-highest: yes. Confidence: source-confirmed conditional route and settled caller/no-record premises; contract exception scope remains interpretive. possible_cover: g007/c4 is now an exact supplied complementary authority finding; g109/g112 duplicate-agent Restart and g111 failed-clone spare sweep remain distinct. No prohibited coverage sources read. Caveats: ordinary untouched legacy tmux-only agent, actual startup survivor, later successful sweep; not every startup failure and not ordinary host-only sessions. Intentional upgrade retirement itself was authorized. No runtime tests, builds or reproductions. This is a synthesis revision of an existing ID, not a new discovery, and all original consequences and proposed-drop bases remain preserved."
+          }
+        },
+        {
+          "line": 13,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "l1",
+            "state": "open",
+            "summary": "A surviving old agent can be reaped by a guarded Delete after startup retirement fails",
+            "location": "crates/farhelm-supervisor/src/service/teardown.rs:411-415,531-540",
+            "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333; introducing retirement within the complete pinned range: dbfc69751215dbf15e1d31d5bed73c3754c4ebc4. TLDR: an old agent surviving bounded startup cleanup can appear interrupted with nothing alive, after which Delete can stop that agent and lose unsaved work without a killing warning. Source-supported conditional consequence, never observed in execution.\n\nComplete prior route retained: old_terminals.rs:162-167,203-233,267-277 shares one server/subtree deadline and can leave a server alive; :290-357 gives agent sweeps only its unused remainder (:351-355). The premise is actual surviving marked agent work, not every startup failure. core.rs:7042-7050 commits conversion despite incomplete cleanup; :6675-6679 drops legacy terminal lookup and :6808-6820 converts Running to Interrupted. The ordinary untouched pre-host session has no host/tab record: schema upgrade store.rs:2493-2507 sets tmux without creating records, while records are created only for actual host starts (host_launch.rs:537-563; host_tabs.rs:619-637). session_hosts.rs:225-265,357-385,587-670 consequently finds no live runtime, .host record or host tab. service/status.rs:198-234,379-388 emits Interrupted/zero host tabs; UI status.rs:387-433 and list/shared.rs:33-70 dispatch NothingAlive without a killing warning; api.rs:4251-4256 and helm sessions.rs:3631-3634,3710-3727 preserve the guard. Supervisor core.rs:5197-5218 protects only terminal-less Launching, :13312-13377 sees no host liveness, and handlers.rs:1253-1279 proceeds. teardown.rs:411-415 requires the portable sweep and :531-540 chooses WholeSession, which claims the survivor's session markers (sweep.rs:251-258,421-445). Later successful cleanup stops it. Attribution remains retirement, not this patch's removed probe: the parent already discarded old lookup (core.rs:6965-6969), marked the tmux driver absent whatever retirement did (dbfc core.rs:6426-6438; parent tmux.rs:3038-3042/presence.rs:11-15), and performed WholeSession (parent teardown.rs:681-693).\n\nExact conflict and proposed-drop basis unchanged: SPEC.md:2048 says \"a destructive confirmation authorizes only what the prompt the user answered said would happen\"; :2054-2056 requires a no-live/no-question Delete to be refused if the agent or any tab runs. SPEC_impl.md:2920-2921 expressly says \"A sweep that runs out of time leaves the rest for the session's Restart or Delete: the conversion commits regardless.\" SPEC.md:3012-3013 leaves unattributable old-tab work for Delete, \"which stops everything of the session\"; :3014-3016 says failed cleanup never stops startup and \"those sessions are treated as ended all the same, accepting that a Restart could then start a second agent beside one still running.\" SPEC_impl.md:2924-2926 repeats that fallback. proposed_drop: the explicit retirement/leftovers-for-Delete exception remains the original proposed basis, pending independent interpretation; it permits later cleanup but does not expressly waive later destructive consent. No parent drop/lowering accepted, and the strongest loss-of-work claim remains. Suggested bucket if retained: highest/security or loss of work. Could-be-highest: yes. Confidence: confirmed conditional source route; exception scope is interpretive.\n\nTurn-4 required interface synthesis before new discovery: g032/l5 is distinct and must keep its own ID, string, action and correction. I read its full updated neighbour event and directly checked dbfc status.rs:622-651, session_view.rs:2588-2621 and core.rs:3784-3797,12957-13010. The already-open Restart question can draw \"Interrupted by a host reboot or a Farhelm update — nothing left to stop; restart it:\", derive false stop consent from the displayed ended status, and send that captured value after consuming the rendered confirmation token. The supervisor's refusal requires alive && !stop_if_running && Running; its no-pane branch still reaps AgentOnly. Thus this neighbour alleges false explicit Restart wording before fresh agent cleanup, whereas g128/l1 alleges NothingAlive Delete admitting hidden live agents before WholeSession cleanup. A Delete-guard correction does not fix that Restart sentence, and a Restart wording correction does not restore Delete's missing legacy liveness check. Do not alias or merge them solely because both start with a retirement survivor. Preserve g032's original highest process-work consequence, exact retirement exception and proposed_drop:false in its own record; g128 does not adopt a drop for it.\n\nPreviously reconciled g007/c4 also remains separate: supported mixed host-agent/old-tmux-tab state (pre-retirement SPEC_impl.md:2956-2958), non-absence connect error returning no panes (old_terminals.rs:179-189), no converted old agent and empty panes (:296-298), then no eligible old-tab session (:321-328). Its ended host agent/hidden old tab can pass the same Delete authority boundary and be swept by teardown.rs:403-419,431-449,531-540. Keep both original IDs and prerequisites; a shared Delete fix must cover both cases. c2's cleanup-completeness refutation never refuted successful-but-unwarned cleanup.\n\npossible_cover: supplied exact neighbour records only: g007/c4 shares the Delete authority/fix boundary; g032/l5 is the distinct Restart wording/false-consent route; g109/g112 duplicate-agent fallback and g111 moved-spare borrower loss are different effects. No prohibited coverage sources read. Caveats: conditional legacy survivor, not every failed startup or ordinary host-only session; intentional upgrade retirement itself was authorized; actual work loss not observed. No runtime tests, builds or reproductions. All prior ID history, consequences, attribution corrections and proposed-drop bases remain preserved. This event adds required interface synthesis, not a new discovery; no source lead reopened."
+          }
+        }
+      ],
+      "latest": {
+        "line": 13,
+        "event": {
+          "version": 1,
+          "kind": "finding",
+          "id": "l1",
+          "state": "open",
+          "summary": "A surviving old agent can be reaped by a guarded Delete after startup retirement fails",
+          "location": "crates/farhelm-supervisor/src/service/teardown.rs:411-415,531-540",
+          "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333; introducing retirement within the complete pinned range: dbfc69751215dbf15e1d31d5bed73c3754c4ebc4. TLDR: an old agent surviving bounded startup cleanup can appear interrupted with nothing alive, after which Delete can stop that agent and lose unsaved work without a killing warning. Source-supported conditional consequence, never observed in execution.\n\nComplete prior route retained: old_terminals.rs:162-167,203-233,267-277 shares one server/subtree deadline and can leave a server alive; :290-357 gives agent sweeps only its unused remainder (:351-355). The premise is actual surviving marked agent work, not every startup failure. core.rs:7042-7050 commits conversion despite incomplete cleanup; :6675-6679 drops legacy terminal lookup and :6808-6820 converts Running to Interrupted. The ordinary untouched pre-host session has no host/tab record: schema upgrade store.rs:2493-2507 sets tmux without creating records, while records are created only for actual host starts (host_launch.rs:537-563; host_tabs.rs:619-637). session_hosts.rs:225-265,357-385,587-670 consequently finds no live runtime, .host record or host tab. service/status.rs:198-234,379-388 emits Interrupted/zero host tabs; UI status.rs:387-433 and list/shared.rs:33-70 dispatch NothingAlive without a killing warning; api.rs:4251-4256 and helm sessions.rs:3631-3634,3710-3727 preserve the guard. Supervisor core.rs:5197-5218 protects only terminal-less Launching, :13312-13377 sees no host liveness, and handlers.rs:1253-1279 proceeds. teardown.rs:411-415 requires the portable sweep and :531-540 chooses WholeSession, which claims the survivor's session markers (sweep.rs:251-258,421-445). Later successful cleanup stops it. Attribution remains retirement, not this patch's removed probe: the parent already discarded old lookup (core.rs:6965-6969), marked the tmux driver absent whatever retirement did (dbfc core.rs:6426-6438; parent tmux.rs:3038-3042/presence.rs:11-15), and performed WholeSession (parent teardown.rs:681-693).\n\nExact conflict and proposed-drop basis unchanged: SPEC.md:2048 says \"a destructive confirmation authorizes only what the prompt the user answered said would happen\"; :2054-2056 requires a no-live/no-question Delete to be refused if the agent or any tab runs. SPEC_impl.md:2920-2921 expressly says \"A sweep that runs out of time leaves the rest for the session's Restart or Delete: the conversion commits regardless.\" SPEC.md:3012-3013 leaves unattributable old-tab work for Delete, \"which stops everything of the session\"; :3014-3016 says failed cleanup never stops startup and \"those sessions are treated as ended all the same, accepting that a Restart could then start a second agent beside one still running.\" SPEC_impl.md:2924-2926 repeats that fallback. proposed_drop: the explicit retirement/leftovers-for-Delete exception remains the original proposed basis, pending independent interpretation; it permits later cleanup but does not expressly waive later destructive consent. No parent drop/lowering accepted, and the strongest loss-of-work claim remains. Suggested bucket if retained: highest/security or loss of work. Could-be-highest: yes. Confidence: confirmed conditional source route; exception scope is interpretive.\n\nTurn-4 required interface synthesis before new discovery: g032/l5 is distinct and must keep its own ID, string, action and correction. I read its full updated neighbour event and directly checked dbfc status.rs:622-651, session_view.rs:2588-2621 and core.rs:3784-3797,12957-13010. The already-open Restart question can draw \"Interrupted by a host reboot or a Farhelm update — nothing left to stop; restart it:\", derive false stop consent from the displayed ended status, and send that captured value after consuming the rendered confirmation token. The supervisor's refusal requires alive && !stop_if_running && Running; its no-pane branch still reaps AgentOnly. Thus this neighbour alleges false explicit Restart wording before fresh agent cleanup, whereas g128/l1 alleges NothingAlive Delete admitting hidden live agents before WholeSession cleanup. A Delete-guard correction does not fix that Restart sentence, and a Restart wording correction does not restore Delete's missing legacy liveness check. Do not alias or merge them solely because both start with a retirement survivor. Preserve g032's original highest process-work consequence, exact retirement exception and proposed_drop:false in its own record; g128 does not adopt a drop for it.\n\nPreviously reconciled g007/c4 also remains separate: supported mixed host-agent/old-tmux-tab state (pre-retirement SPEC_impl.md:2956-2958), non-absence connect error returning no panes (old_terminals.rs:179-189), no converted old agent and empty panes (:296-298), then no eligible old-tab session (:321-328). Its ended host agent/hidden old tab can pass the same Delete authority boundary and be swept by teardown.rs:403-419,431-449,531-540. Keep both original IDs and prerequisites; a shared Delete fix must cover both cases. c2's cleanup-completeness refutation never refuted successful-but-unwarned cleanup.\n\npossible_cover: supplied exact neighbour records only: g007/c4 shares the Delete authority/fix boundary; g032/l5 is the distinct Restart wording/false-consent route; g109/g112 duplicate-agent fallback and g111 moved-spare borrower loss are different effects. No prohibited coverage sources read. Caveats: conditional legacy survivor, not every failed startup or ordinary host-only session; intentional upgrade retirement itself was authorized; actual work loss not observed. No runtime tests, builds or reproductions. All prior ID history, consequences, attribution corrections and proposed-drop bases remain preserved. This event adds required interface synthesis, not a new discovery; no source lead reopened."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g128/findings.jsonl",
+        "id": "l1",
+        "line": 13,
+        "disposition": "under-investigation",
+        "group": "g128-l1",
+        "reason": "Record durably acknowledged; parent source/contract validation, cross-group synthesis, coverage/filter matching and any independent drop check remain pending. This preserves the claim and uncertainty without accepting, dropping or lowering it."
+      },
+      "accepted_parent_decision": null,
+      "returned_claim_checks": [
+        {
+          "batch": "claims-081",
+          "key": "g128/l1",
+          "latest_line": 13,
+          "recommendation": "retain-verified",
+          "bucket": "highest",
+          "underlying_key": "legacy-retirement-nothingalive-delete-surviving-agent-consent",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The conditional survivor/display/guard/sweep route is established by source. Retirement intentionally treats the session as ended and assigns leftovers to later Delete, but it does not expressly settle the later no-warning destructive-consent boundary. Retain that ambiguity and the strongest consequence; neither rarity nor preexistence in the final removal patch refutes it.",
+          "checks": [
+            "1ed482dde220452e424973faf38a5e1318986333 old_terminals.rs:162-167,203-233,267-277 can leave a server alive and charge its work to one budget; 290-357 attempts agent sweeps only with that budget's remainder. An actual surviving marked agent is required, not any startup error.",
+            "Same revision core.rs:6675-6679 omits old terminal lookup, 6808-6820 converts Running to Interrupted, and 7042-7050 commits after the bounded sweep. store.rs:2493-2507 adds tmux kind to older rows without creating host records. A pre-host session that never started host terminals or tabs has no host liveness to discover.",
+            "Same revision service/status.rs:198-234 emits Interrupted with absent terminal evidence and 379-388 lists only host tabs. UI status.rs:387-433 states the update ended the agent and derives NothingAlive for ended/zero-tab rows; list/shared.rs:33-70 dispatches that Delete without a killing question.",
+            "Same revision core.rs:5197-5218 protects only terminal-less Launching; 13312-13377 checks the absent runtime and host inventory. handlers.rs:1253-1279 then accepts and starts teardown. teardown.rs:411-419 forces a sweep and 531-540 requests WholeSession; sweep.rs:251-258,421-445 selects the surviving session-marked agent on a later successful process walk.",
+            "dbfc69751215dbf15e1d31d5bed73c3754c4ebc4 core.rs:6426-6438 introduces retirement and marks the tmux driver absent whatever happened. Ancestry checks place dbfc within the full reviewed range. The latest record correctly attributes the interaction there rather than to 1ed482d's removed teardown probe.",
+            "All eight supplied history events read. Corrections about the startup sweep, no-host-record scope and introducing commit are preserved. Referenced g007/c4 has different old-tab prerequisites and g032/l5 has a different explicit Restart sentence/action; neither is treated as an exact alias from this batch. No runtime execution or loss was observed."
+          ],
+          "coverage_checked": [
+            "Current SPEC.md:2050-2067 Lifecycle operations requires the no-question Delete to refuse a live agent. SPEC.md:2998-3011 and SPEC_impl.md:2780-2825 intentionally commit retirement despite failures and assign leftovers to Restart/Delete. Exact acceptance of this later unconfirmed kill remains ambiguous, so specification coverage does not justify omission.",
+            "TODO.md Planned is empty. The Mid term phase-3 removal entry is outside Planned and does not promise to repair consent for already converted rows. BUGS.md only covers the unrelated local-SSH-output hang.",
+            "plans/queue/tmux-end-old-terminals.md:162-174 says start anyway and do not add retry/refusal state for startup failure. Its running-product work is already represented by reviewed commits; it is not an unlanded plan to repair the later Delete guard. Other tmux follower plans remove tooling/install/docs and do not state a consent fix.",
+            "INDEX.md and active TRIAGE_OUTCOMES.md searched for legacy/tmux survivor, NothingAlive, terminal-less, retirement/Delete and confirmation. No exact queued/decided legacy-survivor Delete item found. retained-refusal-can-clear-restart-delete-protection.md was read: it has a distinct generation-update/missing-producer premise and is not coverage or an alias. No archive read.",
+            "FILTER.md Upgrades from older releases combined with another rare condition is a material possible cover: this route needs legacy state plus failed/timed-out bounded startup cleanup and allows session work loss. Its security/trust-boundary exclusion makes application to bypassing a destructive-consent guard ambiguous. Recommend retention pending the parent's explicit boundary judgment and independent drop check. The session-status/partial-operation filter expressly excludes destructive actions without required confirmation; the rare-diagnostic filter excludes lost processes/work. No filter applied."
+          ],
+          "exact_cover_quotes": [
+            {
+              "source": "SPEC_impl.md:2815-2816, Ending the old private tmux server",
+              "quote": "A sweep that runs out of time leaves the rest for the session's Restart or Delete: the conversion commits regardless."
+            },
+            {
+              "source": "SPEC.md:3008-3010, Terminal experience",
+              "quote": "those sessions are treated as ended all the same, accepting that a Restart could then start a second agent beside one still running."
+            },
+            {
+              "source": "SPEC.md:2050-2060, Lifecycle operations",
+              "quote": "a destructive confirmation authorizes only what the prompt the user answered said would happen"
+            },
+            {
+              "source": "review_feedback_queue/FILTER.md, Upgrades from older releases combined with another rare condition",
+              "quote": "Unlike the filters above, this one also covers losing user-owned work within the affected sessions"
+            },
+            {
+              "source": "review_feedback_queue/FILTER.md, same filter exclusions",
+              "quote": "a security or trust-boundary consequence."
+            }
+          ],
+          "missing_premise": "No remaining source premise for the conditional route was identified. The unresolved issue is whether the explicit retirement/leftovers-for-Delete exception or upgrade filter covers this later destructive-consent violation. The startup survivor is a required condition, not an observed incident.",
+          "original_stronger_consequence": "A legacy agent actually surviving bounded upgrade cleanup can be shown interrupted with zero tabs; a subsequent NothingAlive Delete can stop it without a killing warning and lose unsaved user-owned process work. Keep highest regardless of rarity. Intentional upgrade retirement itself was authorized and is not the disputed action.",
+          "needs_independent_drop_check": true,
+          "proposed_basis": "Recommend retain-verified/highest. Preserve the reviewer's original proposed drop based on explicit retirement acceptance and leftovers assigned to Delete, along with its caveat that consent was not expressly waived. Any parent drop, filter application, merger or consequence lowering needs the independent check. Supplied complementary g007/c4 and distinct g032/l5 must retain their own IDs and prerequisites; no exact duplicate disposition proposed here."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": true,
+        "clearly_refuted_candidate": false,
+        "needs_unfinished_gate": true,
+        "provisional_bucket": "highest",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "legacy-retirement-nothingalive-delete-surviving-agent-consent",
+        "destination": "trailing-legacy-retirement-nothingalive-delete-surviving-agent-consent.md"
+      }
+    },
+    {
+      "key": "g128/c2",
+      "owner": "g128",
+      "id": "c2",
+      "domain": "supervisor-stop-delete",
+      "purpose": "supervisor-stop-delete: crates/farhelm-supervisor/src/service/teardown.rs; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 5,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c2",
+            "state": "open",
+            "summary": "Removing tmux tab discovery preserves the incomplete-inventory sweep",
+            "location": "crates/farhelm-supervisor/src/service/teardown.rs:402-419",
+            "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. TLDR: considered whether removing tmux tab discovery would let Delete overlook leftover tab jobs after an upgrade. Details: teardown.rs:403-415 still requires the portable sweep whenever the terminal inventory is incomplete or the session has no terminal. The replacement core.rs:13400-13427 reports completeness only when an agent terminal exists at generation zero; later host generations and retired terminal-less rows remain incomplete, so historical unscoped tab jobs cannot be hidden by a scoped agent. session_hosts.rs:510-547 carries current tab children into the root set, and :554-579 carries both true and false tab containment selections and forces the sweep for gone/unreadable recorded hosts. teardown.rs:431-449 independently enumerates the session-specific tab and launch scope globs. The changed test at teardown.rs:1401-1465 retains the no-terminal incomplete-inventory premise. SPEC.md Lifecycle operations lines 2083-2087 and SPEC_impl.md Process-tree ownership around 5024-5046 require this conservative fallback. proposed_drop: true, the replacement source retains the fallback and current host-tab roots; no route established for omission merely from removing tmux inventory. Suggested bucket if omission existed: other/cleanup until a material consequence is established. Confidence: confirmed source refutation of this specific optimization concern. possible_cover: none; coverage sources not consulted. Could-be-highest: no established loss-of-work or security route for this concern; the separate consent consequence after failed legacy retirement is preserved as l1. Caveat: the accepted marker/containment residuals remain; this is not a claim that all possible descendants can be identified. No execution performed."
+          }
+        }
+      ],
+      "latest": {
+        "line": 5,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c2",
+          "state": "open",
+          "summary": "Removing tmux tab discovery preserves the incomplete-inventory sweep",
+          "location": "crates/farhelm-supervisor/src/service/teardown.rs:402-419",
+          "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. TLDR: considered whether removing tmux tab discovery would let Delete overlook leftover tab jobs after an upgrade. Details: teardown.rs:403-415 still requires the portable sweep whenever the terminal inventory is incomplete or the session has no terminal. The replacement core.rs:13400-13427 reports completeness only when an agent terminal exists at generation zero; later host generations and retired terminal-less rows remain incomplete, so historical unscoped tab jobs cannot be hidden by a scoped agent. session_hosts.rs:510-547 carries current tab children into the root set, and :554-579 carries both true and false tab containment selections and forces the sweep for gone/unreadable recorded hosts. teardown.rs:431-449 independently enumerates the session-specific tab and launch scope globs. The changed test at teardown.rs:1401-1465 retains the no-terminal incomplete-inventory premise. SPEC.md Lifecycle operations lines 2083-2087 and SPEC_impl.md Process-tree ownership around 5024-5046 require this conservative fallback. proposed_drop: true, the replacement source retains the fallback and current host-tab roots; no route established for omission merely from removing tmux inventory. Suggested bucket if omission existed: other/cleanup until a material consequence is established. Confidence: confirmed source refutation of this specific optimization concern. possible_cover: none; coverage sources not consulted. Could-be-highest: no established loss-of-work or security route for this concern; the separate consent consequence after failed legacy retirement is preserved as l1. Caveat: the accepted marker/containment residuals remain; this is not a claim that all possible descendants can be identified. No execution performed."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g128/findings.jsonl",
+        "id": "c2",
+        "line": 5,
+        "disposition": "excluded",
+        "group": "removed-tmux-tab-inventory-preserves-delete-fallback",
+        "reason": "Parent explicitly accepted named refuted proposal from claims-081 after inspecting it. Removing tmux discovery does not make missing historical tabs proof of complete containment. Terminal-less and later-generation sessions still force a portable sweep, and host tab roots/selections and scope globs remain. This does not refute successful cleanup without consent. Narrow source refutation of missing portable fallback after tmux-inventory removal. Do not treat this as a refutation or lowering of g128/l1 or the referenced complementary old-tab consent claim. Checked source/results: [\"1ed482dde220452e424973faf38a5e1318986333 core.rs:13400-13427 limits complete inventory to an existing host at generation zero.\",\"Same revision teardown.rs:402-419 requires the sweep for incomplete or absent inventory, and 431-449 independently enumerates session tab/launch scopes. session_hosts.rs:554-579 preserves unscoped and Gone/Unreadable host evidence.\",\"The retained WholeSession sweep is explicit at teardown.rs:531-540. No omission route from deleting tmux inventory was established. No runtime test was run.\"] Current coverage/results: [\"Current SPEC.md Lifecycle operations and SPEC_impl.md:4866-4899 state the same conservative incomplete-inventory fallback. Intentional user-run tmux escape is a separate supported containment limit.\",\"TODO.md Planned empty; BUGS.md unrelated. plans/queue/tmux-end-old-terminals and user-tmux-jobs-outlive-cleanup explain retirement/containment choices, not a missing-fallback correction. INDEX.md and active TRIAGE_OUTCOMES.md searches yielded no exact omission record. No archive read.\",\"FILTER.md not used.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Delete could overlook leftover tab jobs after an upgrade. This ID alleged cleanup incompleteness, without an established extra-destruction or work-loss route; g128/l1 separately preserves consent harm.\"; null."
+      },
+      "accepted_parent_decision": {
+        "key": "g128/c2",
+        "line": 5,
+        "disposition": "excluded",
+        "group": "removed-tmux-tab-inventory-preserves-delete-fallback",
+        "bucket": "other",
+        "recording": "refuted",
+        "queue_target_candidate": null,
+        "needs_independent_drop_check": false,
+        "reason": "Parent explicitly accepted named refuted proposal from claims-081 after inspecting it. Removing tmux discovery does not make missing historical tabs proof of complete containment. Terminal-less and later-generation sessions still force a portable sweep, and host tab roots/selections and scope globs remain. This does not refute successful cleanup without consent. Narrow source refutation of missing portable fallback after tmux-inventory removal. Do not treat this as a refutation or lowering of g128/l1 or the referenced complementary old-tab consent claim. Checked source/results: [\"1ed482dde220452e424973faf38a5e1318986333 core.rs:13400-13427 limits complete inventory to an existing host at generation zero.\",\"Same revision teardown.rs:402-419 requires the sweep for incomplete or absent inventory, and 431-449 independently enumerates session tab/launch scopes. session_hosts.rs:554-579 preserves unscoped and Gone/Unreadable host evidence.\",\"The retained WholeSession sweep is explicit at teardown.rs:531-540. No omission route from deleting tmux inventory was established. No runtime test was run.\"] Current coverage/results: [\"Current SPEC.md Lifecycle operations and SPEC_impl.md:4866-4899 state the same conservative incomplete-inventory fallback. Intentional user-run tmux escape is a separate supported containment limit.\",\"TODO.md Planned empty; BUGS.md unrelated. plans/queue/tmux-end-old-terminals and user-tmux-jobs-outlive-cleanup explain retirement/containment choices, not a missing-fallback correction. INDEX.md and active TRIAGE_OUTCOMES.md searches yielded no exact omission record. No archive read.\",\"FILTER.md not used.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Delete could overlook leftover tab jobs after an upgrade. This ID alleged cleanup incompleteness, without an established extra-destruction or work-loss route; g128/l1 separately preserves consent harm.\"; null."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-081",
+          "key": "g128/c2",
+          "latest_line": 5,
+          "recommendation": "refuted",
+          "bucket": "other",
+          "underlying_key": "removed-tmux-tab-inventory-preserves-delete-fallback",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "Removing tmux discovery does not make missing historical tabs proof of complete containment. Terminal-less and later-generation sessions still force a portable sweep, and host tab roots/selections and scope globs remain. This does not refute successful cleanup without consent.",
+          "checks": [
+            "1ed482dde220452e424973faf38a5e1318986333 core.rs:13400-13427 limits complete inventory to an existing host at generation zero.",
+            "Same revision teardown.rs:402-419 requires the sweep for incomplete or absent inventory, and 431-449 independently enumerates session tab/launch scopes. session_hosts.rs:554-579 preserves unscoped and Gone/Unreadable host evidence.",
+            "The retained WholeSession sweep is explicit at teardown.rs:531-540. No omission route from deleting tmux inventory was established. No runtime test was run."
+          ],
+          "coverage_checked": [
+            "Current SPEC.md Lifecycle operations and SPEC_impl.md:4866-4899 state the same conservative incomplete-inventory fallback. Intentional user-run tmux escape is a separate supported containment limit.",
+            "TODO.md Planned empty; BUGS.md unrelated. plans/queue/tmux-end-old-terminals and user-tmux-jobs-outlive-cleanup explain retirement/containment choices, not a missing-fallback correction. INDEX.md and active TRIAGE_OUTCOMES.md searches yielded no exact omission record. No archive read.",
+            "FILTER.md not used."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": null,
+          "original_stronger_consequence": "Delete could overlook leftover tab jobs after an upgrade. This ID alleged cleanup incompleteness, without an established extra-destruction or work-loss route; g128/l1 separately preserves consent harm.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Narrow source refutation of missing portable fallback after tmux-inventory removal. Do not treat this as a refutation or lowering of g128/l1 or the referenced complementary old-tab consent claim."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "removed-tmux-tab-inventory-preserves-delete-fallback",
+        "destination": null
+      }
+    },
+    {
+      "key": "g128/d1",
+      "owner": "g128",
+      "id": "d1",
+      "domain": "supervisor-stop-delete",
+      "purpose": "supervisor-stop-delete: crates/farhelm-supervisor/src/service/teardown.rs; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 10,
+          "event": {
+            "version": 1,
+            "kind": "lead",
+            "id": "d1",
+            "state": "open",
+            "summary": "Check the changed teardown comment's claim that Stop leaves tabs running",
+            "location": "crates/farhelm-supervisor/src/service/teardown.rs:370-379",
+            "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. TLDR: the modified teardown explanation tells future readers that Delete is the only lifecycle operation that takes tabs down and explicitly attributes leaving tabs running to Stop. The pinned product contract and caller source say Stop closes tabs. Source basis already read: teardown.rs:370-379 states this claim in the rewritten root explanation; SPEC.md Lifecycle operations Stop bullet says Stop closes the session's terminal tabs under the same lifecycle claim, while Restart leaves them running. core.rs:13430-13457 implements close_tabs_for_stop. This is potentially misleading developer documentation, not a demonstrated runtime cleanup failure. Exact readily checkable remaining premise: whether this stale claim was introduced in the complete reviewed range, or is pre-range text merely adjacent to this hunk, and whether the changed comment intends Restart instead. Next check: compare the range base and per-file history/Stop-contract history. Suggested bucket if retained: other/documentation correctness. Confidence: unverified lead pending attribution, with a concrete source/contract mismatch. Could-be-highest: no established security or loss-of-work route from the comment. proposed_drop: false pending source attribution; correct production behavior alone is not the proposed refutation of the documentation. possible_cover: no matching concern in the supplied neighbour snapshot; no prohibited coverage sources read. No runtime tests or reproductions."
+          }
+        },
+        {
+          "line": 11,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "d1",
+            "state": "open",
+            "summary": "The false Stop/tab comment predates the complete reviewed range",
+            "location": "crates/farhelm-supervisor/src/service/teardown.rs:370-379",
+            "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. TLDR: the teardown explanation incorrectly says Stop leaves terminal tabs running, although Stop closes them. This is developer-documentation drift with no demonstrated runtime consequence. Source/contract mismatch is real, but source comparison refutes attribution to any change in the complete assigned review range. At exclusive range base 6e423e30068b62c6cfa276c6d720ee35bb70387a, teardown.rs:442-445 already says exactly: 'delete is the one lifecycle operation that takes tabs down with the agent (SPEC.md — stop leaves them running)'. The same base SPEC.md:1865-1871 already says Stop closes tabs under the lifecycle claim and Restart leaves tabs running. Reviewed teardown.rs:370-373 retains that sentence verbatim; the hunk rewrites the subsequent root explanation from panes to host children, not the false Stop claim. The full range's teardown path history contains only 04d85f0c98a9b635709d00b056719a0baa7fd3fc, 47f33bbdbd5ff4a6e437e97a800f9083be43096e, 70bc66a9f285cc2a9984924f389834d118b7cfdc and 1ed482dde220452e424973faf38a5e1318986333, and the incorrect sentence is unchanged between base and reviewed revision. proposed_drop: source attribution outside the full pinned range; not correct production behavior and not spec acceptance of the incorrect prose. Suggested bucket if addressed separately: other/documentation correctness. Confidence: confirmed source mismatch and pre-range provenance. Could-be-highest: no established or suspected security or loss-of-work route from this comment. possible_cover: none in supplied neighbour snapshot; no prohibited coverage sources searched. This closes d1's only open premise, retaining the exact considered documentation defect and reason for not reporting it as an in-range finding. No runtime tests or reproductions."
+          }
+        }
+      ],
+      "latest": {
+        "line": 11,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "d1",
+          "state": "open",
+          "summary": "The false Stop/tab comment predates the complete reviewed range",
+          "location": "crates/farhelm-supervisor/src/service/teardown.rs:370-379",
+          "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. TLDR: the teardown explanation incorrectly says Stop leaves terminal tabs running, although Stop closes them. This is developer-documentation drift with no demonstrated runtime consequence. Source/contract mismatch is real, but source comparison refutes attribution to any change in the complete assigned review range. At exclusive range base 6e423e30068b62c6cfa276c6d720ee35bb70387a, teardown.rs:442-445 already says exactly: 'delete is the one lifecycle operation that takes tabs down with the agent (SPEC.md — stop leaves them running)'. The same base SPEC.md:1865-1871 already says Stop closes tabs under the lifecycle claim and Restart leaves tabs running. Reviewed teardown.rs:370-373 retains that sentence verbatim; the hunk rewrites the subsequent root explanation from panes to host children, not the false Stop claim. The full range's teardown path history contains only 04d85f0c98a9b635709d00b056719a0baa7fd3fc, 47f33bbdbd5ff4a6e437e97a800f9083be43096e, 70bc66a9f285cc2a9984924f389834d118b7cfdc and 1ed482dde220452e424973faf38a5e1318986333, and the incorrect sentence is unchanged between base and reviewed revision. proposed_drop: source attribution outside the full pinned range; not correct production behavior and not spec acceptance of the incorrect prose. Suggested bucket if addressed separately: other/documentation correctness. Confidence: confirmed source mismatch and pre-range provenance. Could-be-highest: no established or suspected security or loss-of-work route from this comment. possible_cover: none in supplied neighbour snapshot; no prohibited coverage sources searched. This closes d1's only open premise, retaining the exact considered documentation defect and reason for not reporting it as an in-range finding. No runtime tests or reproductions."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g128/findings.jsonl",
+        "id": "d1",
+        "line": 11,
+        "disposition": "excluded",
+        "group": "pre-range-teardown-comment-stop-leaves-tabs",
+        "reason": "Parent explicitly accepted named out-of-range proposal from claims-081 after inspecting it. The comment is false, but its false sentence is already present at the exclusive base and remains unchanged. Correct production behavior does not refute the documentation defect; pre-range provenance excludes it from this review. Exact false sentence and opposing contract both predate the exclusive review base. Preserve the documentation mismatch if separately addressed, but do not record it as introduced in this range. Checked source/results: [\"6e423e30068b62c6cfa276c6d720ee35bb70387a teardown.rs:442-445 already states that Delete alone takes tabs down and that Stop leaves them running. Base SPEC.md:1865-1871 already says Stop closes tabs and Restart leaves them running.\",\"1ed482dde220452e424973faf38a5e1318986333 teardown.rs:370-373 retains the false sentence verbatim; core.rs:13430-13457 implements Stop's tab closes. The changed surrounding root explanation does not introduce that sentence.\",\"Path-scoped git log over the full range lists only 04d85f0c98a9b635709d00b056719a0baa7fd3fc, 47f33bbdbd5ff4a6e437e97a800f9083be43096e, 70bc66a9f285cc2a9984924f389834d118b7cfdc and 1ed482dde220452e424973faf38a5e1318986333. No runtime tests needed or performed.\"] Current coverage/results: [\"Both specifications agree Stop closes tabs; there is no acceptance of the erroneous comment.\",\"TODO.md Planned empty; BUGS.md unrelated. plans/queue/tmux-drop-from-docs.md contains a broad future comment/rationale sweep, but no exact Stop/tab correction is needed as a coverage basis here. INDEX.md and active TRIAGE_OUTCOMES.md searches found no exact item. No archive read.\",\"FILTER.md not applied; the disposition is full-range attribution, not low-value documentation filtering.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Developer documentation falsely teaches that Stop leaves tabs running. No demonstrated runtime failure or plausible reader-induced security/work-loss mistake was claimed.\"; null."
+      },
+      "accepted_parent_decision": {
+        "key": "g128/d1",
+        "line": 11,
+        "disposition": "excluded",
+        "group": "pre-range-teardown-comment-stop-leaves-tabs",
+        "bucket": "other",
+        "recording": "out-of-range",
+        "queue_target_candidate": null,
+        "needs_independent_drop_check": false,
+        "reason": "Parent explicitly accepted named out-of-range proposal from claims-081 after inspecting it. The comment is false, but its false sentence is already present at the exclusive base and remains unchanged. Correct production behavior does not refute the documentation defect; pre-range provenance excludes it from this review. Exact false sentence and opposing contract both predate the exclusive review base. Preserve the documentation mismatch if separately addressed, but do not record it as introduced in this range. Checked source/results: [\"6e423e30068b62c6cfa276c6d720ee35bb70387a teardown.rs:442-445 already states that Delete alone takes tabs down and that Stop leaves them running. Base SPEC.md:1865-1871 already says Stop closes tabs and Restart leaves them running.\",\"1ed482dde220452e424973faf38a5e1318986333 teardown.rs:370-373 retains the false sentence verbatim; core.rs:13430-13457 implements Stop's tab closes. The changed surrounding root explanation does not introduce that sentence.\",\"Path-scoped git log over the full range lists only 04d85f0c98a9b635709d00b056719a0baa7fd3fc, 47f33bbdbd5ff4a6e437e97a800f9083be43096e, 70bc66a9f285cc2a9984924f389834d118b7cfdc and 1ed482dde220452e424973faf38a5e1318986333. No runtime tests needed or performed.\"] Current coverage/results: [\"Both specifications agree Stop closes tabs; there is no acceptance of the erroneous comment.\",\"TODO.md Planned empty; BUGS.md unrelated. plans/queue/tmux-drop-from-docs.md contains a broad future comment/rationale sweep, but no exact Stop/tab correction is needed as a coverage basis here. INDEX.md and active TRIAGE_OUTCOMES.md searches found no exact item. No archive read.\",\"FILTER.md not applied; the disposition is full-range attribution, not low-value documentation filtering.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Developer documentation falsely teaches that Stop leaves tabs running. No demonstrated runtime failure or plausible reader-induced security/work-loss mistake was claimed.\"; null."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-081",
+          "key": "g128/d1",
+          "latest_line": 11,
+          "recommendation": "out-of-range",
+          "bucket": "other",
+          "underlying_key": "pre-range-teardown-comment-stop-leaves-tabs",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The comment is false, but its false sentence is already present at the exclusive base and remains unchanged. Correct production behavior does not refute the documentation defect; pre-range provenance excludes it from this review.",
+          "checks": [
+            "6e423e30068b62c6cfa276c6d720ee35bb70387a teardown.rs:442-445 already states that Delete alone takes tabs down and that Stop leaves them running. Base SPEC.md:1865-1871 already says Stop closes tabs and Restart leaves them running.",
+            "1ed482dde220452e424973faf38a5e1318986333 teardown.rs:370-373 retains the false sentence verbatim; core.rs:13430-13457 implements Stop's tab closes. The changed surrounding root explanation does not introduce that sentence.",
+            "Path-scoped git log over the full range lists only 04d85f0c98a9b635709d00b056719a0baa7fd3fc, 47f33bbdbd5ff4a6e437e97a800f9083be43096e, 70bc66a9f285cc2a9984924f389834d118b7cfdc and 1ed482dde220452e424973faf38a5e1318986333. No runtime tests needed or performed."
+          ],
+          "coverage_checked": [
+            "Both specifications agree Stop closes tabs; there is no acceptance of the erroneous comment.",
+            "TODO.md Planned empty; BUGS.md unrelated. plans/queue/tmux-drop-from-docs.md contains a broad future comment/rationale sweep, but no exact Stop/tab correction is needed as a coverage basis here. INDEX.md and active TRIAGE_OUTCOMES.md searches found no exact item. No archive read.",
+            "FILTER.md not applied; the disposition is full-range attribution, not low-value documentation filtering."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": null,
+          "original_stronger_consequence": "Developer documentation falsely teaches that Stop leaves tabs running. No demonstrated runtime failure or plausible reader-induced security/work-loss mistake was claimed.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Exact false sentence and opposing contract both predate the exclusive review base. Preserve the documentation mismatch if separately addressed, but do not record it as introduced in this range."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": false,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "pre-range-teardown-comment-stop-leaves-tabs",
+        "destination": null
+      }
+    },
+    {
+      "key": "g128/d2",
+      "owner": "g128",
+      "id": "d2",
+      "domain": "supervisor-stop-delete",
+      "purpose": "supervisor-stop-delete: crates/farhelm-supervisor/src/service/teardown.rs; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 12,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "d2",
+            "state": "open",
+            "summary": "Simplified attachment teardown still cancels its input pump",
+            "location": "crates/farhelm-supervisor/src/service/teardown.rs:600-608,1237-1253",
+            "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. TLDR: considered whether replacing the old backend/join wrappers with direct output-task joins leaves a viewer's input pump alive or waiting indefinitely during Delete or supervisor shutdown. Source checks refute this particular omission: ActiveAttach owns HostAttach as input (terminals.rs:457-461), so destructuring/dropping the attachment drops that input. grid_stream.rs:1022-1049 creates the pump with its own cancellation channel; HostAttach::drop at :1169-1175 sends cancellation. Pump::run at :1201-1233 gives that cancellation priority both outside and inside handling an input, so a blocked queued input is cancellation-safe. The output task independently races its full stream against shutdown (:937-963), and teardown.rs:596-608/1245-1249 signals every output before joining. No tmux external-client resource remains for the removed sink-reaper wrapper to own. proposed_drop: true, source refutation of the input-pump ownership/cancellation leak, not a claim that every host-runtime cleanup path is correct. Suggested bucket if established: other/in-process resource cleanup; no material product effect established. Confidence: confirmed source ownership/cancellation analysis, not execution. Could-be-highest: no established or suspected security or loss-of-user-work route from this considered input-pump leak. possible_cover: none; c1 independently covers the output-task/attachment-lock deadlock route, and supplied g166/c5 addresses a different terminal-host process confirmation bypass. No prohibited coverage sources searched. No runtime tests, builds or reproductions."
+          }
+        }
+      ],
+      "latest": {
+        "line": 12,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "d2",
+          "state": "open",
+          "summary": "Simplified attachment teardown still cancels its input pump",
+          "location": "crates/farhelm-supervisor/src/service/teardown.rs:600-608,1237-1253",
+          "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. TLDR: considered whether replacing the old backend/join wrappers with direct output-task joins leaves a viewer's input pump alive or waiting indefinitely during Delete or supervisor shutdown. Source checks refute this particular omission: ActiveAttach owns HostAttach as input (terminals.rs:457-461), so destructuring/dropping the attachment drops that input. grid_stream.rs:1022-1049 creates the pump with its own cancellation channel; HostAttach::drop at :1169-1175 sends cancellation. Pump::run at :1201-1233 gives that cancellation priority both outside and inside handling an input, so a blocked queued input is cancellation-safe. The output task independently races its full stream against shutdown (:937-963), and teardown.rs:596-608/1245-1249 signals every output before joining. No tmux external-client resource remains for the removed sink-reaper wrapper to own. proposed_drop: true, source refutation of the input-pump ownership/cancellation leak, not a claim that every host-runtime cleanup path is correct. Suggested bucket if established: other/in-process resource cleanup; no material product effect established. Confidence: confirmed source ownership/cancellation analysis, not execution. Could-be-highest: no established or suspected security or loss-of-user-work route from this considered input-pump leak. possible_cover: none; c1 independently covers the output-task/attachment-lock deadlock route, and supplied g166/c5 addresses a different terminal-host process confirmation bypass. No prohibited coverage sources searched. No runtime tests, builds or reproductions."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g128/findings.jsonl",
+        "id": "d2",
+        "line": 12,
+        "disposition": "excluded",
+        "group": "attachment-teardown-input-pump-cancellation-ownership",
+        "reason": "Parent explicitly accepted named refuted proposal from claims-081 after inspecting it. The attachment owns its input pump handle and cancellation sender. Teardown drops that input ownership, and the pump gives cancellation priority while waiting for queued work or a blocked handoff. The named missing-cancellation leak is source-refuted; cancellation is not a proof about every already-polled send ordering. Narrow source ownership/cancellation refutation. Separate from g128/c1's output/map-lock cycle and from accepted already-polled input handoff residuals. Checked source/results: [\"1ed482dde220452e424973faf38a5e1318986333 terminals.rs:457-461 stores HostAttach in ActiveAttach. teardown.rs:600-608 destructures/removes attachments and joins output tasks; 1237-1253 drains them for supervisor shutdown.\",\"Same revision grid_stream.rs:1022-1049 creates a cancellation channel owned by HostAttach; 1169-1175 sends on Drop. Pump::run at 1201-1233 prioritizes cancellation both at its outer wait and around handle(input).\",\"Same revision grid_stream.rs:937-963 independently races full output streaming against shutdown, and teardown signals outputs before joining them. No remaining tmux external client resource requires the deleted wrappers. No runtime observation.\"] Current coverage/results: [\"Both specifications' terminal-host attachment/lifecycle descriptions searched; they do not require preserving a retired tmux sink wrapper for pump cancellation.\",\"TODO.md Planned empty; BUGS.md unrelated. Searches of plans/queue, INDEX.md and active TRIAGE_OUTCOMES.md found no exact input-pump-cancellation leak. delete-reader-notice-bypass.md concerns an input failure's notice arbitration; retired-runtime-retains-restart-seed-reply concerns runtime channel lifetime, not this attachment pump ownership. No archive read.\",\"FILTER.md's displaced-input-task already-running-poll ordering is explicitly narrower and different from omitting cancellation; no filter applied.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Delete or orderly supervisor shutdown could leave a viewer input pump alive or indefinitely waiting after wrapper removal. No material user effect, security consequence or loss of user-owned work was established for that leak hypothesis.\"; null."
+      },
+      "accepted_parent_decision": {
+        "key": "g128/d2",
+        "line": 12,
+        "disposition": "excluded",
+        "group": "attachment-teardown-input-pump-cancellation-ownership",
+        "bucket": "other",
+        "recording": "refuted",
+        "queue_target_candidate": null,
+        "needs_independent_drop_check": false,
+        "reason": "Parent explicitly accepted named refuted proposal from claims-081 after inspecting it. The attachment owns its input pump handle and cancellation sender. Teardown drops that input ownership, and the pump gives cancellation priority while waiting for queued work or a blocked handoff. The named missing-cancellation leak is source-refuted; cancellation is not a proof about every already-polled send ordering. Narrow source ownership/cancellation refutation. Separate from g128/c1's output/map-lock cycle and from accepted already-polled input handoff residuals. Checked source/results: [\"1ed482dde220452e424973faf38a5e1318986333 terminals.rs:457-461 stores HostAttach in ActiveAttach. teardown.rs:600-608 destructures/removes attachments and joins output tasks; 1237-1253 drains them for supervisor shutdown.\",\"Same revision grid_stream.rs:1022-1049 creates a cancellation channel owned by HostAttach; 1169-1175 sends on Drop. Pump::run at 1201-1233 prioritizes cancellation both at its outer wait and around handle(input).\",\"Same revision grid_stream.rs:937-963 independently races full output streaming against shutdown, and teardown signals outputs before joining them. No remaining tmux external client resource requires the deleted wrappers. No runtime observation.\"] Current coverage/results: [\"Both specifications' terminal-host attachment/lifecycle descriptions searched; they do not require preserving a retired tmux sink wrapper for pump cancellation.\",\"TODO.md Planned empty; BUGS.md unrelated. Searches of plans/queue, INDEX.md and active TRIAGE_OUTCOMES.md found no exact input-pump-cancellation leak. delete-reader-notice-bypass.md concerns an input failure's notice arbitration; retired-runtime-retains-restart-seed-reply concerns runtime channel lifetime, not this attachment pump ownership. No archive read.\",\"FILTER.md's displaced-input-task already-running-poll ordering is explicitly narrower and different from omitting cancellation; no filter applied.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Delete or orderly supervisor shutdown could leave a viewer input pump alive or indefinitely waiting after wrapper removal. No material user effect, security consequence or loss of user-owned work was established for that leak hypothesis.\"; null."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-081",
+          "key": "g128/d2",
+          "latest_line": 12,
+          "recommendation": "refuted",
+          "bucket": "other",
+          "underlying_key": "attachment-teardown-input-pump-cancellation-ownership",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The attachment owns its input pump handle and cancellation sender. Teardown drops that input ownership, and the pump gives cancellation priority while waiting for queued work or a blocked handoff. The named missing-cancellation leak is source-refuted; cancellation is not a proof about every already-polled send ordering.",
+          "checks": [
+            "1ed482dde220452e424973faf38a5e1318986333 terminals.rs:457-461 stores HostAttach in ActiveAttach. teardown.rs:600-608 destructures/removes attachments and joins output tasks; 1237-1253 drains them for supervisor shutdown.",
+            "Same revision grid_stream.rs:1022-1049 creates a cancellation channel owned by HostAttach; 1169-1175 sends on Drop. Pump::run at 1201-1233 prioritizes cancellation both at its outer wait and around handle(input).",
+            "Same revision grid_stream.rs:937-963 independently races full output streaming against shutdown, and teardown signals outputs before joining them. No remaining tmux external client resource requires the deleted wrappers. No runtime observation."
+          ],
+          "coverage_checked": [
+            "Both specifications' terminal-host attachment/lifecycle descriptions searched; they do not require preserving a retired tmux sink wrapper for pump cancellation.",
+            "TODO.md Planned empty; BUGS.md unrelated. Searches of plans/queue, INDEX.md and active TRIAGE_OUTCOMES.md found no exact input-pump-cancellation leak. delete-reader-notice-bypass.md concerns an input failure's notice arbitration; retired-runtime-retains-restart-seed-reply concerns runtime channel lifetime, not this attachment pump ownership. No archive read.",
+            "FILTER.md's displaced-input-task already-running-poll ordering is explicitly narrower and different from omitting cancellation; no filter applied."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": null,
+          "original_stronger_consequence": "Delete or orderly supervisor shutdown could leave a viewer input pump alive or indefinitely waiting after wrapper removal. No material user effect, security consequence or loss of user-owned work was established for that leak hypothesis.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Narrow source ownership/cancellation refutation. Separate from g128/c1's output/map-lock cycle and from accepted already-polled input handoff residuals."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "attachment-teardown-input-pump-cancellation-ownership",
+        "destination": null
+      }
+    }
+  ],
+  "replies": [
+    {
+      "turn": 1,
+      "reply": "Initial pass complete; all 1,224 assigned patch lines reviewed.\n\nLogged `l1`: a potential highest-priority consent issue, proposed for dropping under explicit specification acceptance; independent check required. Logged refuted candidates `c1` and `c2`. No open leads.\n\nFindings and progress are saved in the assigned artifacts. Source-only review; no tests or reproductions run."
+    },
+    {
+      "turn": 2,
+      "reply": "Revised `l1`: confirmed the display → `NothingAlive` → `WholeSession` route and legacy no-host-record premise. Corrected attribution to retirement commit `dbfc69751215dbf15e1d31d5bed73c3754c4ebc4`.\n\nPreserved the highest-priority consequence and exact contract conflict for independent judgment. No drop accepted.\n\nUnresolved lead IDs: none. No execution performed."
+    },
+    {
+      "turn": 3,
+      "reply": "No new in-range finding.\n\nChecked cleanup ordering, shutdown cancellation, attachment ownership, changed comments, and retained test premises. Logged settled candidates `d1` (predates the range) and `d2` (source-refuted); revised `l1` with neighbour synthesis.\n\nNew verified findings: none. New unverified findings: none. Open leads: none. Discovery count: 1. No execution performed."
+    },
+    {
+      "turn": 4,
+      "reply": "Nothing new found in discovery pass 2.\n\nChecked teardown handoffs, host inventories, process-identity revalidation, failure propagation, and detach-wait lifetime. Revised `l1` only for the required cross-group synthesis.\n\nNew verified IDs: none. New unverified IDs: none. Open leads: none. Logs updated; no execution performed."
+    }
+  ],
+  "progress": "Group: g128, supervisor-stop-delete.\nTurn: initial review, 1. Discovery-pass count: 0 (initial pass only).\nState: assigned initial pass complete; awaiting caller's later synthesis prompt.\n\nCoverage: read the full brief and inventory.json commits field only. Delivered every assigned patch line, 1–1224, in seven evidence packets (1–180, 181–360, 361–540, 541–720, 721–900, 901–1080, 1081–1224). No assigned material omitted or unread. Judged the patch and replacement context at 1ed482dde220452e424973faf38a5e1318986333. No claims about unassigned groups or the whole commit range.\n\nContracts checked: SPEC.md Lifecycle operations and legacy terminal retirement; SPEC_impl.md Delete terminal hosts, process-tree ownership/containment, private tmux retirement, GUI answers binding, and Environment Delete and the seal. Read the requested priority buckets and recording format. The initial broad specification search output clipped; relevant governing text was subsequently delivered in bounded focused reads.\n\nInterfaces checked: Delete's guard and supervisor-owned handler; terminal-less launch liveness; host/tab root capture and host-end settlement; incomplete historical inventory and systemd unit discovery; GridSender shutdown and its separate natural-detach arbiter; orderly stop and attach admission. Source establishes that shutdown joins do not acquire the held attachment lock, current host children are pinned roots, incomplete inventory retains marker cleanup, and the stop flag is checked under the same lock that establishes it.\n\nDurable records: c1 rejects the sequential-join deadlock route; c2 rejects losing the incomplete-inventory fallback. l1 was opened as a lead, then revised to a source-supported finding with proposed_drop under explicit legacy-retirement acceptance. A further revision accounts for startup's agent sweep: an early server error alone is insufficient; the agent must survive the bounded startup cleanup. The original consent/loss-of-work consequence remains explicit. l1 is could-be-highest and needs the caller's independent proposed-drop check; this reviewer did not delegate it.\n\nNew source-verified IDs this pass: l1 (conditional source route; contract acceptance is interpretive). New unverified-after-investigation IDs: none. Open lead IDs: none. Proposed drops: c1, c2, l1, with their source/contract bases in findings.jsonl.\n\nValidation: source and contract analysis only. No execution, runtime tests, builds, reproductions, checkout edits, coverage-source reads, helper agents, or live-install actions. Private artifacts only.\nNext action: caller-directed later synthesis; resolve l1's acceptance through the required independent highest-drop process. Do not run later-turn discovery/synthesis inside this initial turn.\n\n## Turn 2: later-turn synthesis\n\nState: synthesis complete. Turn count: 2. Discovery-pass count: 0; this was the caller-requested synthesis, not a discovery pass. Assigned material remains fully read; no unread scope.\n\nRevisited interactions: startup end and sweep share one budget; Interrupted metadata flows to zero host tabs and NothingAlive; the HTTP/helm path preserves that guard; the supervisor examines no old tmux process before WholeSession cleanup for this row. Checked schema migration and the actual agent/tab host-record writers: the no-record premise is valid for an ordinary untouched pre-host session that never started a host tab. It is not inferred for all tmux-kind rows. All readily checkable source premises are settled.\n\nl1 revisions this turn: strengthened the production UI/guard metadata route; temporarily reopened attribution as a lead after discovering retirement already existed in the parent; closed that lead with source evidence. The route predates the assigned removal patch and originates in dbfc69751215dbf15e1d31d5bed73c3754c4ebc4 (within the supplied range). Startup there unconditionally marks the tmux driver absent, so the parent's remaining tmux query/probe code was not a safety backstop. The initial statement that removing the teardown probe introduced this consequence was corrected. The strongest consent/loss-of-work claim is preserved for the caller's cross-group judgment.\n\nContract result: the final l1 event gives exact text from both destructive-consent requirements and the stronger instruction leaving startup survivors for Restart or Delete. That instruction could authorize the residual, but does not expressly waive the later guard. Proposed drop remains unresolved by independent check; no parent drop accepted. The caller's g109/g112 duplicate-Restart and g111 private-spare consequences are distinct and not treated as coverage of this Delete issue.\n\nNew verified/unverified findings this turn: no new IDs; l1's metadata, no-record and attribution premises are now source-verified. c1/c2 unchanged after revisiting their assumptions. Open lead IDs: none. Independent contract disposition pending: l1, could-be-highest with proposed_drop retained for independent review.\n\nValidation: source and contract analysis only, all at the recorded revision or its named parent/introduction for attribution. No tests, builds, reproductions, checkout changes, extra agents or live-install actions.\nNext action: caller's independent exception-scope judgment for l1; await the next caller-defined turn.\n\n## Turn 3: separate discovery pass 1\n\nState: discovery complete. Turn count: 3. Discovery-pass count: 1. Result: no new reportable in-range finding; no open source leads. Assigned patch scope remains fully read with no omissions.\n\nBefore new search: read the entire supplied discovery-neighbours.json, including g007/c4's complementary old-tab authority route and g166/c5's separate host-process confirmation issue. The first 1–160-line neighbour read was larger than intended; those lines were redelivered in 40-line bounded packets. Remaining neighbour text was read in bounded 33–50-line packets through its line 583 end. No separate peer logs or prohibited coverage sources were opened.\n\nRequired pending-question synthesis: source-checked the supported host-agent/old-tmux-tab predecessor contract, old server connection-error return, empty converted/panes early return and eligible-tab session set. Revised l1 under its original ID to preserve g007/c4 as a complementary same-authority/fix-boundary alias with distinct prerequisites, not a new g128 discovery. Both the agent and tab consequences and the exact later-Delete-residual-versus-destructive-consent conflict remain explicit. No drop/lowering accepted.\n\nNew search checks: revisited the assigned preflight/finish transition, process-before-host-before-attachment ordering, attachment signal/join/destructure ownership, shutdown's total timeout and stop flag, replacement output-task cancellation and input-pump ownership, durable row removal/failed-Delete detach ordering, and retained attach-during-stop and timeout test premises. These checks did not establish a new implementation or test-oracle defect beyond the supplied known issues.\n\nNew candidate d1: found the changed paragraph's false assertion that Stop leaves tabs running. Compared the entire pinned range base, not just this commit's parent: teardown.rs:442-445 at 6e423e30068b62c6cfa276c6d720ee35bb70387a already contains the identical false sentence, and base SPEC.md:1865-1871 already says Stop closes tabs. Closed d1 as a source-confirmed pre-range documentation mismatch, proposed drop solely on full-range attribution. Correct production behavior was not used to refute the prose defect.\n\nNew candidate d2: checked whether direct output joins lose input-pump cancellation. HostAttach::drop sends its cancellation channel, and Pump::run selects it with priority even while handling queued input. Closed as source-refuted ownership/cancellation concern, separate from c1's output-task lock route. Did not claim this refutes the supplied g166 host-process confirmation issue.\n\nNew verified finding IDs: none. New unverified-after-investigation finding IDs: none. New source-settled candidate IDs: d1, d2. Existing finding revised: l1 (neighbour synthesis only). Open lead IDs: none. Discovery explicitly found no new reportable in-range issue.\n\nValidation: source/contract analysis only; no runtime tests, builds, reproductions, checkout edits, extra agents or live-install actions. Next action: await caller's next defined pass or independent disposition; do not perform another discovery pass within this turn.\n\n## Turn 4: separate discovery pass 2\n\nState: pass complete. Turn count: 4. Discovery-pass count: 2. Result: no new finding or candidate beyond the complete existing history. No open source leads. No unread assigned scope.\n\nBefore search: read the complete updated discovery-neighbours.json (at 2026-11-13T17:01:11.669Z, 240616 bytes, 746 lines) in contiguous bounded byte packets, offsets 0 through EOF, each at most 20000 bytes. The final packet delivered the closing JSON brackets. No peer logs or prohibited coverage sources were opened.\n\nRequired synthesis: read g032/l5's exact latest record and directly checked dbfc UI status.rs:622-651, session_view.rs:2588-2621 and core.rs:3784-3797,12957-13010. Revised existing l1 only to record the distinction: Restart's already-open prompt/false nothing-to-stop sentence/captured false stop consent plus AgentOnly cleanup is different from Delete's NothingAlive liveness omission plus WholeSession cleanup. Keep g032/l5, g128/l1 and g007/c4 IDs, original strongest consequences, exact acceptance clauses and correction boundaries distinct. No new discovery credited for received information and no parent drop/lowering accepted.\n\nFresh source search: reviewed all additions to the assigned teardown patch, then focused on the preflight/finish ownership contract and reuse of guard-settled hosts; child-root capture over later asynchronous work and revalidation before sweeping; placeholder end ownership and fail-closed host shutdown propagation; error-to-caller mapping; and DeleteInProgress lifetime/wakeup ordering on failure, successful row removal and later unbounded file cleanup. Earlier recorded c1/c2/d1/d2 and supplied known adjacent issues were used to avoid relabelling known concerns as new. These checks established no new mismatch or concrete unresolved lead in this assigned group.\n\nUseful results: SessionHosts root preparation refuses unreadable or unpinned live children; the reaper revalidates captured PID/start identities before admitting them as roots; unconfirmed host shutdown propagates before row removal except the already supplied adjacent known route; Delete's natural-detach watch is released on mark drop and success explicitly releases it after row/map removal but before unbounded file cleanup. The caller retains lifecycle/directory admission through the two teardown halves. No new test-oracle/documentation defect was established from the reviewed additions/deletions.\n\nNew verified finding IDs: none. New unverified-after-investigation finding IDs: none. New candidate IDs: none. Existing revised IDs: l1 (required neighbour synthesis only). Remaining lead IDs: none. Explicit discovery result: nothing new found in this pass.\n\nValidation: source/contract analysis only. No runtime tests, builds, reproductions, checkout edits, agents or live-install actions. Next action: await caller's independent disposition or next defined pass; no extra pass performed inside this turn.\n"
+}

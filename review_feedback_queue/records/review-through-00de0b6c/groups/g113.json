@@ -1,0 +1,642 @@
+{
+  "group": {
+    "id": "g113",
+    "domain": "supervisor-core-integration",
+    "purpose": "supervisor-core-integration: crates/farhelm-supervisor/src/service/core.rs; phases @@ -14524,41 +13743,24 @@ impl Supervisor {",
+    "interfaces": [
+      "g001",
+      "g007",
+      "g008",
+      "g009",
+      "g097",
+      "g098",
+      "g099",
+      "g100",
+      "g101",
+      "g102",
+      "g103",
+      "g104",
+      "g105",
+      "g106",
+      "g107",
+      "g108",
+      "g109",
+      "g110",
+      "g111",
+      "g112",
+      "g114",
+      "g115",
+      "g116",
+      "g117",
+      "g118",
+      "g119",
+      "g120",
+      "g121",
+      "g122",
+      "g123",
+      "g124",
+      "g125",
+      "g126",
+      "g127",
+      "g128",
+      "g129",
+      "g130",
+      "g131",
+      "g132",
+      "g133",
+      "g134",
+      "g149",
+      "g150",
+      "g159",
+      "g160",
+      "g161",
+      "g162",
+      "g163",
+      "g164",
+      "g165",
+      "g166",
+      "g167",
+      "g168",
+      "g169",
+      "g170",
+      "g171",
+      "g172",
+      "g173"
+    ],
+    "sources": [
+      {
+        "path": "[private-run]/prep/parts/00923-003.patch",
+        "ranges": [
+          [
+            1,
+            1141
+          ]
+        ],
+        "original_path": "crates/farhelm-supervisor/src/service/core.rs",
+        "commit": "1ed482dde220452e424973faf38a5e1318986333",
+        "notes": "@@ -14524,41 +13743,24 @@ impl Supervisor {; patch character offsets [177608,236776)",
+        "lines": 1141,
+        "bytes": 59212,
+        "start": 177608,
+        "end": 236776,
+        "original": "[private-run]/prep/originals/00923.patch"
+      }
+    ],
+    "lines": 1141,
+    "bytes": 59212
+  },
+  "records": [
+    {
+      "key": "g113/l1",
+      "owner": "g113",
+      "id": "l1",
+      "domain": "supervisor-core-integration",
+      "purpose": "supervisor-core-integration: crates/farhelm-supervisor/src/service/core.rs; phases @@ -14524,41 +13743,24 @@ impl Supervisor {",
+      "history": [
+        {
+          "line": 1,
+          "event": {
+            "version": 1,
+            "kind": "lead",
+            "id": "l1",
+            "state": "open",
+            "summary": "Check removal of tab attachment shutdown barriers",
+            "location": "crates/farhelm-supervisor/src/service/core.rs:14073",
+            "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. TLDR: investigate whether closing a terminal tab can leave an output task active or race a replacement attachment after the tmux cleanup barriers are removed. Source basis: assigned patch changes detach_closed_tab from begin_forwarder_shutdown/record_forwarder_join and error propagation to request_forwarder_shutdown/join_forwarder, and no Result. Need inspect host close ordering, join_forwarder and attach locking. Suggested bucket: other unless a concrete material UX or loss-of-work route is established. Confidence: unresolved lead, not a finding. Could-be-highest: not established; no owned-work harm route identified. proposed_drop: false. possible_cover: none. No execution performed."
+          }
+        },
+        {
+          "line": 2,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "l1",
+            "state": "open",
+            "summary": "Removed tab output barrier is unnecessary for grid tasks",
+            "location": "crates/farhelm-supervisor/src/service/core.rs:14073",
+            "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. TLDR: considered whether tab close could race a replacement attachment or leave output cleanup unconfirmed after deleting tmux shutdown barriers; source refutes this concern. Details: core.rs:14073–14099 signals the output task, removes the attachment and awaits join_forwarder before issuing TabClosed. terminals.rs:417–461 stores only a GridSender task and in-process HostAttach, with no external tmux child; terminals.rs:478–482 joins that task. grid_stream.rs:937–963 races the whole stream against the shutdown watch (biased toward shutdown) and preserves Requested after a concurrent natural end. handlers.rs:1631–1665 holds the same session lifecycle claim for a tab attach, preventing a replacement attach during close; host_tabs.rs:987–1000 detaches before ending the host. Thus no removed subprocess reaping barrier is required, and a panicked output task leaves no process needing cleanup. Suggested bucket: other (refuted). Confidence: confirmed by source, no execution. proposed_drop: refuted by the cited source. possible_cover: none. Could-be-highest: no; no security or owned-work loss route was identified. Revision closes unresolved lead l1; its original possible stale-stream/replacement-race consequence is refuted, not lowered."
+          }
+        },
+        {
+          "line": 6,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "l1",
+            "state": "open",
+            "summary": "Tab-close claim and notice ownership replace the tmux output barrier",
+            "location": "crates/farhelm-supervisor/src/service/core.rs:14073",
+            "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. TLDR: the considered tab-close replacement-attachment race and unconfirmed external output-client cleanup are refuted for this path. The removed tmux barrier is replaced by an in-process output-task join, while host lifetime is handled separately; this is not blanket certification of arbitrary cancellation. Details: core.rs:13947 and 14013–14032 keep the session lifecycle claim on the supervisor-owned close task. handlers.rs:1631–1665 takes that same claim for tab attaches, so removing the map entry and releasing the attachment lock in core.rs:14073–14099 cannot admit a replacement tab attachment until close finishes. ActiveAttach holds a GridSender task and HostAttach, no external output subprocess (terminals.rs:417–461). GridSender::run at grid_stream.rs:937–963 races the whole stream future against shutdown and uses Requested if the teardown signal won after a natural stream end. report_forwarder_end at connection.rs:1272–1327 sends nothing for Requested. A previously spawned natural/stall arbiter independently checks the exact output-task id plus channel and connection under the attachment lock (connection.rs:1427–1457, 1487–1516); after close removes that entry it cannot emit a competing verdict or remove another attachment. An arbiter that already removed it owns its earlier notice instead, and close sees no attachment. The join logs a panic/cancelled task (terminals.rs:478–482); there is no external process for that join failure to leave unreaped. Host failure boundaries are independent: host_tabs.rs:987–994 returns on the first sweep failure before detach/end; 999–1000 detaches before attempting host end; 1013–1037 removes record/cell only after confirmed end, returns post-end survivor errors, and retains and marks an unconfirmed host end for retry. end_launch_host in host_launch.rs:688–719 bounds runtime Shutdown, then aborts the runtime and uses its pinned adopted process or tag-checked connection; tab end specially confirms an adopted process for an already-Gone host at host_tabs.rs:1052–1062. HostTab::reap_due at host_tabs.rs:190–200 retries failed ends after backoff, rather than relying on a stopped runtime to announce them. SPEC_impl.md, Tabs in hosts, 2331–2348 explicitly specifies detach before end, record retention, and failed-end retries. Suggested bucket: other (refuted). Confidence: confirmed by source/contract analysis; no runtime execution. proposed_drop: source-refuted as scoped above. possible_cover: none. Could-be-highest: no established security or owned-work-loss route in the considered output-barrier concern. Revision strengthens original l1's stale-stream/replacement-race refutation with notice-arbiter identity and host-failure checks; it preserves the original consequence and does not certify cancellation of unrelated work. Parent reports g112/c3 independently confirms the whole-stream shutdown select; the source checks above were performed here as well."
+          }
+        }
+      ],
+      "latest": {
+        "line": 6,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "l1",
+          "state": "open",
+          "summary": "Tab-close claim and notice ownership replace the tmux output barrier",
+          "location": "crates/farhelm-supervisor/src/service/core.rs:14073",
+          "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. TLDR: the considered tab-close replacement-attachment race and unconfirmed external output-client cleanup are refuted for this path. The removed tmux barrier is replaced by an in-process output-task join, while host lifetime is handled separately; this is not blanket certification of arbitrary cancellation. Details: core.rs:13947 and 14013–14032 keep the session lifecycle claim on the supervisor-owned close task. handlers.rs:1631–1665 takes that same claim for tab attaches, so removing the map entry and releasing the attachment lock in core.rs:14073–14099 cannot admit a replacement tab attachment until close finishes. ActiveAttach holds a GridSender task and HostAttach, no external output subprocess (terminals.rs:417–461). GridSender::run at grid_stream.rs:937–963 races the whole stream future against shutdown and uses Requested if the teardown signal won after a natural stream end. report_forwarder_end at connection.rs:1272–1327 sends nothing for Requested. A previously spawned natural/stall arbiter independently checks the exact output-task id plus channel and connection under the attachment lock (connection.rs:1427–1457, 1487–1516); after close removes that entry it cannot emit a competing verdict or remove another attachment. An arbiter that already removed it owns its earlier notice instead, and close sees no attachment. The join logs a panic/cancelled task (terminals.rs:478–482); there is no external process for that join failure to leave unreaped. Host failure boundaries are independent: host_tabs.rs:987–994 returns on the first sweep failure before detach/end; 999–1000 detaches before attempting host end; 1013–1037 removes record/cell only after confirmed end, returns post-end survivor errors, and retains and marks an unconfirmed host end for retry. end_launch_host in host_launch.rs:688–719 bounds runtime Shutdown, then aborts the runtime and uses its pinned adopted process or tag-checked connection; tab end specially confirms an adopted process for an already-Gone host at host_tabs.rs:1052–1062. HostTab::reap_due at host_tabs.rs:190–200 retries failed ends after backoff, rather than relying on a stopped runtime to announce them. SPEC_impl.md, Tabs in hosts, 2331–2348 explicitly specifies detach before end, record retention, and failed-end retries. Suggested bucket: other (refuted). Confidence: confirmed by source/contract analysis; no runtime execution. proposed_drop: source-refuted as scoped above. possible_cover: none. Could-be-highest: no established security or owned-work-loss route in the considered output-barrier concern. Revision strengthens original l1's stale-stream/replacement-race refutation with notice-arbiter identity and host-failure checks; it preserves the original consequence and does not certify cancellation of unrelated work. Parent reports g112/c3 independently confirms the whole-stream shutdown select; the source checks above were performed here as well."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g113/findings.jsonl",
+        "id": "l1",
+        "line": 6,
+        "disposition": "excluded",
+        "group": "host-tab-close-output-task-shutdown-and-notice-ownership",
+        "reason": "Parent explicitly accepted named refuted proposal from claims-073 after inspecting it. The considered replacement-attachment race and unreaped external output client do not survive the implementation change. This conclusion is limited to the tab-close output path; it does not certify unrelated cancellation or host cleanup. Source refutation of the named output-barrier concern, preserving the separate host failure boundaries. Checked source/results: [\"At 1ed482dde220452e424973faf38a5e1318986333, service/core.rs:13942-13949,14005-14029 keeps the lifecycle claim on a supervisor-owned close task; service/handlers.rs:1631-1665 refuses a competing tab attach while that claim is held.\",\"At that revision, service/core.rs:14072-14094 removes the attachment, requests shutdown, joins the task, then sends TabClosed. service/terminals.rs:417-482 holds only in-process output/input tasks and logs a failed join; no external output subprocess remains to reap.\",\"service/grid_stream.rs:937-963 selects shutdown against the entire stream and preserves Requested after a concurrent natural end. service/connection.rs:1272-1327 sends no notice for Requested; :1427-1457 and :1487-1516 check task, channel and connection identity under the attachment lock before owning a natural/stalled notice.\",\"service/core/host_tabs.rs:987-1037 detaches before host end, retains an unconfirmed end for retry and reports post-end survivors separately. Source checks only; no runtime observation.\"] Current coverage/results: [\"SPEC.md Terminal experience and lifecycle cleanup searches: no acceptance needed for this source refutation.\",\"SPEC_impl.md Tabs in hosts, current :2240-2269, describes detach-before-end and failed-end retries; it supports the intended ordering.\",\"TODO.md Planned is empty. Exact behavior and symbol searches in plans/queue, BUGS.md, INDEX.md and active TRIAGE_OUTCOMES.md found no matching current coverage. The tmux plans are recorded as landed in plans/REPORTS.md:29-32. FILTER.md supplies no necessary basis.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Tab close might leave an output task active, race a replacement attachment, or lose confirmation that an external output client was cleaned up. No security or user-work-loss route was established in the history.\"; null."
+      },
+      "accepted_parent_decision": {
+        "key": "g113/l1",
+        "line": 6,
+        "disposition": "excluded",
+        "group": "host-tab-close-output-task-shutdown-and-notice-ownership",
+        "bucket": "other",
+        "recording": "refuted",
+        "queue_target_candidate": null,
+        "needs_independent_drop_check": false,
+        "reason": "Parent explicitly accepted named refuted proposal from claims-073 after inspecting it. The considered replacement-attachment race and unreaped external output client do not survive the implementation change. This conclusion is limited to the tab-close output path; it does not certify unrelated cancellation or host cleanup. Source refutation of the named output-barrier concern, preserving the separate host failure boundaries. Checked source/results: [\"At 1ed482dde220452e424973faf38a5e1318986333, service/core.rs:13942-13949,14005-14029 keeps the lifecycle claim on a supervisor-owned close task; service/handlers.rs:1631-1665 refuses a competing tab attach while that claim is held.\",\"At that revision, service/core.rs:14072-14094 removes the attachment, requests shutdown, joins the task, then sends TabClosed. service/terminals.rs:417-482 holds only in-process output/input tasks and logs a failed join; no external output subprocess remains to reap.\",\"service/grid_stream.rs:937-963 selects shutdown against the entire stream and preserves Requested after a concurrent natural end. service/connection.rs:1272-1327 sends no notice for Requested; :1427-1457 and :1487-1516 check task, channel and connection identity under the attachment lock before owning a natural/stalled notice.\",\"service/core/host_tabs.rs:987-1037 detaches before host end, retains an unconfirmed end for retry and reports post-end survivors separately. Source checks only; no runtime observation.\"] Current coverage/results: [\"SPEC.md Terminal experience and lifecycle cleanup searches: no acceptance needed for this source refutation.\",\"SPEC_impl.md Tabs in hosts, current :2240-2269, describes detach-before-end and failed-end retries; it supports the intended ordering.\",\"TODO.md Planned is empty. Exact behavior and symbol searches in plans/queue, BUGS.md, INDEX.md and active TRIAGE_OUTCOMES.md found no matching current coverage. The tmux plans are recorded as landed in plans/REPORTS.md:29-32. FILTER.md supplies no necessary basis.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Tab close might leave an output task active, race a replacement attachment, or lose confirmation that an external output client was cleaned up. No security or user-work-loss route was established in the history.\"; null."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-073",
+          "key": "g113/l1",
+          "latest_line": 6,
+          "recommendation": "refuted",
+          "bucket": "other",
+          "underlying_key": "host-tab-close-output-task-shutdown-and-notice-ownership",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The considered replacement-attachment race and unreaped external output client do not survive the implementation change. This conclusion is limited to the tab-close output path; it does not certify unrelated cancellation or host cleanup.",
+          "checks": [
+            "At 1ed482dde220452e424973faf38a5e1318986333, service/core.rs:13942-13949,14005-14029 keeps the lifecycle claim on a supervisor-owned close task; service/handlers.rs:1631-1665 refuses a competing tab attach while that claim is held.",
+            "At that revision, service/core.rs:14072-14094 removes the attachment, requests shutdown, joins the task, then sends TabClosed. service/terminals.rs:417-482 holds only in-process output/input tasks and logs a failed join; no external output subprocess remains to reap.",
+            "service/grid_stream.rs:937-963 selects shutdown against the entire stream and preserves Requested after a concurrent natural end. service/connection.rs:1272-1327 sends no notice for Requested; :1427-1457 and :1487-1516 check task, channel and connection identity under the attachment lock before owning a natural/stalled notice.",
+            "service/core/host_tabs.rs:987-1037 detaches before host end, retains an unconfirmed end for retry and reports post-end survivors separately. Source checks only; no runtime observation."
+          ],
+          "coverage_checked": [
+            "SPEC.md Terminal experience and lifecycle cleanup searches: no acceptance needed for this source refutation.",
+            "SPEC_impl.md Tabs in hosts, current :2240-2269, describes detach-before-end and failed-end retries; it supports the intended ordering.",
+            "TODO.md Planned is empty. Exact behavior and symbol searches in plans/queue, BUGS.md, INDEX.md and active TRIAGE_OUTCOMES.md found no matching current coverage. The tmux plans are recorded as landed in plans/REPORTS.md:29-32. FILTER.md supplies no necessary basis."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": null,
+          "original_stronger_consequence": "Tab close might leave an output task active, race a replacement attachment, or lose confirmation that an external output client was cleaned up. No security or user-work-loss route was established in the history.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Source refutation of the named output-barrier concern, preserving the separate host failure boundaries."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "host-tab-close-output-task-shutdown-and-notice-ownership",
+        "destination": null
+      }
+    },
+    {
+      "key": "g113/f2",
+      "owner": "g113",
+      "id": "f2",
+      "domain": "supervisor-core-integration",
+      "purpose": "supervisor-core-integration: crates/farhelm-supervisor/src/service/core.rs; phases @@ -14524,41 +13743,24 @@ impl Supervisor {",
+      "history": [
+        {
+          "line": 3,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "f2",
+            "state": "open",
+            "summary": "Old tmux terminal access is deliberately removed on upgrade",
+            "location": "crates/farhelm-supervisor/src/service/core.rs:13750",
+            "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. TLDR: upgrading ends agents and shell tabs still in the old tmux terminals and loses their terminal screen/history; the supervisor no longer supports accessing or closing those terminals through its normal paths. This is an explicitly specified migration, proposed for dropping rather than reported as a defect. Details: assigned patch core.rs:13750–13768 replaces the tab-open tmux liveness gate with host-only liveness; core.rs:14050–14060 removes tmux tab rediscovery/close; core.rs:15799–15813 refuses conversation-report anchors for stored tmux rows. The replacement contract ends old terminals during startup and exposes their session metadata for Restart/Replace. Suggested bucket: highest if treated as a defect, because running processes and terminal history are user-owned work. Confidence: confirmed source/contract behavior; no runtime observation. Could-be-highest: yes. proposed_drop: SPEC.md, Terminal experience, lines 3003–3016 explicitly accepts: ‘This release ends them: the first time a host’s supervisor of this release starts, it ends that tmux server, and with it everything that still ran in an old terminal, without needing a tmux program.’ The same paragraph says ‘one whose agent had already ended keeps its outcome, but its terminal’s last screen, which lived in the server, is gone; old tabs are closed’ and ‘A failure to end the server or to stop what ran there is logged and never stops the supervisor from starting; those sessions are treated as ended all the same, accepting that a Restart could then start a second agent beside one still running.’ SPEC_impl.md, Terminal substrate: private tmux server, lines 2882–2930 details the startup conversion and cleanup. These exact acceptance rules cover ending the old terminals and dropping their access paths; independent check is required by caller before a highest drop. possible_cover: none beyond the quoted specification. Caveat: this entry does not assert a separate implementation defect in startup cleanup or conversation reporting; it preserves the destructive removal implication for independent specification acceptance review."
+          }
+        },
+        {
+          "line": 5,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "f2",
+            "state": "open",
+            "summary": "Old tmux terminal access is deliberately removed on upgrade",
+            "location": "crates/farhelm-supervisor/src/service/core.rs:13750",
+            "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. TLDR: upgrading ends agents and shell tabs still in the old tmux terminals and loses their terminal screen/history; the supervisor no longer supports accessing or closing those terminals through its normal paths. This is an explicitly specified migration, proposed for dropping rather than reported as a defect. Details: assigned patch core.rs:13750–13768 replaces the tab-open tmux liveness gate with host-only liveness; core.rs:14050–14060 removes tmux tab rediscovery/close; core.rs:15799–15813 refuses conversation-report anchors for stored tmux rows. The replacement contract ends old terminals during startup and exposes their session metadata for Restart/Replace. Constructor core.rs:6142–6152 calls OldTerminals::end_private_server before reload; reload's contract at 6372–6392 explicitly leaves old-kind rows with no terminal and preserves the recorded address as prior-launch evidence. Suggested bucket: highest if treated as a defect, because running processes and terminal history are user-owned work. Confidence: confirmed source/contract behavior; no runtime observation. Could-be-highest: yes. proposed_drop: SPEC.md, Terminal experience, lines 3003–3016 explicitly accepts the removal. Exact text: \"This release ends them: the first time a host's supervisor of this release starts, it ends that tmux server, and with it everything that still ran in an old terminal, without needing a tmux program.\" Exact text concerning prior screen/tab loss: \"one whose agent had already ended keeps its outcome, but its terminal's last screen, which lived in the server, is gone; old tabs are closed.\" Exact failure acceptance: \"A failure to end the server or to stop what ran there is logged and never stops the supervisor from starting; those sessions are treated as ended all the same, accepting that a Restart could then start a second agent beside one still running.\" SPEC_impl.md, Terminal substrate: private tmux server, lines 2882–2930 details the startup conversion and cleanup. These quoted rules cover ending the old terminals and dropping their access paths; independent check is required by caller before a highest drop. possible_cover: none beyond the quoted specification. Caveat: this entry does not assert a separate implementation defect in startup cleanup or conversation reporting; it preserves the destructive removal implication for independent specification acceptance review. Revision adds startup source confirmation and preserves the original process/history-loss consequence, suggested bucket and proposed-drop disposition; quoted words retain the source apostrophes (line wrapping normalized)."
+          }
+        },
+        {
+          "line": 7,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "f2",
+            "state": "open",
+            "summary": "Old tmux terminal access is deliberately removed on upgrade",
+            "location": "crates/farhelm-supervisor/src/service/core.rs:13750",
+            "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. TLDR: upgrading ends agents and shell tabs still in old tmux terminals and loses their terminal screen/history; normal supervisor paths no longer support accessing or closing those terminals. This is an explicitly specified migration consequence proposed for dropping, not a confirmed implementation defect. Details: assigned patch core.rs:13750–13768 replaces tmux tab-open liveness with host liveness; 14050–14060 removes tmux tab rediscovery/close; 15799–15813 refuses report anchors for stored tmux rows. Constructor 6142–6152 invokes OldTerminals::end_private_server before reload; reload contract 6372–6392 leaves old-kind rows with no terminal while preserving their recorded address as evidence of a prior launch. Suggested bucket: highest if treated as a defect, because running processes and terminal history are user-owned work. Confidence: confirmed source/contract behavior, not runtime-observed. Could-be-highest: yes. proposed_drop: SPEC.md, Terminal experience, 3003–3016 explicitly accepts this process/history loss. Exact text (line wrapping normalized): \"This release ends them: the first time a host's supervisor of this release starts, it ends that tmux server, and with it everything that still ran in an old terminal, without needing a tmux program.\" Exact screen/tab-loss acceptance: \"one whose agent had already ended keeps its outcome, but its terminal's last screen, which lived in the server, is gone; old tabs are closed.\" Exact failure acceptance: \"A failure to end the server or to stop what ran there is logged and never stops the supervisor from starting; those sessions are treated as ended all the same, accepting that a Restart could then start a second agent beside one still running.\" SPEC_impl.md, Terminal substrate: private tmux server, 2882–2930 describes startup cleanup and conversion. possible_cover: the parent reports likely duplicate scope in g099/f1, g110/f1 and g053/f1; those logs were not read here and semantic deduplication remains the parent's. Material caveats: independent proposed-drop review has not accepted a drop, so this record remains open with its original highest consequence. This acceptance applies only to ending old tmux terminals, their process/history loss, and removal of their operational access paths. It does not settle generic survival guidance, a missing migration warning, or a distinct implementation error in cleanup/report handling. Revision preserves exact reviewed source and acceptance text and adds the caller-supplied possible-duplicate references and acceptance limits; no original consequence or severity has been lowered."
+          }
+        }
+      ],
+      "latest": {
+        "line": 7,
+        "event": {
+          "version": 1,
+          "kind": "finding",
+          "id": "f2",
+          "state": "open",
+          "summary": "Old tmux terminal access is deliberately removed on upgrade",
+          "location": "crates/farhelm-supervisor/src/service/core.rs:13750",
+          "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. TLDR: upgrading ends agents and shell tabs still in old tmux terminals and loses their terminal screen/history; normal supervisor paths no longer support accessing or closing those terminals. This is an explicitly specified migration consequence proposed for dropping, not a confirmed implementation defect. Details: assigned patch core.rs:13750–13768 replaces tmux tab-open liveness with host liveness; 14050–14060 removes tmux tab rediscovery/close; 15799–15813 refuses report anchors for stored tmux rows. Constructor 6142–6152 invokes OldTerminals::end_private_server before reload; reload contract 6372–6392 leaves old-kind rows with no terminal while preserving their recorded address as evidence of a prior launch. Suggested bucket: highest if treated as a defect, because running processes and terminal history are user-owned work. Confidence: confirmed source/contract behavior, not runtime-observed. Could-be-highest: yes. proposed_drop: SPEC.md, Terminal experience, 3003–3016 explicitly accepts this process/history loss. Exact text (line wrapping normalized): \"This release ends them: the first time a host's supervisor of this release starts, it ends that tmux server, and with it everything that still ran in an old terminal, without needing a tmux program.\" Exact screen/tab-loss acceptance: \"one whose agent had already ended keeps its outcome, but its terminal's last screen, which lived in the server, is gone; old tabs are closed.\" Exact failure acceptance: \"A failure to end the server or to stop what ran there is logged and never stops the supervisor from starting; those sessions are treated as ended all the same, accepting that a Restart could then start a second agent beside one still running.\" SPEC_impl.md, Terminal substrate: private tmux server, 2882–2930 describes startup cleanup and conversion. possible_cover: the parent reports likely duplicate scope in g099/f1, g110/f1 and g053/f1; those logs were not read here and semantic deduplication remains the parent's. Material caveats: independent proposed-drop review has not accepted a drop, so this record remains open with its original highest consequence. This acceptance applies only to ending old tmux terminals, their process/history loss, and removal of their operational access paths. It does not settle generic survival guidance, a missing migration warning, or a distinct implementation error in cleanup/report handling. Revision preserves exact reviewed source and acceptance text and adds the caller-supplied possible-duplicate references and acceptance limits; no original consequence or severity has been lowered."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g113/findings.jsonl",
+        "id": "f2",
+        "line": 7,
+        "disposition": "under-investigation",
+        "group": "g113-f2",
+        "reason": "Record durably acknowledged; parent source/contract validation, cross-group synthesis, coverage/filter matching and any independent drop check remain pending. This preserves the claim and uncertainty without accepting, dropping or lowering it."
+      },
+      "accepted_parent_decision": null,
+      "returned_claim_checks": [
+        {
+          "batch": "claims-073",
+          "key": "g113/f2",
+          "latest_line": 7,
+          "recommendation": "covered",
+          "bucket": "highest",
+          "underlying_key": "explicit-old-private-tmux-terminal-retirement",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The specifications explicitly accept ending old terminals, their programs and terminal history, and removing their operational access. This is a proposed specification-coverage disposition requiring the independent drop check. It does not cover misleading survival guidance, missing warnings or a distinct cleanup/reporting implementation error.",
+          "checks": [
+            "At 1ed482dde220452e424973faf38a5e1318986333, service/core.rs:6142-6151 ends the old private server before reload. :6372-6388 describes terminal-less conversion and retained launch-address evidence; :13743-13764 opens tabs only beside host terminals; :14050-14058 resolves only host-backed close; :15795-15809 refuses old-kind reporting anchors.",
+            "Current SPEC.md:2998-3012 explicitly accepts server termination, lost screens, closed tabs, interrupted sessions and nonfatal cleanup failure. Current SPEC_impl.md Ending the old private tmux server :2780-2824 specifies the corresponding startup conversion and cleanup, including residuals.",
+            "The supplied possible aliases g099/f1, g110/f1 and g053/f1 are outside this named batch and were not inspected. The underlying key permits parent reconciliation without claiming exact deduplication. Source/contract evidence only; no reproduction."
+          ],
+          "coverage_checked": [
+            "SPEC.md Terminal experience :2998-3012 and SPEC_impl.md Ending the old private tmux server :2780-2824 fully cover this narrowly stated retirement consequence.",
+            "TODO.md Planned is empty. The broader tmux plans in plans/queue are already landed per plans/REPORTS.md:29-32, so they are not unlanded-plan cover. BUGS.md, INDEX.md and active TRIAGE_OUTCOMES.md searches found no separate exact item.",
+            "FILTER.md older-upgrade filter is not the basis: ordinary retirement needs no additional rare condition. Coverage rests on the explicit specifications."
+          ],
+          "exact_cover_quotes": [
+            {
+              "source": "SPEC.md:3000-3002, Terminal experience",
+              "quote": "A supervisor that finds that tmux server when it starts ends it, and with it everything that still ran in an old terminal, without needing a tmux program."
+            },
+            {
+              "source": "SPEC.md:3003-3004, Terminal experience",
+              "quote": "one whose agent had already ended keeps its outcome, but its terminal's last screen, which lived in the server, is gone; old tabs are closed."
+            },
+            {
+              "source": "SPEC.md:3009-3011, Terminal experience",
+              "quote": "A failure to end the server or to stop what ran there is logged and never stops the supervisor from starting; those sessions are treated as ended all the same, accepting that a Restart could then start a second agent beside one still running."
+            }
+          ],
+          "missing_premise": "Independent fresh-context agreement is still required before the parent drops this highest-consequence record.",
+          "original_stronger_consequence": "Upgrade ends running old agents and tab shells and loses their terminal screens/history. These are user-owned processes and work, so highest is preserved even though the migration is explicitly accepted.",
+          "needs_independent_drop_check": true,
+          "proposed_basis": "Explicit specification acceptance of old-terminal retirement only; no accepted drop is inferred."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": true,
+        "clearly_refuted_candidate": false,
+        "needs_unfinished_gate": true,
+        "provisional_bucket": "highest",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "explicit-old-private-tmux-terminal-retirement",
+        "destination": "trailing-explicit-old-private-tmux-terminal-retirement.md"
+      }
+    },
+    {
+      "key": "g113/c3",
+      "owner": "g113",
+      "id": "c3",
+      "domain": "supervisor-core-integration",
+      "purpose": "supervisor-core-integration: crates/farhelm-supervisor/src/service/core.rs; phases @@ -14524,41 +13743,24 @@ impl Supervisor {",
+      "history": [
+        {
+          "line": 4,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c3",
+            "state": "open",
+            "summary": "Removing the excerpt cache preserves host launch diagnostics",
+            "location": "crates/farhelm-supervisor/src/service/core.rs:14941",
+            "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. TLDR: considered whether removing launch_excerpt from retained-create runtime cells loses the failed launch's last words. Source refutes the concern: service/launch_artifacts.rs:42–76 obtains the final screen directly from the entry's host only after HostEvidence::Owned dead=true; status.rs:652 and handlers.rs:1039 still append it. Hosts retain one child's final screen, while the cache was for the retired tmux path. SPEC_impl.md, Launch failure classification, lines 2756–2765 requires quoting only the processed exit's final screen, and says lists never quote. Suggested bucket: other (refuted). Confidence: confirmed source analysis, no execution. proposed_drop: refuted by direct host-screen excerpt path. possible_cover: none. Could-be-highest: no; the considered impact was missing diagnostic context, with no security or owned-work loss route."
+          }
+        }
+      ],
+      "latest": {
+        "line": 4,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c3",
+          "state": "open",
+          "summary": "Removing the excerpt cache preserves host launch diagnostics",
+          "location": "crates/farhelm-supervisor/src/service/core.rs:14941",
+          "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. TLDR: considered whether removing launch_excerpt from retained-create runtime cells loses the failed launch's last words. Source refutes the concern: service/launch_artifacts.rs:42–76 obtains the final screen directly from the entry's host only after HostEvidence::Owned dead=true; status.rs:652 and handlers.rs:1039 still append it. Hosts retain one child's final screen, while the cache was for the retired tmux path. SPEC_impl.md, Launch failure classification, lines 2756–2765 requires quoting only the processed exit's final screen, and says lists never quote. Suggested bucket: other (refuted). Confidence: confirmed source analysis, no execution. proposed_drop: refuted by direct host-screen excerpt path. possible_cover: none. Could-be-highest: no; the considered impact was missing diagnostic context, with no security or owned-work loss route."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g113/findings.jsonl",
+        "id": "c3",
+        "line": 4,
+        "disposition": "excluded",
+        "group": "removed-tmux-excerpt-cache-does-not-remove-host-diagnostic-read",
+        "reason": "Parent explicitly accepted named refuted proposal from claims-073 after inspecting it. Removing the cache does not remove the host final-screen diagnostic path. This refutes missing diagnostics caused by that cache deletion, not every possible excerpt-provenance problem. Host excerpts are read directly and the deleted cache was bypassed for host terminals already. Checked source/results: [\"At 1ed482dde220452e424973faf38a5e1318986333, service/launch_artifacts.rs:59-76 reads the entry's host screen after HostEvidence::Owned dead=true. service/status.rs:652 and service/handlers.rs:1037-1039 still append the excerpt.\",\"At that revision's parent, service/launch_artifacts.rs:78-106 returns from the host branch before reading RunCells.launch_excerpt. Thus the deleted cache was not the host read mechanism.\",\"The global one-child/blank-screen rationale at service/launch_artifacts.rs:44-56 is not independently certified: g114/c3's history explicitly preserves the separately owned inherited-history/resize concern. No runtime execution.\"] Current coverage/results: [\"SPEC.md Terminal experience :2888-2895 requires safe attribution and bounded failed-launch excerpts. SPEC_impl.md Launch failure classification :2658-2669 retains the screen path and says lists never quote; no acceptance of losing all host diagnostics was found.\",\"TODO.md Planned empty; exact cache/excerpt searches of unlanded plans, BUGS.md, INDEX.md and active TRIAGE_OUTCOMES.md found no matching cover. Landed tmux-plan cleanup is historical context. FILTER.md is not needed for source refutation.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Removing launch_excerpt from runtime cells might lose the failed launch's last words. Diagnostic loss only; no security or user-owned-work-loss route was claimed.\"; null."
+      },
+      "accepted_parent_decision": {
+        "key": "g113/c3",
+        "line": 4,
+        "disposition": "excluded",
+        "group": "removed-tmux-excerpt-cache-does-not-remove-host-diagnostic-read",
+        "bucket": "other",
+        "recording": "refuted",
+        "queue_target_candidate": null,
+        "needs_independent_drop_check": false,
+        "reason": "Parent explicitly accepted named refuted proposal from claims-073 after inspecting it. Removing the cache does not remove the host final-screen diagnostic path. This refutes missing diagnostics caused by that cache deletion, not every possible excerpt-provenance problem. Host excerpts are read directly and the deleted cache was bypassed for host terminals already. Checked source/results: [\"At 1ed482dde220452e424973faf38a5e1318986333, service/launch_artifacts.rs:59-76 reads the entry's host screen after HostEvidence::Owned dead=true. service/status.rs:652 and service/handlers.rs:1037-1039 still append the excerpt.\",\"At that revision's parent, service/launch_artifacts.rs:78-106 returns from the host branch before reading RunCells.launch_excerpt. Thus the deleted cache was not the host read mechanism.\",\"The global one-child/blank-screen rationale at service/launch_artifacts.rs:44-56 is not independently certified: g114/c3's history explicitly preserves the separately owned inherited-history/resize concern. No runtime execution.\"] Current coverage/results: [\"SPEC.md Terminal experience :2888-2895 requires safe attribution and bounded failed-launch excerpts. SPEC_impl.md Launch failure classification :2658-2669 retains the screen path and says lists never quote; no acceptance of losing all host diagnostics was found.\",\"TODO.md Planned empty; exact cache/excerpt searches of unlanded plans, BUGS.md, INDEX.md and active TRIAGE_OUTCOMES.md found no matching cover. Landed tmux-plan cleanup is historical context. FILTER.md is not needed for source refutation.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Removing launch_excerpt from runtime cells might lose the failed launch's last words. Diagnostic loss only; no security or user-owned-work-loss route was claimed.\"; null."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-073",
+          "key": "g113/c3",
+          "latest_line": 4,
+          "recommendation": "refuted",
+          "bucket": "other",
+          "underlying_key": "removed-tmux-excerpt-cache-does-not-remove-host-diagnostic-read",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "Removing the cache does not remove the host final-screen diagnostic path. This refutes missing diagnostics caused by that cache deletion, not every possible excerpt-provenance problem.",
+          "checks": [
+            "At 1ed482dde220452e424973faf38a5e1318986333, service/launch_artifacts.rs:59-76 reads the entry's host screen after HostEvidence::Owned dead=true. service/status.rs:652 and service/handlers.rs:1037-1039 still append the excerpt.",
+            "At that revision's parent, service/launch_artifacts.rs:78-106 returns from the host branch before reading RunCells.launch_excerpt. Thus the deleted cache was not the host read mechanism.",
+            "The global one-child/blank-screen rationale at service/launch_artifacts.rs:44-56 is not independently certified: g114/c3's history explicitly preserves the separately owned inherited-history/resize concern. No runtime execution."
+          ],
+          "coverage_checked": [
+            "SPEC.md Terminal experience :2888-2895 requires safe attribution and bounded failed-launch excerpts. SPEC_impl.md Launch failure classification :2658-2669 retains the screen path and says lists never quote; no acceptance of losing all host diagnostics was found.",
+            "TODO.md Planned empty; exact cache/excerpt searches of unlanded plans, BUGS.md, INDEX.md and active TRIAGE_OUTCOMES.md found no matching cover. Landed tmux-plan cleanup is historical context. FILTER.md is not needed for source refutation."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": null,
+          "original_stronger_consequence": "Removing launch_excerpt from runtime cells might lose the failed launch's last words. Diagnostic loss only; no security or user-owned-work-loss route was claimed.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Host excerpts are read directly and the deleted cache was bypassed for host terminals already."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "removed-tmux-excerpt-cache-does-not-remove-host-diagnostic-read",
+        "destination": null
+      }
+    },
+    {
+      "key": "g113/l4",
+      "owner": "g113",
+      "id": "l4",
+      "domain": "supervisor-core-integration",
+      "purpose": "supervisor-core-integration: crates/farhelm-supervisor/src/service/core.rs; phases @@ -14524,41 +13743,24 @@ impl Supervisor {",
+      "history": [
+        {
+          "line": 8,
+          "event": {
+            "version": 1,
+            "kind": "lead",
+            "id": "l4",
+            "state": "open",
+            "summary": "Check stale two-kind scope-helper documentation in the assigned hunk",
+            "location": "crates/farhelm-supervisor/src/service/core.rs:13809",
+            "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. TLDR: the changed scope-helper docstring still says it is shared by both kinds of terminal tab, although this revision serves only terminal hosts. Need establish whether that distinction has another valid meaning, its in-range provenance, and later correction before retaining a documentation finding. Source basis: core.rs:13807–13813 changes marker storage to the host tag but retains 'Shared by both kinds of tab'; pinned git grep finds the only caller in core/host_tabs.rs:405. Contract: SPEC_impl.md, Every new terminal in a host / Tabs in hosts, says every tab opens in a terminal host and old terminals end at startup. Suggested bucket: other/documentation if confirmed; could-be-highest: no, no security or owned-work-loss route. Confidence: unresolved source-checkable lead, no execution. proposed_drop: false. possible_cover: none known from supplied neighbours; their stale-comment findings name different symbols/contracts. Missing premises: old helper's actual caller distinction and remaining range's wording changes. No runtime tests or reproduction."
+          }
+        },
+        {
+          "line": 9,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "l4",
+            "state": "open",
+            "summary": "Tab scope-helper documentation retains a removed two-kind responsibility",
+            "location": "crates/farhelm-supervisor/src/service/core.rs:13809",
+            "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. TLDR: the changed internal documentation says the tab scope helper serves two kinds of terminal tab, although only terminal-host tabs can be opened. This leaves a false responsibility map for maintainers at the reviewed intermediate revision, not an established runtime defect. Details: core.rs:13807–13813 still says 'Shared by both kinds of tab' while this assigned hunk replaces the two-kind marker explanation with host-tag storage. The parent docstring at core.rs:14605–14612 explicitly identifies those kinds as tmux and host, so this is not a scoped/unscoped distinction. Pinned git grep of tab_scope_prefix finds only its definition and core/host_tabs.rs:405; the latter's :396–420 always opens a terminal host. SPEC_impl.md, Every new terminal in a host and Tabs in hosts, :2236–2253 and :2311 onward requires that sole path; no other-kind new tab remains. The initial range base still has a tmux caller (base core.rs:15954), and in-range 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513 deletes open_tmux_tab and its tab_scope_prefix call. Thus this distinction becomes stale within the pinned range, rather than predating the entire review. At the assigned driver-removal revision the docstring is partly rewritten but retains the stale responsibility claim. Later full scoped diff from the reviewed revision to 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db removes 'Shared by both kinds of tab' and accurately describes the sole tab path; no endpoint defect is alleged. Suggested bucket: other/documentation correctness. Confidence: confirmed source/caller/history analysis, no execution. Could-be-highest: no security or owned-work-loss route established or suspected from this wording. proposed_drop: false for the reviewed intermediate documentation; later correction is supplied for the caller's historical disposition, not treated as refutation of the earlier false description. possible_cover: no duplicate found in supplied neighbour records; their stale-comment findings concern different symbols and contracts. Caveat: this is a narrow internal responsibility-description error; it does not claim scope selection, provenance, cleanup, or runtime behavior is wrong. Revision resolves lead l4; no missing source premise remains for the intermediate mismatch."
+          }
+        },
+        {
+          "line": 11,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "l4",
+            "state": "open",
+            "summary": "Tab scope-helper documentation retains a removed two-kind responsibility",
+            "location": "crates/farhelm-supervisor/src/service/core.rs:13809",
+            "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. TLDR: changed internal documentation says the tab scope helper serves two kinds of terminal tab, although only terminal-host tabs can be opened. This is an intermediate false responsibility map for maintainers, not an established runtime defect. Details: core.rs:13807–13813 retains 'Shared by both kinds of tab' while its assigned hunk replaces the old two-kind marker explanation with host-tag storage. Parent core.rs:14605–14612 explicitly identifies the two kinds as tmux and host, refuting a possible scoped/unscoped interpretation. Pinned git grep finds only the helper definition and caller core/host_tabs.rs:405; that caller at :396–420 always opens a terminal host. SPEC_impl.md, Every new terminal in a host and Tabs in hosts, :2236–2253 and :2311 onward specifies the sole path. The exclusive range base 6e423e30068b62c6cfa276c6d720ee35bb70387a still has the tmux caller at core.rs:15954; in-range 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513 deletes open_tmux_tab and that caller. Thus this description becomes stale within the pinned range; it does not predate the entire review. The assigned driver-removal commit partly updates the same docstring without removing the stale responsibility. Later correction verified exactly: git log -S identifies 08399d092d20815ced6619c26df2391944ae2b4a, whose core.rs diff at old :13760 removes 'Shared by both kinds of tab' and accurately describes the sole host path. The scoped diff to pinned tip 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db includes that correction. No endpoint defect is alleged. Suggested bucket: other/documentation correctness. Confidence: confirmed source/caller/range-history analysis, no runtime observation or reproduction. Could-be-highest: no security or user-work-loss route established or suspected from this wording. proposed_drop: false for this intermediate documentation error; later correction is historical disposition evidence, not a refutation that it was false at the reviewed revision. possible_cover: no duplicate in the supplied neighbour records; their stale-comment findings concern different symbols/contracts. Caveat: narrow responsibility-description error only; no claim that actual scope selection, provenance, cleanup or runtime behavior is wrong. Revision resolves the last history detail by naming the exact later correction; original consequence, bucket and proposed-drop basis unchanged. Lead l4 is closed as this finding with no unresolved source premise."
+          }
+        }
+      ],
+      "latest": {
+        "line": 11,
+        "event": {
+          "version": 1,
+          "kind": "finding",
+          "id": "l4",
+          "state": "open",
+          "summary": "Tab scope-helper documentation retains a removed two-kind responsibility",
+          "location": "crates/farhelm-supervisor/src/service/core.rs:13809",
+          "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. TLDR: changed internal documentation says the tab scope helper serves two kinds of terminal tab, although only terminal-host tabs can be opened. This is an intermediate false responsibility map for maintainers, not an established runtime defect. Details: core.rs:13807–13813 retains 'Shared by both kinds of tab' while its assigned hunk replaces the old two-kind marker explanation with host-tag storage. Parent core.rs:14605–14612 explicitly identifies the two kinds as tmux and host, refuting a possible scoped/unscoped interpretation. Pinned git grep finds only the helper definition and caller core/host_tabs.rs:405; that caller at :396–420 always opens a terminal host. SPEC_impl.md, Every new terminal in a host and Tabs in hosts, :2236–2253 and :2311 onward specifies the sole path. The exclusive range base 6e423e30068b62c6cfa276c6d720ee35bb70387a still has the tmux caller at core.rs:15954; in-range 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513 deletes open_tmux_tab and that caller. Thus this description becomes stale within the pinned range; it does not predate the entire review. The assigned driver-removal commit partly updates the same docstring without removing the stale responsibility. Later correction verified exactly: git log -S identifies 08399d092d20815ced6619c26df2391944ae2b4a, whose core.rs diff at old :13760 removes 'Shared by both kinds of tab' and accurately describes the sole host path. The scoped diff to pinned tip 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db includes that correction. No endpoint defect is alleged. Suggested bucket: other/documentation correctness. Confidence: confirmed source/caller/range-history analysis, no runtime observation or reproduction. Could-be-highest: no security or user-work-loss route established or suspected from this wording. proposed_drop: false for this intermediate documentation error; later correction is historical disposition evidence, not a refutation that it was false at the reviewed revision. possible_cover: no duplicate in the supplied neighbour records; their stale-comment findings concern different symbols/contracts. Caveat: narrow responsibility-description error only; no claim that actual scope selection, provenance, cleanup or runtime behavior is wrong. Revision resolves the last history detail by naming the exact later correction; original consequence, bucket and proposed-drop basis unchanged. Lead l4 is closed as this finding with no unresolved source premise."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g113/findings.jsonl",
+        "id": "l4",
+        "line": 11,
+        "disposition": "rejected",
+        "group": "tab-scope-prefix-stale-two-terminal-kinds-docstring",
+        "reason": "Parent read full claims073.647f0227 removes the remaining tmux tab caller and1ed482 retains an explicit two-kind docstring whose prior wording names tmux/host. Actual intermediate responsibility-map defect, corrected at exact clause by08399d09 and retained corrected at00de. Preserve historical defect/repair without residual item. No stronger scope or runtime consequence established."
+      },
+      "accepted_parent_decision": {
+        "key": "g113/l4",
+        "line": 11,
+        "disposition": "rejected",
+        "group": "tab-scope-prefix-stale-two-terminal-kinds-docstring",
+        "bucket": "other",
+        "recording": "repaired-in-range",
+        "needs_independent_drop_check": false,
+        "reason": "Parent read full claims073.647f0227 removes the remaining tmux tab caller and1ed482 retains an explicit two-kind docstring whose prior wording names tmux/host. Actual intermediate responsibility-map defect, corrected at exact clause by08399d09 and retained corrected at00de. Preserve historical defect/repair without residual item. No stronger scope or runtime consequence established."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-073",
+          "key": "g113/l4",
+          "latest_line": 11,
+          "recommendation": "needs-parent",
+          "bucket": "other",
+          "underlying_key": "tab-scope-prefix-stale-two-terminal-kinds-docstring",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The intermediate documentation defect is established, but it was corrected before the pinned tip. The allowed result dispositions have no fixed-in-range category. Preserve the historical finding and let the parent record that explicit disposition; do not call it source-refuted or out of range.",
+          "checks": [
+            "At 1ed482dde220452e424973faf38a5e1318986333, service/core.rs:13807-13814 retains Shared by both kinds of tab. Its parent :14605-14612 names the kinds as tmux and host, excluding a scoped/unscoped interpretation.",
+            "git grep at the reviewed revision finds only the helper definition and service/core/host_tabs.rs:405 caller, whose :396-420 always starts a host terminal. The exclusive base core.rs:15945-15954 still has the tmux caller; in-range 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513 removes it.",
+            "Commit 08399d092d20815ced6619c26df2391944ae2b4a changes the exact docstring, deleting Shared by both kinds of tab at old core.rs:13760. The pinned tip retains the corrected description. This verifies repair, not a denial that the earlier statement was false."
+          ],
+          "coverage_checked": [
+            "SPEC.md Terminal experience and SPEC_impl.md Every terminal in a host/Tabs in hosts specify the single host path; neither accepts a false two-kind responsibility map.",
+            "TODO.md Planned empty. plans/queue/tmux-drop-from-docs.md:68-75,88-101 requests this class of comment correction, but plans/REPORTS.md:32 records that plan landed; the actual source repair is stronger evidence than prospective coverage.",
+            "BUGS.md, INDEX.md and active TRIAGE_OUTCOMES.md searches found no exact item. FILTER.md does not filter ordinary stale internal documentation."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": "Parent must choose its bookkeeping disposition for a genuine intermediate defect fixed inside the reviewed range; no source premise remains unresolved.",
+          "original_stronger_consequence": "Maintainers receive a false responsibility map. No runtime scope, provenance or cleanup defect and no security/user-work consequence was claimed.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Verified historical documentation defect, repaired in-range by 08399d092d20815ced6619c26df2391944ae2b4a; no current queue addition appears necessary."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": true,
+        "clearly_refuted_candidate": false,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "tab-scope-prefix-stale-two-terminal-kinds-docstring",
+        "destination": "trailing-tab-scope-prefix-stale-two-terminal-kinds-docstring.md"
+      }
+    },
+    {
+      "key": "g113/c5",
+      "owner": "g113",
+      "id": "c5",
+      "domain": "supervisor-core-integration",
+      "purpose": "supervisor-core-integration: crates/farhelm-supervisor/src/service/core.rs; phases @@ -14524,41 +13743,24 @@ impl Supervisor {",
+      "history": [
+        {
+          "line": 10,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c5",
+            "state": "open",
+            "summary": "Deleted tab-close test covered the retired two-error aggregation",
+            "location": "crates/farhelm-supervisor/src/service/core.rs (parent):18261",
+            "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. TLDR: considered a distinct test-oracle loss from deleting tab_close_preserves_process_and_output_cleanup_failures. The deleted fixture's two-error aggregation no longer exists, so that specific oracle is obsolete; no independent new test defect is established by the deletion. Details: parent core.rs:18254–18279 constructs two errors and asserts that tab_close_cleanup_result retains both diagnostic strings. It creates no tab, host, process, lifecycle claim or real failure boundary. The assigned patch removes the external tmux output-client cleanup Result entirely: core.rs:14073–14099 joins an in-process output task and issues the notice; :15890–15905 now converts a single survivors error, rather than selecting/combining two independent errors. The original test's specific competing-error case therefore cannot occur in this implementation, not merely because the production branch appears correct. Its one remaining assertion would directly mirror a single map_err formatting expression; removing it alone does not establish loss of a distinct integrated lifecycle oracle. Separate real retained host-end failure coverage was inspected in e2e/host_tabs.rs:1269–1355: it asserts the error reason, retained tab/record/live host and later retry completion; this is useful evidence for that host-end boundary but is explicitly not claimed to exercise the post-end survivors branch. Suggested bucket: other/test quality if a further missing behavioral oracle were established. Confidence: source-confirmed obsolete aggregation contract and absence of such an integrated oracle in the deleted test; no runtime execution. Could-be-highest: no established or suspected security/user-work route from this particular unit-test deletion. proposed_drop: the exact two-error aggregation fixture is refuted as a remaining behavior contract by removal of external output-client cleanup, not by a blanket claim that correct production code replaces tests. possible_cover: none. Caveat: this does not certify all tab-close failure test coverage, and does not settle neighbours' distinct lost live-tab, consent, or lifetime oracles."
+          }
+        }
+      ],
+      "latest": {
+        "line": 10,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c5",
+          "state": "open",
+          "summary": "Deleted tab-close test covered the retired two-error aggregation",
+          "location": "crates/farhelm-supervisor/src/service/core.rs (parent):18261",
+          "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. TLDR: considered a distinct test-oracle loss from deleting tab_close_preserves_process_and_output_cleanup_failures. The deleted fixture's two-error aggregation no longer exists, so that specific oracle is obsolete; no independent new test defect is established by the deletion. Details: parent core.rs:18254–18279 constructs two errors and asserts that tab_close_cleanup_result retains both diagnostic strings. It creates no tab, host, process, lifecycle claim or real failure boundary. The assigned patch removes the external tmux output-client cleanup Result entirely: core.rs:14073–14099 joins an in-process output task and issues the notice; :15890–15905 now converts a single survivors error, rather than selecting/combining two independent errors. The original test's specific competing-error case therefore cannot occur in this implementation, not merely because the production branch appears correct. Its one remaining assertion would directly mirror a single map_err formatting expression; removing it alone does not establish loss of a distinct integrated lifecycle oracle. Separate real retained host-end failure coverage was inspected in e2e/host_tabs.rs:1269–1355: it asserts the error reason, retained tab/record/live host and later retry completion; this is useful evidence for that host-end boundary but is explicitly not claimed to exercise the post-end survivors branch. Suggested bucket: other/test quality if a further missing behavioral oracle were established. Confidence: source-confirmed obsolete aggregation contract and absence of such an integrated oracle in the deleted test; no runtime execution. Could-be-highest: no established or suspected security/user-work route from this particular unit-test deletion. proposed_drop: the exact two-error aggregation fixture is refuted as a remaining behavior contract by removal of external output-client cleanup, not by a blanket claim that correct production code replaces tests. possible_cover: none. Caveat: this does not certify all tab-close failure test coverage, and does not settle neighbours' distinct lost live-tab, consent, or lifetime oracles."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g113/findings.jsonl",
+        "id": "c5",
+        "line": 10,
+        "disposition": "excluded",
+        "group": "obsolete-tab-close-two-error-aggregation-unit-oracle",
+        "reason": "Parent explicitly accepted named refuted proposal from claims-073 after inspecting it. The deleted test checks exactly the two-error aggregation contract removed with external output-client cleanup. It does not exercise an integrated lifecycle boundary that could remain independently valuable. The particular behavioral oracle is obsolete, rather than merely unneeded because the current implementation looks correct. Checked source/results: [\"At 1ed482dde220452e424973faf38a5e1318986333^, service/core.rs:18254-18279 constructs two synthetic errors and checks both strings. It creates no process, terminal, host or lifecycle claim.\",\"At 1ed482dde220452e424973faf38a5e1318986333, core.rs:14072-14094 joins an in-process output task without an external cleanup Result; :15886-15904 maps the sole survivors error. service/terminals.rs:417-482 confirms the missing second error source.\",\"service/core/host_tabs.rs:987-1037 still has real host-end and post-end survivor boundaries. This check does not certify all tests for those boundaries, and does not claim production correctness substitutes for regression tests. No execution.\"] Current coverage/results: [\"SPEC.md lifecycle cleanup and SPEC_impl.md Tabs in hosts still require truthful cleanup failure handling, but do not require a removed external-client error aggregator.\",\"TODO.md Planned empty. Exact test/helper and two-error searches in plans/queue, BUGS.md, INDEX.md and active TRIAGE_OUTCOMES.md found no exact current cover. Landed tmux plans explain removal context. FILTER.md is not the proposed basis.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Deleting the test might lose protection against discarding one of two cleanup failures. The specific second error source no longer exists; no additional loss-of-work route was alleged for the unit-test deletion.\"; null."
+      },
+      "accepted_parent_decision": {
+        "key": "g113/c5",
+        "line": 10,
+        "disposition": "excluded",
+        "group": "obsolete-tab-close-two-error-aggregation-unit-oracle",
+        "bucket": "other",
+        "recording": "refuted",
+        "queue_target_candidate": null,
+        "needs_independent_drop_check": false,
+        "reason": "Parent explicitly accepted named refuted proposal from claims-073 after inspecting it. The deleted test checks exactly the two-error aggregation contract removed with external output-client cleanup. It does not exercise an integrated lifecycle boundary that could remain independently valuable. The particular behavioral oracle is obsolete, rather than merely unneeded because the current implementation looks correct. Checked source/results: [\"At 1ed482dde220452e424973faf38a5e1318986333^, service/core.rs:18254-18279 constructs two synthetic errors and checks both strings. It creates no process, terminal, host or lifecycle claim.\",\"At 1ed482dde220452e424973faf38a5e1318986333, core.rs:14072-14094 joins an in-process output task without an external cleanup Result; :15886-15904 maps the sole survivors error. service/terminals.rs:417-482 confirms the missing second error source.\",\"service/core/host_tabs.rs:987-1037 still has real host-end and post-end survivor boundaries. This check does not certify all tests for those boundaries, and does not claim production correctness substitutes for regression tests. No execution.\"] Current coverage/results: [\"SPEC.md lifecycle cleanup and SPEC_impl.md Tabs in hosts still require truthful cleanup failure handling, but do not require a removed external-client error aggregator.\",\"TODO.md Planned empty. Exact test/helper and two-error searches in plans/queue, BUGS.md, INDEX.md and active TRIAGE_OUTCOMES.md found no exact current cover. Landed tmux plans explain removal context. FILTER.md is not the proposed basis.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Deleting the test might lose protection against discarding one of two cleanup failures. The specific second error source no longer exists; no additional loss-of-work route was alleged for the unit-test deletion.\"; null."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-073",
+          "key": "g113/c5",
+          "latest_line": 10,
+          "recommendation": "refuted",
+          "bucket": "other",
+          "underlying_key": "obsolete-tab-close-two-error-aggregation-unit-oracle",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The deleted test checks exactly the two-error aggregation contract removed with external output-client cleanup. It does not exercise an integrated lifecycle boundary that could remain independently valuable.",
+          "checks": [
+            "At 1ed482dde220452e424973faf38a5e1318986333^, service/core.rs:18254-18279 constructs two synthetic errors and checks both strings. It creates no process, terminal, host or lifecycle claim.",
+            "At 1ed482dde220452e424973faf38a5e1318986333, core.rs:14072-14094 joins an in-process output task without an external cleanup Result; :15886-15904 maps the sole survivors error. service/terminals.rs:417-482 confirms the missing second error source.",
+            "service/core/host_tabs.rs:987-1037 still has real host-end and post-end survivor boundaries. This check does not certify all tests for those boundaries, and does not claim production correctness substitutes for regression tests. No execution."
+          ],
+          "coverage_checked": [
+            "SPEC.md lifecycle cleanup and SPEC_impl.md Tabs in hosts still require truthful cleanup failure handling, but do not require a removed external-client error aggregator.",
+            "TODO.md Planned empty. Exact test/helper and two-error searches in plans/queue, BUGS.md, INDEX.md and active TRIAGE_OUTCOMES.md found no exact current cover. Landed tmux plans explain removal context. FILTER.md is not the proposed basis."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": null,
+          "original_stronger_consequence": "Deleting the test might lose protection against discarding one of two cleanup failures. The specific second error source no longer exists; no additional loss-of-work route was alleged for the unit-test deletion.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "The particular behavioral oracle is obsolete, rather than merely unneeded because the current implementation looks correct."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "obsolete-tab-close-two-error-aggregation-unit-oracle",
+        "destination": null
+      }
+    }
+  ],
+  "replies": [
+    {
+      "turn": 1,
+      "reply": "Initial review complete; all 1,141 assigned patch lines read.\n\nNo confirmed implementation defects. Logged `f2` as a spec-accepted destructive migration with `proposed_drop` for independent checking; `l1` and `c3` are source-refuted candidates. No open leads.\n\nFindings log and progress updated. No tests or reproductions run."
+    },
+    {
+      "turn": 2,
+      "reply": "Revised `l1` with claim, notice-identity, join, and host-failure checks; it remains source-refuted, without blanket cancellation certification.\n\nRevised `f2` with possible duplicate references and explicit acceptance limits. Its proposed drop still requires independent review.\n\nNo new findings. Unresolved lead IDs: none."
+    },
+    {
+      "turn": 3,
+      "reply": "Checked callers, contracts, range history, later repairs, and deleted test responsibilities.\n\n- New verified: `l4` — intermediate tab-scope documentation incorrectly describes two terminal kinds; fixed later in `08399d0`.\n- New candidate: `c5` — deleted aggregation test covered a removed failure combination.\n- New unverified-after-investigation IDs: none.\n- Open leads: none.\n\nSomething new was found: the documentation issue above. No runtime execution."
+    },
+    {
+      "turn": 4,
+      "reply": "Checked remaining helper/type conversions, cleanup callers, pinned process roots, scope provenance, status snapshots, and removed test-cleanup dependencies.\n\nNew verified IDs: none. New unverified IDs: none. Open leads: none.\n\nNothing new found. Discovery count is now 2; progress updated. No runtime execution."
+    }
+  ],
+  "progress": "# g113 progress\n\nTurn 1: initial review complete. Discovery-pass count: 0 (no later synthesis/discovery turn performed).\nReviewed revision: 1ed482dde220452e424973faf38a5e1318986333.\nDomain: supervisor-core-integration, assigned core.rs patch partition 00923-003.patch.\n\nMandatory scope read through evidence packets: lines 1–1141, in six independent packets (1–190, 191–380, 381–570, 571–760, 761–950, 951–1141). No assigned scope unread. Complete inventory commits field read; excluded metadata not read.\n\nGoverning documents read: injected root AGENTS.md through End sentinel; skillette skill and scripts skillette; .agents/machine.md; review_feedback_queue/AGENTS.md and recording.md. One combined instruction result was clipped around the queue flow list; that missing section was reread with sed 100–240. Priority buckets and feedback template were delivered intact.\n\nPinned contract snapshots: SPEC.md and SPEC_impl.md at reviewed revision in this directory. Evidence packets delivered SPEC.md 1884–2080, 2081–2175, 2855–3048; SPEC_impl.md 1054–1110, 2175–2235, 2236–2425, 2423–2610, 2611–2766, 2880–2991, 4558–4631. The source manifest rejected an initial context read because the SPEC snapshot was outside it; context-manifest.json was then created separately and the read repeated successfully. The context manifest does not expand the assigned patch's required scope.\n\nContext checks at pinned revision: core.rs tab-open/close/reaping, unpublished terminal end, retained refusal runtime cells, host test installation helpers, report anchors, stop orchestration and FoundTerminal, StateDir helper; host_tabs.rs 530–1180; terminals.rs 105–280 and 395–505; handlers.rs 1615–1725; grid_stream.rs 905–1000; hosts/terminal.rs 770–885 and 2510–2620; sweep.rs 1220–1330; launch_artifacts.rs 1–130; constructor core.rs 6090–6185 and reload contract 6368–6455. Parent terminals.rs 135–245 checked only to compare replaced host probe/root behavior. Targeted searches verified excerpt callers and no remaining core test tmux driver starts. No runtime tests or reproductions performed; all conclusions are source/contract analysis.\n\nInterface assumptions checked: host tabs are resolved from session cells independently of the agent's terminal; tab attaches and close share the lifecycle claim; grid output holds no external process and shutdown races the entire stream; close detaches before ending the host; roots retain adoption-time pid/start identity; scoped tabs preserve recorded provenance while unscoped tabs retain portable sweep; failed-create end uses the host cleanup path; final launch excerpts come from processed host exits; hook anchors wait across entry publication and reject retired tmux rows; startup ends old terminals before reload and old rows receive no terminal.\n\nDurable records: l1 began as a shutdown-barrier lead and is now a source-refuted candidate; c3 is a source-refuted launch-excerpt-cache candidate; f2 is the potentially-highest destructive tmux-retirement consequence, explicitly accepted by SPEC.md, with proposed_drop and exact quoted acceptance for independent caller check. f2 was revised to add startup source checks and source apostrophes. New verified implementation defects: none. New unverified findings: none. Open leads: none. Every considered substantive candidate is recorded. No coverage sources forbidden by the brief were read.\n\nNext action: return to caller for the separately requested later synthesis turn. Caller owns independent proposed-drop checks and queue coverage. No repository edits, fixes, tests, processes or live-install actions made.\n\n## Turn 2 — later-turn synthesis complete\n\nRevisited the tab-close lifecycle claim, map removal, forwarder join, natural/stall notice ownership, input delivery and pump boundaries, and host end/retry ownership at the reviewed revision. New context reads: connection.rs 390–630, 1080–1340, 1400–1538; handlers.rs 1750–1875; grid_stream.rs 1180–1260; host_tabs.rs 120–235, 950–1065; host_launch.rs 635–770. Targeted symbol searches selected these ranges. Source-only checks; no execution or reproduction.\n\nRevised l1 under its original ID: confirmed tab attach exclusion by the lifecycle claim, exact task/channel/connection ownership in stale notice arbiters, Requested suppression, and independent host cleanup boundaries. The first sweep failure returns before detach/end; confirmed host end permits record/cell removal and propagates survivor error; unconfirmed end retains and marks the tab for retry. This conclusion is limited to the removed external output-client barrier and does not certify arbitrary cancellation. Parent-supplied g112/c3 agreement noted, with source checked here.\n\nRevised f2 under its original ID: preserved exact reviewed source, highest process/history-loss consequence and SPEC acceptance quotations; noted parent-supplied possible duplicates g099/f1, g110/f1, g053/f1 without reading their logs. Explicitly retained independent-drop requirement and excluded generic survival guidance/missing-warning issues from the acceptance. No parent drop has been accepted.\n\nTurn type/count: synthesis, turn 2. Discovery-pass count remains 0. New verified/unverified IDs this turn: none. Revisions this turn: l1, f2. Open lead IDs: none. No new implementation finding. Assigned scope remains fully read; no unread assigned material. Next action: return deltas to caller and await separately requested further discovery/synthesis.\n\n## Turn 3 — separate discovery pass 1 complete\n\nRead discovery-neighbours.json completely in bounded ranges 1–160, 161–240, 241–320, 321–400, 401–480, 481–560, 561–640, 641–720 and 721–801 before beginning source discovery. No named pending questions. Synthesized their relevance: natural-detach input lifetime is distinct from the tab-close path protected by the lifecycle claim; migration consent/survival guidance remain separate from f2 acceptance; neighbouring lost test-oracle records do not make production correctness a substitute for behavioral coverage. No neighbour finding is newly claimed as this group's discovery.\n\nNew source checks: numbered core.rs 13795–13885; helper definition/call grep; range history of core.rs; exclusive base helper/caller positions; 647f0227's removal of open_tmux_tab; parent core.rs 14580–14640; host_tabs.rs 380–435; reviewed-to-tip scoped comment diff; git log -S for the two-kind phrase and exact 08399d commit diff (first 185 lines); parent removed test/helper 18250–18365; targeted survivor/cleanup fault/test searches; e2e/host_tabs.rs 1215–1355. No runtime execution, tests, reproduction, or live-install actions. No prohibited coverage source search.\n\nNew verified ID: l4, a narrow intermediate documentation responsibility mismatch in the changed tab_scope_prefix docstring, introduced when the in-range tmux caller was removed and still present at assigned commit. Recorded first as lead, resolved to finding through caller/contract/history analysis, then revised with exact repair commit 08399d092d20815ced6619c26df2391944ae2b4a. It is corrected before pinned tip; no endpoint defect or runtime harm claimed. Suggested bucket other; could-be-highest false. This is genuinely new to this group's history and the supplied neighbour records.\n\nNew candidate c5: deleted unit test's two-error aggregation oracle is obsolete because the external output-client failure/result was removed. Preserved the distinction that the retained real failed-host-end test checks its own boundary, not post-end survivor errors, and that correctness does not refute an independent missing integration oracle. No such oracle was present in the deleted aggregation-only unit fixture. No blanket test coverage claim made.\n\nDiscovery count: 1. Turn type/count: discovery, turn 3. New verified findings: l4. New unverified-after-investigation findings: none. Remaining open lead IDs: none. New finding found: yes, corrected intermediate documentation only. All assigned patch scope remains fully read; no unread assigned material. Known l1/c3/f2 were not re-reported or lowered; no parent drop accepted. Next action: return this discovery delta; any subsequent pass must be a separately requested later turn.\n\n## Turn 4 — separate discovery pass 2 complete, empty result\n\nRead refreshed discovery-neighbours.json (1006 lines, 308614 bytes, timestamp 2026-11-13T16:57:00.659Z) completely before source search in bounded ranges 1–80, 81–160, 161–240, 241–320, 321–400, 401–480, 481–560, 561–640, 641–720, 721–800, 801–880, 881–960, 961–1006. No named pending questions. Preserved the separation of received natural-detach input lifetime, launch-excerpt provenance, host-scan documentation, report-anchor documentation, migration-consent and lost test-oracle records; none was claimed as a new g113 discovery or accepted for dropping.\n\nSource discovery concentrated on remaining assigned type-narrowing/helper responsibilities: PendingHold and FoundTerminal integration; unpublished-create cleanup callers; root/probe and scope-provenance conversion; host tag/placeholder metadata retention; StateDir's removed tmux cleanup. Checks read core.rs 7650–7820, 11620–11745, 14105–14190, 16152–16222, plus targeted PendingHold/FoundTerminal/end_unpublished_terminal caller searches. Parent-to-reviewed diff excerpts verified host-only hold handling retains the previous host branch rather than replacing it with tmux semantics. Whole-range hosts/terminal.rs diff excerpts checked probe/anchor/root migration from TerminalProcess to Running/Dead/Gone and adoption-time root identity. HostTab::after_retry at host_tabs.rs 225–282 retains known scope metadata; ScopeUnits::tab at sweep.rs 1288–1318 distinguishes recorded scoped units and unscoped portable-sweep requirements. Git grep over reviewed core.rs found no TmuxDriver, Command::new(\"tmux\"), open_tmux_tab or Terminal::Tmux uses. This supports removal of that module's automatic tmux test cleanup without asserting all tests elsewhere are tmux-free.\n\nResults: FoundTerminal still derives state and reaped from one supplied status observation and carries the same host handle/address. PendingHold still compares the launch mark with the runtime-probed child; unreadability does not count as settled. The assigned unpublished-terminal helper keeps the prior host cleanup path; caller checks retain launching ownership/records on unconfirmed end and release the spawn fence before ending the host. Root conversion keeps pinned identity and propagates unreadable probes. No new substantive lead, finding, or set-aside candidate arose; existing records are unchanged.\n\nTurn type/count: discovery, turn 4. Discovery-pass count: 2. New verified finding IDs: none. New unverified-after-investigation IDs: none. New candidate IDs: none. Remaining open lead IDs: none. Anything new found: no. All conclusions source/contract analysis; no runtime tests, builds, reproductions, checkout changes, prohibited coverage searches or live-install actions. No assigned material unread. No parent drop/lowering accepted. Next action: return the empty discovery delta to caller.\n"
+}

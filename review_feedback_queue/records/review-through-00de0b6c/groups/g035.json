@@ -1,0 +1,1112 @@
+{
+  "group": {
+    "id": "g035",
+    "domain": "gui-session-lifecycle",
+    "purpose": "gui-session-lifecycle: crates/farhelm-ui/src/list/shared.rs, crates/farhelm-ui/src/list/trash.rs, crates/farhelm-ui/src/list/view.rs, crates/farhelm-ui/src/rows.rs, crates/farhelm-ui/src/list/lifecycle.rs, crates/farhelm-ui/src/list/row.rs, crates/farhelm-ui/src/list/marking.rs, crates/farhelm-ui/src/list/bell.rs; phases complete small per-commit changes",
+    "interfaces": [
+      "g001",
+      "g009",
+      "g010",
+      "g011",
+      "g022",
+      "g023",
+      "g024",
+      "g025",
+      "g026",
+      "g027",
+      "g028",
+      "g029",
+      "g036",
+      "g037",
+      "g038"
+    ],
+    "sources": [
+      {
+        "path": "[private-run]/prep/parts/00040-000.patch",
+        "ranges": [
+          [
+            1,
+            20
+          ]
+        ],
+        "original_path": "crates/farhelm-ui/src/list/shared.rs",
+        "commit": "06d4b68f3a9e913f47cd426fedee5946a4eed77b",
+        "notes": "patch header; patch character offsets [0,819)",
+        "lines": 20,
+        "bytes": 819,
+        "start": 0,
+        "end": 819,
+        "original": "[private-run]/prep/originals/00040.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/00041-000.patch",
+        "ranges": [
+          [
+            1,
+            162
+          ]
+        ],
+        "original_path": "crates/farhelm-ui/src/list/trash.rs",
+        "commit": "06d4b68f3a9e913f47cd426fedee5946a4eed77b",
+        "notes": "patch header; patch character offsets [0,7256)",
+        "lines": 162,
+        "bytes": 7256,
+        "start": 0,
+        "end": 7256,
+        "original": "[private-run]/prep/originals/00041.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/00042-000.patch",
+        "ranges": [
+          [
+            1,
+            56
+          ]
+        ],
+        "original_path": "crates/farhelm-ui/src/list/view.rs",
+        "commit": "06d4b68f3a9e913f47cd426fedee5946a4eed77b",
+        "notes": "patch header; patch character offsets [0,2952)",
+        "lines": 56,
+        "bytes": 2954,
+        "start": 0,
+        "end": 2952,
+        "original": "[private-run]/prep/originals/00042.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/00043-000.patch",
+        "ranges": [
+          [
+            1,
+            12
+          ]
+        ],
+        "original_path": "crates/farhelm-ui/src/rows.rs",
+        "commit": "06d4b68f3a9e913f47cd426fedee5946a4eed77b",
+        "notes": "patch header; patch character offsets [0,463)",
+        "lines": 12,
+        "bytes": 463,
+        "start": 0,
+        "end": 463,
+        "original": "[private-run]/prep/originals/00043.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/00242-000.patch",
+        "ranges": [
+          [
+            1,
+            69
+          ]
+        ],
+        "original_path": "crates/farhelm-ui/src/list/lifecycle.rs",
+        "commit": "350a4b33b6d4476f4a78e43cea124bc2b828f462",
+        "notes": "patch header; patch character offsets [0,3855)",
+        "lines": 69,
+        "bytes": 3855,
+        "start": 0,
+        "end": 3855,
+        "original": "[private-run]/prep/originals/00242.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/00243-000.patch",
+        "ranges": [
+          [
+            1,
+            142
+          ]
+        ],
+        "original_path": "crates/farhelm-ui/src/list/row.rs",
+        "commit": "350a4b33b6d4476f4a78e43cea124bc2b828f462",
+        "notes": "patch header; patch character offsets [0,11146)",
+        "lines": 142,
+        "bytes": 11146,
+        "start": 0,
+        "end": 11146,
+        "original": "[private-run]/prep/originals/00243.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/00245-000.patch",
+        "ranges": [
+          [
+            1,
+            82
+          ]
+        ],
+        "original_path": "crates/farhelm-ui/src/list/shared.rs",
+        "commit": "350a4b33b6d4476f4a78e43cea124bc2b828f462",
+        "notes": "patch header; patch character offsets [0,3574)",
+        "lines": 82,
+        "bytes": 3574,
+        "start": 0,
+        "end": 3574,
+        "original": "[private-run]/prep/originals/00245.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/00247-000.patch",
+        "ranges": [
+          [
+            1,
+            13
+          ]
+        ],
+        "original_path": "crates/farhelm-ui/src/rows.rs",
+        "commit": "350a4b33b6d4476f4a78e43cea124bc2b828f462",
+        "notes": "patch header; patch character offsets [0,377)",
+        "lines": 13,
+        "bytes": 377,
+        "start": 0,
+        "end": 377,
+        "original": "[private-run]/prep/originals/00247.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/00316-000.patch",
+        "ranges": [
+          [
+            1,
+            167
+          ]
+        ],
+        "original_path": "crates/farhelm-ui/src/list/marking.rs",
+        "commit": "04d85f0c98a9b635709d00b056719a0baa7fd3fc",
+        "notes": "patch header; patch character offsets [0,7851)",
+        "lines": 167,
+        "bytes": 7851,
+        "start": 0,
+        "end": 7851,
+        "original": "[private-run]/prep/originals/00316.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/00317-000.patch",
+        "ranges": [
+          [
+            1,
+            181
+          ]
+        ],
+        "original_path": "crates/farhelm-ui/src/list/row.rs",
+        "commit": "04d85f0c98a9b635709d00b056719a0baa7fd3fc",
+        "notes": "patch header; patch character offsets [0,8195)",
+        "lines": 181,
+        "bytes": 8201,
+        "start": 0,
+        "end": 8195,
+        "original": "[private-run]/prep/originals/00317.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/00319-000.patch",
+        "ranges": [
+          [
+            1,
+            149
+          ]
+        ],
+        "original_path": "crates/farhelm-ui/src/list/view.rs",
+        "commit": "04d85f0c98a9b635709d00b056719a0baa7fd3fc",
+        "notes": "patch header; patch character offsets [0,6609)",
+        "lines": 149,
+        "bytes": 6609,
+        "start": 0,
+        "end": 6609,
+        "original": "[private-run]/prep/originals/00319.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/00515-000.patch",
+        "ranges": [
+          [
+            1,
+            35
+          ]
+        ],
+        "original_path": "crates/farhelm-ui/src/list/row.rs",
+        "commit": "1d24c6af0b6fdbbec854623ff53f90281b8271ab",
+        "notes": "patch header; patch character offsets [0,2508)",
+        "lines": 35,
+        "bytes": 2508,
+        "start": 0,
+        "end": 2508,
+        "original": "[private-run]/prep/originals/00515.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/00516-000.patch",
+        "ranges": [
+          [
+            1,
+            136
+          ]
+        ],
+        "original_path": "crates/farhelm-ui/src/list/view.rs",
+        "commit": "1d24c6af0b6fdbbec854623ff53f90281b8271ab",
+        "notes": "patch header; patch character offsets [0,6664)",
+        "lines": 136,
+        "bytes": 6664,
+        "start": 0,
+        "end": 6664,
+        "original": "[private-run]/prep/originals/00516.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/01110-000.patch",
+        "ranges": [
+          [
+            1,
+            17
+          ]
+        ],
+        "original_path": "crates/farhelm-ui/src/list/bell.rs",
+        "commit": "f560058da19e02716e6f943883a9508b447aff4e",
+        "notes": "patch header; patch character offsets [0,1038)",
+        "lines": 17,
+        "bytes": 1038,
+        "start": 0,
+        "end": 1038,
+        "original": "[private-run]/prep/originals/01110.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/01112-000.patch",
+        "ranges": [
+          [
+            1,
+            13
+          ]
+        ],
+        "original_path": "crates/farhelm-ui/src/list/row.rs",
+        "commit": "f560058da19e02716e6f943883a9508b447aff4e",
+        "notes": "patch header; patch character offsets [0,466)",
+        "lines": 13,
+        "bytes": 466,
+        "start": 0,
+        "end": 466,
+        "original": "[private-run]/prep/originals/01112.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/01113-000.patch",
+        "ranges": [
+          [
+            1,
+            16
+          ]
+        ],
+        "original_path": "crates/farhelm-ui/src/list/shared.rs",
+        "commit": "f560058da19e02716e6f943883a9508b447aff4e",
+        "notes": "patch header; patch character offsets [0,681)",
+        "lines": 16,
+        "bytes": 681,
+        "start": 0,
+        "end": 681,
+        "original": "[private-run]/prep/originals/01113.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/01118-000.patch",
+        "ranges": [
+          [
+            1,
+            13
+          ]
+        ],
+        "original_path": "crates/farhelm-ui/src/rows.rs",
+        "commit": "f560058da19e02716e6f943883a9508b447aff4e",
+        "notes": "patch header; patch character offsets [0,440)",
+        "lines": 13,
+        "bytes": 440,
+        "start": 0,
+        "end": 440,
+        "original": "[private-run]/prep/originals/01118.patch"
+      }
+    ],
+    "lines": 1283,
+    "bytes": 64902
+  },
+  "records": [
+    {
+      "key": "g035/c1",
+      "owner": "g035",
+      "id": "c1",
+      "domain": "gui-session-lifecycle",
+      "purpose": "gui-session-lifecycle: crates/farhelm-ui/src/list/shared.rs, crates/farhelm-ui/src/list/trash.rs, crates/farhelm-ui/src/list/view.rs, crates/farhelm-ui/src/rows.rs, crates/farhelm-ui/src/list/lifecycle.rs, crates/farhelm-ui/src/list/row.rs, crates/farhelm-ui/src/list/marking.rs, crates/farhelm-ui/src/list/bell.rs; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 1,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c1",
+            "state": "open",
+            "summary": "Stopped-container menu direction matches the control contract",
+            "location": "crates/farhelm-ui/src/list/row.rs:1377",
+            "detail": "Reviewed commit: 350a4b33b6d4476f4a78e43cea124bc2b828f462. TLDR: considered whether adding Stopped to the row menu's resume-state predicate would disagree with its actual Suspend/Resume control, including keyboard action order. Source refutation: row.rs:1377-1382 treats Suspended or Stopped as the resume-only menu shape; sandbox_sessions.rs:236-260 treats Stopped with waiting_for_place=false as Resume and waiting_for_place=true as changing/disabled, preventing an actionable conflicting direction. The row's label and click use ControlButtons.resume/start at row.rs:2773-2820. SPEC.md, Container sessions: 'Stopped has its own state and is never labelled Suspended' and 'A failed start shows the reason and offers Resume.' Suggested bucket: other if real, but refuted. Confidence: confirmed by source only, no execution. proposed_drop: source refutation above. possible_cover: none. Could-be-highest: no; the considered consequence was an incorrect or unreachable menu action, not established work loss. Caveat: provider control internals are context, not a separately assigned patch."
+          }
+        },
+        {
+          "line": 7,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c1",
+            "state": "open",
+            "summary": "Stopped-container menu projection does not establish rendered-event authority",
+            "location": "crates/farhelm-ui/src/list/row.rs:1377",
+            "detail": "Reviewed commit: 350a4b33b6d4476f4a78e43cea124bc2b828f462. Revision reason: caller cross-input g025/f3 latest7 distinguishes label projection from callback event authority. Original considered consequence preserved: a row could expose an incorrect/unreachable lifecycle direction. The source refutation recorded earlier applies only to the menu shape: row.rs:1377-1382 includes Stopped in resume-only order, and sandbox_sessions.rs:236-260 makes Stopped(waiting_for_place:false) Resume and waiting_for_place:true changing/disabled. It does not prove a rendered Suspend activation cannot reach a refreshed start callback selecting Resume. The latter route is owned by g025/f3, whose latest7 candidate documents the refreshed use_callback, native current-VDOM listener dispatch, provider unpause/start consequence, and proposed sub-second-delivery specification acceptance; the parent has accepted no drops. No duplicate finding is created here. Next synthesis check will independently inspect the row adapter and callback contract and preserve g025/f3 as an unresolved parent disposition, not use c1 to dismiss it. Suggested bucket for the original projection concern: other, refuted; related opposite-action concern: high if unaccepted, as g025 records. Confidence: confirmed source projection only; event-authority synthesis pending. proposed_drop: source refutation only of projection/order mismatch, not a drop of g025/f3. possible_cover: cross-group g025/f3, no queue coverage searched. Could-be-highest: no established work-loss/security route in either the considered projection or ordinary Suspend/Resume direction substitution. No runtime observations."
+          }
+        },
+        {
+          "line": 9,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c1",
+            "state": "open",
+            "summary": "Menu projection is consistent; refreshed direction is separately owned by g025/f3",
+            "location": "crates/farhelm-ui/src/list/row.rs:1377",
+            "detail": "Reviewed commit: 350a4b33b6d4476f4a78e43cea124bc2b828f462. Synthesis revision closes the pending c1 distinction without duplicating or dropping g025/f3. Original considered consequence retained: an incorrect or unreachable row-menu lifecycle direction. Rechecked source: row.rs:1377-1382 chooses the resume-only keyboard order for Stopped; sandbox_sessions.rs:230-245 projects Stopped(waiting_for_place:false) to Resume and waiting_for_place:true to changing/disabled. The adapter draws label from ControlButtons.resume but passes only false to controls.start (row.rs:2779-2795); Controls uses use_callback and selects Operation::requested(stop, suspended) inside it (sandbox_sessions.rs:274-286). Therefore static menu/label agreement does not bind an earlier render's direction. c1's original refutation is restricted to projection/order mismatch. g025/f3 already preserves the possible opposite-action consequence, framework dispatch evidence, provider consequences, exact sub-second acceptance text, confidence caveats, and missing premise; parent has accepted no drops. No new local finding is created for that same route.\n\nIndependent application check: once start selects Operation, it carries that value unchanged through suspend_asks and into question (286-300); the rendered question calls execute(operation), and Operation::execute selects the captured endpoint (192-196, 305-336). This refutes direction recomputation after the activity-read boundary for this route, not destructive guard drift: execute reads current session.tabs/status for StopAndSuspend at 259-260, the separately recorded g025/f7 attribution concern. SPEC_impl.md:1068-1088 requires answer binding and destructive preconditions; SPEC.md:5022-5025 permits sub-second input-before-screen-update delivery while preserving explicit guards. I do not use the latter rule to dispose of g025/f3 here: physical event ordering and independent parent disposition remain in that owning record. Suggested bucket: other if the local projection mismatch were real; related direction route high if unaccepted. Confidence: confirmed source projection and post-capture Operation preservation, not observed event behavior. proposed_drop: source-refuted local projection/order mismatch only. possible_cover: g025/f3 for direction and g025/f7 for distinct Stop guard attribution; no queue/excluded metadata searched. Could-be-highest: no established security/work-loss route for ordinary Suspend/Resume projection/direction. No open local lead remains from c1; no nested review or reproduction performed."
+          }
+        },
+        {
+          "line": 13,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c1",
+            "state": "open",
+            "summary": "Earlier menu-projection refutation excludes the newly established disabled-item mismatch",
+            "location": "crates/farhelm-ui/src/list/row.rs:1377",
+            "detail": "Reviewed commit: 350a4b33b6d4476f4a78e43cea124bc2b828f462. Discovery revision: preserve the original possible incorrect/unreachable lifecycle-menu consequence and correct the earlier projection refutation. Actionable Resume/Stop direction remains guarded for waiting_for_place=true, as previously checked, but disabled does not mean absent from the menu-navigation contract. New record l2 establishes the specific projection mismatch: all-Stopped menu_order omits StopSuspend, while Controls projects waiting Stopped to resume=false/changing=true and renders a disabled Stop and suspend item. c1 therefore no longer proposes dropping the entire menu-projection concern. l2 is the retained actionable record for this newly checked accessibility consequence; avoid counting c1 as a second finding. g025/f3 remains separate rendered-event direction authority, not settled here. Suggested bucket: other for l2's established navigation consequence. Could-be-highest: no; no mutation/security/work-loss route. Confidence: source-confirmed narrower defect, no execution. proposed_drop: only the previously considered enabled wrong-direction projection remains source-refuted; disabled-item reachability is not dropped and is reported as l2. possible_cover: l2 within this own log, g025/f3 distinct. No parent drop or lowering assumed."
+          }
+        }
+      ],
+      "latest": {
+        "line": 13,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c1",
+          "state": "open",
+          "summary": "Earlier menu-projection refutation excludes the newly established disabled-item mismatch",
+          "location": "crates/farhelm-ui/src/list/row.rs:1377",
+          "detail": "Reviewed commit: 350a4b33b6d4476f4a78e43cea124bc2b828f462. Discovery revision: preserve the original possible incorrect/unreachable lifecycle-menu consequence and correct the earlier projection refutation. Actionable Resume/Stop direction remains guarded for waiting_for_place=true, as previously checked, but disabled does not mean absent from the menu-navigation contract. New record l2 establishes the specific projection mismatch: all-Stopped menu_order omits StopSuspend, while Controls projects waiting Stopped to resume=false/changing=true and renders a disabled Stop and suspend item. c1 therefore no longer proposes dropping the entire menu-projection concern. l2 is the retained actionable record for this newly checked accessibility consequence; avoid counting c1 as a second finding. g025/f3 remains separate rendered-event direction authority, not settled here. Suggested bucket: other for l2's established navigation consequence. Could-be-highest: no; no mutation/security/work-loss route. Confidence: source-confirmed narrower defect, no execution. proposed_drop: only the previously considered enabled wrong-direction projection remains source-refuted; disabled-item reachability is not dropped and is reported as l2. possible_cover: l2 within this own log, g025/f3 distinct. No parent drop or lowering assumed."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g035/findings.jsonl",
+        "id": "c1",
+        "line": 13,
+        "disposition": "duplicate",
+        "group": "stopped-waiting-row-menu-order-disagrees-with-render",
+        "reason": "Parent read both claims-021 objects and accepts the same-owner reconciliation:350a4b33 row.rs:249-268,1377-1381 omits StopSuspend from order for every Stopped row, whereas sandbox_sessions.rs:230-245,338-341 and row.rs:2798-2810 render its disabled command when waiting_for_place=true. g035/l2 carries that exact keyboard/navigation defect. c1's broad enabled wrong-direction suspicion was narrowed by the disabled state and stored Operation, with its earlier wording retained; separate refreshed-event and destructive-consent claims are not absorbed. No highest consequence was alleged."
+      },
+      "accepted_parent_decision": {
+        "key": "g035/c1",
+        "line": 13,
+        "disposition": "duplicate",
+        "group": "stopped-waiting-row-menu-order-disagrees-with-render",
+        "bucket": "other",
+        "recording": "same-local-defect",
+        "needs_independent_drop_check": false,
+        "reason": "Parent read both claims-021 objects and accepts the same-owner reconciliation:350a4b33 row.rs:249-268,1377-1381 omits StopSuspend from order for every Stopped row, whereas sandbox_sessions.rs:230-245,338-341 and row.rs:2798-2810 render its disabled command when waiting_for_place=true. g035/l2 carries that exact keyboard/navigation defect. c1's broad enabled wrong-direction suspicion was narrowed by the disabled state and stored Operation, with its earlier wording retained; separate refreshed-event and destructive-consent claims are not absorbed. No highest consequence was alleged."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-021",
+          "key": "g035/c1",
+          "latest_line": 13,
+          "recommendation": "duplicate",
+          "bucket": "other",
+          "underlying_key": "stopped-waiting-row-menu-order-disagrees-with-render",
+          "aliases": [
+            "g035/l2"
+          ],
+          "target_queue_file": null,
+          "why": "The latest record correctly withdraws the broad projection refutation. Its retained disabled-item defect is exactly g035/l2; record that defect once. The original enabled wrong-direction projection is source-refuted. This does not dispose of the separately owned refreshed-callback direction or destructive-guard concerns.",
+          "checks": [
+            "350a4b33b6d4476f4a78e43cea124bc2b828f462:crates/farhelm-ui/src/list/row.rs:249-268,1377-1381 maps every Stopped state to resume-only order, excluding StopSuspend.",
+            "Same revision:sandbox_sessions.rs:230-245,274-286,338-341 instead makes stopped/waiting_for_place=true changing, resume=false and disabled=true; list/row.rs:2798-2810 draws the disabled Stop and suspend item. Thus enabled contradictory action is refused, but the disabled-item mismatch is real.",
+            "Same revision:sandbox_sessions.rs:294-300,305-336 carries the selected Operation through activity read/question/execute; this establishes post-capture direction preservation only. It does not establish rendered-event authority or the Stop guard's attribution. Source only; no execution."
+          ],
+          "coverage_checked": [
+            "Current SPEC.md:4806-4891 and SPEC_impl.md:1011-1046 require stopped-state presentation and focusable disabled menu commands; neither accepts the omission.",
+            "TODO.md:25-27 Planned is empty; plans/queue/INDEX.md has no unlanded entries. Stored podman plan retirement wording does not cover keyboard omission.",
+            "BUGS.md contains only the SSH transfer hang. Searches of INDEX.md and active TRIAGE_OUTCOMES.md found no exact stopped-waiting menu-order item. Existing sandbox-row-menu-owns-transient-lifecycle-state.md concerns conditional component lifetime, not order."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": null,
+          "original_stronger_consequence": "Original incorrect or unreachable lifecycle-menu direction; earlier refutation was narrowed after the disabled-item defect was found. Refreshed-event direction and destructive guard attribution were explicitly excluded and remain separately owned.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Same local trigger, implementation mismatch and navigation consequence as g035/l2; no second queue item. Preserve the c1 correction in provenance."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": true,
+        "clearly_refuted_candidate": false,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "stopped-waiting-row-menu-order-disagrees-with-render",
+        "destination": "trailing-stopped-waiting-row-menu-order-disagrees-with-render.md"
+      }
+    },
+    {
+      "key": "g035/l1",
+      "owner": "g035",
+      "id": "l1",
+      "domain": "gui-session-lifecycle",
+      "purpose": "gui-session-lifecycle: crates/farhelm-ui/src/list/shared.rs, crates/farhelm-ui/src/list/trash.rs, crates/farhelm-ui/src/list/view.rs, crates/farhelm-ui/src/rows.rs, crates/farhelm-ui/src/list/lifecycle.rs, crates/farhelm-ui/src/list/row.rs, crates/farhelm-ui/src/list/marking.rs, crates/farhelm-ui/src/list/bell.rs; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 2,
+          "event": {
+            "version": 1,
+            "kind": "lead",
+            "id": "l1",
+            "state": "open",
+            "summary": "Retired-only bulk Delete may lose cancellation focus",
+            "location": "crates/farhelm-ui/src/list/marking.rs:358",
+            "detail": "Reviewed commit: 04d85f0c98a9b635709d00b056719a0baa7fd3fc. TLDR: cancelling a bulk Delete question with only retired rows marked may return focus to no surviving control. Source basis: the patch hides marked-menu-toggle when metadata order is empty; lifecycle.rs CANCEL_FOCUS selects .marked-menu-toggle or .sort-title. Need inspect how order is formed, how ListView mounts the marked toolbar/title, and which close callbacks use this script. Suspected consequence: keyboard focus lost after cancellation. Suggested bucket: other pending route analysis; could-be-highest: no (focus/navigation only). Confidence: uninvestigated lead, source only. proposed_drop: false. possible_cover: none. Exact missing premise: retired-only effective marking produces empty metadata order and leaves neither fallback element mounted when cancellation runs. Next checks: marking.rs and ListView rendering/cancel handlers at this revision plus SPEC focus contract."
+          }
+        },
+        {
+          "line": 3,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "l1",
+            "state": "open",
+            "summary": "Cancelling bulk Delete loses focus for retired-only markings",
+            "location": "crates/farhelm-ui/src/list/marking.rs:358",
+            "detail": "Reviewed commit: 04d85f0c98a9b635709d00b056719a0baa7fd3fc. TLDR: when only retired container sessions are marked, cancelling their bulk Delete question leaves keyboard focus without a return target. Details: MetadataAction::applies rejects every retired row (marking.rs:102-106), so MarkedBar's order is empty (235-244), and the newly conditional wrapper at 358 omits .marked-menu-toggle. ListView renders MarkedBar instead of SortMenu while effective marks remain (view.rs:5391-5415), so .sort-title is also absent. The Cancel/Close/Escape handler consumes only the question and calls lifecycle::CANCEL_FOCUS (view.rs:4375-4379); that script selects .marked-menu-toggle then .sort-title (lifecycle.rs:264-266). Neither exists, so its optional focus call does nothing after the dialog disappears. Modal DialogHandle::close schedules only the supplied return body (modal_dialog.rs:137-149); it provides no alternate return. SPEC.md Session list says: 'Cancel, Close and Escape dismiss their current question without clearing marks.' Its ordinary cancellation destination is the toolbar menu (SPEC_impl.md GUI: Dioxus, combined confirmation paragraph), which this patch removes for this supported row class. Use a surviving toolbar control, such as .marked-delete or .marked-count, when the metadata menu is absent. Suggested bucket: other; a narrow keyboard-focus regression. Confidence: confirmed by source/contract analysis only, not executed. proposed_drop: false. possible_cover: none. Could-be-highest: no; no loss-of-work or security route is alleged. Caveats: requires a retired session whose bulk Delete opens a confirmation (e.g. last-known live agent/tabs with confirmations enabled); no claim that a completed Delete is affected. Original lead's focus-loss consequence is retained and resolved by the source checks above."
+          }
+        },
+        {
+          "line": 8,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "l1",
+            "state": "open",
+            "summary": "Retired-only bulk Delete cancellation has no rendered focus return",
+            "location": "crates/farhelm-ui/src/list/marking.rs:358",
+            "detail": "Reviewed commit: 04d85f0c98a9b635709d00b056719a0baa7fd3fc. Revision reason: caller requested actual rendered-return chain and terminal/toolbar fallbacks, rather than inferring user focus solely from a missing selector. Original consequence retained: cancelling bulk Delete with only retired rows marked leaves keyboard focus without the promised return target. Source chain: MetadataAction::applies rejects retired rows (marking.rs:102-106); order at 234-243 is empty; the changed conditional at 358 removes the metadata toggle. MarkedBar still renders .marked-delete, .marked-clear and tabindex=-1 .marked-count (337-397), but CANCEL_FOCUS references none of them: lifecycle.rs:264 selects only .marked-menu-toggle then .sort-title. ListView renders SortMenu only in the else branch when effective_marks is empty (view.rs:5391-5416), while cancellation takes only the confirmation token and preserves marks (4375-4379). Thus neither selected return node exists. Cancel, Close and Escape all enter that same on_cancel (lifecycle.rs:310-335, 374-376).\n\nFallback checks: DialogHandle::close releases modal isolation and schedules exactly that return body (modal_dialog.rs:137-149). Its missing-target behavior is explicitly a no-op. modal_isolation.rs:212-223 removes inert/listener state without restoring a saved opener; its DOM-removal observer only releases. ScrollRegion's recovery at modal_dialog.rs:577-582 requires both region and dialog connected/usable, and its observer disposes on removal at 644-646; it cannot hand focus to the toolbar after unmount. DialogFocus::remembered stores the last control inside the modal (794-809), not an opener-restoration policy. A surviving .marked-delete is therefore available but never selected by this cancellation chain. Explicit terminal.focusSelected is a separate invoked method (assets/terminal.js:3001-3012); no call occurs from this cancellation. For the particularly clear premise of selecting the retired session itself, keep_terminal_surface rejects retirement (session_view.rs:3724 onward; test at 4325-4327), and the view draws a nonfocusable status-only retired card at 2850. There is no terminal to receive a hypothetical home-focus handoff. This does not require the selected session or row to disappear: cancelling removes the modal only. If independent user navigation or unrelated asynchronous work supplies focus, the eventual active element can differ; the finding is the missing deterministic return under otherwise stable state, not a universal claim about every concurrent UI state.\n\nShipped trigger premise remains explicit: the retired-only marking must include a row whose last-known agent is not ended or has tabs, with confirmations enabled, so ordinary bulk Delete asks. DeleteTarget::needs_confirmation uses those visible facts (shared.rs:44-60); retirement identifies stored launch intent without normalizing those facts, and the new ticker exclusion preserves retired tabs for whole-session cleanup (service/ticker.rs:2098-2100, 2167-2169). No claim that a terminal exists for that retired row or that all retired rows necessarily ask. SPEC.md Keyboard focus: 'Closing something the user opened returns focus to where it was before it opened, on every platform'; Session list preserves marks on cancellation. SPEC_impl.md's existing combined-confirmation cancellation target is the enabled toolbar menu, whose new absence is the regression. Fix can choose a surviving .marked-delete or .marked-count fallback. Suggested bucket: other, narrow keyboard-navigation impact. Could-be-highest: no. Confidence: confirmed source/contract mechanism under the named reachable state; physical post-close activeElement not observed because no execution/reproduction was requested. proposed_drop: false. possible_cover: none. The earlier unqualified wording is narrowed to this stable rendered-state premise, without dropping or lowering any loss-of-work allegation (none was made)."
+          }
+        }
+      ],
+      "latest": {
+        "line": 8,
+        "event": {
+          "version": 1,
+          "kind": "finding",
+          "id": "l1",
+          "state": "open",
+          "summary": "Retired-only bulk Delete cancellation has no rendered focus return",
+          "location": "crates/farhelm-ui/src/list/marking.rs:358",
+          "detail": "Reviewed commit: 04d85f0c98a9b635709d00b056719a0baa7fd3fc. Revision reason: caller requested actual rendered-return chain and terminal/toolbar fallbacks, rather than inferring user focus solely from a missing selector. Original consequence retained: cancelling bulk Delete with only retired rows marked leaves keyboard focus without the promised return target. Source chain: MetadataAction::applies rejects retired rows (marking.rs:102-106); order at 234-243 is empty; the changed conditional at 358 removes the metadata toggle. MarkedBar still renders .marked-delete, .marked-clear and tabindex=-1 .marked-count (337-397), but CANCEL_FOCUS references none of them: lifecycle.rs:264 selects only .marked-menu-toggle then .sort-title. ListView renders SortMenu only in the else branch when effective_marks is empty (view.rs:5391-5416), while cancellation takes only the confirmation token and preserves marks (4375-4379). Thus neither selected return node exists. Cancel, Close and Escape all enter that same on_cancel (lifecycle.rs:310-335, 374-376).\n\nFallback checks: DialogHandle::close releases modal isolation and schedules exactly that return body (modal_dialog.rs:137-149). Its missing-target behavior is explicitly a no-op. modal_isolation.rs:212-223 removes inert/listener state without restoring a saved opener; its DOM-removal observer only releases. ScrollRegion's recovery at modal_dialog.rs:577-582 requires both region and dialog connected/usable, and its observer disposes on removal at 644-646; it cannot hand focus to the toolbar after unmount. DialogFocus::remembered stores the last control inside the modal (794-809), not an opener-restoration policy. A surviving .marked-delete is therefore available but never selected by this cancellation chain. Explicit terminal.focusSelected is a separate invoked method (assets/terminal.js:3001-3012); no call occurs from this cancellation. For the particularly clear premise of selecting the retired session itself, keep_terminal_surface rejects retirement (session_view.rs:3724 onward; test at 4325-4327), and the view draws a nonfocusable status-only retired card at 2850. There is no terminal to receive a hypothetical home-focus handoff. This does not require the selected session or row to disappear: cancelling removes the modal only. If independent user navigation or unrelated asynchronous work supplies focus, the eventual active element can differ; the finding is the missing deterministic return under otherwise stable state, not a universal claim about every concurrent UI state.\n\nShipped trigger premise remains explicit: the retired-only marking must include a row whose last-known agent is not ended or has tabs, with confirmations enabled, so ordinary bulk Delete asks. DeleteTarget::needs_confirmation uses those visible facts (shared.rs:44-60); retirement identifies stored launch intent without normalizing those facts, and the new ticker exclusion preserves retired tabs for whole-session cleanup (service/ticker.rs:2098-2100, 2167-2169). No claim that a terminal exists for that retired row or that all retired rows necessarily ask. SPEC.md Keyboard focus: 'Closing something the user opened returns focus to where it was before it opened, on every platform'; Session list preserves marks on cancellation. SPEC_impl.md's existing combined-confirmation cancellation target is the enabled toolbar menu, whose new absence is the regression. Fix can choose a surviving .marked-delete or .marked-count fallback. Suggested bucket: other, narrow keyboard-navigation impact. Could-be-highest: no. Confidence: confirmed source/contract mechanism under the named reachable state; physical post-close activeElement not observed because no execution/reproduction was requested. proposed_drop: false. possible_cover: none. The earlier unqualified wording is narrowed to this stable rendered-state premise, without dropping or lowering any loss-of-work allegation (none was made)."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g035/findings.jsonl",
+        "id": "l1",
+        "line": 8,
+        "disposition": "verified",
+        "group": "retired-only-bulk-delete-cancel-has-no-focus-target",
+        "reason": "Parent explicitly accepted named retain-verified proposal from claims-021 after inspecting it. Under stable retired-only marking, cancellation invokes a return script whose two possible destinations are both absent. This is a supported keyboard-focus regression, not an inferred destructive consequence. Keep a new other-priority item. Existing focus items share a destination policy but require different fixes at different close owners; they are related, not exact coverage. Checked source/results: [\"04d85f0c98a9b635709d00b056719a0baa7fd3fc:crates/farhelm-ui/src/list/marking.rs:103-106,234-242 rejects retired rows from every metadata action, and :358-389 omits the toggle when order is empty. The marked count, Delete and Clear survive at :337-395.\",\"Same revision:list/view.rs:5391-5417 chooses MarkedBar instead of SortMenu while marks remain. :4375-4379 consumes only the question and calls lifecycle::CANCEL_FOCUS, so marks and the absent-sort state persist.\",\"Same revision:list/lifecycle.rs:263 selects only .marked-menu-toggle or .sort-title; :313-327 routes Escape and Close through on_cancel. modal_dialog.rs:137-148 schedules only that supplied body and explicitly documents missing-target no-op behavior.\",\"Same revision:list/shared.rs:44-65 confirms live/with-tabs rows can require confirmation. The claim remains conditional on retained last-known live/tab facts and confirmations enabled, not on all retired rows. Tip 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db still omits the empty-order toggle (marking.rs:402) and uses the same cancellation selector (lifecycle.rs:417). Source only; activeElement was not observed.\"] Current coverage/results: [\"SPEC.md:2176-2240 preserves marks on cancellation; :3282-3287 requires opener focus return. SPEC_impl.md:1204-1214 prescribes the enabled toolbar menu for cancellation but does not accept its absence.\",\"Planned is empty (TODO.md:25-27); plans/queue/INDEX.md has no unlanded entries. The landed podman retirement plan supplies Delete-only context, not a focus fix.\",\"BUGS.md has no focus exception. INDEX.md searches found templates-close-targets-disabled-bulk-button.md and bulk-completion-focuses-sort.md; both files were read. Templates targets a disabled surviving button, and bulk completion removes marks/toolbar. Neither covers cancellation with preserved marks and no toggle. Active ledger menu-close/menu-blur discard sections concern unrelated delayed focus ordering.\",\"FILTER.md does not match: no narrow race, crash or unusual-size premise is required; the missing return repeats for the supported stable state.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Keyboard focus lost after cancelling retired-only bulk Delete. Later wording qualifies the stable rendered-state premise; no security or user-work-loss consequence was alleged.\"; \"Physical browser focus after close was not measured. The established defect is the missing deterministic rendered return target under stable state; unrelated navigation may independently place focus.\"."
+      },
+      "accepted_parent_decision": {
+        "key": "g035/l1",
+        "line": 8,
+        "disposition": "verified",
+        "group": "retired-only-bulk-delete-cancel-has-no-focus-target",
+        "bucket": "other",
+        "recording": "retain-verified",
+        "queue_target_candidate": null,
+        "needs_independent_drop_check": false,
+        "reason": "Parent explicitly accepted named retain-verified proposal from claims-021 after inspecting it. Under stable retired-only marking, cancellation invokes a return script whose two possible destinations are both absent. This is a supported keyboard-focus regression, not an inferred destructive consequence. Keep a new other-priority item. Existing focus items share a destination policy but require different fixes at different close owners; they are related, not exact coverage. Checked source/results: [\"04d85f0c98a9b635709d00b056719a0baa7fd3fc:crates/farhelm-ui/src/list/marking.rs:103-106,234-242 rejects retired rows from every metadata action, and :358-389 omits the toggle when order is empty. The marked count, Delete and Clear survive at :337-395.\",\"Same revision:list/view.rs:5391-5417 chooses MarkedBar instead of SortMenu while marks remain. :4375-4379 consumes only the question and calls lifecycle::CANCEL_FOCUS, so marks and the absent-sort state persist.\",\"Same revision:list/lifecycle.rs:263 selects only .marked-menu-toggle or .sort-title; :313-327 routes Escape and Close through on_cancel. modal_dialog.rs:137-148 schedules only that supplied body and explicitly documents missing-target no-op behavior.\",\"Same revision:list/shared.rs:44-65 confirms live/with-tabs rows can require confirmation. The claim remains conditional on retained last-known live/tab facts and confirmations enabled, not on all retired rows. Tip 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db still omits the empty-order toggle (marking.rs:402) and uses the same cancellation selector (lifecycle.rs:417). Source only; activeElement was not observed.\"] Current coverage/results: [\"SPEC.md:2176-2240 preserves marks on cancellation; :3282-3287 requires opener focus return. SPEC_impl.md:1204-1214 prescribes the enabled toolbar menu for cancellation but does not accept its absence.\",\"Planned is empty (TODO.md:25-27); plans/queue/INDEX.md has no unlanded entries. The landed podman retirement plan supplies Delete-only context, not a focus fix.\",\"BUGS.md has no focus exception. INDEX.md searches found templates-close-targets-disabled-bulk-button.md and bulk-completion-focuses-sort.md; both files were read. Templates targets a disabled surviving button, and bulk completion removes marks/toolbar. Neither covers cancellation with preserved marks and no toggle. Active ledger menu-close/menu-blur discard sections concern unrelated delayed focus ordering.\",\"FILTER.md does not match: no narrow race, crash or unusual-size premise is required; the missing return repeats for the supported stable state.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Keyboard focus lost after cancelling retired-only bulk Delete. Later wording qualifies the stable rendered-state premise; no security or user-work-loss consequence was alleged.\"; \"Physical browser focus after close was not measured. The established defect is the missing deterministic rendered return target under stable state; unrelated navigation may independently place focus.\"."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-021",
+          "key": "g035/l1",
+          "latest_line": 8,
+          "recommendation": "retain-verified",
+          "bucket": "other",
+          "underlying_key": "retired-only-bulk-delete-cancel-has-no-focus-target",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "Under stable retired-only marking, cancellation invokes a return script whose two possible destinations are both absent. This is a supported keyboard-focus regression, not an inferred destructive consequence.",
+          "checks": [
+            "04d85f0c98a9b635709d00b056719a0baa7fd3fc:crates/farhelm-ui/src/list/marking.rs:103-106,234-242 rejects retired rows from every metadata action, and :358-389 omits the toggle when order is empty. The marked count, Delete and Clear survive at :337-395.",
+            "Same revision:list/view.rs:5391-5417 chooses MarkedBar instead of SortMenu while marks remain. :4375-4379 consumes only the question and calls lifecycle::CANCEL_FOCUS, so marks and the absent-sort state persist.",
+            "Same revision:list/lifecycle.rs:263 selects only .marked-menu-toggle or .sort-title; :313-327 routes Escape and Close through on_cancel. modal_dialog.rs:137-148 schedules only that supplied body and explicitly documents missing-target no-op behavior.",
+            "Same revision:list/shared.rs:44-65 confirms live/with-tabs rows can require confirmation. The claim remains conditional on retained last-known live/tab facts and confirmations enabled, not on all retired rows. Tip 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db still omits the empty-order toggle (marking.rs:402) and uses the same cancellation selector (lifecycle.rs:417). Source only; activeElement was not observed."
+          ],
+          "coverage_checked": [
+            "SPEC.md:2176-2240 preserves marks on cancellation; :3282-3287 requires opener focus return. SPEC_impl.md:1204-1214 prescribes the enabled toolbar menu for cancellation but does not accept its absence.",
+            "Planned is empty (TODO.md:25-27); plans/queue/INDEX.md has no unlanded entries. The landed podman retirement plan supplies Delete-only context, not a focus fix.",
+            "BUGS.md has no focus exception. INDEX.md searches found templates-close-targets-disabled-bulk-button.md and bulk-completion-focuses-sort.md; both files were read. Templates targets a disabled surviving button, and bulk completion removes marks/toolbar. Neither covers cancellation with preserved marks and no toggle. Active ledger menu-close/menu-blur discard sections concern unrelated delayed focus ordering.",
+            "FILTER.md does not match: no narrow race, crash or unusual-size premise is required; the missing return repeats for the supported stable state."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": "Physical browser focus after close was not measured. The established defect is the missing deterministic rendered return target under stable state; unrelated navigation may independently place focus.",
+          "original_stronger_consequence": "Keyboard focus lost after cancelling retired-only bulk Delete. Later wording qualifies the stable rendered-state premise; no security or user-work-loss consequence was alleged.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Keep a new other-priority item. Existing focus items share a destination policy but require different fixes at different close owners; they are related, not exact coverage."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": true,
+        "clearly_refuted_candidate": false,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Source-confirmed by an existing parent decision; not runtime reproduced",
+        "deduplication_key": "retired-only-bulk-delete-cancel-has-no-focus-target",
+        "destination": "trailing-retired-only-bulk-delete-cancel-has-no-focus-target.md"
+      }
+    },
+    {
+      "key": "g035/c2",
+      "owner": "g035",
+      "id": "c2",
+      "domain": "gui-session-lifecycle",
+      "purpose": "gui-session-lifecycle: crates/farhelm-ui/src/list/shared.rs, crates/farhelm-ui/src/list/trash.rs, crates/farhelm-ui/src/list/view.rs, crates/farhelm-ui/src/rows.rs, crates/farhelm-ui/src/list/lifecycle.rs, crates/farhelm-ui/src/list/row.rs, crates/farhelm-ui/src/list/marking.rs, crates/farhelm-ui/src/list/bell.rs; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 4,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c2",
+            "state": "open",
+            "summary": "Trash removal of generic feed and fallback reads retains scoped invalidation",
+            "location": "crates/farhelm-ui/src/list/view.rs:2318",
+            "detail": "Reviewed commit: 06d4b68f3a9e913f47cd426fedee5946a4eed77b. TLDR: considered whether removing Trash reads from ordinary fleet events and fallback ticks makes another client's accepted cleanup or archive invisible indefinitely. Source checks refute this within the specified same-helm scope: sessions.rs:629-635 advances the host epoch on nonempty cleanup acceptance before waking the fleet; sessions.rs:3373-3379 and 4194-4199 do so for archived Delete/Replace; notices.rs:262-266 does so for changed notice observations; hosts.rs:547 publishes it in host views. HostTrashReader at trash.rs:690-698 observes the host epoch and 738-768 delivers changed news/recovery through its existing reader, with active-removal timer at 785-807. Local explicit requests remain counted, including ones paused by registry/deletion eligibility. Contract SPEC_impl.md Archived-checkout trash states exactly: 'Ordinary fleet events and fallback ticks do not themselves read Trash. Changes through another helm are noticed on reconnect, app load or dialog open.' Suggested bucket: high if lost invalidation were real, but source-refuted for same-helm changes and explicitly accepted for another helm. Confidence: confirmed from source only. proposed_drop: source refutation and exact cross-helm acceptance above. possible_cover: none beyond cited spec. Could-be-highest: no; considered consequence was a stale count/removal indicator, not deletion beyond frozen IDs or loss of work. No runtime behavior observed."
+          }
+        },
+        {
+          "line": 10,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c2",
+            "state": "open",
+            "summary": "Trash epoch delivery works only when the host refresh is actually woken",
+            "location": "crates/farhelm-ui/src/list/view.rs:2318",
+            "detail": "Reviewed commit: 06d4b68f3a9e913f47cd426fedee5946a4eed77b. Revision reason: discovery-neighbours supplies g022/f2, which invalidates the earlier unqualified assertion that every archived Delete/Replace publishes its epoch before a guaranteed fleet wake. Original possible consequence retained: other clients keep a stale or missing Trash display after archive/cleanup. The local UI check remains sound conditional on epoch delivery: HostTrashReader reacts to changed host trash_epoch and retains paused explicit demand. It does not prove the producer wakes the host listing. g022/f2 establishes that sessions.rs:3377 and 4198 advance the epoch but changed-only manager.forget_session may emit no late wake after an early supervisor SessionsChanged/list already removed the session cache. That separate producer defect is already recorded by g022/f2 and is not a new local finding. The previous c2 proposed-drop basis is narrowed to the UI consumer and explicit cross-helm acceptance; it must not dismiss the same-helm archive wake route. Suggested bucket for the known producer consequence: high as g022 records, no work loss alleged. Confidence: local consumer source mechanism confirmed; producer premise corrected from supplied source-backed interface record. proposed_drop: only local consumer failure refutation and exact cross-helm acceptance ('Changes through another helm are noticed on reconnect, app load or dialog open.'), not a drop of g022/f2. possible_cover: g022/f2, already supplied by caller; no forbidden coverage sources searched. Could-be-highest: no established security or loss-of-work route; files remain archived. Source-only, no runtime observation. No new local lead is needed for an already owned, synthesized defect."
+          }
+        }
+      ],
+      "latest": {
+        "line": 10,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c2",
+          "state": "open",
+          "summary": "Trash epoch delivery works only when the host refresh is actually woken",
+          "location": "crates/farhelm-ui/src/list/view.rs:2318",
+          "detail": "Reviewed commit: 06d4b68f3a9e913f47cd426fedee5946a4eed77b. Revision reason: discovery-neighbours supplies g022/f2, which invalidates the earlier unqualified assertion that every archived Delete/Replace publishes its epoch before a guaranteed fleet wake. Original possible consequence retained: other clients keep a stale or missing Trash display after archive/cleanup. The local UI check remains sound conditional on epoch delivery: HostTrashReader reacts to changed host trash_epoch and retains paused explicit demand. It does not prove the producer wakes the host listing. g022/f2 establishes that sessions.rs:3377 and 4198 advance the epoch but changed-only manager.forget_session may emit no late wake after an early supervisor SessionsChanged/list already removed the session cache. That separate producer defect is already recorded by g022/f2 and is not a new local finding. The previous c2 proposed-drop basis is narrowed to the UI consumer and explicit cross-helm acceptance; it must not dismiss the same-helm archive wake route. Suggested bucket for the known producer consequence: high as g022 records, no work loss alleged. Confidence: local consumer source mechanism confirmed; producer premise corrected from supplied source-backed interface record. proposed_drop: only local consumer failure refutation and exact cross-helm acceptance ('Changes through another helm are noticed on reconnect, app load or dialog open.'), not a drop of g022/f2. possible_cover: g022/f2, already supplied by caller; no forbidden coverage sources searched. Could-be-highest: no established security or loss-of-work route; files remain archived. Source-only, no runtime observation. No new local lead is needed for an already owned, synthesized defect."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g035/findings.jsonl",
+        "id": "c2",
+        "line": 10,
+        "disposition": "duplicate",
+        "group": "archive-trash-epoch-lacks-unconditional-fleet-wake",
+        "reason": "Parent read claims-012 g022/f2's complete early-list-before-epoch route and claims-021 g035/c2. Conditional UI consumer correctness in trash.rs:690-698,738-764 cannot ensure epoch delivery. g022/f2 already retains the exact same-helm producer failure: supervisor removal hint can be consumed before archive completion, epoch later advances, and changed-only cache forgetting supplies no second fleet wake. This alias adds consumer corroboration and withdraws its earlier guaranteed-wake refutation. Both originalIDs/wording remain; existing cross-helm reconnect-only acceptance covers only that separate branch. Files remain retrievable and high reflects the retained idle cross-window count consequence, not data loss."
+      },
+      "accepted_parent_decision": {
+        "key": "g035/c2",
+        "line": 10,
+        "disposition": "duplicate",
+        "group": "archive-trash-epoch-lacks-unconditional-fleet-wake",
+        "bucket": "high",
+        "recording": "same-producer-defect",
+        "needs_independent_drop_check": false,
+        "reason": "Parent read claims-012 g022/f2's complete early-list-before-epoch route and claims-021 g035/c2. Conditional UI consumer correctness in trash.rs:690-698,738-764 cannot ensure epoch delivery. g022/f2 already retains the exact same-helm producer failure: supervisor removal hint can be consumed before archive completion, epoch later advances, and changed-only cache forgetting supplies no second fleet wake. This alias adds consumer corroboration and withdraws its earlier guaranteed-wake refutation. Both originalIDs/wording remain; existing cross-helm reconnect-only acceptance covers only that separate branch. Files remain retrievable and high reflects the retained idle cross-window count consequence, not data loss."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-021",
+          "key": "g035/c2",
+          "latest_line": 10,
+          "recommendation": "needs-parent",
+          "bucket": "high",
+          "underlying_key": "archive-trash-epoch-has-no-guaranteed-post-epoch-fleet-wake",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The UI consumer refutation is valid only if a changed host epoch is delivered. The original same-helm archive consequence is not refuted by that check. Preserve the supplied separately owned producer claim for parent reconciliation rather than writing or dismissing a second finding here.",
+          "checks": [
+            "06d4b68f3a9e913f47cd426fedee5946a4eed77b:crates/farhelm-ui/src/list/trash.rs:690-698 observes host trash_epoch; :738-764 requests Notice on epoch changes/recovery and preserves explicit revision/open changes. This supports the conditional consumer conclusion.",
+            "Same revision:crates/farhelm-helm/src/sessions.rs:3373-3379,4194-4199 increments the archive epoch before subsequent forgetting; manager.rs:2406-2434 makes its fleet bump conditional on actual cache change. Therefore the earlier assertion of a guaranteed late wake is too strong.",
+            "The supplied history attributes the early-event/changed-only wake route to g022/f2. This consultation did not inspect that other record or independently reconstruct its complete producer sequence. No runtime observation."
+          ],
+          "coverage_checked": [
+            "SPEC_impl.md:4039-4059 requires same-helm epoch invalidation but expressly accepts delayed discovery through another helm. That acceptance covers the other-helm branch only.",
+            "TODO Planned and the unlanded-plan index are empty; BUGS.md has no Trash entry. INDEX.md searches found no exact post-archive epoch/wake item. trash-read-eligibility-can-remain-cached.md was read and concerns admitting extra reads during cleanup, not missing epoch delivery.",
+            "Active TRIAGE_OUTCOMES.md Trash matches concern alias movement and a test witness; neither covers archive producer wakes. No filter proposed for the unrefuted producer route: a wrong count can persist without a delivered cause, and this record does not establish the full recovery boundary."
+          ],
+          "exact_cover_quotes": [
+            "SPEC_impl.md:4051-4052: Ordinary fleet events and fallback ticks do not themselves read Trash. Changes through another helm are noticed on reconnect, app load or dialog open."
+          ],
+          "missing_premise": "Parent must reconcile g022/f2's complete supported early-list-before-epoch sequence and its final priority. Conditional consumer correctness alone cannot dismiss that producer route.",
+          "original_stronger_consequence": "Another client's accepted cleanup/archive remains stale or missing in Trash. The original unqualified same-helm invalidation refutation was withdrawn; cross-helm delayed discovery remains explicitly accepted. Files remain archived; no work-loss route was alleged.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Do not create a second local consumer finding, and do not count the broad candidate as source-refuted. Keep the producer consequence with its owning claim; high is the supplied producer suggestion pending parent reconciliation."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": true,
+        "clearly_refuted_candidate": false,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "high",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "archive-trash-epoch-lacks-unconditional-fleet-wake",
+        "destination": "trailing-archive-trash-epoch-lacks-unconditional-fleet-wake.md"
+      }
+    },
+    {
+      "key": "g035/c3",
+      "owner": "g035",
+      "id": "c3",
+      "domain": "gui-session-lifecycle",
+      "purpose": "gui-session-lifecycle: crates/farhelm-ui/src/list/shared.rs, crates/farhelm-ui/src/list/trash.rs, crates/farhelm-ui/src/list/view.rs, crates/farhelm-ui/src/rows.rs, crates/farhelm-ui/src/list/lifecycle.rs, crates/farhelm-ui/src/list/row.rs, crates/farhelm-ui/src/list/marking.rs, crates/farhelm-ui/src/list/bell.rs; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 5,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c3",
+            "state": "open",
+            "summary": "Removing page-token ownership preserves the specified launch-target checks",
+            "location": "crates/farhelm-ui/src/list/view.rs:2607",
+            "detail": "Reviewed commit: 1d24c6af0b6fdbbec854623ff53f90281b8271ab. TLDR: considered whether removing the global launch/host token from Stop and suspend allows it to race a launch the UI promises to exclude. Row's confirming answer synchronously checks host_ops.launch_targets_now(host) before sending the rendered Stop token and guards (row.rs:2391-2403); confirm_stop_suspend takes that token then admits the work synchronously (view.rs:2607-2621). The header adapter independently checks ops.launch_targets_now both at start and execute (sandbox_sessions.rs:265-329); ordinary Stop never needs this exclusion. The governing contract explicitly narrows the exclusion: SPEC_impl.md GUI: Dioxus says 'Suspend and Resume, from Hosts or a sandbox session (Stop and suspend included), are not registry mutations and never claim it' and 'those controls are refused while it names their host, at the click and again at the answer.' This patch follows that rule; it does not promise exclusion against launches begun after admission. Suggested bucket: other for the considered availability race; confidence: confirmed source/contract analysis only. proposed_drop: exact specification acceptance plus source checks above. possible_cover: none. Could-be-highest: no established work-loss route, only considered launch/suspension ordering. No execution or reproduction."
+          }
+        }
+      ],
+      "latest": {
+        "line": 5,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c3",
+          "state": "open",
+          "summary": "Removing page-token ownership preserves the specified launch-target checks",
+          "location": "crates/farhelm-ui/src/list/view.rs:2607",
+          "detail": "Reviewed commit: 1d24c6af0b6fdbbec854623ff53f90281b8271ab. TLDR: considered whether removing the global launch/host token from Stop and suspend allows it to race a launch the UI promises to exclude. Row's confirming answer synchronously checks host_ops.launch_targets_now(host) before sending the rendered Stop token and guards (row.rs:2391-2403); confirm_stop_suspend takes that token then admits the work synchronously (view.rs:2607-2621). The header adapter independently checks ops.launch_targets_now both at start and execute (sandbox_sessions.rs:265-329); ordinary Stop never needs this exclusion. The governing contract explicitly narrows the exclusion: SPEC_impl.md GUI: Dioxus says 'Suspend and Resume, from Hosts or a sandbox session (Stop and suspend included), are not registry mutations and never claim it' and 'those controls are refused while it names their host, at the click and again at the answer.' This patch follows that rule; it does not promise exclusion against launches begun after admission. Suggested bucket: other for the considered availability race; confidence: confirmed source/contract analysis only. proposed_drop: exact specification acceptance plus source checks above. possible_cover: none. Could-be-highest: no established work-loss route, only considered launch/suspension ordering. No execution or reproduction."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g035/findings.jsonl",
+        "id": "c3",
+        "line": 5,
+        "disposition": "under-investigation",
+        "group": "g035-c3",
+        "reason": "Record durably acknowledged; parent source/contract validation, cross-group synthesis, coverage/filter matching and any independent drop check remain pending. This preserves the claim and uncertainty without accepting, dropping or lowering it."
+      },
+      "accepted_parent_decision": null,
+      "returned_claim_checks": [
+        {
+          "batch": "claims-021",
+          "key": "g035/c3",
+          "latest_line": 5,
+          "recommendation": "refuted",
+          "bucket": "other",
+          "underlying_key": "sandbox-page-token-removal-preserves-launch-target-admission",
+          "aliases": [
+            "g036/c2"
+          ],
+          "target_queue_file": null,
+          "why": "Removing the global token does not remove the specified same-host checks. The candidate assumes broader exclusion after admission than the contract promises.",
+          "checks": [
+            "1d24c6af0b6fdbbec854623ff53f90281b8271ab:crates/farhelm-ui/src/list/row.rs:2391-2403 disables and synchronously rechecks launch_targets_now before forwarding the rendered Stop-and-suspend answer.",
+            "Same revision:sandbox_sessions.rs:262-272 checks the host target again at execute, including after activity read/question; :292-300 refuses at start. ops.rs:49-58 records the launch's resolved existing host synchronously.",
+            "The conclusion is UI admission only, not proof of every backend lifecycle/launch ordering or a launch begun after this action's admission. Source only."
+          ],
+          "coverage_checked": [
+            "SPEC_impl.md:1143-1151 explicitly removes these controls from page-token claims and defines click/answer host-target refusal. SPEC.md:1894-1905 allows independent session navigation/actions; no broader exclusion found.",
+            "TODO Planned and plans/queue/INDEX.md are empty; BUGS.md has no matching exception. INDEX.md/active ledger searches found no exact token-removal item. Stored sandbox overlap/guard plans provide historical context, not an unlanded fix."
+          ],
+          "exact_cover_quotes": [
+            "SPEC_impl.md:1144-1148: Suspend and Resume, from Hosts or a sandbox session (Stop and suspend included), are not registry mutations and never claim it. The token instead records the existing host a launch resolved ... and those controls are refused while it names their host, at the click and again at the answer."
+          ],
+          "missing_premise": null,
+          "original_stronger_consequence": "Stop and suspend could race an already accepted same-host launch after page-token removal. Only an availability/ordering concern was established; no loss-of-work route was shown.",
+          "needs_independent_drop_check": true,
+          "proposed_basis": "Narrow source refutation plus explicit contract. Flagged conservatively for independent checking because the considered path includes the process-ending Stop-and-suspend action; this consultation is not that check."
+        }
+      ],
+      "parent_proposals": [
+        {
+          "artifact": "parent-flagged-judgments-021.json",
+          "key": "g035/c3",
+          "proposal": "claim-checks/claims-021/result.json",
+          "parent_proposal": "source-refuted-same-host-launch-admission-after-global-token-removal",
+          "final_independent_gate": "required-by-conservative-stop-work-flag",
+          "reason": "Parent read full021; ops synchronously records resolvedhost, Controls checks startandexecute afteractivity/question, rowanswer independentlyrechecks. ExactSPECneverclaimregistrytoken/click-answerhosttargetrule met. ProposedonlyUIadmissionrefutation, notbackendlifecycleordering/launchadmittedlater. Preserveoriginalavailability/possibleprocess-endingfamily forfreshgate;036c2samerootevidencebutbothhistoriesincluded."
+        }
+      ],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": true,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "sandbox-page-token-removal-preserves-launch-target-admission",
+        "destination": null
+      }
+    },
+    {
+      "key": "g035/c4",
+      "owner": "g035",
+      "id": "c4",
+      "domain": "gui-session-lifecycle",
+      "purpose": "gui-session-lifecycle: crates/farhelm-ui/src/list/shared.rs, crates/farhelm-ui/src/list/trash.rs, crates/farhelm-ui/src/list/view.rs, crates/farhelm-ui/src/rows.rs, crates/farhelm-ui/src/list/lifecycle.rs, crates/farhelm-ui/src/list/row.rs, crates/farhelm-ui/src/list/marking.rs, crates/farhelm-ui/src/list/bell.rs; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 6,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c4",
+            "state": "open",
+            "summary": "Environment host options preserve recipe and placement together",
+            "location": "crates/farhelm-ui/src/list/shared.rs:675",
+            "detail": "Reviewed commit: 350a4b33b6d4476f4a78e43cea124bc2b828f462. TLDR: considered whether replacing the recipe string with a shared target lets Clone reuse the disposable host or lose its container placement. Refuted by source: host_options copies environment.target atomically, retaining recipe and place; only legacy Tensorlake metadata constructs a TensorlakeAccount target (shared.rs:675-690). default_create_host rejects session_owned sources (549-558); local fallback derives only HostKind::is_this_machine. Clone prefill copies the session-owned host's environment_target, while modes holding their host select no fresh target (create_form/draft.rs:2935-2946, 2980-2988). Contract SPEC.md Sandbox sessions: 'Clone targets the recipe for a fresh sandbox with the source’s launch and repository intent, never a copy of its disk' (source text uses ASCII apostrophe); Container sessions: 'Clone creates a new container from the recipe at its selected place, with repository intent and no disk copy.' Suggested bucket: other for a potential incorrect create destination, refuted. Confidence: confirmed source only. proposed_drop: source refutation above. possible_cover: none. Could-be-highest: no established security or loss-of-work route; no destructive action is implicated. No runtime observations."
+          }
+        }
+      ],
+      "latest": {
+        "line": 6,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c4",
+          "state": "open",
+          "summary": "Environment host options preserve recipe and placement together",
+          "location": "crates/farhelm-ui/src/list/shared.rs:675",
+          "detail": "Reviewed commit: 350a4b33b6d4476f4a78e43cea124bc2b828f462. TLDR: considered whether replacing the recipe string with a shared target lets Clone reuse the disposable host or lose its container placement. Refuted by source: host_options copies environment.target atomically, retaining recipe and place; only legacy Tensorlake metadata constructs a TensorlakeAccount target (shared.rs:675-690). default_create_host rejects session_owned sources (549-558); local fallback derives only HostKind::is_this_machine. Clone prefill copies the session-owned host's environment_target, while modes holding their host select no fresh target (create_form/draft.rs:2935-2946, 2980-2988). Contract SPEC.md Sandbox sessions: 'Clone targets the recipe for a fresh sandbox with the source’s launch and repository intent, never a copy of its disk' (source text uses ASCII apostrophe); Container sessions: 'Clone creates a new container from the recipe at its selected place, with repository intent and no disk copy.' Suggested bucket: other for a potential incorrect create destination, refuted. Confidence: confirmed source only. proposed_drop: source refutation above. possible_cover: none. Could-be-highest: no established security or loss-of-work route; no destructive action is implicated. No runtime observations."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g035/findings.jsonl",
+        "id": "c4",
+        "line": 6,
+        "disposition": "excluded",
+        "group": "clone-environment-target-preserves-recipe-and-place",
+        "reason": "Parent explicitly accepted named refuted proposal from claims-021 after inspecting it. The target copy retains both recipe and place, and ordinary-host defaulting excludes session-owned hosts. The feared reuse/lost-placement route is contradicted by the named code. Source refutation of the specific target-copy/defaulting candidate; does not dismiss the separate asynchronous Clone-choice overwrite item. Checked source/results: [\"350a4b33b6d4476f4a78e43cea124bc2b828f462:crates/farhelm-ui/src/list/shared.rs:675-685 copies environment.target intact; only legacy Tensorlake metadata constructs TensorlakeAccount. :549-556 excludes session_owned from ordinary host defaulting.\",\"Corrected reference: the draft is crates/farhelm-ui/src/list/create_form/draft.rs, not src/create_form/draft.rs. At this revision :2937-2946 and :2980-2987 seed the disposable target only for modes not holding their existing host. Source only.\"] Current coverage/results: [\"SPEC.md Sandbox sessions Clone rule and Container sessions:4832-4834 require a fresh recipe environment retaining selected place. SPEC_impl.md Environment Delete/ownership sections do not accept a wrong Clone destination.\",\"Planned and unlanded-plan index are empty; BUGS has no Clone exception. INDEX.md/active ledger searches found clone-read-overwrites-manual-recipe-choice.md, whose described late-read/manual-choice trigger is distinct from loss in host_options' target copy. No exact coverage needed to establish the source refutation.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Clone could reuse the disposable host or lose its container placement. No destructive action, credential disclosure or loss-of-work route was alleged.\"; null."
+      },
+      "accepted_parent_decision": {
+        "key": "g035/c4",
+        "line": 6,
+        "disposition": "excluded",
+        "group": "clone-environment-target-preserves-recipe-and-place",
+        "bucket": "other",
+        "recording": "refuted",
+        "queue_target_candidate": null,
+        "needs_independent_drop_check": false,
+        "reason": "Parent explicitly accepted named refuted proposal from claims-021 after inspecting it. The target copy retains both recipe and place, and ordinary-host defaulting excludes session-owned hosts. The feared reuse/lost-placement route is contradicted by the named code. Source refutation of the specific target-copy/defaulting candidate; does not dismiss the separate asynchronous Clone-choice overwrite item. Checked source/results: [\"350a4b33b6d4476f4a78e43cea124bc2b828f462:crates/farhelm-ui/src/list/shared.rs:675-685 copies environment.target intact; only legacy Tensorlake metadata constructs TensorlakeAccount. :549-556 excludes session_owned from ordinary host defaulting.\",\"Corrected reference: the draft is crates/farhelm-ui/src/list/create_form/draft.rs, not src/create_form/draft.rs. At this revision :2937-2946 and :2980-2987 seed the disposable target only for modes not holding their existing host. Source only.\"] Current coverage/results: [\"SPEC.md Sandbox sessions Clone rule and Container sessions:4832-4834 require a fresh recipe environment retaining selected place. SPEC_impl.md Environment Delete/ownership sections do not accept a wrong Clone destination.\",\"Planned and unlanded-plan index are empty; BUGS has no Clone exception. INDEX.md/active ledger searches found clone-read-overwrites-manual-recipe-choice.md, whose described late-read/manual-choice trigger is distinct from loss in host_options' target copy. No exact coverage needed to establish the source refutation.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Clone could reuse the disposable host or lose its container placement. No destructive action, credential disclosure or loss-of-work route was alleged.\"; null."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-021",
+          "key": "g035/c4",
+          "latest_line": 6,
+          "recommendation": "refuted",
+          "bucket": "other",
+          "underlying_key": "clone-environment-target-preserves-recipe-and-place",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The target copy retains both recipe and place, and ordinary-host defaulting excludes session-owned hosts. The feared reuse/lost-placement route is contradicted by the named code.",
+          "checks": [
+            "350a4b33b6d4476f4a78e43cea124bc2b828f462:crates/farhelm-ui/src/list/shared.rs:675-685 copies environment.target intact; only legacy Tensorlake metadata constructs TensorlakeAccount. :549-556 excludes session_owned from ordinary host defaulting.",
+            "Corrected reference: the draft is crates/farhelm-ui/src/list/create_form/draft.rs, not src/create_form/draft.rs. At this revision :2937-2946 and :2980-2987 seed the disposable target only for modes not holding their existing host. Source only."
+          ],
+          "coverage_checked": [
+            "SPEC.md Sandbox sessions Clone rule and Container sessions:4832-4834 require a fresh recipe environment retaining selected place. SPEC_impl.md Environment Delete/ownership sections do not accept a wrong Clone destination.",
+            "Planned and unlanded-plan index are empty; BUGS has no Clone exception. INDEX.md/active ledger searches found clone-read-overwrites-manual-recipe-choice.md, whose described late-read/manual-choice trigger is distinct from loss in host_options' target copy. No exact coverage needed to establish the source refutation."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": null,
+          "original_stronger_consequence": "Clone could reuse the disposable host or lose its container placement. No destructive action, credential disclosure or loss-of-work route was alleged.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Source refutation of the specific target-copy/defaulting candidate; does not dismiss the separate asynchronous Clone-choice overwrite item."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "clone-environment-target-preserves-recipe-and-place",
+        "destination": null
+      }
+    },
+    {
+      "key": "g035/l2",
+      "owner": "g035",
+      "id": "l2",
+      "domain": "gui-session-lifecycle",
+      "purpose": "gui-session-lifecycle: crates/farhelm-ui/src/list/shared.rs, crates/farhelm-ui/src/list/trash.rs, crates/farhelm-ui/src/list/view.rs, crates/farhelm-ui/src/rows.rs, crates/farhelm-ui/src/list/lifecycle.rs, crates/farhelm-ui/src/list/row.rs, crates/farhelm-ui/src/list/marking.rs, crates/farhelm-ui/src/list/bell.rs; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 11,
+          "event": {
+            "version": 1,
+            "kind": "lead",
+            "id": "l2",
+            "state": "open",
+            "summary": "Stopped-waiting row may render an item absent from its keyboard menu order",
+            "location": "crates/farhelm-ui/src/list/row.rs:1377",
+            "detail": "Reviewed commit: 350a4b33b6d4476f4a78e43cea124bc2b828f462. TLDR: while a stopped container is waiting for its container host, its row may show a disabled Stop and suspend item that keyboard menu navigation cannot reach. This is distinct from ordinary direction callback substitution and c1's actionable-direction question. Source basis already read: row.rs:1377-1382 treats every Stopped as resume-only menu shape, but sandbox_sessions.rs:230-245 treats Stopped(waiting_for_place:true) as changing and not suspended, so ControlButtons.resume=false. The row adapter renders Stop and suspend whenever !controls.resume at row.rs:2797 onward. Need check menu_order_with_sandbox's actual inclusion predicate, keyboard/focus wiring, and whether shipped manager/UI states publish this waiting variant to session-owned rows at this exact revision. Suggested bucket: other for a disabled-command navigation inconsistency if reachable. Could-be-highest: no; action remains disabled. Confidence: uninvestigated lead; no runtime observation. proposed_drop: false. possible_cover: c1 overlaps state projection but did not investigate disabled item keyboard reachability; no duplicate user-visible destructive route. Next checks: order helper, focus helper, waiting_for_place publisher and full-range attribution."
+          }
+        },
+        {
+          "line": 12,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "l2",
+            "state": "open",
+            "summary": "A stopped-waiting container row renders an item omitted from keyboard navigation",
+            "location": "crates/farhelm-ui/src/list/row.rs:1377",
+            "detail": "Reviewed commit: 350a4b33b6d4476f4a78e43cea124bc2b828f462. TLDR: while a stopped container waits for its container host, its row menu visibly includes disabled Stop and suspend, but keyboard arrow navigation skips it. Focus bookkeeping also ignores it if assistive technology focuses it directly. This is a disabled-menu navigation inconsistency, not an unintended lifecycle mutation. Details: the changed sandbox_menu_state at row.rs:1377-1382 treats every HostPhase::Stopped as true. session_menu_order_with_sandbox at row.rs:249-268 includes StopSuspend only for Some(false), so it excludes that action. Controls has a different boundary: sandbox_sessions.rs:230-245 counts Stopped as suspended/resume only when waiting_for_place=false; waiting_for_place=true sets changing=true and suspended=false. Its ControlButtons at 340-341 therefore carries resume=false and disabled=true. The row adapter at 2797-2821 renders Stop and suspend whenever !controls.resume, leaving a visible aria-disabled menu item absent from menu_order. It always has tabindex=-1; arrow/Home/End selection uses only order in menu_panel.rs:781-819 and 893-913, and record_menu_item_focus returns early when order has no position for the action (737-743). Tab treats current=None as the toggle rather than an item (795-796). The manager publishes the waiting phase from its real place-connectivity gate at manager.rs:3842-3861 and 3889; cached session rows remain inspectable on unavailable hosts. The existing manager test at 13220-13252 confirms the intended state model with an unavailable place and a stopped environment, but was read only, not run. SPEC_impl.md GUI: Dioxus at 1025-1037 says disabled commands remain focusable, arrows step from whichever item actually has focus, and inert menu items stay focusable with aria-disabled. Keep the rendered and navigable action projection identical, including the waiting-for-place distinction, or omit the item from both. Attribution: the full exclusive-base-to-reviewed diff changes the row's predicate from only sandbox_suspended to all Stopped in this commit; Stopped/provider controls are newly introduced in the range. Endpoint diff through 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db retains the all-Stopped predicate and the ControlButtons.resume boundary; later retired-row filtering does not fix ordinary provider-backed container rows. Suggested bucket: other, narrow keyboard/accessibility correctness. Confidence: confirmed source/contract projection mismatch; physical menu navigation not executed. Could-be-highest: no; changing disables the action and no request or loss-of-work route is alleged. proposed_drop: false. possible_cover: c1 shares the state projection but did not settle disabled-item keyboard reachability; g025 direction binding is a different cause/consequence. No forbidden coverage source, runtime test, reproduction or live-install action used. No missing source premise remains for the conditional rendered mismatch; runtime incidence unmeasured."
+          }
+        },
+        {
+          "line": 14,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "l2",
+            "state": "open",
+            "summary": "A stopped-waiting container row renders an item omitted from keyboard navigation",
+            "location": "crates/farhelm-ui/src/list/row.rs:1377",
+            "detail": "Reviewed commit: 350a4b33b6d4476f4a78e43cea124bc2b828f462. TLDR: while a stopped container waits for its container host, its row menu visibly includes disabled Stop and suspend, but keyboard arrow navigation skips it. Focus bookkeeping also ignores it if assistive technology focuses it directly. This is a disabled-menu navigation inconsistency, not an unintended lifecycle mutation. Details: the changed sandbox_menu_state at row.rs:1377-1382 treats every HostPhase::Stopped as true. session_menu_order_with_sandbox at row.rs:249-268 includes StopSuspend only for Some(false), so it excludes that action. Controls has a different boundary: sandbox_sessions.rs:230-245 counts Stopped as suspended/resume only when waiting_for_place=false; waiting_for_place=true sets changing=true and suspended=false. Its ControlButtons at 340-341 therefore carries resume=false and disabled=true. The row adapter at 2797-2821 renders Stop and suspend whenever !controls.resume, leaving a visible aria-disabled menu item absent from menu_order. It always has tabindex=-1; arrow/Home/End selection uses only order in menu_panel.rs:781-819 and 893-913, and record_menu_item_focus returns early when order has no position for the action (737-743). Tab treats current=None as the toggle rather than an item (795-796). The manager publishes the waiting phase from its real place-connectivity gate at manager.rs:3842-3861 and 3889; cached session rows remain inspectable on unavailable hosts. The existing manager test at 13220-13252 confirms the intended state model with an unavailable place and a stopped environment, but was read only, not run. SPEC_impl.md GUI: Dioxus at 1025-1037 says disabled commands remain focusable, arrows step from whichever item actually has focus, and inert menu items stay focusable with aria-disabled. Keep the rendered and navigable action projection identical, including the waiting-for-place distinction, or omit the item from both. Attribution: the full exclusive-base-to-reviewed diff changes the row's predicate from only sandbox_suspended to all Stopped in this commit; Stopped/provider controls are newly introduced in the range. Endpoint diff through 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db retains the all-Stopped predicate and the ControlButtons.resume boundary; later retired-row filtering does not fix ordinary provider-backed container rows. Suggested bucket: other, narrow keyboard/accessibility correctness. Confidence: confirmed source/contract projection mismatch; physical menu navigation not executed. Could-be-highest: no; changing disables the action and no request or loss-of-work route is alleged. proposed_drop: false. possible_cover: c1 shares the state projection but did not settle disabled-item keyboard reachability; g025 direction binding is a different cause/consequence. No forbidden coverage source, runtime test, reproduction or live-install action used. No missing source premise remains for the conditional rendered mismatch; runtime incidence unmeasured. Follow-up admission check: row.rs:2148-2156 deliberately leaves the menu toggle enabled under unavailable/nav-lock conditions. ListView at 5919-5954 renders cached rows and derives row busy only from local pending/session claims, not Stopped. Thus an otherwise idle stopped-waiting row can open the mismatched menu; no active launch or local lifecycle claim is required. The frozen projection dims the row and disables individual lifecycle items, but does not suppress the panel. No execution was used for this premise."
+          }
+        }
+      ],
+      "latest": {
+        "line": 14,
+        "event": {
+          "version": 1,
+          "kind": "finding",
+          "id": "l2",
+          "state": "open",
+          "summary": "A stopped-waiting container row renders an item omitted from keyboard navigation",
+          "location": "crates/farhelm-ui/src/list/row.rs:1377",
+          "detail": "Reviewed commit: 350a4b33b6d4476f4a78e43cea124bc2b828f462. TLDR: while a stopped container waits for its container host, its row menu visibly includes disabled Stop and suspend, but keyboard arrow navigation skips it. Focus bookkeeping also ignores it if assistive technology focuses it directly. This is a disabled-menu navigation inconsistency, not an unintended lifecycle mutation. Details: the changed sandbox_menu_state at row.rs:1377-1382 treats every HostPhase::Stopped as true. session_menu_order_with_sandbox at row.rs:249-268 includes StopSuspend only for Some(false), so it excludes that action. Controls has a different boundary: sandbox_sessions.rs:230-245 counts Stopped as suspended/resume only when waiting_for_place=false; waiting_for_place=true sets changing=true and suspended=false. Its ControlButtons at 340-341 therefore carries resume=false and disabled=true. The row adapter at 2797-2821 renders Stop and suspend whenever !controls.resume, leaving a visible aria-disabled menu item absent from menu_order. It always has tabindex=-1; arrow/Home/End selection uses only order in menu_panel.rs:781-819 and 893-913, and record_menu_item_focus returns early when order has no position for the action (737-743). Tab treats current=None as the toggle rather than an item (795-796). The manager publishes the waiting phase from its real place-connectivity gate at manager.rs:3842-3861 and 3889; cached session rows remain inspectable on unavailable hosts. The existing manager test at 13220-13252 confirms the intended state model with an unavailable place and a stopped environment, but was read only, not run. SPEC_impl.md GUI: Dioxus at 1025-1037 says disabled commands remain focusable, arrows step from whichever item actually has focus, and inert menu items stay focusable with aria-disabled. Keep the rendered and navigable action projection identical, including the waiting-for-place distinction, or omit the item from both. Attribution: the full exclusive-base-to-reviewed diff changes the row's predicate from only sandbox_suspended to all Stopped in this commit; Stopped/provider controls are newly introduced in the range. Endpoint diff through 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db retains the all-Stopped predicate and the ControlButtons.resume boundary; later retired-row filtering does not fix ordinary provider-backed container rows. Suggested bucket: other, narrow keyboard/accessibility correctness. Confidence: confirmed source/contract projection mismatch; physical menu navigation not executed. Could-be-highest: no; changing disables the action and no request or loss-of-work route is alleged. proposed_drop: false. possible_cover: c1 shares the state projection but did not settle disabled-item keyboard reachability; g025 direction binding is a different cause/consequence. No forbidden coverage source, runtime test, reproduction or live-install action used. No missing source premise remains for the conditional rendered mismatch; runtime incidence unmeasured. Follow-up admission check: row.rs:2148-2156 deliberately leaves the menu toggle enabled under unavailable/nav-lock conditions. ListView at 5919-5954 renders cached rows and derives row busy only from local pending/session claims, not Stopped. Thus an otherwise idle stopped-waiting row can open the mismatched menu; no active launch or local lifecycle claim is required. The frozen projection dims the row and disables individual lifecycle items, but does not suppress the panel. No execution was used for this premise."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g035/findings.jsonl",
+        "id": "l2",
+        "line": 14,
+        "disposition": "verified",
+        "group": "stopped-waiting-row-menu-order-disagrees-with-render",
+        "reason": "Parent explicitly accepted named retain-verified proposal from claims-021 after inspecting it. A supported stopped/waiting-for-place state draws a disabled Stop and suspend item outside the menu's navigation order. Disabled items are part of the specified keyboard contract. The condition can last as long as its container host is unavailable; rarity filters do not cover it. New other-priority queue item; carry g035/c1 only as history/alias. Checked source/results: [\"350a4b33b6d4476f4a78e43cea124bc2b828f462:crates/farhelm-ui/src/list/row.rs:1377-1381 treats every Stopped as resume-only; :249-268 then excludes StopSuspend. sandbox_sessions.rs:230-245,338-341 makes stopped/waiting resume=false and disabled=true; row.rs:2798-2810 nevertheless renders that item with tabindex=-1.\",\"Same revision:menu_panel.rs:737-743 ignores focus on absent-order actions; :781-819 and :893-914 navigate only order entries. This establishes the conditional rendered/navigation mismatch, not a mutation.\",\"Same revision:crates/farhelm-helm/src/manager.rs:3845-3861 publishes waiting_for_place from the real place-host connectivity gate. row.rs:2149-2156 leaves its menu toggle available; list/view.rs:5919-5948 renders rows and derives local busy from claims/pending requests, not Stopped. A locally idle waiting row can open this menu.\",\"Tip 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db:list/row.rs:1441-1445 retains the all-Stopped order projection. Retired-only filtering is a different row class. Source only; no physical navigation observed.\"] Current coverage/results: [\"SPEC_impl.md:1025-1046 says disabled commands remain focusable and arrows follow actual focused items. SPEC.md:4806-4891 supports Stopped/Resume and unavailable container-host presentation; it does not waive keyboard access.\",\"Planned and the unlanded-plan index are empty; BUGS has no menu exception. INDEX.md and active ledger searches found no stopped-waiting order item. sandbox-row-menu-owns-transient-lifecycle-state.md was read and concerns scope teardown, not omitted keyboard order.\",\"FILTER.md: no required short-lived timing window or other matching trigger. A disabled command being unreachable by keyboard is also outside the scrollable-explanation filter.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Disabled Stop and suspend is skipped by keyboard navigation and ignored by focus bookkeeping. No unintended lifecycle request or user-work-loss consequence was alleged; refreshed enabled callback authority remains a distinct record.\"; \"Runtime incidence/navigation has not been measured; no missing source premise remains for the stated conditional mismatch.\"."
+      },
+      "accepted_parent_decision": {
+        "key": "g035/l2",
+        "line": 14,
+        "disposition": "verified",
+        "group": "stopped-waiting-row-menu-order-disagrees-with-render",
+        "bucket": "other",
+        "recording": "retain-verified",
+        "queue_target_candidate": null,
+        "needs_independent_drop_check": false,
+        "reason": "Parent explicitly accepted named retain-verified proposal from claims-021 after inspecting it. A supported stopped/waiting-for-place state draws a disabled Stop and suspend item outside the menu's navigation order. Disabled items are part of the specified keyboard contract. The condition can last as long as its container host is unavailable; rarity filters do not cover it. New other-priority queue item; carry g035/c1 only as history/alias. Checked source/results: [\"350a4b33b6d4476f4a78e43cea124bc2b828f462:crates/farhelm-ui/src/list/row.rs:1377-1381 treats every Stopped as resume-only; :249-268 then excludes StopSuspend. sandbox_sessions.rs:230-245,338-341 makes stopped/waiting resume=false and disabled=true; row.rs:2798-2810 nevertheless renders that item with tabindex=-1.\",\"Same revision:menu_panel.rs:737-743 ignores focus on absent-order actions; :781-819 and :893-914 navigate only order entries. This establishes the conditional rendered/navigation mismatch, not a mutation.\",\"Same revision:crates/farhelm-helm/src/manager.rs:3845-3861 publishes waiting_for_place from the real place-host connectivity gate. row.rs:2149-2156 leaves its menu toggle available; list/view.rs:5919-5948 renders rows and derives local busy from claims/pending requests, not Stopped. A locally idle waiting row can open this menu.\",\"Tip 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db:list/row.rs:1441-1445 retains the all-Stopped order projection. Retired-only filtering is a different row class. Source only; no physical navigation observed.\"] Current coverage/results: [\"SPEC_impl.md:1025-1046 says disabled commands remain focusable and arrows follow actual focused items. SPEC.md:4806-4891 supports Stopped/Resume and unavailable container-host presentation; it does not waive keyboard access.\",\"Planned and the unlanded-plan index are empty; BUGS has no menu exception. INDEX.md and active ledger searches found no stopped-waiting order item. sandbox-row-menu-owns-transient-lifecycle-state.md was read and concerns scope teardown, not omitted keyboard order.\",\"FILTER.md: no required short-lived timing window or other matching trigger. A disabled command being unreachable by keyboard is also outside the scrollable-explanation filter.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Disabled Stop and suspend is skipped by keyboard navigation and ignored by focus bookkeeping. No unintended lifecycle request or user-work-loss consequence was alleged; refreshed enabled callback authority remains a distinct record.\"; \"Runtime incidence/navigation has not been measured; no missing source premise remains for the stated conditional mismatch.\"."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-021",
+          "key": "g035/l2",
+          "latest_line": 14,
+          "recommendation": "retain-verified",
+          "bucket": "other",
+          "underlying_key": "stopped-waiting-row-menu-order-disagrees-with-render",
+          "aliases": [
+            "g035/c1"
+          ],
+          "target_queue_file": null,
+          "why": "A supported stopped/waiting-for-place state draws a disabled Stop and suspend item outside the menu's navigation order. Disabled items are part of the specified keyboard contract. The condition can last as long as its container host is unavailable; rarity filters do not cover it.",
+          "checks": [
+            "350a4b33b6d4476f4a78e43cea124bc2b828f462:crates/farhelm-ui/src/list/row.rs:1377-1381 treats every Stopped as resume-only; :249-268 then excludes StopSuspend. sandbox_sessions.rs:230-245,338-341 makes stopped/waiting resume=false and disabled=true; row.rs:2798-2810 nevertheless renders that item with tabindex=-1.",
+            "Same revision:menu_panel.rs:737-743 ignores focus on absent-order actions; :781-819 and :893-914 navigate only order entries. This establishes the conditional rendered/navigation mismatch, not a mutation.",
+            "Same revision:crates/farhelm-helm/src/manager.rs:3845-3861 publishes waiting_for_place from the real place-host connectivity gate. row.rs:2149-2156 leaves its menu toggle available; list/view.rs:5919-5948 renders rows and derives local busy from claims/pending requests, not Stopped. A locally idle waiting row can open this menu.",
+            "Tip 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db:list/row.rs:1441-1445 retains the all-Stopped order projection. Retired-only filtering is a different row class. Source only; no physical navigation observed."
+          ],
+          "coverage_checked": [
+            "SPEC_impl.md:1025-1046 says disabled commands remain focusable and arrows follow actual focused items. SPEC.md:4806-4891 supports Stopped/Resume and unavailable container-host presentation; it does not waive keyboard access.",
+            "Planned and the unlanded-plan index are empty; BUGS has no menu exception. INDEX.md and active ledger searches found no stopped-waiting order item. sandbox-row-menu-owns-transient-lifecycle-state.md was read and concerns scope teardown, not omitted keyboard order.",
+            "FILTER.md: no required short-lived timing window or other matching trigger. A disabled command being unreachable by keyboard is also outside the scrollable-explanation filter."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": "Runtime incidence/navigation has not been measured; no missing source premise remains for the stated conditional mismatch.",
+          "original_stronger_consequence": "Disabled Stop and suspend is skipped by keyboard navigation and ignored by focus bookkeeping. No unintended lifecycle request or user-work-loss consequence was alleged; refreshed enabled callback authority remains a distinct record.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "New other-priority queue item; carry g035/c1 only as history/alias."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": true,
+        "clearly_refuted_candidate": false,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Source-confirmed by an existing parent decision; not runtime reproduced",
+        "deduplication_key": "stopped-waiting-row-menu-order-disagrees-with-render",
+        "destination": "trailing-stopped-waiting-row-menu-order-disagrees-with-render.md"
+      }
+    },
+    {
+      "key": "g035/l3",
+      "owner": "g035",
+      "id": "l3",
+      "domain": "gui-session-lifecycle",
+      "purpose": "gui-session-lifecycle: crates/farhelm-ui/src/list/shared.rs, crates/farhelm-ui/src/list/trash.rs, crates/farhelm-ui/src/list/view.rs, crates/farhelm-ui/src/rows.rs, crates/farhelm-ui/src/list/lifecycle.rs, crates/farhelm-ui/src/list/row.rs, crates/farhelm-ui/src/list/marking.rs, crates/farhelm-ui/src/list/bell.rs; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 15,
+          "event": {
+            "version": 1,
+            "kind": "lead",
+            "id": "l3",
+            "state": "open",
+            "summary": "Retired-menu change may leave the separator rationale claiming Rename is unconditional",
+            "location": "crates/farhelm-ui/src/list/row.rs:1405",
+            "detail": "Reviewed commit: 04d85f0c98a9b635709d00b056719a0baa7fd3fc. TLDR: the row-menu explanation may still tell future maintainers that Rename always precedes Delete, even though this assigned change introduces Delete-only retired rows. Source basis: previously read SessionRow context has the delete_follows_a_separator rationale saying Rename is unconditional and the predicate is always true in practice; assigned patch adds retirement-only menu order and wraps non-Delete rendering in !retired. Need check exact pinned wording, line, parent/base attribution and later persistence before deciding whether this is a distinct inaccurate maintenance explanation. Suspected consequence: misleading documentation about the first-item separator boundary; no runtime separator defect alleged. Suggested bucket: other if confirmed. Could-be-highest: no, documentation of menu layout only. Confidence: uninvestigated lead; no execution. proposed_drop: false. possible_cover: none in own log or refreshed neighbours. Production correctness will be judged separately from the comment's accuracy."
+          }
+        },
+        {
+          "line": 16,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "l3",
+            "state": "open",
+            "summary": "Delete-only retirement leaves the separator explanation claiming every row has Rename",
+            "location": "crates/farhelm-ui/src/list/row.rs:1396",
+            "detail": "Reviewed commit: 04d85f0c98a9b635709d00b056719a0baa7fd3fc. TLDR: the row-menu explanation still tells future maintainers that Rename is unconditional and Delete always has a preceding command. This change introduces Delete-only retired rows, making that explanation false precisely where the conditional separator is now necessary. Details: the retained comment immediately above delete_follows_a_separator says 'Rename is unconditional today, so this is always true in practice' and describes the first-item check as defensive future-proofing. The assigned change switches the actual menu_order call to session_menu_order_for_session at row.rs:1396, whose retired branch packs only Delete (5118-5128); it also wraps all non-Delete rendered commands in !retired (2603-3041). Consequently Delete has position zero on these supported rows, and delete_follows_a_separator is false. Rendering at 3042-3048 correctly omits its separator. The new pure test also asserts Delete at position zero and no second item. Production layout is correct; the distinct defect is the stale rationale teaching that this first-item case never occurs today. Replace the unconditional-Rename claim with the actual ordinary-row/retired-row distinction so future readers understand why the conditional is required. Attribution: excluded-base row.rs:1385-1388 already has the old comment, when the menu still offered Rename unconditionally. The reviewed patch's complete diff introduces the retirement branch and renderer gate but leaves that comment unchanged. Therefore this is new in-range documentation drift caused by changed behavior, not an unrelated pre-range prose defect. Pinned tip row.rs:1463-1466 retains the same inaccurate claim. Governing contract: SPEC.md Retired containerized sessions requires Delete only, and root AGENTS.md requires nearby explanations to track changed invariants. Suggested bucket: other, internal maintenance documentation accuracy only. Could-be-highest: no security, process-loss or data-loss route is alleged or inferred. Confidence: confirmed source/comment contradiction, not execution. proposed_drop: false. possible_cover: none in the complete refreshed neighbours or own prior records; l1/l2 concern different focus/navigation behavior, not this rationale. No tests, reproductions, builds, checkout edits or live-install actions. The originally suspected misleading first-item explanation is retained; no runtime separator defect is claimed."
+          }
+        },
+        {
+          "line": 17,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "l3",
+            "state": "open",
+            "summary": "Delete-only retirement leaves the separator explanation claiming every row has Rename",
+            "location": "crates/farhelm-ui/src/list/row.rs:1415",
+            "detail": "Reviewed commit: 04d85f0c98a9b635709d00b056719a0baa7fd3fc. TLDR: the row-menu explanation still tells future maintainers that Rename is unconditional and Delete always has a preceding command. This change introduces Delete-only retired rows, making that explanation false precisely where the conditional separator is now necessary. Details: the retained comment immediately above delete_follows_a_separator says 'Rename is unconditional today, so this is always true in practice' and describes the first-item check as defensive future-proofing. The assigned change switches the actual menu_order call to session_menu_order_for_session at row.rs:1396, whose retired branch packs only Delete (5118-5128); it also wraps all non-Delete rendered commands in !retired (2603-3041). Consequently Delete has position zero on these supported rows, and delete_follows_a_separator is false. Rendering at 3042-3048 correctly omits its separator. The new pure test also asserts Delete at position zero and no second item. Production layout is correct; the distinct defect is the stale rationale teaching that this first-item case never occurs today. Replace the unconditional-Rename claim with the actual ordinary-row/retired-row distinction so future readers understand why the conditional is required. Attribution: excluded-base row.rs:1385-1388 already has the old comment, when the menu still offered Rename unconditionally. The reviewed patch's complete diff introduces the retirement branch and renderer gate but leaves that comment unchanged. Therefore this is new in-range documentation drift caused by changed behavior, not an unrelated pre-range prose defect. Pinned tip row.rs:1463-1466 retains the same inaccurate claim. Governing contract: SPEC.md Retired containerized sessions requires Delete only, and root AGENTS.md requires nearby explanations to track changed invariants. Suggested bucket: other, internal maintenance documentation accuracy only. Could-be-highest: no security, process-loss or data-loss route is alleged or inferred. Confidence: confirmed source/comment contradiction, not execution. proposed_drop: false. possible_cover: none in the complete refreshed neighbours or own prior records; l1/l2 concern different focus/navigation behavior, not this rationale. No tests, reproductions, builds, checkout edits or live-install actions. The originally suspected misleading first-item explanation is retained; no runtime separator defect is claimed. Numbered source follow-up pins the inaccurate sentence to row.rs:1415-1417 at the reviewed commit, directly above the correct position>0 predicate at 1418-1420. Its original broader location 1396 identifies the changed caller that made the sentence stale. No change to consequence, bucket or confidence."
+          }
+        }
+      ],
+      "latest": {
+        "line": 17,
+        "event": {
+          "version": 1,
+          "kind": "finding",
+          "id": "l3",
+          "state": "open",
+          "summary": "Delete-only retirement leaves the separator explanation claiming every row has Rename",
+          "location": "crates/farhelm-ui/src/list/row.rs:1415",
+          "detail": "Reviewed commit: 04d85f0c98a9b635709d00b056719a0baa7fd3fc. TLDR: the row-menu explanation still tells future maintainers that Rename is unconditional and Delete always has a preceding command. This change introduces Delete-only retired rows, making that explanation false precisely where the conditional separator is now necessary. Details: the retained comment immediately above delete_follows_a_separator says 'Rename is unconditional today, so this is always true in practice' and describes the first-item check as defensive future-proofing. The assigned change switches the actual menu_order call to session_menu_order_for_session at row.rs:1396, whose retired branch packs only Delete (5118-5128); it also wraps all non-Delete rendered commands in !retired (2603-3041). Consequently Delete has position zero on these supported rows, and delete_follows_a_separator is false. Rendering at 3042-3048 correctly omits its separator. The new pure test also asserts Delete at position zero and no second item. Production layout is correct; the distinct defect is the stale rationale teaching that this first-item case never occurs today. Replace the unconditional-Rename claim with the actual ordinary-row/retired-row distinction so future readers understand why the conditional is required. Attribution: excluded-base row.rs:1385-1388 already has the old comment, when the menu still offered Rename unconditionally. The reviewed patch's complete diff introduces the retirement branch and renderer gate but leaves that comment unchanged. Therefore this is new in-range documentation drift caused by changed behavior, not an unrelated pre-range prose defect. Pinned tip row.rs:1463-1466 retains the same inaccurate claim. Governing contract: SPEC.md Retired containerized sessions requires Delete only, and root AGENTS.md requires nearby explanations to track changed invariants. Suggested bucket: other, internal maintenance documentation accuracy only. Could-be-highest: no security, process-loss or data-loss route is alleged or inferred. Confidence: confirmed source/comment contradiction, not execution. proposed_drop: false. possible_cover: none in the complete refreshed neighbours or own prior records; l1/l2 concern different focus/navigation behavior, not this rationale. No tests, reproductions, builds, checkout edits or live-install actions. The originally suspected misleading first-item explanation is retained; no runtime separator defect is claimed. Numbered source follow-up pins the inaccurate sentence to row.rs:1415-1417 at the reviewed commit, directly above the correct position>0 predicate at 1418-1420. Its original broader location 1396 identifies the changed caller that made the sentence stale. No change to consequence, bucket or confidence."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g035/findings.jsonl",
+        "id": "l3",
+        "line": 17,
+        "disposition": "verified",
+        "group": "retired-delete-only-menu-invalidates-unconditional-rename-rationale",
+        "reason": "Parent explicitly accepted named retain-verified proposal from claims-021 after inspecting it. The changed behavior makes an existing source explanation false. The correct separator implementation does not refute the distinct maintenance-documentation defect, which is in scope. New other-priority source-documentation item. Keep separate from retired cancellation focus and stopped-waiting keyboard order. Checked source/results: [\"04d85f0c98a9b635709d00b056719a0baa7fd3fc:crates/farhelm-ui/src/list/row.rs:1414-1417 says Rename is unconditional and Delete always has a preceding item. :1396 selects session_menu_order_for_session, whose :5116-5121 retired branch contains only Delete, so Delete position is zero and :1418-1420 is materially needed today.\",\"Exclusive-base-to-reviewed diff introduces the retired-only order/renderer gate while retaining that explanation. This is in-range drift, not an old independently false statement. Tip 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db:row.rs:1463-1469 retains it. No runtime separator defect is claimed.\"] Current coverage/results: [\"SPEC.md:4892-4900 and SPEC_impl.md:8312 onward require retired Delete-only behavior; neither accepts contradictory source rationale. Root AGENTS documentation requirements reinforce updating the explanation.\",\"Planned and unlanded-plan index are empty. Stored podman retirement section:284-296 specifies retirement but is already landed and does not repair the comment. BUGS.md, INDEX.md and active TRIAGE_OUTCOMES.md searches found no unconditional-Rename/separator item.\",\"FILTER.md has no source-comment-drift filter; no race or large-content trigger applies.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Misleading separator rationale tells maintainers the first-item case does not happen. No runtime layout, data-loss or security consequence was alleged.\"; null."
+      },
+      "accepted_parent_decision": {
+        "key": "g035/l3",
+        "line": 17,
+        "disposition": "verified",
+        "group": "retired-delete-only-menu-invalidates-unconditional-rename-rationale",
+        "bucket": "other",
+        "recording": "retain-verified",
+        "queue_target_candidate": null,
+        "needs_independent_drop_check": false,
+        "reason": "Parent explicitly accepted named retain-verified proposal from claims-021 after inspecting it. The changed behavior makes an existing source explanation false. The correct separator implementation does not refute the distinct maintenance-documentation defect, which is in scope. New other-priority source-documentation item. Keep separate from retired cancellation focus and stopped-waiting keyboard order. Checked source/results: [\"04d85f0c98a9b635709d00b056719a0baa7fd3fc:crates/farhelm-ui/src/list/row.rs:1414-1417 says Rename is unconditional and Delete always has a preceding item. :1396 selects session_menu_order_for_session, whose :5116-5121 retired branch contains only Delete, so Delete position is zero and :1418-1420 is materially needed today.\",\"Exclusive-base-to-reviewed diff introduces the retired-only order/renderer gate while retaining that explanation. This is in-range drift, not an old independently false statement. Tip 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db:row.rs:1463-1469 retains it. No runtime separator defect is claimed.\"] Current coverage/results: [\"SPEC.md:4892-4900 and SPEC_impl.md:8312 onward require retired Delete-only behavior; neither accepts contradictory source rationale. Root AGENTS documentation requirements reinforce updating the explanation.\",\"Planned and unlanded-plan index are empty. Stored podman retirement section:284-296 specifies retirement but is already landed and does not repair the comment. BUGS.md, INDEX.md and active TRIAGE_OUTCOMES.md searches found no unconditional-Rename/separator item.\",\"FILTER.md has no source-comment-drift filter; no race or large-content trigger applies.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Misleading separator rationale tells maintainers the first-item case does not happen. No runtime layout, data-loss or security consequence was alleged.\"; null."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-021",
+          "key": "g035/l3",
+          "latest_line": 17,
+          "recommendation": "retain-verified",
+          "bucket": "other",
+          "underlying_key": "retired-delete-only-menu-invalidates-unconditional-rename-rationale",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The changed behavior makes an existing source explanation false. The correct separator implementation does not refute the distinct maintenance-documentation defect, which is in scope.",
+          "checks": [
+            "04d85f0c98a9b635709d00b056719a0baa7fd3fc:crates/farhelm-ui/src/list/row.rs:1414-1417 says Rename is unconditional and Delete always has a preceding item. :1396 selects session_menu_order_for_session, whose :5116-5121 retired branch contains only Delete, so Delete position is zero and :1418-1420 is materially needed today.",
+            "Exclusive-base-to-reviewed diff introduces the retired-only order/renderer gate while retaining that explanation. This is in-range drift, not an old independently false statement. Tip 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db:row.rs:1463-1469 retains it. No runtime separator defect is claimed."
+          ],
+          "coverage_checked": [
+            "SPEC.md:4892-4900 and SPEC_impl.md:8312 onward require retired Delete-only behavior; neither accepts contradictory source rationale. Root AGENTS documentation requirements reinforce updating the explanation.",
+            "Planned and unlanded-plan index are empty. Stored podman retirement section:284-296 specifies retirement but is already landed and does not repair the comment. BUGS.md, INDEX.md and active TRIAGE_OUTCOMES.md searches found no unconditional-Rename/separator item.",
+            "FILTER.md has no source-comment-drift filter; no race or large-content trigger applies."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": null,
+          "original_stronger_consequence": "Misleading separator rationale tells maintainers the first-item case does not happen. No runtime layout, data-loss or security consequence was alleged.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "New other-priority source-documentation item. Keep separate from retired cancellation focus and stopped-waiting keyboard order."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": true,
+        "clearly_refuted_candidate": false,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Source-confirmed by an existing parent decision; not runtime reproduced",
+        "deduplication_key": "retired-delete-only-menu-invalidates-unconditional-rename-rationale",
+        "destination": "trailing-retired-delete-only-menu-invalidates-unconditional-rename-rationale.md"
+      }
+    }
+  ],
+  "replies": [
+    {
+      "turn": 1,
+      "reply": "Initial review complete: all 17 assigned packets read; no unread scope.\n\nRecorded **l1**: cancelling bulk Delete with only retired sessions marked has no surviving focus-return target. Suggested bucket: **other**, confirmed through source analysis.\n\nFour candidates set aside with recorded reasons; no open leads. No tests or reproductions run.\n\n[Findings log]([private-run]/g035/findings.jsonl)"
+    },
+    {
+      "turn": 2,
+      "reply": "Delivered all 17 corrected ranges directly: 1283 lines, none unread. Synthesis complete.\n\n- `c1` narrowed to menu projection; `g025/f3` remains separate, with no duplicate or accepted drop.\n- `l1` retained with the full focus-return chain and explicit stable-state premises.\n\nNo new findings or open local leads. No reproductions run."
+    },
+    {
+      "turn": 3,
+      "reply": "Discovery pass 1 found **new verified `l2`**: a stopped container waiting for its host renders a disabled “Stop and suspend” item that keyboard navigation omits. Source checks confirmed menu admission, focus behavior, attribution and persistence through the pinned range.\n\nAlso checked retired metadata paths, Trash demand recovery, provider snapshots, changed test oracles and link documentation.\n\nNew unverified IDs: none. Open leads: none. `c1` and `c2` were narrowed in the durable log. No runtime execution."
+    },
+    {
+      "turn": 4,
+      "reply": "Discovery pass 2 found **new verified `l3`**: the menu-separator comment incorrectly claims Rename is unconditional after retired rows became Delete-only. Source checks confirmed attribution and persistence; layout behavior is correct.\n\nAlso checked identity/movement inputs, bulk targets, Trash completion guards, header handoffs, host projection and fixture changes.\n\nNew unverified IDs: none. Open leads: none. No runtime execution."
+    },
+    {
+      "turn": 5,
+      "reply": "Discovery pass 3 found **nothing new**.\n\nChecked retired-row action admission, Trash recovery and generation guards, frozen confirmation targets, Stop/bulk handoffs, and changed test helpers.\n\nNew verified IDs: none. New unverified IDs: none. Open leads: none. Progress updated; no runtime execution."
+    }
+  ],
+  "progress": "# g035 initial review\n\nTurn type/count: initial / 1. Discovery-pass count: 0. Initial assigned pass complete; await the caller's later synthesis prompt. Do not run later-turn protocol inside this turn.\n\nAll 17 assigned packets read fully through the evidence command, each in its own shell tool call: 00040:1-20, 00041:1-162, 00042:1-56, 00043:1-12, 00242:1-69, 00243:1-142, 00245:1-82, 00247:1-13, 00316:1-167, 00317:1-181, 00319:1-149, 00515:1-35, 00516:1-136, 01110:1-17, 01112:1-13, 01113:1-16, 01118:1-13. Total assigned: 1283 lines. No assigned packet unread.\n\nComplete inventory commits field read. No excluded coverage metadata or forbidden coverage sources read. Root AGENTS.md End sentinel present. Read queue instructions and recording instructions; no queue findings, index, filters, TODO, plans, bugs or triage ledger consulted. Machine, skillette, scode-voice, and scripts skillette instructions read. No checkout writes; artifacts belong only to this supplied group directory.\n\nContracts and interfaces examined at recorded revisions:\n- 06d4b68: SPEC.md Managed checkouts 1520-1833; SPEC_impl.md Archived-checkout trash 4435-4600. HostTrashReader trash.rs 570-855, helm epoch publication/observation and host views, HostsRead retained-snapshot API. Assumption verified: epochs precede fleet wakes; registry uncertainty retains the reader and eligible recovery delivers Notice; active-removal polling remains scoped to removing hosts.\n- 350a4b3: SPEC.md Sandbox sessions (1431-1524; the preceding request-deadline paragraph was included) and Container sessions (same product contract read at 04d85f0), relevant environment wording. row.rs 1120-1405 and 2710-2855; lifecycle.rs 120-270; shared.rs 320-720; sandbox_sessions.rs 1-290; environment_ui.rs consequence/label methods; draft.rs 2890-3010. Assumptions verified: provider metadata comes from owned host identity; clone copies recipe/place while Restart/Replace hold host; stopped controls are Resume or inert, not an actionable conflicting suspend direction.\n- 04d85f0: SPEC.md Lifecycle operations 1839-2088, Session list 2139-2222, Container sessions and Retired containerized sessions 4737-4824; SPEC_impl.md Rootless Podman sessions 8642-8661. marking.rs 90-400; view.rs 4295-4397, 5385-5470 and cancellation/reconciliation search context; modal_dialog.rs 1-24 and 90-174; lifecycle.rs 267-385; Session retired predicate lib.rs 650-710; supervisor container.rs 1-220, ticker.rs 2070-2195. Retired launch intent is retained and dead-tab reap skips it, so retained tab/last-known-live confirmation premises are possible. No source evidence of a generic opener-restoration fallback: explicit close schedules only its provided return body.\n- 1d24c6a: SPEC_impl.md GUI: Dioxus answer binding, shared session admission, launch exclusion, combined confirmations and settlement/focus paragraphs 1025-1225. view.rs 2450-2665; sandbox_sessions.rs 225-415; row patch confirms synchronous launch-target guard before callback. No page token is required for Suspend/Resume by the contract; exclusion is checked at click and answer.\n- f560058: small fixture/type removals and bell comment read in full assigned patches; lib.rs TabInfo alias and specimen adapter search; bell.rs 390-495 confirms the comment describes the unchanged external-page helper call. No independent defect search of retired terminal implementation.\n\nDurable records: findings.jsonl is authoritative. One verified finding this pass: l1 (retired-only bulk Delete cancellation has no surviving focus destination), suggested other, source-confirmed, no reproduction. Initial lead l1 was revised to finding; no open leads remain. Candidates c1, c2, c3, c4 record the source refutations/spec acceptance for considered menu-direction, Trash invalidation, launch-token and Clone destination concerns. No highest-capable drops. No additional unverified findings.\n\nNo tests, builds or reproductions run; this is the requested source-only review. No runtime behavior is claimed. Remaining work: caller-requested later synthesis/discovery only. No unread assigned scope.\n\n## Coverage repair continuation\nTurn 2: initial coverage repair plus caller-requested synthesis after packet delivery. Discovery passes remain 0.\nCorrected brief reread fully. Prior supported audit matched 0 packets; previous delivery claim is superseded pending all 17 corrected evidence reads.\nNext: deliver all mandatory ranges as direct stdout, inspect g025/f3latest7 direction binding, validate l1 complete focus-return chain. Existing records preserved.\n\n## Turn 2 completion: corrected delivery and synthesis\n\nCorrected brief read fully. All 17 required source ranges (1283 lines) delivered anew through the corrected manifest, one evidence read per shell invocation, with raw stdout emitted directly in the tool result. This replaces the old unsupported delivery claim; the source bytes/hashes were unchanged. Required ranges: 00040:1-20; 00041:1-162; 00042:1-56; 00043:1-12; 00242:1-69; 00243:1-142; 00245:1-82; 00247:1-13; 00316:1-167; 00317:1-181; 00319:1-149; 00515:1-35; 00516:1-136; 01110:1-17; 01112:1-13; 01113:1-16; 01118:1-13. No assigned material remains unread. No read invocation was rejected/truncated in this repaired delivery.\n\nCaller explicitly requested later-turn synthesis in this continuation, overriding generic initial-repair-only wording. Completed that synthesis after delivery. Discovery-pass count remains 0; no separate discovery pass run.\n\nRecord deltas: c1 revised immediately after g025 cross-input, then revised after source checks. Its source refutation is limited to static menu projection/order. It does not dispose of g025/f3 direction binding, which remains owned by that record and awaiting the parent's disposition (no drops accepted). Rechecked sandbox_sessions.rs:165-365, row.rs:2770-2815, SPEC_impl.md:1060-1100 and SPEC.md:4986-5026 at 350a4b3. Operation is chosen in refreshed start callback, but preserved through the activity read and question; no duplicate finding created. The distinct refreshed Stop guards stay in g025/f7 attribution, not folded into c1.\n\nl1 revised with the complete rendered return/fallback chain and stable-state premises. Rechecked lifecycle.rs:250-385, view.rs:4365-4396 and 5385-5430, marking.rs:230-245, modal_dialog.rs:125-170/515-810, modal_isolation.rs:130-230, session_view.rs:1720-1750/2835-2860/3710-3747, terminal.js:2990-3045/5260-5330, shared.rs:30-65, and relevant focus/combined-confirmation contracts. Both CANCEL_FOCUS selectors are absent under retired-only effective marks; cancellation preserves that toolbar. Available marked-delete/count are not selected. Modal release does not restore an opener, disconnected ScrollRegion cannot recover, and selecting the retired session supplies no terminal (terminal_specs explicitly becomes empty). Cancellation does not delete or select another session, so no session-disappearance handoff is needed for the stable trigger. Confidence remains source-confirmed mechanism under explicit confirmation and stable-layout premises; physical activeElement was not observed. Suggested other remains unchanged; no security/work-loss claim was lowered or dropped.\n\nNo new finding IDs or unresolved local leads in this continuation. Existing c2/c3/c4 conclusions were checked against the unchanged reread patches and prior source/contract evidence; no new contradiction found. No tests, builds or reproductions executed. No checkout files changed. Two event record attempts rejected invalid multiline JSON; each input was repaired and the same evidence record command succeeded before further source analysis. No log events were truncated or overwritten. A broad context search accidentally included a minified vendor line and was clipped; that line was not relied on, and subsequent focused nonvendor reads supplied the actual focus checks.\n\nNext action: return only delta/open-lead and repaired coverage status to caller. Parent owns cross-group drop disposition and subsequent discovery scheduling.\n\n## Turn 3: separate discovery pass 1\nRead complete own findings history and discovery-neighbours.json in four bounded chunks (1-65, 66-112, 113-159, 160-216).\nNo pending named synthesis questions. c2 revised immediately: consumer correctness is conditional on delivered epoch; known g022/f2 missing producer wake is not refuted or duplicated.\nNext: search assigned changes beyond known issues, concentrating on retired-only keyboard/metadata paths, provider consequence snapshots, and Trash reader demand recovery. No runtime actions.\n\n## Turn 3 completion: discovery pass 1\n\nSeparate discovery pass completed beyond known findings, after full bounded neighbour/context read. New verified ID: l2, source-confirmed menu-order/render mismatch for Stopped(waiting_for_place=true). New unverified-after-investigation IDs: none. Open lead IDs: none (l2 lead revised to finding). Something new was found; caller should schedule a later pass as its charter requires. No runtime tests, builds, reproductions or live-install actions performed.\n\nUseful checks/results:\n- Retired metadata paths: row.rs:1900-2085 checks offers_mark_seen both for dot activation and clickable labeling; view.rs:3935-4225 checks pin/move/read writes and drag funnel; view.rs:4400-4485 filters retired bulk metadata. No additional metadata write route established in these changed paths.\n- Trash reader: reread trash.rs:680-815 at 06d4b68 for explicit counters, eligibility recovery, mode/epoch delivery and active-removal poll. The consumer mechanism has no additional lost-demand lead beyond the now-corrected conditional producer assumption. c2 revised immediately on learning known g022/f2; no duplicate producer finding.\n- Provider snapshots: lifecycle.rs:123-241 at 350a4b3 freezes provider with target equality, preserves it in reconciliation, and carries consent guards unchanged. Shared host phase test and fixtures at shared.rs:1255-1320 continue to assert same-host-only wake preparation. No new distinct contract issue established.\n- New l2: row.rs:1377-1382 all-Stopped menu order disagrees with Controls' waiting_for_place=false-only Resume boundary; row adapter still renders disabled StopSuspend for waiting=true. menu_panel.rs:737-743/781-819/893-913 excludes it from both arrow selection and focus bookkeeping. Real manager branch at 3842-3861/3889 publishes waiting=true; its source test at 13175-13278 corroborates intended unavailable-place model. row toggle at 2148-2156 remains operable, and ListView:5870-5970 derives busy from local claims/pending, not host stopped phase. A fresh menu can therefore expose the mismatch without an in-flight user action. Whole-base-to-reviewed diff attributes all-Stopped predicate and provider state introduction to range; endpoint source row.rs:1441-1445 and sandbox_sessions.rs:332-361 retains the mismatch. l2 is other, not a mutation or data-loss route. c1 revised to avoid claiming disabled safety refutes this distinct keyboard-navigation defect.\n- Changed tests independently inspected: marking.rs:667-815 establishes non-retired/metadata fixture premises and visits nested VNode disabled attributes; f560 shared.rs:890-945 retains explicit ended/live/tab confirmation premises after Tab shape removal. No distinct oracle failure established. bell comment's external-page claim matches app_bar.rs:251-264 helper's desktop/browser branches; no documentation error established.\n\nExisting findings retained. No parent drop or severity lowering accepted. No unread assigned mandatory scope. No prohibited coverage sources searched. Own log has c2/c1 revisions plus l2 lead/finding/follow-up admission evidence; original consequences and bases remain append-only.\n\n## Turn 4: discovery pass 2 started\nRead refreshed discovery-neighbours.json fully in eight bounded chunks: 1-65, 66-110, 111-155, 156-200, 201-245, 246-287, 288-330, 331-373. No pending named questions. Existing findings/history retained; no duplicate claims added from neighbors.\nNext: inspect remaining comments/test-oracle contracts and boundary handling within the assigned five-commit patches. No runtime actions.\n\n## Turn 4 completion: discovery pass 2\n\nDiscovery count: 2. Completed a separate source-only search beyond known issues after reading the full refreshed 373-line neighbour snapshot in bounded chunks. No pending named cross-group questions. No neighbour finding was adopted as a duplicate new claim.\n\nNew verified ID: l3 (documentation mismatch at row.rs:1415). New unverified-after-investigation IDs: none. Open lead IDs: none; l3 was recorded before checks and then closed to a finding. Something new was found, limited to an inaccurate maintenance explanation; no new runtime defect was established in this pass. Parent should schedule any required later pass separately. Existing IDs/consequences/proposed-drop bases remain append-only; no parent drop or lowering accepted.\n\nChecks and useful results:\n- Full-range l3 attribution: exclusive base already has the unconditional-Rename separator comment at row.rs:1385-1388, but no retirement-only menu projection. The assigned 04d85f0 patch introduces session_menu_order_for_session and its Delete-only branch plus !retired renderer gate. At that revision the comment's 'always true in practice' claim is false while the position>0 rendering remains correct. Read pinned helper/render/test ranges 1396-1425, 3035-3090, 5100-5134 and complete compact assigned row patch; endpoint retains the false explanation at 1463-1466. Precise finding location corrected to 1415 without changing impact.\n- Retirement identity and movement inputs: row.rs:35-105 centralizes the prefixed title and retired bell exclusion for rendering and IdentityFlow; no additional disagreement between displayed identity and movement comparison was established.\n- MarkedBar: marking.rs:315-405 carries filtered Stop snapshots, all Delete snapshots, conditional metadata toggle and surviving Clear/count. No distinct new target-expansion path was found beyond the already logged focus issue and known neighbour cleanup records.\n- Trash: at 06d4b68, trash.rs:875-975 checks complete current-host registry and frozen incarnation before commitment; 1040-1090 preserves selected per-ID uncertainty and requests explicit refresh after the final pending host settles. No new dispatch/uncertainty lead was established; the known producer wake issue remains separate.\n- Header handoff: at 1d24c6a, view.rs:3060-3123 drops the old claim and immediately re-admits Stop/Delete/Replace without an await/effect gap; the captured guards travel in the action. No additional interposed-input gap was established from the page-token removal.\n- Shared host projection: at 350a4b3, shared.rs:645-720 retains recipe/place target, owned-row filtering boundary and distinct connection identity/fingerprint. No new wrong-host route was found.\n- Small final-commit changes: f560 bell.rs:430-482 still opens docs links through the helper named by its changed comment, using unchanged renderer behavior. rows.rs:1265-1320 uses plain Session fixture fields after removing terminal-kind fields; no new executable premise changed by that assigned mechanical edit was found. These checks do not claim to refute unrelated neighbour terminal transport findings.\n\nNo mandatory scope remains unread. No tests, builds, reproductions, live-install actions, checkout edits, helper-agent launches or prohibited coverage searches. All conclusions are source/contract analysis; no runtime occurrence/frequency claimed.\n\n## Turn 5: discovery pass 3 started\nRead the complete refreshed discovery-neighbours.json (382 lines) in bounded chunks 1-55, 56-101, 102-146, 147-191, 192-236, 237-281, 282-326, 327-382. Existing complete local history remains in context. No named pending questions.\nNext: independently check remaining removal/recovery authority, retired pin/metadata admission and changed test-helper contracts within assigned revisions. No runtime actions or prohibited coverage reads.\n\n## Turn 5 completion: discovery pass 3\n\nDiscovery count: 3. Completed separate source search beyond all known findings after full bounded read of the refreshed 382-line neighbour snapshot. New verified IDs: none. New unverified-after-investigation IDs: none. Open lead IDs: none. Explicit result: nothing new found. Existing findings/candidates and their complete earlier histories remain unchanged; no parent drop or lowering assumed. No synthetic candidate records added for routine checks that never produced a substantive suspected defect.\n\nUseful checks/results at the recorded assigned revisions:\n- 04d85f0: view.rs:4080-4166, row.rs:1372-1402 and marking.rs:399-470. Retired drag presentation is disabled; the drag admission requires a successful current listing and routes through on_move_pin's retired-row guard. Metadata menu callbacks capture action-eligible drawn subsets and retain explicit action direction; no new target enlargement or failed-list bypass was established.\n- 06d4b68: trash.rs:815-886, 969-998, 1315-1341 and 736-809; view.rs:1940-1988. Healthy registry absence prunes only known host state; uncertain registry leaves retained owners. Per-host reader key includes host/incarnation, mutation generation supersedes older reads, and pending eligibility does not consume newly changed explicit counters. Active removal uses the existing scoped timer. Complete-list disappearance check still requires admitted authoritative uncut replies. No distinct new consumer/removal authority issue found; supplied producer-wake finding remains separately owned.\n- 350a4b3: lifecycle.rs:275-365 and shared.rs:543-611. Confirmation buttons carry the same rendered token as the warning; provider consequence rendering uses frozen target/provider data, with ordinary guard paths separate. The default host excludes session-owned destinations but still reuses install-identity matching for explicit internal callers. No new retargeting route found.\n- 1d24c6a: view.rs:2598-2662 and 4210-4262. Single Stop confirmation consumes rendered token/guards synchronously; bulk Stop stays nonsuspending; Delete coalesces only captured environment hosts after recording accepted marking identities. No additional page-token-removal or batching regression beyond known records established.\n- Changed tests: marking.rs:715-815 scans nested fragment/component disabled attributes and expects the explicit four-control map; row.rs:5133-5179 exercises retired menu order and launch-intent identity; f560 rows.rs:1810-1848 keeps HostRead/phase fixture fields explicit after type cleanup. No distinct new test-oracle or fixture-lifetime defect found from these assigned edits. These are source checks only, not executed passes.\n\nNo assigned mandatory scope unread. No tests, builds, reproductions, helper agents, checkout edits, prohibited coverage searches or live-install actions. Findings log remains authoritative. Next action: return empty discovery delta and await caller direction.\n"
+}

@@ -1,0 +1,247 @@
+[
+  {
+    "key": "g026/f6",
+    "latest_line": 21,
+    "recommendation": "retain-verified",
+    "bucket": "other",
+    "underlying_key": "browser-owned-session-acquired-before-try:stop-suspend-click-guards",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "A rejected route registration after the real session create bypasses the only session cleanup. This is a conditional per-test isolation defect, not an observed leak or product failure.",
+    "checks": [
+      "00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db:e2e/tests/tensorlake-sandbox-sessions.spec.ts:474-508 creates the session at 476, awaits route registration at 483 and 504, and enters try at 508; cleanup is at 523-528.",
+      "086d4ff96efb13bdb51accaa1ce0a0a6f7d5ca5b:e2e/tests/helpers/drained-route.ts:38 awaits page.route before returning its disposer. Registration rejection escapes to the pre-try caller.",
+      "Same revision:helpers/fleet.ts:408-435 posts a real session, using FAKE_AGENT by default. helpers/evidence.ts:46-111 adds observation, not a session sweep. The spec has no afterEach session sweep.",
+      "Same revision:e2e/playwright.config.ts:119-134,160-169 explicitly shares long-lived stacks across serial tests/files. Eventual stack teardown bounds the consequence; intervening contamination remains possible. No runtime check ran."
+    ],
+    "coverage_checked": [
+      "SPEC.md and SPEC_impl.md searched for fixture ownership, test cleanup, route/gate waits and test isolation: no acceptance of this failure path. .agents/test-authoring.md requires fixture-lifetime/failure-path handling.",
+      "TODO.md:25-27 Planned is empty. BUGS.md only accepts the escaped local SSH-helper installation hang, unrelated here. Active TRIAGE_OUTCOMES.md has no matching test or pre-try registration decision.",
+      "plans/queue searched for the test name/file and cleanup/route ownership. sandbox-stop-click-guards.md describes the test's product guard purpose, not repairing its setup cleanup. No exact pending repair established.",
+      "INDEX.md and matching route-retirement-failure-skips-owned-session-cleanup.md, name-regression-registers-cleanup-after-assertions.md, resume-launch-test-records-session-after-assertion.md and lifecycle-fixture-cleanup-stops-after-release-failure.md read. They concern different failure operations/callers. This pre-try caller is useful additional cleanup coverage, not exact coverage or an established same-root alias.",
+      "FILTER.md: no full match. The whole consequence includes skipped owned-resource cleanup, not solely a transient display or diagnostic."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": "Actual leftover work requires route-registration rejection/cancellation after create succeeds; incidence and downstream failures were not observed.",
+    "original_stronger_consequence": "No highest consequence was asserted: extra test-owned session/agent may survive this test until broader stack cleanup. No indefinite user-process leak or catastrophic tooling harm.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Record the conditional setup ownership gap, preserving its bounded maintainer-test scope. Parent-supplied g069/l1 is related provenance only; its source/history was not assigned here."
+  },
+  {
+    "key": "g026/f7",
+    "latest_line": 20,
+    "recommendation": "retain-unverified",
+    "bucket": "other",
+    "underlying_key": "retired-metadata-cache-only-fence-vs-identityless-live-membership",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The cache/live distinction is source-real, but a legitimate serving supervisor producing an identity-less retired row remains unestablished. Preserve that investigated missing premise rather than silently equating normal-constructor refutation with refutation of the supported identity-less interface.",
+    "checks": [
+      "04d85f0c98a9b635709d00b056719a0baa7fd3fc:crates/farhelm-helm/src/sessions.rs:936-956 accepts exact-host live membership without cached membership; :4538-4546 checks retirement only through cached_session. mark_seen/set_pin call this guard at 3584/3625.",
+      "Same revision:crates/farhelm-supervisor/src/service/core.rs:6529-6555,6587-6591 gives a state-directory owner Some(identity); :8483-8505 refuses serve without that ownership. Thus the ordinary constructor/serve route does not supply the premise.",
+      "Same revision:manager.rs:4366-4372 says a pre-identity supervisor speaks an older refused protocol; identity-less same-protocol peers are test/embedded constructions. session_view.rs:3405-3409 excludes retired rows from automatic seen writes.",
+      "No runtime check, custom-peer construction, or shipped GUI metadata emitter was demonstrated. The reviewer's candidate closure is preserved as a proposed dismissal, not an accepted conclusion."
+    ],
+    "coverage_checked": [
+      "SPEC.md Retired containerized sessions (at reviewed revision 4816 onward) and current SPEC_impl.md:8312-8325 require Delete only. Neither explicitly permits metadata mutation.",
+      "Current SPEC_impl.md:5430-5444 explicitly retains identity-less live-list serving/owner lookup on an identity-less registry row. That supported interface prevents using cache absence alone as refutation, but does not itself establish a retired producer.",
+      "TODO Planned is empty; BUGS.md has no retirement metadata exception. Searched active TRIAGE_OUTCOMES.md, plans/queue and INDEX.md for identity-less/retired metadata, pin and mark-seen: no exact cover or pending repair. Podman retirement plan context is not acceptance of this conditional bypass.",
+      "FILTER.md has no full match: an accepted metadata write is state-changing/durable, not merely a rare imprecise diagnostic."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": "A supported production producer of a retired session on a same-protocol identity-less live-only connection, and an admitted metadata request against that row. Ordinary official serve is fenced; custom/embedded interface reachability remains unspecified here.",
+    "original_stronger_consequence": "Metadata-only violation of the retirement Delete-only boundary; no security or user-work-loss route was asserted.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Retain as investigated but unverified unless the parent deliberately narrows the claim to the normal official-supervisor constructor route, which the cited ownership fence refutes."
+  },
+  {
+    "key": "g027/c1",
+    "latest_line": 13,
+    "recommendation": "retain-verified",
+    "bucket": "other",
+    "underlying_key": "agent-environment-target-history-admission-lacks-origin",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "Approved command/trust survives the in-memory handoff, while an agent-origin environment target independently reaches GUI-history storage. Retain the confirmed history effect and preserve the separate proposed security-consequence refutation for independent checking.",
+    "checks": [
+      "190d844e58c96cf197aa838d0b0eea8062f48435:agent_requests.rs:4471-4483 fixes trust and creates the request before displaying ApprovalAction::LaunchEnvironment at 4493-4515; :4542-4548 passes that request into provisioning after approval.",
+      "Same revision:provisioning/tensorlake_add.rs:357-361 attaches environment_target; :465-485 moves the request into SessionLaunch and its owned task; :1007-1013 moves it directly to create_in_session_sandbox. sessions.rs:1756-1794 changes placement/preview fields, not private agent authority.",
+      "sessions.rs:1848-1863 supplies the private approved launch as resolved_mode; :1879-1885 uses it directly for home launches; :2501-2506 does not re-resolve supplied trust. explicit_selection is None for agent origin at :2454-2463.",
+      "sessions.rs:2174-2235 passes environment_target independently of explicit_selection and admits session-owned hosts when environment is present. store/environment_history.rs:49-99 accepts NULL selection, updates last_container_host for novel container targets and ages the shared bounded window; :111-114 merely hides NULL selections from returned setups.",
+      "The history storage file has no diff between this revision and 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db. No runtime observation was made."
+    ],
+    "coverage_checked": [
+      "Current SPEC.md:5122-5127 excludes anything an agent creates from GUI defaults/suggestions. SPEC.md Agents and environments and SPEC_impl.md Agent requests and environments require per-launch approval, not GUI-choice provenance. Approval does not cover the history mutation.",
+      "TODO Planned is empty. BUGS.md, active TRIAGE_OUTCOMES.md, plans/queue and INDEX.md searched for agent environment history/defaults/recents/last_container_host: no exact existing record or pending repair established. environment-agent-operations.md describes the feature, not origin-gated history storage.",
+      "FILTER.md: no full match. Ordinary successful agent environment launches can trigger this; no rare extra condition is needed. Convenience history is other, but that alone is not a filter.",
+      "The supplied history names canonical g050/l1 and independent g024/c3. They are outside this batch and not existing queue items found by this check; preserve them for parent reconciliation without independently asserting exact aliases."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": "No missing source premise for the history-storage effect. Actual loss of a visible recent setup requires enough novel launches to age it out. No changed approved command/security-policy route is established by this handoff.",
+    "original_stronger_consequence": "Originally considered a silently changed approved command/security policy (highest), and treating agent choices as GUI defaults. Later records correctly withdraw the broad history refutation while retaining a narrow command/trust refutation.",
+    "needs_independent_drop_check": true,
+    "proposed_basis": "Record/consolidate the history defect under its shared origin-admission root. Independently check only the proposed rejection of command/trust substitution; do not let that rejection erase the confirmed history effect."
+  },
+  {
+    "key": "g027/c2",
+    "latest_line": 2,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "removed-terminal-kind-fixture-fields-no-oracle-loss",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The assigned test diff removes obsolete protocol fields and preserves the session/tab identities and assertions. No test-oracle defect is established by those removals.",
+    "checks": [
+      "Complete f560058da19e02716e6f943883a9508b447aff4e parent-to-commit diff for crates/farhelm-helm/src/sessions_tests.rs inspected: changes remove agent_terminal, supervisor_creates_host_terminals and TabInfo.kind fixture fields only. The tabs remain tab-1/tab-2 at :5278; rename and TabOpened retain tab-1. No behavioral/readiness/cleanup assertion is deleted.",
+      "Current SPEC_impl.md:2937-2951 Grid streams explicitly describes protocol 77's universal grid stream and removal of terminal-kind fields from SessionInfo/TabInfo. This explains fixture shape; it does not excuse unrelated substrate/test defects. No runtime check ran."
+    ],
+    "coverage_checked": [
+      "Both specifications searched for terminal-kind/grid-stream and fixture behavior; Grid streams provides the positive protocol contract. No product specification requires the removed fields in current fixtures.",
+      "TODO Planned is empty. BUGS.md, active TRIAGE_OUTCOMES.md, INDEX.md and plans/queue searched for terminal-kind fixture assertion loss: no exact queued defect or pending repair. tmux-removal plans describe the broader migration, not evidence of a defect in these literals.",
+      "No FILTER.md rule is used: this is source refutation of a test-weakening claim."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": "A removed assertion or remaining semantic role for the deleted protocol fields was not shown.",
+    "original_stronger_consequence": "Possible weakened maintainer tests or wrong terminal fixture type; no highest consequence was claimed.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Dismiss only the named fixture-field-removal concern; this does not certify the rest of terminal-substrate removal."
+  },
+  {
+    "key": "g027/l3",
+    "latest_line": 10,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "stale-seal-destroys-rebound-environment-missing-binding-transition",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The checked shipped editing/adoption/provider paths do not replace a recorded resource beneath the connected listing. The original destructive consequence remains conditional and must pass independent drop checking.",
+    "checks": [
+      "222bf6253bcd168db04bcbb1df20180c88306998:manager.rs:5117-5133 notes a seal before the later cache/identity work, confirming the original observation. hosts.rs:1450-1471 re-reads session ownership and machine-deleting kind under the provisioning lock and destroys the recorded binding.",
+      "Same revision:store.rs:7521-7567 rejects Tensorlake/Podman SSH-destination edits. manager.rs:2914-2937 admits adoption only in IdentityMismatch; :2978-3000 retires the withdrawn client, clears live rows and advances incarnation.",
+      "store/podman.rs:415-433 enforces saved ID null-or-equal in SQL. Tensorlake store.rs:7040-7060 does not impose that SQL invariant; the reviewer's correction is required.",
+      "tensorlake/hosts.rs:364-470 reads current binding, uses saved ID when present and permits create-on-NotFound only without a saved ID. :550-600 destroys by saved ID, recovering by name only for pending create without one. git grep of ID setters found these production callers; :719-756 and the remaining callsites are test support/tests.",
+      "No runtime reproduction. External resource replacement/reset and a hypothetical future binding-replacement API are outside the demonstrated refutation. Correct provider lookup-by-ID semantics remains an assumption."
+    ],
+    "coverage_checked": [
+      "SPEC.md Sandbox sessions and SPEC_impl.md Environment Delete and the seal authorize finishing a permanent seal for the same recorded environment, not unrelated replacement work. Neither accepts stale destructive targeting.",
+      "TODO Planned is empty; BUGS.md has no matching acceptance. Active TRIAGE_OUTCOMES.md, plans/queue and INDEX.md searched for sealed-listing retarget/adoption/resource replacement: no exact covered defect or pending repair found. environment-agent-operations.md's feature design is not coverage for wrong-resource destruction.",
+      "No FILTER.md rule is used: wrong-target destruction lies outside the rare-glitch boundary."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": "An allowed in-place binding/installation transition that leaves the stale connected refresh actionable and changes which user resource destruction reaches. The checked edit/adoption/create paths do not supply it.",
+    "original_stronger_consequence": "An obsolete connection's sealed listing might destroy unrelated current files or processes, potentially highest. Later wording narrows the source refutation and explicitly disclaims a universal Tensorlake SQL immutability invariant.",
+    "needs_independent_drop_check": true,
+    "proposed_basis": "Propose a narrow source refutation of the checked shipped transitions, preserving the original highest hypothesis and external/provider assumptions for the independent checker."
+  },
+  {
+    "key": "g027/l4",
+    "latest_line": 8,
+    "recommendation": "retain-verified",
+    "bucket": "other",
+    "underlying_key": "ordinary-host-remove-bypasses-sealed-attempt-outcome",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "Ordinary Hosts Delete bypasses the seal outcome wrapper, so a failed attempt preserves an obsolete failure or Pending eligibility. This is persistent bookkeeping/retry-policy failure on destruction the user already authorized.",
+    "checks": [
+      "222bf6253bcd168db04bcbb1df20180c88306998:hosts.rs:1375-1402,1422-1437 calls forget_host_locked directly. Its provider-error branch :1537-1545 and post-destruction cleanup-error branch :1555-1564 return without sealed_outcome; success alone clears it at :1575.",
+      "sessions/sandbox.rs:290-304 supplies sealed_attempt and sealed_outcome for the seal path. Ordinary removal does not pass through it.",
+      "UI hosts.rs:2502-2535 sends ordinary remove_host for the captured host; :2540-2568 checks operation/provisioning busy state, not seal state. Row busy :3355-3361 and Remove handler :5321-5353 allow another attempt on a Failed sealed host after prior work finishes.",
+      "manager.rs:2606-2651 preserves an existing seal on note_sealed and changes outcome only through sealed_outcome. snapshots/status :2166-2228 project the seal over connection state and withhold clients, so reconnect does not refresh the saved error.",
+      "Path diff from this commit to 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db shows only two manager test-fixture field removals, no production repair. No runtime failure was observed."
+    ],
+    "coverage_checked": [
+      "SPEC.md Sandbox sessions requires visible failure and Retry; current SPEC_impl.md:6148-6157 requires the last destruction failure and Retry-only failed state. The source violates these rather than implementing an accepted limitation.",
+      "TODO Planned is empty; BUGS.md has no matching exception. Active TRIAGE_OUTCOMES.md and INDEX.md searched for sealed deletion errors/Pending retry: no exact item. plans/queue/environment-agent-operations.md:524-530 requires reason/Retry but does not separately schedule this bypass repair.",
+      "FILTER.md's rare-diagnostic filter does not wholly match: Pending can remain automatically retryable, and the retained failure survives reconnect. Already-Failed ordinary Delete also needs no narrow timing race.",
+      "Supplied g028/l3 concerns stale captured finisher eligibility after a correctly recorded failure. It is a different cause; no alias is asserted without its assigned record."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": "A provider/local-cleanup failure must occur. The Pending variant additionally needs a known seal while ordinary removal obtains the free provisioning lock; the Failed(old_reason) variant needs no such race.",
+    "original_stronger_consequence": "Unchanged throughout: obsolete persistent error and unintended retry of already-authorized sealed-environment destruction. No wrong resource or work loss beyond consent is established.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Record both failure branches and preserve the simpler Failed case. Keep separate from stale finisher-snapshot eligibility."
+  },
+  {
+    "key": "g027/l5",
+    "latest_line": 15,
+    "recommendation": "retain-verified",
+    "bucket": "other",
+    "underlying_key": "browser-raw-helper-arrival-await-prevents-gate-finally:wake-timeout",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The raw arrival Promise can remain pending after the runner deadline, preventing the test's own finally from releasing the gate that afterEach drains. This adds teardown failure; it does not establish an indefinite overall runner hang.",
+    "checks": [
+      "533169cf19571d34af3a8497eaceb8d2d7b7c852:e2e/tests/tensorlake-lifecycle.spec.ts:1850-1857 arms helperRead before fulfilling Resume; :1916-1917 polls existence then awaits entered without a rejecting deadline; :1979-1984 owns all releases.",
+      "The fixture is the local fleet function in tensorlake-lifecycle.spec.ts, not helpers/fleet.ts: :80-85 blocks a held host callback, :117-131 resolves entered only on arrival or explicit release, :153-159 afterEach drains routes without gate references. This corrects an ambiguous file citation in the named record.",
+      "helpers/drained-route.ts:38-42 waits tracked callback Promises; helpers/route-gate.ts:10-15 supplies no cancellation. helpers/evidence.ts adds observation, no raw-Promise cancellation owner.",
+      "The lock pins Playwright/core 1.64.0. Checked official v1.64.0 timeoutManager.ts:83-114,128-132: it races the callback against a separate rejecting timeout Promise, without rejecting the raw callback wait. Official workerMain.ts:384-409 proceeds from the timed test wrapper into afterEach. Primary URLs: https://raw.githubusercontent.com/microsoft/playwright/v1.64.0/packages/playwright/src/worker/timeoutManager.ts and https://raw.githubusercontent.com/microsoft/playwright/v1.64.0/packages/playwright/src/worker/workerMain.ts .",
+      "Complete later diff through 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db for the test/route helpers changes only the unrelated terminal selector. No reproduction ran."
+    ],
+    "coverage_checked": [
+      "SPEC.md and SPEC_impl.md searched for test fixture cleanup/gate/wait ownership: no accepted failure path. .agents/test-authoring.md requires bounded readiness and owned-fixture lifetime; product wake-timeout correctness does not settle this test defect.",
+      "TODO Planned is empty. BUGS.md accepts an unrelated local-SSH installation hang. Active TRIAGE_OUTCOMES.md has a popover-template-movement gate cleanup claim, not this trigger/site; no exact coverage.",
+      "plans/queue/wake-launch-stuck.md supplies the product timeout/test purpose, not a bounded helper-arrival repair. INDEX.md and related cleanup-status-masks-body-assertion.md, route-retirement-failure-skips-owned-session-cleanup.md and lifecycle-fixture-cleanup-stops-after-release-failure.md concern different causes. No exact queue item was found.",
+      "FILTER.md has no full match: a missing helper request can be an ordinary regression and the whole consequence includes prevented gate release and failed route drain, not solely an imprecise diagnostic. Parent-supplied g069/c3 remains related unverified provenance outside this batch."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": "The expected helper GET must fail to arrive after helperRead is armed. Normal arrival and later ordinary assertion failures release gates correctly. Incidence is unmeasured.",
+    "original_stronger_consequence": "No higher consequence was asserted: timeout/teardown failure within the browser worker; no real session, shared-stack contamination, leak beyond worker lifetime or observed product failure.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Record this separate test wait/cleanup boundary with corrected local-fleet references. Keep the runner-lifetime limitation and source-only confidence."
+  },
+  {
+    "key": "g028/l1",
+    "latest_line": 9,
+    "recommendation": "out-of-range",
+    "bucket": "other",
+    "underlying_key": "sandbox-lifecycle-question-plain-signal-no-opening-token",
+    "aliases": ["review_feedback_queue/sandbox-lifecycle-questions-lack-opening-guards.md"],
+    "target_queue_file": "review_feedback_queue/sandbox-lifecycle-questions-lack-opening-guards.md",
+    "why": "The missing prompt identity and refreshed callback structure already exist at the exclusive base. The named Delete patch does not introduce them. An existing queue item preserves the same implementation omission and stronger unverified obsolete-opening consequence.",
+    "checks": [
+      "6e423e30068b62c6cfa276c6d720ee35bb70387a:crates/farhelm-ui/src/sandbox_sessions.rs:190 stores Option<Operation>; :197-218 executes with current-render execute_session; :220-247 refreshes the start callback; :268-286 has untokened cancellation and confirm. These mechanisms predate this entire range, not only the immediate patch.",
+      "2ef10815f12ed719ab6c51c6e3ac6fcd3f8bc1fa parent-to-commit diff for this file has hunks at :89 and :395 only: Delete helpers and tests, leaving Controls unchanged. Later in-range work changes guard capture/host admission, without making the original missing question identity newly introduced.",
+      "Existing queue sandbox-lifecycle-questions-lack-opening-guards.md records plain question/guard ownership and preserves unverified obsolete-opening substitution. It explicitly does not claim a complete shipped cross-opening/element-ID loss sequence. No execution ran."
+    ],
+    "coverage_checked": [
+      "SPEC_impl.md:1069-1100 Answers bind to what was drawn requires ConfirmSlot; it does not accept this omission. Existing queue distinguishes the product-accepted same-dialog burst from stronger unverified obsolete-opening substitution. Neither accepts stopping a different session beyond consent.",
+      "TODO Planned is empty; BUGS.md and active TRIAGE_OUTCOMES.md searches found no exact decision withdrawing this stronger hypothesis.",
+      "plans/queue/hosts-suspend-confirm-slot.md:34 explicitly excludes the separate session-toolbar question; sandbox-stop-click-guards.md:58 likewise excludes it and repairs click-time Stop preconditions instead. Neither is full cover for question identity.",
+      "INDEX.md:2087-2090 and the complete matching queue file establish the same-root omission already queued. Any useful newly established loss sequence would extend that item, but this record supplies none.",
+      "FILTER.md is not a basis for this proposal. Wrong-target destructive action would be outside its boundaries."
+    ],
+    "exact_cover_quotes": [
+      "review_feedback_queue/sandbox-lifecycle-questions-lack-opening-guards.md: 'Stronger obsolete-opening substitution remains unverified after investigation'",
+      "Same file: 'Controls stores an Option<Operation> and a separate held operation guard instead of using ConfirmSlot'"
+    ],
+    "missing_premise": "A complete shipped delayed-answer sequence changing the prompt/session target beyond the displayed warning remains unestablished. The base proves age of the mechanism, not safety of every possible sequence.",
+    "original_stronger_consequence": "Delayed Suspend/Stop and suspend could answer a newer prompt or stop a different running process, potentially highest. Latest history explicitly preserves that hypothetical consequence while proposing range exclusion.",
+    "needs_independent_drop_check": true,
+    "proposed_basis": "Propose out-of-range for this named record's pre-existing mechanism, with existing-queue same-root context. Independent check must preserve the stronger hypothesis and must not dispose of other reviewers' direction/old-question/guard records."
+  },
+  {
+    "key": "g028/l2",
+    "latest_line": 4,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "ambiguous-delete-default-does-not-remove-session-scope-peers",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The ambiguity is deliberate and the consumer gates peer removal on the captured Whole scope. A successful Session-scope retry without a count removes only the selected session locally.",
+    "checks": [
+      "222bf6253bcd168db04bcbb1df20180c88306998:crates/farhelm-helm/src/sessions/sandbox.rs:241-245 and :257-261 return the same default after NotFound and successful sealed destruction, confirming the initially suspected ambiguity.",
+      "2ef10815f12ed719ab6c51c6e3ac6fcd3f8bc1fa:crates/farhelm-ui/src/list/view.rs:945-975 explicitly documents that no count does not prove destruction; takes_peers requires reply.is_some() and captured DeleteScope::Whole. Session scope always adds only its own ID. :978-990 shows stays text only with an actual count.",
+      "The consumer explicitly notes that erroneously dropping peers could close their views and avoids doing so. This source refutes the named outcome-decoding route; no runtime retry was exercised."
+    ],
+    "coverage_checked": [
+      "SPEC.md Sandbox sessions and SPEC_impl.md:6108-6125,6144-6157 require preserving non-final peers and treat unsealed NotFound as an earlier session-only deletion. These are contracts, not acceptance of hidden surviving peers.",
+      "TODO Planned is empty; BUGS.md, active TRIAGE_OUTCOMES.md, INDEX.md and plans/queue searched for ambiguous NotFound/default outcome and surviving-peer removal: no exact queued defect or pending repair found. environment-agent-operations.md:524-536 describes the same outcome contract.",
+      "No FILTER.md rule is needed for source refutation. The earlier display-effect hypothesis is preserved; no actual deletion of surviving user work is shown."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": "A consumer that treats a Session-scope count-less reply as proof of whole-environment destruction was not found in the named path; the checked consumer explicitly refuses that inference.",
+    "original_stronger_consequence": "Originally high if a lost-reply retry hid surviving sessions. No process/file deletion route was asserted. Later source refutation preserves the ambiguity but rejects the proposed UI consequence.",
+    "needs_independent_drop_check": true,
+    "proposed_basis": "Propose dismissal only of the ambiguous-default peer-removal route. Conservative independent check flag because the hypothesis concerns surviving user sessions and a destructive operation, although its original stated effect was display-only."
+  }
+]

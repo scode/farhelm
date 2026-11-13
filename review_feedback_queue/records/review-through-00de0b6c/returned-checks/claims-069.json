@@ -1,0 +1,295 @@
+[
+  {
+    "key": "g106/c3",
+    "latest_line": 4,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "screen-reader-physical-wrap-comment",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The replacement explanation agrees with the screen-text producer. It does not change detection or establish a misleading contract.",
+    "checks": [
+      "4b489b4f2eeade14f119b186ecb16eeaaf027021:crates/farhelm-supervisor/src/agent_kind/screen_reader.rs:122-125,556-565 normalizes physical wraps with whitespace splitting.",
+      "Same revision:crates/farhelm-terminal-emulator/src/screen.rs:11-24,52-103 defines and implements one newline per visible grid row, including wrapped rows. No runtime or vendor-TUI observation was made."
+    ],
+    "coverage_checked": [
+      "SPEC_impl.md:2670-2681 explicitly describes one line per row and shared reader rules; SPEC.md terminal experience search adds no contrary text.",
+      "TODO.md Planned is empty. Searches of plans/queue, BUGS.md, INDEX.md, matching queue text and active TRIAGE_OUTCOMES.md found no exact wrap-comment defect. The tmux docs cleanup plan is already landed (plans/REPORTS.md:32), not unlanded coverage."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": "None for this bounded source refutation; it says nothing about installed vendor rendering.",
+    "original_stronger_consequence": "Potential misleading wrap-normalization explanation; no security or user-work loss was claimed.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Source refutation of the proposed comment defect, not a rarity filter."
+  },
+  {
+    "key": "g106/l1",
+    "latest_line": 11,
+    "recommendation": "retain-verified",
+    "bucket": "other",
+    "underlying_key": "restart-reply-stale-tab-rediscovery-comment",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The field comment still teaches a removed distinction between pane reuse and post-replacement discovery. Correct production behavior does not repair that false explanation.",
+    "checks": [
+      "647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513:crates/farhelm-supervisor/src/service/core.rs:13608-13638 reads tabs once before side effects and forwards them to the host restart; :13747-13749 claims two tmux-specific provenance paths.",
+      "Same revision:core/host_restart.rs:393-394,540-549,569-579 documents the preflight list and publishes the supplied vector on both branches.",
+      "647f0227^:core.rs:14428-14453 actually selects preflight versus post-replacement tabs, so the removal introduces the mismatch. At 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db:core.rs:13096-13098 the false comment remains, while :3987-3988 correctly describes the preflight list."
+    ],
+    "coverage_checked": [
+      "SPEC.md:1925 and SPEC_impl.md Terminal host describe tabs surviving Restart; neither accepts false reply documentation.",
+      "TODO.md Planned is empty. Exact phrase/rediscovery searches of plans/queue, BUGS.md, INDEX.md, queue files and active TRIAGE_OUTCOMES.md found no matching item. plans/queue/tmux-drop-from-docs.md criterion 3 would have targeted stale comments, but plans/REPORTS.md:32 says it has landed; it is not unlanded coverage and did not fix this line."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": null,
+    "original_stronger_consequence": "A maintainer receives a false contract for the freshness and provenance of restart-reply tabs. No runtime failure, security mistake or loss-of-work route is established.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Retain as an internal documentation defect introduced within the range and still present at its tip. No filter matches the entire consequence."
+  },
+  {
+    "key": "g106/c4",
+    "latest_line": 12,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "restart-removed-tmux-anchor-wrong-target-hypothesis",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "Deleting the former replacement-window machinery does not remove the host migration's recorded target or the driver's identity check. This does not adjudicate deleted-test coverage.",
+    "checks": [
+      "647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513:core.rs:13623-13638 chooses Replacing::TmuxWindow only from the recorded agent terminal with surviving terminal and history seed.",
+      "Same revision:core/host_restart.rs:603-623 forwards exactly the recorded tmux session/pane to kill_window.",
+      "Same revision:crates/farhelm-supervisor/src/tmux.rs:3949-3986 places the identity predicate and targeted kill in one synchronous tmux queue group; refusal does not select a current-window fallback. Source analysis only."
+    ],
+    "coverage_checked": [
+      "Reviewed SPEC_impl.md:2290-2296,2954-3002 describes host migration retaining old tabs; current SPEC.md:2998-3012 and SPEC_impl.md Ending the old private tmux server describe later retirement, not an authorization for wrong-target removal.",
+      "TODO.md Planned empty; searches of plans/queue, BUGS.md, INDEX.md, queue files and active TRIAGE_OUTCOMES.md found no exact removed-anchor wrong-target item. tmux retirement plans have landed (plans/REPORTS.md:29,32)."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": "No missing target barrier is shown by this removal; no general lifecycle-safety conclusion is implied.",
+    "original_stronger_consequence": "Restart could kill an unrelated shell tab and its user-owned processes after removal of old_agent_window_anchor.",
+    "needs_independent_drop_check": true,
+    "proposed_basis": "Bounded source refutation of wrong-target process loss. An independent drop check must agree before disposal."
+  },
+  {
+    "key": "g106/c5",
+    "latest_line": 13,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "host-agent-gate-mixed-session-comment",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "In context the sentence identifies the agent terminal being probed. The same section explicitly says the logical session can contain old tmux tabs and new host tabs.",
+    "checks": [
+      "647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513:core.rs:14491-14495 states mixed-session support; :14565-14599 selects the gate by the agent's terminal kind.",
+      "Same revision:core.rs:13617-13622 preserves old tmux tabs during agent migration, so the shortened comment does not deny that supported lifecycle. Source/context analysis only."
+    ],
+    "coverage_checked": [
+      "Reviewed SPEC_impl.md:2367-2411 explicitly describes mixed sessions. Current SPEC.md terminal experience and SPEC_impl.md Terminal host searches reflect later retirement, not a distinct current comment contract.",
+      "TODO.md Planned empty; searches of plans/queue, BUGS.md, INDEX.md, queue files and active TRIAGE_OUTCOMES.md found no exact gate-comment item. Landed tmux cleanup plans are not pending coverage."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": null,
+    "original_stronger_consequence": "Potentially teaching that a host agent's logical session cannot contain old tmux tabs; no harmful reader action was claimed.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Context refutes the proposed universal reading. This is distinct from g106/l1, which names paths actually removed."
+  },
+  {
+    "key": "g107/g107-l1",
+    "latest_line": 2,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "legacy-retry-planned-checkout-rollback-hypothesis",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The rollback helper lacks its own filesystem check, but validation before launch refuses occupied or unreadable Planned candidates and retains their ownership evidence.",
+    "checks": [
+      "647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513:core.rs:9158 invokes validate_retry before launching a retry; :10020-10082 explains the mkdir/identity gap and rejects occupied or unreadable candidates with RetainedCreateRefusal.",
+      "Same revision:core.rs:15904-15909 reaches Planned rollback only after that validation; :15927-15931 explains its pre-mkdir contract. No file-deletion route was observed or reproduced."
+    ],
+    "coverage_checked": [
+      "Both specifications were searched for Planned ownership/rollback, interrupted create and legacy retry. The implementation's retained ambiguous-path rule agrees with the validation; it does not excuse forgetting an occupied directory.",
+      "TODO.md Planned empty; searches of plans/queue, BUGS.md, INDEX.md, queue files and active TRIAGE_OUTCOMES.md found no exact retry-rollback item. No filter is needed for the refutation."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": "The original sequence requires an occupied Planned path to reach rollback; source validation prevents that stated sequence.",
+    "original_stronger_consequence": "Retry might forget an existing checkout and its ownership/deletion handle after mkdir but before identity capture. The lead did not establish actual deletion of user files.",
+    "needs_independent_drop_check": true,
+    "proposed_basis": "Source refutation of the stated crash/rollback sequence. Conservatively send the proposed dismissal to the independent check because it concerns ownership of user work."
+  },
+  {
+    "key": "g107/g107-c2",
+    "latest_line": 3,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "host-tab-open-removed-safeguards-hypothesis",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The host replacement retains dead-at-reply checks, failed-open cleanup, scope attribution and supervisor-owned cancellation behavior. Removal of tmux creation alone does not establish the alleged loss.",
+    "checks": [
+      "647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513:core.rs:14621-14633 opens the host tab on an owned task holding the lifecycle claim.",
+      "Same revision:core/host_tabs.rs:419-440 derives scoped from the selected wrapper and tags the tab; :471-537 settles child death, waits for final output and refuses/unwinds failure; :742-764 probes the pinned child.",
+      "Same revision:core/host_tabs.rs:838-890 sweeps before host shutdown and again by scope/marker, retaining cleanup uncertainty in the error. Source-only check does not certify every runtime schedule."
+    ],
+    "coverage_checked": [
+      "Reviewed SPEC_impl.md Tabs in hosts:2367-2411 states these replacement obligations. Current SPEC.md:1921-1926,2136-2158 retains tab cleanup and lifetime obligations.",
+      "TODO.md Planned empty; searches of plans/queue, BUGS.md, INDEX.md, queue files and active TRIAGE_OUTCOMES.md found no exact removal-of-open-safeguards item. Existing tab-helper-can-fail-after-open-succeeds index wording concerns directory entry timing, a distinct trigger and cause."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": "No removed replacement safeguard or shipped stranded-process route is shown.",
+    "original_stronger_consequence": "A successful reply could name a dead shell, or a failed open could strand processes that might be user-owned work.",
+    "needs_independent_drop_check": true,
+    "proposed_basis": "Bounded source refutation; independent agreement is required for disposal of the potential process-work consequence."
+  },
+  {
+    "key": "g107/g107-c3",
+    "latest_line": 4,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "test-host-installer-unsupported-tmux-input",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The helper does mutate before rejecting tmux, but its declared input is the host created for a test session. The recorded misuse is outside that contract and no supported caller is established.",
+    "checks": [
+      "647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513:core.rs:16756-16773 explicitly describes replacing the host its create started; cfg(test/test-seams) limits compilation. :16780-16821 confirms publication/store mutation precedes the unsupported Tmux refusal.",
+      "Same revision:core/tests/host_terminals.rs:1609-1652 uses fresh_create, then installs a stand-in host. crates/farhelm/tests/e2e/host_terminals.rs:105-115 wraps the same test installer. No runtime execution."
+    ],
+    "coverage_checked": [
+      "Reviewed SPEC_impl.md:2294-2314 requires every new create to use a host. Current SPEC.md terminal-host contract adds no supported tmux-create input to this test helper.",
+      "TODO.md Planned empty; searches of plans/queue, BUGS.md, INDEX.md, queue files and active TRIAGE_OUTCOMES.md found no exact unsupported installer-input item."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": "A supported caller supplying an adopted tmux agent to a helper documented to replace its created host.",
+    "original_stronger_consequence": "On unsupported tmux input the test helper changes the entry and stored address before returning an error, leaving the former tmux terminal running. No production user action or deletion was shown.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Refuted as a supported product/test-contract failure; preserve the actual late validation behavior and caller limitation."
+  },
+  {
+    "key": "g107/g107-c4",
+    "latest_line": 8,
+    "recommendation": "retain-verified",
+    "bucket": "other",
+    "underlying_key": "removed-lone-legacy-tab-lifecycle-oracles",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "At the intermediate revision, legacy tabs remain supported while their integrated absent-agent listing/Delete oracle is deleted. Retained host tests and pure marker-query tests do not exercise that legacy boundary. Later retirement makes the old fixture obsolete but does not erase the intermediate deletion.",
+    "checks": [
+      "647f0227^:core.rs:23163-23268 removes the agent pane, proves its marked tab is the only remaining window, checks NothingAlive refusal, then terminal=None, ordinary listing and refusal again. The reviewed commit deletes this test.",
+      "647f0227:core.rs:14025-14080 retains unconditional marker discovery for absent/present agents and refuses live tabs, refuting the original claim of an actual removed consent check.",
+      "647f0227:core/tests/host_terminals.rs:329-382 tests an absent agent with a host tab becoming unreadable, not lone legacy-window listing; crates/farhelm/tests/e2e/session_lifecycle.rs:3646-3759 tests ended agents plus host tabs without removing their terminal handle.",
+      "647f0227^:core.rs:23929-24000 also contains the deleted lone-tmux-tab Stop oracle. The record reports overlap with g108/c2; that other record was not separately assigned or opened, so parent reconciliation is still needed. No runtime tests ran."
+    ],
+    "coverage_checked": [
+      "Reviewed SPEC_impl.md:2954-3002 still serves and rediscovers old tabs when no agent terminal remains. Current SPEC.md:2998-3012 retires them; plans/REPORTS.md:29 confirms the retirement plan landed. This is later obsolescence, not pending-plan coverage of intermediate test loss.",
+      "TODO.md Planned empty; searches of plans/queue, BUGS.md, INDEX.md, queue files and active TRIAGE_OUTCOMES.md found no exact lone-legacy-tab lifecycle-oracle item. Source behavior being correct is not test-defect coverage."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": "No shipped unauthorized Delete or Stop regression is established. The Stop-oracle alias synthesis was reported by the original reviewer, and requires reconciliation with the separately owned g108/c2 record before combining files.",
+    "original_stronger_consequence": "Unconfirmed Delete might terminate user work in a lone surviving tab after the agent disappears; the later synthesis also preserves Stop leaving tab work alive if inventory regresses. Current production checks refute an actual removed-guard bug; the established issue is missing regression protection.",
+    "needs_independent_drop_check": true,
+    "proposed_basis": "Retain the verified intermediate test defect, other priority. Independent review must judge the consequence lowering from possible user-work loss. Proposed same-root alias reported in the history: g108/c2; do not discard its Stop scope when consolidating."
+  },
+  {
+    "key": "g107/g107-l2",
+    "latest_line": 10,
+    "recommendation": "out-of-range",
+    "bucket": "other",
+    "underlying_key": "preexisting-shared-launch-tmux-comments",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The shared preparation comments were already inaccurate for the existing default host path at the exclusive base. The assigned deletion removes the remaining tmux caller but does not introduce host-path misinformation.",
+    "checks": [
+      "6e423e30068b62c6cfa276c6d720ee35bb70387a:core.rs:1363 defaults new terminals to Host; :17145 calls cwd the directory tmux gets; :17362-17375 claims provenance precedes a required tmux start.",
+      "Same exclusive base:core/host_launch.rs:449-465 already calls this shared preparation before a host start.",
+      "git log -S 'directory tmux gets' over the assigned range identifies 1ed482dde220452e424973faf38a5e1318986333 removing that phrase. Tip core.rs:14339-14347 and :14507-14524 correctly refer to the host. Later repair supports provenance but is not the out-of-range basis."
+    ],
+    "coverage_checked": [
+      "Both specifications' host-launch/preparation text was searched; it does not accept the inaccurate shared explanation.",
+      "TODO.md Planned empty; searches of plans/queue, BUGS.md, INDEX.md, queue files and active TRIAGE_OUTCOMES.md found no exact shared-preparation-comment record. Landed tmux docs cleanup is not pending coverage."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": null,
+    "original_stronger_consequence": "Maintainers could infer that shared preparation requires tmux or gives cwd to tmux, although host callers use it. No security or user-work-loss route was claimed.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Source-proven preexisting defect at the exclusive base; later correction is explicitly not the reason for exclusion."
+  },
+  {
+    "key": "g107/g107-c5",
+    "latest_line": 11,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "retired-tmux-tab-scope-marker-write-oracle",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The deleted test checks writing and reading the scope marker on newly created tmux windows. That creation contract is retired in this commit. It is distinct from still-supported legacy marker reads and from g107-c4.",
+    "checks": [
+      "647f0227^:core.rs:21554-21624 opens a new tmux tab, compares its exact scope marker with manager availability, and requires Unknown for another tab ID.",
+      "647f0227:core.rs:14621-14626 always opens a host tab. core/host_tabs.rs:419-440 stores actual selected scope in HostRole::Tab.scoped rather than a tmux window option.",
+      "No host-equivalent test oracle is inferred from correct production code. The bounded refutation is retirement of the exact old write path, not a claim that legacy marker-read coverage is complete."
+    ],
+    "coverage_checked": [
+      "Reviewed SPEC_impl.md:2294-2296 says every new terminal is a host and nothing selects tmux. Both current specifications retain only the later old-server shutdown, not tmux-tab creation.",
+      "TODO.md Planned empty; searches of plans/queue, BUGS.md, INDEX.md, queue files and active TRIAGE_OUTCOMES.md found no exact retired marker-write oracle item."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": "An active tmux-tab creation path requiring this write oracle; no such path remains at the reviewed commit.",
+    "original_stronger_consequence": "Loss of a scope-selection regression oracle, with hypothetical cleanup misattribution. No resulting user-work-loss route or missing legacy-read oracle is established by this record.",
+    "needs_independent_drop_check": true,
+    "proposed_basis": "Refute loss of an active old write-path oracle; conservatively obtain independent agreement because hypothetical scope misattribution could affect user processes."
+  },
+  {
+    "key": "g107/g107-l3",
+    "latest_line": 14,
+    "recommendation": "retain-verified",
+    "bucket": "other",
+    "underlying_key": "legacy-retry-refusal-skips-launch-artifact-cleanup",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The refusal can remove the interrupted legacy create's row without synchronously removing its private published launch instructions. General next-start retention acceptance and the specific creation-cleanup sentence conflict enough that coverage should not be assumed.",
+    "checks": [
+      "647f0227:core.rs:11226-11240 refuses the legacy retry before :11703-11725's fail-closed artifact removal. :15866-15924 deletes/rolls back absent/no-origin rows without artifact cleanup. :10883-10901 propagates failure without another cleanup pass.",
+      "647f0227^:core.rs:17290-17312 prepares/publishes the spec before tmux starts, establishing the interrupted-before-start premise. Reviewed :15695-15709 publishes privately with mode 0600.",
+      "647f0227:service/launch_artifacts.rs:751-790 removes unknown-session specs/waypoints/holds during the startup sweep called at core.rs:8437-8445. Error-retained rows instead have cleanup_error_once at launch_artifacts.rs:348-355. Thus this is bounded to removed-row or absent-Planned cases, not indefinite retention for every retry.",
+      "The existing validation-refused retry at core.rs:10732-10748 explicitly removes the old generation's artifacts, unlike the new early branch. No credential reader, exposure, misuse or lost-work route was established; no runtime reproduction ran."
+    ],
+    "coverage_checked": [
+      "Current SPEC_impl.md:94-97 accepts next-start cleanup; :4974-4985 repeats private-spec/tidiness and also says creation removes it if the session never starts. Reviewed SPEC_impl.md:5451-5461 has the same tension. SPEC.md state/security searches give no separate disclosure route.",
+      "review_feedback_queue/launch-input-database-duplication-rationale-overstated.md and active TRIAGE_OUTCOMES.md:1721-1738 cover inaccurate duplication rationale and accepted retention while a current-generation session exists. They do not explicitly cover removal of a never-started session's row while keeping its spec until restart; not an exact duplicate or useful same-root extension.",
+      "TODO.md Planned empty; remaining queue/index, BUGS.md and plans/queue searches found no exact early-refusal artifact item. tmux retirement plans have landed. FILTER.md older-release-plus-rare-condition could cover private tidiness after interrupted legacy create, but the original security concern and specific cleanup promise require a narrowly scoped independent disposition rather than silent filtering."
+    ],
+    "exact_cover_quotes": [
+      {"source": "SPEC_impl.md:94-97", "quote": "files left behind are not a leak, and need no extra cleanup machinery, when they are bounded by a fixed amount, grow only with a rare and explicit user action (such as switching the release download source), or are removed by the next attempt at the same operation or by the next start of the process that owns them."},
+      {"source": "SPEC_impl.md:4980-4982", "quote": "Removing specs is therefore tidiness, not a credential boundary: the shim unlinks its spec as soon as it has read it, creation removes it if the session never starts, and the supervisor's startup sweep removes specs of sessions that no longer exist and of launches a later generation superseded."},
+      {"source": "review_feedback_queue/FILTER.md, Upgrades from older releases combined with another rare condition", "quote": "The trigger needs something carried across an upgrade from an older Farhelm release"},
+      {"source": "review_feedback_queue/FILTER.md, same filter", "quote": "The trigger also needs another rare condition on top of that: a narrow timing window, a crash or fault at a specific point, or an unusual sequence of user or agent actions."},
+      {"source": "review_feedback_queue/FILTER.md, same filter exclusion", "quote": "a security or trust-boundary consequence."}
+    ],
+    "missing_premise": "No missing source premise for private leftover timing. A security consequence needs an actual new reader, disclosure, misuse or boundary crossing; none is shown. Whether general next-start acceptance or the more specific never-started creation-cleanup promise controls remains a recording ambiguity.",
+    "original_stronger_consequence": "Private launch instructions can retain session credentials or user-supplied command secrets after the refusal removes the session row. The original lead explicitly did not establish credential exposure; the later proposal lowers this to private tidiness and suggests specification coverage.",
+    "needs_independent_drop_check": true,
+    "proposed_basis": "Retain the source-confirmed timing discrepancy with the coverage ambiguity. Any later drop as covered/filtered, or final lowering of the original security concern, needs independent agreement on that narrow scope."
+  },
+  {
+    "key": "g108/c1",
+    "latest_line": 1,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "host-provenance-ordering-test-observation-boundary",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The converted fake host still holds the start open until after the durable-row observation. Its separate consumed-release witness rejects an iteration-cap exit that would invalidate the ordering premise.",
+    "checks": [
+      "647f0227:core.rs:26428-26676 seeds empty provenance, starts a fake host that publishes entered-start, reads both provenance fields before releasing it, and requires consumed-release after joining. Only the released branch creates that witness.",
+      "Same revision:core/host_launch.rs:454-468 prepares the launch before start_host at :538; core.rs:15712-15743 publishes provenance in that preparation. The test targets the real preparation-to-start ordering, not merely a post-failure value.",
+      "The source includes cancellation/panic release handling and finite cap behavior. No fixture execution or claim about platform success or measured timing is made."
+    ],
+    "coverage_checked": [
+      "Reviewed SPEC_impl.md:2322-2324 states host launch shares spec/hook/shell/command preparation. Current SPEC_impl.md launch-provenance text at :4459-4461 retains pre-spawn ordering; SPEC.md conversation ownership searches do not contradict it.",
+      "TODO.md Planned empty; searches of plans/queue, BUGS.md, INDEX.md, queue files and active TRIAGE_OUTCOMES.md found no exact OMP held-start ordering-oracle item. Other provenance records have different triggers and consequences."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": null,
+    "original_stronger_consequence": "The test might pass despite provenance publication moving after terminal start. No current production race or user-work-loss route was claimed.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Source refutation of a weakened ordering oracle, preserving its platform and timing limitations."
+  }
+]

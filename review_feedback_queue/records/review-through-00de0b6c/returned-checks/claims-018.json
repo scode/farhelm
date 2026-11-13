@@ -1,0 +1,263 @@
+[
+  {
+    "key": "g031/f1",
+    "latest_line": 30,
+    "recommendation": "retain-verified",
+    "bucket": "other",
+    "underlying_key": "ui-host-lifecycle-provider-and-start-wording",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The supported Podman path reaches local text that still assumes Tensorlake and does not distinguish start from resume. These are incorrect operation/provider diagnostics, not a wrong-provider mutation.",
+    "checks": [
+      "350a4b33b6d4476f4a78e43cea124bc2b828f462:crates/farhelm-helm/src/environment/podman.rs:636-684 sets starting from verb == start and uses Resuming on start.",
+      "350a4b33:crates/farhelm-ui/src/hosts.rs:4758-4762 drops starting/provider; TensorlakeChangingStatus:4151-4165 prints lifecycle_label(direction) and literal asked Tensorlake. host_state_detail:1209-1225 uses provider attribution but passes lifecycle_verb(direction), which yields resume.",
+      "350a4b33:hosts.rs:3528,3544 contains sandbox-specific Suspend tooltips. UI lib.rs:954-959 permits Podman lifecycle controls; exclusive base lib.rs:936-940 permitted only Tensorlake.",
+      "350a4b33:sandbox_sessions.rs:104-137 overrides the Starting cause/explanation correctly. 222bf625:session_view.rs:2020-2032 uses that wrapper. The original claim against the ordinary card's main Starting message is refuted; inherited detail still uses resume.",
+      "Tip 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db hosts.rs retains asked Tensorlake at 4251 and sandbox tooltips at 3608,3624. git diff 222bf625..00de0b6c for hosts.rs is empty. Source only; no runtime observation."
+    ],
+    "coverage_checked": [
+      "Current SPEC.md Container sessions:4806-4865 distinguishes Stopped/Starting and container lifecycle; it does not accept these text errors. SPEC_impl.md Disposable environments:5929-5983 requires per-provider wording in one exhaustive UI module.",
+      "TODO.md Planned:25-26 is empty. plans/queue/INDEX.md has no unlanded plan entries; podman-environments is listed landed in plans/REPORTS.md:21.",
+      "BUGS.md covers only a retained ssh-output install/update hang. INDEX.md and queue content searches for asked Tensorlake, start/resume, provider wording and host lifecycle found no exact item. Active TRIAGE_OUTCOMES.md has no matching diagnostic decision.",
+      "FILTER.md does not match: normal supported container lifecycle is sufficient; no rare trigger was established."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": null,
+    "original_stronger_consequence": "Earlier history also alleged the ordinary unavailable card's main Starting text was wrong. The provider wrapper refutes that part; keep the correction explicit. No security or user-work-loss route was asserted.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Retain the inline progress, expanded/inherited detail and Suspend-tooltip scope together. The supplied reference to a separate backend formatter is not an alias established by this batch."
+  },
+  {
+    "key": "g031/f2",
+    "latest_line": 14,
+    "recommendation": "retain-verified",
+    "bucket": "other",
+    "underlying_key": "ui-host-retry-selects-delete-from-live-phase",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "Retry's connection description disagrees with its deletion request even on a current failed-deletion row. The callback also selects the operation from live state. The proposed other bucket depends on independent acceptance of the preserved authority narrowing.",
+    "checks": [
+      "222bf6253bcd168db04bcbb1df20180c88306998:crates/farhelm-ui/src/hosts.rs:2337-2380 reads hosts.peek and selects retry_environment_delete for Deleting with failure; :5008-5020 sends only the id and says Try the connection again.",
+      "222bf625:crates/farhelm-helm/src/sessions/sandbox.rs:316-341 refuses unless manager.sealed_failed(host); manager.rs:2657-2665 requires SealedHost::Failed. This endpoint does not authorize destruction of an unsealed environment.",
+      "Current SPEC.md Sandbox sessions:1506-1540 makes the seal permanent, requires completion of sealed destruction after failure/restart, and puts every process/file in the initial confirmation. SPEC_impl.md:6150-6158 limits Retry to a failed seal record.",
+      "git diff 222bf625..00de0b6c is empty for UI hosts.rs, helm hosts.rs and sessions/sandbox.rs; tip still has the connection description at UI hosts.rs:5017. Source only."
+    ],
+    "coverage_checked": [
+      "SPEC_impl.md Answers bind to what was drawn:1069-1095 forbids choosing an answered operation from later state. The seal contract accepts completion of prior destruction, not the misleading Retry description.",
+      "TODO.md Planned is empty; plans/queue/INDEX.md has no unlanded entries. BUGS.md is unrelated.",
+      "INDEX.md and queue content searches for Try the connection again, retry-delete and destructive Retry found no exact item. Active TRIAGE_OUTCOMES.md:915-1058 accepts several convenience-state lags, but explicitly reserves destructive-action fences; none settles this named Retry mismatch.",
+      "FILTER.md is not exact coverage: the description is wrong in an ordinary current failed-deletion row, and the original destructive interpretation requires independent checking."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": "No fresh unsealed-destruction route is shown. Independent judgment must accept that permanently authorized seal completion removes the original unauthorized-loss interpretation before finalizing other.",
+    "original_stronger_consequence": "An old reconnect Retry can dispatch destruction and end every remaining process/file, beyond the consequence stated on that control. The reviewer proposed narrowing this out of highest because destruction was already irrevocably authorized by the seal; that lowering is not accepted here.",
+    "needs_independent_drop_check": true,
+    "proposed_basis": "Retain the verified UI mismatch. Independently check the proposed consequence lowering against SPEC.md:1506-1540 and the sealed_failed endpoint guard; this consultation does not authorize lowering or dropping it."
+  },
+  {
+    "key": "g031/f3",
+    "latest_line": 16,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "agent-add-observation-alone-opens-dialog",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "Observing an agent request alone does not enqueue an opening after this patch. The exact unsolicited-opening trigger is source-refuted.",
+    "checks": [
+      "9ff03ce91f191ea59f3ce16cefbd0b76d7fe599d:crates/farhelm-ui/src/approvals.rs:125-160 only expires/prunes openings on refresh; :180-192 drains queued openings; :277-284 inserts them only on explicit Allow/open action. AgentAddOpening:65-69 has no automatic field.",
+      "9ff03ce9:modal_isolation.rs:77-111 retains admission behind existing modal roots and retires the observer on unmount. Source only."
+    ],
+    "coverage_checked": [
+      "Current SPEC.md:4193-4204 says the request never opens its dialog itself and preserves an existing draft/modal. Checked code satisfies that narrow rule.",
+      "TODO.md Planned and plans/queue/INDEX.md are empty. plans/REPORTS.md:20 confirms agent-host-add-card landed; that plan's Decisions explicitly preserve deferred explicit opening.",
+      "BUGS.md is unrelated. INDEX.md and active TRIAGE_OUTCOMES.md:183-207 cover ordinary setup discarding a parked agent opening, a distinct loss-of-opening trigger; :955-963 concerns arm timing. Neither is an exact alias.",
+      "FILTER.md is unnecessary; this proposal is based on source refutation."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": null,
+    "original_stronger_consequence": "Removing require_active/on_rejected might let an agent request alone open Add host and steal focus. The proposed refutation is limited to request observation without the user's card action. It says nothing about a deferred explicit opening taking focus after the user moves on.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Do not queue this narrow candidate. Do not use it to dismiss the separately owned deferred-opening or unintended-approval concern mentioned in the supplied history."
+  },
+  {
+    "key": "g031/f4",
+    "latest_line": 15,
+    "recommendation": "retain-verified",
+    "bucket": "other",
+    "underlying_key": "ui-deleting-environment-retains-running-reconnect-promise",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "During supported whole-environment destruction, a retained cached session can receive the generic promise that it keeps running and will reconnect, beside correct deletion details.",
+    "checks": [
+      "222bf6253bcd168db04bcbb1df20180c88306998:crates/farhelm-helm/src/hosts.rs:1513-1564 holds the actor in Deleting before awaiting provider.destroy; delete_registered_host follows successful destruction. Cached data is retained during that await.",
+      "222bf625:sessions.rs:3162-3185 serves cached session detail with stale true when status.client is absent. UI session_view.rs:1938-1942 resolves its owned host, :2020-2032 obtains unavailable_notice for the stale/frozen view, and :3363 displays its explanation.",
+      "222bf625:UI hosts.rs:1757-1764 gives Deleting without failure the generic keeps-running/reattaches explanation; sandbox_sessions::unavailable_notice overrides Suspended and Starting only.",
+      "Tip 00de0b6c:sandbox_sessions.rs:209-237 still overrides only those two states, while frozen includes Deleting at :93-102. The later action-gating fix therefore does not repair the explanation. git diff 222bf625..00de0b6c for helm hosts.rs is empty. Source only; the two-window retained interval was not executed."
+    ],
+    "coverage_checked": [
+      "SPEC.md Sandbox sessions:1524-1540 and Container sessions:4839-4849 require visible deletion/retry; SPEC_impl.md:6150-6158 says Deleting sessions show as being deleted. No acceptance of a concurrent running/reconnect promise.",
+      "TODO.md Planned is empty; plans/queue/INDEX.md has no unlanded entries. BUGS.md is unrelated.",
+      "INDEX.md and queue searches for deletion-card/running promises found no exact item. sandbox-outage-card-ignores-host-refresh-failure.md was read in full: it concerns stale Suspended after failed host refresh and successful Resume, not a fresh Deleting snapshot during destruction. Active TRIAGE_OUTCOMES.md has no exact decision.",
+      "FILTER.md is not exact coverage: ordinary offline whole-environment Delete is sufficient, rather than a rare interruption/timing trigger."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": null,
+    "original_stronger_consequence": "False reassurance that a cached session keeps running and reconnects while its environment is being destroyed. No additional unauthorized destruction or user-work-loss route was alleged. Earlier seal/cache race reasoning was replaced with the supported offline whole-environment interval.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Retain contradictory diagnostics for the retained-view interval. Do not claim a sealed supervisor still has a live session or that action disabling remains unfixed."
+  },
+  {
+    "key": "g031/f5",
+    "latest_line": 11,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "host-lifecycle-without-global-token-overlaps-same-host-write",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The shared dispatcher checks and inserts the per-host busy set before spawning, so releasing the global token does not admit overlapping same-page requests for the same host.",
+    "checks": [
+      "1d24c6af0b6fdbbec854623ff53f90281b8271ab:crates/farhelm-ui/src/hosts.rs:2182-2201 checks provisioning_busy_hosts and mutation_busy_hosts and synchronously inserts the latter before spawn.",
+      "1d24c6a:hosts.rs:2281-2303 routes both registry run and run_lifecycle through run_with; run_lifecycle also checks launch_targets_now before it. Source only."
+    ],
+    "coverage_checked": [
+      "SPEC_impl.md:1143-1152 expressly says Suspend/Resume never claim the registry token and that Hosts' per-host busy checks still serialize this page's requests on one host. Cross-host concurrency is accepted.",
+      "TODO.md Planned and plans/queue/INDEX.md are empty. sandbox-suspend-overlap is listed landed at plans/REPORTS.md:23. BUGS.md is unrelated.",
+      "INDEX.md and active TRIAGE_OUTCOMES.md searches for same-host lifecycle overlap found no exact unresolved item; existing lifecycle confirmation items have different admission/token causes. FILTER.md is unnecessary."
+    ],
+    "exact_cover_quotes": [
+      "SPEC_impl.md:1149-1151: Hosts' per-host busy checks still serialize this page's requests on one host."
+    ],
+    "missing_premise": null,
+    "original_stronger_consequence": "Queued Suspend/Resume might overlap host edits or provisioning on the same host after removal of the global page token. No actual conflicting dispatch or destructive consequence was established.",
+    "needs_independent_drop_check": true,
+    "proposed_basis": "Source-refute the considered same-page overlap and preserve the explicit cross-host allowance. Conservatively include this proposed dismissal in independent checking because the original collision concern touches operations on a host containing user work; no broader cross-window claim is refuted."
+  },
+  {
+    "key": "g031/f6",
+    "latest_line": 18,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "ui-environment-metadata-unknown-host-kind-expect",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The expectation exists, but the reviewed supported producer cannot construct the unknown-kind plus environment-metadata combination it would need to panic.",
+    "checks": [
+      "350a4b33b6d4476f4a78e43cea124bc2b828f462:UI hosts.rs:5278-5283 invokes provider_ui whenever environment metadata is present; sandbox_sessions.rs:82-91 expects a known environment kind.",
+      "350a4b33:helm hosts.rs:532-555 spells snapshot kind exhaustively as local/ssh/tensorlake/podman; environment_view in the same file:4261-4289 returns None for Local/Ssh and metadata only for Tensorlake/Podman.",
+      "350a4b33:UI lib.rs:924-950 understands both Tensorlake and Podman. Its unknown-kind contract remains real, but no supported reviewed producer for the mismatched combination was shown. Source only."
+    ],
+    "coverage_checked": [
+      "SPEC_impl.md Environment rows and provider state:5955-5962 requires decoding kind/name/provider together and refusing unknown provider spellings. Current specs do not establish a supported future mismatched producer.",
+      "TODO.md Planned and plans/queue/INDEX.md are empty. The related Podman plan is landed, not prospective coverage. BUGS.md is unrelated.",
+      "INDEX.md, queue content and active TRIAGE_OUTCOMES.md searches for unknown-kind environment detail/panic found no exact item. FILTER.md is unnecessary."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": "A supported payload producer with environment metadata and a kind this UI does not recognize. An unspecified future provider or hand-crafted response does not supply that premise.",
+    "original_stronger_consequence": "Expanding such a mismatched row could panic and lose the host panel's diagnostics; hypothetical severity high. The expectation itself is not defensive, and the producer check does not promise future compatibility.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Dismiss only the current supported-product panic claim for lack of its required producer. Preserve the unchecked-expect observation and exact missing premise; no security or user-work-loss consequence was alleged."
+  },
+  {
+    "key": "g031/f7",
+    "latest_line": 21,
+    "recommendation": "retain-verified",
+    "bucket": "other",
+    "underlying_key": "ui-stopped-container-waiting-place-offers-suspend",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "Stopped with waiting_for_place true falls through to Suspend. The backend refuses the stopped-resource suspension, but that does not correct the offered operation or contradictory Resume remedy.",
+    "checks": [
+      "350a4b33b6d4476f4a78e43cea124bc2b828f462:UI hosts.rs:4394-4412 includes Stopped in the resumable predicate only with waiting_for_place false; :4930-4945 offers the resulting Suspend and gates it only on busy/changing.",
+      "350a4b33:helm manager.rs:3840-3861 publishes Stopped with waiting_for_place = !gate, where gate depends on the place supervisor being Connected.",
+      "350a4b33:environment/podman.rs:150-189 resolves local/SSH place command routes independently of a supervisor client; :1237-1261 maps exited/stopped/created to Stopped. :636-684 checks actual resource state; lifecycle_verb:1421-1434 refuses suspension of a stopped container with use Resume to start it.",
+      "Exclusive-base-to-350a4b33 diff introduces the waiting_for_place:false predicate with Stopped. Tip hosts.rs:4481-4504 retains it, and hosts.rs has no later diff after 222bf625. Source only; no guarantee manual Resume succeeds while the place is unavailable."
+    ],
+    "coverage_checked": [
+      "SPEC.md Container sessions:4857-4865 distinguishes Stopped, connected-place automatic start and failed-start Resume. SPEC_impl.md:5979-5983,6161-6166 agrees. Neither accepts affirmative Suspend for Stopped.",
+      "TODO.md Planned and plans/queue/INDEX.md are empty. podman-environments is landed per REPORTS.md:21. BUGS.md is unrelated.",
+      "INDEX.md, queue content and active TRIAGE_OUTCOMES.md searches for waiting_for_place, stopped lifecycle, Suspend/Resume remedy found no exact item. FILTER.md's rare trigger requirement is not established by ordinary place-supervisor disconnection."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": null,
+    "original_stronger_consequence": "Wrong Suspend affordance and pointless confirmation/refusal for an already stopped container; no unsafe mutation was alleged. No claim that manual Resume must work while its container host is unavailable.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Retain the menu eligibility/verb issue separately from f1's displayed progress wording; those require different decision fixes."
+  },
+  {
+    "key": "g031/f8",
+    "latest_line": 24,
+    "recommendation": "retain-verified",
+    "bucket": "other",
+    "underlying_key": "ui-host-phase-fixture-omits-stopped-deleting",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The test advertises exhaustive protection against new phase-label collisions but its fixture omits the two new variants. Correct current production labels do not supply that missing regression oracle.",
+    "checks": [
+      "350a4b33b6d4476f4a78e43cea124bc2b828f462:UI hosts.rs:6995-7050 every_phase contains the old 11 cases and no Stopped; :7170-7201 explicitly claims exhaustive taxonomy coverage, computes labels from that fixture and compares only those 11 tokens.",
+      "350a4b33:hosts.rs:7076-7099 zips the same fixture with an old rail table. Exclusive-base-to-350a4b33 diff updates TensorlakeChanging.starting in the fixture without adding Stopped.",
+      "Tip 00de0b6c hosts.rs source search finds Stopped and Deleting only before tests; every_phase remains at :7091 and the exhaustive-token guard at :7271. Both new production phase labels exist at :375-377. Source only; no mutation test or runtime test was run."
+    ],
+    "coverage_checked": [
+      "Both specs require the new phase distinctions; no acceptance of incomplete phase-oracle claims was found. This is a test assurance/source-docstring defect, not a current runtime label defect.",
+      "TODO.md Planned and plans/queue/INDEX.md are empty. BUGS.md is unrelated. INDEX.md, queue content and active TRIAGE_OUTCOMES.md searches for every_phase, exhaustive host taxonomy, Stopped/Deleting fixture omissions found no exact item.",
+      "FILTER.md has no boundary for this ordinary test-oracle mismatch."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": null,
+    "original_stronger_consequence": "New-state UI mapping regressions can bypass tests described as exhaustive. No present runtime label, security or user-work-loss consequence was claimed. Older incompleteness in the separate detail expectation table is not newly attributed here.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Retain UI fixture/table coverage as its own root. The supplied history's backend serializer neighbour does not establish an alias or coverage of UI rail/outage mappings."
+  },
+  {
+    "key": "g031/f9",
+    "latest_line": 26,
+    "recommendation": "retain-unverified",
+    "bucket": "other",
+    "underlying_key": "ui-host-flow-omits-shared-environment-details",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "Source confirms new mutable environment detail containers are absent from causal prefix projection. Actual surviving menu misplacement remains conditional on layout movement without a section-size change or another invalidator.",
+    "checks": [
+      "350a4b33b6d4476f4a78e43cea124bc2b828f462:UI hosts.rs:5278-5293 renders environment name/recipe/place/tunnels/warning. HostRowLines:1355-1388 and host_flow_rows:1430-1446 include only destination/detail/remedy.",
+      "350a4b33:list/view.rs:2160-2225 compares that projection before publishing accepted host reads. HostRow:4664-4666 reports only retained diagnostics locally. Helm hosts.rs:537-555 supplies mutable place alias and health data.",
+      "350a4b33:HostsPanel:3004-3007 observes whole-section resize. list/view.rs:1456-1459,1524-1533 closes open Hosts/Session surfaces on the resulting layout epoch. Ordinary net panel growth therefore has an independent repair path.",
+      "350a4b33:list/view.rs:1490-1512 list shape tracks count/read status/traces/auto-disclosure, not these detail texts. The diff adds the shared environment block within range; older Tensorlake-only omitted metadata is not independently attributed. UI hosts.rs has no diff after 222bf625 through tip. No native/browser layout observation was performed."
+    ],
+    "coverage_checked": [
+      "SPEC_impl.md:1027-1031 requires fixed menus to close when layout could move their measured row. :1216-1225 adds measured probes for session-heading size, not general host detail changes. Generic convenience-state lag acceptance in active TRIAGE_OUTCOMES.md:915-928 does not clearly override this specific geometry contract; retain that ambiguity.",
+      "TODO.md Planned and plans/queue/INDEX.md are empty; BUGS.md is unrelated.",
+      "INDEX.md and queue content searched for HostRowLines, host_flow_rows, environment details and host anchors. late-rail-restoration-retains-menu-coordinates.md and marked-count-reflow-leaves-popup-at-old-anchor.md were read in full: different geometry producers/owners, not exact aliases. Active ledger has no exact environment-detail case.",
+      "FILTER.md does not clearly match: neither actual rarity nor the whole surviving consequence has been established. Uncertainty alone is not a filter."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": "A concrete supported before/after environment-detail publication moves the chosen host header while the entire Hosts section's measured dimensions stay equal, and no scroll/resize/trace invalidator closes its menu. Equal-height wrapping/font geometry and that event sequence remain unobserved.",
+    "original_stronger_consequence": "A lower host menu might remain at old coordinates after details above it change. The original ordinary row-growth route is limited by the whole-panel resize fallback. Materially misplaced-menu UX could justify high only after its complete route is established; no wrong-target operation or work loss was alleged.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Retain the investigated uncertainty and fallback, without presenting source omission as runtime misplacement or silently lowering an established harm."
+  },
+  {
+    "key": "g031/f10",
+    "latest_line": 28,
+    "recommendation": "retain-verified",
+    "bucket": "other",
+    "underlying_key": "ui-remove-label-docstring-still-sandbox-only",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The helper's docstring still promises Delete sandbox for every machine-deleting host, but its new provider dispatch correctly returns Delete container for Podman. Source comments are in scope.",
+    "checks": [
+      "Exclusive base 6e423e30068b62c6cfa276c6d720ee35bb70387a:UI hosts.rs:3663-3671 has the same prose beside a bool helper that literally returns Delete sandbox for true; base lib.rs:966-970 makes only Tensorlake machine-deleting.",
+      "350a4b33b6d4476f4a78e43cea124bc2b828f462:UI hosts.rs:3718-3724 retains that prose while dispatching by provider. environment_ui.rs:75-79 maps Podman to Delete container, and lib.rs:987-990 makes both providers machine-deleting.",
+      "Tip hosts.rs:3801-3806 retains the mismatch; hosts.rs has no diff after 222bf625. This is documentation drift introduced by widening the helper's domain, not a claim of incorrect production consent or deletion. Source only."
+    ],
+    "coverage_checked": [
+      "SPEC_impl.md Disposable environments:5929-5943 requires provider-owned wording; the implementation follows it and the helper prose no longer describes that contract. SPEC.md Container sessions:4848 names Delete container; no acceptance of misleading internal documentation.",
+      "TODO.md Planned and plans/queue/INDEX.md are empty. BUGS.md is unrelated. INDEX.md, queue content and active TRIAGE_OUTCOMES.md searches for remove_label and sandbox-only removal documentation found no exact item.",
+      "FILTER.md has no boundary for this ordinary source-docstring contradiction."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": null,
+    "original_stronger_consequence": "Maintainers can be misled about the provider-specific removal vocabulary. No wrong production consent/deletion, security or work-loss route was alleged.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Retain a documentation-only finding. Keep it separate from f1's actual rendered wording errors; correcting this docstring does not repair those callers."
+  }
+]

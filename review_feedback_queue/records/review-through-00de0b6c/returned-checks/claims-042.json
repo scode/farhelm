@@ -1,0 +1,344 @@
+[
+  {
+    "key": "g065/l3",
+    "latest_line": 16,
+    "recommendation": "covered",
+    "bucket": "high",
+    "underlying_key": "podman-ownership-wal-normal-tail-loss",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The production ownership writes use ordinary WAL/NORMAL durability, so OS/power loss can lose ownership records while a remote container survives. The specification expressly accepts ordinary tail loss and explicit leftover handling when both identity records are lost. This is a proposed narrow coverage disposition, not an accepted drop or highest-consequence lowering.",
+    "checks": [
+      "At 56659839785691f76da3af5d8f51b511cff4ba8b, provisioning/tensorlake_add.rs:388-398 registers the environment before work; store/podman.rs:256-278,355-394,415-432 use ordinary conn.call for pending creation, registration and canonical identity.",
+      "At the same revision, farhelm-supervisor/src/db.rs:94-117 selects NORMAL only in WAL; call at 230-245 adds no FULL barrier. podman.rs:1103-1125 records the pending send before run. These establish a conditional power-loss route, not a runtime observation or a process-crash defect.",
+      "podman.rs:1073-1085 refuses name-only adoption without pending/ID proof; destroy at 1294-1319 leaves an unproven name alone and saves a recovered canonical ID before removal. No accidental deletion route is established.",
+      "The complete podman.rs diff from 56659839785691f76da3af5d8f51b511cff4ba8b to 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db changes only lifecycle-lock acquisition."
+    ],
+    "coverage_checked": {
+      "SPEC.md": "Container sessions, current 4831-4837, adopts sandbox ownership/cleanup and exposes interrupted resources for explicit deletion; it does not promise transparent restart recovery.",
+      "SPEC_impl.md": "Current 5182-5201 accepts ordinary OS/power-loss tail rollback; 6296-6305 accepts missing-ID-and-pending-marker recovery by explicit leftover handling. The reviewed revision contains these at 5665-5683 and 6677-6685; 6840-6842 also expressly retains ordinary durability.",
+      "TODO.md Planned": "Empty at current lines 25-27.",
+      "unlanded plans": "plans/queue/INDEX.md contains no unlanded plan entries; retained historical plan files are not unlanded coverage.",
+      "BUGS.md": "Read in full; its SSH-output-pipe stall does not cover this claim.",
+      "queue and active triage": "Searched ownership/power-loss/container tail-loss terms and exact source identifiers. No exact existing item or active outcome found. Existing Podman storage-selection and remote-routing items concern different causes and were read; they are not coverage.",
+      "FILTER.md": "No full match. Manual recovery and possible loss of normal access exceed the rare self-correcting/diagnostic filter. No upgrade prerequisite is shown."
+    },
+    "exact_cover_quotes": [
+      {"source": "SPEC_impl.md:5187-5189 (24bc058066fd57848e788b465719b0e6da2f98f7); reviewed 56659839785691f76da3af5d8f51b511cff4ba8b:5670-5672", "quote": "every ordinary read-write connection selects `synchronous=NORMAL` only after reading an actual WAL mode and otherwise retains FULL. This accepts losing the last commits on an OS crash or power loss without weakening database consistency; process crashes preserve commits."},
+      {"source": "SPEC_impl.md:6301-6305; reviewed 56659839785691f76da3af5d8f51b511cff4ba8b:6682-6685", "quote": "A row with neither a saved ID nor an outstanding create is removed without looking up its name or deleting any sandbox or snapshots. The API-key requirement still applies. A legacy row or a power loss that lost both records cannot recover by name: remove that host entry, then handle the leftover explicitly."},
+      {"source": "SPEC.md:4831-4832", "quote": "Container sessions follow Sandbox sessions' ownership, launch cleanup, Clone, Restart, Replace, Delete and visibility contracts."}
+    ],
+    "missing_premise": "No missing premise for accepted ownership tail rollback. Permanent loss of user work or erroneous deletion remains unestablished; loss of registry access may require manual recovery. The parent must independently check coverage and any lowering from potential highest.",
+    "original_stronger_consequence": "A surviving container containing user processes/work could become untracked or unavailable through ordinary host/session views; the first lead also considered erroneous deletion, which subsequent source checks did not establish. The integrated caller supersedes the earlier storage-only missing-caller rationale. This durability proposal does not refute the separately mentioned earlier-approval/retarget credential claim or recursive image pruning.",
+    "needs_independent_drop_check": true,
+    "proposed_basis": "Accepted ordinary WAL/NORMAL power-loss tail rollback plus the explicitly documented no-ID/no-pending-marker leftover procedure, applied through the shared container ownership contract. High reflects established manual control/recovery disruption; a highest route is not silently discarded. Supplied history reports the same root in g064/c3; parent reconciliation is needed, with no independent alias verdict here."
+  },
+  {
+    "key": "g065/c4",
+    "latest_line": 22,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "podman-failed-private-script-cleanup-to-image-capture",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The considered route requires failed private-script cleanup to reach successful image capture. The wrapper reports failure when removal fails, script rejects failure, and callers propagate it before committing.",
+    "checks": [
+      "56659839785691f76da3af5d8f51b511cff4ba8b:environment/podman.rs:41-56 sets umask, stores stdin privately, removes the file before success, and exits nonzero if rm fails; 347-395 rejects nonzero command status.",
+      "Same revision: environment/podman/build.rs:45-52 and 152-209 await script success before commit. Preparation at 349-369 awaits the preparer and validates its result before commit. Error handling at 267-290 reconciles helpers and retires images rather than capturing the failed helper.",
+      "Pinned-tip selected-path diff shows no later change to these boundaries. No command, container, test or reproduction was executed."
+    ],
+    "coverage_checked": {
+      "specifications": "Read current SPEC.md Container sessions and SPEC_impl.md Disposable environments/Podman creation, including proxy inheritance and image-cleanup contracts. No accepted disclosure or independent coverage settles this hypothesis; the basis is source refutation.",
+      "TODO.md Planned and plans": "Planned is empty; plans/queue/INDEX.md has no unlanded entries.",
+      "BUGS.md": "Read; no private-script/capture coverage.",
+      "queue and active triage": "Searched private-script, capture/commit, private-input and source identifiers in INDEX, queue files and TRIAGE_OUTCOMES. No exact cover or same-root item found.",
+      "FILTER.md": "No filter applies to the considered security consequence."
+    },
+    "exact_cover_quotes": [],
+    "missing_premise": "The required successful-capture-after-failed-cleanup step is contradicted by source. Abrupt termination can leave a private file in a retained helper, but does not itself publish an image.",
+    "original_stronger_consequence": "Proxy credentials left in a private script could be captured in a reusable image and inherited by later clones (highest security if established). This conclusion does not promise secure erasure of deleted storage, exclude credentials inherited from custom bases, or refute image retirement recursively pruning a user-owned ancestor. Error cleanup can retire images even when no new capture occurs.",
+    "needs_independent_drop_check": true,
+    "proposed_basis": "Narrow source refutation of failed-cleanup-to-successful-capture only; retain the original security theory and caveats for an independent drop check."
+  },
+  {
+    "key": "g065/c5",
+    "latest_line": 23,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "podman-leftover-delete-same-name-replacement",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "Reusing a container name cannot redirect this leftover Delete: it accepts and carries the captured canonical container ID through reinspection and removal.",
+    "checks": [
+      "56659839785691f76da3af5d8f51b511cff4ba8b:environment/podman.rs:725-765 requires canonical(id), checks ownership and current host/recipe/job references, and passes that id to remove_container.",
+      "Same revision: podman.rs:226-259 requires observed ID equality for canonical inputs; 400-413 rechecks ownership, removes info.id and confirms the original ID absent. A later same-name different-ID container is not that target.",
+      "podman.rs:1073-1085 refuses adoption without saved-ID/pending-create authority. The refutation does not depend on a name collision being improbable. The pinned-tip diff contains only an unrelated lifecycle-lock change."
+    ],
+    "coverage_checked": {
+      "specifications": "Current SPEC_impl.md:6046-6050 requires canonical identity, ownership and no active references. Read together with SPEC.md container ownership/cleanup and SPEC_impl.md:6093-6105. This is a source refutation, not reliance on a broad ownership promise.",
+      "TODO.md Planned and plans": "Planned empty; no unlanded plan entries.",
+      "BUGS.md": "Read; no matching cleanup-identity route.",
+      "queue and active triage": "Searched canonical leftover deletion, container-name collisions and ownership races. Read orphan-cleanup-promises-unheld-provisioning-lock.md: its Tensorlake specification/lock mismatch is different and explicitly lacks a proven same-name adoption route. No exact coverage/alias found.",
+      "FILTER.md": "No filter covers wrong-target destruction of user work."
+    },
+    "exact_cover_quotes": [],
+    "missing_premise": "A shipped path redirecting immutable captured-ID removal to a different same-name container is absent and contradicted by the identity checks.",
+    "original_stronger_consequence": "Confirmed cleanup of an old leftover might delete a newly registered environment and its user work (highest if established). The refutation is confined to same-name replacement of a canonical CONTAINER target; it makes no general assertion about arbitrary external storage mutation and does not refute recursive IMAGE ancestor deletion.",
+    "needs_independent_drop_check": true,
+    "proposed_basis": "Narrow immutable-container-ID source refutation. Independent agreement is still required before dropping the original user-work-loss candidate."
+  },
+  {
+    "key": "g065/l4",
+    "latest_line": 21,
+    "recommendation": "retain-verified",
+    "bucket": "highest",
+    "underlying_key": "podman-owned-image-removal-recursively-prunes-user-base",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "Ownership checks constrain only the explicit image. Podman removal without --no-prune can then remove an untagged user-owned parent. The conditional sole-copy local-base route crosses the explicit retained-base contract.",
+    "checks": [
+      "56659839785691f76da3af5d8f51b511cff4ba8b:environment/podman/build.rs:689-743 checks the explicit image labels/use and issues image rm -- ID without --no-prune. clean_images at 764-788 reaches it; podman.rs:945-950 dispatches provider cleanup there; tensorlake/recipes.rs:593-614 admits recipe deletion and invokes provider cleanup.",
+      "Same revision: farhelm-proto/src/recipes.rs:788-797 accepts a local ID as a nonempty NUL-free reference; build.rs:808-837 leaves an existing base untagged and 150 uses it for the helper. podman.rs:475-551 commits without squashing or removing inherited history. The full selected-path diff to 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db leaves build.rs unchanged and changes only lifecycle locking in podman.rs.",
+      "Primary-source check: https://docs.podman.io/en/v4.9.3/markdown/podman-rmi.1.html documents default removal of dangling parents and the --no-prune option. https://raw.githubusercontent.com/containers/podman/v4.9.3/cmd/podman/images/rm.go:43,60-64 defaults NoPrune to false.",
+      "Primary-source check: v4.9.3 vendor/github.com/containers/common/libimage/image.go:193-209 defines dangling as no names/children; 509-560 obtains the parent, deletes the explicit image, then recursively removes a dangling parent unless NoPrune. oci.go:64-99 recognizes shared diff IDs plus inherited history and one additional entry. No Farhelm label predicate is applied to that implicit parent.",
+      "Primary-source commit check at https://raw.githubusercontent.com/containers/podman/v4.9.3/libpod/container_commit.go:62-75,169 imports the container builder and forwards Squash; vendor/github.com/containers/buildah/image.go:264-278 retains inherited history when not squashing/omitting it, and 631-660 appends a history entry. This supports actual committed-child parent recognition rather than assuming shared layers suffice.",
+      "Source-supported conditional harm only. No reproduction, actual data loss or measured frequency is claimed. Tagged bases, surviving child images and containers can prevent pruning. No forced deletion of active user containers is claimed."
+    ],
+    "coverage_checked": {
+      "SPEC.md": "Current 4885-4889 explicitly requires retaining user-owned bases; this conflicts with the route rather than accepting it.",
+      "SPEC_impl.md": "Current 6046-6050 separates user bases from owned layers and 6087-6091 says never delete a user's base image. The reviewed revision contains the same boundaries at 6525-6529 and 6566-6570.",
+      "TODO.md Planned": "Empty.",
+      "unlanded plans": "plans/queue/INDEX.md is empty. Retained historical Podman plan text is not an unlanded fix.",
+      "BUGS.md": "Read; no accepted recursive-image-pruning bug.",
+      "queue and active triage": "Searched no-prune, dangling parents, untagged/local bases, retire_images, image cleanup and original source names in INDEX/queue and active ledger. No exact item found. Existing image-inspection and Podman storage/routing items were read and have different causes/consequences.",
+      "FILTER.md": "No full boundary matches; this is loss of user-owned image contents, with no required old-release upgrade."
+    },
+    "exact_cover_quotes": [],
+    "missing_premise": "No missing repository premise for the conditional route. The condition is a valid untagged local user base with no protecting reference when owned descendants are retired; occurrence was not reproduced. Supplied history identifies g061/l8 as original owner, but that separate record is outside this batch and must be reconciled by the parent.",
+    "original_stronger_consequence": "An untagged sole retained copy of a user-authored local base image and its contents can be removed during ordinary recipe cleanup/replacement, beyond the ownership-checked artifact. The local record explicitly mirrors g061/l8; it is not a new discovery. Canonical container deletion and failed-script capture refutations do not narrow this separate highest consequence. Shared child layers may defer physical reclamation without preserving the original image object; final removal of protecting owned artifacts permits reclamation.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Retain highest; parent should consolidate under the reported original g061/l8 after comparing that record. Do not count an additional independent defect or treat the alias statement as authorization to drop either record. --no-prune on owned-image removal is the bounded fix direction."
+  },
+  {
+    "key": "g066/c1",
+    "latest_line": 4,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "podman-failure-fake-fixed-name-cross-run-collision",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The fixed container names are scoped to a fresh per-fixture in-memory Commands model. The examined command and transport seams cannot send those names to real Podman storage.",
+    "checks": [
+      "56659839785691f76da3af5d8f51b511cff4ba8b:provisioning/session_launch_failure_tests.rs:41-90 creates a fresh store/harness and Commands instance, then injects PodmanPlaces::with_commands and the E2e provisioning backend.",
+      "environment/podman/failure_tests.rs:135-145 gives each Commands its own mutex state; PlaceCommands methods at 325-343 call execute only; 520-536 and 659-678 create/remove modeled containers. The fixed reserved session name at 1080 is therefore not a shared engine resource.",
+      "rest_harness.rs:372-434 connects scripted peers through Tokio duplex streams. No runtime execution or claim of real-container lifecycle coverage follows."
+    ],
+    "coverage_checked": {
+      "specifications": "SPEC_impl.md Podman places requires isolation in actual shared Podman storage. The injected model has no such shared storage. Both relevant specification sections were read; no separate acceptance is needed for the source refutation.",
+      "TODO.md Planned and plans": "Empty Planned bucket and no unlanded queue entries.",
+      "BUGS.md": "Read; no matching fixture-name issue.",
+      "queue and active triage": "Searched fixed container names, collisions and failure_tests/session_launch_failure_tests identifiers. No exact cover/alias found; other shared-resource harness findings do not concern this injected model.",
+      "FILTER.md": "No filter invoked."
+    },
+    "exact_cover_quotes": [],
+    "missing_premise": "A route from these injected names to external Podman resources is absent and contradicted by the seams.",
+    "original_stronger_consequence": "Another test run's or real installation's container could collide or be removed. Earlier records label this other/no-highest, but the wording includes potentially user-owned real resources; preserve that original consequence for a cautious independent check. This only covers the assigned fake's names, not unrelated runtime harnesses or fixture lifetime.",
+    "needs_independent_drop_check": true,
+    "proposed_basis": "Narrow source refutation by per-instance command state and scripted transport. Marked for independent drop review because the original considered removal of real resources despite the reviewer's other label."
+  },
+  {
+    "key": "g066/c2",
+    "latest_line": 2,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "podman-failure-fixture-timeout-external-resource-escape",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "Dropping the preparation waiter need not stop its owned background task, but the examined fixture injects command/backend/transport models and owns its runtime. No real container or independent supervisor escapes through those seams.",
+    "checks": [
+      "56659839785691f76da3af5d8f51b511cff4ba8b:provisioning/session_launch_failure_tests.rs:152-174 times out the waiter, not an explicit task join. Fixture construction at 41-90 injects Commands, E2eProvisioningBackend and payloads before provider use; fixture owns its TempDir at 18-27.",
+      "environment/podman/failure_tests.rs:325-343 invokes the in-memory executor; modeled run/remove at 520-536,659-678 affects no external engine. rest_harness.rs:372-434 uses duplex streams/scripted tasks, and Harness at 710-726 owns its directory.",
+      "manager.rs:3137-3145 shuts actors down on Drop. farhelm-testtrace/src/lib.rs:994-1024 owns the per-test runtime, catches body unwind and drops the runtime before finishing/resuming unwind. Detached asynchronous work is bounded by that owner, not by the waiter's timeout.",
+      "No reproduction ran. This does not prove synchronous draining before temp-directory drop or real-process termination semantics."
+    ],
+    "coverage_checked": {
+      "specifications": "Read the shared environment ownership and Podman lifecycle contracts; no product promise about an injected fake's task drain independently covers this candidate.",
+      "TODO.md Planned and plans": "Planned empty; no unlanded queue entries.",
+      "BUGS.md": "Read; its real escaped SSH-output helper is a different route.",
+      "queue and active triage": "Searched fixture preparation timeouts, orphan containers/supervisors and assigned source identifiers. No matching item or active decision found; unrelated fixture ownership-publication findings do not cover this injected fixture.",
+      "FILTER.md": "No filter invoked; source refutation is limited to external escape."
+    },
+    "exact_cover_quotes": [],
+    "missing_premise": "The claimed external resource requires a real command/backend/transport escape that these seams do not provide. A task may remain alive until runtime teardown; early waiter completion alone does not establish task cessation.",
+    "original_stronger_consequence": "Assertion/setup failure or the ten-second timeout could orphan a real container or independently running supervisor. The original record calls this tooling/other and establishes no shipped user-work/security route. Keep the narrow external-escape scope and caveat that synchronous fixture draining is unproven.",
+    "needs_independent_drop_check": true,
+    "proposed_basis": "Refute only external real-container/supervisor escape through these injected seams. Cautiously request independent review of the external-resource dismissal; do not generalize it into a claim that timeout joins background work."
+  },
+  {
+    "key": "g066/c3",
+    "latest_line": 5,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "podman-failure-matrix-unrelated-setup-error-false-pass",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The assigned failure matrices observe the selected phase/target, not just a generic error. Earlier unrelated setup failures cannot satisfy those reach assertions.",
+    "checks": [
+      "56659839785691f76da3af5d8f51b511cff4ba8b:environment/podman/failure_tests.rs:220-229 records failed only upon consuming the selected phase. Command matrix at 821-861 asserts failed==phase; success prerequisite at 779-814 checks command/backend traversal and reuse.",
+      "Backend matrix at 869-887 requires backend_reached(container,event), whose implementation at provisioning/session_launch_failure_tests.rs:194-233 matches the exact canonical target and event. provisioning/e2e.rs:208-235 records the event before the configured fault.",
+      "Cleanup refusal at failure_tests.rs:659-666 requires a recorded fault before refusing rm; the test at 895-911 observes the retained canonical helper and cleanup failure. Lost/invalid commit and absent-create cases at 918-936,1106-1136,1156-1193 assert the selected phase and intended absent-resource premise."
+    ],
+    "coverage_checked": {
+      "specifications": "Read relevant environment lifecycle/ownership sections in both specs; these require real production behavior but do not convert modeled tests into real-engine evidence.",
+      "TODO.md Planned and plans": "Empty/no unlanded entries.",
+      "BUGS.md": "Read; no matching failure-oracle issue.",
+      "queue and active triage": "Searched phase/fault gates, generic/unrelated errors and assigned test/module names. No same-root item or active decision found.",
+      "FILTER.md": "No filter invoked."
+    },
+    "exact_cover_quotes": [],
+    "missing_premise": "The suspected false pass needs the selected phase/target assertion to succeed without visiting it, which the fault gate contradicts for these cases.",
+    "original_stronger_consequence": "Tests might pass from an unrelated earlier setup error and falsely claim coverage of later failure boundaries. Scope remains test assurance only. The fake does not execute real Podman/systemd, verify private-file bytes or simulate delayed external materialization; uncertainty assertions retain pending ownership rather than proving real delayed cleanup.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Source-refute unrelated-earlier-error false passes in the named cases; preserve the modeled-substrate limitation and do not infer full real-engine coverage."
+  },
+  {
+    "key": "g066/l1",
+    "latest_line": 7,
+    "recommendation": "retain-verified",
+    "bucket": "other",
+    "underlying_key": "podman-proxy-exact-inheritance-test-shared-serializer-oracle",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The test expressly promises sensitivity to lossy proxy transformations but obtains its expected prefix from production's serializer. A newline-to-space transformation inside that shared helper changes both sides and preserves the remaining assertions.",
+    "checks": [
+      "56659839785691f76da3af5d8f51b511cff4ba8b:environment/podman/failure_tests.rs:12-14 promises exact inheritance against lossy sanitization. At 987-991 it creates original values but computes exports with build::proxy_exports; 1027-1029 compares input to those computed exports.",
+      "Production podman.rs:355-356 calls the same proxy_exports, defined at podman/build.rs:420-429. Replacing newlines with spaces there would affect both expected and delivered prefix; marker count at 1032-1038, no-marker argv checks at 999-1019 and import-name checks at 1040-1058 still permit the changed value.",
+      "failure_tests.rs:545-597 parses script text into phases and returns canned output rather than evaluating exports. provisioning/e2e.rs:382-408 ignores installed _content, so it supplies no independent original-value observation.",
+      "Range log and diff show failure_tests.rs and build.rs introduced at 56659839785691f76da3af5d8f51b511cff4ba8b and unchanged through 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db. Source/counterfactual analysis only; no mutation or execution."
+    ],
+    "coverage_checked": {
+      "SPEC.md": "Container sessions at 4876-4882 promises deterministic creation-time proxy inheritance. This does not accept overstated regression sensitivity in the test.",
+      "SPEC_impl.md": "Current 6082-6085 requires selected proxy values in environment.d. Read surrounding Podman creation and prepared-artifact sections; no shared-oracle exception.",
+      "test-authoring contract": "Read .agents/test-authoring.md in full; it requires an observable distinguishing competing mechanisms.",
+      "TODO.md Planned and plans": "Empty/no unlanded entries.",
+      "BUGS.md": "Read; no matching test oracle acceptance.",
+      "queue and active triage": "Searched proxy_exports, exact inheritance, lossy sanitization, test name and module, then broader proxy/test assurance terms across queue/index and active ledger. No exact cover/alias found. Existing fixture proxy-privacy guards concern different source strings and assertions.",
+      "FILTER.md": "No full match. The consequence is persistent false test assurance, not an imprecise runtime diagnostic or self-correcting rare failure."
+    },
+    "exact_cover_quotes": [],
+    "missing_premise": null,
+    "original_stronger_consequence": "False assurance that shell metacharacters/newlines survive unchanged. This is a test-oracle/comment defect, not an observed product proxy failure or credential exposure. Current serialization may be correct; the test still meaningfully checks private-input transport, absence from argv and transformations introduced outside the shared helper. Supplied g065/l1 production empty-value persistence is a distinct consequence, not a duplicate or cover.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Record other with source-confirmed confidence. Use independent expected bytes/semantic observation, or narrow the exact-inheritance claim to transport of the serializer's output."
+  },
+  {
+    "key": "g066/c4",
+    "latest_line": 8,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "podman-failure-fake-synthesized-label-oracle-scope",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The fake synthesizes labels and cannot independently prove real label transport. Its named failure tests assert orchestration and durable ownership accounting of model-owned resources, without an explicit claim to test label tampering. No contradiction with that bounded contract is established.",
+    "checks": [
+      "56659839785691f76da3af5d8f51b511cff4ba8b:failure_tests.rs:388-405 synthesizes helm/recipe labels for modeled containers/images. Run at 422-432 reads role; stored Container at 520-534 does not retain supplied helm/recipe argv labels.",
+      "The file contract at 1-3 describes command/backend models. assert_ownership_accounted at 259-294 checks model-owned images against real durable provider state, not independent engine labels. Failure tests at 821-887 check reached boundaries and resource/accounting effects, without foreign/relabeled input.",
+      "Canonical distinct model IDs at 74-75 are a narrower cleanup identity premise, not a promise of exhaustive independent label verification. No runtime or product ownership defect is established."
+    ],
+    "coverage_checked": {
+      "specifications": "Read SPEC.md container cleanup and SPEC_impl.md:6046-6050,6087-6091 label/retained-base requirements. These govern real cleanup; they do not require each workflow fake to validate every label boundary.",
+      "TODO.md Planned and plans": "Empty/no unlanded entries.",
+      "BUGS.md": "Read; no matching fake-label acceptance.",
+      "queue and active triage": "Searched synthesized label, ownership fake, failure_tests and phase-oracle terms. No exact existing item/outcome found.",
+      "FILTER.md": "No filter invoked; disposition is absence of a demonstrated test-contract contradiction."
+    },
+    "exact_cover_quotes": [],
+    "missing_premise": "A specific asserted label-tampering/real-label guarantee defeated by this oracle has not been identified.",
+    "original_stronger_consequence": "Fabricated inspect labels might invalidate failure-cleanup evidence. The bounded conclusion preserves that the fake cannot detect missing real run labels by itself; it does not establish a shipped security/destructive route. A future explicitly label-focused test needs independent label state/assertions. This is distinct from l1's express exact-inheritance promise.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Do not record a new coverage request as an established defect. Preserve the model limitation; any parent claim that these tests independently prove label transport would exceed this disposition."
+  },
+  {
+    "key": "g067/c1",
+    "latest_line": 1,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "podman-no-input-command-private-input-race",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "With no input, the inline send future is immediately successful and the biased select polls it first. Already-ready capture cannot choose the incomplete-input error before that successful branch.",
+    "checks": [
+      "56659839785691f76da3af5d8f51b511cff4ba8b:environment/podman_probe.rs:175-187 selects null stdin for no input; 205-213 makes send return Ok without suspension when input=None; biased select at 217-221 tries send first and then awaits capture.",
+      "The suspected artificial private-input refusal at 230 is therefore not reachable merely from capture finishing first on a no-input command. This is source reasoning, not executed behavior."
+    ],
+    "coverage_checked": {
+      "specifications": "Read current container-host probe/lifecycle contracts in SPEC.md and SPEC_impl.md. No separate accepted spurious-refusal rule is needed; the exact route is source-refuted.",
+      "TODO.md Planned and plans": "Empty/no unlanded entries.",
+      "BUGS.md": "Read; no same-route coverage. Its escaped SSH-output stall is different.",
+      "queue and active triage": "Searched private-input race/incomplete-input text, podman_probe and no-input command terms. No exact cover/alias found.",
+      "FILTER.md": "No filter invoked."
+    },
+    "exact_cover_quotes": [],
+    "missing_premise": "The hypothesis requires capture to win before an immediately-ready first biased branch; the select ordering refutes it.",
+    "original_stronger_consequence": "Ordinary probes/lifecycle commands might fail spuriously with a private-input error despite supplying no input. The considered impact was command refusal only. No conclusion is drawn about descendant cancellation, remote cleanup, data loss or credential disclosure.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Source-refute this no-input select-ordering route only."
+  },
+  {
+    "key": "g067/l1",
+    "latest_line": 14,
+    "recommendation": "retain-verified",
+    "bucket": "other",
+    "underlying_key": "podman-delete-lifecycle-test-equal-membership-oracle",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The deletion test claims a helm-side membership count would fail but deliberately makes the helm list both container sessions. Counting that same list could satisfy the reported count and keep/delete assertions. Correct production code does not refute the overstated test claim.",
+    "checks": [
+      "2ef10815f12ed719ab6c51c6e3ac6fcd3f8bc1fa:crates/farhelm/tests/e2e/podman_environments.rs:1416-1418 claims a helm counting its own list fails; 1427-1431 establishes both sessions listed; 1439-1454 expects one remaining and keeps the container; 1456-1486 deletes the last and expects absence.",
+      "The enclosing sequence at 1128-1316 pauses/resumes, restarts/reconnects the helm and stops/restarts the container but establishes no hidden/unlisted surviving session. A helm-side count agreeing with those two visible sessions can satisfy the assertions.",
+      "At pinned tip 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db, the same unsupported claim persists at 1415-1418 and the equal-membership premise at 1426-1429.",
+      "Production at 2ef10815f12ed719ab6c51c6e3ac6fcd3f8bc1fa:farhelm-helm/src/sessions/sandbox.rs:196-261 correctly calls delete_session_or_seal and uses its result/count. Thus this is a test/comment defect, not an established production destructive route. No tests or reproduction ran."
+    ],
+    "coverage_checked": {
+      "SPEC.md": "Read Sandbox sessions in full, including current 1507 onward: helm lists may miss sessions, so deletion must ask the environment's Farhelm. Container sessions adopts the rule. No acceptance of the overstated oracle.",
+      "SPEC_impl.md": "Read Environment Delete and the seal at 6106-6166; authoritative supervisor count is the intended mechanism.",
+      "test-authoring contract": "Read in full: an observable must distinguish competing mechanisms.",
+      "TODO.md Planned and plans": "Planned is empty. plans/queue/INDEX.md has no unlanded entries. Historical environment-agent-operations plan at 584-601 asks for hidden/offline-admitted membership cases, but it is no longer an unlanded plan and does not correct this specific false claim.",
+      "BUGS.md": "Read; no test-oracle acceptance.",
+      "queue and active triage": "Searched test/helper names, helm counting/list, membership authority and test oracle terms in INDEX/queue and active ledger. No exact same-root item/decision found; unrelated attention membership and template test-oracle items are not coverage.",
+      "FILTER.md": "No full match. Persistent overstated test assurance is neither a rare imprecise runtime diagnostic nor a self-correcting display."
+    },
+    "exact_cover_quotes": [],
+    "missing_premise": null,
+    "original_stronger_consequence": "False assurance against deleting from helm-side membership guesses. The history briefly proposed dropping this as a scope limitation because production is correct, then restored it as a test-oracle/documentation defect. Preserve that withdrawal/reversal. The test meaningfully covers two-session lifecycle and premature sealing; it need not test every deletion case. No shipped user-work-loss route is claimed.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Record other. Establish an intentionally divergent membership premise and authoritative result, or narrow the comment to the two-session lifecycle guarantee actually demonstrated. Production correctness is not a basis to drop the test claim."
+  },
+  {
+    "key": "g067/l2",
+    "latest_line": 15,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "podman-tests-nested-build-module-registration",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The alleged orphan file is explicitly included as podman::build::tests. Its reported stale namespace is correct for that actual module graph.",
+    "checks": [
+      "56659839785691f76da3af5d8f51b511cff4ba8b:environment/podman.rs:19 declares mod build; podman/build.rs:9-11 declares #[cfg(test)] #[path = \"tests.rs\"] mod tests. That relative path selects podman/tests.rs alongside build.rs.",
+      "tests.rs:4 imports super::* from build, whose line 6 imports podman. Calls at tests.rs:527,530 to super::super::script_failure_output therefore name podman::script_failure_output, not environment.",
+      "The same nested module declaration was read at pinned tip 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db:build.rs:9-11. No compile/run was performed; source registration refutes the claimed lack of registration without claiming all tests pass."
+    ],
+    "coverage_checked": {
+      "specifications": "Read governing container/ownership/proxy sections. Those contracts do not establish that a test file is excluded; actual module declarations decide it.",
+      "TODO.md Planned and plans": "Planned empty; no unlanded entries.",
+      "BUGS.md": "Read; no matching orphan-module acceptance.",
+      "queue and active triage": "Searched podman/tests.rs, registration, orphan-module and helper symbol terms; no exact coverage. Existing landing-tests-import-unregistered-module index entry is Python tooling with a different module/contract, not this Rust path attribute.",
+      "FILTER.md": "No filter invoked."
+    },
+    "exact_cover_quotes": [],
+    "missing_premise": "The earlier searches omitted the nested build module's relative path attribute. Both missing-registration and stale-namespace conclusions are contradicted by the actual graph.",
+    "original_stronger_consequence": "Wholesale exclusion of ownership, cleanup and private-input tests, with suspected compilation errors if wired normally. Both were explicitly withdrawn in later history. This refutation relies on the assigned file's own registration, not substitute coverage from failure_tests. No product security/data-loss route was asserted.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Accept the narrow source refutation while preserving the withdrawn records. Inclusion does not prove compilation/runtime success; it disproves the asserted missing module and wrong super namespace."
+  }
+]

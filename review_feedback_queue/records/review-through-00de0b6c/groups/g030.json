@@ -1,0 +1,1372 @@
+{
+  "group": {
+    "id": "g030",
+    "domain": "helm-service-integration",
+    "purpose": "helm-service-integration: crates/farhelm-helm/src/lib.rs, crates/farhelm-helm/src/notices.rs, crates/farhelm-helm/src/rest_harness.rs, crates/farhelm-helm/src/aggregate.rs, crates/farhelm-helm/src/ensure.rs, crates/farhelm-helm/src/checkout_config.rs, crates/farhelm-helm/src/preferences.rs, crates/farhelm-helm/src/browser.rs, crates/farhelm-helm/units/farhelm-supervisor.service.in, crates/farhelm-helm/tests/fixtures/release/SHA256SUMS, crates/farhelm-helm/tests/fixtures/release/SHA256SUMS.minisig, crates/farhelm-helm/tests/fixtures/release/test-key.pub, crates/farhelm-helm/tests/fixtures/release/tmux-aarch64-unknown-linux-musl, crates/farhelm-helm/tests/fixtures/release/tmux-x86_64-unknown-linux-musl, crates/farhelm-helm/tests/fixtures/release/variants/legacy-signature/SHA256SUMS.minisig, crates/farhelm-helm/tests/fixtures/release/variants/other-version/SHA256SUMS, crates/farhelm-helm/tests/fixtures/release/variants/other-version/SHA256SUMS.minisig, crates/farhelm-helm/tests/fixtures/release/variants/two-member/SHA256SUMS, crates/farhelm-helm/tests/fixtures/release/variants/two-member/SHA256SUMS.minisig, crates/farhelm-helm/tests/fixtures/release/variants/without-linux-aarch64/SHA256SUMS, crates/farhelm-helm/tests/fixtures/release/variants/without-linux-aarch64/SHA256SUMS.minisig, crates/farhelm-helm/tests/fixtures/release/variants/without-tmux/SHA256SUMS, crates/farhelm-helm/tests/fixtures/release/variants/without-tmux/SHA256SUMS.minisig; phases complete small per-commit changes",
+    "interfaces": [
+      "g001",
+      "g005",
+      "g006",
+      "g009",
+      "g010",
+      "g011",
+      "g012",
+      "g017"
+    ],
+    "sources": [
+      {
+        "path": "[private-run]/prep/parts/00032-000.patch",
+        "ranges": [
+          [
+            1,
+            22
+          ]
+        ],
+        "original_path": "crates/farhelm-helm/src/lib.rs",
+        "commit": "06d4b68f3a9e913f47cd426fedee5946a4eed77b",
+        "notes": "patch header; patch character offsets [0,1156)",
+        "lines": 22,
+        "bytes": 1156,
+        "start": 0,
+        "end": 1156,
+        "original": "[private-run]/prep/originals/00032.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/00033-000.patch",
+        "ranges": [
+          [
+            1,
+            145
+          ]
+        ],
+        "original_path": "crates/farhelm-helm/src/notices.rs",
+        "commit": "06d4b68f3a9e913f47cd426fedee5946a4eed77b",
+        "notes": "patch header; patch character offsets [0,6175)",
+        "lines": 145,
+        "bytes": 6175,
+        "start": 0,
+        "end": 6175,
+        "original": "[private-run]/prep/originals/00033.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/00088-000.patch",
+        "ranges": [
+          [
+            1,
+            71
+          ]
+        ],
+        "original_path": "crates/farhelm-helm/src/lib.rs",
+        "commit": "ee39aeacdaccfeaa0cea25246540b20008c868f0",
+        "notes": "patch header; patch character offsets [0,3165)",
+        "lines": 71,
+        "bytes": 3165,
+        "start": 0,
+        "end": 3165,
+        "original": "[private-run]/prep/originals/00088.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/00095-000.patch",
+        "ranges": [
+          [
+            1,
+            53
+          ]
+        ],
+        "original_path": "crates/farhelm-helm/src/rest_harness.rs",
+        "commit": "ee39aeacdaccfeaa0cea25246540b20008c868f0",
+        "notes": "patch header; patch character offsets [0,2322)",
+        "lines": 53,
+        "bytes": 2322,
+        "start": 0,
+        "end": 2322,
+        "original": "[private-run]/prep/originals/00095.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/00105-000.patch",
+        "ranges": [
+          [
+            1,
+            34
+          ]
+        ],
+        "original_path": "crates/farhelm-helm/src/lib.rs",
+        "commit": "1038bb1f4549f6896fa6e064fecf540f4548b4da",
+        "notes": "patch header; patch character offsets [0,1177)",
+        "lines": 34,
+        "bytes": 1177,
+        "start": 0,
+        "end": 1177,
+        "original": "[private-run]/prep/originals/00105.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/00146-000.patch",
+        "ranges": [
+          [
+            1,
+            16
+          ]
+        ],
+        "original_path": "crates/farhelm-helm/src/aggregate.rs",
+        "commit": "04ffdbb35773cef36e73eb798c005ddbeb9a9de6",
+        "notes": "patch header; patch character offsets [0,865)",
+        "lines": 16,
+        "bytes": 865,
+        "start": 0,
+        "end": 865,
+        "original": "[private-run]/prep/originals/00146.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/00147-000.patch",
+        "ranges": [
+          [
+            1,
+            12
+          ]
+        ],
+        "original_path": "crates/farhelm-helm/src/ensure.rs",
+        "commit": "04ffdbb35773cef36e73eb798c005ddbeb9a9de6",
+        "notes": "patch header; patch character offsets [0,459)",
+        "lines": 12,
+        "bytes": 459,
+        "start": 0,
+        "end": 459,
+        "original": "[private-run]/prep/originals/00147.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/00151-000.patch",
+        "ranges": [
+          [
+            1,
+            34
+          ]
+        ],
+        "original_path": "crates/farhelm-helm/src/lib.rs",
+        "commit": "04ffdbb35773cef36e73eb798c005ddbeb9a9de6",
+        "notes": "patch header; patch character offsets [0,1672)",
+        "lines": 34,
+        "bytes": 1672,
+        "start": 0,
+        "end": 1672,
+        "original": "[private-run]/prep/originals/00151.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/00167-000.patch",
+        "ranges": [
+          [
+            1,
+            79
+          ]
+        ],
+        "original_path": "crates/farhelm-helm/src/checkout_config.rs",
+        "commit": "52cc5d7250d262f93b730d91a07c240d33c2ea5f",
+        "notes": "patch header; patch character offsets [0,4607)",
+        "lines": 79,
+        "bytes": 4609,
+        "start": 0,
+        "end": 4607,
+        "original": "[private-run]/prep/originals/00167.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/00168-000.patch",
+        "ranges": [
+          [
+            1,
+            20
+          ]
+        ],
+        "original_path": "crates/farhelm-helm/src/preferences.rs",
+        "commit": "52cc5d7250d262f93b730d91a07c240d33c2ea5f",
+        "notes": "patch header; patch character offsets [0,859)",
+        "lines": 20,
+        "bytes": 859,
+        "start": 0,
+        "end": 859,
+        "original": "[private-run]/prep/originals/00168.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/00187-000.patch",
+        "ranges": [
+          [
+            1,
+            150
+          ]
+        ],
+        "original_path": "crates/farhelm-helm/src/lib.rs",
+        "commit": "56659839785691f76da3af5d8f51b511cff4ba8b",
+        "notes": "patch header; patch character offsets [0,6877)",
+        "lines": 150,
+        "bytes": 6877,
+        "start": 0,
+        "end": 6877,
+        "original": "[private-run]/prep/originals/00187.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/00201-000.patch",
+        "ranges": [
+          [
+            1,
+            157
+          ]
+        ],
+        "original_path": "crates/farhelm-helm/src/rest_harness.rs",
+        "commit": "56659839785691f76da3af5d8f51b511cff4ba8b",
+        "notes": "patch header; patch character offsets [0,6601)",
+        "lines": 157,
+        "bytes": 6603,
+        "start": 0,
+        "end": 6601,
+        "original": "[private-run]/prep/originals/00201.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/00281-000.patch",
+        "ranges": [
+          [
+            1,
+            13
+          ]
+        ],
+        "original_path": "crates/farhelm-helm/src/browser.rs",
+        "commit": "04d85f0c98a9b635709d00b056719a0baa7fd3fc",
+        "notes": "patch header; patch character offsets [0,616)",
+        "lines": 13,
+        "bytes": 616,
+        "start": 0,
+        "end": 616,
+        "original": "[private-run]/prep/originals/00281.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/00530-000.patch",
+        "ranges": [
+          [
+            1,
+            30
+          ]
+        ],
+        "original_path": "crates/farhelm-helm/src/lib.rs",
+        "commit": "ba7cc0264028eebb39647deb1d25b055e6886935",
+        "notes": "patch header; patch character offsets [0,1406)",
+        "lines": 30,
+        "bytes": 1406,
+        "start": 0,
+        "end": 1406,
+        "original": "[private-run]/prep/originals/00530.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/00645-000.patch",
+        "ranges": [
+          [
+            1,
+            59
+          ]
+        ],
+        "original_path": "crates/farhelm-helm/src/rest_harness.rs",
+        "commit": "12c79f61a627a4241707dad0cf3b55b859d2d4fc",
+        "notes": "patch header; patch character offsets [0,2479)",
+        "lines": 59,
+        "bytes": 2479,
+        "start": 0,
+        "end": 2479,
+        "original": "[private-run]/prep/originals/00645.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/00676-000.patch",
+        "ranges": [
+          [
+            1,
+            30
+          ]
+        ],
+        "original_path": "crates/farhelm-helm/src/lib.rs",
+        "commit": "47f33bbdbd5ff4a6e437e97a800f9083be43096e",
+        "notes": "patch header; patch character offsets [0,1896)",
+        "lines": 30,
+        "bytes": 1896,
+        "start": 0,
+        "end": 1896,
+        "original": "[private-run]/prep/originals/00676.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/00678-000.patch",
+        "ranges": [
+          [
+            1,
+            12
+          ]
+        ],
+        "original_path": "crates/farhelm-helm/src/rest_harness.rs",
+        "commit": "47f33bbdbd5ff4a6e437e97a800f9083be43096e",
+        "notes": "patch header; patch character offsets [0,564)",
+        "lines": 12,
+        "bytes": 564,
+        "start": 0,
+        "end": 564,
+        "original": "[private-run]/prep/originals/00678.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/00694-000.patch",
+        "ranges": [
+          [
+            1,
+            68
+          ]
+        ],
+        "original_path": "crates/farhelm-helm/src/lib.rs",
+        "commit": "222bf6253bcd168db04bcbb1df20180c88306998",
+        "notes": "patch header; patch character offsets [0,3441)",
+        "lines": 68,
+        "bytes": 3443,
+        "start": 0,
+        "end": 3441,
+        "original": "[private-run]/prep/originals/00694.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/00698-000.patch",
+        "ranges": [
+          [
+            1,
+            48
+          ]
+        ],
+        "original_path": "crates/farhelm-helm/src/rest_harness.rs",
+        "commit": "222bf6253bcd168db04bcbb1df20180c88306998",
+        "notes": "patch header; patch character offsets [0,1929)",
+        "lines": 48,
+        "bytes": 1931,
+        "start": 0,
+        "end": 1929,
+        "original": "[private-run]/prep/originals/00698.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/01026-000.patch",
+        "ranges": [
+          [
+            1,
+            13
+          ]
+        ],
+        "original_path": "crates/farhelm-helm/src/aggregate.rs",
+        "commit": "f560058da19e02716e6f943883a9508b447aff4e",
+        "notes": "patch header; patch character offsets [0,562)",
+        "lines": 13,
+        "bytes": 562,
+        "start": 0,
+        "end": 562,
+        "original": "[private-run]/prep/originals/01026.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/01027-000.patch",
+        "ranges": [
+          [
+            1,
+            13
+          ]
+        ],
+        "original_path": "crates/farhelm-helm/src/checkout_config.rs",
+        "commit": "f560058da19e02716e6f943883a9508b447aff4e",
+        "notes": "patch header; patch character offsets [0,480)",
+        "lines": 13,
+        "bytes": 480,
+        "start": 0,
+        "end": 480,
+        "original": "[private-run]/prep/originals/01027.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/01030-000.patch",
+        "ranges": [
+          [
+            1,
+            13
+          ]
+        ],
+        "original_path": "crates/farhelm-helm/src/ensure.rs",
+        "commit": "f560058da19e02716e6f943883a9508b447aff4e",
+        "notes": "patch header; patch character offsets [0,595)",
+        "lines": 13,
+        "bytes": 595,
+        "start": 0,
+        "end": 595,
+        "original": "[private-run]/prep/originals/01030.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/01032-000.patch",
+        "ranges": [
+          [
+            1,
+            13
+          ]
+        ],
+        "original_path": "crates/farhelm-helm/src/lib.rs",
+        "commit": "f560058da19e02716e6f943883a9508b447aff4e",
+        "notes": "patch header; patch character offsets [0,549)",
+        "lines": 13,
+        "bytes": 551,
+        "start": 0,
+        "end": 549,
+        "original": "[private-run]/prep/originals/01032.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/01036-000.patch",
+        "ranges": [
+          [
+            1,
+            13
+          ]
+        ],
+        "original_path": "crates/farhelm-helm/src/rest_harness.rs",
+        "commit": "f560058da19e02716e6f943883a9508b447aff4e",
+        "notes": "patch header; patch character offsets [0,492)",
+        "lines": 13,
+        "bytes": 492,
+        "start": 0,
+        "end": 492,
+        "original": "[private-run]/prep/originals/01036.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/01234-000.patch",
+        "ranges": [
+          [
+            1,
+            12
+          ]
+        ],
+        "original_path": "crates/farhelm-helm/units/farhelm-supervisor.service.in",
+        "commit": "17a3fe858c5511a24b7403af15dd41c93bf69fd7",
+        "notes": "patch header; patch character offsets [0,572)",
+        "lines": 12,
+        "bytes": 572,
+        "start": 0,
+        "end": 572,
+        "original": "[private-run]/prep/originals/01234.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/01266-000.patch",
+        "ranges": [
+          [
+            1,
+            17
+          ]
+        ],
+        "original_path": "crates/farhelm-helm/src/lib.rs",
+        "commit": "500548b9253b07a26fd03119679184b69544e31d",
+        "notes": "patch header; patch character offsets [0,971)",
+        "lines": 17,
+        "bytes": 973,
+        "start": 0,
+        "end": 971,
+        "original": "[private-run]/prep/originals/01266.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/01311-000.patch",
+        "ranges": [
+          [
+            1,
+            10
+          ]
+        ],
+        "original_path": "crates/farhelm-helm/tests/fixtures/release/SHA256SUMS",
+        "commit": "cb762a313abbe6da03ae0bf041f07486c4ed4df9",
+        "notes": "patch header; patch character offsets [0,897)",
+        "lines": 10,
+        "bytes": 897,
+        "start": 0,
+        "end": 897,
+        "original": "[private-run]/prep/originals/01311.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/01312-000.patch",
+        "ranges": [
+          [
+            1,
+            11
+          ]
+        ],
+        "original_path": "crates/farhelm-helm/tests/fixtures/release/SHA256SUMS.minisig",
+        "commit": "cb762a313abbe6da03ae0bf041f07486c4ed4df9",
+        "notes": "patch header; patch character offsets [0,795)",
+        "lines": 11,
+        "bytes": 795,
+        "start": 0,
+        "end": 795,
+        "original": "[private-run]/prep/originals/01312.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/01313-000.patch",
+        "ranges": [
+          [
+            1,
+            9
+          ]
+        ],
+        "original_path": "crates/farhelm-helm/tests/fixtures/release/test-key.pub",
+        "commit": "cb762a313abbe6da03ae0bf041f07486c4ed4df9",
+        "notes": "patch header; patch character offsets [0,529)",
+        "lines": 9,
+        "bytes": 529,
+        "start": 0,
+        "end": 529,
+        "original": "[private-run]/prep/originals/01313.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/01314-000.patch",
+        "ranges": [
+          [
+            1,
+            8
+          ]
+        ],
+        "original_path": "crates/farhelm-helm/tests/fixtures/release/tmux-aarch64-unknown-linux-musl",
+        "commit": "cb762a313abbe6da03ae0bf041f07486c4ed4df9",
+        "notes": "patch header; patch character offsets [0,394)",
+        "lines": 8,
+        "bytes": 394,
+        "start": 0,
+        "end": 394,
+        "original": "[private-run]/prep/originals/01314.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/01315-000.patch",
+        "ranges": [
+          [
+            1,
+            8
+          ]
+        ],
+        "original_path": "crates/farhelm-helm/tests/fixtures/release/tmux-x86_64-unknown-linux-musl",
+        "commit": "cb762a313abbe6da03ae0bf041f07486c4ed4df9",
+        "notes": "patch header; patch character offsets [0,390)",
+        "lines": 8,
+        "bytes": 390,
+        "start": 0,
+        "end": 390,
+        "original": "[private-run]/prep/originals/01315.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/01316-000.patch",
+        "ranges": [
+          [
+            1,
+            11
+          ]
+        ],
+        "original_path": "crates/farhelm-helm/tests/fixtures/release/variants/legacy-signature/SHA256SUMS.minisig",
+        "commit": "cb762a313abbe6da03ae0bf041f07486c4ed4df9",
+        "notes": "patch header; patch character offsets [0,899)",
+        "lines": 11,
+        "bytes": 899,
+        "start": 0,
+        "end": 899,
+        "original": "[private-run]/prep/originals/01316.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/01317-000.patch",
+        "ranges": [
+          [
+            1,
+            10
+          ]
+        ],
+        "original_path": "crates/farhelm-helm/tests/fixtures/release/variants/other-version/SHA256SUMS",
+        "commit": "cb762a313abbe6da03ae0bf041f07486c4ed4df9",
+        "notes": "patch header; patch character offsets [0,989)",
+        "lines": 10,
+        "bytes": 989,
+        "start": 0,
+        "end": 989,
+        "original": "[private-run]/prep/originals/01317.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/01318-000.patch",
+        "ranges": [
+          [
+            1,
+            11
+          ]
+        ],
+        "original_path": "crates/farhelm-helm/tests/fixtures/release/variants/other-version/SHA256SUMS.minisig",
+        "commit": "cb762a313abbe6da03ae0bf041f07486c4ed4df9",
+        "notes": "patch header; patch character offsets [0,887)",
+        "lines": 11,
+        "bytes": 887,
+        "start": 0,
+        "end": 887,
+        "original": "[private-run]/prep/originals/01318.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/01319-000.patch",
+        "ranges": [
+          [
+            1,
+            10
+          ]
+        ],
+        "original_path": "crates/farhelm-helm/tests/fixtures/release/variants/two-member/SHA256SUMS",
+        "commit": "cb762a313abbe6da03ae0bf041f07486c4ed4df9",
+        "notes": "patch header; patch character offsets [0,977)",
+        "lines": 10,
+        "bytes": 977,
+        "start": 0,
+        "end": 977,
+        "original": "[private-run]/prep/originals/01319.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/01320-000.patch",
+        "ranges": [
+          [
+            1,
+            11
+          ]
+        ],
+        "original_path": "crates/farhelm-helm/tests/fixtures/release/variants/two-member/SHA256SUMS.minisig",
+        "commit": "cb762a313abbe6da03ae0bf041f07486c4ed4df9",
+        "notes": "patch header; patch character offsets [0,875)",
+        "lines": 11,
+        "bytes": 875,
+        "start": 0,
+        "end": 875,
+        "original": "[private-run]/prep/originals/01320.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/01321-000.patch",
+        "ranges": [
+          [
+            1,
+            9
+          ]
+        ],
+        "original_path": "crates/farhelm-helm/tests/fixtures/release/variants/without-linux-aarch64/SHA256SUMS",
+        "commit": "cb762a313abbe6da03ae0bf041f07486c4ed4df9",
+        "notes": "patch header; patch character offsets [0,674)",
+        "lines": 9,
+        "bytes": 674,
+        "start": 0,
+        "end": 674,
+        "original": "[private-run]/prep/originals/01321.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/01322-000.patch",
+        "ranges": [
+          [
+            1,
+            10
+          ]
+        ],
+        "original_path": "crates/farhelm-helm/tests/fixtures/release/variants/without-linux-aarch64/SHA256SUMS.minisig",
+        "commit": "cb762a313abbe6da03ae0bf041f07486c4ed4df9",
+        "notes": "patch header; patch character offsets [0,656)",
+        "lines": 10,
+        "bytes": 656,
+        "start": 0,
+        "end": 656,
+        "original": "[private-run]/prep/originals/01322.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/01323-000.patch",
+        "ranges": [
+          [
+            1,
+            11
+          ]
+        ],
+        "original_path": "crates/farhelm-helm/tests/fixtures/release/variants/without-tmux/SHA256SUMS",
+        "commit": "cb762a313abbe6da03ae0bf041f07486c4ed4df9",
+        "notes": "patch header; patch character offsets [0,858)",
+        "lines": 11,
+        "bytes": 858,
+        "start": 0,
+        "end": 858,
+        "original": "[private-run]/prep/originals/01323.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/01324-000.patch",
+        "ranges": [
+          [
+            1,
+            10
+          ]
+        ],
+        "original_path": "crates/farhelm-helm/tests/fixtures/release/variants/without-tmux/SHA256SUMS.minisig",
+        "commit": "cb762a313abbe6da03ae0bf041f07486c4ed4df9",
+        "notes": "patch header; patch character offsets [0,633)",
+        "lines": 10,
+        "bytes": 633,
+        "start": 0,
+        "end": 633,
+        "original": "[private-run]/prep/originals/01324.patch"
+      }
+    ],
+    "lines": 1286,
+    "bytes": 62952
+  },
+  "records": [
+    {
+      "key": "g030/c1",
+      "owner": "g030",
+      "id": "c1",
+      "domain": "helm-service-integration",
+      "purpose": "helm-service-integration: crates/farhelm-helm/src/lib.rs, crates/farhelm-helm/src/notices.rs, crates/farhelm-helm/src/rest_harness.rs, crates/farhelm-helm/src/aggregate.rs, crates/farhelm-helm/src/ensure.rs, crates/farhelm-helm/src/checkout_config.rs, crates/farhelm-helm/src/preferences.rs, crates/farhelm-helm/src/browser.rs, crates/farhelm-helm/units/farhelm-supervisor.service.in, crates/farhelm-helm/tests/fixtures/release/SHA256SUMS, crates/farhelm-helm/tests/fixtures/release/SHA256SUMS.minisig, crates/farhelm-helm/tests/fixtures/release/test-key.pub, crates/farhelm-helm/tests/fixtures/release/tmux-aarch64-unknown-linux-musl, crates/farhelm-helm/tests/fixtures/release/tmux-x86_64-unknown-linux-musl, crates/farhelm-helm/tests/fixtures/release/variants/legacy-signature/SHA256SUMS.minisig, crates/farhelm-helm/tests/fixtures/release/variants/other-version/SHA256SUMS, crates/farhelm-helm/tests/fixtures/release/variants/other-version/SHA256SUMS.minisig, crates/farhelm-helm/tests/fixtures/release/variants/two-member/SHA256SUMS, crates/farhelm-helm/tests/fixtures/release/variants/two-member/SHA256SUMS.minisig, crates/farhelm-helm/tests/fixtures/release/variants/without-linux-aarch64/SHA256SUMS, crates/farhelm-helm/tests/fixtures/release/variants/without-linux-aarch64/SHA256SUMS.minisig, crates/farhelm-helm/tests/fixtures/release/variants/without-tmux/SHA256SUMS, crates/farhelm-helm/tests/fixtures/release/variants/without-tmux/SHA256SUMS.minisig; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 1,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c1",
+            "state": "open",
+            "summary": "Seal finisher starts only after helm ownership is held",
+            "location": "crates/farhelm-helm/src/lib.rs:2519",
+            "detail": "Reviewed commit: 222bf6253bcd168db04bcbb1df20180c88306998\n\n## TLDR\nConsidered whether a second helm could destroy a sealed environment before failing to acquire ownership of the helm state directory. Source refutes that ordering.\n\n## Details\nThe new spawn_seal_finisher call is at lib.rs:2519. serve_with_ready first binds the HTTP listener, then acquires claim_serving_ownership at line 2444 (the full block was read at lines 2370–2560), before opening the store, starting actors or constructing AppState. The finisher cannot run before that ownership claim succeeds. SPEC_impl.md, Environment Delete and the seal, requires a helm-owned finisher for a sealed listing; this startup path retains the existing single-owner gate. No behavior was executed. Suggested bucket: highest if the hypothesized unauthorized duplicate-owner destruction existed; source refuted. Confidence: confirmed source refutation. Could-be-highest: yes, considered environment destruction beyond an owning helm. proposed_drop: source refutation by the ownership acquisition preceding store/manager/finisher construction. possible_cover: none. Caveat: this candidate concerns startup ordering only, not the separate finisher's authorization and identity checks."
+          }
+        },
+        {
+          "line": 5,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c1",
+            "state": "open",
+            "summary": "Seal finisher starts only after helm ownership is held",
+            "location": "crates/farhelm-helm/src/lib.rs:2521",
+            "detail": "Reviewed commit: 222bf6253bcd168db04bcbb1df20180c88306998\n\n## TLDR\nConsidered whether a second helm could destroy a sealed environment before failing to acquire ownership of the helm state directory. Source refutes that ordering.\n\n## Details\nRevision corrects the exact line numbers after checking numbered source: serve_with_ready acquires claim_serving_ownership at lib.rs:2438, before opening the store, starting actors, constructing AppState or spawning the new seal finisher at lib.rs:2521. The earlier event's approximate line numbers 2444/2519 were inaccurate; its ordering conclusion and hypothetical environment-destruction consequence are unchanged. SPEC_impl.md, Environment Delete and the seal, requires a helm-owned finisher for a sealed listing; this startup path retains the existing single-owner gate. No behavior was executed. Suggested bucket: highest if the hypothesized unauthorized duplicate-owner destruction existed; source refuted. Confidence: confirmed source refutation. Could-be-highest: yes, considered environment destruction beyond an owning helm. proposed_drop: source refutation by the ownership acquisition preceding store/manager/finisher construction. possible_cover: none. Caveat: this candidate concerns startup ordering only, not the separate finisher's authorization and identity checks."
+          }
+        },
+        {
+          "line": 6,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c1",
+            "state": "open",
+            "summary": "Seal finisher retains startup and teardown ownership boundaries",
+            "location": "crates/farhelm-helm/src/lib.rs:2521",
+            "detail": "Reviewed commit: 222bf6253bcd168db04bcbb1df20180c88306998\n\n## TLDR\nRevisited the concern that a second helm could destroy an environment without owning its state directory, including work that survives the serving future. The serving entry points share one runtime-owning startup path; the claim is acquired before the finisher starts and retained through runtime teardown.\n\n## Details\nSynthesis source checks: lib.rs:2315–2380 shows run_embedded calls run_with_ready, which declares ownership before the runtime and passes a mutable claim slot into serve_with_ready. Reverse destruction order retains the claim while Runtime drops. The previously checked acquisition remains lib.rs:2438, preceding spawn_seal_finisher at :2521. sessions/sandbox.rs:281–365 shows the finisher is a task on that runtime; finish_seal takes the host provisioning lock and finish_seal_locked records the attempt/outcome. hosts.rs:1450–1473 re-reads the current row under that guard and refuses a host that is not session-owned or machine-deleting. hosts.rs:1507–1575 routes destruction through manager.providers().get(binding.provider()).destroy, retaining the lock through resource removal and registry teardown. manager.rs:2700–2723 and :5117–5134 only enqueue actionable session-owned machine-deleting hosts; a foreign host seal is a displayed refresh problem, not destruction authority. These caller checks support the earlier startup-order refutation and add teardown/provider-boundary evidence.\n\nOriginal consequence retained: unauthorized duplicate-owner destruction would be highest/security or loss of user-owned work. Suggested bucket: highest for that hypothetical consequence, which these source checks refute; no established harmful route. Confidence: confirmed source evidence for startup ordering, runtime lifetime and host-kind guards; claim_serving_ownership's lock implementation is the remaining named-interface check for this synthesis. Could-be-highest: yes. proposed_drop: unchanged proposal based on source refutation; no drop is accepted here, and this record remains for the parent's independent disposition. possible_cover: none. No execution, reproduction or runtime observation. Caveat: this candidate is the ownership/wiring concern, not an independent review of provider destruction internals."
+          }
+        },
+        {
+          "line": 7,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c1",
+            "state": "open",
+            "summary": "Seal finisher retains the serving claim through runtime teardown",
+            "location": "crates/farhelm-helm/src/lib.rs:2521",
+            "detail": "Reviewed commit: 222bf6253bcd168db04bcbb1df20180c88306998\n\n## TLDR\nCompleted the named-interface check for the concern that a second helm could destroy an environment before acquiring ownership, or after its serving claim had ended. Source refutes those ownership routes.\n\n## Details\nThis revision preserves the original hypothetical unauthorized environment-destruction consequence and proposed drop, and closes the remaining lock-implementation premise from the preceding event. lib.rs:2315–2380 routes embedded serving through run_with_ready; ownership is declared before Runtime, so Runtime is destroyed first, including on unwind. serve_with_ready acquires the claim at :2438 and starts the finisher at :2521. token_control.rs:79–88 owns a File in OwnershipLock and unlocks only at Drop; :133–162 retries acquire_ownership without allowing startup to proceed on contention; :515–541 opens the directory lock and takes LOCK_EX|LOCK_NB, returning OwnershipLock only after successful flock. The finisher's task therefore cannot execute before an exclusive claim or outlive runtime teardown while its claim is released.\n\nCaller/resource checks retained: sessions/sandbox.rs:281–365 takes the provisioning guard, records the attempt/outcome and runs the finisher on that runtime; hosts.rs:1450–1473 re-reads the current host under the guard and refuses any row that is not session-owned and machine-deleting; :1507–1575 parks the connection, resolves the binding through manager.providers(), requires provider destruction proof and completes registry teardown while retaining the guard. manager.rs:2700–2723 and :5117–5134 admits only actionable seals from owned machine-deleting hosts and displays a foreign seal as a problem. SPEC_impl.md, Who owns an accepted action and Environment Delete and the seal, matches these ownership boundaries.\n\nSuggested bucket: highest for the original hypothesized unauthorized destruction, which source refutes. Confidence: confirmed source refutation of startup and runtime-lifetime routes; no readily checkable premise remains for this candidate. Could-be-highest: yes. proposed_drop: unchanged source-refutation proposal, retained for independent disposition; no drop is accepted by this reviewer. possible_cover: none. No execution or reproduction. Scope caveat: this checks ownership and integration, not every provider-specific destruction algorithm or malicious same-account lock-file replacement, which is outside the product's local-account trust boundary."
+          }
+        }
+      ],
+      "latest": {
+        "line": 7,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c1",
+          "state": "open",
+          "summary": "Seal finisher retains the serving claim through runtime teardown",
+          "location": "crates/farhelm-helm/src/lib.rs:2521",
+          "detail": "Reviewed commit: 222bf6253bcd168db04bcbb1df20180c88306998\n\n## TLDR\nCompleted the named-interface check for the concern that a second helm could destroy an environment before acquiring ownership, or after its serving claim had ended. Source refutes those ownership routes.\n\n## Details\nThis revision preserves the original hypothetical unauthorized environment-destruction consequence and proposed drop, and closes the remaining lock-implementation premise from the preceding event. lib.rs:2315–2380 routes embedded serving through run_with_ready; ownership is declared before Runtime, so Runtime is destroyed first, including on unwind. serve_with_ready acquires the claim at :2438 and starts the finisher at :2521. token_control.rs:79–88 owns a File in OwnershipLock and unlocks only at Drop; :133–162 retries acquire_ownership without allowing startup to proceed on contention; :515–541 opens the directory lock and takes LOCK_EX|LOCK_NB, returning OwnershipLock only after successful flock. The finisher's task therefore cannot execute before an exclusive claim or outlive runtime teardown while its claim is released.\n\nCaller/resource checks retained: sessions/sandbox.rs:281–365 takes the provisioning guard, records the attempt/outcome and runs the finisher on that runtime; hosts.rs:1450–1473 re-reads the current host under the guard and refuses any row that is not session-owned and machine-deleting; :1507–1575 parks the connection, resolves the binding through manager.providers(), requires provider destruction proof and completes registry teardown while retaining the guard. manager.rs:2700–2723 and :5117–5134 admits only actionable seals from owned machine-deleting hosts and displays a foreign seal as a problem. SPEC_impl.md, Who owns an accepted action and Environment Delete and the seal, matches these ownership boundaries.\n\nSuggested bucket: highest for the original hypothesized unauthorized destruction, which source refutes. Confidence: confirmed source refutation of startup and runtime-lifetime routes; no readily checkable premise remains for this candidate. Could-be-highest: yes. proposed_drop: unchanged source-refutation proposal, retained for independent disposition; no drop is accepted by this reviewer. possible_cover: none. No execution or reproduction. Scope caveat: this checks ownership and integration, not every provider-specific destruction algorithm or malicious same-account lock-file replacement, which is outside the product's local-account trust boundary."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g030/findings.jsonl",
+        "id": "c1",
+        "line": 7,
+        "disposition": "under-investigation",
+        "group": "g030-c1",
+        "reason": "Record durably acknowledged; parent source/contract validation, cross-group synthesis, coverage/filter matching and any independent drop check remain pending. This preserves the claim and uncertainty without accepting, dropping or lowering it."
+      },
+      "accepted_parent_decision": null,
+      "returned_claim_checks": [
+        {
+          "batch": "claims-017",
+          "key": "g030/c1",
+          "latest_line": 7,
+          "recommendation": "refuted",
+          "bucket": "other",
+          "underlying_key": "helm-seal-finisher-state-directory-ownership-lifetime",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "Source refutes the named pre-claim and post-claim startup/runtime routes. This proposes a disposition only; the original destruction consequence still requires the independent drop check.",
+          "checks": [
+            "At 222bf6253bcd168db04bcbb1df20180c88306998, crates/farhelm-helm/src/lib.rs:2330-2346 routes embedded serving through run_with_ready. Lines 2365-2379 declare ownership before Runtime and pass its slot into serving; runtime teardown therefore precedes release of the claim, including unwind.",
+            "At the same revision, lib.rs:2438 acquires claim_serving_ownership before the store opens at 2445 and the seal finisher starts at 2521. The corrected line numbers in history event 5 are accurate; event 1's approximate 2444/2519 references were inaccurate.",
+            "At the same revision, token_control.rs:79-88 retains the lock File and unlocks at Drop; 140-162 does not proceed on contention; 514-541 returns OwnershipLock only after successful LOCK_EX|LOCK_NB flock.",
+            "At the same revision, sessions/sandbox.rs:281-305 acquires the provisioning guard and records the outcome, and 344-360 spawns the finisher on the owned runtime. hosts.rs:1450-1472 re-reads and requires a session-owned, machine-deleting host; 1506-1576 retains the guard through provider destruction and registry cleanup. manager.rs:2699-2706,5117-5131 rejects foreign-host seals as destruction authority.",
+            "Source checks only. No execution or reproduction. This does not audit provider destruction internals or deliberate same-account lock-file replacement."
+          ],
+          "coverage_checked": [
+            "Current SPEC.md:1514-1549 requires finishing destruction of a sealed sandbox and preserves warned whole-sandbox deletion; it does not accept duplicate state-directory ownership. SPEC_impl.md:22-59 and 6106-6165 require runtime-held ownership and a helm-owned finisher for actionable seals.",
+            "TODO.md:23-26 has an empty Planned bucket. plans/queue/INDEX.md contains no unlanded plan entries. The stored environment-agent-operations plan describes the landed seal feature, not an outstanding fix for this concern.",
+            "BUGS.md, review_feedback_queue/INDEX.md and active TRIAGE_OUTCOMES.md were searched for seal finisher, serving ownership and state-directory claim routes; no exact trigger/consequence/scope cover or alias was found. Archive not read.",
+            "FILTER.md does not match unauthorized environment destruction; rarity alone cannot filter it."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": "No missing premise remains for the narrowly stated startup/runtime ownership refutation. A harmful finding would need a route around the exclusive claim or work surviving its runtime teardown; neither was established.",
+          "original_stronger_consequence": "A second or no-longer-owning helm could destroy a sealed environment without authority, losing its processes/files or crossing ownership boundaries: hypothetical highest. History events 1,5,6,7 preserve that consequence and propose refutation rather than an observed destructive failure.",
+          "needs_independent_drop_check": true,
+          "proposed_basis": "Source refutation of the two named ownership routes, not coverage or a filter. Established harmful consequence is absent, hence other if a bucket is needed for the proposed disposition; independent review must still judge the retained hypothetical highest consequence before any drop."
+        }
+      ],
+      "parent_proposals": [
+        {
+          "artifact": "parent-flagged-judgments-017.json",
+          "key": "g030/c1",
+          "proposal": "claim-checks/claims-017/result.json",
+          "parent_proposal": "source-refuted-seal-finisher-state-claim-lifetime",
+          "final_independent_gate": "required-before-highest-drop",
+          "reason": "Parent read full017 corrected startup lines: exclusive claim before store/finisher, ownership declared beforeRuntime so runtime drops first including unwind, flock retained until OwnershipLock Drop, contention refuses. Finisher spawned on ownedruntime and provisioningguard/re-read sessionowned machine-deletingbinding holdthroughdestruction; foreignseals not authority. Narrow preclaim/postclaim source refutation preserves original second/nonowninghelm destructive loss route for fresh checker; excludes provider internals/deliberate lock-file replacement, no blanket destruction correctness."
+        }
+      ],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": true,
+        "provisional_bucket": "highest",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "helm-seal-finisher-state-directory-ownership-lifetime",
+        "destination": null
+      }
+    },
+    {
+      "key": "g030/c2",
+      "owner": "g030",
+      "id": "c2",
+      "domain": "helm-service-integration",
+      "purpose": "helm-service-integration: crates/farhelm-helm/src/lib.rs, crates/farhelm-helm/src/notices.rs, crates/farhelm-helm/src/rest_harness.rs, crates/farhelm-helm/src/aggregate.rs, crates/farhelm-helm/src/ensure.rs, crates/farhelm-helm/src/checkout_config.rs, crates/farhelm-helm/src/preferences.rs, crates/farhelm-helm/src/browser.rs, crates/farhelm-helm/units/farhelm-supervisor.service.in, crates/farhelm-helm/tests/fixtures/release/SHA256SUMS, crates/farhelm-helm/tests/fixtures/release/SHA256SUMS.minisig, crates/farhelm-helm/tests/fixtures/release/test-key.pub, crates/farhelm-helm/tests/fixtures/release/tmux-aarch64-unknown-linux-musl, crates/farhelm-helm/tests/fixtures/release/tmux-x86_64-unknown-linux-musl, crates/farhelm-helm/tests/fixtures/release/variants/legacy-signature/SHA256SUMS.minisig, crates/farhelm-helm/tests/fixtures/release/variants/other-version/SHA256SUMS, crates/farhelm-helm/tests/fixtures/release/variants/other-version/SHA256SUMS.minisig, crates/farhelm-helm/tests/fixtures/release/variants/two-member/SHA256SUMS, crates/farhelm-helm/tests/fixtures/release/variants/two-member/SHA256SUMS.minisig, crates/farhelm-helm/tests/fixtures/release/variants/without-linux-aarch64/SHA256SUMS, crates/farhelm-helm/tests/fixtures/release/variants/without-linux-aarch64/SHA256SUMS.minisig, crates/farhelm-helm/tests/fixtures/release/variants/without-tmux/SHA256SUMS, crates/farhelm-helm/tests/fixtures/release/variants/without-tmux/SHA256SUMS.minisig; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 2,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c2",
+            "state": "open",
+            "summary": "Production providers share the recipe registry and place cache",
+            "location": "crates/farhelm-helm/src/lib.rs:2462",
+            "detail": "Reviewed commit: 56659839785691f76da3af5d8f51b511cff4ba8b\n\n## TLDR\nConsidered whether constructing the container provider and then AppState gives the two providers independent build admissions or place observations. The production wiring explicitly shares both.\n\n## Details\nThe assigned lib.rs patch constructs Podman with Arc::clone(tensorlake.builds()), sources.delivery.places(), and Arc::clone(&sources.delivery), then installs that exact Podman Arc with the Tensorlake clone in the manager's Providers registry and passes Some(podman) to AppState::new. AppState::with_provisioning uses provisioning.credential_delivery().places(); AppState::new replaces its detached Tensorlake and absent Podman with the supplied concrete services. These references implement SPEC_impl.md, Disposable environments / Shared recipes and prepared artifacts: 'Both engines share the same registry instance.' Actor/lifecycle dispatch therefore does not accidentally use a second Podman assembly. No runtime behavior was executed. Suggested bucket: other for a wiring concern without an established harmful route. Confidence: confirmed source refutation of duplicate production assembly. Could-be-highest: no established route; competing recipe cleanup could matter if an independent registry existed, but the assigned construction explicitly prevents that premise. proposed_drop: source refutation by the shared Arc arguments and exact concrete handle passed into AppState. possible_cover: none. Caveat: this checks production assembly, not provider-internal admission correctness."
+          }
+        },
+        {
+          "line": 8,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c2",
+            "state": "open",
+            "summary": "Provider consumers use the shared production registry and caches",
+            "location": "crates/farhelm-helm/src/lib.rs:2462",
+            "detail": "Reviewed commit: 56659839785691f76da3af5d8f51b511cff4ba8b\n\n## TLDR\nSynthesis traced the shared services beyond their constructor arguments. Actor status and leases, lifecycle, creation, recipe deletion, Settings progress and container cleanup use the production registry and cache instances that startup supplies. No second admission registry or probe cache was found along these callers.\n\n## Details\nOriginal concern and consequence retained: independent provider/build admissions could let recipe cleanup conflict with preparation or creation, and independent place caches could split UI availability from actual routing. The original production assembly passes Arc::clone(tensorlake.builds()), sources.delivery.places() and the shared CredentialDelivery to Podman, installs the same Podman Arc in Providers and AppState, and passes the registry before actors start. Additional source checks now establish the consumed interfaces: Podman::new at environment/podman.rs:124–144 stores those exact Arc arguments without constructing replacements; credential_delivery.rs:262–264 returns Arc::clone(&self.places); ProvisioningService::production at service.rs:515–534 moves sources.delivery into the service, and credential_delivery() at :2164–2166 clones it. Tensorlake is Arc<Inner> with the builds Arc retained inside it (tensorlake/mod.rs:75–95, :239–242, read in the initial pass).\n\nmanager.rs:1488–1497 and :1528–1561 stores the supplied Providers before sync_registry starts actors; :1983 clones that registry into each actor; :4198–4201 and :4237–4242 use it for status and connected leases. environment/lifecycle.rs:20–48 resolves the stored binding through manager.providers(). Provisioning consumers in provisioning/tensorlake_add.rs:354–392 and :493–535 select the same manager registry for availability, preparation and creation. hosts.rs:4294–4408 uses it for places and Rebuild, while recipe_places reads AppState::recipe_builds() from the supplied Tensorlake service. tensorlake/recipes.rs:602–615 takes its deletion guard from that same builds Arc and then invokes manager.providers().clean_recipe under the guard. Podman preparations use self.0.builds.start_podman and lock_podman_use at podman.rs:1000–1034, and orphan cleanup checks self.0.builds.podman_job_active at :760 before removal. The provider-owned HTTP routes at :843–905 consume AppState's supplied Podman handle, not a new provider. Test-only adapters at environment/mod.rs:486–626 keep scripted status/connected observations separate from their actual lifecycle/create/cleanup service, explaining the harness's deliberate split without creating a production split.\n\nContract: SPEC_impl.md, Disposable environments / Shared recipes and prepared artifacts, says 'Both engines share the same registry instance.' Its One route for transport and provisioning and provider-dispatch rules match these consumers. Confidence: confirmed source refutation of duplicate production wiring; no readily checkable premise remains. Suggested bucket remains other for an unestablished wiring defect. Could-be-highest: yes if a second admission registry actually permitted cleanup to destroy in-use user resources; that required premise is source-refuted, not discounted for rarity. proposed_drop: source-refutation proposal retained for independent disposition; no drop is accepted by this reviewer. possible_cover: none. No execution or reproduction. Caveat: this is an integration judgment, not a new independent review of every provider's cleanup algorithm."
+          }
+        }
+      ],
+      "latest": {
+        "line": 8,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c2",
+          "state": "open",
+          "summary": "Provider consumers use the shared production registry and caches",
+          "location": "crates/farhelm-helm/src/lib.rs:2462",
+          "detail": "Reviewed commit: 56659839785691f76da3af5d8f51b511cff4ba8b\n\n## TLDR\nSynthesis traced the shared services beyond their constructor arguments. Actor status and leases, lifecycle, creation, recipe deletion, Settings progress and container cleanup use the production registry and cache instances that startup supplies. No second admission registry or probe cache was found along these callers.\n\n## Details\nOriginal concern and consequence retained: independent provider/build admissions could let recipe cleanup conflict with preparation or creation, and independent place caches could split UI availability from actual routing. The original production assembly passes Arc::clone(tensorlake.builds()), sources.delivery.places() and the shared CredentialDelivery to Podman, installs the same Podman Arc in Providers and AppState, and passes the registry before actors start. Additional source checks now establish the consumed interfaces: Podman::new at environment/podman.rs:124–144 stores those exact Arc arguments without constructing replacements; credential_delivery.rs:262–264 returns Arc::clone(&self.places); ProvisioningService::production at service.rs:515–534 moves sources.delivery into the service, and credential_delivery() at :2164–2166 clones it. Tensorlake is Arc<Inner> with the builds Arc retained inside it (tensorlake/mod.rs:75–95, :239–242, read in the initial pass).\n\nmanager.rs:1488–1497 and :1528–1561 stores the supplied Providers before sync_registry starts actors; :1983 clones that registry into each actor; :4198–4201 and :4237–4242 use it for status and connected leases. environment/lifecycle.rs:20–48 resolves the stored binding through manager.providers(). Provisioning consumers in provisioning/tensorlake_add.rs:354–392 and :493–535 select the same manager registry for availability, preparation and creation. hosts.rs:4294–4408 uses it for places and Rebuild, while recipe_places reads AppState::recipe_builds() from the supplied Tensorlake service. tensorlake/recipes.rs:602–615 takes its deletion guard from that same builds Arc and then invokes manager.providers().clean_recipe under the guard. Podman preparations use self.0.builds.start_podman and lock_podman_use at podman.rs:1000–1034, and orphan cleanup checks self.0.builds.podman_job_active at :760 before removal. The provider-owned HTTP routes at :843–905 consume AppState's supplied Podman handle, not a new provider. Test-only adapters at environment/mod.rs:486–626 keep scripted status/connected observations separate from their actual lifecycle/create/cleanup service, explaining the harness's deliberate split without creating a production split.\n\nContract: SPEC_impl.md, Disposable environments / Shared recipes and prepared artifacts, says 'Both engines share the same registry instance.' Its One route for transport and provisioning and provider-dispatch rules match these consumers. Confidence: confirmed source refutation of duplicate production wiring; no readily checkable premise remains. Suggested bucket remains other for an unestablished wiring defect. Could-be-highest: yes if a second admission registry actually permitted cleanup to destroy in-use user resources; that required premise is source-refuted, not discounted for rarity. proposed_drop: source-refutation proposal retained for independent disposition; no drop is accepted by this reviewer. possible_cover: none. No execution or reproduction. Caveat: this is an integration judgment, not a new independent review of every provider's cleanup algorithm."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g030/findings.jsonl",
+        "id": "c2",
+        "line": 8,
+        "disposition": "under-investigation",
+        "group": "g030-c2",
+        "reason": "Record durably acknowledged; parent source/contract validation, cross-group synthesis, coverage/filter matching and any independent drop check remain pending. This preserves the claim and uncertainty without accepting, dropping or lowering it."
+      },
+      "accepted_parent_decision": null,
+      "returned_claim_checks": [
+        {
+          "batch": "claims-017",
+          "key": "g030/c2",
+          "latest_line": 8,
+          "recommendation": "refuted",
+          "bucket": "other",
+          "underlying_key": "production-environment-provider-build-registry-place-cache-identity",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The production composition passes the same registry/cache handles through providers, actors and AppState. The hypothesized independent assembly is absent in the checked source.",
+          "checks": [
+            "At 56659839785691f76da3af5d8f51b511cff4ba8b, lib.rs:2450-2498 constructs Podman with sources.delivery.places(), the same delivery Arc and tensorlake.builds(); installs that Podman Arc with a Tensorlake clone in Providers before starting the manager; and supplies the same concrete handles to AppState.",
+            "At that revision, lib.rs:615-618 exposes the supplied Tensorlake build registry; 631-674 replaces the detached constructor defaults with supplied providers while taking podman_places from provisioning.credential_delivery().places(). credential_delivery.rs:261-264 clones its existing places Arc, and provisioning/service.rs:515-534,2164-2166 retains and clones sources.delivery.",
+            "At that revision, environment/podman.rs:124-138 stores the supplied Arcs without replacement; 750-765 uses the shared builds registry to refuse referenced leftovers; 1000-1034 uses it for build admission and prepared-artifact use. tensorlake/mod.rs:75-95,239-242 makes Tensorlake clones share its Inner/builds Arc.",
+            "At that revision, manager.rs:1488-1497,1530-1561 installs Providers before sync_registry; 1977-1983 clones it into actors; 4198-4201 and 4237-4242 dispatch status/connected resources through it. environment/lifecycle.rs:18-44 dispatches through manager.providers(). tensorlake/recipes.rs:602-615 takes the same builds deletion guard and calls manager.providers().clean_recipe under it.",
+            "At that revision, environment/mod.rs:482-506,597-618 explains the test-only split: scripted status observations and actual lifecycle services use one adapter. This is not a second production assembly. No runtime observation or provider-internal cleanup audit is claimed."
+          ],
+          "coverage_checked": [
+            "Current SPEC.md's sandbox/container cleanup rules and SPEC_impl.md:6010-6057 were checked. The specification requires one build registry and guarded recipe cleanup; it does not accept a production identity split.",
+            "TODO.md Planned is empty and plans/queue/INDEX.md has no unlanded entries. Stored podman-environments/environment-agent-operations plans concern the landed feature; no outstanding exact fix supplies coverage.",
+            "BUGS.md, queue INDEX and active TRIAGE_OUTCOMES.md were searched for provider registry, recipe admission/cleanup and cache identity. snapshot-cleanup-races-new-host-registration.md was read: its root is missing admission between registration and snapshot cleanup, not independent registry instances. It is neither an alias nor exact coverage of this refuted construction concern.",
+            "No FILTER.md boundary matches destruction from independent admission registries. No archive read."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": "The independent registry/cache required by the concern is source-refuted. No established route to cleanup of in-use user resources follows from this production assembly.",
+          "original_stronger_consequence": "Independent build admissions could conflict with preparation/creation; independent place caches could split UI availability from routing. Event 8 preserves the stronger hypothetical that a second admission registry might allow cleanup to destroy in-use user resources, which could be highest. Event 2 had no established destructive route.",
+          "needs_independent_drop_check": true,
+          "proposed_basis": "Source refutation of duplicate production wiring only. Do not extend this disposition to provider-internal admission algorithms, other recipe races, or every consumer without separate evidence."
+        }
+      ],
+      "parent_proposals": [
+        {
+          "artifact": "parent-flagged-judgments-017.json",
+          "key": "g030/c2",
+          "proposal": "claim-checks/claims-017/result.json",
+          "parent_proposal": "source-refuted-production-provider-registry-cache-split",
+          "final_independent_gate": "required-before-possible-highest-drop",
+          "reason": "Full017 actual production composition shares delivery places/builds/provider Arcs across Podman, Tensorlake, manager andAppState; default detached providers replaced before sync, adapterssplitonlytests. Same guards clean_recipe. Refutes exact independentlyassembledregistry/cache premise, not all provider admission cleanup race algorithms. Original later hypothetical in-use-resource destruction preserved for fresh gate; snapshot-cleanup-races-new-host-registration is distinct missing-admission root and not cover."
+        }
+      ],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": true,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "production-environment-provider-build-registry-place-cache-identity",
+        "destination": null
+      }
+    },
+    {
+      "key": "g030/c3",
+      "owner": "g030",
+      "id": "c3",
+      "domain": "helm-service-integration",
+      "purpose": "helm-service-integration: crates/farhelm-helm/src/lib.rs, crates/farhelm-helm/src/notices.rs, crates/farhelm-helm/src/rest_harness.rs, crates/farhelm-helm/src/aggregate.rs, crates/farhelm-helm/src/ensure.rs, crates/farhelm-helm/src/checkout_config.rs, crates/farhelm-helm/src/preferences.rs, crates/farhelm-helm/src/browser.rs, crates/farhelm-helm/units/farhelm-supervisor.service.in, crates/farhelm-helm/tests/fixtures/release/SHA256SUMS, crates/farhelm-helm/tests/fixtures/release/SHA256SUMS.minisig, crates/farhelm-helm/tests/fixtures/release/test-key.pub, crates/farhelm-helm/tests/fixtures/release/tmux-aarch64-unknown-linux-musl, crates/farhelm-helm/tests/fixtures/release/tmux-x86_64-unknown-linux-musl, crates/farhelm-helm/tests/fixtures/release/variants/legacy-signature/SHA256SUMS.minisig, crates/farhelm-helm/tests/fixtures/release/variants/other-version/SHA256SUMS, crates/farhelm-helm/tests/fixtures/release/variants/other-version/SHA256SUMS.minisig, crates/farhelm-helm/tests/fixtures/release/variants/two-member/SHA256SUMS, crates/farhelm-helm/tests/fixtures/release/variants/two-member/SHA256SUMS.minisig, crates/farhelm-helm/tests/fixtures/release/variants/without-linux-aarch64/SHA256SUMS, crates/farhelm-helm/tests/fixtures/release/variants/without-linux-aarch64/SHA256SUMS.minisig, crates/farhelm-helm/tests/fixtures/release/variants/without-tmux/SHA256SUMS, crates/farhelm-helm/tests/fixtures/release/variants/without-tmux/SHA256SUMS.minisig; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 3,
+          "event": {
+            "version": 1,
+            "kind": "lead",
+            "id": "c3",
+            "state": "open",
+            "summary": "Check whether removing FARHELM_TMUX breaks legacy-terminal cleanup",
+            "location": "crates/farhelm-helm/units/farhelm-supervisor.service.in:8",
+            "detail": "Reviewed commit: 17a3fe858c5511a24b7403af15dd41c93bf69fd7\n\n## TLDR\nChecking whether removing the service's tmux executable setting can strand old terminals during upgrade.\n\n## Details\nThe assigned service template patch removes Environment=FARHELM_TMUX. SPEC_impl.md, Terminal substrate: private tmux server, states that legacy cleanup connects to the private socket and ends its verified server without requiring a tmux executable. units.rs:62–70 states the supervisor ignores FARHELM_TMUX. Source verification still needed in old_terminals.rs to establish that cleanup has no program dependency. Suggested bucket: high if upgrade cleanup is broken; a highest consequence is not established. Confidence: open source check, not an observed failure. proposed_drop: false pending source verification. possible_cover: none. Missing premise: whether the actual cleanup uses the binary despite the documented socket-only contract. Next check: inspect the cleanup implementation and its process-identification path at this revision. No execution requested or performed."
+          }
+        },
+        {
+          "line": 4,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c3",
+            "state": "open",
+            "summary": "Removing FARHELM_TMUX does not remove legacy-cleanup capability",
+            "location": "crates/farhelm-helm/units/farhelm-supervisor.service.in:8",
+            "detail": "Reviewed commit: 17a3fe858c5511a24b7403af15dd41c93bf69fd7\n\n## TLDR\nThe removed service setting does not strand legacy terminals: the retained startup cleanup reaches their server through its socket and does not run a tmux executable.\n\n## Details\nClosed the earlier lead by inspecting crates/farhelm-supervisor/src/service/core/old_terminals.rs:1–320 at this commit. end_server opens state_dir/tmux.sock with UnixStream::connect, obtains same-user peer credentials, pins the peer process, and passes it to terminate_process_within with names_tmux_server_socket. It does not read FARHELM_TMUX or invoke tmux. units.rs:62–70 also documents that the supervisor ignores this variable; SPEC_impl.md, Terminal substrate: private tmux server, describes the same socket-only cleanup. Source refutes the suspected regression from removing Environment=FARHELM_TMUX in the assigned template. No runtime behavior was executed. Suggested bucket: high for the hypothetical upgrade-cleanup failure, which source refutes. Confidence: confirmed source refutation. Could-be-highest: no established security or loss-of-work route from removing this unused setting. proposed_drop: source refutation by old_terminals.rs:end_server using socket/peer-process termination rather than a tmux program. possible_cover: none. Caveat: this does not independently review every residual cleanup failure in the old-terminal implementation; it checks the dependency removed by this patch."
+          }
+        }
+      ],
+      "latest": {
+        "line": 4,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c3",
+          "state": "open",
+          "summary": "Removing FARHELM_TMUX does not remove legacy-cleanup capability",
+          "location": "crates/farhelm-helm/units/farhelm-supervisor.service.in:8",
+          "detail": "Reviewed commit: 17a3fe858c5511a24b7403af15dd41c93bf69fd7\n\n## TLDR\nThe removed service setting does not strand legacy terminals: the retained startup cleanup reaches their server through its socket and does not run a tmux executable.\n\n## Details\nClosed the earlier lead by inspecting crates/farhelm-supervisor/src/service/core/old_terminals.rs:1–320 at this commit. end_server opens state_dir/tmux.sock with UnixStream::connect, obtains same-user peer credentials, pins the peer process, and passes it to terminate_process_within with names_tmux_server_socket. It does not read FARHELM_TMUX or invoke tmux. units.rs:62–70 also documents that the supervisor ignores this variable; SPEC_impl.md, Terminal substrate: private tmux server, describes the same socket-only cleanup. Source refutes the suspected regression from removing Environment=FARHELM_TMUX in the assigned template. No runtime behavior was executed. Suggested bucket: high for the hypothetical upgrade-cleanup failure, which source refutes. Confidence: confirmed source refutation. Could-be-highest: no established security or loss-of-work route from removing this unused setting. proposed_drop: source refutation by old_terminals.rs:end_server using socket/peer-process termination rather than a tmux program. possible_cover: none. Caveat: this does not independently review every residual cleanup failure in the old-terminal implementation; it checks the dependency removed by this patch."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g030/findings.jsonl",
+        "id": "c3",
+        "line": 4,
+        "disposition": "under-investigation",
+        "group": "g030-c3",
+        "reason": "Record durably acknowledged; parent source/contract validation, cross-group synthesis, coverage/filter matching and any independent drop check remain pending. This preserves the claim and uncertainty without accepting, dropping or lowering it."
+      },
+      "accepted_parent_decision": null,
+      "returned_claim_checks": [
+        {
+          "batch": "claims-017",
+          "key": "g030/c3",
+          "latest_line": 4,
+          "recommendation": "refuted",
+          "bucket": "other",
+          "underlying_key": "removed-farhelm-tmux-setting-legacy-cleanup-dependency",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "Removing the unused executable setting cannot remove the checked cleanup's capability: that cleanup connects directly to the private socket and signals its verified peer.",
+          "checks": [
+            "At 17a3fe858c5511a24b7403af15dd41c93bf69fd7, crates/farhelm-helm/units/farhelm-supervisor.service.in contains no FARHELM_TMUX assignment. crates/farhelm-helm/src/units.rs:62-68 says the supervisor ignores old assignments and excludes them from sessions.",
+            "At that revision, crates/farhelm-supervisor/src/service/core/old_terminals.rs:159-280 obtains state_dir/tmux.sock with UnixStream::connect, requires same-user peer credentials, obtains the peer process, and invokes terminate_process_within with names_tmux_server_socket. It does not invoke a tmux program or read FARHELM_TMUX. The surrounding module docs and 1-320 were read.",
+            "Event 3's explicitly missing implementation premise is closed by this source. Event 4 refutes the removed-setting regression only; it does not claim all residual old-terminal cleanup failures are impossible. No runtime behavior was tested."
+          ],
+          "coverage_checked": [
+            "Current SPEC.md:2998-3010 and SPEC_impl.md:2780-2825 explicitly require legacy shutdown without a tmux program. They also accept separately described cleanup failures, but those are not the hypothesized dependency on this removed setting.",
+            "TODO.md Planned is empty. TODO.md:226-232's phase-3 removal is Mid term, not Planned and not exact coverage. plans/queue/INDEX.md has no unlanded entries. Stored tmux plans describe the already landed socket-only cleanup and removed setting.",
+            "BUGS.md, queue INDEX and active TRIAGE_OUTCOMES.md searches for FARHELM_TMUX, legacy cleanup and tmux executable dependency found no exact unresolved item or decision. No archive read.",
+            "The upgrade filter requires another rare condition as well as an older release; the concern as stated is ordinary upgrade cleanup, so that filter would not apply."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": "None for the narrow executable-dependency refutation. Broader residual cleanup and process-identity behavior are outside this claim.",
+          "original_stronger_consequence": "Removing Environment=FARHELM_TMUX might strand old terminals during an upgrade; event 3 suggested high if cleanup were broken. Event 4 withdraws that dependency concern on source evidence. No wrong-target signal or loss-of-work route was established.",
+          "needs_independent_drop_check": true,
+          "proposed_basis": "Source refutation, not general acceptance of upgrade defects. Conservatively route the proposed dismissal through the independent check because the candidate concerns cleanup of user-owned terminal processes, even though its stated stronger consequence was high rather than established highest."
+        }
+      ],
+      "parent_proposals": [
+        {
+          "artifact": "parent-flagged-judgments-017.json",
+          "key": "g030/c3",
+          "proposal": "claim-checks/claims-017/result.json",
+          "parent_proposal": "source-refuted-removed-tmux-program-setting-cleanup-dependency",
+          "final_independent_gate": "required-by-conservative-user-process-cleanup-flag",
+          "reason": "Full017 socket-only old cleanup connects private socket, same-user verifiedpeer+identity then termination; no tmux program/FARHELM_TMUX read. Removed ignored env assignment therefore cannot remove named cleanup capability. Original high stranding concern preserved, no established wrongtarget/workloss; freshgate narrowdependencyonly not acceptanceallupgradecleanupfailure. Upgradefilter not applicable ordinaryolderreleasewithoutanotherrarecondition."
+        }
+      ],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": true,
+        "provisional_bucket": "high",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "removed-farhelm-tmux-setting-legacy-cleanup-dependency",
+        "destination": null
+      }
+    },
+    {
+      "key": "g030/c4",
+      "owner": "g030",
+      "id": "c4",
+      "domain": "helm-service-integration",
+      "purpose": "helm-service-integration: crates/farhelm-helm/src/lib.rs, crates/farhelm-helm/src/notices.rs, crates/farhelm-helm/src/rest_harness.rs, crates/farhelm-helm/src/aggregate.rs, crates/farhelm-helm/src/ensure.rs, crates/farhelm-helm/src/checkout_config.rs, crates/farhelm-helm/src/preferences.rs, crates/farhelm-helm/src/browser.rs, crates/farhelm-helm/units/farhelm-supervisor.service.in, crates/farhelm-helm/tests/fixtures/release/SHA256SUMS, crates/farhelm-helm/tests/fixtures/release/SHA256SUMS.minisig, crates/farhelm-helm/tests/fixtures/release/test-key.pub, crates/farhelm-helm/tests/fixtures/release/tmux-aarch64-unknown-linux-musl, crates/farhelm-helm/tests/fixtures/release/tmux-x86_64-unknown-linux-musl, crates/farhelm-helm/tests/fixtures/release/variants/legacy-signature/SHA256SUMS.minisig, crates/farhelm-helm/tests/fixtures/release/variants/other-version/SHA256SUMS, crates/farhelm-helm/tests/fixtures/release/variants/other-version/SHA256SUMS.minisig, crates/farhelm-helm/tests/fixtures/release/variants/two-member/SHA256SUMS, crates/farhelm-helm/tests/fixtures/release/variants/two-member/SHA256SUMS.minisig, crates/farhelm-helm/tests/fixtures/release/variants/without-linux-aarch64/SHA256SUMS, crates/farhelm-helm/tests/fixtures/release/variants/without-linux-aarch64/SHA256SUMS.minisig, crates/farhelm-helm/tests/fixtures/release/variants/without-tmux/SHA256SUMS, crates/farhelm-helm/tests/fixtures/release/variants/without-tmux/SHA256SUMS.minisig; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 9,
+          "event": {
+            "version": 1,
+            "kind": "lead",
+            "id": "c4",
+            "state": "open",
+            "summary": "Check restart fixture provider activation against loopback-only tests",
+            "location": "crates/farhelm-helm/src/rest_harness.rs:1023",
+            "detail": "Reviewed commit: 56659839785691f76da3af5d8f51b511cff4ba8b\n\n## TLDR\nChecking whether the restart fixture's newly activated real Tensorlake provider can make tests reach an external API when persisted account data and sandbox rows survive a restart.\n\n## Details\nThe assigned rest_harness.rs patch changes restart_with from ConnectionManager::start (no environment provider) to production_with_delivery plus start_with_providers, giving actors the new Tensorlake service. This is a distinct test-harness concern from c2's production registry identity. An apparent risk is a fixture that persisted an API key and sandbox rows then restarted: status may now use the production API because the restart constructor does not visibly carry its previous injected API/shell services. Need inspect production_with_delivery's test backend selection, the restart_with call graph and all actual restart fixture inputs across the pinned range before judging. Suggested bucket: other/test isolation if established; no security or user-work loss route established. Confidence: open source lead, not observed behavior. proposed_drop: false. possible_cover: none. Missing premises: whether test-mode construction substitutes an offline/loopback API, and whether any real restart caller leaves a keyed sandbox binding. Next checks are accessible source reads only; no runtime reproduction or test execution."
+          }
+        },
+        {
+          "line": 10,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c4",
+            "state": "open",
+            "summary": "Restart fixture provider remains offline in test builds",
+            "location": "crates/farhelm-helm/src/rest_harness.rs:1023",
+            "detail": "Reviewed commit: 56659839785691f76da3af5d8f51b511cff4ba8b\n\n## TLDR\nThe restart fixture's new provider does not make persisted sandbox/account fixtures contact Tensorlake. Its constructor selects an offline API and shell in test builds.\n\n## Details\nResolved the discovery lead by reading tensorlake/mod.rs:151–178: production_with_delivery chooses (Offline::test(), OfflineShell, None) when cfg!(test), bypassing production_seams and its real HTTP client/environment selection. rest_harness is test-only and restart_with uses that constructor at :1023–1030 before installing it in the manager. The concern was specifically that activating actor provider calls after restart could reach an external API using persisted test account data; the constructor branch refutes the necessary external-client premise. Actual restart callers exist, including tensorlake_add_tests.rs:2504 and :2586 retaining sandbox rows; they do not override this constructor before actors start. Fixture::restart at tensorlake_add_tests.rs:375–410 reconstructs explicitly injected fake service objects for its own operations. No statement is made that this offline service validates every fake model or test oracle: that would be a separate question. The positive-control test at :2504–2540 explicitly admits install coordinates and awaits the same fake supervisor identity, so its absence-of-dial assertion is not explained merely by a dead fake transport.\n\nSuggested bucket: other/test isolation for the hypothesized external I/O, which source refutes. Confidence: confirmed source refutation. Could-be-highest: no established security or user-work loss route; test fixtures use their own stored data. proposed_drop: source-refutation proposal by cfg!(test) choosing Offline API/OfflineShell; no drop disposition is accepted here. possible_cover: none. No runtime tests, reproductions or external requests were executed. Remaining premise for this lead: none. This does not use production correctness to reject a distinct test-sensitivity defect."
+          }
+        }
+      ],
+      "latest": {
+        "line": 10,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c4",
+          "state": "open",
+          "summary": "Restart fixture provider remains offline in test builds",
+          "location": "crates/farhelm-helm/src/rest_harness.rs:1023",
+          "detail": "Reviewed commit: 56659839785691f76da3af5d8f51b511cff4ba8b\n\n## TLDR\nThe restart fixture's new provider does not make persisted sandbox/account fixtures contact Tensorlake. Its constructor selects an offline API and shell in test builds.\n\n## Details\nResolved the discovery lead by reading tensorlake/mod.rs:151–178: production_with_delivery chooses (Offline::test(), OfflineShell, None) when cfg!(test), bypassing production_seams and its real HTTP client/environment selection. rest_harness is test-only and restart_with uses that constructor at :1023–1030 before installing it in the manager. The concern was specifically that activating actor provider calls after restart could reach an external API using persisted test account data; the constructor branch refutes the necessary external-client premise. Actual restart callers exist, including tensorlake_add_tests.rs:2504 and :2586 retaining sandbox rows; they do not override this constructor before actors start. Fixture::restart at tensorlake_add_tests.rs:375–410 reconstructs explicitly injected fake service objects for its own operations. No statement is made that this offline service validates every fake model or test oracle: that would be a separate question. The positive-control test at :2504–2540 explicitly admits install coordinates and awaits the same fake supervisor identity, so its absence-of-dial assertion is not explained merely by a dead fake transport.\n\nSuggested bucket: other/test isolation for the hypothesized external I/O, which source refutes. Confidence: confirmed source refutation. Could-be-highest: no established security or user-work loss route; test fixtures use their own stored data. proposed_drop: source-refutation proposal by cfg!(test) choosing Offline API/OfflineShell; no drop disposition is accepted here. possible_cover: none. No runtime tests, reproductions or external requests were executed. Remaining premise for this lead: none. This does not use production correctness to reject a distinct test-sensitivity defect."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g030/findings.jsonl",
+        "id": "c4",
+        "line": 10,
+        "disposition": "excluded",
+        "group": "test-restart-tensorlake-provider-external-api-selection",
+        "reason": "Parent explicitly accepted named refuted proposal from claims-017 after inspecting it. The restart fixture's selected Tensorlake backend is offline in the test compilation. Persisted fixture account/sandbox rows do not make that constructor select the real HTTP API. Source refutation by the cfg(test) constructor branch. Keep the original lead and scope caveat in the parent's disposition record; do not turn this into a production-correctness dismissal of a different test defect. Checked source/results: [\"At 56659839785691f76da3af5d8f51b511cff4ba8b, lib.rs:283-288 compiles rest_harness only under cfg(test). rest_harness.rs:1013-1039 calls Tensorlake::production_with_delivery and installs that service before manager actor startup.\",\"At that revision, tensorlake/mod.rs:151-178 selects Offline::test(), OfflineShell and None under cfg!(test), bypassing production_seams. This closes event 9's named external-client premise.\",\"At that revision, provisioning/tensorlake_add_tests.rs:375-406 restarts the harness then constructs injected fake API/shell/preparer services for fixture operations. Actual restart callers at 2504 and 2586 retain sandbox data; 2520-2532 admits install coordinates and observes the same fake supervisor as a positive control. No constructor override before actors start appears at those callers.\",\"No runtime test, external request or reproduction was performed. This establishes backend isolation, not the sensitivity or completeness of every fake-model test oracle.\"] Current coverage/results: [\"Both current specifications were searched for restart-fixture/external-test API behavior. Product Tensorlake API rules do not accept accidental test I/O; SPEC_impl.md:6227 describes an offline implementation for test-built helms. Its ntfy offline rule at 5824 is a different service and is not used as exact coverage.\",\"TODO.md Planned is empty; plans/queue/INDEX.md has no unlanded entries. BUGS.md, queue INDEX and active TRIAGE_OUTCOMES.md searches found no exact fixture-restart external-API item or decision. No archive read.\",\"No FILTER.md boundary applies to this test-backend selection concern.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"New restart provider activation might contact Tensorlake using persisted test account data and sandbox rows. Both history events bound this to other/test isolation; no real user credential, security or user-work loss route was established.\"; \"No missing premise remains for the narrowly stated external-Tensorlake-I/O concern: the required real API client is not selected. This does not resolve unrelated fake-model sensitivity questions.\"."
+      },
+      "accepted_parent_decision": {
+        "key": "g030/c4",
+        "line": 10,
+        "disposition": "excluded",
+        "group": "test-restart-tensorlake-provider-external-api-selection",
+        "bucket": "other",
+        "recording": "refuted",
+        "queue_target_candidate": null,
+        "needs_independent_drop_check": false,
+        "reason": "Parent explicitly accepted named refuted proposal from claims-017 after inspecting it. The restart fixture's selected Tensorlake backend is offline in the test compilation. Persisted fixture account/sandbox rows do not make that constructor select the real HTTP API. Source refutation by the cfg(test) constructor branch. Keep the original lead and scope caveat in the parent's disposition record; do not turn this into a production-correctness dismissal of a different test defect. Checked source/results: [\"At 56659839785691f76da3af5d8f51b511cff4ba8b, lib.rs:283-288 compiles rest_harness only under cfg(test). rest_harness.rs:1013-1039 calls Tensorlake::production_with_delivery and installs that service before manager actor startup.\",\"At that revision, tensorlake/mod.rs:151-178 selects Offline::test(), OfflineShell and None under cfg!(test), bypassing production_seams. This closes event 9's named external-client premise.\",\"At that revision, provisioning/tensorlake_add_tests.rs:375-406 restarts the harness then constructs injected fake API/shell/preparer services for fixture operations. Actual restart callers at 2504 and 2586 retain sandbox data; 2520-2532 admits install coordinates and observes the same fake supervisor as a positive control. No constructor override before actors start appears at those callers.\",\"No runtime test, external request or reproduction was performed. This establishes backend isolation, not the sensitivity or completeness of every fake-model test oracle.\"] Current coverage/results: [\"Both current specifications were searched for restart-fixture/external-test API behavior. Product Tensorlake API rules do not accept accidental test I/O; SPEC_impl.md:6227 describes an offline implementation for test-built helms. Its ntfy offline rule at 5824 is a different service and is not used as exact coverage.\",\"TODO.md Planned is empty; plans/queue/INDEX.md has no unlanded entries. BUGS.md, queue INDEX and active TRIAGE_OUTCOMES.md searches found no exact fixture-restart external-API item or decision. No archive read.\",\"No FILTER.md boundary applies to this test-backend selection concern.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"New restart provider activation might contact Tensorlake using persisted test account data and sandbox rows. Both history events bound this to other/test isolation; no real user credential, security or user-work loss route was established.\"; \"No missing premise remains for the narrowly stated external-Tensorlake-I/O concern: the required real API client is not selected. This does not resolve unrelated fake-model sensitivity questions.\"."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-017",
+          "key": "g030/c4",
+          "latest_line": 10,
+          "recommendation": "refuted",
+          "bucket": "other",
+          "underlying_key": "test-restart-tensorlake-provider-external-api-selection",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The restart fixture's selected Tensorlake backend is offline in the test compilation. Persisted fixture account/sandbox rows do not make that constructor select the real HTTP API.",
+          "checks": [
+            "At 56659839785691f76da3af5d8f51b511cff4ba8b, lib.rs:283-288 compiles rest_harness only under cfg(test). rest_harness.rs:1013-1039 calls Tensorlake::production_with_delivery and installs that service before manager actor startup.",
+            "At that revision, tensorlake/mod.rs:151-178 selects Offline::test(), OfflineShell and None under cfg!(test), bypassing production_seams. This closes event 9's named external-client premise.",
+            "At that revision, provisioning/tensorlake_add_tests.rs:375-406 restarts the harness then constructs injected fake API/shell/preparer services for fixture operations. Actual restart callers at 2504 and 2586 retain sandbox data; 2520-2532 admits install coordinates and observes the same fake supervisor as a positive control. No constructor override before actors start appears at those callers.",
+            "No runtime test, external request or reproduction was performed. This establishes backend isolation, not the sensitivity or completeness of every fake-model test oracle."
+          ],
+          "coverage_checked": [
+            "Both current specifications were searched for restart-fixture/external-test API behavior. Product Tensorlake API rules do not accept accidental test I/O; SPEC_impl.md:6227 describes an offline implementation for test-built helms. Its ntfy offline rule at 5824 is a different service and is not used as exact coverage.",
+            "TODO.md Planned is empty; plans/queue/INDEX.md has no unlanded entries. BUGS.md, queue INDEX and active TRIAGE_OUTCOMES.md searches found no exact fixture-restart external-API item or decision. No archive read.",
+            "No FILTER.md boundary applies to this test-backend selection concern."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": "No missing premise remains for the narrowly stated external-Tensorlake-I/O concern: the required real API client is not selected. This does not resolve unrelated fake-model sensitivity questions.",
+          "original_stronger_consequence": "New restart provider activation might contact Tensorlake using persisted test account data and sandbox rows. Both history events bound this to other/test isolation; no real user credential, security or user-work loss route was established.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Source refutation by the cfg(test) constructor branch. Keep the original lead and scope caveat in the parent's disposition record; do not turn this into a production-correctness dismissal of a different test defect."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "test-restart-tensorlake-provider-external-api-selection",
+        "destination": null
+      }
+    },
+    {
+      "key": "g030/c5",
+      "owner": "g030",
+      "id": "c5",
+      "domain": "helm-service-integration",
+      "purpose": "helm-service-integration: crates/farhelm-helm/src/lib.rs, crates/farhelm-helm/src/notices.rs, crates/farhelm-helm/src/rest_harness.rs, crates/farhelm-helm/src/aggregate.rs, crates/farhelm-helm/src/ensure.rs, crates/farhelm-helm/src/checkout_config.rs, crates/farhelm-helm/src/preferences.rs, crates/farhelm-helm/src/browser.rs, crates/farhelm-helm/units/farhelm-supervisor.service.in, crates/farhelm-helm/tests/fixtures/release/SHA256SUMS, crates/farhelm-helm/tests/fixtures/release/SHA256SUMS.minisig, crates/farhelm-helm/tests/fixtures/release/test-key.pub, crates/farhelm-helm/tests/fixtures/release/tmux-aarch64-unknown-linux-musl, crates/farhelm-helm/tests/fixtures/release/tmux-x86_64-unknown-linux-musl, crates/farhelm-helm/tests/fixtures/release/variants/legacy-signature/SHA256SUMS.minisig, crates/farhelm-helm/tests/fixtures/release/variants/other-version/SHA256SUMS, crates/farhelm-helm/tests/fixtures/release/variants/other-version/SHA256SUMS.minisig, crates/farhelm-helm/tests/fixtures/release/variants/two-member/SHA256SUMS, crates/farhelm-helm/tests/fixtures/release/variants/two-member/SHA256SUMS.minisig, crates/farhelm-helm/tests/fixtures/release/variants/without-linux-aarch64/SHA256SUMS, crates/farhelm-helm/tests/fixtures/release/variants/without-linux-aarch64/SHA256SUMS.minisig, crates/farhelm-helm/tests/fixtures/release/variants/without-tmux/SHA256SUMS, crates/farhelm-helm/tests/fixtures/release/variants/without-tmux/SHA256SUMS.minisig; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 11,
+          "event": {
+            "version": 1,
+            "kind": "lead",
+            "id": "c5",
+            "state": "open",
+            "summary": "Cancellation assertion checks Trash epoch but not the fleet wake",
+            "location": "crates/farhelm-helm/src/notices.rs:737",
+            "detail": "Reviewed commit: 06d4b68f3a9e913f47cd426fedee5946a4eed77b\n\n## TLDR\nChecking a test-oracle gap in the changed cancellation test: it says cancellation cannot lose the committed observation's wake, but asserts only the per-host epoch and notice row, not the fleet event that tells another window to read that epoch.\n\n## Details\nnotices.rs:699–744 polls observe_trash once with the DB blocked, drops its HTTP-style observer future, waits for both guards, and asserts notice count plus the newly added epoch == 1. observe_trash at :261–267 currently does both changed(host) and manager.events().bump() inside owned DB work. A competing regression that retains changed(host) there but moves bump to after the awaited call would preserve every assertion in this cancellation test, while dropping its observer would skip the fleet wake; a normal request test could still see a bump. Need check exact event publisher/reader interface, the full pinned history of this test, and whether another cancellation-specific assertion covers that distinction before retaining a test-quality finding. Suggested bucket: other/test quality; no current production bug or destructive route asserted. Confidence: open source-oracle lead. Could-be-highest: no. proposed_drop: false. possible_cover: the adjacent normal HTTP test checks event revision; it is not yet established whether cancellation-specific coverage exists elsewhere. No execution or reproduction."
+          }
+        },
+        {
+          "line": 12,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "c5",
+            "state": "open",
+            "summary": "The cancellation test does not assert its committed fleet wake",
+            "location": "crates/farhelm-helm/src/notices.rs:737",
+            "detail": "Reviewed commit: 06d4b68f3a9e913f47cd426fedee5946a4eed77b\n\n## TLDR\nThe changed cancellation test can pass when cancelling a Trash read loses the event that tells other windows to refresh. It checks the stored notice and new per-host counter, but not the separate fleet event. This is a test-quality finding; the current production code publishes both correctly.\n\n## Details\nnotices.rs:700–742 deliberately blocks SQLite, polls observe_trash once so its owned closure receives the guards, drops the observer future at :719, releases SQLite and waits for the guards before asserting the notice count. This commit adds only the :737–741 epoch == 1 assertion, with the message 'cancellation cannot lose the committed observation's wake'. TrashRequests::changed at :107–114 only changes its private map; it does not publish a fleet event. FleetEvents::bump in feed.rs:143 onward is the separate watch-channel publication that prompts connected clients to reread. observe_trash at notices.rs:254–279 currently calls both changed(host) and manager.events().bump() inside the owned database closure, which is correct.\n\nThe specific competing regression is to leave the notice write and changed(host) in that closure but publish the changed-only fleet bump after the awaited Db::call returns. Normal completed reads would still publish the bump. The cancellation test would still observe its row, epoch and retained guards, yet dropping its observer would suppress the bump. The neighbouring forwarded_lists_and_delete_receipts_drive_changed_only_notices_and_errors test at :824–948 does assert event revisions for ordinary completed HTTP requests; it does not cancel an observation and would not distinguish this relocation. The fixture's own ready/guard waits and notice read do not assert or consume a required bump. Capture and assert the fleet revision for this cancelled observation, or use FleetEvents::observe_bumps to verify that the event occurs with the epoch already advanced inside owned work.\n\nContract: SPEC_impl.md, Archived-checkout trash, at :4591–4599 says started blocking work owns both gates and its changed-only fleet invalidation through commit even if the HTTP reader is cancelled. Its :4538–4543 couples the per-host epoch to the existing fleet wake; an epoch value alone is not publication. Attribution across the whole pinned range: git log for notices.rs over exclusive 6e423e30068b62c6cfa276c6d720ee35bb70387a through inclusive 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db shows only 06d4b68f3a9e913f47cd426fedee5946a4eed77b. The cancellation/guard test existed before the range; this patch newly adds the epoch assertion and its wake guarantee message without checking that new epoch's fleet-publication pair. The finding is bounded to the changed assertion's claimed sensitivity, not a claim that every older test responsibility was introduced here. Source search at the pinned tip found this cancellation-specific test, its same epoch assertions and the adjacent normal-request revision checks; no cancellation-specific fleet-wake assertion was found.\n\nSuggested bucket: other/test quality. Confidence: confirmed source/assertion analysis; no mutant, reproduction, test or runtime behavior was executed. Could-be-highest: no; this establishes a test sensitivity gap and potential delayed refresh if a regression were introduced, not a current security or loss-of-work route. proposed_drop: false. possible_cover: the adjacent normal-request event check and g017/c1's different JSON-golden gap are explicitly distinct; no forbidden coverage sources searched. Remaining premise: none for the bounded test-oracle claim. Original c5 lead consequence and uncertainty history remain retained; no current production lost wake is alleged."
+          }
+        }
+      ],
+      "latest": {
+        "line": 12,
+        "event": {
+          "version": 1,
+          "kind": "finding",
+          "id": "c5",
+          "state": "open",
+          "summary": "The cancellation test does not assert its committed fleet wake",
+          "location": "crates/farhelm-helm/src/notices.rs:737",
+          "detail": "Reviewed commit: 06d4b68f3a9e913f47cd426fedee5946a4eed77b\n\n## TLDR\nThe changed cancellation test can pass when cancelling a Trash read loses the event that tells other windows to refresh. It checks the stored notice and new per-host counter, but not the separate fleet event. This is a test-quality finding; the current production code publishes both correctly.\n\n## Details\nnotices.rs:700–742 deliberately blocks SQLite, polls observe_trash once so its owned closure receives the guards, drops the observer future at :719, releases SQLite and waits for the guards before asserting the notice count. This commit adds only the :737–741 epoch == 1 assertion, with the message 'cancellation cannot lose the committed observation's wake'. TrashRequests::changed at :107–114 only changes its private map; it does not publish a fleet event. FleetEvents::bump in feed.rs:143 onward is the separate watch-channel publication that prompts connected clients to reread. observe_trash at notices.rs:254–279 currently calls both changed(host) and manager.events().bump() inside the owned database closure, which is correct.\n\nThe specific competing regression is to leave the notice write and changed(host) in that closure but publish the changed-only fleet bump after the awaited Db::call returns. Normal completed reads would still publish the bump. The cancellation test would still observe its row, epoch and retained guards, yet dropping its observer would suppress the bump. The neighbouring forwarded_lists_and_delete_receipts_drive_changed_only_notices_and_errors test at :824–948 does assert event revisions for ordinary completed HTTP requests; it does not cancel an observation and would not distinguish this relocation. The fixture's own ready/guard waits and notice read do not assert or consume a required bump. Capture and assert the fleet revision for this cancelled observation, or use FleetEvents::observe_bumps to verify that the event occurs with the epoch already advanced inside owned work.\n\nContract: SPEC_impl.md, Archived-checkout trash, at :4591–4599 says started blocking work owns both gates and its changed-only fleet invalidation through commit even if the HTTP reader is cancelled. Its :4538–4543 couples the per-host epoch to the existing fleet wake; an epoch value alone is not publication. Attribution across the whole pinned range: git log for notices.rs over exclusive 6e423e30068b62c6cfa276c6d720ee35bb70387a through inclusive 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db shows only 06d4b68f3a9e913f47cd426fedee5946a4eed77b. The cancellation/guard test existed before the range; this patch newly adds the epoch assertion and its wake guarantee message without checking that new epoch's fleet-publication pair. The finding is bounded to the changed assertion's claimed sensitivity, not a claim that every older test responsibility was introduced here. Source search at the pinned tip found this cancellation-specific test, its same epoch assertions and the adjacent normal-request revision checks; no cancellation-specific fleet-wake assertion was found.\n\nSuggested bucket: other/test quality. Confidence: confirmed source/assertion analysis; no mutant, reproduction, test or runtime behavior was executed. Could-be-highest: no; this establishes a test sensitivity gap and potential delayed refresh if a regression were introduced, not a current security or loss-of-work route. proposed_drop: false. possible_cover: the adjacent normal-request event check and g017/c1's different JSON-golden gap are explicitly distinct; no forbidden coverage sources searched. Remaining premise: none for the bounded test-oracle claim. Original c5 lead consequence and uncertainty history remain retained; no current production lost wake is alleged."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g030/findings.jsonl",
+        "id": "c5",
+        "line": 12,
+        "disposition": "verified",
+        "group": "cancelled-trash-observation-test-misses-fleet-publication",
+        "reason": "Parent explicitly accepted named retain-verified proposal from claims-017 after inspecting it. The changed assertion checks the epoch but does not witness the separate fleet publication its message promises. Source establishes the bounded test-sensitivity gap; it does not establish a current production lost wake. Retain one other/test-quality finding. Describe the cancelled future, the separate epoch and watch publication, the specific undetected relocation and the in-range assertion change. Keep source analysis distinct from runtime reproduction. Checked source/results: [\"At 06d4b68f3a9e913f47cd426fedee5946a4eed77b, notices.rs:700-742 blocks SQLite, polls observe_trash, drops the observer at 719, waits for both guards, then checks the notice row and epoch only. The new 737-741 assertion says cancellation cannot lose the committed observation's wake but reads no fleet revision or bump witness.\",\"At that revision, notices.rs:107-112 increments only the private epoch map. feed.rs:149-159 separately advances the watch revision. notices.rs:254-275 correctly publishes both in the database closure today. Relocating only the changed-only bump after the awaited database call would preserve the cancelled test's row/epoch/guard observations while cancellation suppresses publication. This is a source counterexample, not an executed mutant.\",\"At that revision, notices.rs:869-909 checks fleet revisions for completed HTTP requests. These requests are awaited, so they do not distinguish the described relocation. At pinned tip 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db, targeted searches found the same cancellation test and ordinary revision tests; observe_bumps call sites belong to other host/preferences behavior, with none in notices.rs.\",\"git log over exclusive 6e423e30068b62c6cfa276c6d720ee35bb70387a through inclusive 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db lists only 06d4b68f3a9e913f47cd426fedee5946a4eed77b for notices.rs. Its diff adds the epoch/wake assertion to the older cancellation test. Attribution is to that changed assertion's claimed coverage; the older absence of a cancellation-specific bump assertion is not falsely claimed to have originated here.\",\"At 06d4b68f3a9e913f47cd426fedee5946a4eed77b, SPEC_impl.md:4538-4543 pairs epoch publication with the fleet wake; 4591-4599 requires started blocking work to own changed-only invalidation despite HTTP cancellation. No runtime work was performed.\"] Current coverage/results: [\"Current SPEC.md's archived-trash and notification-bell rules and SPEC_impl.md:3945-4110 were checked. SPEC_impl.md:4048-4053 pairs epoch and wake, and 4101-4110 retains cancellation-safe fleet invalidation. These require the behavior; they do not accept the missing regression oracle.\",\"TODO.md Planned is empty and plans/queue/INDEX.md has no unlanded entries. Stored bell-trash-reads.md acceptance/outline describes the landed epoch work and ordinary cross-window checks, not an outstanding cancellation-publication oracle fix.\",\"BUGS.md and active TRIAGE_OUTCOMES.md were searched. TRIAGE_OUTCOMES.md:1362-1372 discards trash-failed-host-refresh-test-lacks-application-witness.md, whose browser response-application witness is a different trigger, consequence and test scope; it does not discard cancellation-owned fleet publication coverage.\",\"Queue INDEX and matching files were checked. trash-failed-host-refresh-test-lacks-application-witness.md and trash-read-eligibility-can-remain-cached.md concern browser refresh/eligibility; unmeasured-notices-can-be-marked-read.md, large-notice-history-exceeds-mark-budget.md and notice-retry-error-hides-clear-failure.md concern acknowledgement/display/API limits. None has this root. No exact queue cover or useful same-root extension found; archive not read.\",\"FILTER.md's rare self-correcting glitch filter does not cover a regression-test oracle defect. No complete filter boundary matches.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"From event 11 onward this was other/test quality: a competing regression could lose the fleet wake after a cancelled Trash observation while the test passes. Event 12 confirms the source-level gap and explicitly preserves correct current production behavior; no security or user-work loss route was alleged or lowered.\"; \"None for the bounded source-level assertion gap. A current production bug or measured mutant survival would require additional evidence; neither is claimed.\"."
+      },
+      "accepted_parent_decision": {
+        "key": "g030/c5",
+        "line": 12,
+        "disposition": "verified",
+        "group": "cancelled-trash-observation-test-misses-fleet-publication",
+        "bucket": "other",
+        "recording": "retain-verified",
+        "queue_target_candidate": null,
+        "needs_independent_drop_check": false,
+        "reason": "Parent explicitly accepted named retain-verified proposal from claims-017 after inspecting it. The changed assertion checks the epoch but does not witness the separate fleet publication its message promises. Source establishes the bounded test-sensitivity gap; it does not establish a current production lost wake. Retain one other/test-quality finding. Describe the cancelled future, the separate epoch and watch publication, the specific undetected relocation and the in-range assertion change. Keep source analysis distinct from runtime reproduction. Checked source/results: [\"At 06d4b68f3a9e913f47cd426fedee5946a4eed77b, notices.rs:700-742 blocks SQLite, polls observe_trash, drops the observer at 719, waits for both guards, then checks the notice row and epoch only. The new 737-741 assertion says cancellation cannot lose the committed observation's wake but reads no fleet revision or bump witness.\",\"At that revision, notices.rs:107-112 increments only the private epoch map. feed.rs:149-159 separately advances the watch revision. notices.rs:254-275 correctly publishes both in the database closure today. Relocating only the changed-only bump after the awaited database call would preserve the cancelled test's row/epoch/guard observations while cancellation suppresses publication. This is a source counterexample, not an executed mutant.\",\"At that revision, notices.rs:869-909 checks fleet revisions for completed HTTP requests. These requests are awaited, so they do not distinguish the described relocation. At pinned tip 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db, targeted searches found the same cancellation test and ordinary revision tests; observe_bumps call sites belong to other host/preferences behavior, with none in notices.rs.\",\"git log over exclusive 6e423e30068b62c6cfa276c6d720ee35bb70387a through inclusive 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db lists only 06d4b68f3a9e913f47cd426fedee5946a4eed77b for notices.rs. Its diff adds the epoch/wake assertion to the older cancellation test. Attribution is to that changed assertion's claimed coverage; the older absence of a cancellation-specific bump assertion is not falsely claimed to have originated here.\",\"At 06d4b68f3a9e913f47cd426fedee5946a4eed77b, SPEC_impl.md:4538-4543 pairs epoch publication with the fleet wake; 4591-4599 requires started blocking work to own changed-only invalidation despite HTTP cancellation. No runtime work was performed.\"] Current coverage/results: [\"Current SPEC.md's archived-trash and notification-bell rules and SPEC_impl.md:3945-4110 were checked. SPEC_impl.md:4048-4053 pairs epoch and wake, and 4101-4110 retains cancellation-safe fleet invalidation. These require the behavior; they do not accept the missing regression oracle.\",\"TODO.md Planned is empty and plans/queue/INDEX.md has no unlanded entries. Stored bell-trash-reads.md acceptance/outline describes the landed epoch work and ordinary cross-window checks, not an outstanding cancellation-publication oracle fix.\",\"BUGS.md and active TRIAGE_OUTCOMES.md were searched. TRIAGE_OUTCOMES.md:1362-1372 discards trash-failed-host-refresh-test-lacks-application-witness.md, whose browser response-application witness is a different trigger, consequence and test scope; it does not discard cancellation-owned fleet publication coverage.\",\"Queue INDEX and matching files were checked. trash-failed-host-refresh-test-lacks-application-witness.md and trash-read-eligibility-can-remain-cached.md concern browser refresh/eligibility; unmeasured-notices-can-be-marked-read.md, large-notice-history-exceeds-mark-budget.md and notice-retry-error-hides-clear-failure.md concern acknowledgement/display/API limits. None has this root. No exact queue cover or useful same-root extension found; archive not read.\",\"FILTER.md's rare self-correcting glitch filter does not cover a regression-test oracle defect. No complete filter boundary matches.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"From event 11 onward this was other/test quality: a competing regression could lose the fleet wake after a cancelled Trash observation while the test passes. Event 12 confirms the source-level gap and explicitly preserves correct current production behavior; no security or user-work loss route was alleged or lowered.\"; \"None for the bounded source-level assertion gap. A current production bug or measured mutant survival would require additional evidence; neither is claimed.\"."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-017",
+          "key": "g030/c5",
+          "latest_line": 12,
+          "recommendation": "retain-verified",
+          "bucket": "other",
+          "underlying_key": "cancelled-trash-observation-test-misses-fleet-publication",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The changed assertion checks the epoch but does not witness the separate fleet publication its message promises. Source establishes the bounded test-sensitivity gap; it does not establish a current production lost wake.",
+          "checks": [
+            "At 06d4b68f3a9e913f47cd426fedee5946a4eed77b, notices.rs:700-742 blocks SQLite, polls observe_trash, drops the observer at 719, waits for both guards, then checks the notice row and epoch only. The new 737-741 assertion says cancellation cannot lose the committed observation's wake but reads no fleet revision or bump witness.",
+            "At that revision, notices.rs:107-112 increments only the private epoch map. feed.rs:149-159 separately advances the watch revision. notices.rs:254-275 correctly publishes both in the database closure today. Relocating only the changed-only bump after the awaited database call would preserve the cancelled test's row/epoch/guard observations while cancellation suppresses publication. This is a source counterexample, not an executed mutant.",
+            "At that revision, notices.rs:869-909 checks fleet revisions for completed HTTP requests. These requests are awaited, so they do not distinguish the described relocation. At pinned tip 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db, targeted searches found the same cancellation test and ordinary revision tests; observe_bumps call sites belong to other host/preferences behavior, with none in notices.rs.",
+            "git log over exclusive 6e423e30068b62c6cfa276c6d720ee35bb70387a through inclusive 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db lists only 06d4b68f3a9e913f47cd426fedee5946a4eed77b for notices.rs. Its diff adds the epoch/wake assertion to the older cancellation test. Attribution is to that changed assertion's claimed coverage; the older absence of a cancellation-specific bump assertion is not falsely claimed to have originated here.",
+            "At 06d4b68f3a9e913f47cd426fedee5946a4eed77b, SPEC_impl.md:4538-4543 pairs epoch publication with the fleet wake; 4591-4599 requires started blocking work to own changed-only invalidation despite HTTP cancellation. No runtime work was performed."
+          ],
+          "coverage_checked": [
+            "Current SPEC.md's archived-trash and notification-bell rules and SPEC_impl.md:3945-4110 were checked. SPEC_impl.md:4048-4053 pairs epoch and wake, and 4101-4110 retains cancellation-safe fleet invalidation. These require the behavior; they do not accept the missing regression oracle.",
+            "TODO.md Planned is empty and plans/queue/INDEX.md has no unlanded entries. Stored bell-trash-reads.md acceptance/outline describes the landed epoch work and ordinary cross-window checks, not an outstanding cancellation-publication oracle fix.",
+            "BUGS.md and active TRIAGE_OUTCOMES.md were searched. TRIAGE_OUTCOMES.md:1362-1372 discards trash-failed-host-refresh-test-lacks-application-witness.md, whose browser response-application witness is a different trigger, consequence and test scope; it does not discard cancellation-owned fleet publication coverage.",
+            "Queue INDEX and matching files were checked. trash-failed-host-refresh-test-lacks-application-witness.md and trash-read-eligibility-can-remain-cached.md concern browser refresh/eligibility; unmeasured-notices-can-be-marked-read.md, large-notice-history-exceeds-mark-budget.md and notice-retry-error-hides-clear-failure.md concern acknowledgement/display/API limits. None has this root. No exact queue cover or useful same-root extension found; archive not read.",
+            "FILTER.md's rare self-correcting glitch filter does not cover a regression-test oracle defect. No complete filter boundary matches."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": "None for the bounded source-level assertion gap. A current production bug or measured mutant survival would require additional evidence; neither is claimed.",
+          "original_stronger_consequence": "From event 11 onward this was other/test quality: a competing regression could lose the fleet wake after a cancelled Trash observation while the test passes. Event 12 confirms the source-level gap and explicitly preserves correct current production behavior; no security or user-work loss route was alleged or lowered.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Retain one other/test-quality finding. Describe the cancelled future, the separate epoch and watch publication, the specific undetected relocation and the in-range assertion change. Keep source analysis distinct from runtime reproduction."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": true,
+        "clearly_refuted_candidate": false,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Source-confirmed by an existing parent decision; not runtime reproduced",
+        "deduplication_key": "cancelled-trash-observation-test-misses-fleet-publication",
+        "destination": "trailing-cancelled-trash-observation-test-misses-fleet-publication.md"
+      }
+    },
+    {
+      "key": "g030/c6",
+      "owner": "g030",
+      "id": "c6",
+      "domain": "helm-service-integration",
+      "purpose": "helm-service-integration: crates/farhelm-helm/src/lib.rs, crates/farhelm-helm/src/notices.rs, crates/farhelm-helm/src/rest_harness.rs, crates/farhelm-helm/src/aggregate.rs, crates/farhelm-helm/src/ensure.rs, crates/farhelm-helm/src/checkout_config.rs, crates/farhelm-helm/src/preferences.rs, crates/farhelm-helm/src/browser.rs, crates/farhelm-helm/units/farhelm-supervisor.service.in, crates/farhelm-helm/tests/fixtures/release/SHA256SUMS, crates/farhelm-helm/tests/fixtures/release/SHA256SUMS.minisig, crates/farhelm-helm/tests/fixtures/release/test-key.pub, crates/farhelm-helm/tests/fixtures/release/tmux-aarch64-unknown-linux-musl, crates/farhelm-helm/tests/fixtures/release/tmux-x86_64-unknown-linux-musl, crates/farhelm-helm/tests/fixtures/release/variants/legacy-signature/SHA256SUMS.minisig, crates/farhelm-helm/tests/fixtures/release/variants/other-version/SHA256SUMS, crates/farhelm-helm/tests/fixtures/release/variants/other-version/SHA256SUMS.minisig, crates/farhelm-helm/tests/fixtures/release/variants/two-member/SHA256SUMS, crates/farhelm-helm/tests/fixtures/release/variants/two-member/SHA256SUMS.minisig, crates/farhelm-helm/tests/fixtures/release/variants/without-linux-aarch64/SHA256SUMS, crates/farhelm-helm/tests/fixtures/release/variants/without-linux-aarch64/SHA256SUMS.minisig, crates/farhelm-helm/tests/fixtures/release/variants/without-tmux/SHA256SUMS, crates/farhelm-helm/tests/fixtures/release/variants/without-tmux/SHA256SUMS.minisig; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 13,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c6",
+            "state": "open",
+            "summary": "Release fixture checksum counts match the archive-only inventory",
+            "location": "crates/farhelm-helm/tests/fixtures/release/variants/without-linux-aarch64/SHA256SUMS:1",
+            "detail": "Reviewed commit: cb762a313abbe6da03ae0bf041f07486c4ed4df9\n\n## TLDR\nChecked whether replacing the missing-tmux fixture with the missing-Linux-archive fixture breaks the test's checksum-count premise. It does not: the inventory function used by this assertion counts four archives, and the variant contains exactly the other three.\n\n## Details\nThe assigned main SHA256SUMS patch leaves the four Farhelm archives; the new without-linux-aarch64/SHA256SUMS contains the two Mac archives and x86_64 Linux archive. release_payloads.rs:2502–2544 selects the arm64 Linux archive, verifies it is absent and requires the manifest length to equal assets::sums_members().len() - 1. assets.rs:105–110 constructs sums_members solely from RELEASE_ARCHIVES and sorts it; the inventory is not the full site manifest including install.sh. Its named four-archive unit test and release_payloads fixture's matching asset-set assertion agree. Thus the new three-entry fixture satisfies the exact asserted count; this is a source check of a fixture premise, not execution or cryptographic signature verification. Suggested bucket: other/test correctness for the suspected mismatch, which source refutes. Confidence: confirmed source refutation. Could-be-highest: no; this concerns test fixture cardinality. proposed_drop: source refutation by archive-only sums_members and the explicit three names in the assigned fixture; no drop disposition is accepted here. possible_cover: none. No unresolved premise or runtime reproduction."
+          }
+        }
+      ],
+      "latest": {
+        "line": 13,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c6",
+          "state": "open",
+          "summary": "Release fixture checksum counts match the archive-only inventory",
+          "location": "crates/farhelm-helm/tests/fixtures/release/variants/without-linux-aarch64/SHA256SUMS:1",
+          "detail": "Reviewed commit: cb762a313abbe6da03ae0bf041f07486c4ed4df9\n\n## TLDR\nChecked whether replacing the missing-tmux fixture with the missing-Linux-archive fixture breaks the test's checksum-count premise. It does not: the inventory function used by this assertion counts four archives, and the variant contains exactly the other three.\n\n## Details\nThe assigned main SHA256SUMS patch leaves the four Farhelm archives; the new without-linux-aarch64/SHA256SUMS contains the two Mac archives and x86_64 Linux archive. release_payloads.rs:2502–2544 selects the arm64 Linux archive, verifies it is absent and requires the manifest length to equal assets::sums_members().len() - 1. assets.rs:105–110 constructs sums_members solely from RELEASE_ARCHIVES and sorts it; the inventory is not the full site manifest including install.sh. Its named four-archive unit test and release_payloads fixture's matching asset-set assertion agree. Thus the new three-entry fixture satisfies the exact asserted count; this is a source check of a fixture premise, not execution or cryptographic signature verification. Suggested bucket: other/test correctness for the suspected mismatch, which source refutes. Confidence: confirmed source refutation. Could-be-highest: no; this concerns test fixture cardinality. proposed_drop: source refutation by archive-only sums_members and the explicit three names in the assigned fixture; no drop disposition is accepted here. possible_cover: none. No unresolved premise or runtime reproduction."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g030/findings.jsonl",
+        "id": "c6",
+        "line": 13,
+        "disposition": "excluded",
+        "group": "release-missing-linux-archive-fixture-cardinality",
+        "reason": "Parent explicitly accepted named refuted proposal from claims-017 after inspecting it. The fixture has three entries and the test compares against four archive members minus the one deliberately missing. The extra installer entry in published manifests is outside this helper's archive inventory. Source refutation from the explicit four-element archive inventory and three-entry variant. Do not equate a source membership check with executing the fixture test or validating its signature. Checked source/results: [\"At cb762a313abbe6da03ae0bf041f07486c4ed4df9, provisioning/assets.rs:43-64 defines four RELEASE_ARCHIVES; 88-109 explicitly documents and implements sums_members as only those archive names, excluding install.sh.\",\"At that revision, provisioning/release_payloads.rs:2502-2544 selects the arm64 Linux archive, verifies its absence, and requires listed.len() == assets::sums_members().len() - 1. tests/fixtures/release/variants/without-linux-aarch64/SHA256SUMS has exactly the two Apple-silicon archives and x86_64 Linux archive. The cardinality premise holds by source.\",\"No signature verification, download, test run or cryptographic correctness claim was performed. The disposition concerns fixture membership/count only.\"] Current coverage/results: [\"Both current specifications were searched for signed manifests/checksums. SPEC_impl.md:8060-8078 distinguishes four payload archives plus install.sh in the published manifest; product signature rules do not require this test helper to count the installer. This is supporting context, not acceptance of a fixture defect.\",\"TODO.md Planned is empty and plans/queue/INDEX.md has no unlanded entries. Stored tmux-drop-from-install.md names the landed checksum inventory migration; it is not an outstanding exact fix.\",\"BUGS.md, queue INDEX and active TRIAGE_OUTCOMES.md were searched for sums_members, checksum cardinality and missing-Linux-archive fixtures; no exact cover, alias or decision was found. No archive read.\",\"No FILTER.md boundary matches fixture cardinality.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Suspected mismatch after replacing the missing-tmux variant could invalidate the missing-asset test premise. The sole event classifies this as other/test correctness and source-refutes it; no production security consequence was alleged.\"; \"None for the count refutation. Signature correctness is outside this named premise and remains untested by this consultation.\"."
+      },
+      "accepted_parent_decision": {
+        "key": "g030/c6",
+        "line": 13,
+        "disposition": "excluded",
+        "group": "release-missing-linux-archive-fixture-cardinality",
+        "bucket": "other",
+        "recording": "refuted",
+        "queue_target_candidate": null,
+        "needs_independent_drop_check": false,
+        "reason": "Parent explicitly accepted named refuted proposal from claims-017 after inspecting it. The fixture has three entries and the test compares against four archive members minus the one deliberately missing. The extra installer entry in published manifests is outside this helper's archive inventory. Source refutation from the explicit four-element archive inventory and three-entry variant. Do not equate a source membership check with executing the fixture test or validating its signature. Checked source/results: [\"At cb762a313abbe6da03ae0bf041f07486c4ed4df9, provisioning/assets.rs:43-64 defines four RELEASE_ARCHIVES; 88-109 explicitly documents and implements sums_members as only those archive names, excluding install.sh.\",\"At that revision, provisioning/release_payloads.rs:2502-2544 selects the arm64 Linux archive, verifies its absence, and requires listed.len() == assets::sums_members().len() - 1. tests/fixtures/release/variants/without-linux-aarch64/SHA256SUMS has exactly the two Apple-silicon archives and x86_64 Linux archive. The cardinality premise holds by source.\",\"No signature verification, download, test run or cryptographic correctness claim was performed. The disposition concerns fixture membership/count only.\"] Current coverage/results: [\"Both current specifications were searched for signed manifests/checksums. SPEC_impl.md:8060-8078 distinguishes four payload archives plus install.sh in the published manifest; product signature rules do not require this test helper to count the installer. This is supporting context, not acceptance of a fixture defect.\",\"TODO.md Planned is empty and plans/queue/INDEX.md has no unlanded entries. Stored tmux-drop-from-install.md names the landed checksum inventory migration; it is not an outstanding exact fix.\",\"BUGS.md, queue INDEX and active TRIAGE_OUTCOMES.md were searched for sums_members, checksum cardinality and missing-Linux-archive fixtures; no exact cover, alias or decision was found. No archive read.\",\"No FILTER.md boundary matches fixture cardinality.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Suspected mismatch after replacing the missing-tmux variant could invalidate the missing-asset test premise. The sole event classifies this as other/test correctness and source-refutes it; no production security consequence was alleged.\"; \"None for the count refutation. Signature correctness is outside this named premise and remains untested by this consultation.\"."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-017",
+          "key": "g030/c6",
+          "latest_line": 13,
+          "recommendation": "refuted",
+          "bucket": "other",
+          "underlying_key": "release-missing-linux-archive-fixture-cardinality",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The fixture has three entries and the test compares against four archive members minus the one deliberately missing. The extra installer entry in published manifests is outside this helper's archive inventory.",
+          "checks": [
+            "At cb762a313abbe6da03ae0bf041f07486c4ed4df9, provisioning/assets.rs:43-64 defines four RELEASE_ARCHIVES; 88-109 explicitly documents and implements sums_members as only those archive names, excluding install.sh.",
+            "At that revision, provisioning/release_payloads.rs:2502-2544 selects the arm64 Linux archive, verifies its absence, and requires listed.len() == assets::sums_members().len() - 1. tests/fixtures/release/variants/without-linux-aarch64/SHA256SUMS has exactly the two Apple-silicon archives and x86_64 Linux archive. The cardinality premise holds by source.",
+            "No signature verification, download, test run or cryptographic correctness claim was performed. The disposition concerns fixture membership/count only."
+          ],
+          "coverage_checked": [
+            "Both current specifications were searched for signed manifests/checksums. SPEC_impl.md:8060-8078 distinguishes four payload archives plus install.sh in the published manifest; product signature rules do not require this test helper to count the installer. This is supporting context, not acceptance of a fixture defect.",
+            "TODO.md Planned is empty and plans/queue/INDEX.md has no unlanded entries. Stored tmux-drop-from-install.md names the landed checksum inventory migration; it is not an outstanding exact fix.",
+            "BUGS.md, queue INDEX and active TRIAGE_OUTCOMES.md were searched for sums_members, checksum cardinality and missing-Linux-archive fixtures; no exact cover, alias or decision was found. No archive read.",
+            "No FILTER.md boundary matches fixture cardinality."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": "None for the count refutation. Signature correctness is outside this named premise and remains untested by this consultation.",
+          "original_stronger_consequence": "Suspected mismatch after replacing the missing-tmux variant could invalidate the missing-asset test premise. The sole event classifies this as other/test correctness and source-refutes it; no production security consequence was alleged.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Source refutation from the explicit four-element archive inventory and three-entry variant. Do not equate a source membership check with executing the fixture test or validating its signature."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "release-missing-linux-archive-fixture-cardinality",
+        "destination": null
+      }
+    }
+  ],
+  "replies": [
+    {
+      "turn": 1,
+      "reply": "Initial review is blocked before source delivery. The evidence tool rejected the manifest: `00032-000.patch` has 22 lines, but its required range ends at 23.\n\nThe brief and complete commits field are read. Progress is recorded; findings remain empty, and all assigned patches remain unread.\n\nPlease repair the manifest or authorize manual inspection. [tooling.md]([skills]/persistent-review/tooling.md) requires approval before that fallback."
+    },
+    {
+      "turn": 2,
+      "reply": "Initial pass complete: all 40 mandatory packets read through the corrected manifest; no assigned scope unread.\n\nNo findings. Recorded candidates `c1`–`c3` with source refutations; `c3`’s lead is closed. No open leads.\n\nProgress and findings log updated. No tests, builds, or reproductions run."
+    },
+    {
+      "turn": 3,
+      "reply": "Revised `c1` and `c2` with actual caller, lock-lifetime, registry and cache-consumer evidence. Readily checkable premises are settled; no new findings.\n\nProposed drops remain recorded for independent disposition. Unresolved lead IDs: none."
+    },
+    {
+      "turn": 4,
+      "reply": "Discovery pass 1 found one new source-confirmed test gap: `c5`. The cancellation test checks the Trash epoch but not its separate fleet wake. No current production failure is alleged.\n\nChecked cancellation callers/history, fixture API isolation, migration assertions and release inventory. Recorded refuted candidates `c4` and `c6`.\n\nNew verified IDs: `c5`. New unverified IDs: none. Open leads: none. No runtime execution."
+    },
+    {
+      "turn": 5,
+      "reply": "Discovery pass 2 found nothing new.\n\nChecked live seal-flag propagation, Retry Delete ownership, payload-directory wording and removed-export callers. No record revisions.\n\nNew verified IDs: none. New unverified IDs: none. Open leads: none. No runtime execution."
+    }
+  ],
+  "progress": "# g030: helm-service-integration\n\nInitial source-review pass complete. Turn 2 was coverage repair and completion of the initial pass; turn 1 stopped before source delivery on the invalid manifest. Discovery-pass count: 0. No synthesis or later discovery pass performed.\n\nThe corrected brief was read fully in four bounded chunks. The complete inventory commits field was read in turn 1; excluded coverage metadata was never read. Existing findings were preserved. All 40 corrected mandatory source ranges (1286 lines, 62952 snapshot bytes) were delivered successfully, one evidence invocation per shell call, through the corrected manifest. Unread assigned scope: none. The parent's audit remains the coverage authority.\n\nCurrent durable records: no findings; candidates c1, c2, c3. c1 refutes a duplicate-owner startup concern by the ownership acquisition at lib.rs:2438 preceding the finisher at :2521. Its final revision corrects the approximate line numbers in its first event. c2 refutes duplicate production recipe/provider/cache assembly. c3 began as a lead about removing FARHELM_TMUX and was resolved to a candidate after reading the socket-only legacy cleanup. Open leads: none. New verified finding IDs: none. New unverified finding IDs: none. No count target was used.\n\nSource checks covered each assigned per-commit patch, not just the endpoint. Context included the Trash observation transaction and its host-epoch projection/callers at 06d4b68f3a9e913f47cd426fedee5946a4eed77b; provider registry at ee39aeacdaccfeaa0cea25246540b20008c868f0; stored route resolution at 1038bb1f4549f6896fa6e064fecf540f4548b4da; place probes and canonical Podman destination storage at 04ffdbb35773cef36e73eb798c005ddbeb9a9de6; downgrade-fixture construction and schema migrations at 52cc5d7250d262f93b730d91a07c240d33c2ea5f; production service construction, protected router layering and fixture mode switch at 56659839785691f76da3af5d8f51b511cff4ba8b; retired-session routing and browser origin checks at 04d85f0c98a9b635709d00b056719a0baa7fd3fc; HostBusy construction at ba7cc0264028eebb39647deb1d25b055e6886935; startup ownership, error classifications and the seal finisher/retry/delete caller at 222bf6253bcd168db04bcbb1df20180c88306998; protocol field/export removal at f560058da19e02716e6f943883a9508b447aff4e; unit rendering and old_terminals.rs:1–320 at 17a3fe858c5511a24b7403af15dd41c93bf69fd7; and release fixture consumers, version/key isolation, missing-member and legacy-signature assertions at cb762a313abbe6da03ae0bf041f07486c4ed4df9.\n\nGoverning contracts read at pinned revisions: Archived-checkout trash at 06d4b68f3a9e913f47cd426fedee5946a4eed77b; complete Disposable environments section at 56659839785691f76da3af5d8f51b511cff4ba8b (git diff confirmed SPEC_impl.md unchanged from ee39aeacdaccfeaa0cea25246540b20008c868f0 through that commit); Container sessions, Security and Who owns an accepted action at that revision; Retired containerized sessions at 04d85f0c98a9b635709d00b056719a0baa7fd3fc; the wake/busy lifecycle contract at ba7cc0264028eebb39647deb1d25b055e6886935; Agent requests and environments at 12c79f61a627a4241707dad0cf3b55b859d2d4fc; Environment Delete and the seal at 47f33bbdbd5ff4a6e437e97a800f9083be43096e and 222bf6253bcd168db04bcbb1df20180c88306998; Sandbox sessions and Answers bind to what was drawn at 222bf6253bcd168db04bcbb1df20180c88306998; Terminal widget: the grid island (1504–1887) at f560058da19e02716e6f943883a9508b447aff4e; Terminal substrate: private tmux server at 17a3fe858c5511a24b7403af15dd41c93bf69fd7; and Provisioning (7771–8154) at cb762a313abbe6da03ae0bf041f07486c4ed4df9. An overbroad release-contract search clipped; its relevant full section was subsequently reread in bounded ranges, so that preview is not relied on.\n\nInterface assumptions: provider clones share the same inner service; manager provider slots own lifecycle dispatch; container endpoints receive the same concrete Podman handle; fresh stored routes supply transport coordinates; cached retired-session checks add a negative fence; typed helm errors supply action headers; new API routes retain authentication/ownership layering; the runtime retains the serving claim until drain. Source checked these integration assumptions. Provider internals outside the assigned group were read only as caller/contract context, not reviewed independently.\n\nAll conclusions are source-supported. No runtime tests, builds, reproductions, live-install changes, checkout changes or helper agents were used. Private review records are the only writes. Next action: return the initial-pass delta and coverage status to the parent, then await its later-turn protocol.\n\nTurn 3: later-turn synthesis begun. Initial delivery was audited complete by parent. Revisiting c1 finisher ownership and c2 registry consumers; preserving all original consequences and proposed drops. No drop disposition is accepted by this reviewer. Discovery-pass count remains 0.\n\n## Turn 3 synthesis completion\n\nSeparate later-turn synthesis is complete; discovery-pass count remains 0. Original initial delivery remains audited complete, with no unread mandatory scope. No new finding IDs or lead IDs. c1 was revised twice in this turn to add actual runtime/lock ownership and guarded destruction consumers, then settle the named lock implementation; c2 was revised to trace the registry/cache identity through actual creation, actor, lifecycle, recipe deletion, projection and orphan-cleanup consumers. c3 required no revision. Original consequences and all proposed drops remain in the append-only log. No drop is accepted here; c1 and c2 retain their potentially highest hypothetical consequences for the parent's independent judgment. Findings tool reports active=0, open_candidates=3, open_leads=0.\n\nReadily checkable premises settled: token_control::acquire_ownership obtains exclusive nonblocking flock and OwnershipLock retains its fd; both public serving entry points route through run_with_ready, which destroys Runtime before its claim slot; finisher work uses the same runtime and the ordinary provisioning lock; sealed removal revalidates ownership/kind and dispatches the stored provider binding. The manager stores the original Providers before actor creation, each actor clones those Arc slots, and lifecycle/creation resolve that registry. Podman::new stores its supplied shared builds/cache/delivery; CredentialDelivery::places and ProvisioningService::credential_delivery clone the original Arcs. Recipe deletion takes its admission from the same Tensorlake builds Arc and dispatches provider cleanup under it; Podman preparation and orphan checks consume its shared builds Arc. The last caller confirmation in provisioning/tensorlake_add.rs:535–588 showed provider.create directly consumes the provider selected before preparation. lib.rs:2277–2322 confirmed standalone run calls the same runtime owner as run_embedded. No readily checkable premise remains for these recorded integration candidates.\n\nSource-only checks; no execution, reproduction, runtime test, build, checkout edit or live-install action. Next action: return only this turn's delta and unresolved lead IDs, then await the parent's next protocol turn.\n\nTurn 4: discovery pass 1 begun after reading discovery-neighbours.json fully (122 lines, 31901 bytes). No named pending cross-group questions. Neighbours identify distinct documentation and HTTP-golden gaps; avoid duplicating them and do not treat current production behavior as refuting test-oracle defects.\n\n## Turn 4 discovery completion\n\nDiscovery pass 1 complete. Something new was found: c5, a source-confirmed test-oracle gap in the newly changed cancellation assertion. It checks the notice row and Trash epoch but not the independent fleet event, so an event publication moved to the cancelled async continuation would escape that cancellation test while ordinary completed-request checks still pass. This is a bounded test-quality finding, not an assertion of a current production lost wake. The log preserves the lead and its resolution to finding. New verified finding IDs: c5. New unverified-after-investigation IDs: none. Remaining lead IDs: none.\n\nAdditional durable delta: c4 recorded the restart-fixture external-API suspicion and resolved it by the test-only Offline API/OfflineShell constructor branch. c6 records the refuted checksum-cardinality suspicion: the selected inventory contains the four archives only and the new missing-arm64 fixture correctly has three. Both remain candidates with their proposed source-refutation drops, without accepting any parent disposition. No original known record was withdrawn or lowered.\n\nUseful discovery checks: read discovery-neighbours.json completely before source search; kept g017's JSON-golden sensitivity findings separate from c5's cancellation/lifecycle oracle. Rechecked restart_with's actual keyed-sandbox callers and cfg!(test) service selection at 56659839785691f76da3af5d8f51b511cff4ba8b; rechecked the changed notices cancellation/normal-HTTP tests and FleetEvents publication interface at 06d4b68f3a9e913f47cd426fedee5946a4eed77b; searched cancellation and epoch assertions through the pinned tip and notices.rs history over the complete range (only the assigned epoch commit changed that file); inspected sparse preference expectations and the populated schema-26 migration oracle at 52cc5d7250d262f93b730d91a07c240d33c2ea5f; checked release fixture inventory and signature-consumer assertions at cb762a313abbe6da03ae0bf041f07486c4ed4df9. No other new issue survived this pass. Initial mandatory source coverage remains complete; no omitted assigned material.\n\nOne c5 append initially failed JSON validation because of an unnecessary apostrophe escape in its private event file; corrected that file and immediately reran the evidence record command successfully before further source reads. Findings count confirms no open leads. No runtime tests, builds, reproductions, checkout writes, prohibited coverage searches or live-install actions. Next action: return the discovery delta and await the parent's required later pass for the substantive new finding.\n\nTurn 5: discovery pass 2 begun. Updated discovery-neighbours.json fully read in four bounded chunks (187 lines, 68704 bytes). No pending named synthesis questions. Known neighbour compatibility/documentation/golden issues are retained as context only; this pass searches the assigned source/test integration beyond own c1–c6.\n\n## Turn 5 discovery completion\n\nDiscovery pass 2 complete with an empty result: nothing new found. New verified IDs: none. New unverified-after-investigation IDs: none. Remaining lead IDs: none. No finding/candidate revisions or withdrawals in this pass. Existing consequences, proposed drops and the prior retained finding remain unchanged and unadjudicated.\n\nUseful source checks beyond the earlier discovery: at 222bf6253bcd168db04bcbb1df20180c88306998, read HostScript → ScriptedList::of → live ListGate propagation and ScriptedFleet::edit; the newly added sealed flag is copied with sessions/truncation and reaches edits on an existing peer. Read the retry-delete route's placement in the cancellable router and its handler's explicit run_owned admission, which requires a recorded deletion failure before dispatch. At 500548b9253b07a26fd03119679184b69544e31d, compared the changed payload-directory help with DirectoryPayloads::path: the documented Farhelm archive name is exactly the selected asset; the directory is read and extraction goes to its private materialization cache. At f560058da19e02716e6f943883a9508b447aff4e, searched the pinned source consumers of removed ViewerStreams versus retained terminal exports; the in-tree e2e harness imports the retained TermEvent/TermStream API, and no ViewerStreams consumer remained. Read the retained stream type contracts as caller context. These checks produced no substantive unresolved suspicion or new finding to record.\n\nUpdated discovery-neighbours.json was read in full first, in four bounded chunks. No prohibited coverage sources were searched, no source scope was broadened into an independent review, and no runtime test, reproduction, build, checkout edit or live-install action occurred. Initial mandatory delivery remains complete. Next action: return the empty discovery delta and await the parent.\n"
+}

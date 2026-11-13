@@ -1,0 +1,449 @@
+{
+  "group": {
+    "id": "g073",
+    "domain": "installation-provisioning",
+    "purpose": "installation-provisioning: crates/farhelm-helm/src/provisioning/release_payloads.rs; phases complete small per-commit changes",
+    "interfaces": [
+      "g005",
+      "g006",
+      "g012",
+      "g061",
+      "g062",
+      "g063",
+      "g072",
+      "g149",
+      "g150",
+      "g159",
+      "g160",
+      "g161",
+      "g162",
+      "g163",
+      "g164",
+      "g165",
+      "g166",
+      "g167",
+      "g168",
+      "g169",
+      "g170",
+      "g171",
+      "g172",
+      "g173",
+      "g198",
+      "g199"
+    ],
+    "sources": [
+      {
+        "path": "[private-run]/prep/parts/01274-000.patch",
+        "ranges": [
+          [
+            1,
+            851
+          ]
+        ],
+        "original_path": "crates/farhelm-helm/src/provisioning/release_payloads.rs",
+        "commit": "500548b9253b07a26fd03119679184b69544e31d",
+        "notes": "patch header; patch character offsets [0,36284)",
+        "lines": 851,
+        "bytes": 36300,
+        "start": 0,
+        "end": 36284,
+        "original": "[private-run]/prep/originals/01274.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/01309-000.patch",
+        "ranges": [
+          [
+            1,
+            163
+          ]
+        ],
+        "original_path": "crates/farhelm-helm/src/provisioning/release_payloads.rs",
+        "commit": "cb762a313abbe6da03ae0bf041f07486c4ed4df9",
+        "notes": "patch header; patch character offsets [0,7997)",
+        "lines": 163,
+        "bytes": 8013,
+        "start": 0,
+        "end": 7997,
+        "original": "[private-run]/prep/originals/01309.patch"
+      }
+    ],
+    "lines": 1014,
+    "bytes": 44313
+  },
+  "records": [
+    {
+      "key": "g073/l1",
+      "owner": "g073",
+      "id": "l1",
+      "domain": "installation-provisioning",
+      "purpose": "installation-provisioning: crates/farhelm-helm/src/provisioning/release_payloads.rs; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 1,
+          "event": {
+            "version": 1,
+            "kind": "lead",
+            "id": "l1",
+            "state": "open",
+            "summary": "Check migrated payload tests still inject faults into requested archives",
+            "location": "crates/farhelm-helm/src/provisioning/release_payloads.rs:2310",
+            "detail": "Reviewed commit: 500548b9253b07a26fd03119679184b69544e31d. TLDR: changing a test request from tmux to farhelm may leave its fault override targeting tmux, invalidating the claimed test or making it fail. Source basis: assigned patch changes the request and expected member in a_failed_fetch_is_not_memoized-style coverage near new lines 2317 without showing the override setup. Check pending: read the full pinned test setup and other migrated asset references. This is an uninvestigated lead, not a confirmed finding. Suggested bucket: other (test coverage); could-be-highest: no established security or loss-of-work route. Confidence: unverified. proposed_drop: false. possible_cover: none. No execution performed."
+          }
+        },
+        {
+          "line": 2,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "l1",
+            "state": "open",
+            "summary": "Migrated checksum retry test targets shared manifest, not retired tmux",
+            "location": "crates/farhelm-helm/src/provisioning/release_payloads.rs:2311",
+            "detail": "Reviewed commit: 500548b9253b07a26fd03119679184b69544e31d. TLDR: considered whether converting payload requests from tmux to farhelm left the retry test faulting a file it no longer requests. Source check: full pinned lines 2303-2333 show Override::FailFirst is attached to SHA256SUMS at 2312-2315, which both requests require; the first request expects HTTP 500, the second compares extracted farhelm bytes and requires exactly two manifest requests. The original suspected consequence was a failing or ineffective migrated test; this setup refutes that consequence for this test. Suggested bucket: other; could-be-highest: no. Confidence: confirmed by source, no execution. proposed_drop: source refutation; the override names \"SHA256SUMS\", not tmux. possible_cover: none. Other migrated tests still require review."
+          }
+        },
+        {
+          "line": 4,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "l1",
+            "state": "open",
+            "summary": "Migrated payload tests retain matching fault targets and assertions",
+            "location": "crates/farhelm-helm/src/provisioning/release_payloads.rs:2311",
+            "detail": "Reviewed commit: 500548b9253b07a26fd03119679184b69544e31d. TLDR: considered whether replacing tmux requests with farhelm requests left fault injection aimed at retired assets, making the migrated tests fail or pass without testing their stated mechanism. Source check: pinned lines 2303-2333 attach Override::FailFirst to SHA256SUMS at 2312-2315, which both requests require; the first expects HTTP 500, the second compares extracted farhelm bytes and requires exactly two manifest requests. Completed the other changed test context checks: concurrent assets at 2112-2172 use separate farhelm x86_64/aarch64 names with arrival gates; scripted retry at 2181-2204 serves the requested farhelm archive; redirect at 2715-2740 redirects and serves that same archive; cache-corruption tests at 2045-2075, 2901-3089 and 3608-3735 change or inspect the requested archive's generation and verify farhelm bytes; failed redirect at 3842-3874 overrides the requested farhelm archive. Missing-entry coverage at 2521-2544 deliberately calls the inner method for the old signed fixture's omitted tmux entry and asserts the exact pre-download refusal. At cb762a313abbe6da03ae0bf041f07486c4ed4df9 lines 2508-2545 that test instead uses the actual Linux aarch64 target; the pinned fixture manifest lists exactly the normal four-archive set minus that archive, and the test additionally checks no request for the missing asset occurred. The original suspected consequence was a failing or ineffective migrated test; the reviewed setups refute it. Suggested bucket: other; could-be-highest: no established security or loss-of-work route. Confidence: confirmed by source only; no tests executed. proposed_drop: source refutation, including the exact shared override name \"SHA256SUMS\" and target-specific asset names derived from the same inventory as production. possible_cover: none. No pending source checks remain for this candidate."
+          }
+        },
+        {
+          "line": 5,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "l1",
+            "state": "open",
+            "summary": "Migrated fault tests target cold requests and retain mechanism-specific checks",
+            "location": "crates/farhelm-helm/src/provisioning/release_payloads.rs:2508",
+            "detail": "Reviewed commits: 500548b9253b07a26fd03119679184b69544e31d and cb762a313abbe6da03ae0bf041f07486c4ed4df9. TLDR: revisited whether changing tmux fault tests to farhelm makes faults miss the request, lets a warm executable hide them, or mistakes failed publication for a usable cache. Original suspected consequence remains failing or ineffective regression tests; no product failure is established. At cb762a31, the missing-entry test at 2508-2545 creates a fresh tempdir, serves a separately signed manifest omitting Linux aarch64, checks that fixture's absent name and cardinality, requests that exact target, requires the precise missing-entry error and asserts no request for the archive occurred. A fresh cache prevents cached() from bypassing the fault; the exact error distinguishes signature failure, malformed manifest and HTTP 404. At 500548b9 the equivalent test deliberately calls archive_member for the omitted old tmux fixture through the same manifest-lookup implementation. At cb762a31, concurrent different-assets coverage at 2099-2159 creates a cold shared source, gates the two distinct farhelm archive names, requires both arrivals before either release and compares the returned executables to architecture-specific bytes. Same-asset coverage at 2071-2086 additionally requires one archive fetch. These tests distinguish serialized requests and target/cache-key aliasing on their exercised paths. Source interactions: path at 805-853 acquires an asset-specific lock, checks that asset's cache, obtains the shared manifest, refuses a missing entry before download and only returns after extraction, marker publication and final executable rename. A signed control file or a verified archive left after an error alone cannot satisfy cached_binary_matches at 1402-1416, which requires an asset-specific regular .bin and matching bounded marker; extraction failure returns before the marker/rename. Existing warm-cache signature-corruption coverage at 2032-2062 uses a fresh source after tampering controls, requires correct recovered bytes and exactly three added requests, distinguishing an erroneous cache hit. Caveat: the cold fault tests do not themselves assert every residual pathname, a later retry after every fault, or simultaneous corruption repair; those are not claimed observations. These boundaries are supported by source analysis, not test execution. Suggested bucket: other; could-be-highest: no established security or loss-of-work route from the test migration. Confidence: confirmed for the checked source paths. proposed_drop: source refutation of the original migrated-fault suspicion; no drop has been accepted by the caller. possible_cover: none. Pending checks: finish baseline comparison of cache/authentication helpers and current farhelm integrity separately under c2."
+          }
+        }
+      ],
+      "latest": {
+        "line": 5,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "l1",
+          "state": "open",
+          "summary": "Migrated fault tests target cold requests and retain mechanism-specific checks",
+          "location": "crates/farhelm-helm/src/provisioning/release_payloads.rs:2508",
+          "detail": "Reviewed commits: 500548b9253b07a26fd03119679184b69544e31d and cb762a313abbe6da03ae0bf041f07486c4ed4df9. TLDR: revisited whether changing tmux fault tests to farhelm makes faults miss the request, lets a warm executable hide them, or mistakes failed publication for a usable cache. Original suspected consequence remains failing or ineffective regression tests; no product failure is established. At cb762a31, the missing-entry test at 2508-2545 creates a fresh tempdir, serves a separately signed manifest omitting Linux aarch64, checks that fixture's absent name and cardinality, requests that exact target, requires the precise missing-entry error and asserts no request for the archive occurred. A fresh cache prevents cached() from bypassing the fault; the exact error distinguishes signature failure, malformed manifest and HTTP 404. At 500548b9 the equivalent test deliberately calls archive_member for the omitted old tmux fixture through the same manifest-lookup implementation. At cb762a31, concurrent different-assets coverage at 2099-2159 creates a cold shared source, gates the two distinct farhelm archive names, requires both arrivals before either release and compares the returned executables to architecture-specific bytes. Same-asset coverage at 2071-2086 additionally requires one archive fetch. These tests distinguish serialized requests and target/cache-key aliasing on their exercised paths. Source interactions: path at 805-853 acquires an asset-specific lock, checks that asset's cache, obtains the shared manifest, refuses a missing entry before download and only returns after extraction, marker publication and final executable rename. A signed control file or a verified archive left after an error alone cannot satisfy cached_binary_matches at 1402-1416, which requires an asset-specific regular .bin and matching bounded marker; extraction failure returns before the marker/rename. Existing warm-cache signature-corruption coverage at 2032-2062 uses a fresh source after tampering controls, requires correct recovered bytes and exactly three added requests, distinguishing an erroneous cache hit. Caveat: the cold fault tests do not themselves assert every residual pathname, a later retry after every fault, or simultaneous corruption repair; those are not claimed observations. These boundaries are supported by source analysis, not test execution. Suggested bucket: other; could-be-highest: no established security or loss-of-work route from the test migration. Confidence: confirmed for the checked source paths. proposed_drop: source refutation of the original migrated-fault suspicion; no drop has been accepted by the caller. possible_cover: none. Pending checks: finish baseline comparison of cache/authentication helpers and current farhelm integrity separately under c2."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g073/findings.jsonl",
+        "id": "l1",
+        "line": 5,
+        "disposition": "under-investigation",
+        "group": "g073-l1",
+        "reason": "Record durably acknowledged; parent source/contract validation, cross-group synthesis, coverage/filter matching and any independent drop check remain pending. This preserves the claim and uncertainty without accepting, dropping or lowering it."
+      },
+      "accepted_parent_decision": null,
+      "returned_claim_checks": [
+        {
+          "batch": "claims-046",
+          "key": "g073/l1",
+          "latest_line": 5,
+          "recommendation": "refuted",
+          "bucket": "other",
+          "underlying_key": "migrated-farhelm-payload-fault-test-targets",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The examined migrated tests fault the shared manifest or the archive actually requested. Fresh caches and mechanism-specific assertions prevent the hypothesized warm-cache or wrong-file bypass on these paths. This is a test-oracle conclusion, not proof of all production cache behavior.",
+          "checks": [
+            "500548b9253b07a26fd03119679184b69544e31d:crates/farhelm-helm/src/provisioning/release_payloads.rs:2303-2333 faults SHA256SUMS, requires the first HTTP 500 and a successful second farhelm result with exactly two manifest requests. 2521-2544 intentionally tests the old signed fixture's absent tmux name through archive_member.",
+            "cb762a313abbe6da03ae0bf041f07486c4ed4df9:same file:2508-2545 uses a fresh cache, signed manifest omitting the actual Linux aarch64 archive, checks absent-name/cardinality premises, exact missing-entry error and no asset request. 2071-2159 uses actual distinct farhelm assets, fetch counts, arrival gates and architecture-specific expected bytes.",
+            "500548b9:same file:2181-2204,2715-2740,2901-2952,3608-3641,3705-3735,3842-3874 directly target requested archives/control files and check bytes, request counts or redaction. At cb762a31:2032-2062 a fresh source after control tampering requires recovered bytes and three new requests.",
+            "cb762a31:same file:805-853 only returns after extraction and binary publication; 1402-1416 requires a regular per-asset binary and matching bounded marker. Signed controls or a downloaded archive alone cannot satisfy this check. Cold tests do not assert every leftover name, a retry after every fault, or simultaneous repair. No test execution."
+          ],
+          "coverage_checked": {
+            "SPEC.md and SPEC_impl.md": "Current signed-payload verification, named-member selection and one-payload provisioning sections govern the test mechanisms. None explicitly accepts ineffective regression tests; the basis is source refutation.",
+            "TODO.md Planned": "Empty.",
+            "plans/queue": "No unlanded plans in INDEX.md; historical tmux release fixture migration was already landed.",
+            "BUGS.md": "No matching test defect.",
+            "queue and active ledger": "Searched migrated faults, checksum retry, missing-entry, archive fault and warm-cache terms. Existing redirect-regression-omits-location-header concerns a different redirect test; no exact cover or extension for these named tests."
+          },
+          "exact_cover_quotes": [],
+          "missing_premise": "No mismatched fault target or wrong warmed-cache bypass was established in the inspected migrated tests. The separately mentioned broader cache/authentication baseline question belongs to another record and is not decided here.",
+          "original_stronger_consequence": "Migrating tmux requests to farhelm might leave faults aimed at retired assets, causing failing or ineffective tests; later concerns included warm binaries hiding faults and failed publication looking usable. No product failure was established.",
+          "needs_independent_drop_check": true,
+          "proposed_basis": "Source refutation limited to the named migrated-fault mechanisms. Conservative independent flag for the authentication and missing-manifest-entry test boundaries; no blanket security or cache-correctness clearance."
+        }
+      ],
+      "parent_proposals": [
+        {
+          "artifact": "parent-flagged-judgments-046.json",
+          "key": "g073/l1",
+          "proposal": "claim-checks/claims-046/result.json",
+          "parent_proposal": "source-refuted-named-migrated-payload-fault-oracles",
+          "final_independent_gate": "required-by-conservative-authentication-test-flag",
+          "reason": "Full046 actual requested farhelm archives/shared manifest are faulted, fresh caches and expected asset-name/cardinality/error/no-fetch premises reject wrong-asset/warm-cache bypass; independent request gates/counts/architecture bytes observe mechanisms. Publication requires regular per-asset binary and bounded marker after extraction, not downloaded archive/control alone. Narrow named test-oracle proof, not all cache authentication, every leftover/retry or simultaneous recovery. Preserve original ineffective/failing authentication-test and missing-entry concerns for fresh check; no runtime pass inferred."
+        }
+      ],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": true,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "migrated-farhelm-payload-fault-test-targets",
+        "destination": null
+      }
+    },
+    {
+      "key": "g073/c2",
+      "owner": "g073",
+      "id": "c2",
+      "domain": "installation-provisioning",
+      "purpose": "installation-provisioning: crates/farhelm-helm/src/provisioning/release_payloads.rs; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 3,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c2",
+            "state": "open",
+            "summary": "Removing tmux retrieval follows the new host-payload contract",
+            "location": "crates/farhelm-helm/src/provisioning/release_payloads.rs:803",
+            "detail": "Reviewed commits: 500548b9253b07a26fd03119679184b69544e31d and cb762a313abbe6da03ae0bf041f07486c4ed4df9. TLDR: considered whether removing the raw tmux payload path strands remote setup or lets an arbitrary archive member share the wrong executable cache entry. Source checks: at 500548b9, PayloadSource::path(target) at lines 862-866 selects archive name and member together from farhelm_archive_for; git grep finds archive_member callers only in that method and the omitted-manifest test at 2538. The target inventory maps Linux x86_64, Linux aarch64 and macOS aarch64 to distinct farhelm archives with member farhelm. The later patch inlines exactly the same selected archive/member pair into path and removes archive_member. Contract: SPEC.md at 500548b9, lines 182 onward, explicitly says \"Setting up or updating a remote Linux host neither needs nor installs tmux.\" SPEC_impl.md, Provisioning, says \"target's `farhelm` binary, the one payload a host gets\"; cb762a31's release-contract amendment says \"releases before this one also list `tmux-x86_64-unknown-linux-musl` and `tmux-aarch64-unknown-linux-musl`; clients look entries up by name\". The original suspected consequence was broken setup or a wrong cached member; no source route exists through the production callers, and removal itself is specified. Suggested bucket: other; could-be-highest: yes if an untrusted asset/member could reach production or authenticated bytes were bypassed, but neither premise is present in these changes. Confidence: confirmed by source only. proposed_drop: exact specification acceptance of tmux removal and source refutation of arbitrary production asset/member selection. possible_cover: none. No runtime observation; broader retirement and remote cleanup are outside this group's assigned file."
+          }
+        },
+        {
+          "line": 6,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c2",
+            "state": "open",
+            "summary": "Tmux retirement and current farhelm cache integrity have separate grounds",
+            "location": "crates/farhelm-helm/src/provisioning/release_payloads.rs:805",
+            "detail": "Reviewed commits: 500548b9253b07a26fd03119679184b69544e31d and cb762a313abbe6da03ae0bf041f07486c4ed4df9; baseline checked at 500548b9253b07a26fd03119679184b69544e31d^. TLDR: removing tmux retrieval follows the product contract, while current farhelm integrity depends on its own unchanged verification and publication path. Original suspected consequences were broken host setup or returning the wrong cached executable; neither route is established in the assigned changes. Specification acceptance applies ONLY to removal: SPEC.md at 500548b9 lines 182 onward states exactly \"Setting up or updating a remote Linux host neither needs nor installs tmux.\" It is not evidence that farhelm cache authentication is correct. Independent source checks: the baseline farhelm branch at 811-814 already selects the same archive/member pair; its lines 825-868 perform the same asset-keyed hit check, signed-manifest lookup, verified download, regular-member extraction, digest marker then executable rename as cb762a31 lines 805-853. The intermediate helper at 500548b9 lines 811-857 preserves those steps and is called only from the fixed target mapping and its omission test. Generation naming remains version plus normalized-base-URL hash; per-asset .bin, .bin.sha256, .part and .bin.part names retain the full target-specific archive name. Thus dropping the tmux branch does not merge targets' cache paths or lock keys. Authentication is separate: fetch_sums authenticates signature and exact version through verified_entries/verify_sums before publishing controls or returning entries; path refuses absent entries before download; download_verified compares the complete archive digest before rename; extraction must succeed before publishing the marker and .bin. Controls alone, archive alone, or marker alone do not make a cold executable generation reusable. On a hit, cached() at 618-644 and cached_sums_verify/cached_binary_matches at cb762a31 1381-1416 recheck the control signature/version and the extracted binary's local self-consistency, NOT a cryptographic binding of .bin to the signed archive. The exact standing source contract at lines 599-604, present unchanged in the baseline, is \"farhelm's state directory is trusted against the account that owns it\" and \"SELF-CONSISTENCY check, not provenance\". Accordingly, this review does not claim resistance to an account rewriting both cached binary and marker, or claim a warm hit rechecks manifest membership. A route requiring replacement of trusted local state or a second authenticated manifest for the same immutable release is not established by this change; the module's key contract at lines 90-91 states \"Published `SHA256SUMS` files are never re-signed or replaced\". Source also distinguishes shared controls from asset publication: initial sums().get_or_try_init serializes the cold authenticated control fetch for different-asset requests; their downloads/extractions use separate asset locks and filenames after that. Migrated arrival-gate tests prove overlap of these cold archive requests, not arbitrary concurrent control-repair behavior. Suggested bucket: other for the considered regression; could-be-highest: yes if a production route allowed untrusted bytes to become farhelm, but no such new route was found. Confidence: confirmed by source comparison; no runtime, crash or fault-injection observation. proposed_drop: source refutation of changed selection/cache integrity regression; exact specification acceptance only for tmux removal. No caller drop acceptance is assumed. possible_cover: parent reports g062/c3 and g063/c1 cover inventory/deleted-build consumers, which does not cover these cache trust checks. No unresolved premise for this candidate within the assigned change scope."
+          }
+        }
+      ],
+      "latest": {
+        "line": 6,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c2",
+          "state": "open",
+          "summary": "Tmux retirement and current farhelm cache integrity have separate grounds",
+          "location": "crates/farhelm-helm/src/provisioning/release_payloads.rs:805",
+          "detail": "Reviewed commits: 500548b9253b07a26fd03119679184b69544e31d and cb762a313abbe6da03ae0bf041f07486c4ed4df9; baseline checked at 500548b9253b07a26fd03119679184b69544e31d^. TLDR: removing tmux retrieval follows the product contract, while current farhelm integrity depends on its own unchanged verification and publication path. Original suspected consequences were broken host setup or returning the wrong cached executable; neither route is established in the assigned changes. Specification acceptance applies ONLY to removal: SPEC.md at 500548b9 lines 182 onward states exactly \"Setting up or updating a remote Linux host neither needs nor installs tmux.\" It is not evidence that farhelm cache authentication is correct. Independent source checks: the baseline farhelm branch at 811-814 already selects the same archive/member pair; its lines 825-868 perform the same asset-keyed hit check, signed-manifest lookup, verified download, regular-member extraction, digest marker then executable rename as cb762a31 lines 805-853. The intermediate helper at 500548b9 lines 811-857 preserves those steps and is called only from the fixed target mapping and its omission test. Generation naming remains version plus normalized-base-URL hash; per-asset .bin, .bin.sha256, .part and .bin.part names retain the full target-specific archive name. Thus dropping the tmux branch does not merge targets' cache paths or lock keys. Authentication is separate: fetch_sums authenticates signature and exact version through verified_entries/verify_sums before publishing controls or returning entries; path refuses absent entries before download; download_verified compares the complete archive digest before rename; extraction must succeed before publishing the marker and .bin. Controls alone, archive alone, or marker alone do not make a cold executable generation reusable. On a hit, cached() at 618-644 and cached_sums_verify/cached_binary_matches at cb762a31 1381-1416 recheck the control signature/version and the extracted binary's local self-consistency, NOT a cryptographic binding of .bin to the signed archive. The exact standing source contract at lines 599-604, present unchanged in the baseline, is \"farhelm's state directory is trusted against the account that owns it\" and \"SELF-CONSISTENCY check, not provenance\". Accordingly, this review does not claim resistance to an account rewriting both cached binary and marker, or claim a warm hit rechecks manifest membership. A route requiring replacement of trusted local state or a second authenticated manifest for the same immutable release is not established by this change; the module's key contract at lines 90-91 states \"Published `SHA256SUMS` files are never re-signed or replaced\". Source also distinguishes shared controls from asset publication: initial sums().get_or_try_init serializes the cold authenticated control fetch for different-asset requests; their downloads/extractions use separate asset locks and filenames after that. Migrated arrival-gate tests prove overlap of these cold archive requests, not arbitrary concurrent control-repair behavior. Suggested bucket: other for the considered regression; could-be-highest: yes if a production route allowed untrusted bytes to become farhelm, but no such new route was found. Confidence: confirmed by source comparison; no runtime, crash or fault-injection observation. proposed_drop: source refutation of changed selection/cache integrity regression; exact specification acceptance only for tmux removal. No caller drop acceptance is assumed. possible_cover: parent reports g062/c3 and g063/c1 cover inventory/deleted-build consumers, which does not cover these cache trust checks. No unresolved premise for this candidate within the assigned change scope."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g073/findings.jsonl",
+        "id": "c2",
+        "line": 6,
+        "disposition": "under-investigation",
+        "group": "g073-c2",
+        "reason": "Record durably acknowledged; parent source/contract validation, cross-group synthesis, coverage/filter matching and any independent drop check remain pending. This preserves the claim and uncertainty without accepting, dropping or lowering it."
+      },
+      "accepted_parent_decision": null,
+      "returned_claim_checks": [
+        {
+          "batch": "claims-047",
+          "key": "g073/c2",
+          "latest_line": 6,
+          "recommendation": "refuted",
+          "bucket": "other",
+          "underlying_key": "release-payload-tmux-removal-changed-selection-or-cache-authentication",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The named regression is source-refuted: the three production host targets still choose distinct farhelm archives and the same farhelm member, with unchanged asset-keyed verification/publication. Tmux removal itself is explicitly accepted. These are separate grounds; acceptance of retirement does not certify cache authentication generally. The reviewer proposed dropping this candidate in both recorded versions; that proposal still needs an independent check because the considered untrusted-executable consequence is security-related.",
+          "checks": [
+            "At 500548b9253b07a26fd03119679184b69544e31d^, release_payloads.rs:805-868 already selects farhelm_archive_for(target), checks the asset-keyed cache, looks up the signed entry, verifies download, extracts, publishes its locally computed digest marker and renames the executable. At cb762a313abbe6da03ae0bf041f07486c4ed4df9:805-853 the same farhelm path remains; removal eliminates only the tmux branch/copy path.",
+            "At 500548b9253b07a26fd03119679184b69544e31d:811-866, archive_member receives the archive/member together from the fixed target mapping. Explicit git grep at that revision finds only this production caller and the absent-entry test at :2538. No production arbitrary-member caller is present.",
+            "At cb762a313abbe6da03ae0bf041f07486c4ed4df9, assets.rs:43-85 maps Linux x86_64, Linux aarch64 and macOS aarch64 to distinct archives, all with member farhelm. release_payloads.rs:375-391 keys the generation by version and normalized-base-URL digest; :814-837 retains the full asset name in lock and per-asset file keys.",
+            "At cb762a313abbe6da03ae0bf041f07486c4ed4df9, release_payloads.rs:451-492 and :899-939,991-1002 authenticate signature and exact version before parsing/publishing controls; :824-830 refuses an absent entry before downloading; :781-799 compares the archive digest before rename. payloads.rs:631-675 requires exactly one regular matching member before publication.",
+            "At cb762a313abbe6da03ae0bf041f07486c4ed4df9, release_payloads.rs:599-610 explicitly limits cached binaries to local self-consistency, not provenance. :618-644,1381-1416 reverify controls and compare the binary to its local marker, without cryptographically binding that binary to the signed archive or rechecking warm-hit membership. The same trust-model comment was present in the baseline. :90-91 states published checksum files are never re-signed or replaced.",
+            "The once-cell at cb762a313abbe6da03ae0bf041f07486c4ed4df9 release_payloads.rs:451-454 serializes the initial authenticated control fetch; per-asset locks cover later download/extraction. This check does not establish arbitrary concurrent control-repair behavior, crash behavior, or general freedom from cache defects. No runtime test or reproduction was run."
+          ],
+          "coverage_checked": [
+            "Current SPEC.md:181-188 explicitly accepts no tmux retrieval/install and its named removal step. Historical SPEC.md at 500548b9253b07a26fd03119679184b69544e31d:182-189 says the same. This covers retirement only.",
+            "Current SPEC_impl.md:7996-8020 says provisioning no longer inspects, downloads, uploads or installs tmux; :8039-8079 describes the one host payload, version/base-URL cache separation, signed checksums and by-name lookup. It does not independently prove cache-hit provenance.",
+            "TODO.md Planned is empty (:23-25). Searches of BUGS.md, active TRIAGE_OUTCOMES.md, the full INDEX.md and queue files found no exact selection/cache-authentication regression coverage. BUGS.md's SSH-helper output hang has a different trigger and consequence.",
+            "plans/queue searches identify tmux-drop-from-install.md criteria 2 and 5 (:49-76), which authorize removal and fixture replacement, not an integrity bug. plans/REPORTS.md:30 marks that plan landed; it is not unlanded-plan coverage. Other tmux plan hits concern lifecycle/tooling/docs and do not cover this cache claim.",
+            "FILTER.md was checked. No filter is needed or used: a security/trust-boundary consequence would be outside the rare-diagnostic filter. No exact same-root alias or useful extension was found among the two supplied records or existing queue items; the history's g062/c3 and g063/c1 references concern other inventory/build consumers and are not asserted to be duplicates here."
+          ],
+          "exact_cover_quotes": [
+            {
+              "source": "SPEC.md:181; historical 500548b9253b07a26fd03119679184b69544e31d:SPEC.md:182",
+              "quote": "Setting up or updating a remote Linux host neither needs nor installs tmux.",
+              "scope": "Tmux retrieval retirement only; not cache authentication."
+            },
+            {
+              "source": "SPEC_impl.md:8007",
+              "quote": "Provisioning no longer inspects, downloads, uploads or installs any tmux",
+              "scope": "Tmux retrieval retirement only."
+            }
+          ],
+          "missing_premise": "To revive the wrong/untrusted executable regression, show a production input or changed cache path that defeats the fixed archive/member selection or authenticated cold publication. Replacing both files in trusted local state, or assuming a second authenticated manifest for the same immutable release, is not established by these changes. This is not a whole-range audit of all historical cache behavior.",
+          "original_stronger_consequence": "Broken host setup or a wrong cached executable; potentially highest if untrusted asset/member selection or an authentication bypass makes attacker-controlled bytes become the host's farhelm. Neither stronger route was established, and no bug was reproduced.",
+          "needs_independent_drop_check": true,
+          "proposed_basis": "Source refutation of the named changed-selection/cache-integrity regression, plus exact specification acceptance of tmux retrieval removal only. Submit the original/latest wording and these separate grounds to the independent drop check; this consultation does not approve a drop."
+        }
+      ],
+      "parent_proposals": [
+        {
+          "artifact": "parent-flagged-judgments-047.json",
+          "key": "g073/c2",
+          "proposal": "claim-checks/claims-047/result.json",
+          "parent_proposal": "source-refuted-changed-release-selection-cold-authentication-with-baseline-cache-limits",
+          "final_independent_gate": "required-before-highest-untrusted-executable-drop",
+          "reason": "Parent read full047. Three host targets still select fixed distinct archives/memberfarhelm; full asset keys, version/baseURL generations, signed exact-version controls and digest-before-cold-publication remain unchanged through tmux branch removal. Exact retrieval-retirement acceptance is separate and does not authorize integrity bugs. Warm binary checking is explicitly local self-consistency, NOT cryptographic signed-archive provenance or current membership; that baseline limit cannot become a false general cache-authentication guarantee. No changed production arbitrary-member or attacker-byte route shown. Refute named changed selection/cold path only, not all range/cache/concurrent repair/crash behavior. Preserve original wrong/untrusted executable highest possibility and exact baseline trust caveat for fresh gate."
+        }
+      ],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": true,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "release-payload-tmux-removal-changed-selection-or-cache-authentication",
+        "destination": null
+      }
+    },
+    {
+      "key": "g073/c3",
+      "owner": "g073",
+      "id": "c3",
+      "domain": "installation-provisioning",
+      "purpose": "installation-provisioning: crates/farhelm-helm/src/provisioning/release_payloads.rs; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 7,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c3",
+            "state": "open",
+            "summary": "Missing-entry fixture cardinality check is weaker than its diagnostic wording",
+            "location": "crates/farhelm-helm/src/provisioning/release_payloads.rs:2527",
+            "detail": "Reviewed commit: cb762a313abbe6da03ae0bf041f07486c4ed4df9. TLDR: considered a distinct test-oracle issue: the new fixture assertion says the variant omits the arm64 archive and nothing else, but checks only that archive's absence and total entry count. It does not establish exact equality with the ordinary inventory minus that archive. Source: lines 2527-2529 use !listed.contains_key(&left_out) && listed.len() == assets::sums_members().len() - 1; replacing some other entry with an unrelated name would retain that cardinality. This is a real limitation of the diagnostic claim, not refuted by correct production code. Actual checked fixture at this revision contains exactly the ordinary three remaining archive names, and the tested behavioral contract at 2498-2506 is refusal of the requested absent entry. The test separately requires the exact absent-entry refusal at 2537-2540 and no archive request at 2541-2545; unrelated entries are not needed to distinguish that mechanism. Thus no concrete lost absent-entry assertion or failing current test is established, and I propose not reporting the surplus exact-set diagnostic as a standalone finding. This is a proposed significance judgment, not an accepted drop or a claim the cardinality check proves set equality. If exact variant-inventory integrity is itself required, compare listed keys with the expected set explicitly. Attribution: this premise assertion is added in cb762a31; its parent omission test has no set assertion. Suggested bucket: other/test diagnostic and oracle specificity, if retained. Could-be-highest: no; no security or loss-of-work route from this test diagnostic. Confidence: confirmed static boolean/fixture analysis, no execution or mutation experiment. proposed_drop: limited diagnostic overclaim does not weaken the actual absent-entry mechanism asserted by this test; pending caller judgment. possible_cover: none in supplied neighbours. No missing source premise remains."
+          }
+        },
+        {
+          "line": 8,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "c3",
+            "state": "open",
+            "summary": "Missing-entry fixture premise overstates its inventory check",
+            "location": "crates/farhelm-helm/src/provisioning/release_payloads.rs:2527",
+            "detail": "Reviewed commit: cb762a313abbe6da03ae0bf041f07486c4ed4df9. TLDR: the release-payload test describes its fixture assertion as proving that exactly one archive was omitted, but the assertion checks only that archive's absence and the total number of entries. This is a bounded mismatch in the test's explanation and premise check; it does not establish a product failure. Details: in an_asset_absent_from_sha256sums_is_refused, lines 2524-2529 derive the omitted Linux aarch64 archive name and assert !listed.contains_key(&left_out) && listed.len() == assets::sums_members().len() - 1. The diagnostic says \"the variant leaves out {left_out} and nothing else\". Equal cardinality plus one absent member does not prove the exact remaining inventory: substituting an unrelated name for another expected archive would satisfy that predicate. Correct production behavior does not make this exact-inventory premise check exact. The actual signed variant at this revision contains precisely the intended three entries: farhelm-aarch64-apple-darwin.tar.gz, farhelm-desktop-aarch64-apple-darwin.tar.gz and farhelm-x86_64-unknown-linux-musl.tar.gz. The separate behavioral assertions at 2537-2545 still require the exact missing-entry refusal and no request for the omitted archive; the mismatch does not weaken that independent refusal/no-download oracle. The fixture is not alleged to be malformed, and no current test failure, product/security regression, runtime failure or lost user work is established. A direct equality comparison between the variant's keys and the normal inventory minus left_out would make the check match its diagnostic; alternatively narrow the wording to what the predicate establishes. Provenance: discovery pass 1 recorded this same mismatch as candidate c3, event 7. The premise assertion is added in cb762a31; its parent omission test lacks it. Full pinned-range path history contains only the two assigned commits, 500548b9253b07a26fd03119679184b69544e31d and cb762a313abbe6da03ae0bf041f07486c4ed4df9, so this is not attributed merely by comparison with one intermediate revision. Original proposed omission is preserved: the surplus diagnostic does not weaken the actual absent-entry mechanism, so I proposed not reporting it as a standalone issue on significance grounds. That proposal was never accepted. Parent now retains the bounded static test-explanation defect at other priority and reports that focused claims047 checks, exact cb762a31 source at 2517-2547, the actual fixture and the independent assertions were reviewed; no FILTER boundary or exact accepted limitation was found. Current proposed_drop: false; the earlier significance-based proposed-drop rationale remains historical provenance, not a source refutation of this mismatch. Suggested bucket: other/test explanation and premise specificity. Could-be-highest: no; no security, user-work loss or product failure route is claimed. Confidence: confirmed by static predicate, fixture and patch analysis, not observed execution. possible_cover: none in supplied interface records; no prohibited coverage source was searched. No missing source premise remains for this bounded finding. This recording-only continuation changes kind/disposition under the original c3 ID, preserves the original consequence and caveats, and adds no stronger allegation or new investigation. No concrete disagreement with the parent's bounded characterization."
+          }
+        }
+      ],
+      "latest": {
+        "line": 8,
+        "event": {
+          "version": 1,
+          "kind": "finding",
+          "id": "c3",
+          "state": "open",
+          "summary": "Missing-entry fixture premise overstates its inventory check",
+          "location": "crates/farhelm-helm/src/provisioning/release_payloads.rs:2527",
+          "detail": "Reviewed commit: cb762a313abbe6da03ae0bf041f07486c4ed4df9. TLDR: the release-payload test describes its fixture assertion as proving that exactly one archive was omitted, but the assertion checks only that archive's absence and the total number of entries. This is a bounded mismatch in the test's explanation and premise check; it does not establish a product failure. Details: in an_asset_absent_from_sha256sums_is_refused, lines 2524-2529 derive the omitted Linux aarch64 archive name and assert !listed.contains_key(&left_out) && listed.len() == assets::sums_members().len() - 1. The diagnostic says \"the variant leaves out {left_out} and nothing else\". Equal cardinality plus one absent member does not prove the exact remaining inventory: substituting an unrelated name for another expected archive would satisfy that predicate. Correct production behavior does not make this exact-inventory premise check exact. The actual signed variant at this revision contains precisely the intended three entries: farhelm-aarch64-apple-darwin.tar.gz, farhelm-desktop-aarch64-apple-darwin.tar.gz and farhelm-x86_64-unknown-linux-musl.tar.gz. The separate behavioral assertions at 2537-2545 still require the exact missing-entry refusal and no request for the omitted archive; the mismatch does not weaken that independent refusal/no-download oracle. The fixture is not alleged to be malformed, and no current test failure, product/security regression, runtime failure or lost user work is established. A direct equality comparison between the variant's keys and the normal inventory minus left_out would make the check match its diagnostic; alternatively narrow the wording to what the predicate establishes. Provenance: discovery pass 1 recorded this same mismatch as candidate c3, event 7. The premise assertion is added in cb762a31; its parent omission test lacks it. Full pinned-range path history contains only the two assigned commits, 500548b9253b07a26fd03119679184b69544e31d and cb762a313abbe6da03ae0bf041f07486c4ed4df9, so this is not attributed merely by comparison with one intermediate revision. Original proposed omission is preserved: the surplus diagnostic does not weaken the actual absent-entry mechanism, so I proposed not reporting it as a standalone issue on significance grounds. That proposal was never accepted. Parent now retains the bounded static test-explanation defect at other priority and reports that focused claims047 checks, exact cb762a31 source at 2517-2547, the actual fixture and the independent assertions were reviewed; no FILTER boundary or exact accepted limitation was found. Current proposed_drop: false; the earlier significance-based proposed-drop rationale remains historical provenance, not a source refutation of this mismatch. Suggested bucket: other/test explanation and premise specificity. Could-be-highest: no; no security, user-work loss or product failure route is claimed. Confidence: confirmed by static predicate, fixture and patch analysis, not observed execution. possible_cover: none in supplied interface records; no prohibited coverage source was searched. No missing source premise remains for this bounded finding. This recording-only continuation changes kind/disposition under the original c3 ID, preserves the original consequence and caveats, and adds no stronger allegation or new investigation. No concrete disagreement with the parent's bounded characterization."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g073/findings.jsonl",
+        "id": "c3",
+        "line": 8,
+        "disposition": "verified",
+        "group": "missing-release-entry-test-count-does-not-prove-exact-variant-inventory",
+        "reason": "Parent read full claims047, exact cb762a31 release_payloads2517-2547 and complete actual recording-only owner event8. Source predicate absence+cardinality does not prove diagnostic's exact remaining inventory. Owner now reports bounded finding under sameID, preserving old significance-based omission proposal, actual correct signed three-entry fixture and independent exact missing-entry/no-download assertions. No weakened production authentication or that independent refusal oracle, no malformed currentfixture, runtimefailure/security/workloss. Current coverage search047found no exact acceptance/Planned/unlandedplan/BUGS/queue/outcome/filter; newly recorded static premise/explanation mismatch other. One recording-only continuation after already completed source review, no newsource/range/discovery."
+      },
+      "accepted_parent_decision": {
+        "key": "g073/c3",
+        "line": 8,
+        "disposition": "verified",
+        "group": "missing-release-entry-test-count-does-not-prove-exact-variant-inventory",
+        "bucket": "other",
+        "recording": "retain-verified",
+        "needs_independent_drop_check": false,
+        "reason": "Parent read full claims047, exact cb762a31 release_payloads2517-2547 and complete actual recording-only owner event8. Source predicate absence+cardinality does not prove diagnostic's exact remaining inventory. Owner now reports bounded finding under sameID, preserving old significance-based omission proposal, actual correct signed three-entry fixture and independent exact missing-entry/no-download assertions. No weakened production authentication or that independent refusal oracle, no malformed currentfixture, runtimefailure/security/workloss. Current coverage search047found no exact acceptance/Planned/unlandedplan/BUGS/queue/outcome/filter; newly recorded static premise/explanation mismatch other. One recording-only continuation after already completed source review, no newsource/range/discovery."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-047",
+          "key": "g073/c3",
+          "latest_line": 7,
+          "recommendation": "retain-verified",
+          "bucket": "other",
+          "underlying_key": "missing-release-entry-test-count-does-not-prove-exact-variant-inventory",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The diagnostic overclaim is established by the new assertion, even though the committed fixture is correct and the production refusal mechanism remains independently asserted. Retain narrowly as a test explanation/oracle-specificity issue. The reviewer's proposal to omit it as insignificant is a significance judgment, not source refutation or exact coverage; no FILTER.md boundary fully settles it.",
+          "checks": [
+            "At cb762a313abbe6da03ae0bf041f07486c4ed4df9, release_payloads.rs:2524-2529 checks only absence of the requested Linux aarch64 archive and total size equal to sums_members().len()-1. That predicate permits substituting an unrelated key for another expected remaining entry; it cannot establish the diagnostic's 'and nothing else' claim. This is static boolean reasoning, not a mutation experiment.",
+            "The explicit cb762a313abbe6da03ae0bf041f07486c4ed4df9 parent diff adds this premise assertion. The earlier absent-entry test had no such set assertion, so the diagnostic overclaim is introduced within the review range.",
+            "At cb762a313abbe6da03ae0bf041f07486c4ed4df9, tests/fixtures/release/SHA256SUMS lists four ordinary archives. variants/without-linux-aarch64/SHA256SUMS lists exactly the other three, with the same digests. assets.rs:43-64,88-108 supplies the expected four-name payload inventory. No currently incorrect fixture is established.",
+            "At cb762a313abbe6da03ae0bf041f07486c4ed4df9, release_payloads.rs:2498-2506 states the actual target: refuse an asset missing from an authentic signed manifest while still serving that archive. :2532-2545 requires the exact missing-entry error and no request for that archive. Drift among unrelated manifest keys would not remove those assertions. No concrete lost absent-entry check, current false pass of that mechanism, runtime failure or security regression is claimed."
+          ],
+          "coverage_checked": [
+            "Searched both specifications for release payloads, checksum/manifest fixtures, inventory equality, omitted/missing entries and cache scope. SPEC_impl.md:8060-8079 defines release layout and by-name production authentication; it does not accept inaccurate test-inventory claims. SPEC.md:945-946 concerns filesystem-refusal evidence in uninstall acceptance, a different trigger/scope.",
+            "TODO.md Planned is empty (:23-25). No matching item was found in BUGS.md or active TRIAGE_OUTCOMES.md; other manifest hits in the active ledger concern the runtime-test recorder, not release fixtures.",
+            "Searched plans/queue for the actual missing-entry/fixture/inventory behavior. tmux-drop-from-install.md:69-76 requires replacing the without-tmux signed variant with another missing asset; it does not accept or schedule correction of this assertion. plans/REPORTS.md:30 marks that plan landed. No matching unlanded plan was found.",
+            "Read INDEX.md in bounded chunks and searched queue files for release_payloads, without-linux, sums_members, missing checksum entries and fixture inventory. No exact queue item or useful same-root extension was found. Other oracle weaknesses concern different tests and do not cover this one.",
+            "FILTER.md's rare/imprecise-diagnostic filter requires a rare timing/crash/shipped-input trigger as well as a confined diagnostic consequence. This is an unconditional static mismatch between what a test assertion proves and what its message says; no qualifying rare trigger is established. Do not apply that filter solely because the consequence is small."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": "No premise is missing for the narrow assertion/message mismatch. A stronger claim that this weakens the missing-entry refusal mechanism, masks a production security bug, or currently fails the test is not established; unrelated remaining keys are not needed to distinguish the mechanism tested.",
+          "original_stronger_consequence": "The original record identifies only a test diagnostic/oracle-specificity limitation and explicitly disclaims a lost absent-entry assertion, failing current test, security consequence or user-work-loss route. It proposes omitting the surplus exact-set diagnostic as insignificant, pending the caller's judgment.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Retain the source-confirmed diagnostic limitation in other, preserving the reviewer's proposed significance drop and all limits. Either compare the exact key set if exact inventory is intended, or narrow the diagnostic to the absence/count predicate actually checked. The proper product refusal is not a refutation of this test-text defect."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": true,
+        "clearly_refuted_candidate": false,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Source-confirmed by an existing parent decision; not runtime reproduced",
+        "deduplication_key": "missing-release-entry-test-count-does-not-prove-exact-variant-inventory",
+        "destination": "trailing-missing-release-entry-test-count-does-not-prove-exact-variant-inventory.md"
+      }
+    }
+  ],
+  "replies": [
+    {
+      "turn": 1,
+      "reply": "Initial review complete: all 1,014 assigned patch lines across both commits reviewed at pinned revisions.\n\nNo reportable findings or unresolved leads. Two considered candidates, with rejection evidence, are recorded in findings.jsonl; progress.md is updated. No runtime tests or reproductions were run."
+    },
+    {
+      "turn": 2,
+      "reply": "Revised `l1` and `c2` with cache-publication, authentication, missing-entry, concurrency, and baseline checks. Clarified test limits and separated specified tmux removal from Farhelm payload integrity.\n\nNo new reportable findings. No unresolved lead IDs. Progress updated; conclusions are source-only."
+    },
+    {
+      "turn": 3,
+      "reply": "Discovery pass 1 complete. Checked fixture assertions, parser modes, retry oracles, documentation counts, retained Mac coverage, and full-range attribution.\n\nNew candidate `c3` records a diagnostic overclaim. No new reportable issue established.\n\nNew verified IDs: none. New unverified IDs: none. Open leads: none. Progress updated; source-only review."
+    },
+    {
+      "turn": 4,
+      "reply": "Revised `c3` to an `other`-priority finding, preserving the earlier omission proposal and all caveats. No stronger product or security claim added. No disagreement with the parent’s characterization."
+    }
+  ],
+  "progress": "Group g073 — installation-provisioning release payloads.\nTurn type/count: separate discovery / 3. Discovery-pass count: 1.\nState: discovery pass complete. No new reportable finding or unverified-after-investigation finding. One new considered candidate c3 recorded immediately with its source basis, consequence and proposed-drop rationale. Existing l1/c2 dispositions unchanged; no proposed drop or lowering is accepted. Open lead IDs: none. Unread assigned scope: none.\n\nCoverage retained: both assigned commit patches, all 1,014 lines, delivered and audited in turn 1; actual later-turn synthesis completed in turn 2. The complete inventory commits field was read without excluded metadata. This turn read discovery-neighbours.json completely, lines 1-376 in bounded chunks. Named pending questions were empty. Supplied interface findings concern independent mechanisms and do not establish a release_payloads.rs issue; no neighbour log or prohibited coverage source was searched.\n\nDiscovery checks beyond earlier records: inspected changed fixture-premise and diagnostic assertions independently of production correctness; checked signed-missing-entry fixture's new cardinality assertion against the claim that nothing else differs; checked changed parser test still exercises both sha256sum text/binary modes after replacing tmux with install.sh; checked scripted retry still supplies the selected archive, consumes the expected number of requests and distinguishes connect/non-connect retry limits; checked changed release/fixture count documentation against the signed-file and archive roles; checked retained Mac target download/byte/mode assertions remain after deletion of the unrepresentable tmux-on-Mac request test. No new substantive runtime issue was found in those changes.\n\nFull-range attribution: git log for this path from exclusive 6e423e30068b62c6cfa276c6d720ee35bb70387a to inclusive 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db contains exactly the two assigned commits. Also read base-revision declarations/locations and pre-change omission test, rather than treating a property merely predating one assigned commit as predating the range. c3's diagnostic assertion is new in cb762a313abbe6da03ae0bf041f07486c4ed4df9. Its absence-plus-cardinality condition cannot prove exact set equality; the checked fixture does have the intended set, and unrelated entries do not weaken the test's separately asserted missing-request-entry refusal/no-download mechanism. That independent test-diagnostic limitation and proposed significance judgment are preserved for caller decision under c3, not hidden behind production correctness.\n\nInterface assumptions retained from synthesis: distinct full archive names identify each target's asset locks/cache files; signature and exact-version verification authenticate manifest downloads; cache hits recheck control authentication and a local binary consistency marker under the existing trusted-state model. Specified tmux retirement remains separate from current farhelm payload integrity. No new interaction from supplied neighbours alters those conclusions.\n\nNew verified finding IDs this pass: none. New unverified-after-investigation finding IDs: none. New candidate ID: c3. Existing IDs revised this pass: none. Remaining lead IDs: none. Explicit result: one new considered diagnostic candidate, no new reportable issue established. All conclusions are source-only. No runtime tests, builds, reproductions or live-install actions. No checkout changes; only private group artifacts written.\nNext action: return discovery delta to caller. No separate final report file.\n\nTurn 4 — recording-only disposition continuation, not synthesis or discovery. Read complete own seven-event findings history first. Appended a finding revision under c3, retaining the bounded source-confirmed mismatch at other priority with proposed_drop false. Preserved the earlier unaccepted significance-based omission proposal, exact predicate/diagnostic distinction, actual correct three-entry signed fixture and independent missing-entry refusal/no-download assertions. No product/security regression, runtime failure or lost user work is established. No concrete disagreement with parent disposition. No new source read, test/build/reproduction, scope expansion or discovery restart. Discovery-pass count remains 1; assigned review coverage unchanged and complete. New defect IDs: none; revised ID: c3. Open lead IDs: none.\n"
+}

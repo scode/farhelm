@@ -1,0 +1,730 @@
+{
+  "group": {
+    "id": "g099",
+    "domain": "supervisor-terminal-host-lifecycle",
+    "purpose": "supervisor-terminal-host-lifecycle: crates/farhelm-supervisor/src/service/core/host_restart.rs, crates/farhelm-supervisor/src/service/core/host_tabs.rs, crates/farhelm-supervisor/src/launch.rs, crates/farhelm-supervisor/src/scope.rs; phases complete small per-commit changes",
+    "interfaces": [
+      "g001",
+      "g007",
+      "g008",
+      "g009",
+      "g010",
+      "g011",
+      "g097",
+      "g098",
+      "g100",
+      "g102",
+      "g103",
+      "g104",
+      "g105",
+      "g106",
+      "g107",
+      "g108",
+      "g109",
+      "g110",
+      "g111",
+      "g112",
+      "g113",
+      "g114",
+      "g115",
+      "g116",
+      "g159",
+      "g160",
+      "g161",
+      "g162",
+      "g163",
+      "g164",
+      "g165",
+      "g166",
+      "g167",
+      "g168",
+      "g169",
+      "g170",
+      "g171",
+      "g172",
+      "g173"
+    ],
+    "sources": [
+      {
+        "path": "[private-run]/prep/parts/00927-000.patch",
+        "ranges": [
+          [
+            1,
+            706
+          ]
+        ],
+        "original_path": "crates/farhelm-supervisor/src/service/core/host_restart.rs",
+        "commit": "1ed482dde220452e424973faf38a5e1318986333",
+        "notes": "patch header; patch character offsets [0,37312)",
+        "lines": 706,
+        "bytes": 37312,
+        "start": 0,
+        "end": 37312,
+        "original": "[private-run]/prep/originals/00927.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/00928-000.patch",
+        "ranges": [
+          [
+            1,
+            389
+          ]
+        ],
+        "original_path": "crates/farhelm-supervisor/src/service/core/host_tabs.rs",
+        "commit": "1ed482dde220452e424973faf38a5e1318986333",
+        "notes": "patch header; patch character offsets [0,19038)",
+        "lines": 389,
+        "bytes": 19038,
+        "start": 0,
+        "end": 19038,
+        "original": "[private-run]/prep/originals/00928.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/01049-000.patch",
+        "ranges": [
+          [
+            1,
+            21
+          ]
+        ],
+        "original_path": "crates/farhelm-supervisor/src/service/core/host_tabs.rs",
+        "commit": "f560058da19e02716e6f943883a9508b447aff4e",
+        "notes": "patch header; patch character offsets [0,916)",
+        "lines": 21,
+        "bytes": 916,
+        "start": 0,
+        "end": 916,
+        "original": "[private-run]/prep/originals/01049.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/01538-000.patch",
+        "ranges": [
+          [
+            1,
+            45
+          ]
+        ],
+        "original_path": "crates/farhelm-supervisor/src/launch.rs",
+        "commit": "08399d092d20815ced6619c26df2391944ae2b4a",
+        "notes": "patch header; patch character offsets [0,2624)",
+        "lines": 45,
+        "bytes": 2624,
+        "start": 0,
+        "end": 2624,
+        "original": "[private-run]/prep/originals/01538.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/01539-000.patch",
+        "ranges": [
+          [
+            1,
+            37
+          ]
+        ],
+        "original_path": "crates/farhelm-supervisor/src/scope.rs",
+        "commit": "08399d092d20815ced6619c26df2391944ae2b4a",
+        "notes": "patch header; patch character offsets [0,2384)",
+        "lines": 37,
+        "bytes": 2388,
+        "start": 0,
+        "end": 2384,
+        "original": "[private-run]/prep/originals/01539.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/01544-000.patch",
+        "ranges": [
+          [
+            1,
+            58
+          ]
+        ],
+        "original_path": "crates/farhelm-supervisor/src/service/core/host_restart.rs",
+        "commit": "08399d092d20815ced6619c26df2391944ae2b4a",
+        "notes": "patch header; patch character offsets [0,3149)",
+        "lines": 58,
+        "bytes": 3149,
+        "start": 0,
+        "end": 3149,
+        "original": "[private-run]/prep/originals/01544.patch"
+      }
+    ],
+    "lines": 1256,
+    "bytes": 65427
+  },
+  "records": [
+    {
+      "key": "g099/f1",
+      "owner": "g099",
+      "id": "f1",
+      "domain": "supervisor-terminal-host-lifecycle",
+      "purpose": "supervisor-terminal-host-lifecycle: crates/farhelm-supervisor/src/service/core/host_restart.rs, crates/farhelm-supervisor/src/service/core/host_tabs.rs, crates/farhelm-supervisor/src/launch.rs, crates/farhelm-supervisor/src/scope.rs; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 1,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "f1",
+            "state": "open",
+            "summary": "old tmux terminal retirement loses retained history and ends programs, explicitly accepted",
+            "location": "crates/farhelm-supervisor/src/service/core/host_restart.rs:81",
+            "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333\n\nTLDR: Upgrading a supervisor with sessions still in old tmux terminals ends their programs and discards their retained terminal history; a later Restart starts with an empty terminal.\n\nDetails: The assigned host_restart.rs patch removes tmux_restart_seed and Replacing::TmuxWindow, including the old history-preserving migration and fallback. At this revision service/core/old_terminals.rs:159-168,176-233 ends the old private tmux server, while host_restart.rs now handles only a HostTerminal or no terminal. Source review establishes this removal is deliberate rather than an accidental loss of the migration path. SPEC_impl.md, Terminal substrate: private tmux server, lines 2882-2884 says: \"This release ends them at startup (below); every terminal runs in a terminal host\". SPEC.md, Lifecycle operations, lines 1945-1947 says: \"When the terminal no longer exists (the process that kept it ended, after a reboot, or an old terminal this release ended, see [Terminal experience](#terminal-experience)), Restart starts with an empty one.\" SPEC_impl.md:2919-2925 explicitly accepts startup proceeding after failures and even a second agent after Restart; this record concerns only the deliberate removal of tmux migration, not independent defects in startup cleanup.\n\nSuggested bucket: highest (programs and retained history can be lost). Could-be-highest: yes. Confidence: confirmed through source and contract analysis; no execution. proposed_drop: explicitly accepted old-terminal retirement and empty Restart under the exact specification text cited above; independent drop check required. possible_cover: the cited specifications only; no queue or excluded coverage sources searched. Material caveat: live terminal hosts retain their normal restart history-seeding path; this consequence is limited to the retired tmux substrate."
+          }
+        },
+        {
+          "line": 6,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "f1",
+            "state": "open",
+            "summary": "old tmux terminal retirement loses retained history and ends programs, explicitly accepted",
+            "location": "crates/farhelm-supervisor/src/service/core/host_restart.rs:81",
+            "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333\n\nTLDR: Upgrading a supervisor with sessions still in old tmux terminals ends their programs and discards their retained terminal history; a later Restart starts with an empty terminal.\n\nDetails: The assigned host_restart.rs patch removes tmux_restart_seed and Replacing::TmuxWindow, including the history-preserving migration and fallback. At this revision service/core/old_terminals.rs:159-168,176-233 ends the private tmux server. host_restart.rs:199-219 accepts a host runtime or none and defaults to an empty seed; core.rs:12486-12493 seeds only a held host, and 13000-13028 forwards the same runtime to restart. This is a deliberate removal, with all live host terminals still retaining the normal host restart path.\n\nExact specification acceptance: SPEC.md, Terminal experience, 3006-3010: \"This release ends them: the first time a host's supervisor of this release starts, it ends that tmux server, and with it everything that still ran in an old terminal, without needing a tmux program.\" The same bullet, 3013-3016: \"A failure to end the server or to stop what ran there is logged and never stops the supervisor from starting; those sessions are treated as ended all the same, accepting that a Restart could then start a second agent beside one still running. After an update to this release, Restart, Clone and Replace start such a session in a new, empty terminal.\" SPEC.md, Lifecycle operations, 1945-1947 separately accepts an empty Restart after an old terminal this release ended. SPEC_impl.md, Terminal substrate: private tmux server, 2880-2932 describes retirement, sweeping and accepted failure residuals.\n\nSuggested bucket: highest (programs and retained history can be lost). Could-be-highest: yes. Confidence: confirmed through source and contract analysis; no execution. proposed_drop: explicitly accepted old-terminal retirement and empty Restart under the exact specification text above; independent drop check required. possible_cover: the cited specifications only; no queue or excluded coverage sources searched. Material caveat: this concerns only removal of the tmux migration path, not independent defects in startup cleanup, which belongs to another group. Existing host terminals retain their normal restart history-seeding path."
+          }
+        },
+        {
+          "line": 7,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "f1",
+            "state": "open",
+            "summary": "old tmux terminal retirement loses retained history and ends programs, explicitly accepted",
+            "location": "crates/farhelm-supervisor/src/service/core/host_restart.rs:81",
+            "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333\n\nTLDR: Upgrading a supervisor with sessions still in old tmux terminals ends their programs and discards their retained terminal history; a later Restart starts with an empty terminal.\n\nDetails: The assigned host_restart.rs patch removes tmux_restart_seed and Replacing::TmuxWindow, including history-preserving migration and fallback. At this revision service/core/old_terminals.rs:159-168,176-233 ends the private server. host_restart.rs:199-219 accepts a host runtime or none and defaults to an empty seed; core.rs:12486-12493 seeds only a held host, and 13000-13028 forwards that runtime.\n\nLiteral specification acceptance: SPEC.md, Terminal experience, 3006-3010: \"This release ends them: the first time a host's supervisor of this release starts, it ends that tmux server, and with it everything that still ran in an old terminal, without needing a tmux program.\" The same bullet, 3013-3016: \"A failure to end the server or to stop what ran there is logged and never stops the supervisor from starting; those sessions are treated as ended all the same, accepting that a Restart could then start a second agent beside one still running. After an update to this release, Restart, Clone and Replace start such a session in a new, empty terminal.\" SPEC.md, Lifecycle operations, 1945-1947 separately accepts an empty Restart after an old terminal this release ended. SPEC_impl.md, Terminal substrate: private tmux server, 2880-2932 describes retirement and accepted failure residuals.\n\nSuggested bucket: highest (programs and retained history can be lost). Could-be-highest: yes. Confidence: confirmed through source and contract analysis; no execution. proposed_drop: explicitly accepted retirement and empty Restart under the literal specification text above; independent drop check still required, no parent drop accepted. possible_cover: parent reports likely duplication with g053/f1; that record was not read or independently matched here. The cited specifications are the only independently inspected acceptance.\n\nSynthesis caveats: This proposed drop is limited to deliberate termination/history loss. It does not settle misleading generic survival guidance (parent identifies distinct g004/g071 concerns), hidden failure warnings (g033), or independent startup-cleanup defects. Those are separate triggers or consequences. Existing host terminals retain their restart seed path; that path and tab cleanup are being checked separately in this turn, without treating the pinned-root mapping as blanket lifecycle correctness."
+          }
+        },
+        {
+          "line": 10,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "f1",
+            "state": "open",
+            "summary": "old tmux terminal retirement loses retained history and ends programs, explicitly accepted",
+            "location": "crates/farhelm-supervisor/src/service/core/host_restart.rs:81",
+            "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333\n\nTLDR: Upgrading a supervisor with sessions still in old tmux terminals ends their programs and discards their retained terminal history; a later Restart starts with an empty terminal.\n\nDetails: The assigned patch removes tmux_restart_seed, Replacing::TmuxWindow and the tmux seed's CancelOnDrop. old_terminals.rs:159-168,176-233 ends the old private server. host_restart.rs:199-219 handles a held host runtime or none and defaults to no seed. core.rs:12486-12493 reads the held host's seed before claiming the new generation, and 13000-13028 forwards that runtime and seed.\n\nLiteral specification acceptance: SPEC.md, Terminal experience, 3006-3010: \"This release ends them: the first time a host's supervisor of this release starts, it ends that tmux server, and with it everything that still ran in an old terminal, without needing a tmux program.\" At 3013-3016: \"A failure to end the server or to stop what ran there is logged and never stops the supervisor from starting; those sessions are treated as ended all the same, accepting that a Restart could then start a second agent beside one still running. After an update to this release, Restart, Clone and Replace start such a session in a new, empty terminal.\" SPEC.md, Lifecycle operations, 1945-1947 also accepts an empty Restart after an old terminal this release ended; SPEC_impl.md:2880-2932 describes retirement and its failure residuals.\n\nSynthesis source checks: Removing the tmux-specific CancelOnDrop does not remove the retained host seed's ownership/cancellation mechanism. hosts/terminal.rs:2443-2450 sends the seed request to the existing runtime; 3155-3161 handles it there. seed_now at 3733-3766 owns the blocking encode, uses the runtime's cancel token, and brings the emulator home even if the request's answer receiver disappears. host_restart.rs:418-490 waits for settled output, requests MAX_SNAPSHOT, and refuses a missing seed during supervisor stopping. host_restart.rs:294-387 publishes the new host before ending the old one; core.rs:12805-12807 bypasses restoration after publication. Definitive restoration at 12933-12948 retains the previous host under publishable; ambiguous restoration names no terminal and aborts the previous runtime. These checks establish preservation of these specific host-seed/caller contracts, not blanket correctness of every failure path; l1 separately records an unchanged unwind-policy concern.\n\nSuggested bucket: highest, unchanged (programs and retained history can be lost). Could-be-highest: yes. Confidence: confirmed by source/contract analysis; no execution. proposed_drop: literal specification acceptance of deliberate retirement and empty Restart only; independent drop check still required and no parent drop accepted. possible_cover: parent reports likely duplication with g053/f1, not independently read/matched here.\n\nMaterial caveats: This proposal does not settle misleading survival guidance (distinct g004/g071 concerns identified by parent), hidden failure warnings (g033), or independent startup cleanup bugs. Those require their own trigger/consequence analysis. The retained host seed was checked in source; nothing was reproduced or observed at runtime."
+          }
+        }
+      ],
+      "latest": {
+        "line": 10,
+        "event": {
+          "version": 1,
+          "kind": "finding",
+          "id": "f1",
+          "state": "open",
+          "summary": "old tmux terminal retirement loses retained history and ends programs, explicitly accepted",
+          "location": "crates/farhelm-supervisor/src/service/core/host_restart.rs:81",
+          "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333\n\nTLDR: Upgrading a supervisor with sessions still in old tmux terminals ends their programs and discards their retained terminal history; a later Restart starts with an empty terminal.\n\nDetails: The assigned patch removes tmux_restart_seed, Replacing::TmuxWindow and the tmux seed's CancelOnDrop. old_terminals.rs:159-168,176-233 ends the old private server. host_restart.rs:199-219 handles a held host runtime or none and defaults to no seed. core.rs:12486-12493 reads the held host's seed before claiming the new generation, and 13000-13028 forwards that runtime and seed.\n\nLiteral specification acceptance: SPEC.md, Terminal experience, 3006-3010: \"This release ends them: the first time a host's supervisor of this release starts, it ends that tmux server, and with it everything that still ran in an old terminal, without needing a tmux program.\" At 3013-3016: \"A failure to end the server or to stop what ran there is logged and never stops the supervisor from starting; those sessions are treated as ended all the same, accepting that a Restart could then start a second agent beside one still running. After an update to this release, Restart, Clone and Replace start such a session in a new, empty terminal.\" SPEC.md, Lifecycle operations, 1945-1947 also accepts an empty Restart after an old terminal this release ended; SPEC_impl.md:2880-2932 describes retirement and its failure residuals.\n\nSynthesis source checks: Removing the tmux-specific CancelOnDrop does not remove the retained host seed's ownership/cancellation mechanism. hosts/terminal.rs:2443-2450 sends the seed request to the existing runtime; 3155-3161 handles it there. seed_now at 3733-3766 owns the blocking encode, uses the runtime's cancel token, and brings the emulator home even if the request's answer receiver disappears. host_restart.rs:418-490 waits for settled output, requests MAX_SNAPSHOT, and refuses a missing seed during supervisor stopping. host_restart.rs:294-387 publishes the new host before ending the old one; core.rs:12805-12807 bypasses restoration after publication. Definitive restoration at 12933-12948 retains the previous host under publishable; ambiguous restoration names no terminal and aborts the previous runtime. These checks establish preservation of these specific host-seed/caller contracts, not blanket correctness of every failure path; l1 separately records an unchanged unwind-policy concern.\n\nSuggested bucket: highest, unchanged (programs and retained history can be lost). Could-be-highest: yes. Confidence: confirmed by source/contract analysis; no execution. proposed_drop: literal specification acceptance of deliberate retirement and empty Restart only; independent drop check still required and no parent drop accepted. possible_cover: parent reports likely duplication with g053/f1, not independently read/matched here.\n\nMaterial caveats: This proposal does not settle misleading survival guidance (distinct g004/g071 concerns identified by parent), hidden failure warnings (g033), or independent startup cleanup bugs. Those require their own trigger/consequence analysis. The retained host seed was checked in source; nothing was reproduced or observed at runtime."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g099/findings.jsonl",
+        "id": "f1",
+        "line": 10,
+        "disposition": "under-investigation",
+        "group": "g099-f1",
+        "reason": "Record durably acknowledged; parent source/contract validation, cross-group synthesis, coverage/filter matching and any independent drop check remain pending. This preserves the claim and uncertainty without accepting, dropping or lowering it."
+      },
+      "accepted_parent_decision": null,
+      "returned_claim_checks": [
+        {
+          "batch": "claims-065",
+          "key": "g099/f1",
+          "latest_line": 10,
+          "recommendation": "covered",
+          "bucket": "highest",
+          "underlying_key": "intentional-retirement-of-old-private-tmux-terminals",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "Termination of old tmux programs and loss of their retained terminal contents are expressly accepted. This proposal is limited to deliberate retirement and empty relaunches.",
+          "checks": [
+            "1ed482dde220452e424973faf38a5e1318986333:service/core/old_terminals.rs:159-168,176-233 locates and terminates the private server. service/core/host_restart.rs:199-219 accepts a held host runtime or none and defaults to no seed.",
+            "Current SPEC.md Terminal experience:2998-3010 explicitly says startup ends the old server and everything in its terminals, loses the old terminal screen, closes tabs, and gives Restart/Clone/Replace new empty terminals. SPEC_impl.md Ending the old private tmux server:2780-2825 describes this deliberate shutdown and accepted residual failures.",
+            "Host-backed restart retains the host seed argument; retirement coverage says nothing about unrelated host-seed failure paths. Source only."
+          ],
+          "coverage_checked": [
+            "Both specifications searched and the exact old-terminal retirement sections read. Coverage matches old tmux terminals, their programs/history, startup retirement and subsequent empty relaunch.",
+            "TODO.md Planned is empty. The phase-3 old-server-removal TODO is future removal of the compatibility step, not coverage for independent cleanup defects. BUGS.md and active TRIAGE_OUTCOMES.md contain no exact additional acceptance.",
+            "plans/queue tmux removal matches are landed per plans/REPORTS.md:29,32, so no unlanded plan is relied on. INDEX.md has no exact deliberate-retirement item. The reported g053/f1 alias is outside this batch and was not independently matched.",
+            "No FILTER.md rule is needed; this is literal specification acceptance."
+          ],
+          "exact_cover_quotes": [
+            "SPEC.md:3000-3002: A supervisor that finds that tmux server when it starts ends it, and with it everything that still ran in an old terminal, without needing a tmux program.",
+            "SPEC.md:3008-3010: A failure to end the server or to stop what ran there is logged and never stops the supervisor from starting; those sessions are treated as ended all the same, accepting that a Restart could then start a second agent beside one still running. Restart, Clone and Replace start such a session in a new, empty terminal."
+          ],
+          "missing_premise": "Independent drop agreement remains required. Any exact alias to g053/f1 remains for the parent to match.",
+          "original_stronger_consequence": "Upgrading with programs in old tmux terminals ends those programs and loses their retained output; Restart is empty. Keep highest until the independent acceptance check agrees. This does not cover misleading survival guidance, hidden failure warnings, or independent startup cleanup defects.",
+          "needs_independent_drop_check": true,
+          "proposed_basis": "Propose covered only for the exact deliberate retirement/history-loss consequence accepted in SPEC.md Terminal experience and SPEC_impl.md Ending the old private tmux server."
+        }
+      ],
+      "parent_proposals": [
+        {
+          "artifact": "parent-flagged-judgments-065.json",
+          "key": "g099/f1",
+          "proposal": "claim-checks/claims-065/result.json",
+          "parent_proposal": "exact-spec-accepted-old-terminal-retirement-and-empty-relaunch",
+          "final_independent_gate": "required-before-highest-drop",
+          "reason": "Full flagged065 read. Exact deliberate old-server program and screen loss, subsequent empty relaunch and nonfatal failed retirement are expressly accepted; preserve highest pending gate. This does not cover misleading survival guidance, wrong victim selection or independent host-history seed failures. Reported053f1 alias still needs the actual join."
+        }
+      ],
+      "collection": {
+        "retain": true,
+        "clearly_refuted_candidate": false,
+        "needs_unfinished_gate": true,
+        "provisional_bucket": "highest",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "intentional-retirement-of-old-private-tmux-terminals",
+        "destination": "trailing-intentional-retirement-of-old-private-tmux-terminals.md"
+      }
+    },
+    {
+      "key": "g099/c1",
+      "owner": "g099",
+      "id": "c1",
+      "domain": "supervisor-terminal-host-lifecycle",
+      "purpose": "supervisor-terminal-host-lifecycle: crates/farhelm-supervisor/src/service/core/host_restart.rs, crates/farhelm-supervisor/src/service/core/host_tabs.rs, crates/farhelm-supervisor/src/launch.rs, crates/farhelm-supervisor/src/scope.rs; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 2,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c1",
+            "state": "open",
+            "summary": "tab settle probe conversion preserves failure handling",
+            "location": "crates/farhelm-supervisor/src/service/core/host_tabs.rs:714",
+            "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333\n\nTLDR: Considered whether tab opens could accept a dead or unreadable shell after the process-probe enum changed. Source refutes a behavior change.\n\nDetails: host_tabs.rs:714-727 retains host.probe()? and maps Dead to refusal, Running to waiting, and Gone to an error. The same-commit hosts/terminal.rs HostStatus::probe diff (around lines 800-835) maps exactly the old Owned{dead:false,pid:Some} result to Running(pid), the old Owned{dead:true,pid:None} to Dead, retains Gone and the errors for an unavailable host or failed pinned-child check. ForeignOwner was never emitted by the host probe and its removal here loses no case. service/core.rs:14120-14142 still derives sweep roots from HostTerminal::sweep_root, and hosts/terminal.rs:2557-2583 rechecks the pinned start identity. SPEC_impl.md, Terminal host / Tabs in hosts, requires a dead-at-open refusal and refusal for a host that cannot be read.\n\nSuggested bucket: other, no established user impact. Could-be-highest: no; no unsafe kill root or new loss route established. Confidence: confirmed through source comparison, no execution. proposed_drop: refuted by the one-to-one host probe mapping and preserved error propagation. possible_cover: none. Caveat: this checks the assigned caller conversion, not independent defects in host liveness implementation."
+          }
+        }
+      ],
+      "latest": {
+        "line": 2,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c1",
+          "state": "open",
+          "summary": "tab settle probe conversion preserves failure handling",
+          "location": "crates/farhelm-supervisor/src/service/core/host_tabs.rs:714",
+          "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333\n\nTLDR: Considered whether tab opens could accept a dead or unreadable shell after the process-probe enum changed. Source refutes a behavior change.\n\nDetails: host_tabs.rs:714-727 retains host.probe()? and maps Dead to refusal, Running to waiting, and Gone to an error. The same-commit hosts/terminal.rs HostStatus::probe diff (around lines 800-835) maps exactly the old Owned{dead:false,pid:Some} result to Running(pid), the old Owned{dead:true,pid:None} to Dead, retains Gone and the errors for an unavailable host or failed pinned-child check. ForeignOwner was never emitted by the host probe and its removal here loses no case. service/core.rs:14120-14142 still derives sweep roots from HostTerminal::sweep_root, and hosts/terminal.rs:2557-2583 rechecks the pinned start identity. SPEC_impl.md, Terminal host / Tabs in hosts, requires a dead-at-open refusal and refusal for a host that cannot be read.\n\nSuggested bucket: other, no established user impact. Could-be-highest: no; no unsafe kill root or new loss route established. Confidence: confirmed through source comparison, no execution. proposed_drop: refuted by the one-to-one host probe mapping and preserved error propagation. possible_cover: none. Caveat: this checks the assigned caller conversion, not independent defects in host liveness implementation."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g099/findings.jsonl",
+        "id": "c1",
+        "line": 2,
+        "disposition": "excluded",
+        "group": "host-tab-settle-probe-enum-conversion",
+        "reason": "Parent explicitly accepted named refuted proposal from claims-065 after inspecting it. The tab settle caller still refuses dead or unreadable children. The enum conversion does not admit a dead shell. Refute the assigned settle conversion only; do not infer that all host liveness behavior is correct. Checked source/results: [\"1ed482dde220452e424973faf38a5e1318986333:service/core/host_tabs.rs:714-727 retains host.probe()?; Dead returns false, Running waits, Gone errors.\",\"Same revision hosts/terminal.rs:791-832 checks the adoption-pinned child and returns errors on unreadability or unavailable host. Its Exited/Running/Gone mapping preserves the relevant settle outcomes. Source only.\"] Current coverage/results: [\"SPEC_impl.md Tabs in hosts:2234-2268 requires refusal for unreadable host and shell death during settle; source meets those bounded contracts. SPEC.md lifecycle/tab text supplies no contrary acceptance.\",\"Searched current TODO Planned (empty), BUGS.md, active TRIAGE_OUTCOMES.md, unlanded plans and INDEX.md for tab settle/dead-at-open/probe conversion. No exact covered finding found. Related tab-helper-can-fail-after-open concerns later helper failure, not changed enum handling.\",\"FILTER.md not used: the proposed regression is source-refuted.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Suspected tab open accepting a dead or unreadable shell. No wrong target, unsafe kill root, or work-loss route was alleged.\"; null."
+      },
+      "accepted_parent_decision": {
+        "key": "g099/c1",
+        "line": 2,
+        "disposition": "excluded",
+        "group": "host-tab-settle-probe-enum-conversion",
+        "bucket": "other",
+        "recording": "refuted",
+        "queue_target_candidate": null,
+        "needs_independent_drop_check": false,
+        "reason": "Parent explicitly accepted named refuted proposal from claims-065 after inspecting it. The tab settle caller still refuses dead or unreadable children. The enum conversion does not admit a dead shell. Refute the assigned settle conversion only; do not infer that all host liveness behavior is correct. Checked source/results: [\"1ed482dde220452e424973faf38a5e1318986333:service/core/host_tabs.rs:714-727 retains host.probe()?; Dead returns false, Running waits, Gone errors.\",\"Same revision hosts/terminal.rs:791-832 checks the adoption-pinned child and returns errors on unreadability or unavailable host. Its Exited/Running/Gone mapping preserves the relevant settle outcomes. Source only.\"] Current coverage/results: [\"SPEC_impl.md Tabs in hosts:2234-2268 requires refusal for unreadable host and shell death during settle; source meets those bounded contracts. SPEC.md lifecycle/tab text supplies no contrary acceptance.\",\"Searched current TODO Planned (empty), BUGS.md, active TRIAGE_OUTCOMES.md, unlanded plans and INDEX.md for tab settle/dead-at-open/probe conversion. No exact covered finding found. Related tab-helper-can-fail-after-open concerns later helper failure, not changed enum handling.\",\"FILTER.md not used: the proposed regression is source-refuted.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Suspected tab open accepting a dead or unreadable shell. No wrong target, unsafe kill root, or work-loss route was alleged.\"; null."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-065",
+          "key": "g099/c1",
+          "latest_line": 2,
+          "recommendation": "refuted",
+          "bucket": "other",
+          "underlying_key": "host-tab-settle-probe-enum-conversion",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The tab settle caller still refuses dead or unreadable children. The enum conversion does not admit a dead shell.",
+          "checks": [
+            "1ed482dde220452e424973faf38a5e1318986333:service/core/host_tabs.rs:714-727 retains host.probe()?; Dead returns false, Running waits, Gone errors.",
+            "Same revision hosts/terminal.rs:791-832 checks the adoption-pinned child and returns errors on unreadability or unavailable host. Its Exited/Running/Gone mapping preserves the relevant settle outcomes. Source only."
+          ],
+          "coverage_checked": [
+            "SPEC_impl.md Tabs in hosts:2234-2268 requires refusal for unreadable host and shell death during settle; source meets those bounded contracts. SPEC.md lifecycle/tab text supplies no contrary acceptance.",
+            "Searched current TODO Planned (empty), BUGS.md, active TRIAGE_OUTCOMES.md, unlanded plans and INDEX.md for tab settle/dead-at-open/probe conversion. No exact covered finding found. Related tab-helper-can-fail-after-open concerns later helper failure, not changed enum handling.",
+            "FILTER.md not used: the proposed regression is source-refuted."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": null,
+          "original_stronger_consequence": "Suspected tab open accepting a dead or unreadable shell. No wrong target, unsafe kill root, or work-loss route was alleged.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Refute the assigned settle conversion only; do not infer that all host liveness behavior is correct."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "host-tab-settle-probe-enum-conversion",
+        "destination": null
+      }
+    },
+    {
+      "key": "g099/c2",
+      "owner": "g099",
+      "id": "c2",
+      "domain": "supervisor-terminal-host-lifecycle",
+      "purpose": "supervisor-terminal-host-lifecycle: crates/farhelm-supervisor/src/service/core/host_restart.rs, crates/farhelm-supervisor/src/service/core/host_tabs.rs, crates/farhelm-supervisor/src/launch.rs, crates/farhelm-supervisor/src/scope.rs; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 3,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c2",
+            "state": "open",
+            "summary": "tab reply no longer carries terminal kind under the new protocol",
+            "location": "crates/farhelm-supervisor/src/service/core/host_tabs.rs:169",
+            "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e\n\nTLDR: Considered whether removing the tab terminal kind leaves clients unable to choose the right renderer. The same revision intentionally removes that choice and advances the protocol.\n\nDetails: host_tabs.rs:169-172 now returns TabInfo{id}. crates/farhelm-proto/src/lib.rs:1676-1695 declares that exact shape and requires only a tab identity, with stable creation order supplying its positional label. Its same-commit diff at line 255 advances PROTOCOL_VERSION from 76 to 77. SPEC_impl.md:3015 states: \"Protocol 77 removed the byte streams with the old terminals and xterm.js: every attachment's data channel carries\" a grid stream (full surrounding contract still being checked in this pass). All served terminals are hosts under the immediately preceding retirement change; no remaining kind should be emitted by this helper.\n\nSuggested bucket: other, no established user impact. Could-be-highest: no; this considered issue is renderer/protocol compatibility, not a destructive target or kill decision. Confidence: confirmed for this assigned reply change by source and schema comparison; no execution. proposed_drop: refuted by the coordinated TabInfo schema removal and protocol version bump. possible_cover: none. Caveat: this does not independently review all changes to protocol dispatch or the grid renderer, which belong to other groups."
+          }
+        },
+        {
+          "line": 5,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c2",
+            "state": "open",
+            "summary": "tab reply kind removal is coordinated; old-page breakage is explicitly accepted",
+            "location": "crates/farhelm-supervisor/src/service/core/host_tabs.rs:169",
+            "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e\n\nTLDR: Removing the terminal kind is safe for matching clients. A page left open from the previous release can misdraw a terminal and lose its attachment on input until reloaded; the specification explicitly accepts that consequence.\n\nDetails: host_tabs.rs:169-172 now returns TabInfo{id}. crates/farhelm-proto/src/lib.rs:1676-1695 declares that exact shape, using stable creation order for positional labels. Its same-commit diff at line 255 advances PROTOCOL_VERSION from 76 to 77. SPEC_impl.md, Grid streams, lines 3010-3031 says: \"every attachment's data channel carries a grid stream\" and \"SessionInfo and TabInfo no longer report a terminal kind\". Matching peers need no renderer choice. The full surrounding contract read at 2985-3050 explicitly says: \"A page loaded from the previous helm and left open across the update must be reloaded; nothing keeps it working.\" It explains that an old page can take the absent kind and stream notice for an old byte stream, display grid messages as output, and have typing rejected as malformed input. Its final decision is: \"Keeping the stream notice for such pages was considered and not done: a reload is the whole remedy.\" A mismatched helm and supervisor refuse at hello; this exception is the already-loaded page.\n\nSuggested bucket: high for the established stale-page display/input interruption, other for the refuted matching-client concern. Could-be-highest: no; the considered route displays messages wrongly and rejects input, with no source route to a destructive action or loss of user-owned work established. Confidence: confirmed through source/schema comparison and the explicit contract; no execution. proposed_drop: matching-client regression refuted by coordinated schema/protocol changes; old-page consequence explicitly accepted by the exact Grid streams text above. possible_cover: the cited specification only; no excluded coverage sources searched. Caveat: the stale-page consequence is documented by contract, not independently observed in execution; broader protocol/renderer implementation belongs to other groups."
+          }
+        }
+      ],
+      "latest": {
+        "line": 5,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c2",
+          "state": "open",
+          "summary": "tab reply kind removal is coordinated; old-page breakage is explicitly accepted",
+          "location": "crates/farhelm-supervisor/src/service/core/host_tabs.rs:169",
+          "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e\n\nTLDR: Removing the terminal kind is safe for matching clients. A page left open from the previous release can misdraw a terminal and lose its attachment on input until reloaded; the specification explicitly accepts that consequence.\n\nDetails: host_tabs.rs:169-172 now returns TabInfo{id}. crates/farhelm-proto/src/lib.rs:1676-1695 declares that exact shape, using stable creation order for positional labels. Its same-commit diff at line 255 advances PROTOCOL_VERSION from 76 to 77. SPEC_impl.md, Grid streams, lines 3010-3031 says: \"every attachment's data channel carries a grid stream\" and \"SessionInfo and TabInfo no longer report a terminal kind\". Matching peers need no renderer choice. The full surrounding contract read at 2985-3050 explicitly says: \"A page loaded from the previous helm and left open across the update must be reloaded; nothing keeps it working.\" It explains that an old page can take the absent kind and stream notice for an old byte stream, display grid messages as output, and have typing rejected as malformed input. Its final decision is: \"Keeping the stream notice for such pages was considered and not done: a reload is the whole remedy.\" A mismatched helm and supervisor refuse at hello; this exception is the already-loaded page.\n\nSuggested bucket: high for the established stale-page display/input interruption, other for the refuted matching-client concern. Could-be-highest: no; the considered route displays messages wrongly and rejects input, with no source route to a destructive action or loss of user-owned work established. Confidence: confirmed through source/schema comparison and the explicit contract; no execution. proposed_drop: matching-client regression refuted by coordinated schema/protocol changes; old-page consequence explicitly accepted by the exact Grid streams text above. possible_cover: the cited specification only; no excluded coverage sources searched. Caveat: the stale-page consequence is documented by contract, not independently observed in execution; broader protocol/renderer implementation belongs to other groups."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g099/findings.jsonl",
+        "id": "c2",
+        "line": 5,
+        "disposition": "excluded",
+        "group": "protocol77-tab-kind-removal-old-page-reload",
+        "reason": "Parent explicitly accepted named covered proposal from claims-065 after inspecting it. The reply and schema agree for matching clients. The distinct old-page misdrawing and input disconnection consequence is explicitly accepted pending reload. Covered for the stale-page consequence; refuted for the matching-client renderer-choice concern. Broader protocol correctness is outside this check. Checked source/results: [\"f560058da19e02716e6f943883a9508b447aff4e:service/core/host_tabs.rs:169-172 returns TabInfo{id}; farhelm-proto/src/lib.rs:1676-1695 defines that shape, and :255 is protocol 77.\",\"Current SPEC_impl.md Grid streams:2937-2956 explains the removed kind fields, protocol refusal between mismatched helm/supervisor, and the old loaded page's absent-kind/notice fallback drawing grid messages as output and rejecting typed input. No execution.\"] Current coverage/results: [\"Both specifications searched for terminal kinds, protocol 77 and old pages. Exact acceptance is SPEC_impl.md Grid streams; matching-client concern is separately refuted by schema coordination.\",\"TODO Planned empty; BUGS and active TRIAGE_OUTCOMES contain no exact additional item. plans/queue tmux-end-old-terminals criterion 3 is already landed (REPORTS.md:29), not unlanded coverage. INDEX.md has no exact same-root item.\",\"No filter needed.\"] Exact cited cover: [\"SPEC_impl.md:2948-2949: A page loaded from the previous helm and left open across the update must be reloaded; nothing keeps it working.\",\"SPEC_impl.md:2955-2956: Keeping the stream notice for such pages was considered and not done: a reload is the whole remedy.\"] Original stronger consequence and missing premise remain preserved: \"Old pages can misdraw grid messages and lose their attachment on input until reloaded. That high UX consequence remains explicit; there is no established destructive action or loss of user-owned work.\"; null."
+      },
+      "accepted_parent_decision": {
+        "key": "g099/c2",
+        "line": 5,
+        "disposition": "excluded",
+        "group": "protocol77-tab-kind-removal-old-page-reload",
+        "bucket": "high",
+        "recording": "covered",
+        "queue_target_candidate": null,
+        "needs_independent_drop_check": false,
+        "reason": "Parent explicitly accepted named covered proposal from claims-065 after inspecting it. The reply and schema agree for matching clients. The distinct old-page misdrawing and input disconnection consequence is explicitly accepted pending reload. Covered for the stale-page consequence; refuted for the matching-client renderer-choice concern. Broader protocol correctness is outside this check. Checked source/results: [\"f560058da19e02716e6f943883a9508b447aff4e:service/core/host_tabs.rs:169-172 returns TabInfo{id}; farhelm-proto/src/lib.rs:1676-1695 defines that shape, and :255 is protocol 77.\",\"Current SPEC_impl.md Grid streams:2937-2956 explains the removed kind fields, protocol refusal between mismatched helm/supervisor, and the old loaded page's absent-kind/notice fallback drawing grid messages as output and rejecting typed input. No execution.\"] Current coverage/results: [\"Both specifications searched for terminal kinds, protocol 77 and old pages. Exact acceptance is SPEC_impl.md Grid streams; matching-client concern is separately refuted by schema coordination.\",\"TODO Planned empty; BUGS and active TRIAGE_OUTCOMES contain no exact additional item. plans/queue tmux-end-old-terminals criterion 3 is already landed (REPORTS.md:29), not unlanded coverage. INDEX.md has no exact same-root item.\",\"No filter needed.\"] Exact cited cover: [\"SPEC_impl.md:2948-2949: A page loaded from the previous helm and left open across the update must be reloaded; nothing keeps it working.\",\"SPEC_impl.md:2955-2956: Keeping the stream notice for such pages was considered and not done: a reload is the whole remedy.\"] Original stronger consequence and missing premise remain preserved: \"Old pages can misdraw grid messages and lose their attachment on input until reloaded. That high UX consequence remains explicit; there is no established destructive action or loss of user-owned work.\"; null."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-065",
+          "key": "g099/c2",
+          "latest_line": 5,
+          "recommendation": "covered",
+          "bucket": "high",
+          "underlying_key": "protocol77-tab-kind-removal-old-page-reload",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The reply and schema agree for matching clients. The distinct old-page misdrawing and input disconnection consequence is explicitly accepted pending reload.",
+          "checks": [
+            "f560058da19e02716e6f943883a9508b447aff4e:service/core/host_tabs.rs:169-172 returns TabInfo{id}; farhelm-proto/src/lib.rs:1676-1695 defines that shape, and :255 is protocol 77.",
+            "Current SPEC_impl.md Grid streams:2937-2956 explains the removed kind fields, protocol refusal between mismatched helm/supervisor, and the old loaded page's absent-kind/notice fallback drawing grid messages as output and rejecting typed input. No execution."
+          ],
+          "coverage_checked": [
+            "Both specifications searched for terminal kinds, protocol 77 and old pages. Exact acceptance is SPEC_impl.md Grid streams; matching-client concern is separately refuted by schema coordination.",
+            "TODO Planned empty; BUGS and active TRIAGE_OUTCOMES contain no exact additional item. plans/queue tmux-end-old-terminals criterion 3 is already landed (REPORTS.md:29), not unlanded coverage. INDEX.md has no exact same-root item.",
+            "No filter needed."
+          ],
+          "exact_cover_quotes": [
+            "SPEC_impl.md:2948-2949: A page loaded from the previous helm and left open across the update must be reloaded; nothing keeps it working.",
+            "SPEC_impl.md:2955-2956: Keeping the stream notice for such pages was considered and not done: a reload is the whole remedy."
+          ],
+          "missing_premise": null,
+          "original_stronger_consequence": "Old pages can misdraw grid messages and lose their attachment on input until reloaded. That high UX consequence remains explicit; there is no established destructive action or loss of user-owned work.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Covered for the stale-page consequence; refuted for the matching-client renderer-choice concern. Broader protocol correctness is outside this check."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": false,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "high",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "protocol77-tab-kind-removal-old-page-reload",
+        "destination": null
+      }
+    },
+    {
+      "key": "g099/c3",
+      "owner": "g099",
+      "id": "c3",
+      "domain": "supervisor-terminal-host-lifecycle",
+      "purpose": "supervisor-terminal-host-lifecycle: crates/farhelm-supervisor/src/service/core/host_restart.rs, crates/farhelm-supervisor/src/service/core/host_tabs.rs, crates/farhelm-supervisor/src/launch.rs, crates/farhelm-supervisor/src/scope.rs; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 4,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c3",
+            "state": "open",
+            "summary": "tab cleanup retains scope provenance and attachment teardown",
+            "location": "crates/farhelm-supervisor/src/service/core/host_tabs.rs:987",
+            "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333\n\nTLDR: Considered whether replacing the tab-scope wrapper with a boolean, and removing the detach result, lets closing a tab falsely report cleanup complete. Source refutes that regression.\n\nDetails: The removed HostTab::tab_scope was exactly a two-way mapping of self.scoped to Scoped/Unscoped. host_tabs.rs:405-417 stores whether this actual launch obtained a scope in its host tag and cell; failed starts pass the same scoped at lines 424-427. Close passes tab.scoped into reap_tab_tree at 987 and 1004-1011. core.rs:14120-14180 uses that value in ScopeUnits::tab and still sets ScopeKillFailure::Refuse; it obtains a root only from the pinned child and uses MarkerOnly after ending the host. host_tabs.rs:1013-1037 forgets the tab only after its host end is confirmed, while a failed end is retained for reaping. core.rs:14072-14094 shows detach_closed_tab now has no fallible result: it removes this tab attachment, joins its forwarder and sends the tab-closed notice without a tmux command. The change at host_tabs.rs:999 therefore drops no error that this host path could produce.\n\nSuggested bucket: other; no regression or user impact established. Could-be-highest: no for the considered false-success/leftover-process concern; no changed destructive target was found. Confidence: confirmed through source and contract comparison, no execution. proposed_drop: refuted by direct preservation of the scoped provenance, cleanup refusal and detach operations. possible_cover: none. Caveat: unrelated pre-existing teardown behavior is outside this conclusion."
+          }
+        },
+        {
+          "line": 11,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c3",
+            "state": "open",
+            "summary": "tab cleanup preserves scope provenance, host end checks and restart sharing",
+            "location": "crates/farhelm-supervisor/src/service/core/host_tabs.rs:987",
+            "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333\n\nTLDR: Considered whether replacing the tab-scope wrapper with a boolean and removing the detach result lets closing a tab falsely report cleanup complete, or lets an agent Restart lose its tab runtimes. Source refutes those specific regressions.\n\nDetails: Removed HostTab::tab_scope exactly mapped self.scoped to Scoped/Unscoped. host_tabs.rs:405-417 records the actual launch's scope selection in the tag/cell; failed starts pass the same scoped at 424-427. Close passes tab.scoped at 987 and 1004-1011. core.rs:14120-14180 takes a pinned child root before teardown, passes ScopeKillFailure::Refuse, and uses MarkerOnly after host teardown. sweep.rs:1291-1300 maps a scoped tab into recorded units, an unscoped tab into derived units with a required portable sweep; 1465-1501 re-probes for recorded units and records an unusable manager as a scope failure; 1527-1543 refuses scope failures even after a successful portable sweep. Thus replacing the wrapper retains the distinction needed when a scoped tab outlives the cached manager verdict. Parent independently reports that g098/g101 corroborate the probe/root mapping; that corroboration is not a blanket lifecycle verdict.\n\nHost end confirmation: host_tabs.rs:1052-1062 has a special Gone case that ends/verifies the original adopted process before forgetting the tab. Other tab closes use host_launch.rs:682-719: runtime Shutdown must report ended, otherwise it aborts the runtime and falls back to its fixed adopted process; without one it validates the socket's tag through end_host_tagged_for at 753-801. host_launch.rs:727-745 accepts only the verified process's confirmed end. A failed end retains the tab/record at host_tabs.rs:1026-1037. These source checks close the specific socket-gone versus process-gone assumption for tabs; they do not claim all host shutdown paths have been reviewed.\n\nRestart interaction: core.rs:12719-12726 keeps the shared tab cell in restarting_tabs while the session is off-map. relaunched_entry shares session cells at 3351. Success removes the holding entry and fences the same tabs under the session map at 13183-13195; failure does so at 12911-12924. host_handover.rs:491-498 aborts those runtimes if orderly shutdown already gathered them, otherwise wakes re-adoption. An agent Restart's retained tabs therefore use the same scoped provenance and cleanup path after publication.\n\nDetach remains infallible at the interface: core.rs:14072-14094 removes only this tab attachment, joins its forwarder and sends the tab-closed notice without a tmux command, so host_tabs.rs:999 drops no fallible result.\n\nSuggested bucket: other; no regression established. Could-be-highest: no for the considered false-success/leftover-process and runtime-retention concerns; no newly changed destructive target or loss route was found. Confidence: confirmed for these mappings and caller contracts through source, no execution. proposed_drop: source refutation of those bounded regression candidates. possible_cover: none. Caveats: host_shutdown internals and independent retained-code failure policies are not declared universally safe; l1 records the separate unchanged failed-relaunch sweep policy."
+          }
+        }
+      ],
+      "latest": {
+        "line": 11,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c3",
+          "state": "open",
+          "summary": "tab cleanup preserves scope provenance, host end checks and restart sharing",
+          "location": "crates/farhelm-supervisor/src/service/core/host_tabs.rs:987",
+          "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333\n\nTLDR: Considered whether replacing the tab-scope wrapper with a boolean and removing the detach result lets closing a tab falsely report cleanup complete, or lets an agent Restart lose its tab runtimes. Source refutes those specific regressions.\n\nDetails: Removed HostTab::tab_scope exactly mapped self.scoped to Scoped/Unscoped. host_tabs.rs:405-417 records the actual launch's scope selection in the tag/cell; failed starts pass the same scoped at 424-427. Close passes tab.scoped at 987 and 1004-1011. core.rs:14120-14180 takes a pinned child root before teardown, passes ScopeKillFailure::Refuse, and uses MarkerOnly after host teardown. sweep.rs:1291-1300 maps a scoped tab into recorded units, an unscoped tab into derived units with a required portable sweep; 1465-1501 re-probes for recorded units and records an unusable manager as a scope failure; 1527-1543 refuses scope failures even after a successful portable sweep. Thus replacing the wrapper retains the distinction needed when a scoped tab outlives the cached manager verdict. Parent independently reports that g098/g101 corroborate the probe/root mapping; that corroboration is not a blanket lifecycle verdict.\n\nHost end confirmation: host_tabs.rs:1052-1062 has a special Gone case that ends/verifies the original adopted process before forgetting the tab. Other tab closes use host_launch.rs:682-719: runtime Shutdown must report ended, otherwise it aborts the runtime and falls back to its fixed adopted process; without one it validates the socket's tag through end_host_tagged_for at 753-801. host_launch.rs:727-745 accepts only the verified process's confirmed end. A failed end retains the tab/record at host_tabs.rs:1026-1037. These source checks close the specific socket-gone versus process-gone assumption for tabs; they do not claim all host shutdown paths have been reviewed.\n\nRestart interaction: core.rs:12719-12726 keeps the shared tab cell in restarting_tabs while the session is off-map. relaunched_entry shares session cells at 3351. Success removes the holding entry and fences the same tabs under the session map at 13183-13195; failure does so at 12911-12924. host_handover.rs:491-498 aborts those runtimes if orderly shutdown already gathered them, otherwise wakes re-adoption. An agent Restart's retained tabs therefore use the same scoped provenance and cleanup path after publication.\n\nDetach remains infallible at the interface: core.rs:14072-14094 removes only this tab attachment, joins its forwarder and sends the tab-closed notice without a tmux command, so host_tabs.rs:999 drops no fallible result.\n\nSuggested bucket: other; no regression established. Could-be-highest: no for the considered false-success/leftover-process and runtime-retention concerns; no newly changed destructive target or loss route was found. Confidence: confirmed for these mappings and caller contracts through source, no execution. proposed_drop: source refutation of those bounded regression candidates. possible_cover: none. Caveats: host_shutdown internals and independent retained-code failure policies are not declared universally safe; l1 records the separate unchanged failed-relaunch sweep policy."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g099/findings.jsonl",
+        "id": "c3",
+        "line": 11,
+        "disposition": "under-investigation",
+        "group": "g099-c3",
+        "reason": "Record durably acknowledged; parent source/contract validation, cross-group synthesis, coverage/filter matching and any independent drop check remain pending. This preserves the claim and uncertainty without accepting, dropping or lowering it."
+      },
+      "accepted_parent_decision": null,
+      "returned_claim_checks": [
+        {
+          "batch": "claims-065",
+          "key": "g099/c3",
+          "latest_line": 11,
+          "recommendation": "refuted",
+          "bucket": "other",
+          "underlying_key": "host-tab-scope-bool-and-detach-conversion",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The actual scoped selection still reaches the cleanup policy, and forgetting a tab still requires confirmed host end. Removing an infallible detach result loses no error.",
+          "checks": [
+            "1ed482dde220452e424973faf38a5e1318986333:service/core/host_tabs.rs:987-1037 passes tab.scoped in both sweeps, detaches before host end, and retains failed ends. :1052-1062 confirms an adopted process even when its socket was judged gone.",
+            "Same revision service/core.rs:14072-14094 detach_closed_tab returns (), removes the exact attachment, joins its forwarder and notifies it. :14120-14180 obtains the pinned root and sends the scope selection with ScopeKillFailure::Refuse.",
+            "service/sweep.rs:1527-1543 distinguishes Warn from Refuse; a clean portable sweep does not hide a scope failure for tab close. These checks refute the wrapper/detach regression; no runtime observation."
+          ],
+          "coverage_checked": [
+            "SPEC.md lifecycle/tab rules and SPEC_impl.md Tabs in hosts and Restarting a host agent were searched/read: tabs share session cells across Restart and failed end retains tab/record. No specification exception is used.",
+            "TODO Planned empty; BUGS and active TRIAGE_OUTCOMES no exact item. Landed tmux removal plans do not provide independent unlanded coverage. INDEX.md related tab cleanup and restart-unwind documentation items have different causes/consequences.",
+            "FILTER.md not applied."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": "The broader Restart tab-cell retention synthesis was not independently reread in full; refutation is firm for scope provenance, detach result and end-confirmation conversion. Parent can retain that broader subclaim as uncertainty if it needs an independent verdict on every synthesis assertion.",
+          "original_stronger_consequence": "Initially false successful cleanup/leftover processes; later considered Restart losing its tab runtimes. No newly changed destructive target was established. Preserve the possible user-work implication of the latter when checking the proposed dismissal.",
+          "needs_independent_drop_check": true,
+          "proposed_basis": "Refute the bounded conversion regressions. Do not turn this into blanket host-shutdown or rollback correctness."
+        }
+      ],
+      "parent_proposals": [
+        {
+          "artifact": "parent-flagged-judgments-065.json",
+          "key": "g099/c3",
+          "proposal": "claim-checks/claims-065/result.json",
+          "parent_proposal": "source-refuted-specific-tab-scope-detach-and-restart-cell-loss-regressions",
+          "final_independent_gate": "required-before-original-possible-work-loss-drop",
+          "reason": "Full065 and complete actual latest c3 read. Scope provenance, Refuse policy and confirmed-end requirements refute the named conversion. Parent additionally directly read1ed core12719-12726,12911-12924,13183-13195,3351 and host_handover491-498: Restart retains the shared tab cell off-map, relaunched entry shares session, both publications fence the same cell, orderly stop aborts otherwise readoption wakes. Thus broader tab-runtime retention subclaim has concrete source checks beyond the focused verdict's limitation. Detach14072-14094 is infallible exact-attachment removal/join/notice. No blanket host shutdown or unwind safety conclusion; original possible work consequence remains in gate."
+        }
+      ],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": true,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "host-tab-scope-bool-and-detach-conversion",
+        "destination": null
+      }
+    },
+    {
+      "key": "g099/l1",
+      "owner": "g099",
+      "id": "l1",
+      "domain": "supervisor-terminal-host-lifecycle",
+      "purpose": "supervisor-terminal-host-lifecycle: crates/farhelm-supervisor/src/service/core/host_restart.rs, crates/farhelm-supervisor/src/service/core/host_tabs.rs, crates/farhelm-supervisor/src/launch.rs, crates/farhelm-supervisor/src/scope.rs; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 8,
+          "event": {
+            "version": 1,
+            "kind": "lead",
+            "id": "l1",
+            "state": "open",
+            "summary": "check failed-relaunch sweep policy before concluding restore is safe",
+            "location": "crates/farhelm-supervisor/src/service/core/host_restart.rs:765",
+            "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333\n\nTLDR: A failed restart must not restore the old outcome while a replacement program may still run. The retained unwind calls its sweep with a warning policy; its actual failure meaning needs checking before drawing a conclusion.\n\nDetails: In synthesis, host_restart.rs:719-782 says that an unconfirmed reap retains an ambiguous launch, but its reap_process_tree call at 765-773 uses ScopeKillFailure::Warn and treats only Err as ambiguous. Missing premise: whether Warn can turn an unconfirmed cleanup into Ok, and whether this was altered or made newly reachable by the assigned patches. Available checks next: read ScopeKillFailure handling and compare this helper with the pre-change revision. No bug or impact is established yet.\n\nSuggested bucket: other pending a route; could-be-highest: potentially, if a new route permits two resumed agents to act on the same work. Confidence: unverified lead, not complete. proposed_drop: false. possible_cover: none. Caveat: the helper appears retained rather than introduced by the assigned removal; independent pre-existing defects unrelated to removal are not this group's target. Source analysis only, no execution."
+          }
+        },
+        {
+          "line": 9,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "l1",
+            "state": "open",
+            "summary": "failed-relaunch sweep warning policy predates the assigned change",
+            "location": "crates/farhelm-supervisor/src/service/core/host_restart.rs:765",
+            "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333\n\nTLDR: A failed restart must not restore the old outcome while a replacement program may still run. The retained unwind can treat a failed scope check as a warning after a successful portable sweep; that policy is unchanged by the assigned patches.\n\nDetails and checks: host_restart.rs:733-782 calls reap_process_tree with ScopeKillFailure::Warn. sweep.rs:1367-1388 explains that warning policy, and 1527-1538 returns Ok when the portable sweep succeeds despite a scope error. Its source comment acknowledges at 1372-1374 that a scope may hold a scrubbed daemon the portable sweep cannot see. However, the immediately preceding revision has the identical unwind at host_restart.rs:1170-1219, including Warn at 1208 and definitive restoration at 1219. The assigned patch neither changes this helper nor changes this call's arguments/reachability for host-backed restart: the old Replacing::Host branch becomes the same Some(host) branch. The later two assigned revisions do not alter this helper either. No newly introduced route was found.\n\nSuggested bucket: other for this scope decision, with the original potential impact preserved: a surviving replacement descendant could act beside a later agent if a failed scope plus a clean portable sweep misses it. Could-be-highest: potentially, if that residual leads to concurrent programs damaging user work; no such damage route is established here. Confidence: confirmed that the policy and call predate this assigned change; the independent pre-existing correctness question is not resolved or declared safe. proposed_drop: outside the assigned per-commit changes, not refuted and not accepted merely because retirement is accepted; the same caller and policy exist in the immediate parent. possible_cover: none. Caveats: no runtime execution; no blanket lifecycle-correctness claim. This closes the readily checkable change-introduction premise of l1, not the safety of Warn in all rollback paths. Parent may route the independent retained-code concern to its owning scope and must preserve the potential highest consequence when considering this scope drop."
+          }
+        },
+        {
+          "line": 12,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "l1",
+            "state": "open",
+            "summary": "failed-relaunch warning policy exists at the exclusive range base",
+            "location": "crates/farhelm-supervisor/src/service/core/host_restart.rs:765",
+            "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333; attribution also checked at exclusive base 6e423e30068b62c6cfa276c6d720ee35bb70387a.\n\nTLDR: Failed-restart rollback can accept a successful portable sweep despite an unconfirmed scope. That policy predates the full review range, not merely the immediate assigned patch.\n\nDetails: Original concern preserved: host_restart.rs:733-782 uses ScopeKillFailure::Warn, and sweep.rs:1527-1538 can return Ok despite a scope error, allowing definitive rollback. A surviving replacement descendant could then act beside a later agent; potential user-work damage was not established. The prior event established only immediate-parent equivalence, which was insufficient to exclude introduction earlier within the range. That basis is superseded by direct base evidence: at 6e423e30068b62c6cfa276c6d720ee35bb70387a, host_restart.rs:1177-1226 contains the same helper, including recorded(scope), no root, AgentOnly, Warn at 1215, and definitive result at 1226. Bounded git log -G 'ScopeKillFailure::Warn|unwind_failed_host_relaunch' over base-exclusive through pinned tip for this path returns no commits. The helper/policy itself therefore predates the entire pinned range. Further comparison of shared sweep/caller behavior follows before treating this as fully attributed.\n\nCross-group reconciliation: g106/c2's actual-Err/Launching/no-terminal Delete guard concerns the branch where reap_process_tree returns Err. It does not refute this Warn-maps-Ok concern, which can reach definitive restoration instead. Do not describe all cleanup failures as either definitive or guarded.\n\nSuggested bucket: other for the attribution question; original potential concurrent-program consequence preserved. Could-be-highest: potentially if concurrent programs damage user work; no such damage route established. Confidence: confirmed base presence/no matching in-range history for the named helper and policy; not a universal correctness verdict. proposed_drop: previous outside-assigned-change proposal retained, now with direct pre-range helper evidence rather than immediate-parent evidence alone; pending shared-sweep/caller comparison. possible_cover: none. No parent drop or lowering accepted. Source-only checks, no execution."
+          }
+        },
+        {
+          "line": 13,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "l1",
+            "state": "open",
+            "summary": "failed-relaunch warning policy and restoration route predate the full range",
+            "location": "crates/farhelm-supervisor/src/service/core/host_restart.rs:765",
+            "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333; attribution checked against exclusive base 6e423e30068b62c6cfa276c6d720ee35bb70387a and inclusive tip 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db.\n\nTLDR: Failed-restart rollback can accept a successful portable sweep despite an unconfirmed scope. The helper, warning semantics and definitive restoration route all predate the full review range. This does not establish that the retained policy is safe.\n\nDetails: Original concern preserved: a replacement descendant missed by the portable sweep while its scope is unconfirmed could survive definitive rollback and act beside a later agent; user-work damage was not established. Current host_restart.rs:733-782 passes recorded(scope), no root, AgentOnly and Warn. sweep.rs:1527-1538 maps clean sweep plus scope error to Ok. Actual sweep Err instead yields ambiguous failure.\n\nFull-range checks/results: Base host_restart.rs:1177-1226 contains the same helper, Warn at 1215 and definitive return at 1226. Bounded git log -G 'ScopeKillFailure::Warn|unwind_failed_host_relaunch' for that file over the entire pinned range returns no commits. Base sweep.rs:1539-1562 already has the same Warn-maps-Ok / Refuse-maps-Err policy. The full-range sweep diff has no changes to that policy, recorded-unit re-probe or recorded(scope) construction; changes to tab classification and Stop do not alter this unwind's inputs. Base core.rs:13755-13829 already selects definitive versus ambiguous failure, aborts the durable relaunch on definitive, and sets Launching only on ambiguous. Thus the originally suspected restored-scope/descendant issue is not introduced by a prior in-range policy change either. These are source comparisons, not runtime observations.\n\nCross-group reconciliation: g106/c2's actual-Err -> ambiguous Launching/no-terminal -> guarded Delete route limits consequences for actual Err. It does not refute Warn -> Ok -> definitive restoration. Both branches remain distinct. No new route from the assigned removal was found.\n\nSuggested bucket: other for this attribution disposition; original potential concurrent-program damage remains explicit. Could-be-highest: potentially if surviving concurrent programs damage work; no such damage route established here. Confidence: confirmed pre-range helper/policy/caller presence; independent pre-existing safety concern remains unproven. proposed_drop: pre-existing before exclusive base, superseding the insufficient immediate-parent-only attribution basis in the earlier event. This is a scope proposal, not source refutation or specification acceptance of the residual. possible_cover: none. Caveats: no parent drop or lowering accepted; independent checking must preserve the original potential highest consequence. No queued coverage sources or runtime actions used. No remaining readily checkable attribution premise is open for this ID."
+          }
+        }
+      ],
+      "latest": {
+        "line": 13,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "l1",
+          "state": "open",
+          "summary": "failed-relaunch warning policy and restoration route predate the full range",
+          "location": "crates/farhelm-supervisor/src/service/core/host_restart.rs:765",
+          "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333; attribution checked against exclusive base 6e423e30068b62c6cfa276c6d720ee35bb70387a and inclusive tip 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db.\n\nTLDR: Failed-restart rollback can accept a successful portable sweep despite an unconfirmed scope. The helper, warning semantics and definitive restoration route all predate the full review range. This does not establish that the retained policy is safe.\n\nDetails: Original concern preserved: a replacement descendant missed by the portable sweep while its scope is unconfirmed could survive definitive rollback and act beside a later agent; user-work damage was not established. Current host_restart.rs:733-782 passes recorded(scope), no root, AgentOnly and Warn. sweep.rs:1527-1538 maps clean sweep plus scope error to Ok. Actual sweep Err instead yields ambiguous failure.\n\nFull-range checks/results: Base host_restart.rs:1177-1226 contains the same helper, Warn at 1215 and definitive return at 1226. Bounded git log -G 'ScopeKillFailure::Warn|unwind_failed_host_relaunch' for that file over the entire pinned range returns no commits. Base sweep.rs:1539-1562 already has the same Warn-maps-Ok / Refuse-maps-Err policy. The full-range sweep diff has no changes to that policy, recorded-unit re-probe or recorded(scope) construction; changes to tab classification and Stop do not alter this unwind's inputs. Base core.rs:13755-13829 already selects definitive versus ambiguous failure, aborts the durable relaunch on definitive, and sets Launching only on ambiguous. Thus the originally suspected restored-scope/descendant issue is not introduced by a prior in-range policy change either. These are source comparisons, not runtime observations.\n\nCross-group reconciliation: g106/c2's actual-Err -> ambiguous Launching/no-terminal -> guarded Delete route limits consequences for actual Err. It does not refute Warn -> Ok -> definitive restoration. Both branches remain distinct. No new route from the assigned removal was found.\n\nSuggested bucket: other for this attribution disposition; original potential concurrent-program damage remains explicit. Could-be-highest: potentially if surviving concurrent programs damage work; no such damage route established here. Confidence: confirmed pre-range helper/policy/caller presence; independent pre-existing safety concern remains unproven. proposed_drop: pre-existing before exclusive base, superseding the insufficient immediate-parent-only attribution basis in the earlier event. This is a scope proposal, not source refutation or specification acceptance of the residual. possible_cover: none. Caveats: no parent drop or lowering accepted; independent checking must preserve the original potential highest consequence. No queued coverage sources or runtime actions used. No remaining readily checkable attribution premise is open for this ID."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g099/findings.jsonl",
+        "id": "l1",
+        "line": 13,
+        "disposition": "under-investigation",
+        "group": "g099-l1",
+        "reason": "Record durably acknowledged; parent source/contract validation, cross-group synthesis, coverage/filter matching and any independent drop check remain pending. This preserves the claim and uncertainty without accepting, dropping or lowering it."
+      },
+      "accepted_parent_decision": null,
+      "returned_claim_checks": [
+        {
+          "batch": "claims-065",
+          "key": "g099/l1",
+          "latest_line": 13,
+          "recommendation": "out-of-range",
+          "bucket": "other",
+          "underlying_key": "failed-host-relaunch-warn-scope-error-definitive-rollback",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The named Warn-to-Ok unwind route exists at the exclusive base. This is an attribution proposal, not a safety refutation.",
+          "checks": [
+            "1ed482dde220452e424973faf38a5e1318986333:service/core/host_restart.rs:733-782 passes recorded(scope), no root, AgentOnly and Warn, and returns definitive after successful reap. Exclusive base 6e423e3:1177-1226 contains the same helper and arguments.",
+            "1ed482d:service/sweep.rs:1527-1543 and exclusive base :1539-1562 both map clean portable sweep plus scope error to Ok under Warn. The full-range sweep diff changes tab selection and Stop but not that policy. Bounded git log -G for Warn/unwind_failed_host_relaunch in host_restart.rs over the pinned range returns no commits.",
+            "Exclusive base service/core.rs:13755-13829 already restores the prior outcome after definitive failure and leaves Launching on ambiguous failure. Source only; no residual daemon or work damage reproduced."
+          ],
+          "coverage_checked": [
+            "SPEC.md cleanup constraints and SPEC_impl.md Restarting a host agent searched/read. They do not expressly accept a surviving replacement descendant under definitive rollback.",
+            "TODO Planned empty; BUGS/active TRIAGE_OUTCOMES no exact route. tmux-drop-from-docs references restart-unwind-omits-tree-sweep-failure but is landed (REPORTS.md:32), and its scope is documentation.",
+            "Read review_feedback_queue/restart-unwind-omits-tree-sweep-failure.md in full. It covers actual reap Err causing ambiguous/no-terminal rollback and inaccurate spec prose. This finding instead concerns Warn converting scope error into Ok, so that queue item is not exact coverage or an alias.",
+            "FILTER.md hung-manager rule excludes user-work loss and does not establish the complete trigger here; no filter proposed."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": "A supported missed replacement descendant and consequent damage remain unestablished. Independent drop check must agree with the whole-range attribution proposal while preserving this unresolved safety question.",
+          "original_stronger_consequence": "A replacement descendant missed by a clean portable sweep while its scope is unconfirmed could survive definitive rollback and act beside a later agent, potentially damaging user work. Actual Err-to-ambiguous guards do not refute this Warn-to-Ok route. Earlier immediate-parent-only exclusion was insufficient and has been superseded by base/policy/caller checks.",
+          "needs_independent_drop_check": true,
+          "proposed_basis": "Outside the pinned range for this unchanged helper/policy/restoration route. Do not label the residual safe or specification-accepted."
+        }
+      ],
+      "parent_proposals": [
+        {
+          "artifact": "parent-flagged-judgments-065.json",
+          "key": "g099/l1",
+          "proposal": "claim-checks/claims-065/result.json",
+          "parent_proposal": "whole-range-attribution-unchanged-Warn-to-Ok-relaunch-unwind",
+          "final_independent_gate": "required-before-possible-work-loss-out-of-range-drop",
+          "reason": "Full065 base helper1177-1226, caller13755-13829 and sweep1539-1562 already carry this Warn-to-Ok definitive rollback;1ed helper733-782 and sweep1527-1543 preserve them, full-range policy diff and bounded history show no introduced change. Attribution only, not safety or acceptance. Concrete missed replacement descendant and consequent harm remain missing. Existing restart-unwind queue covers actual Err/ambiguous/no-terminal path and is not an alias. Do not invent a new Podman exposure without a named new producer or changed contract."
+        }
+      ],
+      "collection": {
+        "retain": true,
+        "clearly_refuted_candidate": false,
+        "needs_unfinished_gate": true,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "failed-host-relaunch-warn-scope-error-definitive-rollback",
+        "destination": "trailing-failed-host-relaunch-warn-scope-error-definitive-rollback.md"
+      }
+    }
+  ],
+  "replies": [
+    {
+      "turn": 1,
+      "reply": "Initial pass complete: all six patches, 1,256 lines reviewed.\n\nRecorded `f1`: old-terminal retirement ends programs and loses history, explicitly accepted by specification; proposed drop requires independent highest-impact review. Recorded candidates `c1`–`c3` with their dispositions. No open leads or unread assigned material.\n\nFindings and progress logs updated. Source analysis only; no execution."
+    },
+    {
+      "turn": 2,
+      "reply": "- Revised `f1`: preserved the highest consequence and literal acceptance, noted possible duplication with `g053/f1`, and separated guidance/warning concerns.\n- Revised `c3`: verified scope provenance, host-end confirmation, and tab sharing across Restart.\n- Added and resolved `l1` as an out-of-scope candidate: the failed-restart warning policy predates the assigned changes; its safety remains unproven.\n\nNo new in-scope bug established. Unresolved lead IDs: none."
+    },
+    {
+      "turn": 3,
+      "reply": "Discovery pass 1 found no new in-scope issue.\n\nChecked removed identifiers, tab metadata and failure cleanup, restart seed/fault contracts, and diagnostic-string consumers. Revised `l1`: its warning policy and restoration route predate the full range; the actual-`Err` guard does not cover `Warn -> Ok`.\n\nNew verified IDs: none. New unverified IDs: none. Open leads: none. Progress updated."
+    }
+  ],
+  "progress": "# g099 review progress\n\nInitial review complete; awaiting the caller's later synthesis turn. Turn type: initial. Turn count: 1. Discovery-pass count: 0. No runtime tests, builds, or reproductions ran. Nothing in the checkout was changed.\n\nRead the brief in full and the entire inventory commits field, without reading excluded coverage metadata. The root AGENTS.md End sentinel was present. Loaded skillette. Read machine rules, Priority buckets, and recording template/rules. All six assigned patch parts were delivered through evidence read, covering all 1,256 assigned lines:\n\n- 00927-000.patch: 1-180, 181-360, 361-540, 541-706 (first packet repeated with direct stdout).\n- 00928-000.patch: 1-195, 196-389.\n- 01049-000.patch: 1-21.\n- 01538-000.patch: 1-45.\n- 01539-000.patch: 1-37.\n- 01544-000.patch: 1-58.\n\nPinned source context read at 1ed482dde220452e424973faf38a5e1318986333:\n\n- service/core/host_restart.rs: 199-650; module docs and deleted tmux migration fully read through its assigned patch.\n- service/core/host_tabs.rs: 397-547, 907-1055; modified settle/open/unwind/cleanup sections fully read through its assigned patch.\n- service/core.rs: 12370-12670, 12980-13055, 14050-14230.\n- terminal_process.rs: 1-180 (entire short file).\n- service/terminals.rs: 1-270.\n- hosts/terminal.rs: 2490-2675; same-commit HostStatus::probe diff around 800-835 read, including a narrow repeat after an oversized exploratory result clipped.\n- service/core/old_terminals.rs: 1-240 for the removal/replacement contract only.\n\nAt f560058da19e02716e6f943883a9508b447aff4e: TabInfo declaration at farhelm-proto/src/lib.rs 1677-1701, its protocol declaration and same-commit protocol diff first 130 lines; relevant Grid streams contract at SPEC_impl.md 2985-3106.\n\nAt 08399d092d20815ced6619c26df2391944ae2b4a: scope.rs 155-267, 1740-1798; launch.rs 4520-4600; environment contract matched at SPEC_impl.md 2188-2205. These assigned changes are comments, assertion diagnostic text, and log wording, with no changed test action or launch/scope behavior.\n\nGoverning contracts at 1ed482dde220452e424973faf38a5e1318986333: SPEC.md Lifecycle operations 1884-2126, Terminal experience 2855-3187, Terminal-tab working directory 4809-4816; SPEC_impl.md Terminal host 1963-2700 and Terminal substrate: private tmux server 2880-2991. Reads used bounded ranges. Searches located relevant contracts; clipped exploratory search results were not treated as complete reads.\n\nInterface assumptions checked: core restart supplies the same held host runtime and history seed to host_restart, and a session with no held terminal starts with no seed. Old tmux terminals are deliberately ended during startup; independent correctness of that startup cleanup belongs to its assigned group. Tab scope provenance remains the actual launch's scoped bit in its tag/cell. Probe variants map one-to-one for hosts, with unreadable-host errors retained. Detach no longer has a fallible tmux action. Protocol 77 removes terminal kinds together; matching peers use grids and mismatched peers refuse, while an old already-loaded page requires reload by explicit specification decision.\n\nDurable records created this pass: f1 (confirmed source consequence; proposed specification drop requiring independent highest drop check), c1 (probe conversion refuted), c2 (matching protocol concern refuted; old-page interruption explicitly accepted), c3 (cleanup concern refuted). Revisions appended under f1 and c2 retain their original consequences and refine exact contract evidence. New verified IDs: f1, c1, c2, c3. New unverified IDs: none. Open leads: none.\n\nUnread assigned material: none. No coverage-source matching performed. Next action: caller-directed synthesis; do not treat the proposed highest drop as approved by this reviewer.\n\n## Later-turn synthesis, turn 2\n\nSynthesis complete. Turn type/count: synthesis / 2 total turns. Discovery-pass count remains 0. No tests, builds, runtime observations or reproductions. Unread assigned scope: none. No open lead-kind records remain.\n\nRevisited retained host seed ownership, cancellation and publication; tab scope provenance, pinned-root mapping, process-versus-socket end confirmation; shared tab cells across successful/failed agent Restart and orderly-stop fences. New pinned context at 1ed482dde220452e424973faf38a5e1318986333: host_restart.rs 650-852; host_tabs.rs 1042-1115; host_launch.rs 650-840; hosts/terminal.rs 2410-2489, 3147-3162, 3720-3805; sweep.rs 1260-1320, 1350-1548; core.rs 3240-3360, 12670-12979, 13055-13205; host_handover.rs 440-515. Compared the parent revision's host_restart.rs 1170-1230 to settle l1's introduction premise. Searches located these symbols; no excluded coverage content read.\n\nRevised f1 under the original ID with the parent's possible g053/f1 duplicate, keeping original highest termination/history-loss consequence and literal acceptance. No drop was accepted. Added source checks showing host seed encode is owned by the runtime, the deleted cancellation helper belonged to tmux, and publication/restoration still receives the same retained host. Explicitly kept generic guidance and hidden-failure-warning concerns separate from retirement acceptance.\n\nRevised c3 under its original ID with the checked scope classification/re-probe/refusal chain, original-adopted-process check for a Gone tab, shared session cell across restart, and shutdown fences. Parent reports g098/g101 independently corroborate pinned-root mapping; no blanket lifecycle correctness inferred.\n\nNew ID l1 was recorded immediately as a lead upon noticing Warn in failed-relaunch unwind. Source inspection established Warn can return Ok after a clean portable sweep despite a failed scope, but the identical helper/policy/call already exists at the immediate parent and is not changed or made newly reachable by these assigned patches. Revised l1 to candidate as outside the assigned changes, preserving the possible concurrent-program consequence and potentially highest residual rather than declaring it refuted or specification-accepted. Independent correctness of that retained policy remains a potential handoff for its owner; no newly introduced in-scope route established.\n\nNew verified IDs this turn: l1's no-delta/introduction premise. New in-scope bug findings: none. New unverified residual: l1's independent pre-existing cleanup question, explicitly bounded outside this assignment. Revised existing IDs: f1, c3. Unresolved lead IDs: none. Next action: caller-directed discovery/synthesis if requested; parent owns scope matching and all proposed-drop decisions.\n\n## Discovery pass 1, turn 3\n\nCompleted a separate discovery search after reading discovery-neighbours.json in bounded line chunks through its closing brace at 551. Read all supplied neighbour records as interface/novelty context, not source credit. No helper agents, tests, builds, reproductions or live-install actions. Unread assigned material: none.\n\nPending cross-group questions settled first: corrected l1's inadequate immediate-parent attribution using the full pinned range. Base 6e423e30068b62c6cfa276c6d720ee35bb70387a already has unwind_failed_host_relaunch at host_restart.rs 1177-1226 with recorded(scope), None root, AgentOnly, Warn and definitive return. Bounded full-range -G history for the helper/Warn has no matches. Base sweep.rs 1539-1562 already maps clean portable sweep plus scope error to Ok for Warn. Read the base-to-tip sweep diff (first 210 lines covering the relevant production changes); no change in the recorded-unit failure/warning policy or that unwind's inputs was found. Base core.rs 13755-13829 already distinguishes definitive restoration from ambiguous Launching. The original potential surviving-descendant/concurrent-work consequence remains in l1; this is pre-range attribution, not a correctness refutation or accepted drop. g106/c2's actual-Err ambiguous/no-terminal Delete guard applies only to actual Err, not Warn mapped to Ok. Recorded two revisions under l1 as each premise was settled; final attribution is no longer pending.\n\nSeparate new search beyond known records: searched assigned paths at 1ed482d for removed terminal/type/hook/seed/scope identifiers; no stale removed identifier was found (HostTerminal references correctly remain). Read host_tabs.rs 115-285 to check metadata preservation, finished/reap predicates and reply ordering after removal of wrappers; read host_restart.rs 110-198 for seed representation and remaining fault-stage contracts. Read host_tabs.rs 730-857 for failed-open cleanup arguments and scope/marker passes; all changed boolean/host arguments continue to come from the actual tab cell/launch. Read 08399d launch.rs 710-785 to check the revised directory/helper explanation against argv construction. Searched crates at 08399d for the replaced old-terminal log and assertion diagnostic strings; no remaining exact-string consumer found. The assigned late patch changes no test action/oracle beyond assertion diagnostic wording; no separate test-quality defect emerged. Known retirement, protocol compatibility, probe mapping, host-end and rollback concerns were not reissued as discoveries.\n\nResult: no new in-scope issue found. New verified finding IDs: none. New unverified-after-investigation IDs: none. Revised ID: l1 (full-range attribution and precise actual-Err versus Warn reconciliation). Remaining open lead IDs: none. Discovery-pass count: 1; total turn count: 3 (initial, synthesis, discovery). All original proposed-drop bases/consequences remain durable; no parent drop or lowering accepted. Next action only if directed by caller.\n"
+}

@@ -1,0 +1,471 @@
+{
+  "group": {
+    "id": "g119",
+    "domain": "supervisor-terminal-streaming",
+    "purpose": "supervisor-terminal-streaming: crates/farhelm-supervisor/src/service/terminals.rs; phases -async fn shutdown_session_sink_until_safe(",
+    "interfaces": [
+      "g001",
+      "g007",
+      "g008",
+      "g009",
+      "g074",
+      "g075",
+      "g076",
+      "g079",
+      "g080",
+      "g081",
+      "g082",
+      "g083",
+      "g084",
+      "g102",
+      "g103",
+      "g104",
+      "g105",
+      "g106",
+      "g107",
+      "g108",
+      "g109",
+      "g110",
+      "g111",
+      "g112",
+      "g113",
+      "g114",
+      "g115",
+      "g116",
+      "g117",
+      "g118",
+      "g120",
+      "g121",
+      "g124",
+      "g159",
+      "g160",
+      "g161",
+      "g162",
+      "g163",
+      "g164",
+      "g165",
+      "g166",
+      "g167",
+      "g168",
+      "g169",
+      "g170",
+      "g171",
+      "g172",
+      "g173"
+    ],
+    "sources": [
+      {
+        "path": "[private-run]/prep/parts/00944-001.patch",
+        "ranges": [
+          [
+            1,
+            1243
+          ]
+        ],
+        "original_path": "crates/farhelm-supervisor/src/service/terminals.rs",
+        "commit": "1ed482dde220452e424973faf38a5e1318986333",
+        "notes": "-async fn shutdown_session_sink_until_safe(; patch character offsets [58738,116219)",
+        "lines": 1243,
+        "bytes": 57511,
+        "start": 58738,
+        "end": 116219,
+        "original": "[private-run]/prep/originals/00944.patch"
+      }
+    ],
+    "lines": 1243,
+    "bytes": 57511
+  },
+  "records": [
+    {
+      "key": "g119/c1",
+      "owner": "g119",
+      "id": "c1",
+      "domain": "supervisor-terminal-streaming",
+      "purpose": "supervisor-terminal-streaming: crates/farhelm-supervisor/src/service/terminals.rs; phases -async fn shutdown_session_sink_until_safe(",
+      "history": [
+        {
+          "line": 1,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c1",
+            "state": "open",
+            "summary": "Removed output reaping barriers do not leave a replacement control client overlapping",
+            "location": "crates/farhelm-supervisor/src/service/terminals.rs:478",
+            "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. TLDR: Considered whether removing the output-reap and session-sink barriers could let disconnect or takeover crash the shared terminal server and lose running sessions. Suggested bucket: highest if the old tmux-control-client route remained; could-be-highest: true. Confidence: confirmed source refutation for this assigned removal, not runtime observation. Source/contract: the replacement ActiveAttach at terminals.rs:431-458 holds HostAttach and an in-process GridSender task, with join_forwarder at 478-483. service/grid_stream.rs:937-965 selects shutdown against the whole stream, drops that stream before synchronous report_forwarder_end, and owns no control-mode child. HostAttach::drop at grid_stream.rs:1169-1175 signals cancellation; Pump::run at 1201-1241 selects that cancellation both while waiting and handing input over. service/teardown.rs:1237-1255 signals all drained tasks before joining any. SPEC_impl.md:1963-1981 says every terminal served is a terminal host; each host runtime independently owns its connection (2098-2128), unlike an attachment's removed tmux client. proposed_drop: refuted by replacement ownership and cancellation code; removing the tmux process reaping barrier cannot produce its former output-client overlap hazard because the replacement holds no such process. possible_cover: none searched. Caveat: this resolves only the removed output-client lifecycle mechanism, not every terminal-host input/order behavior or the separately specified startup retirement policy."
+          }
+        }
+      ],
+      "latest": {
+        "line": 1,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c1",
+          "state": "open",
+          "summary": "Removed output reaping barriers do not leave a replacement control client overlapping",
+          "location": "crates/farhelm-supervisor/src/service/terminals.rs:478",
+          "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. TLDR: Considered whether removing the output-reap and session-sink barriers could let disconnect or takeover crash the shared terminal server and lose running sessions. Suggested bucket: highest if the old tmux-control-client route remained; could-be-highest: true. Confidence: confirmed source refutation for this assigned removal, not runtime observation. Source/contract: the replacement ActiveAttach at terminals.rs:431-458 holds HostAttach and an in-process GridSender task, with join_forwarder at 478-483. service/grid_stream.rs:937-965 selects shutdown against the whole stream, drops that stream before synchronous report_forwarder_end, and owns no control-mode child. HostAttach::drop at grid_stream.rs:1169-1175 signals cancellation; Pump::run at 1201-1241 selects that cancellation both while waiting and handing input over. service/teardown.rs:1237-1255 signals all drained tasks before joining any. SPEC_impl.md:1963-1981 says every terminal served is a terminal host; each host runtime independently owns its connection (2098-2128), unlike an attachment's removed tmux client. proposed_drop: refuted by replacement ownership and cancellation code; removing the tmux process reaping barrier cannot produce its former output-client overlap hazard because the replacement holds no such process. possible_cover: none searched. Caveat: this resolves only the removed output-client lifecycle mechanism, not every terminal-host input/order behavior or the separately specified startup retirement policy."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g119/findings.jsonl",
+        "id": "c1",
+        "line": 1,
+        "disposition": "under-investigation",
+        "group": "g119-c1",
+        "reason": "Record durably acknowledged; parent source/contract validation, cross-group synthesis, coverage/filter matching and any independent drop check remain pending. This preserves the claim and uncertainty without accepting, dropping or lowering it."
+      },
+      "accepted_parent_decision": null,
+      "returned_claim_checks": [
+        {
+          "batch": "claims-076",
+          "key": "g119/c1",
+          "latest_line": 1,
+          "recommendation": "refuted",
+          "bucket": "other",
+          "underlying_key": "removed-tmux-output-client-reap-hazard",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The old control-client overlap hazard requires the removed tmux process. A replacement attachment owns an in-process stream task rather than a tmux control-mode child. This narrowly refutes the removed-process lifecycle concern, not input ordering or startup retirement.",
+          "checks": [
+            "1ed482dde220452e424973faf38a5e1318986333:service/terminals.rs:414-483 owns HostAttach and a GridSender JoinHandle; service/grid_stream.rs:917-963 drops the whole stream future on shutdown and owns no control-mode child.",
+            "1ed482dd:service/teardown.rs:1237-1253 signals every output task before joining any. HostAttach drop at grid_stream.rs:1169-1175 cancels only input-pump work, not an agent or shared server."
+          ],
+          "coverage_checked": [
+            "SPEC.md Terminal experience:2898-2923,2998-3028 describes terminal hosts and deliberate old-server retirement; SPEC_impl.md Grid streams:2551-2589 assigns each viewer its own sender over an independently driven host.",
+            "TODO Planned empty. Searches of plans/queue, BUGS.md, INDEX.md and active TRIAGE_OUTCOMES for output reap/control-client overlap show no exact outstanding cover. No filter is used.",
+            "g117/c2 shares output ownership evidence but its original defect is output-task completion/deadlock, not a surviving external control-client crash route. They are related checks, not asserted exact aliases."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": "The required external output client no longer exists in this path. This says nothing about other causes that could terminate terminal hosts.",
+          "original_stronger_consequence": "Disconnect/takeover might crash a shared terminal server and lose running sessions (highest if the removed tmux-client hazard survived).",
+          "needs_independent_drop_check": true,
+          "proposed_basis": "Source refutation by replacement resource ownership; independent highest-impact drop check must judge that narrow scope."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": true,
+        "provisional_bucket": "highest",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "removed-tmux-output-client-reap-hazard",
+        "destination": null
+      }
+    },
+    {
+      "key": "g119/c2",
+      "owner": "g119",
+      "id": "c2",
+      "domain": "supervisor-terminal-streaming",
+      "purpose": "supervisor-terminal-streaming: crates/farhelm-supervisor/src/service/terminals.rs; phases -async fn shutdown_session_sink_until_safe(",
+      "history": [
+        {
+          "line": 2,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c2",
+            "state": "open",
+            "summary": "Atomic stop flag retains the locked attach-admission boundary",
+            "location": "crates/farhelm-supervisor/src/service/terminals.rs:490",
+            "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. TLDR: Considered whether replacing the sink registry's stopping flag with an atomic lets a new terminal attachment install after orderly shutdown drains the existing ones. Suggested bucket: high if established; could-be-highest: false (this check concerns a stranded attachment, with no source route to lost processes or user data). Confidence: confirmed source refutation, no runtime observation. Source: service/teardown.rs:1237-1255 acquires attachments and stores attachments_closed=true before draining it. service/handlers.rs:1740-1754 checks is_stopping under that same attachments lock before creating output tasks or installing an attachment. terminals.rs:490-493 reads the flag with SeqCst. Thus the atomic does not replace the lock that serializes installation against the drain; it only stores the closed state. Contract: SPEC_impl.md, Terminal host, Grid streams (2626-2676) preserves shared attachment machinery while terminals remain independently driven. proposed_drop: refuted by the common attachments lock in the writer and reader. possible_cover: none searched. Caveat: shutdown_output_clients may time out while waiting for that lock, as its documented budget allows; that is separate from an atomic visibility or check/install race."
+          }
+        }
+      ],
+      "latest": {
+        "line": 2,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c2",
+          "state": "open",
+          "summary": "Atomic stop flag retains the locked attach-admission boundary",
+          "location": "crates/farhelm-supervisor/src/service/terminals.rs:490",
+          "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. TLDR: Considered whether replacing the sink registry's stopping flag with an atomic lets a new terminal attachment install after orderly shutdown drains the existing ones. Suggested bucket: high if established; could-be-highest: false (this check concerns a stranded attachment, with no source route to lost processes or user data). Confidence: confirmed source refutation, no runtime observation. Source: service/teardown.rs:1237-1255 acquires attachments and stores attachments_closed=true before draining it. service/handlers.rs:1740-1754 checks is_stopping under that same attachments lock before creating output tasks or installing an attachment. terminals.rs:490-493 reads the flag with SeqCst. Thus the atomic does not replace the lock that serializes installation against the drain; it only stores the closed state. Contract: SPEC_impl.md, Terminal host, Grid streams (2626-2676) preserves shared attachment machinery while terminals remain independently driven. proposed_drop: refuted by the common attachments lock in the writer and reader. possible_cover: none searched. Caveat: shutdown_output_clients may time out while waiting for that lock, as its documented budget allows; that is separate from an atomic visibility or check/install race."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g119/findings.jsonl",
+        "id": "c2",
+        "line": 2,
+        "disposition": "excluded",
+        "group": "atomic-attachment-stop-admission",
+        "reason": "Parent explicitly accepted named refuted proposal from claims-076 after inspecting it. The atomic stores the stop state; it does not replace the mutex that serializes checking/installing against closing/draining attachments. Source refutation by the shared attachments lock across both admission and drain. Checked source/results: [\"1ed482dde220452e424973faf38a5e1318986333:service/teardown.rs:1237-1244 takes attachments and stores closed=true before draining under that same lock.\",\"1ed482dd:service/handlers.rs:1733-1751 acquires attachments and checks is_stopping before creating/installing output work; :1933-1968 constructs and inserts while retaining that lock. service/terminals.rs:490-493 uses SeqCst for the flag read.\"] Current coverage/results: [\"SPEC.md Terminal experience and SPEC_impl.md Grid streams were checked for shared attachment lifecycle; neither accepts a stranded post-shutdown attachment.\",\"TODO Planned empty; plans/queue, BUGS.md, INDEX.md and active TRIAGE_OUTCOMES searches for atomic stop/attachment admission show no exact cover. FILTER not applied.\",\"The documented total shutdown budget can expire while waiting for attachments; that is not the hypothesized check/install race.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"An attachment might install after the orderly-stop drain and be stranded (high if real); no route to loss of user data/processes was established.\"; \"No unlocked flag-check/install window exists in the cited path.\"."
+      },
+      "accepted_parent_decision": {
+        "key": "g119/c2",
+        "line": 2,
+        "disposition": "excluded",
+        "group": "atomic-attachment-stop-admission",
+        "bucket": "other",
+        "recording": "refuted",
+        "queue_target_candidate": null,
+        "needs_independent_drop_check": false,
+        "reason": "Parent explicitly accepted named refuted proposal from claims-076 after inspecting it. The atomic stores the stop state; it does not replace the mutex that serializes checking/installing against closing/draining attachments. Source refutation by the shared attachments lock across both admission and drain. Checked source/results: [\"1ed482dde220452e424973faf38a5e1318986333:service/teardown.rs:1237-1244 takes attachments and stores closed=true before draining under that same lock.\",\"1ed482dd:service/handlers.rs:1733-1751 acquires attachments and checks is_stopping before creating/installing output work; :1933-1968 constructs and inserts while retaining that lock. service/terminals.rs:490-493 uses SeqCst for the flag read.\"] Current coverage/results: [\"SPEC.md Terminal experience and SPEC_impl.md Grid streams were checked for shared attachment lifecycle; neither accepts a stranded post-shutdown attachment.\",\"TODO Planned empty; plans/queue, BUGS.md, INDEX.md and active TRIAGE_OUTCOMES searches for atomic stop/attachment admission show no exact cover. FILTER not applied.\",\"The documented total shutdown budget can expire while waiting for attachments; that is not the hypothesized check/install race.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"An attachment might install after the orderly-stop drain and be stranded (high if real); no route to loss of user data/processes was established.\"; \"No unlocked flag-check/install window exists in the cited path.\"."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-076",
+          "key": "g119/c2",
+          "latest_line": 2,
+          "recommendation": "refuted",
+          "bucket": "other",
+          "underlying_key": "atomic-attachment-stop-admission",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The atomic stores the stop state; it does not replace the mutex that serializes checking/installing against closing/draining attachments.",
+          "checks": [
+            "1ed482dde220452e424973faf38a5e1318986333:service/teardown.rs:1237-1244 takes attachments and stores closed=true before draining under that same lock.",
+            "1ed482dd:service/handlers.rs:1733-1751 acquires attachments and checks is_stopping before creating/installing output work; :1933-1968 constructs and inserts while retaining that lock. service/terminals.rs:490-493 uses SeqCst for the flag read."
+          ],
+          "coverage_checked": [
+            "SPEC.md Terminal experience and SPEC_impl.md Grid streams were checked for shared attachment lifecycle; neither accepts a stranded post-shutdown attachment.",
+            "TODO Planned empty; plans/queue, BUGS.md, INDEX.md and active TRIAGE_OUTCOMES searches for atomic stop/attachment admission show no exact cover. FILTER not applied.",
+            "The documented total shutdown budget can expire while waiting for attachments; that is not the hypothesized check/install race."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": "No unlocked flag-check/install window exists in the cited path.",
+          "original_stronger_consequence": "An attachment might install after the orderly-stop drain and be stranded (high if real); no route to loss of user data/processes was established.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Source refutation by the shared attachments lock across both admission and drain."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "high",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "atomic-attachment-stop-admission",
+        "destination": null
+      }
+    },
+    {
+      "key": "g119/c3",
+      "owner": "g119",
+      "id": "c3",
+      "domain": "supervisor-terminal-streaming",
+      "purpose": "supervisor-terminal-streaming: crates/farhelm-supervisor/src/service/terminals.rs; phases -async fn shutdown_session_sink_until_safe(",
+      "history": [
+        {
+          "line": 3,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c3",
+            "state": "open",
+            "summary": "Removing the pane-death latch does not discard the host terminal's final screen",
+            "location": "crates/farhelm-supervisor/src/service/terminals.rs:455",
+            "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. TLDR: Considered whether removing AttachBackend::observed_death and PaneDeath makes an exited agent disappear or leaves a dead stream waiting forever. Suggested bucket: high if established; could-be-highest: false (the examined consequence is final-screen visibility and attachment liveness, not lost execution or data). Confidence: confirmed source refutation, not execution. Source: service/grid_stream.rs:603-626 performs a final cycle before acting on the liveness it read; Exited leaves the attachment running, Gone reports TerminalEnded, and Unavailable reports StreamFailed. Its wait_for_work at 631-677 follows the runtime status watch and its closure, independently of the removed ticker-driven tmux latch. GridSender::run at 937-965 selects teardown against the whole stream. service/connection.rs:1272-1326 reports natural end/failure via a separate arbiter; detach_naturally at 1486-1519 identity-checks the originating task so a stale end cannot detach its replacement. Contract: SPEC.md, Terminal experience, lines 2898-2905 promises an exited session's terminal remains viewable; SPEC_impl.md, Terminal host, runtime paragraph at 2124-2128 says the processed exit follows drained output, while Grid streams at 2650-2656 distinguishes program exit from a gone host. proposed_drop: refuted by the replacement's runtime liveness/watch and final-cycle behavior; the removed latch was for a tmux attachment no longer constructed. possible_cover: none searched. Caveat: this is the deletion's interface check; it does not claim an exhaustive review of grid rendering or host journaling."
+          }
+        }
+      ],
+      "latest": {
+        "line": 3,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c3",
+          "state": "open",
+          "summary": "Removing the pane-death latch does not discard the host terminal's final screen",
+          "location": "crates/farhelm-supervisor/src/service/terminals.rs:455",
+          "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. TLDR: Considered whether removing AttachBackend::observed_death and PaneDeath makes an exited agent disappear or leaves a dead stream waiting forever. Suggested bucket: high if established; could-be-highest: false (the examined consequence is final-screen visibility and attachment liveness, not lost execution or data). Confidence: confirmed source refutation, not execution. Source: service/grid_stream.rs:603-626 performs a final cycle before acting on the liveness it read; Exited leaves the attachment running, Gone reports TerminalEnded, and Unavailable reports StreamFailed. Its wait_for_work at 631-677 follows the runtime status watch and its closure, independently of the removed ticker-driven tmux latch. GridSender::run at 937-965 selects teardown against the whole stream. service/connection.rs:1272-1326 reports natural end/failure via a separate arbiter; detach_naturally at 1486-1519 identity-checks the originating task so a stale end cannot detach its replacement. Contract: SPEC.md, Terminal experience, lines 2898-2905 promises an exited session's terminal remains viewable; SPEC_impl.md, Terminal host, runtime paragraph at 2124-2128 says the processed exit follows drained output, while Grid streams at 2650-2656 distinguishes program exit from a gone host. proposed_drop: refuted by the replacement's runtime liveness/watch and final-cycle behavior; the removed latch was for a tmux attachment no longer constructed. possible_cover: none searched. Caveat: this is the deletion's interface check; it does not claim an exhaustive review of grid rendering or host journaling."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g119/findings.jsonl",
+        "id": "c3",
+        "line": 3,
+        "disposition": "under-investigation",
+        "group": "g119-c3",
+        "reason": "Record durably acknowledged; parent source/contract validation, cross-group synthesis, coverage/filter matching and any independent drop check remain pending. This preserves the claim and uncertainty without accepting, dropping or lowering it."
+      },
+      "accepted_parent_decision": null,
+      "returned_claim_checks": [
+        {
+          "batch": "claims-076",
+          "key": "g119/c3",
+          "latest_line": 3,
+          "recommendation": "refuted",
+          "bucket": "other",
+          "underlying_key": "removed-pane-death-latch-host-final-screen",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "Runtime liveness/watch replaces the removed tmux latch. Program exit does not end the view; a cycle runs before Gone/Unavailable verdicts, and a separate identity-checked arbiter handles natural detach.",
+          "checks": [
+            "1ed482dde220452e424973faf38a5e1318986333:service/grid_stream.rs:603-625 cycles before examining liveness; Exited continues, Gone ends and Unavailable fails. :631-675 observes runtime status changes/closure; :937-963 races full-stream teardown.",
+            "1ed482dd:service/connection.rs:1272-1327 schedules the verdict and :1502-1517 checks task id/channel/writer before removing the attachment. This prevents an obsolete output end from removing its replacement; it does not prove input cancellation timing."
+          ],
+          "coverage_checked": [
+            "SPEC.md:2888-2923 retains an exited session's terminal and explains final-screen semantics; SPEC_impl.md Grid streams:2570-2576 distinguishes child exit from host Gone/Unavailable.",
+            "TODO Planned empty. Searches of plans/queue, BUGS.md, INDEX.md and active TRIAGE_OUTCOMES for pane-death latch/final-screen attachment liveness reveal no exact cover. Related stop-wait/final-output test findings concern their test premises, not this removed latch.",
+            "FILTER not used."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": "The hypothesized missing runtime liveness/final-cycle mechanism is contradicted. No exhaustive rendering, journaling or host-history safety claim follows.",
+          "original_stronger_consequence": "An exited agent's last screen might disappear or its stream wait forever (high if real). Reviewer did not allege lost execution/data; final terminal output can nevertheless be user-owned work, so preserve a conservative independent drop check.",
+          "needs_independent_drop_check": true,
+          "proposed_basis": "Source refutation limited to pane-death-latch replacement and final-view liveness."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": true,
+        "provisional_bucket": "high",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "removed-pane-death-latch-host-final-screen",
+        "destination": null
+      }
+    },
+    {
+      "key": "g119/c4",
+      "owner": "g119",
+      "id": "c4",
+      "domain": "supervisor-terminal-streaming",
+      "purpose": "supervisor-terminal-streaming: crates/farhelm-supervisor/src/service/terminals.rs; phases -async fn shutdown_session_sink_until_safe(",
+      "history": [
+        {
+          "line": 4,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c4",
+            "state": "open",
+            "summary": "Takeover drops the old input side before constructing the replacement",
+            "location": "crates/farhelm-supervisor/src/service/terminals.rs:458",
+            "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. TLDR: Considered whether replacing AttachBackend with a bare HostAttach and dropping it without joining its pump lets queued keys from the displaced viewer enter after a new viewer takes control. Suggested bucket: high for mixed terminal input if established; could-be-highest: true if such mixed input executed an unintended destructive command, but that route is not established. Confidence: confirmed source refutation of the replacement-starts-before-cancellation premise; no runtime observation. Source: service/handlers.rs:1729-1969 holds attachments across extraction, signalling, joining and replacement installation. Each old ActiveAttach's remaining fields, including input, are dropped in the doomed loop at 1876-1886; HostAttach::new for the replacement runs only at 1935. HostAttach::drop (grid_stream.rs:1169-1175) sends the cancellation, and Pump::run (1201-1241) checks cancellation first both outside and inside the input handover. It cannot resume unsent old input after that signal; input already handed to the runtime belongs to its ordered queue. SPEC_impl.md, Terminal host, Grid streams ends with the exact contract: 'An attachment that ends drops the input its pump had not handed to the runtime and stops the pump at once; what the pump handed over is written before anything a replacement attachment sends.' proposed_drop: refuted by the teardown-before-construction ordering and biased cancellation, rather than specification permission to mix input. possible_cover: none searched. Caveat: this checks the removed backend's ownership handoff, not every producer or connection-loss epoch inside the host runtime."
+          }
+        },
+        {
+          "line": 5,
+          "event": {
+            "version": 1,
+            "kind": "lead",
+            "id": "c4",
+            "state": "open",
+            "summary": "Check whether an input handover already being polled can outlive takeover cancellation",
+            "location": "crates/farhelm-supervisor/src/service/terminals.rs:458",
+            "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. TLDR: The prior candidate refutation proves the cancellation signal precedes replacement construction, but a pump concurrently inside a poll of its handover may not observe that signal before enqueueing. The exact remaining check is whether InputSequence::send/send_paste has an ordering or ownership fence that prevents such an in-flight old handover from entering behind new-viewer input; biased select alone only prioritizes cancellation when it is polled. Source already checked: handlers.rs:1729-1969 serializes attachment replacement, grid_stream.rs:1169-1175 signals input-pump cancellation without joining, 1201-1262 races cancellation with handover. Suggested bucket: high if mixed input established; could-be-highest: true if mixed terminal commands cause destructive execution, not established. Confidence: unverified lead pending source analysis of InputSequence and the runtime queue. proposed_drop: not settled; prior c4 refutation is narrowed to cancellation-before-construction, not proof of all concurrent handovers. possible_cover: none. No runtime reproduction requested or performed. Next checks: inspect host runtime InputSequence contract, queue admission and whether this behavior existed unchanged before the assigned deletion."
+          }
+        },
+        {
+          "line": 6,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c4",
+            "state": "open",
+            "summary": "Input-pump handover race is a pre-existing interface concern, not created by this removal",
+            "location": "crates/farhelm-supervisor/src/service/grid_stream.rs:1224",
+            "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333; exclusive review base: 6e423e30068b62c6cfa276c6d720ee35bb70387a. TLDR: An old viewer's pump may already be polling its send when takeover signals cancellation. Without joining that pump, an old send might enter behind the replacement viewer's input, potentially changing a terminal command. Suggested bucket: high for mixed input if established; could-be-highest: true if mixed input executes a destructive command. Confidence: likely concurrency concern with the precise premise that an already-running send poll can enqueue after cancellation while replacement input has become runnable; no execution observed. Investigation: grid_stream.rs:1169-1175 only sends cancellation and never joins the pump; 1201-1241 uses biased selects, which prioritize a cancellation only when polled and do not preempt the handover branch mid-poll. hosts/terminal.rs:1527-1535 and 2320-2339 use an ordinary mpsc send, with a connection epoch rather than an attachment ownership fence. Thus the initial c4 claim that cancellation ordering refuted every concurrent handover was too strong and is retracted; the possible mixed-input consequence is preserved here. Scope checks: git diff from the exclusive base to this commit's parent for service/grid_stream.rs is empty. The assigned commit's diff for that file changes comments and GridSender cleanup notification only; HostAttach, Pump and their cancellation/send behavior are unchanged. At the parent handlers.rs:2047-2069 the old AttachBackend::Host(input) is dropped after the output forwarder joins, without awaiting the pump; at the reviewed revision handlers.rs:1876-1886 drops the same HostAttach after the same output join, before replacement construction at 1935. The removed output-reap barriers track only the output task, never the input pump. Contract: SPEC_impl.md, Terminal host, Grid streams promises input handed over precedes replacement input, and input not handed over is dropped. proposed_drop: outside the assigned removal and pre-existing before the exclusive range in the unchanged input-pump mechanism; refer to the parent as an interface concern if a broader review is desired. This is a scope proposal, not a source refutation or acceptance by the spec. possible_cover: none searched. Exact remaining uncertainty: no production scheduler interleaving or destructive command has been observed, and no reproduction is authorized. Source comparison settles that the assigned removal adds no new pump synchronization loss; a dedicated source review of the existing pump contract, or an explicitly authorized concurrency test, would judge the broader concern. This resolves the c4 lead for the assigned scope; it does not certify the broader pump behavior safe."
+          }
+        },
+        {
+          "line": 7,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c4",
+            "state": "open",
+            "summary": "Keep unchanged already-polled handover separate from newly delayed natural-detach cancellation",
+            "location": "crates/farhelm-supervisor/src/service/grid_stream.rs:1224",
+            "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333; exclusive review base: 6e423e30068b62c6cfa276c6d720ee35bb70387a. TLDR and original strongest consequence preserved: queued old-viewer input may enter behind replacement input and change a terminal command, potentially executing destructive input. Suggested bucket: high for an established mixed-input consequence; could-be-highest: true if the mixed command executes a destructive action. Confidence for the original already-polled concern: likely with the precise premise that the old pump is inside a ready send poll when cancellation is signalled and can enqueue after replacement input; no execution or destructive command observed. Original investigation still applies: HostAttach::drop at grid_stream.rs:1169-1175 only signals cancellation; Pump::run:1201-1241 prioritizes it at poll boundaries, not during a poll. InputSequence::send at hosts/terminal.rs:1527-1535 and queue_input:2320-2339 use mpsc admission and a connection epoch, with no attachment ownership fence. The initial broad c4 safety refutation remains retracted. Original proposed_drop basis is preserved as a pending scope proposal only: the HostAttach/Pump mechanism is unchanged from the exclusive base to the reviewed commit's parent (empty diff), and the reviewed diff changes no pump cancellation or input admission code. The removed output reapers never joined the input pump. Parent has accepted no drop or lowering. possible_cover: none searched; caller-supplied g124/l1 is a related, distinct finding rather than coverage of this original concern. Required cross-group synthesis before discovery: g124/l1 establishes a different source lifetime gap, not the original already-polled race. Checked reviewed connection.rs:1510-1517: the natural-detach task moves old.forwarder only, releases attachments at 1515, notifies at 1516, and only then drops the remaining old.input at the block end. The immediate parent connection.rs:2172-2189 explicitly binds and drops backend at 2187 before releasing attachments at 2188. Exclusive-base connection.rs still has this explicit drop at 2187. Therefore an old pump not polled yet can begin before it has received any cancellation, after replacement admission; that particular regression is in-range and is not dismissed by c4's original pre-range comparison. The pinned ActiveAttach replacement at terminals.rs:458 supplies the ordinary HostAttach field whose drop controls that cancellation. Contract remains SPEC_impl.md, Terminal host, Grid streams: an attachment ending drops input not handed to its runtime, while already handed input precedes replacement input. Restoring drop-before-unlock addresses the new delay, but does not certify against the unchanged mid-poll concern. Caller-supplied trigger evidence retained with priority caveat: g124/l1 traces an accepted authenticated API size of 1001 columns to a live host runtime and grid output encoding failure, then natural detach; the bundled GUI itself clamps size to 1000. This reviewer independently checked the source lifetime ordering above, not every link of that size-producer route. Preserve g124/l1's potential highest command-execution consequence and its explicit accepted-API versus bundled-GUI producer distinction for the parent's priority judgment; neither becomes a source refutation here. No new ID or independent discovery is claimed for this already-known interface finding. The remaining uncertainty for the original c4 concern is the actual production interleaving and harmful mixed-command route, not an uninvestigated missing source fence. Source-only analysis; no tests or reproductions."
+          }
+        }
+      ],
+      "latest": {
+        "line": 7,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c4",
+          "state": "open",
+          "summary": "Keep unchanged already-polled handover separate from newly delayed natural-detach cancellation",
+          "location": "crates/farhelm-supervisor/src/service/grid_stream.rs:1224",
+          "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333; exclusive review base: 6e423e30068b62c6cfa276c6d720ee35bb70387a. TLDR and original strongest consequence preserved: queued old-viewer input may enter behind replacement input and change a terminal command, potentially executing destructive input. Suggested bucket: high for an established mixed-input consequence; could-be-highest: true if the mixed command executes a destructive action. Confidence for the original already-polled concern: likely with the precise premise that the old pump is inside a ready send poll when cancellation is signalled and can enqueue after replacement input; no execution or destructive command observed. Original investigation still applies: HostAttach::drop at grid_stream.rs:1169-1175 only signals cancellation; Pump::run:1201-1241 prioritizes it at poll boundaries, not during a poll. InputSequence::send at hosts/terminal.rs:1527-1535 and queue_input:2320-2339 use mpsc admission and a connection epoch, with no attachment ownership fence. The initial broad c4 safety refutation remains retracted. Original proposed_drop basis is preserved as a pending scope proposal only: the HostAttach/Pump mechanism is unchanged from the exclusive base to the reviewed commit's parent (empty diff), and the reviewed diff changes no pump cancellation or input admission code. The removed output reapers never joined the input pump. Parent has accepted no drop or lowering. possible_cover: none searched; caller-supplied g124/l1 is a related, distinct finding rather than coverage of this original concern. Required cross-group synthesis before discovery: g124/l1 establishes a different source lifetime gap, not the original already-polled race. Checked reviewed connection.rs:1510-1517: the natural-detach task moves old.forwarder only, releases attachments at 1515, notifies at 1516, and only then drops the remaining old.input at the block end. The immediate parent connection.rs:2172-2189 explicitly binds and drops backend at 2187 before releasing attachments at 2188. Exclusive-base connection.rs still has this explicit drop at 2187. Therefore an old pump not polled yet can begin before it has received any cancellation, after replacement admission; that particular regression is in-range and is not dismissed by c4's original pre-range comparison. The pinned ActiveAttach replacement at terminals.rs:458 supplies the ordinary HostAttach field whose drop controls that cancellation. Contract remains SPEC_impl.md, Terminal host, Grid streams: an attachment ending drops input not handed to its runtime, while already handed input precedes replacement input. Restoring drop-before-unlock addresses the new delay, but does not certify against the unchanged mid-poll concern. Caller-supplied trigger evidence retained with priority caveat: g124/l1 traces an accepted authenticated API size of 1001 columns to a live host runtime and grid output encoding failure, then natural detach; the bundled GUI itself clamps size to 1000. This reviewer independently checked the source lifetime ordering above, not every link of that size-producer route. Preserve g124/l1's potential highest command-execution consequence and its explicit accepted-API versus bundled-GUI producer distinction for the parent's priority judgment; neither becomes a source refutation here. No new ID or independent discovery is claimed for this already-known interface finding. The remaining uncertainty for the original c4 concern is the actual production interleaving and harmful mixed-command route, not an uninvestigated missing source fence. Source-only analysis; no tests or reproductions."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g119/findings.jsonl",
+        "id": "c4",
+        "line": 7,
+        "disposition": "under-investigation",
+        "group": "g119-c4",
+        "reason": "Record durably acknowledged; parent source/contract validation, cross-group synthesis, coverage/filter matching and any independent drop check remain pending. This preserves the claim and uncertainty without accepting, dropping or lowering it."
+      },
+      "accepted_parent_decision": null,
+      "returned_claim_checks": [
+        {
+          "batch": "claims-076",
+          "key": "g119/c4",
+          "latest_line": 7,
+          "recommendation": "out-of-range",
+          "bucket": "high",
+          "underlying_key": "already-polled-displaced-input-handover",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The original already-running-send concern predates the exclusive review base; the removed barriers did not join input. The broad initial safety refutation remains withdrawn. The distinct new natural-detach delayed-cancellation regression is in range and is not covered by this scope result or the already-polled filter.",
+          "checks": [
+            "git diff 6e423e30068b62c6cfa276c6d720ee35bb70387a..1ed482dd^ is empty for both service/grid_stream.rs and hosts/terminal.rs. 1ed482dd's grid_stream diff changes docs and GridSender cleanup notification, not HostAttach/Pump/admission.",
+            "1ed482dde220452e424973faf38a5e1318986333:service/grid_stream.rs:1169-1175 signals cancellation without joining; :1201-1241 checks it at poll boundaries. hosts/terminal.rs:1527-1535,2320-2339 uses ordinary mpsc admission with connection epoch, no attachment ownership fence. Thus signal-before-replacement alone does not refute a send already executing mid-poll.",
+            "1ed482dd:service/handlers.rs:1877-1886 drops old fields at loop end before replacement HostAttach construction at :1935. In contrast, natural detach connection.rs:1510-1517 drops old.input after unlock; its parent :2172-2189 explicitly dropped backend before unlock. This supplied g124/l1 regression admits a pump that was not already in a send poll and must be handled separately."
+          ],
+          "coverage_checked": [
+            "SPEC.md:3011-3012 requires exclusive input and SPEC_impl.md Grid streams:2586-2589 promises ended pumps drop unsent input; neither generically accepts all delayed cancellation.",
+            "FILTER.md:206-220, 'A displaced input task resumes inside an in-progress handoff', exactly covers the original already-polled ordering, including old Enter submitting a replacement prefix. It expressly excludes newly received input after lost ownership and other mechanisms. This is an additional narrow filter basis if parent records an outside-range concern, not a basis for dropping the natural-detach regression.",
+            "TODO Planned empty. BUGS.md and active TRIAGE_OUTCOMES have no exact claim match. INDEX.md and matching initial-oversized-grid-cannot-attach.md cover the oversized Hello failure only. plans/queue searches supply no unlanded repair for either cancellation ordering."
+          ],
+          "exact_cover_quotes": [
+            "FILTER.md, 'A displaced input task resumes inside an in-progress handoff': 'A worker was already polling that task's send: it observed cancellation as pending and was stalled before handing the old input to the terminal runtime.'",
+            "Same filter: 'Replacement input reaches that runtime first, and the stalled old send then resumes, so the old input follows the replacement's typing. An old Enter can submit a command prefix the replacement had not chosen to submit.'",
+            "Same filter: 'This covers that specific already-running-poll ordering gap.'"
+          ],
+          "missing_premise": "No production interleaving or destructive command was observed. High is the conditional mixed-input consequence; moving to highest needs the harmful command route established. Parent must retain the original possible-highest wording and independently judge any scope/filter drop or lowering. g124/l1's accepted API size 1001 route was supplied, not fully rechecked; bundled GUI caps 1000.",
+          "original_stronger_consequence": "Old queued input could follow replacement input, alter a terminal command and potentially execute destructive input. Initial blanket cancellation-based refutation was retracted. Later scope proposal concerns only the unchanged already-polled race, not the in-range natural-detach lifetime regression.",
+          "needs_independent_drop_check": true,
+          "proposed_basis": "Original mechanism and both implicated files are unchanged before the exclusive base; exact already-polled FILTER boundary is also present. Independent drop check must limit agreement to that mechanism and preserve the separate natural-detach finding.",
+          "new_interface_evidence": "The source comparison independently confirms the supplied distinction with g124/l1: natural detach newly releases the attachment lock before signalling old input cancellation, unlike the already-polled gap covered by FILTER. No g124 record was supplied here, so no exact alias is asserted."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": true,
+        "clearly_refuted_candidate": false,
+        "needs_unfinished_gate": true,
+        "provisional_bucket": "high",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "already-polled-displaced-input-handover",
+        "destination": "trailing-already-polled-displaced-input-handover.md"
+      }
+    }
+  ],
+  "replies": [
+    {
+      "turn": 1,
+      "reply": "Initial pass complete: all 1,243 assigned patch lines reviewed.\n\nNo verified in-scope findings. Recorded candidates c1–c4; c4 preserves a possible input-handover race that predates the review range for the caller’s scope/drop check.\n\nFindings log and progress updated. No assigned scope unread; no tests or reproductions run."
+    },
+    {
+      "turn": 2,
+      "reply": "Delivered patch lines 1–1243 through the corrected manifest in seven direct stdout packets; no assigned ranges remain unread.\n\nSynthesis added no findings or revisions. All six events remain preserved. c4 remains an unsettled, pre-range input-handover concern; no drop is accepted.\n\nProgress updated. No tests or reproductions run."
+    },
+    {
+      "turn": 3,
+      "reply": "Discovery pass 1 found nothing new.\n\n- Checked removed-symbol references, attachment construction/join callers, teardown scopes, and pinned-range history.\n- Revised c4 to distinguish the known g124/l1 gap while preserving its original concern and pre-range evidence.\n- New verified IDs: none. New unverified IDs: none.\n- Open uninvestigated leads: none; c4 remains unsettled pending parent disposition.\n\nProgress updated. No runtime execution."
+    }
+  ],
+  "progress": "Group: g119 supervisor-terminal-streaming\nState: discovery pass 1 complete; awaiting parent disposition.\nTurn type/count: discovery/3. Discovery passes: 1.\n\nAssigned scope: 1ed482dde220452e424973faf38a5e1318986333, the 1243-line terminals.rs deletion/replacement packet. All assigned lines read through evidence, packets 1-180, 181-360, 361-540, 541-720, 721-900, 901-1080, 1081-1243. No assigned material unread. The complete inventory commits field was read; excluded coverage metadata was not read.\n\nResult this pass: no verified in-scope finding. Durable records c1-c4 are considered candidates. c1, c2 and c3 are refuted for the assigned change. c4 was revised first to a lead and then back to a candidate after source comparison established that the suspected pump handover mechanism predates the exclusive review base. The original c4 cancellation-only refutation was too strong and is explicitly retracted in the later events. No open lead remains for this assigned scope. New verified finding IDs: none. New unverified interface concern: c4 (likely handover race; scope-drop proposal, could-be-highest, available for the parent's independent check).\n\nInterface assumptions checked: only terminal hosts are served after startup; host connections belong to session runtimes, not attachments; GridSender cancellation races the whole stream and its report does not await attachments; stop and attach share the attachments lock despite the new atomic flag; host exit retains the final screen; takeover drops the old HostAttach before making the new one. c4 preserves the limitation that signalling cancellation does not preempt an already-running send poll, and that the removed barriers never joined the input pump either.\n\nPinned governing contracts read: SPEC.md Terminal experience 2855-3187; SPEC_impl.md Terminal host 1963-2700, Terminal substrate 2880-2991, transport Grid streams 3104-3196, all through the private context-manifest evidence packets. Cleanup on quit 99-143 was also read through git show. The private SPEC snapshots are exact git-show output for the reviewed commit. GUI answer contracts do not govern this non-GUI assignment.\n\nAdditional source context at the reviewed commit: terminals.rs 413-505; grid_stream.rs 917-1062, 1150-1281, 603-679; handlers.rs 1670-2012; connection.rs 525-564, 680-815, 1238-1520; teardown.rs 563-620, 1199-1280; core.rs 6128-6190, 6650-6698, 13212-13255, 14050-14102; core/old_terminals.rs 1-180; hosts/terminal.rs 1500-1600, 2290-2390. Parent-revision handlers.rs 2030-2090 and 2238-2300 were read to compare ownership. Exclusive-base grid_stream.rs 1160-1250 and handlers.rs 2040-2075 were read. Base-to-parent grid_stream.rs diff is empty. Reviewed commit grid_stream.rs diff was read completely; hosts/terminal.rs diff was only contextual first 100 lines, not assigned scope. Targeted symbol searches located all join_forwarder callers and startup terminal-kind decisions; each production join caller was inspected for preceding shutdown signalling.\n\nNo runtime tests, builds or reproductions were run. No checkout files changed. All durable review records and supporting snapshots remain in this assigned private directory. No queue/coverage sources prohibited by the brief were opened. Next action: return to the caller for a later synthesis prompt; c4's scope disposition and any independent drop check belong to the caller.\n\nTurn 2 started: coverage repair plus caller-requested synthesis. Prior audit credited zero packet coverage; prior coverage claim is superseded. Re-delivering all assigned lines with direct stdout under the corrected manifest. Existing six events preserved; no drop accepted by the parent. Discovery passes remain 0.\n\nTurn 2 completion: reread the complete current brief and all six existing finding events. Delivered the exact evidence command against the current manifest in seven separate shell calls, printing each command's stdout directly (not serializing the exec result): patch 1-180, 181-360, 361-540, 541-720, 721-900, 901-1080, 1081-1243. Every packet carried its end marker and the unchanged f9c4038fec4a3dfbe6cd0ba4160d95b05d162eec84e84b7bab46be56651a43ca source hash. No assigned line remains undelivered or unread. Parent audit is still the coverage authority; this records delivery, not an audit verdict.\n\nSynthesis: no new verified or unverified IDs and no event revisions in this turn. The re-delivered deletion removes external tmux control-client supervision, provisional-open barriers, process-reap completion, and tmux pane-death latches; the replacement holds an in-process output task and the existing HostAttach input side. The pinned caller and contract analysis from turn 1 still applies. Parent-provided interface results from g118/g120/g121 confirm no surviving reader requires the external output-client reap mechanism. That supports the narrow c1 analysis and does not settle c4. c2's attach/stop lock boundary and c3's host liveness/final-screen analysis are unchanged. No candidate disposition has been accepted: every proposed drop remains for the parent, including the could-be-highest records.\n\nc4 status after synthesis: the source comparison establishes the mechanism predates this assigned removal and its input-pump implementation predates the review base. It does not establish safety. Biased cancellation does not preempt a send already being polled, and no input-pump join or attachment epoch was found in the inspected paths. The concern, original possible mixed-command consequence, missing production interleaving/destructive route, and pre-range evidence remain in the six-event log without dilution. There is no new uninvestigated lead from this turn; the broader c4 concern remains an investigated, unsettled candidate pending the parent's scope/coverage decision. No tests or reproductions were run. Next action: parent audits repaired delivery and handles candidate scope/drop checks; this turn did not perform a discovery pass.\n\nTurn 3 started: separate discovery pass 1. Complete discovery-neighbours.json read in bounded ranges 1-180, 181-260, 261-330, 331-410, 411-490, 491-570, 571-654; no clipping notices. First reconcile g124/l1 against c4, then search the assigned terminals.rs deletion/replacement beyond known candidates. No drops or lowerings accepted.\n\nTurn 3 synthesis before discovery: appended one revision under existing c4 (event-c4-discovery-synthesis.json). Direct numbered source checks of reviewed connection.rs:1485-1524, parent:2162-2197, and the exclusive-base search for explicit backend drops confirm the caller's new natural-detach gap is distinct and in-range: old.input survives release of attachments, whereas the parent and base explicitly dropped backend first. This is already-known g124/l1, not a new local discovery. c4's unchanged already-polled race and original possible destructive-command consequence remain; its pre-range scope proposal does not cover the new delayed-cancellation gap. The authenticated-API size route and bundled-GUI 1000-column cap remain attributed to the supplied g124 record, preserving the priority-producer caveat and potential highest impact. No claim that either route is safe, accepted, or dropped.\n\nSeparate discovery checks after that synthesis: searched all supervisor src/tests at the reviewed revision for SessionSinkHandle, SessionSinkCandidate, SessionSinkLease, run_session_sink, SinkRegistryEntry, OutputReapEntry, forwarder_cleanup, wait_for_all_output_cleanup, begin_forwarder_shutdown, record_forwarder_join, PaneDeath, AttachBackend and DELETE_SINK_REAP_WAIT; no surviving matches. Enumerated every production ActiveAttach construction, join_forwarder call and attachments_closed access. Re-read exact new terminals.rs:413-496, GridSender:917-969, stalled-detach scope connection.rs:1416-1467, takeover teardown handlers.rs:1853-1889 and shutdown drain teardown.rs:1222-1257. These checks found no new stale executable dependency, hidden construction path, output-task mutex wait or additional unresolved output-client cleanup contract in the assigned removal. The stalled-detach inner scope drops old.input before unlocking; takeover's doomed iteration does likewise; shutdown closes admission and signals all drained tasks before joining. These are narrow caller checks, not a broad proof of pump correctness. Pinned-range path history was read for terminals.rs and connection.rs to avoid inferring range provenance from a single parent comparison. No retired implementation was searched for independent defects, and no prohibited coverage source was opened.\n\nDiscovery result: empty. New verified finding IDs: none. New unverified-after-investigation IDs: none. Revised IDs: c4 only, for required known-interface synthesis. Local open uninvestigated lead IDs: none. c4 remains an investigated, unsettled candidate with original uncertainty and parent scope/drop decision pending; g124/l1 remains a distinct known external finding. No assigned source scope unread. No tests, builds, reproductions or live-install actions. Existing durable history is append-only (now seven events); all earlier proposed-drop bases and consequences are preserved. Next action: return these deltas to the parent; no new substantive discovery requiring another discovery pass was made.\n"
+}

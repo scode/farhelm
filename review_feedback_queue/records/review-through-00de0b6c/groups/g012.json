@@ -1,0 +1,437 @@
+{
+  "group": {
+    "id": "g012",
+    "domain": "product-contracts",
+    "purpose": "product-contracts: SPEC_impl.md; phases ### The desktop app's updater",
+    "interfaces": [
+      "g001",
+      "g003",
+      "g004",
+      "g005",
+      "g006",
+      "g007",
+      "g008",
+      "g009",
+      "g010",
+      "g011",
+      "g013",
+      "g014",
+      "g015",
+      "g016",
+      "g030",
+      "g032",
+      "g034",
+      "g042",
+      "g044",
+      "g045",
+      "g046",
+      "g047",
+      "g048",
+      "g055",
+      "g057",
+      "g062",
+      "g071",
+      "g072",
+      "g073",
+      "g074",
+      "g090",
+      "g093",
+      "g098",
+      "g104",
+      "g105",
+      "g148",
+      "g149",
+      "g169",
+      "g173",
+      "g180"
+    ],
+    "sources": [
+      {
+        "path": "[private-run]/prep/parts/01229-000.patch",
+        "ranges": [
+          [
+            1,
+            211
+          ]
+        ],
+        "original_path": "SPEC_impl.md",
+        "commit": "17a3fe858c5511a24b7403af15dd41c93bf69fd7",
+        "notes": "patch header; patch character offsets [0,21974)",
+        "lines": 211,
+        "bytes": 22012,
+        "start": 0,
+        "end": 21974,
+        "original": "[private-run]/prep/originals/01229.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/01263-000.patch",
+        "ranges": [
+          [
+            1,
+            224
+          ]
+        ],
+        "original_path": "SPEC_impl.md",
+        "commit": "500548b9253b07a26fd03119679184b69544e31d",
+        "notes": "patch header; patch character offsets [0,23394)",
+        "lines": 224,
+        "bytes": 23418,
+        "start": 0,
+        "end": 23394,
+        "original": "[private-run]/prep/originals/01263.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/01473-003.patch",
+        "ranges": [
+          [
+            1,
+            174
+          ]
+        ],
+        "original_path": "SPEC_impl.md",
+        "commit": "f96dd4363d97dc7e07dea5b8947c96be6bf912e8",
+        "notes": "### The desktop app's updater; patch character offsets [177656,195729)",
+        "lines": 174,
+        "bytes": 18085,
+        "start": 177656,
+        "end": 195729,
+        "original": "[private-run]/prep/originals/01473.patch"
+      }
+    ],
+    "lines": 609,
+    "bytes": 63515
+  },
+  "records": [
+    {
+      "key": "g012/c1",
+      "owner": "g012",
+      "id": "c1",
+      "domain": "product-contracts",
+      "purpose": "product-contracts: SPEC_impl.md; phases ### The desktop app's updater",
+      "history": [
+        {
+          "line": 1,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c1",
+            "state": "open",
+            "summary": "Uninstall can leave an earlier private tmux server running",
+            "location": "SPEC_impl.md:7861",
+            "detail": "Reviewed commit: 500548b9253b07a26fd03119679184b69544e31d. TLDR: Removing a remote host can leave a private tmux server that already outlived an earlier supervisor stop. Details: The changed Provisioning section removes the socket-addressed tmux stop after the systemd stop; its stated replacement ends the unit control group and explicitly covers terminal hosts with stop-terminal-hosts. A server already outside that group can remain, so the deletion intentionally narrows cleanup. Suggested bucket: other (residual process cleanup; no established loss of work or security route). Confidence: confirmed contract acceptance, source-only, not observed in execution. proposed_drop: SPEC_impl.md, Provisioning, explicitly states: \"Uninstall has no tmux step: a private tmux server that outlived a supervisor stopped before uninstall (a host never updated to a release that ends it at startup, or one whose startup ending failed and whose supervisor was later stopped) keeps running. The maintainer accepted that residual on 2026-11-11 when the step was removed.\" possible_cover: that exact specification acceptance; no other coverage sources searched. Could-be-highest: no established route; surviving user processes are not lost processes. Caveat: this candidate concerns only the explicitly accepted out-of-control-group residual, not unrelated incorrect termination or a missing terminal-host cleanup."
+          }
+        },
+        {
+          "line": 4,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c1",
+            "state": "open",
+            "summary": "Uninstall can leave an earlier private tmux server running",
+            "location": "SPEC_impl.md:7861",
+            "detail": "Reviewed commit: 500548b9253b07a26fd03119679184b69544e31d. TLDR: Removing a remote host can leave a private tmux server that already outlived an earlier supervisor stop. Details: The changed Provisioning section removes the socket-addressed tmux stop; its replacement stops the unit control group and explicitly stops terminal hosts. backend.rs (crates/farhelm-helm/src/provisioning/backend.rs 3254..3352) confirms those are the stop helper's actions and that every terminal-host stop must return 0 before cleanup can complete. service.rs 2826..2842 dispatches the frozen farhelm_program and state_dir from StopSupervisor to that helper. A tmux server already outside the unit group can remain. Suggested bucket: other (residual process cleanup; no established security or lost-work route). Confidence: confirmed contract acceptance and implementation match, source-only; no execution. proposed_drop: SPEC_impl.md, Provisioning, 7860..7863 explicitly states: \"Uninstall has no tmux step: a private tmux server that outlived a supervisor stopped before uninstall (a host never updated to a release that ends it at startup, or one whose startup ending failed and whose supervisor was later stopped) keeps running. The maintainer accepted that residual on 2026-11-11 when the step was removed.\" The f96dd4363d97dc7e07dea5b8947c96be6bf912e8 surrounding contract retains this exact acceptance; the later removal of a redundant Mac no-tmux sentence does not change it. possible_cover: that exact specification acceptance; no other coverage sources searched. Could-be-highest: no established route; this candidate concerns processes surviving an explicitly authorized uninstall, not incorrect termination or lost processes. Caveat: does not excuse unrelated missing terminal-host cleanup, wrong-path cleanup or termination beyond confirmation. Synthesis revision adds implementation and later-contract checks; original consequence, bucket and proposed disposition are unchanged."
+          }
+        }
+      ],
+      "latest": {
+        "line": 4,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c1",
+          "state": "open",
+          "summary": "Uninstall can leave an earlier private tmux server running",
+          "location": "SPEC_impl.md:7861",
+          "detail": "Reviewed commit: 500548b9253b07a26fd03119679184b69544e31d. TLDR: Removing a remote host can leave a private tmux server that already outlived an earlier supervisor stop. Details: The changed Provisioning section removes the socket-addressed tmux stop; its replacement stops the unit control group and explicitly stops terminal hosts. backend.rs (crates/farhelm-helm/src/provisioning/backend.rs 3254..3352) confirms those are the stop helper's actions and that every terminal-host stop must return 0 before cleanup can complete. service.rs 2826..2842 dispatches the frozen farhelm_program and state_dir from StopSupervisor to that helper. A tmux server already outside the unit group can remain. Suggested bucket: other (residual process cleanup; no established security or lost-work route). Confidence: confirmed contract acceptance and implementation match, source-only; no execution. proposed_drop: SPEC_impl.md, Provisioning, 7860..7863 explicitly states: \"Uninstall has no tmux step: a private tmux server that outlived a supervisor stopped before uninstall (a host never updated to a release that ends it at startup, or one whose startup ending failed and whose supervisor was later stopped) keeps running. The maintainer accepted that residual on 2026-11-11 when the step was removed.\" The f96dd4363d97dc7e07dea5b8947c96be6bf912e8 surrounding contract retains this exact acceptance; the later removal of a redundant Mac no-tmux sentence does not change it. possible_cover: that exact specification acceptance; no other coverage sources searched. Could-be-highest: no established route; this candidate concerns processes surviving an explicitly authorized uninstall, not incorrect termination or lost processes. Caveat: does not excuse unrelated missing terminal-host cleanup, wrong-path cleanup or termination beyond confirmation. Synthesis revision adds implementation and later-contract checks; original consequence, bucket and proposed disposition are unchanged."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g012/findings.jsonl",
+        "id": "c1",
+        "line": 4,
+        "disposition": "under-investigation",
+        "group": "g012-c1",
+        "reason": "Record durably acknowledged; parent source/contract validation, cross-group synthesis, coverage/filter matching and any independent drop check remain pending. This preserves the claim and uncertainty without accepting, dropping or lowering it."
+      },
+      "accepted_parent_decision": null,
+      "returned_claim_checks": [
+        {
+          "batch": "claims-005",
+          "key": "g012/c1",
+          "latest_line": 4,
+          "recommendation": "covered",
+          "bucket": "other",
+          "underlying_key": "uninstall-accepted-outlived-private-tmux-residual",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "Both current specifications explicitly accept precisely this surviving server after its supervisor was already stopped. The narrow cleanup consequence is real in the stated topology but accepted; it is not a finding about incorrect termination or missing terminal-host cleanup.",
+          "checks": [
+            "500548b9253b07a26fd03119679184b69544e31d:crates/farhelm-helm/src/provisioning/backend.rs:3254-3357 stops the unit if active and invokes stop-terminal-hosts when hosts exists, requiring status 0. It contains no socket-addressed tmux stop. A pre-existing server outside the stopped unit's group is outside these stop actions.",
+            "Current SPEC.md:209-218 and SPEC_impl.md:7814-7837 explicitly name the prior-stop residual and preserve terminal-host confirmation before lib removal. No runtime observation or broader cleanup certification."
+          ],
+          "coverage_checked": [
+            "SPEC.md:212-215 and SPEC_impl.md:7824-7827 exactly match trigger, surviving server consequence and remote-uninstall scope.",
+            "TODO.md Planned is empty. tmux-drop-from-install.md:58-63,98-104 repeats this acceptance, but plans/REPORTS.md:30 says it has landed, so it is corroborating decision context rather than unlanded-plan coverage. Other tmux plans are also landed per REPORTS.md:29-32; user-tmux cleanup is a different root.",
+            "BUGS.md has no match. INDEX.md and active TRIAGE_OUTCOMES.md searches found no remaining exact private-server residual item. The plan references removal of offline-uninstall-live-tmux-history-unresolved; no archival ledger was read.",
+            "No FILTER.md rule needed or proposed; exact explicit specification acceptance supplies the basis."
+          ],
+          "exact_cover_quotes": [
+            "SPEC_impl.md:7824-7827: Uninstall has no tmux step: a private tmux server that outlived a supervisor stopped before uninstall (a host never updated to a release that ends it at startup, or one whose startup ending failed and whose supervisor was later stopped) keeps running. The maintainer accepted that residual on 2026-11-11 when the step was removed."
+          ],
+          "missing_premise": null,
+          "original_stronger_consequence": "Uninstall may leave an earlier private tmux server running. Both history entries retain this residual-process consequence and disclaim incorrect termination, missing terminal-host cleanup or loss of processes. Surviving processes are not established lost work.",
+          "needs_independent_drop_check": true,
+          "proposed_basis": "Propose coverage only for the explicitly accepted out-of-control-group residual. Independent confirmation is conservative because the proposed dismissal concerns surviving user processes; it cannot cover termination beyond confirmation or another cleanup route."
+        }
+      ],
+      "parent_proposals": [
+        {
+          "artifact": "parent-flagged-judgments-005.json",
+          "key": "g012/c1",
+          "proposal": "claim-checks/claims-005/result.json",
+          "parent_proposal": "covered-same-root-g006/f2",
+          "final_independent_gate": "required-before-drop",
+          "reason": "Full005exactremoteuninstallstopped-supervisor/outofunitgroupprivatetmuxsurvivoracceptance inSPEC/impl. Terminalhoststopconfirmationremainschecked, noincorrectterminationorunrelatedcleanupaccepted. Same006f2rootneedsbothprovenance/sourcevariants, preserveuserprocessaccess/resourceconsequence, notautomaticallylostwork. Landedplan corroboratingintentnotfuturefix. Freshchecknarrowpriorstopresidualonly."
+        }
+      ],
+      "collection": {
+        "retain": true,
+        "clearly_refuted_candidate": false,
+        "needs_unfinished_gate": true,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "uninstall-accepted-outlived-private-tmux-residual",
+        "destination": "trailing-uninstall-accepted-outlived-private-tmux-residual.md"
+      }
+    },
+    {
+      "key": "g012/c2",
+      "owner": "g012",
+      "id": "c2",
+      "domain": "product-contracts",
+      "purpose": "product-contracts: SPEC_impl.md; phases ### The desktop app's updater",
+      "history": [
+        {
+          "line": 2,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c2",
+            "state": "open",
+            "summary": "Removing the Mac tmux preflight does not remove a required runtime dependency",
+            "location": "SPEC_impl.md:2788",
+            "detail": "Reviewed commit: 17a3fe858c5511a24b7403af15dd41c93bf69fd7. TLDR: Considered whether allowing the Mac app or local setup to proceed without tmux would break terminal startup or upgrade cleanup. Details: The changed specification explicitly states the supervisor creates terminals through terminal hosts and that the remaining old-terminal termination uses a socket connect and peer process signals, without requiring a tmux program (SPEC_impl.md 2784..2836). The pinned source search for FARHELM_TMUX, tmux::, tmux_preflight and tmux_probe in desktop, setup, supervisor and shared units found no remaining runtime executable call; matches are compatibility filtering, ignored old-unit documentation and tests. The changed CLI and bootstrap prerequisites agree with that replacement contract. Suggested bucket: other if a stale description alone were found; no failure established. Confidence: confirmed refutation from source and contract, not execution. proposed_drop: refuted by terminal-host ownership and executable-independent old-terminal cleanup at the cited pinned specification, with no remaining runtime tmux call in the searched source paths. possible_cover: none beyond the cited contract. Could-be-highest: no established route to losing work or security impact. Caveat: this does not assess the historical tmux implementation for independent bugs or claim complete review of the terminal-host implementation."
+          }
+        },
+        {
+          "line": 3,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c2",
+            "state": "open",
+            "summary": "Removing the Mac tmux preflight does not remove a required runtime dependency",
+            "location": "SPEC_impl.md:2788",
+            "detail": "Reviewed commit: 17a3fe858c5511a24b7403af15dd41c93bf69fd7. TLDR: Considered whether allowing the Mac app or local setup to proceed without tmux would break terminal startup or upgrade cleanup. Details: The replacement contract makes terminal hosts the terminal owners and preserves old-terminal cleanup without executing tmux (SPEC_impl.md 2784..2836). Source checks: crates/farhelm-supervisor/src/service/core/old_terminals.rs 14..34 states the no-program contract, and end_server at 176..185 directly connects with tokio::net::UnixStream; crates/farhelm-helm/src/units.rs 57..115 defines the fixed base PATH and unit inputs without tmux. A pinned git grep for FARHELM_TMUX, tmux::, tmux_preflight and tmux_probe across desktop, setup, supervisor and units found only compatibility filtering, ignored-old-unit documentation and tests; no runtime tmux executable call. The removed preflight therefore no longer guards a dependency the described replacement needs. Suggested bucket: other if a stale description alone were found; no user failure established. Confidence: confirmed refutation from source and contract; no execution performed. proposed_drop: refuted by executable-independent cleanup in old_terminals.rs and terminal-host ownership, with no runtime tmux call in the searched source paths. possible_cover: none beyond the cited specification contract. Could-be-highest: no established security or loss-of-work route. Caveat: this checks the implications of removing the dependency gate, not independent defects in the historical tmux driver or a complete review of terminal hosts. Revision adds concrete implementation references to the original candidate; its consequence and disposition are unchanged."
+          }
+        },
+        {
+          "line": 5,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c2",
+            "state": "open",
+            "summary": "Removing the Mac tmux preflight does not remove a required runtime dependency",
+            "location": "SPEC_impl.md:2788",
+            "detail": "Reviewed commit: 17a3fe858c5511a24b7403af15dd41c93bf69fd7. TLDR: Considered whether allowing the Mac app or local setup to proceed without tmux would break terminal startup or upgrade cleanup. Details: The replacement contract makes terminal hosts the terminal owners and preserves old-terminal cleanup without executing tmux (SPEC_impl.md 2784..2836). Source checks: old_terminals.rs (crates/farhelm-supervisor/src/service/core/old_terminals.rs 14..34 and 176..185) declares and implements direct socket connection without a tmux executable; crates/farhelm-helm/src/units.rs 57..115 defines fixed base PATH and unit inputs without tmux. The pinned search for FARHELM_TMUX, tmux::, tmux_preflight and tmux_probe across desktop, setup, supervisor and units found only compatibility filtering, ignored-old-unit documentation and tests. Synthesis checked the actual caller diff: crates/farhelm-ui/src/desktop.rs removes tmux resolution from DesktopBootstrap::start and leaves check_prerequisites (1145..1158) validating the session executable path, before supervisor replacement; spawn_child (1179..1201) uses the absolute farhelm program and inherited PATH without a tmux selection. The next assigned commit 500548b9253b07a26fd03119679184b69544e31d removes only the remaining provisioning floor/module and supplies a single farhelm payload; it does not remove the socket cleanup or reintroduce a desktop tmux requirement. The f96dd4363d97dc7e07dea5b8947c96be6bf912e8 documentation moves the same no-tmux policy into provisioning. Suggested bucket: other if only stale description were established; no user failure established. Confidence: confirmed source/contract refutation; no execution. proposed_drop: executable-independent cleanup and terminal-host ownership mean the removed gate no longer guards a dependency of the replacement; actual caller changes agree. possible_cover: none beyond the cited specification contract. Could-be-highest: no established security or loss-of-work route. Caveat: checks removal of the dependency gate and interactions among assigned batches, not independent historical tmux-driver defects or a complete terminal-host review. Synthesis revision adds caller and intermediate-commit checks; original consequence and disposition are unchanged."
+          }
+        }
+      ],
+      "latest": {
+        "line": 5,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c2",
+          "state": "open",
+          "summary": "Removing the Mac tmux preflight does not remove a required runtime dependency",
+          "location": "SPEC_impl.md:2788",
+          "detail": "Reviewed commit: 17a3fe858c5511a24b7403af15dd41c93bf69fd7. TLDR: Considered whether allowing the Mac app or local setup to proceed without tmux would break terminal startup or upgrade cleanup. Details: The replacement contract makes terminal hosts the terminal owners and preserves old-terminal cleanup without executing tmux (SPEC_impl.md 2784..2836). Source checks: old_terminals.rs (crates/farhelm-supervisor/src/service/core/old_terminals.rs 14..34 and 176..185) declares and implements direct socket connection without a tmux executable; crates/farhelm-helm/src/units.rs 57..115 defines fixed base PATH and unit inputs without tmux. The pinned search for FARHELM_TMUX, tmux::, tmux_preflight and tmux_probe across desktop, setup, supervisor and units found only compatibility filtering, ignored-old-unit documentation and tests. Synthesis checked the actual caller diff: crates/farhelm-ui/src/desktop.rs removes tmux resolution from DesktopBootstrap::start and leaves check_prerequisites (1145..1158) validating the session executable path, before supervisor replacement; spawn_child (1179..1201) uses the absolute farhelm program and inherited PATH without a tmux selection. The next assigned commit 500548b9253b07a26fd03119679184b69544e31d removes only the remaining provisioning floor/module and supplies a single farhelm payload; it does not remove the socket cleanup or reintroduce a desktop tmux requirement. The f96dd4363d97dc7e07dea5b8947c96be6bf912e8 documentation moves the same no-tmux policy into provisioning. Suggested bucket: other if only stale description were established; no user failure established. Confidence: confirmed source/contract refutation; no execution. proposed_drop: executable-independent cleanup and terminal-host ownership mean the removed gate no longer guards a dependency of the replacement; actual caller changes agree. possible_cover: none beyond the cited specification contract. Could-be-highest: no established security or loss-of-work route. Caveat: checks removal of the dependency gate and interactions among assigned batches, not independent historical tmux-driver defects or a complete terminal-host review. Synthesis revision adds caller and intermediate-commit checks; original consequence and disposition are unchanged."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g012/findings.jsonl",
+        "id": "c2",
+        "line": 5,
+        "disposition": "under-investigation",
+        "group": "g012-c2",
+        "reason": "Record durably acknowledged; parent source/contract validation, cross-group synthesis, coverage/filter matching and any independent drop check remain pending. This preserves the claim and uncertainty without accepting, dropping or lowering it."
+      },
+      "accepted_parent_decision": null,
+      "returned_claim_checks": [
+        {
+          "batch": "claims-005",
+          "key": "g012/c2",
+          "latest_line": 5,
+          "recommendation": "refuted",
+          "bucket": "other",
+          "underlying_key": "removed-mac-tmux-preflight-no-longer-needed",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The removed gate no longer guards an executable dependency of terminal-host startup or old-server cleanup. The cleanup reaches the old server directly through its socket; the desktop prerequisite and spawn paths no longer select tmux.",
+          "checks": [
+            "17a3fe858c5511a24b7403af15dd41c93bf69fd7:old_terminals.rs:14-34 documents the executable-independent contract and 176-200 implements UnixStream::connect plus peer identification. This is not a claim that all cleanup outcomes succeed.",
+            "At 17a3fe8, desktop.rs:1147-1158 checks the session-program path; 1175-1200 launches farhelm supervisor run by its program path without a tmux handoff. A pinned git grep across desktop.rs, setup.rs, supervisor source and units.rs for FARHELM_TMUX, tmux::, tmux_preflight, tmux_probe and Command::new(\"tmux\") found only environment scrubbing, old-unit explanations and tests, no runtime tmux execution.",
+            "From f96dd4363d97dc7e07dea5b8947c96be6bf912e8 to 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db, desktop.rs and old_terminals.rs are unchanged. No runtime tests or reproduction."
+          ],
+          "coverage_checked": [
+            "Current SPEC_impl.md:7996-8001 explicitly says the supervisor runs no tmux and the Mac bundles/needs none. Current SPEC.md uninstall and terminal-host descriptions agree with that substrate; no acceptance of broken terminal startup is being inferred.",
+            "TODO.md Planned is empty. tmux-drop-from-install.md:40-48 states the preflight removal; plans/REPORTS.md:30 confirms it landed, so it is not unlanded repair coverage. Other targeted plans concern completed removal or user-run tmux, not a remaining executable dependency.",
+            "BUGS.md, targeted INDEX.md and active TRIAGE_OUTCOMES.md searches found no exact remaining Mac-preflight dependency item. No FILTER.md rule proposed."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": null,
+          "original_stronger_consequence": "Removing the preflight might break terminal startup or upgrade cleanup on a Mac without tmux. All three history entries retain that concern and source-refute its dependency premise; they do not certify every historical tmux-driver or terminal-host behavior.",
+          "needs_independent_drop_check": true,
+          "proposed_basis": "Propose narrow no-executable-dependency refutation. Because the original concern includes upgrade cleanup of user processes, obtain an independent check before dismissing that part; do not reinterpret it as blanket cleanup correctness."
+        }
+      ],
+      "parent_proposals": [
+        {
+          "artifact": "parent-flagged-judgments-005.json",
+          "key": "g012/c2",
+          "proposal": "claim-checks/claims-005/result.json",
+          "parent_proposal": "source-refuted-no-executable-dependency",
+          "final_independent_gate": "required-before-drop",
+          "reason": "Full005Macpreflightremovedwithruntime/provisioneddependency; actualdesktopspawnsFarhelmsupervisorwithnotmuxhandoff andoldstartupcleanupconnectssocket/verifiespeerwithouttmuxprogram. Refutesmissingexecutablebreaksterminalstartup/upgradecleanupprerequisite, notcorrectness/successofeverycleanupoutcome. Preserveuserprocesscleanupcontextforfreshgate, separatemisleadinginstallerassurance/sourcefailuresunaffected."
+        }
+      ],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": true,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "removed-mac-tmux-preflight-no-longer-needed",
+        "destination": null
+      }
+    },
+    {
+      "key": "g012/c3",
+      "owner": "g012",
+      "id": "c3",
+      "domain": "product-contracts",
+      "purpose": "product-contracts: SPEC_impl.md; phases ### The desktop app's updater",
+      "history": [
+        {
+          "line": 6,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c3",
+            "state": "open",
+            "summary": "The rewritten tab BROWSER contract preserves the ambient environment",
+            "location": "SPEC_impl.md:9056",
+            "detail": "Reviewed commit: f96dd4363d97dc7e07dea5b8947c96be6bf912e8. TLDR: Considered whether changing the description from tmux environment passing to terminal-host child passing incorrectly promised preservation of an existing browser selection. A new host boundary that cleared ambient variables could have lost an inherited browser value when no string override was added. Details and source refutation: service/core.rs 13809..13857 constructs the tab environment and gives append_tab_browser the ambient OsString. launch.rs 1331..1350 lets explicit launch values win, then inherited values (including empty), then the generated fallback; an inherited non-UTF-8 value is intentionally not converted to a string override. Crucially service/core/host_tabs.rs 585..606 calls host_child_env(std::env::vars_os(), env, ...) and includes the result in ChildSpec. service/core/host_launch.rs 135..159 starts with the complete OsString base environment and overlays launch values; it does not clear the base or remove BROWSER. Thus the changed documentation accurately describes both ordinary string overrides and retained ambient non-UTF-8 values. Suggested bucket: other had this been only an incorrect internal environment contract; no user defect established. Confidence: confirmed source refutation, no execution. proposed_drop: refuted by the actual tab caller and host_child_env base-plus-overlay implementation at the cited paths. possible_cover: none. Could-be-highest: no established security or loss-of-work route; this considered concern was lost browser-selection behavior, not a new forwarding authority. Caveat: does not claim all external BROWSER consumers interpret generated templates successfully; those separate limitations are expressly described immediately after this paragraph. This candidate is newly checked during discovery, not a reported finding."
+          }
+        }
+      ],
+      "latest": {
+        "line": 6,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c3",
+          "state": "open",
+          "summary": "The rewritten tab BROWSER contract preserves the ambient environment",
+          "location": "SPEC_impl.md:9056",
+          "detail": "Reviewed commit: f96dd4363d97dc7e07dea5b8947c96be6bf912e8. TLDR: Considered whether changing the description from tmux environment passing to terminal-host child passing incorrectly promised preservation of an existing browser selection. A new host boundary that cleared ambient variables could have lost an inherited browser value when no string override was added. Details and source refutation: service/core.rs 13809..13857 constructs the tab environment and gives append_tab_browser the ambient OsString. launch.rs 1331..1350 lets explicit launch values win, then inherited values (including empty), then the generated fallback; an inherited non-UTF-8 value is intentionally not converted to a string override. Crucially service/core/host_tabs.rs 585..606 calls host_child_env(std::env::vars_os(), env, ...) and includes the result in ChildSpec. service/core/host_launch.rs 135..159 starts with the complete OsString base environment and overlays launch values; it does not clear the base or remove BROWSER. Thus the changed documentation accurately describes both ordinary string overrides and retained ambient non-UTF-8 values. Suggested bucket: other had this been only an incorrect internal environment contract; no user defect established. Confidence: confirmed source refutation, no execution. proposed_drop: refuted by the actual tab caller and host_child_env base-plus-overlay implementation at the cited paths. possible_cover: none. Could-be-highest: no established security or loss-of-work route; this considered concern was lost browser-selection behavior, not a new forwarding authority. Caveat: does not claim all external BROWSER consumers interpret generated templates successfully; those separate limitations are expressly described immediately after this paragraph. This candidate is newly checked during discovery, not a reported finding."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g012/findings.jsonl",
+        "id": "c3",
+        "line": 6,
+        "disposition": "excluded",
+        "group": "tab-browser-ambient-osstring-preservation",
+        "reason": "Parent explicitly accepted named refuted proposal from claims-005 after inspecting it. The terminal-host boundary starts with the supervisor's complete OsString environment and overlays launch values. Inherited BROWSER, including non-UTF-8, therefore survives when no string override is added. Propose narrow source refutation of ambient-browser loss; retain the caveats about independent opener and template-consumer behavior. Checked source/results: [\"f96dd4363d97dc7e07dea5b8947c96be6bf912e8:service/core.rs:13812-13840 reads ambient BROWSER and passes it to append_tab_browser. launch.rs:1331-1350 preserves explicit launch values first, inherited values including empty next, and supplies fallback only on absence; a non-UTF-8 value remains ambient.\",\"At f96dd43, service/core/host_tabs.rs:591-606 calls host_child_env(std::env::vars_os(), env, ...) and puts the result in ChildSpec. host_launch.rs:108-159 removes six named terminal/activation variables, none BROWSER, after collecting and overlaying the OsString base.\",\"The f96dd43-to-00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db complete launch.rs/host_launch.rs diff contains explanatory comments and one test diagnostic change, with no browser environment change; host_tabs.rs is unchanged. Source-only.\"] Current coverage/results: [\"SPEC.md:3956-3968 says existing inherited BROWSER, including empty, wins and lists external consumer limits. SPEC_impl.md:9053-9068 describes the host-child environment and the same limits. The source supports that contract rather than needing an exception.\",\"TODO.md Planned is empty. Targeted plans/queue BROWSER and tab-environment searches found no unlanded matching plan. BUGS.md has no match. INDEX.md and active TRIAGE_OUTCOMES.md searches found no exact inherited-browser loss item.\",\"No FILTER.md rule needed or proposed; refutation is the base-plus-overlay implementation.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"The rewritten host-child contract might lose an inherited browser selection, particularly non-UTF-8, by clearing ambient state. The single history entry source-refutes that premise and explicitly separates it from new forwarding authority and external BROWSER reader compatibility.\"; null."
+      },
+      "accepted_parent_decision": {
+        "key": "g012/c3",
+        "line": 6,
+        "disposition": "excluded",
+        "group": "tab-browser-ambient-osstring-preservation",
+        "bucket": "other",
+        "recording": "refuted",
+        "queue_target_candidate": null,
+        "needs_independent_drop_check": false,
+        "reason": "Parent explicitly accepted named refuted proposal from claims-005 after inspecting it. The terminal-host boundary starts with the supervisor's complete OsString environment and overlays launch values. Inherited BROWSER, including non-UTF-8, therefore survives when no string override is added. Propose narrow source refutation of ambient-browser loss; retain the caveats about independent opener and template-consumer behavior. Checked source/results: [\"f96dd4363d97dc7e07dea5b8947c96be6bf912e8:service/core.rs:13812-13840 reads ambient BROWSER and passes it to append_tab_browser. launch.rs:1331-1350 preserves explicit launch values first, inherited values including empty next, and supplies fallback only on absence; a non-UTF-8 value remains ambient.\",\"At f96dd43, service/core/host_tabs.rs:591-606 calls host_child_env(std::env::vars_os(), env, ...) and puts the result in ChildSpec. host_launch.rs:108-159 removes six named terminal/activation variables, none BROWSER, after collecting and overlaying the OsString base.\",\"The f96dd43-to-00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db complete launch.rs/host_launch.rs diff contains explanatory comments and one test diagnostic change, with no browser environment change; host_tabs.rs is unchanged. Source-only.\"] Current coverage/results: [\"SPEC.md:3956-3968 says existing inherited BROWSER, including empty, wins and lists external consumer limits. SPEC_impl.md:9053-9068 describes the host-child environment and the same limits. The source supports that contract rather than needing an exception.\",\"TODO.md Planned is empty. Targeted plans/queue BROWSER and tab-environment searches found no unlanded matching plan. BUGS.md has no match. INDEX.md and active TRIAGE_OUTCOMES.md searches found no exact inherited-browser loss item.\",\"No FILTER.md rule needed or proposed; refutation is the base-plus-overlay implementation.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"The rewritten host-child contract might lose an inherited browser selection, particularly non-UTF-8, by clearing ambient state. The single history entry source-refutes that premise and explicitly separates it from new forwarding authority and external BROWSER reader compatibility.\"; null."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-005",
+          "key": "g012/c3",
+          "latest_line": 6,
+          "recommendation": "refuted",
+          "bucket": "other",
+          "underlying_key": "tab-browser-ambient-osstring-preservation",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The terminal-host boundary starts with the supervisor's complete OsString environment and overlays launch values. Inherited BROWSER, including non-UTF-8, therefore survives when no string override is added.",
+          "checks": [
+            "f96dd4363d97dc7e07dea5b8947c96be6bf912e8:service/core.rs:13812-13840 reads ambient BROWSER and passes it to append_tab_browser. launch.rs:1331-1350 preserves explicit launch values first, inherited values including empty next, and supplies fallback only on absence; a non-UTF-8 value remains ambient.",
+            "At f96dd43, service/core/host_tabs.rs:591-606 calls host_child_env(std::env::vars_os(), env, ...) and puts the result in ChildSpec. host_launch.rs:108-159 removes six named terminal/activation variables, none BROWSER, after collecting and overlaying the OsString base.",
+            "The f96dd43-to-00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db complete launch.rs/host_launch.rs diff contains explanatory comments and one test diagnostic change, with no browser environment change; host_tabs.rs is unchanged. Source-only."
+          ],
+          "coverage_checked": [
+            "SPEC.md:3956-3968 says existing inherited BROWSER, including empty, wins and lists external consumer limits. SPEC_impl.md:9053-9068 describes the host-child environment and the same limits. The source supports that contract rather than needing an exception.",
+            "TODO.md Planned is empty. Targeted plans/queue BROWSER and tab-environment searches found no unlanded matching plan. BUGS.md has no match. INDEX.md and active TRIAGE_OUTCOMES.md searches found no exact inherited-browser loss item.",
+            "No FILTER.md rule needed or proposed; refutation is the base-plus-overlay implementation."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": null,
+          "original_stronger_consequence": "The rewritten host-child contract might lose an inherited browser selection, particularly non-UTF-8, by clearing ambient state. The single history entry source-refutes that premise and explicitly separates it from new forwarding authority and external BROWSER reader compatibility.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Propose narrow source refutation of ambient-browser loss; retain the caveats about independent opener and template-consumer behavior."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "tab-browser-ambient-osstring-preservation",
+        "destination": null
+      }
+    }
+  ],
+  "replies": [
+    {
+      "turn": 1,
+      "reply": "Initial review is incomplete: the supplied manifest has invalid line endpoints, so mandatory evidence reads fail.\n\nRecorded candidate `c1`: orphaned tmux cleanup is explicitly accepted by the specification. No findings or open leads.\n\nProgress is saved. All three mandatory patch reads still need certified delivery after the manifest is corrected."
+    },
+    {
+      "turn": 2,
+      "reply": "Initial pass complete. All 609 mandatory lines were delivered through the corrected evidence manifest; no assigned scope remains unread.\n\nAppended and revised candidate `c2` with source refutation. `c1` is unchanged. No reportable findings or open leads. No execution performed.\n\nProgress and complete records are saved in the assigned directory."
+    },
+    {
+      "turn": 3,
+      "reply": "Revised `c1` and `c2` with caller and cross-batch source checks; their conclusions are unchanged. No new findings.\n\nUnresolved lead IDs: none. Synthesis complete; assigned coverage remains complete."
+    },
+    {
+      "turn": 4,
+      "reply": "Discovery pass complete. Checked interface records, intermediate tmux floor/pin contracts, CentOS payload wording, and tab browser-environment inheritance.\n\nRecorded source-refuted candidate `c3`. New verified findings: none. New unverified findings: none. Open leads: none.\n\nNothing new reportable was found. Progress updated; assigned coverage remains complete."
+    }
+  ],
+  "progress": "Group: g012 product-contracts, SPEC_impl.md changes at 17a3fe858c5511a24b7403af15dd41c93bf69fd7, 500548b9253b07a26fd03119679184b69544e31d, and the assigned f96dd4363d97dc7e07dea5b8947c96be6bf912e8 slice.\nTurn type/count: initial review 1, incomplete because mandatory evidence reader rejects the supplied manifest. Discovery-pass count: 0.\n\nThe complete brief and inventory.json commits field were read. No excluded inventory coverage metadata or prohibited coverage sources were read. Root AGENTS.md has its End sentinel. Skillette, scode-voice, machine instructions, queue AGENTS.md and recording procedure were read. No checkout files changed; no tests, builds, reproductions, helper agents, live installation actions, or unrelated process actions.\n\nEvidence blocker: evidence read on 01229-000.patch 1..140 and 01473-003.patch 1..100 both failed with PERSISTENT_REVIEW_TOOL_FAILED: Invalid source range. No coverage was certified. The manifest requires 1..212, 1..225 and 1..175, but wc and Python splitlines independently show snapshots have 211, 224 and 174 lines. The helper validates every manifest range before reading any packet. Original manifest and snapshots were not changed. A clarification request is pending for caller correction or approval of a separate corrected manifest; no approval assumed.\n\nContext reads (not mandatory packet coverage): pinned SPEC.md installation/updates at 17a3fe8 lines 673..788 and f96dd43 lines 681..795; SPEC_impl.md updater section at 17a3fe8 7574..7772 and f96dd43 7536..7734; tmux substrate at 17a3fe8 2784..2876 and 500548b 2784..2875; native packaging at 17a3fe8 7247..7321; provisioning at 17a3fe8 7773..7970; SPEC.md topology at 500548b 110..222. Full SPEC_impl.md git-show patches for 17a3fe8 (lines 1..240) and 500548b (lines 1..250) were explored as context only; f96dd43 patch lines 1625..1755 were explored, also not certified. Source search at 17a3fe8 found FARHELM_TMUX only as ignored/filtered compatibility and test references in desktop/setup/supervisor/unit paths, with no remaining tmux startup preflight.\n\nInterface assumptions: terminal hosts replace tmux as the terminal owner; ordinary supervisor replacement preserves terminals; provisioning removes only the earlier private Linux tmux file after supervisor restart; uninstall still explicitly ends terminal hosts. Product contracts accept a private tmux server already outside the unit control group surviving uninstall. Neither updater contract nor its verification chain changes in the examined slices; apparent updater heading labels also include neighboring provisioning changes, so review must cover all assigned lines rather than the heading alone.\n\nLog delta: c1 appended as candidate (other; exact specification acceptance of orphan tmux server surviving uninstall). Verified finding IDs: none. Unverified finding IDs: none. Open lead IDs: none. Candidate c1 is source/contract analysis, not an execution observation.\n\nNext action: obtain corrected evidence manifest; reread all three immutable patch snapshots through evidence read in packets of at most 200 lines and 24000 encoded bytes. Then finish source/contract checks for every assigned hunk, including the exact f96dd43 slice boundaries. Resolve c1 line attribution if needed. Do not begin later synthesis/discovery protocol before initial review completes.\nUnread mandatory scope: all required evidence packets (612 manifest lines as supplied; actual source text has 609 lines). This group must not be reported complete.\n\nCoverage repair continuation: initial review turn 2, discovery passes 0. Corrected brief reread fully; findings log exists with c1 preserved. Reading all corrected mandatory ranges next.\n\nCoverage repair / completed initial pass, turn 2:\nThe parent corrected manifest endpoints without changing snapshot bytes or hashes. Corrected brief read in full. All mandatory source text delivered successfully, each packet in its own shell call and direct stdout: 01229-000.patch 1..120 and 121..211; 01263-000.patch 1..115 and 116..224; 01473-003.patch 1..174. Total mandatory coverage delivered: 609/609 lines, no clipped output. Parent retains responsibility for transcript audit; this is a delivery statement, not a separately run audit. No unread assigned material remains.\n\nReview checks completed at the assigned revisions: assessed all added/deleted hunks, including intermediate Linux tmux floor behavior at 17a3fe8 and its removal at 500548b, and every neighboring hunk in the f96dd43 slice (provisioning, tests contract, session compatibility, prompt delivery and BROWSER environment). The updater heading itself has no behavior change in f96dd43. No GUI confirmation handlers change in this group. Read the Answers bind to what was drawn contract at f96dd43 1069..1125.\n\nAdditional context read this turn: SPEC_impl.md at 500548b 6580..6675 and 7771..8158; at 17a3fe8 7322..7573; at f96dd43 8321..8420, 8860..8915, 9015..9090 and 8160..8247. These include complete relevant prepared-snapshot, side-by-side installation, provisioning and testing contracts, plus the changed prompt and browser paragraphs and their governing surrounding constraints. Previous turn's product installation, updater, topology and substrate context remains applicable.\n\nImplementation checks: at 500548b, provisioning/plan.rs 770..890 places Linux RemoveBundledTmux after EnableSupervisor and any RestartSupervisor and targets lib_dir/tmux; service.rs 2655..2690 and 2750..2800 maps its failure to degraded warning; snapshot_preparer.rs 70..150 skips it; backend.rs 3245..3440 explicitly stops terminal hosts, preserves failure/retry guards, and unlinks the tmux file without following a final symlink. At 17a3fe8, old_terminals.rs 1..185 confirms direct socket cleanup without executing tmux; units.rs 55..115 confirms unit inputs and fixed PATH. At f96dd43, service/core.rs 11845..12020 checks lifecycle/liveness/activity, caught_up and bracketed-paste mode; 2160..2245 confirms the paste's acknowledged write precedes submit; 13760..13905 plus launch.rs 1318..1368 confirms tab BROWSER precedence and environment handling. Pinned search also confirms AGENT_PROMPTS_ENABLED=false in agent_requests.rs. These are source checks, not behavior observed by execution.\n\nFindings-log delta this turn: appended c2 and revised c2 with concrete source references. c1 retained unchanged; pinned numbered lines confirm its attribution SPEC_impl.md 7860..7863. New verified finding IDs: none. New unverified finding IDs: none. Open lead IDs: none. No reportable defect established. Candidate c2 records refutation of a potential missing-runtime-dependency concern; c1 records explicit acceptance of the out-of-control-group tmux residual. No other substantive leads were retained or silently dropped.\n\nInterface assumptions unchanged: terminal hosts own new terminals; ordinary manager replacement preserves them, while uninstall explicitly ends them. Removing the unused private tmux executable neither ends a personal running server nor replaces shared-directory tmux. The update verification interface and retained-version compatibility remain unchanged in assigned edits.\n\nNo tests, builds or reproductions were run: the caller requested source-only review. No checkout edits, helper agents, excluded coverage reads, or live-install/process actions. Discovery-pass count remains 0; this was initial-pass coverage repair, not synthesis or discovery. Initial source-review pass complete; next action is to return delta and await the parent's separately requested synthesis turn.\n\nTurn 3: later-turn synthesis. Mandatory delivery audited by caller. Discovery passes remain 0. Revisit batch interactions and recorded candidate premises; no open leads entering turn.\n\nTurn 3 synthesis complete. No new findings, candidates or leads. Revisions appended under original IDs c1 and c2, preserving consequences and dispositions. No verified or unverified finding IDs added. Open lead IDs: none.\n\nCross-batch checks: the desktop removal keeps session executable validation before replacement, launches the absolute farhelm binary with inherited PATH, and removes only tmux resolution/preflight/selection; the remote removal leaves executable-independent legacy-server cleanup intact, removes the remaining floor module and changes payload preparation to one awaited farhelm payload (so the deleted sibling-writer join contract has no remaining siblings). PlanLayout's defaults and registered-binary override separation keep tmux deletion bound to the dedicated private lib directory. Linux restart is an awaited systemctl restart before removal; StopSupervisor dispatch still uses frozen farhelm and state paths and explicit terminal-host shutdown. The later f96dd43 contract retains the orphan-server acceptance and the same confirmation/retry safety contracts rather than broadening removal authority. No new mismatch found between assigned patches and callers.\n\nAdditional context in this turn: at 500548b plan.rs 650..775, service.rs 2790..2860; backend.rs restart implementation 2983..2996 (search context), plus previously checked stop implementation. Read pinned patches for 500548b installation.rs/lib.rs/hosts/spawn.rs and 17a3fe8 desktop.rs (first 190 patch lines); these are caller context, not expanded assigned review scope. At f96dd43 SPEC_impl.md 7778..7868 confirms retained uninstall and plan contracts. The trailing empty installation.rs range returned no text and supplied no evidence; the actual installation helper diff already delivered its one-payload staging implementation.\n\nState: audited mandatory coverage remains complete (609/609 lines), no unread assigned material. Source-only conclusions; no tests, builds or reproductions run, and no checkout modifications. Turn type/count: synthesis / 3 total turns including repair. Discovery-pass count: 0. Interface assumptions unchanged. Next action: return this turn's delta and await any separately commissioned discovery pass.\n\nTurn 4: separate discovery pass 1. Reusing audited source delivery and completed synthesis. Read discovery-neighbours before new search; no pending named questions. Source-only, same assigned group.\n\nTurn 4 discovery pass 1 complete. Read discovery-neighbours.json fully in bounded ranges 1..120, 121..190, 191..270, 271..350, 351..430 and 431..522 before the new search. Interface reconciliation: supplied records already cover old-terminal termination/reassurance, failed-cleanup/guard interactions, lingering orphan servers, stale migration pointers, and separate fixture/doc assertions. g046/f1 and g057/l1 identify the same orphan-server route as c1; their possible consequences do not establish a new separate shipped loss/security route in this group. No parent drop or lowering is assumed. Do not reproduce those known concerns as new discoveries. There were no named pending questions and no open leads entering this turn.\n\nNew search beyond known records checked three remaining contract seams at assigned revisions:\n- At 17a3fe8, tmux.rs 1..220 still supplies the strict stable-version parser, 3.7c floor and release-pin contract. .github/release/source-pins.env names 3.7c; release.yml still builds the pin and wraps runtime selections with it. The intermediate specification's retained remote-only floor is consistent with the surviving producer/parser, distinct from removing local startup requirements.\n- At 500548b, test-provision-centos.sh payload/build/static-ELF and runtime selection context confirms the rewritten SPEC_impl.md CentOS paragraph describes one musl-static farhelm payload, inspected by check-static-elf before the fixture. No claim of executed test coverage was inferred; this is documentation-to-producer consistency, separate from interface groups' retained fixture-oracle findings.\n- At f96dd43, host_tabs.rs 568..625 and host_launch.rs 130..163 establish ambient OsString environment plus tab overrides into ChildSpec. This resolves the considered concern that the tmux-to-host wording might incorrectly promise BROWSER inheritance. Source preserves inherited selection, including the non-UTF-8 case omitted from string overrides. Record c3 appended immediately when that candidate was resolved. The same range's path history was checked for attribution context; no independent out-of-scope defect alleged.\n\nDiscovery result: no new verified findings; no new unverified-after-investigation findings; no open lead IDs. New candidate ID: c3 (source-refuted tab-browser environment concern). c1 and c2 unchanged, all original consequences and proposed-drop bases retained. No new reportable issue found. This is an empty discovery result with one newly documented refutation, not a claim that neighboring groups are clean.\n\nTurn count: 4. Discovery-pass count: 1. Audited mandatory coverage remains 609/609 lines; no unread assigned material. No runtime tests, builds, reproductions, live-install actions, prohibited coverage searches, checkout edits or helper agents. All conclusions are source/contract analysis. Next action: return this pass's checks and ID delta; await the caller's next instruction.\n"
+}

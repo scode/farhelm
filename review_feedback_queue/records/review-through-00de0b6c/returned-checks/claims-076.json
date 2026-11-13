@@ -1,0 +1,306 @@
+[
+  {
+    "key": "g117/l1",
+    "latest_line": 11,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "retired-container-file-authority-after-confinement-removal",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The file-specific disclosure hypothesis is source-refuted. Retirement is checked before path resolution or opening; new container hosts use an in-container supervisor. This says nothing about the separately mentioned constructed-peer/TCP/cache concern.",
+    "checks": [
+      "04d85f0c98a9b635709d00b056719a0baa7fd3fc:service/downloads.rs:54-66,182-190,204-217 (under crates/farhelm-supervisor/src/) independently checks the stored launch on both stat and download; service/core.rs:3731-3739 and container.rs:18-22 reject stored agent selections with container.is_some().",
+      "04d85f0c:service/connection.rs:613-614 separates restricted controls, while :690-700 dispatches full-authority file requests; service/handlers.rs:3607-3615 rejects the restricted catch-all. service/uploads.rs:920-943 rechecks retirement under the lifecycle claim before making directories.",
+      "04d85f0c:crates/farhelm-helm/src/access.rs:397-427 uses the registered Podman binding and confirmed container identity; :207-230 constructs podman exec with --user and -- followed by that identity. This is source routing evidence, conditional on the ordinary Podman and authenticated-transport premises, not a runtime isolation observation.",
+      "00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db:service/downloads.rs:54-66 retains the same pre-filesystem refusal."
+    ],
+    "coverage_checked": [
+      "Current SPEC.md:4892-4900 and SPEC_impl.md:8312-8326 explicitly retire supervisor-outside sessions; SPEC_impl.md:3611-3613 explicitly removes their file confinement. These support the intended boundary, not an exception permitting disclosure.",
+      "TODO.md Planned is empty (:25-26). Searched plans/queue, BUGS.md, INDEX.md and active TRIAGE_OUTCOMES.md for retired-container file/confinement triggers; no exact outstanding defect cover. The Podman plan's retirement language is not separate coverage of an access bypass.",
+      "FILTER.md read in full; no filter permits a security boundary failure."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": "No remaining source premise for the narrow proposed disclosure: the necessary retired launch passing admission is contradicted. Broader peer/namespace threats were not assigned or checked.",
+    "original_stronger_consequence": "Removing confinement might let a retired container session disclose outside-host files (highest/security). The later source refutation preserves and withdraws only this file-specific hypothesis.",
+    "needs_independent_drop_check": true,
+    "proposed_basis": "Source refutation by equivalent retired-launch predicate and pre-filesystem rejection, corroborated by container-host routing. Parent still needs the independent security-drop consultation."
+  },
+  {
+    "key": "g117/c2",
+    "latest_line": 13,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "grid-output-cleanup-watch-removal",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The original output-task leak/deadlock hypothesis is refuted. Its later input-lifetime addendum is a distinct supported boundary and must reach g124/l1's recording decision; the refutation does not dispose of it.",
+    "checks": [
+      "1ed482dde220452e424973faf38a5e1318986333:service/grid_stream.rs:917-963 cancels the complete stream future and reports synchronously; service/terminals.rs:431-438,465-483 retains its shutdown sender and joins the exact task. service/connection.rs:1272-1327 delegates natural/stall verdicts rather than taking the attachment lock inside the joined output task.",
+      "1ed482dd:service/connection.rs:1502-1517 removes old under the lock but partially moves only old.forwarder, unlocks at :1515, and drops remaining old.input at task-block end. Its immediate parent :2172-2189 explicitly drops backend before unlocking. HostAttach::drop at grid_stream.rs:1169-1175 is the input cancellation signal. This validates the distinct delayed-cancellation evidence.",
+      "Diff 1ed482dd..00de0b6c for service/terminals.rs and service/grid_stream.rs changes only the latter's module wording; output synchronization remains. No runtime test or scheduler interleaving was observed."
+    ],
+    "coverage_checked": [
+      "SPEC.md Terminal experience:3011-3028 and SPEC_impl.md Grid streams:2551-2589 read: one owner and independent output; ended input is dropped before replacement input. No permission for delayed cancellation.",
+      "TODO Planned empty. Searched plans/queue, BUGS.md, INDEX.md and active TRIAGE_OUTCOMES.md for output cleanup/deadlock and natural-detach input cancellation; no exact queue coverage of the input-lifetime consequence.",
+      "Read initial-oversized-grid-cannot-attach.md in full: it covers accepted API sizes above 1000 failing Hello, not old input surviving ownership loss. It is related trigger evidence, not complete coverage. FILTER's already-polled handoff exception does not cover cancellation not yet signalled."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": "None for original output-join refutation. The supplied size-1001 trigger and harmful mixed-command sequence belong to g124/l1 and were not fully re-established here; bundled GUI cap 1000 remains a material caveat.",
+    "original_stronger_consequence": "Original: output left running or detach deadlocked (high if real). Later addendum: old queued input may execute after replacement takes control, potentially destructive (could be highest); that addendum is not withdrawn.",
+    "needs_independent_drop_check": true,
+    "proposed_basis": "Refute only the output-join hypothesis; preserve distinct input-lifetime evidence for parent reconciliation with g124/l1. Do not use this result as a broad attachment-safety drop.",
+    "new_interface_evidence": "Confirmed the supplied g124/l1 lifetime regression: 1ed482dd removes the parent's explicit backend drop before unlock. The oversized-attach queue item does not record that input consequence."
+  },
+  {
+    "key": "g117/c3",
+    "latest_line": 9,
+    "recommendation": "needs-parent",
+    "bucket": "other",
+    "underlying_key": "migration-missing-terminal-lifecycle-docs",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The intermediate documentation defect is verified, and its correction within the review range is verified. It is neither source-refuted at the reviewed commit nor a remaining endpoint defect. Parent must choose the already-corrected historical disposition; do not revive the withdrawn absent-user-harm rationale.",
+    "checks": [
+      "dbfc69751215dbf15e1d31d5bed73c3754c4ebc4:service/terminals.rs:806-850 attributes terminal absence to failed survival and Interrupted to the boot classifier, although :864-875 already words update retirement correctly.",
+      "dbfc6975:service/core.rs:6965-6969 unconditionally maps Tmux rows to no terminal; :7097-7114 interrupts live old rows without requiring reboot. The stale explanation is therefore contradicted by implementation, not only contract.",
+      "1ed482dde220452e424973faf38a5e1318986333:service/terminals.rs:151-182 corrects the docstring to boot-or-update Interrupted, host unavailability and deliberate old-kind retirement. Diff to 00de0b6c shows terminals.rs unchanged, preserving the correction."
+    ],
+    "coverage_checked": [
+      "Current SPEC.md:2998-3010 and SPEC_impl.md:2780-2823 describe deliberate retirement and retained ended outcomes, agreeing with corrected source.",
+      "TODO Planned empty; BUGS.md and active TRIAGE_OUTCOMES searches yield no exact cover. INDEX.md has no matching lifecycle-doc item. tmux-drop-from-docs.md:68-74,88-103 concerns stale comments generally, but does not add an outstanding fix for this already-corrected helper.",
+      "FILTER rare-diagnostic clause does not justify removing a concrete maintenance-documentation error merely because it has no runtime malfunction."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": "No endpoint defect remains. The available disposition vocabulary has no 'fixed within range'; needs-parent preserves that distinction.",
+    "original_stronger_consequence": "Maintainers could infer old terminal presence is still probed and Interrupted means reboot. No security, work loss or incorrect runtime behavior was established. Initial proposed exclusion solely for no user-facing harm was withdrawn.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Verified historical defect, corrected by 1ed482dd before the endpoint; retain both facts in the parent's completion record."
+  },
+  {
+    "key": "g117/c4",
+    "latest_line": 14,
+    "recommendation": "needs-parent",
+    "bucket": "other",
+    "underlying_key": "restart-history-promoted-into-launch-error-excerpt",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The narrow interface evidence is verified: a blank initial screen does not guarantee excerpt provenance after growth. The parent-supplied g013/f2 owns the complete publication path; its history was not supplied in this batch, so an exact alias or whole-finding disposition cannot be certified here.",
+    "checks": [
+      "f96dd4363d97dc7e07dea5b8947c96be6bf912e8:vendor/alacritty_terminal/src/grid/resize.rs:25-28,46-71 grows the visible area using retained history.",
+      "f96dd436:service/launch_artifacts.rs:44-58 asserts blank seeding prevents previous-run quotations; :63-75 reads the final visible screen; :96-102 selects nonblank lines with no run provenance. service/handlers.rs:1881-1887 and :2042-2054 permit attach/owned resize without a launch-spec-consumption prerequisite.",
+      "This is source support for the given counterexample, not observation of a durable wrong error. No independent defect discovery or claim that the issue predates the whole range."
+    ],
+    "coverage_checked": [
+      "SPEC.md:2888-2905 permits excerpts only when safely attributable. SPEC_impl.md:2658-2668 repeats the incorrect blanket blank-screen rationale, so this is not product acceptance of prior-run quotations.",
+      "TODO Planned empty. Searched plans/queue, BUGS.md, INDEX.md and active TRIAGE_OUTCOMES.md for launch excerpt/previous-run/blank-screen provenance: no exact existing cover. The tmux plan's instruction to move excerpt helpers is unrelated to provenance.",
+      "FILTER rare-diagnostic application is uncertain because the full trigger/publication path is owned by g013/f2 and absent here. Do not infer a filter drop from the consequence alone."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": "Parent must match g013/f2's full record, including restart seeding and a never-started classification that actually publishes the promoted text. No runtime reproduction was performed.",
+    "original_stronger_consequence": "A durable startup error can misleadingly quote the previous run. No established security or work-loss consequence. No local blanket seed-provenance refutation is retained.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Carry verified history-promotion/excerpt-selection evidence into g013/f2; do not create a second local finding merely for supplied interface synthesis."
+  },
+  {
+    "key": "g118/c1",
+    "latest_line": 4,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "terminal-wrapper-removal-pinned-sweep-final-state",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "Both removed-wrapper safeguards survive in the host implementation and its lifecycle callers. No reused-process or premature-classification route is established by this removal.",
+    "checks": [
+      "1ed482dd parent:service/terminals.rs:185-237 retains the host pid-equality and final-state watch branches. 1ed482dde220452e424973faf38a5e1318986333:hosts/terminal.rs:2571-2583,2599-2612 preserves those branches in sweep_root and holds_final_state.",
+      "1ed482dd:service/handlers.rs:865-910 probes and captures the pinned sweep root before intent; :1009-1034 requires final_state && dead for inferred launch classification. service/core.rs:12381-12397 and :14128-14138 retain probe/root checks for Restart and tab cleanup."
+    ],
+    "coverage_checked": [
+      "SPEC_impl.md Grid streams and Launch failure classification:2551-2668 requires final exit evidence and attribution; no exception accepts a wrong-process sweep. SPEC.md Terminal experience retains ended screens and scoped ownership.",
+      "TODO Planned empty. Searches of plans/queue, BUGS.md, INDEX.md and active TRIAGE_OUTCOMES.md for sweep-root/final-state wrapper removal reveal no exact covered finding. Adjacent gone-host and stop-wait test items are different causes.",
+      "FILTER's numeric-signal handoff exception is different from deleting root identity checks and is not used."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": "The suspected missing guard is contradicted by the surviving implementation. Independent defects inside process identity or host runtime are outside this named claim.",
+    "original_stronger_consequence": "Stop might kill an unrelated process after pid reuse (highest), or durable launch classification might use incomplete final output. Neither route follows from the wrapper removal.",
+    "needs_independent_drop_check": true,
+    "proposed_basis": "Source-equivalent host safeguards and retained lifecycle call-site checks; independent highest-impact drop check still required."
+  },
+  {
+    "key": "g118/f1",
+    "latest_line": 6,
+    "recommendation": "covered",
+    "bucket": "highest",
+    "underlying_key": "intentional-old-tmux-terminal-retirement",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The source does enact the loss of old terminals, their screens and running programs. The current product and implementation specifications explicitly accept exactly that migration. This does not cover unintended host-terminal destruction or unsafe startup cleanup.",
+    "checks": [
+      "1ed482dde220452e424973faf38a5e1318986333:service/terminals.rs:231-247,263-274 resolves only host terminals; old-kind missing-terminal wording at :204-206 names deliberate retirement.",
+      "1ed482dd:service/core.rs:6142-6151 calls OldTerminals::end_private_server before reload only for a state-directory owner. service/core/old_terminals.rs:176-231 identifies same-user peer and invokes verified termination; :247-251 removes server files after confirmed termination. Source-only, no observed shutdown."
+    ],
+    "coverage_checked": [
+      "Exact current cover: SPEC.md Terminal experience:2998-3010 and SPEC_impl.md Ending the old private tmux server:2780-2823. They match trigger, loss and scope.",
+      "TODO Planned empty; phase-3 removal at TODO.md:225-232 is outside Planned and is not the basis. plans/queue/tmux-end-old-terminals.md states the same retirement, while the docs follow-up preserves its startup shutdown; no additional plan cover is needed.",
+      "BUGS.md, INDEX.md and active TRIAGE_OUTCOMES searches show no exact queued/ledger item for intentional retirement. Other reviewers' mentioned possible aliases were not supplied and are not asserted here. FILTER is unnecessary; no filter is applied."
+    ],
+    "exact_cover_quotes": [
+      "SPEC.md:3000-3004: 'A supervisor that finds that tmux server when it starts ends it, and with it everything that still ran in an old terminal, without needing a tmux program.'",
+      "SPEC.md:3003-3005: 'one whose agent had already ended keeps its outcome, but its terminal's last screen, which lived in the server, is gone; old tabs are closed.'",
+      "SPEC.md:3008-3010: 'A session whose agent or tabs already run in terminal hosts keeps them.'"
+    ],
+    "missing_premise": "None for intentional migration behavior and exact specification cover. Safety of every startup-cleanup operation is not part of this acceptance.",
+    "original_stronger_consequence": "Update ends programs still running in old terminals and discards old terminal screens/tabs: loss of processes and retained terminal work, highest if treated as a defect. No withdrawal or lowering has occurred.",
+    "needs_independent_drop_check": true,
+    "proposed_basis": "Explicit specification acceptance of this exact old-terminal migration; independent highest-impact coverage check must agree before dropping."
+  },
+  {
+    "key": "g118/c2",
+    "latest_line": 3,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "tmux-sink-removal-host-viewer-isolation",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The host runtime is driven independently and the viewer waits after releasing its emulator read. Removing tmux sinks therefore does not establish stalled-viewer backpressure on the agent.",
+    "checks": [
+      "1ed482dde220452e424973faf38a5e1318986333:service/handlers.rs:1914-1945 constructs the stream over an already-connected host and performs streaming inside its own task.",
+      "1ed482dd:service/grid_stream.rs:524-560 completes host.try_read before returning/waiting, and :818-831 waits on only the viewer queue/pause/failure path. The owned read result is no emulator lock held across the send await."
+    ],
+    "coverage_checked": [
+      "SPEC.md:3013-3028 and SPEC_impl.md Grid streams:2551-2589 require and describe independent slow-viewer behavior. They corroborate the source; they do not accept a freeze.",
+      "TODO Planned empty; searches of plans/queue, BUGS.md, INDEX.md and active TRIAGE_OUTCOMES.md found no exact product finding about sink removal freezing a host agent. Existing stopped-reader/host-flood items concern test premises, not this defect.",
+      "FILTER read; no rare-trigger argument needed or used for this refutation."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": "No surviving dependency from the viewer's queue wait to the runtime reader is established by the deletion. This does not certify every grid/runtime implementation detail.",
+    "original_stronger_consequence": "A stalled viewer could freeze its agent or another session (high if real); no security or loss-of-work route was established.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Source refutation of the sink-deletion concern by independent runtime ownership and released emulator reads."
+  },
+  {
+    "key": "g118/c3",
+    "latest_line": 8,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "host-only-terminal-selector-boundaries",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "Retirement refusal and exact session-tab lookup survive. An absent or finished tab on an interactive path fails instead of falling back to the agent; resize additionally checks the owning connection/channel.",
+    "checks": [
+      "1ed482dde220452e424973faf38a5e1318986333:service/terminals.rs:130-148 restricts DeadIncluded to close; :225-248 checks require_active_launch first and branches Agent separately from exact tab lookup. No tab-to-agent fallback exists.",
+      "1ed482dd parent:service/terminals.rs:899-912 has the same active-launch and finished-tab predicates. At 1ed482dd service/handlers.rs:2060-2083 ignores failed resolution and resizes only if both channel and owning writer still match under the attachment lock."
+    ],
+    "coverage_checked": [
+      "SPEC.md Terminal experience:2998-3028 and Retired containerized sessions:4892-4900 require relevant refusal/ownership boundaries; SPEC_impl.md Grid streams:2551-2589 and Rootless Podman sessions:8312-8326 do not accept selector fallback.",
+      "TODO Planned empty. Searched plans/queue, BUGS.md, INDEX.md and active TRIAGE_OUTCOMES for stale-tab fallback/retired attach/finished-tab exposure: no exact outstanding cover. Adjacent gone-host cleanup and old-tab consent issues are different routes.",
+      "FILTER has no applicable wrong-target exception; not applied."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": "The hypothesized fallback/bypass is contradicted by the resolver. This result does not certify independent host attribution or cleanup mechanisms.",
+    "original_stronger_consequence": "Wrong-target terminal input or cleanup could destroy work (potential highest); stale-selector misrouting or finished-tab exposure could degrade UX. Neither route is established here.",
+    "needs_independent_drop_check": true,
+    "proposed_basis": "Source refutation of exact selector/retirement hypotheses; independent work-loss drop check required."
+  },
+  {
+    "key": "g119/c1",
+    "latest_line": 1,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "removed-tmux-output-client-reap-hazard",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The old control-client overlap hazard requires the removed tmux process. A replacement attachment owns an in-process stream task rather than a tmux control-mode child. This narrowly refutes the removed-process lifecycle concern, not input ordering or startup retirement.",
+    "checks": [
+      "1ed482dde220452e424973faf38a5e1318986333:service/terminals.rs:414-483 owns HostAttach and a GridSender JoinHandle; service/grid_stream.rs:917-963 drops the whole stream future on shutdown and owns no control-mode child.",
+      "1ed482dd:service/teardown.rs:1237-1253 signals every output task before joining any. HostAttach drop at grid_stream.rs:1169-1175 cancels only input-pump work, not an agent or shared server."
+    ],
+    "coverage_checked": [
+      "SPEC.md Terminal experience:2898-2923,2998-3028 describes terminal hosts and deliberate old-server retirement; SPEC_impl.md Grid streams:2551-2589 assigns each viewer its own sender over an independently driven host.",
+      "TODO Planned empty. Searches of plans/queue, BUGS.md, INDEX.md and active TRIAGE_OUTCOMES for output reap/control-client overlap show no exact outstanding cover. No filter is used.",
+      "g117/c2 shares output ownership evidence but its original defect is output-task completion/deadlock, not a surviving external control-client crash route. They are related checks, not asserted exact aliases."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": "The required external output client no longer exists in this path. This says nothing about other causes that could terminate terminal hosts.",
+    "original_stronger_consequence": "Disconnect/takeover might crash a shared terminal server and lose running sessions (highest if the removed tmux-client hazard survived).",
+    "needs_independent_drop_check": true,
+    "proposed_basis": "Source refutation by replacement resource ownership; independent highest-impact drop check must judge that narrow scope."
+  },
+  {
+    "key": "g119/c2",
+    "latest_line": 2,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "atomic-attachment-stop-admission",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The atomic stores the stop state; it does not replace the mutex that serializes checking/installing against closing/draining attachments.",
+    "checks": [
+      "1ed482dde220452e424973faf38a5e1318986333:service/teardown.rs:1237-1244 takes attachments and stores closed=true before draining under that same lock.",
+      "1ed482dd:service/handlers.rs:1733-1751 acquires attachments and checks is_stopping before creating/installing output work; :1933-1968 constructs and inserts while retaining that lock. service/terminals.rs:490-493 uses SeqCst for the flag read."
+    ],
+    "coverage_checked": [
+      "SPEC.md Terminal experience and SPEC_impl.md Grid streams were checked for shared attachment lifecycle; neither accepts a stranded post-shutdown attachment.",
+      "TODO Planned empty; plans/queue, BUGS.md, INDEX.md and active TRIAGE_OUTCOMES searches for atomic stop/attachment admission show no exact cover. FILTER not applied.",
+      "The documented total shutdown budget can expire while waiting for attachments; that is not the hypothesized check/install race."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": "No unlocked flag-check/install window exists in the cited path.",
+    "original_stronger_consequence": "An attachment might install after the orderly-stop drain and be stranded (high if real); no route to loss of user data/processes was established.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Source refutation by the shared attachments lock across both admission and drain."
+  },
+  {
+    "key": "g119/c3",
+    "latest_line": 3,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "removed-pane-death-latch-host-final-screen",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "Runtime liveness/watch replaces the removed tmux latch. Program exit does not end the view; a cycle runs before Gone/Unavailable verdicts, and a separate identity-checked arbiter handles natural detach.",
+    "checks": [
+      "1ed482dde220452e424973faf38a5e1318986333:service/grid_stream.rs:603-625 cycles before examining liveness; Exited continues, Gone ends and Unavailable fails. :631-675 observes runtime status changes/closure; :937-963 races full-stream teardown.",
+      "1ed482dd:service/connection.rs:1272-1327 schedules the verdict and :1502-1517 checks task id/channel/writer before removing the attachment. This prevents an obsolete output end from removing its replacement; it does not prove input cancellation timing."
+    ],
+    "coverage_checked": [
+      "SPEC.md:2888-2923 retains an exited session's terminal and explains final-screen semantics; SPEC_impl.md Grid streams:2570-2576 distinguishes child exit from host Gone/Unavailable.",
+      "TODO Planned empty. Searches of plans/queue, BUGS.md, INDEX.md and active TRIAGE_OUTCOMES for pane-death latch/final-screen attachment liveness reveal no exact cover. Related stop-wait/final-output test findings concern their test premises, not this removed latch.",
+      "FILTER not used."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": "The hypothesized missing runtime liveness/final-cycle mechanism is contradicted. No exhaustive rendering, journaling or host-history safety claim follows.",
+    "original_stronger_consequence": "An exited agent's last screen might disappear or its stream wait forever (high if real). Reviewer did not allege lost execution/data; final terminal output can nevertheless be user-owned work, so preserve a conservative independent drop check.",
+    "needs_independent_drop_check": true,
+    "proposed_basis": "Source refutation limited to pane-death-latch replacement and final-view liveness."
+  },
+  {
+    "key": "g119/c4",
+    "latest_line": 7,
+    "recommendation": "out-of-range",
+    "bucket": "high",
+    "underlying_key": "already-polled-displaced-input-handover",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The original already-running-send concern predates the exclusive review base; the removed barriers did not join input. The broad initial safety refutation remains withdrawn. The distinct new natural-detach delayed-cancellation regression is in range and is not covered by this scope result or the already-polled filter.",
+    "checks": [
+      "git diff 6e423e30068b62c6cfa276c6d720ee35bb70387a..1ed482dd^ is empty for both service/grid_stream.rs and hosts/terminal.rs. 1ed482dd's grid_stream diff changes docs and GridSender cleanup notification, not HostAttach/Pump/admission.",
+      "1ed482dde220452e424973faf38a5e1318986333:service/grid_stream.rs:1169-1175 signals cancellation without joining; :1201-1241 checks it at poll boundaries. hosts/terminal.rs:1527-1535,2320-2339 uses ordinary mpsc admission with connection epoch, no attachment ownership fence. Thus signal-before-replacement alone does not refute a send already executing mid-poll.",
+      "1ed482dd:service/handlers.rs:1877-1886 drops old fields at loop end before replacement HostAttach construction at :1935. In contrast, natural detach connection.rs:1510-1517 drops old.input after unlock; its parent :2172-2189 explicitly dropped backend before unlock. This supplied g124/l1 regression admits a pump that was not already in a send poll and must be handled separately."
+    ],
+    "coverage_checked": [
+      "SPEC.md:3011-3012 requires exclusive input and SPEC_impl.md Grid streams:2586-2589 promises ended pumps drop unsent input; neither generically accepts all delayed cancellation.",
+      "FILTER.md:206-220, 'A displaced input task resumes inside an in-progress handoff', exactly covers the original already-polled ordering, including old Enter submitting a replacement prefix. It expressly excludes newly received input after lost ownership and other mechanisms. This is an additional narrow filter basis if parent records an outside-range concern, not a basis for dropping the natural-detach regression.",
+      "TODO Planned empty. BUGS.md and active TRIAGE_OUTCOMES have no exact claim match. INDEX.md and matching initial-oversized-grid-cannot-attach.md cover the oversized Hello failure only. plans/queue searches supply no unlanded repair for either cancellation ordering."
+    ],
+    "exact_cover_quotes": [
+      "FILTER.md, 'A displaced input task resumes inside an in-progress handoff': 'A worker was already polling that task's send: it observed cancellation as pending and was stalled before handing the old input to the terminal runtime.'",
+      "Same filter: 'Replacement input reaches that runtime first, and the stalled old send then resumes, so the old input follows the replacement's typing. An old Enter can submit a command prefix the replacement had not chosen to submit.'",
+      "Same filter: 'This covers that specific already-running-poll ordering gap.'"
+    ],
+    "missing_premise": "No production interleaving or destructive command was observed. High is the conditional mixed-input consequence; moving to highest needs the harmful command route established. Parent must retain the original possible-highest wording and independently judge any scope/filter drop or lowering. g124/l1's accepted API size 1001 route was supplied, not fully rechecked; bundled GUI caps 1000.",
+    "original_stronger_consequence": "Old queued input could follow replacement input, alter a terminal command and potentially execute destructive input. Initial blanket cancellation-based refutation was retracted. Later scope proposal concerns only the unchanged already-polled race, not the in-range natural-detach lifetime regression.",
+    "needs_independent_drop_check": true,
+    "proposed_basis": "Original mechanism and both implicated files are unchanged before the exclusive base; exact already-polled FILTER boundary is also present. Independent drop check must limit agreement to that mechanism and preserve the separate natural-detach finding.",
+    "new_interface_evidence": "The source comparison independently confirms the supplied distinction with g124/l1: natural detach newly releases the attachment lock before signalling old input cancellation, unlike the already-polled gap covered by FILTER. No g124 record was supplied here, so no exact alias is asserted."
+  }
+]

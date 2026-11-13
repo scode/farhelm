@@ -1,0 +1,753 @@
+{
+  "group": {
+    "id": "g109",
+    "domain": "supervisor-core-integration",
+    "purpose": "supervisor-core-integration: crates/farhelm-supervisor/src/service/core.rs; phases complete small per-commit changes",
+    "interfaces": [
+      "g005",
+      "g007",
+      "g097",
+      "g098",
+      "g099",
+      "g100",
+      "g101",
+      "g102",
+      "g103",
+      "g104",
+      "g105",
+      "g106",
+      "g107",
+      "g108",
+      "g110",
+      "g111",
+      "g112",
+      "g113",
+      "g114",
+      "g115",
+      "g116",
+      "g117",
+      "g118",
+      "g119",
+      "g120",
+      "g121",
+      "g122",
+      "g123",
+      "g124",
+      "g125",
+      "g126",
+      "g127",
+      "g128",
+      "g129",
+      "g130",
+      "g131",
+      "g132",
+      "g133",
+      "g134",
+      "g149",
+      "g150",
+      "g159",
+      "g160",
+      "g161",
+      "g162",
+      "g163",
+      "g164",
+      "g165",
+      "g166",
+      "g167",
+      "g168",
+      "g169",
+      "g170",
+      "g171",
+      "g172",
+      "g173"
+    ],
+    "sources": [
+      {
+        "path": "[private-run]/prep/parts/00866-000.patch",
+        "ranges": [
+          [
+            1,
+            1245
+          ]
+        ],
+        "original_path": "crates/farhelm-supervisor/src/service/core.rs",
+        "commit": "dbfc69751215dbf15e1d31d5bed73c3754c4ebc4",
+        "notes": "patch header; patch character offsets [0,59190)",
+        "lines": 1245,
+        "bytes": 59214,
+        "start": 0,
+        "end": 59190,
+        "original": "[private-run]/prep/originals/00866.patch"
+      }
+    ],
+    "lines": 1245,
+    "bytes": 59214
+  },
+  "records": [
+    {
+      "key": "g109/c1",
+      "owner": "g109",
+      "id": "c1",
+      "domain": "supervisor-core-integration",
+      "purpose": "supervisor-core-integration: crates/farhelm-supervisor/src/service/core.rs; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 1,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c1",
+            "state": "open",
+            "summary": "Startup treats old terminals as ended even if ending the server fails",
+            "location": "crates/farhelm-supervisor/src/service/core.rs:6436",
+            "detail": "Reviewed commit: dbfc69751215dbf15e1d31d5bed73c3754c4ebc4. TLDR: an old agent can keep running while its session is shown as interrupted; Restart could start a second agent in the same folder. Details: startup takes OldTerminals::end_private_server without propagating a failure, disables the tmux driver, and reload always treats TerminalKind::Tmux as absent (core.rs:6436-6443, 6970). The no-sentinel branch converts live old rows with TerminalEnded (7099-7116). Suggested bucket: could-be-highest because two agents in one working directory could conflict and lose work; that downstream loss is not established here. Confidence: source-confirmed intended fallback, not execution-observed. proposed_drop: specification acceptance requires independent check. Exact SPEC.md:3014-3016 text: 'A failure to end the server or to stop what ran there is logged and never stops the supervisor from starting; those sessions are treated as ended all the same, accepting that a Restart could then start a second agent beside one still running.' SPEC_impl.md:2997-2999 likewise explicitly accepts this fallback. possible_cover: exact specification acceptance above; no queue or excluded coverage sources searched. Caveat: no runtime reproduction requested or run; inspect other contracts for unintended routes separately."
+          }
+        },
+        {
+          "line": 3,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "c1",
+            "state": "open",
+            "summary": "Startup treats old terminals as ended even if ending the server fails",
+            "location": "crates/farhelm-supervisor/src/service/core.rs:6433",
+            "detail": "Reviewed commit: dbfc69751215dbf15e1d31d5bed73c3754c4ebc4. TLDR: an old agent can keep running while its session is shown as interrupted; Restart could start a second agent in the same folder. Details: startup takes OldTerminals::end_private_server without propagating a failure and disables the tmux driver (core.rs:6433-6438); reload always treats TerminalKind::Tmux as absent (6965-6969). The no-sentinel branch converts live old rows with TerminalEnded (7100-7114). old_terminals.rs:67-78 explicitly describes the fallback. Suggested bucket: could-be-highest because two agents in one working directory could conflict and lose work; that downstream loss is not established here, so established consequence alone is high/material UX. Confidence: source-confirmed intended fallback, not execution-observed. proposed_drop: specification acceptance requires independent check. Exact SPEC.md Terminal experience text: 'A failure to end the server or to stop what ran there is logged and never stops the supervisor from starting; those sessions are treated as ended all the same, accepting that a Restart could then start a second agent beside one still running.' Exact SPEC_impl.md Terminal substrate: private tmux server text: 'A failure anywhere is logged and never fatal (the maintainer chose to start anyway and treat old sessions as ended, accepting that a Restart could then start a second agent beside one still running)'. possible_cover: exact specification acceptance above; no queue or excluded coverage sources searched. Caveat: no runtime reproduction requested or run. Revision: changed kind from candidate to finding, as the charter requires for a potentially highest issue accepted only by specification, and corrected source line references. The original possible loss-of-work consequence is preserved."
+          }
+        },
+        {
+          "line": 7,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "c1",
+            "state": "open",
+            "summary": "Startup treats old terminals as ended even if ending the server fails",
+            "location": "crates/farhelm-supervisor/src/service/core.rs:6433",
+            "detail": "Reviewed commit: dbfc69751215dbf15e1d31d5bed73c3754c4ebc4. TLDR: an old agent can remain alive after startup nevertheless publishes its session as interrupted; if later cleanup cannot see that survivor, Restart could start a second agent in the same folder. Original strongest concern preserved: concurrent agents can conflict over the same working directory and potentially lose user-owned work. Suggested bucket: high/material UX from the established misleading lifecycle state; could-be-highest is explicit, but loss of work requires the remaining route to a second agent and conflicting writes. Confidence: source-confirmed fallback policy and removal of the old unusable-tmux refusal, not execution-observed; downstream duplicate and data-loss premises are not fully established. Details: core.rs:6433-6438 always proceeds after OldTerminals::end_private_server and marks the tmux driver absent; 6965-6969 takes old-kind terminals as absent; 7100-7114 converts no-sentinel live old rows to Interrupted, without requiring positive termination evidence. old_terminals.rs:67-78 states the fallback and 179-200 returns without ending a server when connect/peer identification fails. Synthesis check this turn: core.rs:12923-12933's former unusable-tmux restart refusal is unreachable after startup marks the driver absent. However Restart still calls the recorded-scope/AgentOnly reaper at 12985-13010 with ScopeKillFailure::Refuse before relaunching: ordinary marker-visible or scoped survivors are not simply ignored. A duplicate requires a survivor that this later cleanup also cannot detect while reporting success (for example no usable recorded scope, no retained root and no readable matching markers), rather than just any startup cleanup timeout. Exact acceptance: SPEC.md:3014-3016, 'A failure to end the server or to stop what ran there is logged and never stops the supervisor from starting; those sessions are treated as ended all the same, accepting that a Restart could then start a second agent beside one still running.' SPEC_impl.md:2998-3000, 'A failure anywhere is logged and never fatal (the maintainer chose to start anyway and treat old sessions as ended, accepting that a Restart could then start a second agent beside one still running)'. proposed_drop: only the explicit specification acceptance of this failure fallback, pending independent check; no parent drop accepted. possible_cover: parent reports overlap with g097/c1 and g099/f1 retirement acceptance, but this record retains the distinct failed-cleanup trigger. No coverage files searched. Material caveats: that acceptance does not establish that separate UI warnings or survival guidance are adequate. Parent's g033/r1 warning-removal concern and g004/g071 guidance concerns are distinct causes, not resolved by this proposed drop. This assignment contains no changed GUI confirmation handler. No runtime reproduction requested or run. Revision: synthesis preserves the original strongest consequence, names the later Restart cleanup that limits its route, and separates fallback acceptance from warning/guidance judgments."
+          }
+        },
+        {
+          "line": 10,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "c1",
+            "state": "open",
+            "summary": "Startup treats old terminals as ended even if ending the server fails",
+            "location": "crates/farhelm-supervisor/src/service/core.rs:6433",
+            "detail": "Reviewed commit: dbfc69751215dbf15e1d31d5bed73c3754c4ebc4. TLDR and strongest original consequence preserved: an old agent can remain alive while startup publishes its session as interrupted; if later cleanup cannot see it, Restart can start a second agent in the same folder, potentially causing conflicting writes and loss of user-owned work. Suggested bucket remains high/material UX for the established fallback classification; could-be-highest is yes, with the duplicate/conflicting-write premises explicit rather than an accepted lowering. Confidence: source-confirmed policy, not observed execution; downstream duplicate/work-loss premises for this ID remain incompletely established. Source: core.rs:6433-6438 marks the tmux driver absent regardless of termination result; :6965-6969 drops old terminal lookup; :7100-7114 converts live no-sentinel old rows to Interrupted. old_terminals.rs:179-200 leaves a server alone on failed connect/peer identification; :67-78 states the fallback. Restart's old unusable-tmux refusal is unreachable (:12923-12933), but :12985-13010 still performs a recorded-scope/AgentOnly sweep with Refuse before relaunch, so an ordinary visible/scoped survivor is not automatically ignored. proposed_drop: only explicit fallback acceptance, still pending independent judgment. Exact SPEC.md:3014-3016: 'A failure to end the server or to stop what ran there is logged and never stops the supervisor from starting; those sessions are treated as ended all the same, accepting that a Restart could then start a second agent beside one still running.' Exact SPEC_impl.md:2998-3000: 'A failure anywhere is logged and never fatal (the maintainer chose to start anyway and treat old sessions as ended, accepting that a Restart could then start a second agent beside one still running)'. No parent drop or lowering accepted. possible_cover: neighbouring g005/f1, g007/f1, g112/c1 and g149/c1 address this fallback; parent also reports g097/c1/g099/f1 retirement overlap. Interface synthesis before discovery: (a) g007/c4 and g128/l1 identify a distinct later consent boundary, not merely the duplicate-Restart fallback. At dbfc, core.rs:5473-5478 guards only terminal-less Launching, so Interrupted does not refuse; :13926-14043 obtains host liveness and tmux tab counts, but startup's absent tmux driver makes the latter empty (tmux.rs:4907-4923). teardown.rs:681-693 still sweeps WholeSession. SPEC.md:2048-2056 requires NothingAlive Delete to refuse if any agent or tab actually runs, while SPEC_impl.md:2994-2995 leaves startup survivors for Restart or Delete. Whether that residual waives later no-live consent is a separate independent interpretation; this ID does not propose dropping those records. (b) g111/l1 identifies a distinct retained-borrower work-loss route. dbfc core.rs:8126-8137 and :8173-8188 use the now-empty tmux map for claim protection; :8412-8417 then invokes cache/spare sweep. The preserved borrower path at :12666-12681 does not require the origin's Ready state. repo_cache.rs:120-138 holds only the cache lock, spare_take.rs:38-40 does not take it, and :156-181 moves children by retained handles then can fail final unlink after parking. checkout_trash.rs:335-349 traverses an opened child before :374-380 checks its old name; source therefore supports the neighbour's movement/traversal hazard rather than refuting it through pathname confinement. SPEC.md:1749-1752 and SPEC_impl.md:4292-4299 specifically retain live/uncertain clone claims. Failed-termination/duplicate acceptance does not expressly authorize deleting work of another host-backed writer. Preserve g111/l1's highest route and policy question independently, with introduction at dbfc rather than the later driver deletion. (c) c2 now separately reconciles g097/l4's conditional wrong-owner host-tab termination; accurate marker injection is not a universal refutation. These interface checks add no new independent g109 finding. Prior warning/guidance boundaries remain: g033/r1 warning removal and g004/g071 survival guidance are not settled by this fallback acceptance. No prohibited coverage sources, runtime tests, reproductions or live-install actions. Revision: completed the named cross-group synthesis before a new search while preserving the original ID, consequence, acceptance basis and unresolved authorial interpretations."
+          }
+        }
+      ],
+      "latest": {
+        "line": 10,
+        "event": {
+          "version": 1,
+          "kind": "finding",
+          "id": "c1",
+          "state": "open",
+          "summary": "Startup treats old terminals as ended even if ending the server fails",
+          "location": "crates/farhelm-supervisor/src/service/core.rs:6433",
+          "detail": "Reviewed commit: dbfc69751215dbf15e1d31d5bed73c3754c4ebc4. TLDR and strongest original consequence preserved: an old agent can remain alive while startup publishes its session as interrupted; if later cleanup cannot see it, Restart can start a second agent in the same folder, potentially causing conflicting writes and loss of user-owned work. Suggested bucket remains high/material UX for the established fallback classification; could-be-highest is yes, with the duplicate/conflicting-write premises explicit rather than an accepted lowering. Confidence: source-confirmed policy, not observed execution; downstream duplicate/work-loss premises for this ID remain incompletely established. Source: core.rs:6433-6438 marks the tmux driver absent regardless of termination result; :6965-6969 drops old terminal lookup; :7100-7114 converts live no-sentinel old rows to Interrupted. old_terminals.rs:179-200 leaves a server alone on failed connect/peer identification; :67-78 states the fallback. Restart's old unusable-tmux refusal is unreachable (:12923-12933), but :12985-13010 still performs a recorded-scope/AgentOnly sweep with Refuse before relaunch, so an ordinary visible/scoped survivor is not automatically ignored. proposed_drop: only explicit fallback acceptance, still pending independent judgment. Exact SPEC.md:3014-3016: 'A failure to end the server or to stop what ran there is logged and never stops the supervisor from starting; those sessions are treated as ended all the same, accepting that a Restart could then start a second agent beside one still running.' Exact SPEC_impl.md:2998-3000: 'A failure anywhere is logged and never fatal (the maintainer chose to start anyway and treat old sessions as ended, accepting that a Restart could then start a second agent beside one still running)'. No parent drop or lowering accepted. possible_cover: neighbouring g005/f1, g007/f1, g112/c1 and g149/c1 address this fallback; parent also reports g097/c1/g099/f1 retirement overlap. Interface synthesis before discovery: (a) g007/c4 and g128/l1 identify a distinct later consent boundary, not merely the duplicate-Restart fallback. At dbfc, core.rs:5473-5478 guards only terminal-less Launching, so Interrupted does not refuse; :13926-14043 obtains host liveness and tmux tab counts, but startup's absent tmux driver makes the latter empty (tmux.rs:4907-4923). teardown.rs:681-693 still sweeps WholeSession. SPEC.md:2048-2056 requires NothingAlive Delete to refuse if any agent or tab actually runs, while SPEC_impl.md:2994-2995 leaves startup survivors for Restart or Delete. Whether that residual waives later no-live consent is a separate independent interpretation; this ID does not propose dropping those records. (b) g111/l1 identifies a distinct retained-borrower work-loss route. dbfc core.rs:8126-8137 and :8173-8188 use the now-empty tmux map for claim protection; :8412-8417 then invokes cache/spare sweep. The preserved borrower path at :12666-12681 does not require the origin's Ready state. repo_cache.rs:120-138 holds only the cache lock, spare_take.rs:38-40 does not take it, and :156-181 moves children by retained handles then can fail final unlink after parking. checkout_trash.rs:335-349 traverses an opened child before :374-380 checks its old name; source therefore supports the neighbour's movement/traversal hazard rather than refuting it through pathname confinement. SPEC.md:1749-1752 and SPEC_impl.md:4292-4299 specifically retain live/uncertain clone claims. Failed-termination/duplicate acceptance does not expressly authorize deleting work of another host-backed writer. Preserve g111/l1's highest route and policy question independently, with introduction at dbfc rather than the later driver deletion. (c) c2 now separately reconciles g097/l4's conditional wrong-owner host-tab termination; accurate marker injection is not a universal refutation. These interface checks add no new independent g109 finding. Prior warning/guidance boundaries remain: g033/r1 warning removal and g004/g071 survival guidance are not settled by this fallback acceptance. No prohibited coverage sources, runtime tests, reproductions or live-install actions. Revision: completed the named cross-group synthesis before a new search while preserving the original ID, consequence, acceptance basis and unresolved authorial interpretations."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g109/findings.jsonl",
+        "id": "c1",
+        "line": 10,
+        "disposition": "under-investigation",
+        "group": "g109-c1",
+        "reason": "Record durably acknowledged; parent source/contract validation, cross-group synthesis, coverage/filter matching and any independent drop check remain pending. This preserves the claim and uncertainty without accepting, dropping or lowering it."
+      },
+      "accepted_parent_decision": null,
+      "returned_claim_checks": [
+        {
+          "batch": "claims-070",
+          "key": "g109/c1",
+          "latest_line": 10,
+          "recommendation": "covered",
+          "bucket": "high",
+          "underlying_key": "policy/legacy-terminal-startup-failure-still-converts-ended",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "Source establishes the fallback and the specifications explicitly accept its exact failed-cleanup/ended-classification/possible-second-agent scope. Propose coverage only for this fallback, preserving the possible conflicting-write/work-loss consequence and all distinct consent, warnings/guidance and cache-retention concerns. This is not an independent drop approval.",
+          "checks": [
+            "dbfc69751215dbf15e1d31d5bed73c3754c4ebc4:crates/farhelm-supervisor/src/service/core.rs:6433-6438 always proceeds after end_private_server and calls no_server_after_startup; :6965-6969 skips old terminal lookup; :7100-7114 converts live old no-sentinel rows via TerminalEnded.",
+            "dbfc6975:service/core/old_terminals.rs:179-200 returns without ending the server on failed connect or unverifiable peer. This conditionally permits survival; no runtime survivor was observed.",
+            "dbfc6975:core.rs:12923-12933 documents the former unusable-tmux refusal as unreachable. :12985-13010 nevertheless sweeps recorded prior scope and AgentOnly markers with ScopeKillFailure::Refuse before relaunch. Merely failing startup cleanup does not establish a second agent: the survivor must also evade this later sweep while it reports success.",
+            "Current SPEC.md:2997-3010 and SPEC_impl.md:2780-2823 retain explicit acceptance. No runtime reproduction, test or live-install action occurred."
+          ],
+          "coverage_checked": [
+            "SPEC.md Terminal experience, Old terminals (:2997-3010), and SPEC_impl.md Ending the old private tmux server (:2780-2823) were read. Exact trigger, classification and possible Restart duplicate are accepted; see exact_cover_quotes.",
+            "TODO.md Planned empty; BUGS.md unrelated. plans/queue searched for failed old-server cleanup and second-agent fallback. tmux-end-old-terminals.md:92-95 and :170-173 also expressly choose this fallback. Coverage recommendation rests on the specifications, not assuming this already implemented plan remains unlanded.",
+            "INDEX.md and active TRIAGE_OUTCOMES.md searched for tmux/old-terminal failure and duplicate-agent fallback; no exact existing item/decision beyond specification acceptance. No archive read. Parent-reported neighbouring identities are not independently read or declared aliases in this batch.",
+            "FILTER.md reviewed. No filter is needed for the narrow specification-accepted fallback; neither a generic session-status filter nor an upgrade filter is used to erase distinct destructive-consent, security or other-session work-loss routes."
+          ],
+          "exact_cover_quotes": [
+            {
+              "source": "SPEC.md:3008-3010, Terminal experience / Old terminals",
+              "quote": "A failure to end the server or to stop what ran there is logged and never stops the supervisor from starting; those sessions are treated as ended all the same, accepting that a Restart could then start a second agent beside one still running."
+            },
+            {
+              "source": "SPEC_impl.md:2819-2821, Ending the old private tmux server",
+              "quote": "A failure anywhere is logged and never fatal (the maintainer chose to start anyway and treat old sessions as ended, accepting that a Restart could then start a second agent beside one still running)"
+            }
+          ],
+          "missing_premise": "The potential highest route still needs a survivor that later AgentOnly/recorded-scope cleanup misses while succeeding, then a second launch and conflicting writes. Ordinary scoped/marker-visible survivors are not automatically ignored. No supported completed work-loss sequence for this ID was reproduced or established here.",
+          "original_stronger_consequence": "Old agent remains alive while shown interrupted; Restart may start a second agent in the same working directory, causing conflicting writes and potentially losing user-owned work. The latest high bucket reflects established misleading lifecycle state, not an accepted dismissal of the stronger consequence.",
+          "needs_independent_drop_check": true,
+          "proposed_basis": "Propose specification coverage of the failed-retirement fallback only. Independent fresh-context agreement is required before dropping or accepting consequence lowering. This does not cover later NothingAlive Delete consent, wrong-owner host-tab termination, retained-borrower/cache work loss, missing warnings or inadequate survival guidance discussed in the supplied history."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": true,
+        "clearly_refuted_candidate": false,
+        "needs_unfinished_gate": true,
+        "provisional_bucket": "high",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "policy/legacy-terminal-startup-failure-still-converts-ended",
+        "destination": "trailing-startup-treats-old-terminals-as-ended-even-if-ending-the-server-fails.md"
+      }
+    },
+    {
+      "key": "g109/c2",
+      "owner": "g109",
+      "id": "c2",
+      "domain": "supervisor-core-integration",
+      "purpose": "supervisor-core-integration: crates/farhelm-supervisor/src/service/core.rs; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 2,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c2",
+            "state": "open",
+            "summary": "Old-agent cleanup does not select the session's host tabs",
+            "location": "crates/farhelm-supervisor/src/service/core.rs:7338",
+            "detail": "Reviewed commit: dbfc69751215dbf15e1d31d5bed73c3754c4ebc4. TLDR: checked whether ending an old agent also destroys shell tabs that have already moved to terminal hosts; source does not establish that route. Details: core.rs:7337-7338 calls old.sweep with only converted old-kind agent rows. core/old_terminals.rs:300-313 passes SweepTarget::AgentOnly with the recorded agent scope and server-pane roots, never WholeSession. service/sweep.rs:252-260 requires the session marker and selects only the matching agent marker or the legacy shape with neither agent nor tab marker, so ordinary host-tab processes are excluded. old_terminals.rs:399-401 excludes tab scope units when the host tab launch record exists. SPEC.md:3013-3014 says 'A session whose agent or tabs already run in terminal hosts keeps them.' Suggested bucket: could-be-highest if host tabs were accidentally killed, because shell processes and user work could be lost; the selection-based route considered here is refuted. Confidence: source-confirmed refutation for normally marked tabs and readable host records, not execution-observed. proposed_drop: source refutation above. possible_cover: none searched. Caveats: deliberately scrubbed markers or unreadable/missing tab records are different failure modes, not established by this check; this does not claim every callee is defect-free."
+          }
+        },
+        {
+          "line": 6,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c2",
+            "state": "open",
+            "summary": "Old-agent cleanup does not select ordinary host tabs",
+            "location": "crates/farhelm-supervisor/src/service/core.rs:7338",
+            "detail": "Reviewed commit: dbfc69751215dbf15e1d31d5bed73c3754c4ebc4. TLDR: checked whether ending an old agent also destroys shell tabs that already run in terminal hosts; the ordinary shipped launch and record lifecycle exclude those tabs. Original strongest concern preserved: an unintended host-tab kill could lose shell processes and user-owned work, so could-be-highest is yes if such a route is established. Details: core.rs:7337-7338 calls old.sweep. old_terminals.rs:300-313 uses AgentOnly, the recorded agent scope and roots under the old server's agent pane, never WholeSession. sweep.rs:252-260 selects a matching agent marker or the legacy session-only shape with neither kind marker. Additional checks this turn: core.rs:14690-14697 explicitly assigns the tab's session and fresh tab marker; host_tabs.rs:418 mints that tab id and 421 supplies this environment; host_launch.rs:137-161 overlays it into the host child's environment; launch.rs:1289-1303 removes the agent marker before execing the shell and preserves the tab marker. Thus an ordinary host-tab shell is not in the AgentOnly selection. old_terminals.rs:399-401 excludes scope-discovered tabs whenever symlink_metadata sees their host record, even if record contents are unreadable. host_tabs.rs:653-686 writes that record before starting.finish delivers the child spec. Its removal follows confirmed host ending at 860-865 and 1039-1059; 901-910 describes this gate. This supplies ordinary evidence for both the marker and record premises rather than assuming them. SPEC.md Terminal experience says 'A session whose agent or tabs already run in terminal hosts keeps them.' Suggested bucket: other as a refuted concern; highest if the original unintended-kill route were established. Confidence: source-confirmed refutation for ordinary correctly launched and recorded host tabs, not execution-observed. proposed_drop: source refutation above, subject to parent's independent judgment; no parent drop accepted. possible_cover: none searched. Caveats: old_terminals.rs:400 treats every metadata error as absence, so an I/O error could still misclassify a scoped host tab; no ordinary shipped action causing that error on an otherwise healthy retained host record was established. Deliberately scrubbing the tab marker or deleting its record remains outside this ordinary-path refutation. No claim that all callees or filesystem failures are safe. Revision: supplied ordinary launch and removal evidence requested by parent; preserved the original loss-of-work concern and narrowed the conclusion to what source establishes."
+          }
+        },
+        {
+          "line": 8,
+          "event": {
+            "version": 1,
+            "kind": "lead",
+            "id": "c2",
+            "state": "open",
+            "summary": "Recheck host-tab exclusion against snapshot owner misattribution",
+            "location": "crates/farhelm-supervisor/src/service/core.rs:7338",
+            "detail": "Reviewed commit: dbfc69751215dbf15e1d31d5bed73c3754c4ebc4. Original TLDR and strongest consequence preserved: ending old terminals must not destroy shell tabs already in terminal hosts; an unintended host-tab kill could lose processes and user-owned work (could-be-highest: yes). Prior ordinary-path refutation remains valid for accurately attributed old-server panes and metadata-discovered scope tabs: correctly launched host shells carry a tab marker and retained host record, so AgentOnly and host-record exclusion ordinarily preserve them. New interface input g097/l4 identifies a different path: old_terminals.rs:464 may read a recycled pane PID's new host-tab markers after snapshotting its old start identity, then use that new Tab owner through the direct snapshot-owner list, bypassing the host-record exclusion. Received latest exact g097/l4 record separately because discovery-neighbours.json has an empty g097 array. Confidence: pending independent source cross-check of this renewed lead, not execution. Checks already made: ordinary marker injection, tab-helper scrub and host-record lifecycle in prior c2 revisions; latest neighbour explicitly names old_terminals.rs:457-476,321-342,369-402 and sweep.rs root revalidation. Missing check now: verify these exact direct-owner and revalidation branches at the assigned dbfc revision and compare the bounded-PID-race contract before closing this lead. Suggested bucket: highest if that conditional unintended-kill route is confirmed. proposed_drop: no drop accepted; prior source refutation is limited to ordinary correctly attributed paths and does not refute this separate PID attribution route. possible_cover: g097/l4 is the received known issue; this is reconciliation of c2, not a claim of new discovery. No prohibited coverage search, runtime test or reproduction. Preserve any exact specification-based proposed-drop text only after reading its source."
+          }
+        },
+        {
+          "line": 9,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "c2",
+            "state": "open",
+            "summary": "Snapshot-owner PID reuse can bypass host-tab exclusion",
+            "location": "crates/farhelm-supervisor/src/service/core.rs:7338",
+            "detail": "Reviewed commit: dbfc69751215dbf15e1d31d5bed73c3754c4ebc4. Original TLDR/strongest concern preserved: old-terminal startup cleanup can unintentionally stop an already-host-backed shell tab and lose its processes or user-owned work. Could-be-highest: yes; suggested bucket: highest for the conditional wrong-target termination route. This is reconciliation of received g097/l4, not a newly discovered independent issue. Actual source checks: old_terminals.rs:457 records pid/ppid/start identities, :464 reads the current environment of each old direct-child pid with no intervening start-identity check, and :473-476 associates the stale subtree identities with that current owner. If a short-lived old pane exits/is reaped and its number is reassigned to a newly started host-tab child, the new session/tab markers can enter PaneOwner::Tab. Ordinary shipped marker premises were checked in the prior c2 revision: core.rs:14690-14697 and host_tabs.rs:629-641 inject the session and tab UUIDs, and launch.rs:1289-1303 removes the agent marker before shell exec. The direct owner list at old_terminals.rs:369-375 bypasses the retained-host-record exclusion at :399-401. The call from assigned core.rs:7338 therefore reaches old_terminals.rs:329-342, which names the misattributed session/tab's scope and exact marker, even though sweep.rs:1595-1646 discards the reused old root as Ok(None); marker/scope discovery continues. Server-process verification at old_terminals.rs:223-277 gates using any subtree and correctly discards AlreadyGone/mismatch/timeout cases, but does not validate each child's owner identity. Confidence: source-confirmed conditional route; no actual PID reuse, termination or work loss observed. Prior ordinary-path refutation is retained and narrowed: accurate attribution plus AgentOnly and retained host records protect normal tabs. It does not refute this separate owner-misattribution path; neither unreadable record contents nor deliberate marker tampering is needed. proposed_drop: only possible bounded-PID-race acceptance, pending independent interpretation; no parent drop accepted. Exact SPEC_impl.md:5431-5435: 'Process-number reuse inside a short window is accepted, for now.' and 'Code that signals or adopts a process by its number may lose the race in which that process exits and the kernel hands the number to an unrelated process within a short, bounded window: between reading a number and checking it, between reaping a child and signalling its group, while a watchdog fires just as its child finishes, or during a polling loop of at most a few seconds.' Exact exclusion at :5438-5439: 'What is not accepted is carrying a bare number across unbounded waits or asynchronous work, or storing it for later.' The accepted-result window here is bounded by the absolute 15-second old-terminal deadline at :204-233, longer than the few-second polling example; child owner attribution itself runs synchronously, whereas the resulting owner is used later after reload work. These boundaries must be judged independently rather than treating rarity as a refutation. possible_cover: g097/l4 is the same snapshot-owner cause; preserve both IDs/provenance for parent deduplication. No prohibited coverage sources, runtime tests or reproductions. All readily checkable source premises examined; close the renewed c2 lead as this finding. No claim that the separate metadata-error caveat or every cleanup path is defect-free."
+          }
+        }
+      ],
+      "latest": {
+        "line": 9,
+        "event": {
+          "version": 1,
+          "kind": "finding",
+          "id": "c2",
+          "state": "open",
+          "summary": "Snapshot-owner PID reuse can bypass host-tab exclusion",
+          "location": "crates/farhelm-supervisor/src/service/core.rs:7338",
+          "detail": "Reviewed commit: dbfc69751215dbf15e1d31d5bed73c3754c4ebc4. Original TLDR/strongest concern preserved: old-terminal startup cleanup can unintentionally stop an already-host-backed shell tab and lose its processes or user-owned work. Could-be-highest: yes; suggested bucket: highest for the conditional wrong-target termination route. This is reconciliation of received g097/l4, not a newly discovered independent issue. Actual source checks: old_terminals.rs:457 records pid/ppid/start identities, :464 reads the current environment of each old direct-child pid with no intervening start-identity check, and :473-476 associates the stale subtree identities with that current owner. If a short-lived old pane exits/is reaped and its number is reassigned to a newly started host-tab child, the new session/tab markers can enter PaneOwner::Tab. Ordinary shipped marker premises were checked in the prior c2 revision: core.rs:14690-14697 and host_tabs.rs:629-641 inject the session and tab UUIDs, and launch.rs:1289-1303 removes the agent marker before shell exec. The direct owner list at old_terminals.rs:369-375 bypasses the retained-host-record exclusion at :399-401. The call from assigned core.rs:7338 therefore reaches old_terminals.rs:329-342, which names the misattributed session/tab's scope and exact marker, even though sweep.rs:1595-1646 discards the reused old root as Ok(None); marker/scope discovery continues. Server-process verification at old_terminals.rs:223-277 gates using any subtree and correctly discards AlreadyGone/mismatch/timeout cases, but does not validate each child's owner identity. Confidence: source-confirmed conditional route; no actual PID reuse, termination or work loss observed. Prior ordinary-path refutation is retained and narrowed: accurate attribution plus AgentOnly and retained host records protect normal tabs. It does not refute this separate owner-misattribution path; neither unreadable record contents nor deliberate marker tampering is needed. proposed_drop: only possible bounded-PID-race acceptance, pending independent interpretation; no parent drop accepted. Exact SPEC_impl.md:5431-5435: 'Process-number reuse inside a short window is accepted, for now.' and 'Code that signals or adopts a process by its number may lose the race in which that process exits and the kernel hands the number to an unrelated process within a short, bounded window: between reading a number and checking it, between reaping a child and signalling its group, while a watchdog fires just as its child finishes, or during a polling loop of at most a few seconds.' Exact exclusion at :5438-5439: 'What is not accepted is carrying a bare number across unbounded waits or asynchronous work, or storing it for later.' The accepted-result window here is bounded by the absolute 15-second old-terminal deadline at :204-233, longer than the few-second polling example; child owner attribution itself runs synchronously, whereas the resulting owner is used later after reload work. These boundaries must be judged independently rather than treating rarity as a refutation. possible_cover: g097/l4 is the same snapshot-owner cause; preserve both IDs/provenance for parent deduplication. No prohibited coverage sources, runtime tests or reproductions. All readily checkable source premises examined; close the renewed c2 lead as this finding. No claim that the separate metadata-error caveat or every cleanup path is defect-free."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g109/findings.jsonl",
+        "id": "c2",
+        "line": 9,
+        "disposition": "under-investigation",
+        "group": "g109-c2",
+        "reason": "Record durably acknowledged; parent source/contract validation, cross-group synthesis, coverage/filter matching and any independent drop check remain pending. This preserves the claim and uncertainty without accepting, dropping or lowering it."
+      },
+      "accepted_parent_decision": null,
+      "returned_claim_checks": [
+        {
+          "batch": "claims-071",
+          "key": "g109/c2",
+          "latest_line": 9,
+          "recommendation": "retain-verified",
+          "bucket": "highest",
+          "underlying_key": "old-terminal-snapshot-unvalidated-pane-owner",
+          "aliases": [
+            "g097/l4 (same cause reported in supplied history; its separate record was not assigned)"
+          ],
+          "target_queue_file": null,
+          "why": "The conditional wrong-tab termination route is supported. Accurate markers and retained records protect ordinary attribution, but do not protect a tab UUID admitted directly from a recycled pane PID's environment. No execution or work loss was observed.",
+          "checks": [
+            "dbfc69751215dbf15e1d31d5bed73c3754c4ebc4:core/old_terminals.rs:456-476 snapshots PID/start pairs, then reads each direct child's current environment without comparing its identity again and stores the resulting owner separately from the stale roots.",
+            "Same revision old_terminals.rs:369-375 accepts direct snapshot Tab owners without the host-record check at :399-401; :329-342 constructs that owner's tab scope and marker sweep.",
+            "Same revision service/sweep.rs:1595-1646 drops changed root identities but explicitly continues marker/scope discovery. Server validation at old_terminals.rs:223-277 validates the server, not each pane owner.",
+            "Prior ordinary-path refutation remains valid only with accurately attributed pane owners. Deliberate marker scrubbing or unreadable record contents are unnecessary for the renewed route. Metadata errors remain a separate unestablished caveat."
+          ],
+          "coverage_checked": [
+            "Current SPEC.md:2998-3010 requires already-host-backed terminals to survive. SPEC_impl.md:2780-2823 describes the snapshot attribution, record exclusion and budget; it does not explicitly accept selecting an unrelated host tab.",
+            "SPEC_impl.md:4944-4957 accepts short PID reuse windows but excludes numbers carried through asynchronous work or stored for later. Whether that acceptance includes unvalidated owner extraction subsequently retained across reload is ambiguous; retain rather than infer coverage.",
+            "TODO.md Planned (:25-26) is empty. Searches of plans/queue, BUGS.md, INDEX.md and active TRIAGE_OUTCOMES.md found no exact trigger/consequence/scope. tmux-end-old-terminals and the documentation cleanup plans are already landed (plans/REPORTS.md:29-32), so are not unlanded coverage.",
+            "FILTER.md upgrade-plus-rare-condition rule is a possible but unclear cover: the reused PID may identify a host tab of another session or installation, beyond work within the affected legacy session. The specific verification-to-signal PID filter is a different handoff. No filter is applied."
+          ],
+          "exact_cover_quotes": [
+            "SPEC_impl.md:4944: Process-number reuse inside a short window is accepted, for now.",
+            "SPEC_impl.md:4951-4952: What is not accepted is carrying a bare number across unbounded waits or asynchronous work, or storing it for later.",
+            "FILTER.md, Upgrades from older releases combined with another rare condition: Unlike the filters above, this one also covers losing user-owned work within the affected sessions, such as resuming the wrong conversation."
+          ],
+          "missing_premise": "No missing source step for the conditional route. Actual PID reuse in this interval was not observed; the scope of the PID acceptance and upgrade filter needs the parent's independent disposition.",
+          "original_stronger_consequence": "Old-agent cleanup could kill a host-backed shell tab and lose its processes or user-owned work. The earlier general dismissal was narrowed and the owner-misattribution route renewed; do not reinstate the earlier dismissal silently.",
+          "needs_independent_drop_check": true,
+          "proposed_basis": "Keep the conditional highest finding, reconcile the history-supplied alias, and independently check any proposed specification/filter dismissal or reliance on the earlier ordinary-path refutation."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": true,
+        "clearly_refuted_candidate": false,
+        "needs_unfinished_gate": true,
+        "provisional_bucket": "highest",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "old-terminal-snapshot-unvalidated-pane-owner",
+        "destination": "trailing-old-terminal-snapshot-unvalidated-pane-owner.md"
+      }
+    },
+    {
+      "key": "g109/c3",
+      "owner": "g109",
+      "id": "c3",
+      "domain": "supervisor-core-integration",
+      "purpose": "supervisor-core-integration: crates/farhelm-supervisor/src/service/core.rs; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 4,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c3",
+            "state": "open",
+            "summary": "Reboot conversion precedes old-terminal conversion",
+            "location": "crates/farhelm-supervisor/src/service/core.rs:6876",
+            "detail": "Reviewed commit: dbfc69751215dbf15e1d31d5bed73c3754c4ebc4. TLDR: checked why an old session first loaded after a reboot does not get the notice for this release ending its old terminal. Details: reload records the changed boot at core.rs:6869-6871 and reflects its Interrupted outcomes into rows at 6876-6888 before the new converted list is populated at 7100-7114. Such a row therefore receives neither this migration's sweep nor notice. The old process was already ended by the reboot, so this is not a missed migration termination. SPEC.md Status says exactly: 'Each session whose agent was still launching, running or being stopped in an old terminal when this release ended it gets one notice instead, at that start' and 'A session whose agent had already ended, or that lost only old tabs, gets none.' The rebooted process had already ended. Suggested bucket: other/diagnostic if this were a defect. Could-be-highest: no; no surviving process or loss-of-work route is established by this check. Confidence: source-confirmed ordering and contract interpretation, not execution-observed. proposed_drop: source and notice contract refute a mandatory notice for already-rebooted processes. possible_cover: specification text above only; no coverage sources searched. Caveat: this concerns true changed-boot classification, not a failed boot-id read."
+          }
+        }
+      ],
+      "latest": {
+        "line": 4,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c3",
+          "state": "open",
+          "summary": "Reboot conversion precedes old-terminal conversion",
+          "location": "crates/farhelm-supervisor/src/service/core.rs:6876",
+          "detail": "Reviewed commit: dbfc69751215dbf15e1d31d5bed73c3754c4ebc4. TLDR: checked why an old session first loaded after a reboot does not get the notice for this release ending its old terminal. Details: reload records the changed boot at core.rs:6869-6871 and reflects its Interrupted outcomes into rows at 6876-6888 before the new converted list is populated at 7100-7114. Such a row therefore receives neither this migration's sweep nor notice. The old process was already ended by the reboot, so this is not a missed migration termination. SPEC.md Status says exactly: 'Each session whose agent was still launching, running or being stopped in an old terminal when this release ended it gets one notice instead, at that start' and 'A session whose agent had already ended, or that lost only old tabs, gets none.' The rebooted process had already ended. Suggested bucket: other/diagnostic if this were a defect. Could-be-highest: no; no surviving process or loss-of-work route is established by this check. Confidence: source-confirmed ordering and contract interpretation, not execution-observed. proposed_drop: source and notice contract refute a mandatory notice for already-rebooted processes. possible_cover: specification text above only; no coverage sources searched. Caveat: this concerns true changed-boot classification, not a failed boot-id read."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g109/findings.jsonl",
+        "id": "c3",
+        "line": 4,
+        "disposition": "excluded",
+        "group": "reboot-before-old-terminal-notice-classification",
+        "reason": "Parent explicitly accepted named refuted proposal from claims-071 after inspecting it. A real reboot has already ended the agent; the notice is specifically for an agent this release ended while it was live. The source ordering matches that distinction. Source and notice scope refute a mandatory migration notice for an agent already ended by a true reboot. Checked source/results: [\"dbfc69751215dbf15e1d31d5bed73c3754c4ebc4:core.rs:6869-6888 commits boot reconciliation and updates live rows to Interrupted before :7100-7114 builds the old-terminal converted set. :7374-7382 emits notices only for that set.\"] Current coverage/results: [\"SPEC.md:2998-3010 and SPEC_impl.md:2780-2823 distinguish live old agents this startup converts from agents already ended. Searches of both specifications, empty TODO Planned, plans/queue, BUGS.md, INDEX.md and active TRIAGE_OUTCOMES.md found no separate obligation to notify a true prior reboot. No filter needed.\"] Exact cited cover: [\"SPEC.md:2808-2809: Each session whose agent was still launching, running or being stopped in an old terminal when a supervisor's start ended it gets one notice instead, at that start\",\"SPEC.md:2813: A session whose agent had already ended, or that lost only old tabs, gets none.\"] Original stronger consequence and missing premise remain preserved: \"Missing old-terminal notice for a session first loaded after reboot; no surviving process or user-work-loss route was alleged. Failed boot-ID reads are outside this claim.\"; null."
+      },
+      "accepted_parent_decision": {
+        "key": "g109/c3",
+        "line": 4,
+        "disposition": "excluded",
+        "group": "reboot-before-old-terminal-notice-classification",
+        "bucket": "other",
+        "recording": "refuted",
+        "queue_target_candidate": null,
+        "needs_independent_drop_check": false,
+        "reason": "Parent explicitly accepted named refuted proposal from claims-071 after inspecting it. A real reboot has already ended the agent; the notice is specifically for an agent this release ended while it was live. The source ordering matches that distinction. Source and notice scope refute a mandatory migration notice for an agent already ended by a true reboot. Checked source/results: [\"dbfc69751215dbf15e1d31d5bed73c3754c4ebc4:core.rs:6869-6888 commits boot reconciliation and updates live rows to Interrupted before :7100-7114 builds the old-terminal converted set. :7374-7382 emits notices only for that set.\"] Current coverage/results: [\"SPEC.md:2998-3010 and SPEC_impl.md:2780-2823 distinguish live old agents this startup converts from agents already ended. Searches of both specifications, empty TODO Planned, plans/queue, BUGS.md, INDEX.md and active TRIAGE_OUTCOMES.md found no separate obligation to notify a true prior reboot. No filter needed.\"] Exact cited cover: [\"SPEC.md:2808-2809: Each session whose agent was still launching, running or being stopped in an old terminal when a supervisor's start ended it gets one notice instead, at that start\",\"SPEC.md:2813: A session whose agent had already ended, or that lost only old tabs, gets none.\"] Original stronger consequence and missing premise remain preserved: \"Missing old-terminal notice for a session first loaded after reboot; no surviving process or user-work-loss route was alleged. Failed boot-ID reads are outside this claim.\"; null."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-071",
+          "key": "g109/c3",
+          "latest_line": 4,
+          "recommendation": "refuted",
+          "bucket": "other",
+          "underlying_key": "reboot-before-old-terminal-notice-classification",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "A real reboot has already ended the agent; the notice is specifically for an agent this release ended while it was live. The source ordering matches that distinction.",
+          "checks": [
+            "dbfc69751215dbf15e1d31d5bed73c3754c4ebc4:core.rs:6869-6888 commits boot reconciliation and updates live rows to Interrupted before :7100-7114 builds the old-terminal converted set. :7374-7382 emits notices only for that set."
+          ],
+          "coverage_checked": [
+            "SPEC.md:2998-3010 and SPEC_impl.md:2780-2823 distinguish live old agents this startup converts from agents already ended. Searches of both specifications, empty TODO Planned, plans/queue, BUGS.md, INDEX.md and active TRIAGE_OUTCOMES.md found no separate obligation to notify a true prior reboot. No filter needed."
+          ],
+          "exact_cover_quotes": [
+            "SPEC.md:2808-2809: Each session whose agent was still launching, running or being stopped in an old terminal when a supervisor's start ended it gets one notice instead, at that start",
+            "SPEC.md:2813: A session whose agent had already ended, or that lost only old tabs, gets none."
+          ],
+          "missing_premise": null,
+          "original_stronger_consequence": "Missing old-terminal notice for a session first loaded after reboot; no surviving process or user-work-loss route was alleged. Failed boot-ID reads are outside this claim.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Source and notice scope refute a mandatory migration notice for an agent already ended by a true reboot."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "reboot-before-old-terminal-notice-classification",
+        "destination": null
+      }
+    },
+    {
+      "key": "g109/c4",
+      "owner": "g109",
+      "id": "c4",
+      "domain": "supervisor-core-integration",
+      "purpose": "supervisor-core-integration: crates/farhelm-supervisor/src/service/core.rs; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 5,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c4",
+            "state": "open",
+            "summary": "Old-terminal reconciliation preserves direct failure and create evidence",
+            "location": "crates/farhelm-supervisor/src/service/core.rs:7060",
+            "detail": "Reviewed commit: dbfc69751215dbf15e1d31d5bed73c3754c4ebc4. TLDR: checked whether migration overwrites a recorded launch failure or destroys the evidence needed to replay an accepted create; the changed path preserves both for the established cases. Details: launch_artifacts.rs:273-281 includes all live states in sentinel_could_still_apply. core.rs:7061-7095 checks a direct sentinel before the new TerminalEnded arm at 7100-7114; unreadable sentinels defer reconciliation at 7191-7212. Artifact cleanup runs only after a committed Interrupted result at 7374-7378, or committed Error at 7343-7353. store.rs:386-392 and Transition::apply preserve terminal_address for TerminalEnded. The later launched set uses the nonempty recorded address at core.rs:7404-7415, and pending reservations use that set at 7603-7605. launch_artifacts.rs:309-333 settles actual generation-zero sentinel evidence before removing it, retaining artifacts if preservation fails. The tmux lookup that was deleted is deliberately no longer evidence once this release ends the old server. SPEC_impl.md Terminal substrate: private tmux server says 'Its terminal_address stays as stored, because the reservation settlement reads a recorded one as evidence that the launch happened' (identifier formatted with backticks in the document), and says the sentinel takes error precedence. Suggested bucket: other/correctness for the classification concern; could-be-highest: no established loss-of-work route, since this check concerns classification and replay evidence after the intended terminal termination. Confidence: source-confirmed refutation for the checked branches, not execution-observed. proposed_drop: source and explicit contract refute the proposed precedence/evidence regression. possible_cover: only specification contract above, no excluded coverage searched. Caveats: a launch with no recorded address, no sentinel, no captured conversation and no remaining scope can remain unproven; the retry path is defined to refuse a taken-over tmux-kind launch before spawning (SPEC_impl.md Creating agents in hosts), rather than silently start another terminal. This is not a proof of every reservation failure mode."
+          }
+        },
+        {
+          "line": 13,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c4",
+            "state": "open",
+            "summary": "Old-terminal reconciliation preserves direct failure and create evidence",
+            "location": "crates/farhelm-supervisor/src/service/core.rs:7060",
+            "detail": "Reviewed commit: dbfc69751215dbf15e1d31d5bed73c3754c4ebc4. Original TLDR retained: checked whether migration overwrites direct launch failure or removes evidence needed to replay an accepted create; the checked changed paths preserve those facts. Source: launch_artifacts.rs:273-281 includes live states in sentinel_could_still_apply; core.rs:7061-7095 reads a direct sentinel before TerminalEnded at :7100-7114, and unreadable reads defer at :7191-7212. Error artifacts are cleaned only after the Error commit (:7343-7353); old-conversion artifacts only after a committed Interrupted (:7374-7378). TerminalEnded preserves terminal_address (store.rs:386-392); core.rs:7404-7415 carries it into the launched set, used at :7603-7605 for reservation settlement. generation-zero cleanup at launch_artifacts.rs:309-333 preserves actual sentinel evidence durably before removal. Additional discovery check: a tmux-kind row can have outstanding host-launch records after a failed move. cleanup_launch_artifacts calls remove_settled_best_effort, which at launch_artifacts.rs:491-502 removes only status/spec/waypoint and explicitly retains the host record until confirmed host end or a retry finding nothing left. The new old-row cleanup therefore does not newly discard that independent cleanup handle. Superseded-host retirement is also restricted to Host rows at host_handover.rs:1000-1007, so old-row Interrupted conversion does not by itself authorize ending an unrelated retained host. Contract: SPEC_impl.md Terminal substrate says 'Its `terminal_address` stays as stored, because the reservation settlement reads a recorded one as evidence that the launch happened' and gives sentinel error precedence. Suggested bucket: other/correctness for the original classification/replay concern. Could-be-highest: no established direct security or loss-of-work route in these checked branches; losing an outstanding host cleanup handle could affect work, but that additional route is specifically refuted by retaining the record. Confidence: source-confirmed refutation for the named branches, not execution. proposed_drop: source and quoted contract refute these implementation-regression hypotheses only. possible_cover: specification above only; no excluded coverage searched. Caveats preserved: a launch with no address/sentinel/report/scope can remain unproven, and a taken-over tmux-kind retry is refused before a host is started. No universal reservation/cleanup correctness claim. New l5 separately records the removed read-only startup test oracle; correct production gating here does not refute that test-quality defect. No parent drop accepted, tests or reproductions. Revision adds the completed outstanding-host-record check without erasing the original concern or claiming a new issue."
+          }
+        }
+      ],
+      "latest": {
+        "line": 13,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c4",
+          "state": "open",
+          "summary": "Old-terminal reconciliation preserves direct failure and create evidence",
+          "location": "crates/farhelm-supervisor/src/service/core.rs:7060",
+          "detail": "Reviewed commit: dbfc69751215dbf15e1d31d5bed73c3754c4ebc4. Original TLDR retained: checked whether migration overwrites direct launch failure or removes evidence needed to replay an accepted create; the checked changed paths preserve those facts. Source: launch_artifacts.rs:273-281 includes live states in sentinel_could_still_apply; core.rs:7061-7095 reads a direct sentinel before TerminalEnded at :7100-7114, and unreadable reads defer at :7191-7212. Error artifacts are cleaned only after the Error commit (:7343-7353); old-conversion artifacts only after a committed Interrupted (:7374-7378). TerminalEnded preserves terminal_address (store.rs:386-392); core.rs:7404-7415 carries it into the launched set, used at :7603-7605 for reservation settlement. generation-zero cleanup at launch_artifacts.rs:309-333 preserves actual sentinel evidence durably before removal. Additional discovery check: a tmux-kind row can have outstanding host-launch records after a failed move. cleanup_launch_artifacts calls remove_settled_best_effort, which at launch_artifacts.rs:491-502 removes only status/spec/waypoint and explicitly retains the host record until confirmed host end or a retry finding nothing left. The new old-row cleanup therefore does not newly discard that independent cleanup handle. Superseded-host retirement is also restricted to Host rows at host_handover.rs:1000-1007, so old-row Interrupted conversion does not by itself authorize ending an unrelated retained host. Contract: SPEC_impl.md Terminal substrate says 'Its `terminal_address` stays as stored, because the reservation settlement reads a recorded one as evidence that the launch happened' and gives sentinel error precedence. Suggested bucket: other/correctness for the original classification/replay concern. Could-be-highest: no established direct security or loss-of-work route in these checked branches; losing an outstanding host cleanup handle could affect work, but that additional route is specifically refuted by retaining the record. Confidence: source-confirmed refutation for the named branches, not execution. proposed_drop: source and quoted contract refute these implementation-regression hypotheses only. possible_cover: specification above only; no excluded coverage searched. Caveats preserved: a launch with no address/sentinel/report/scope can remain unproven, and a taken-over tmux-kind retry is refused before a host is started. No universal reservation/cleanup correctness claim. New l5 separately records the removed read-only startup test oracle; correct production gating here does not refute that test-quality defect. No parent drop accepted, tests or reproductions. Revision adds the completed outstanding-host-record check without erasing the original concern or claiming a new issue."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g109/findings.jsonl",
+        "id": "c4",
+        "line": 13,
+        "disposition": "under-investigation",
+        "group": "g109-c4",
+        "reason": "Record durably acknowledged; parent source/contract validation, cross-group synthesis, coverage/filter matching and any independent drop check remain pending. This preserves the claim and uncertainty without accepting, dropping or lowering it."
+      },
+      "accepted_parent_decision": null,
+      "returned_claim_checks": [
+        {
+          "batch": "claims-071",
+          "key": "g109/c4",
+          "latest_line": 13,
+          "recommendation": "refuted",
+          "bucket": "other",
+          "underlying_key": "old-terminal-reload-sentinel-and-create-evidence",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The named reconciliation branches preserve direct failure precedence, accepted-create evidence and outstanding host records. This does not refute the separate deleted-test oracle in l5.",
+          "checks": [
+            "dbfc69751215dbf15e1d31d5bed73c3754c4ebc4:core.rs:7060-7114 checks the sentinel before TerminalEnded. :7343-7353 and :7374-7378 clean artifacts after the corresponding committed outcomes. :7404-7415 keeps nonempty stored terminal addresses as launch evidence.",
+            "Same revision launch_artifacts.rs:299-333 settles generation-zero sentinel evidence before removal and retains artifacts on preservation failure; :491-502 removes status/spec/waypoint but explicitly retains the host record.",
+            "store.rs:386-392 declares address retention for TerminalEnded. At 1ed482dde220452e424973faf38a5e1318986333, host_handover.rs:994-1004 permits superseded-host retirement only for Host rows, so old-row conversion is not that authority."
+          ],
+          "coverage_checked": [
+            "Current SPEC_impl.md:2780-2823 explicitly gives sentinel error precedence and requires recorded-address retention. Searches of both specifications, empty TODO Planned, plans/queue, BUGS.md, INDEX.md and active TRIAGE_OUTCOMES.md found no independent exact item; retired-terminal plans are landed, not future coverage. No filter needed."
+          ],
+          "exact_cover_quotes": [
+            "SPEC_impl.md:2803-2804: Its `terminal_address` stays as stored, because the reservation settlement reads a recorded one as evidence that the launch happened."
+          ],
+          "missing_premise": "A launch with no recorded address, sentinel, report or remaining scope can still be unproven; the claim does not establish every reservation failure mode.",
+          "original_stronger_consequence": "Overwriting direct launch failure or removing accepted-create replay evidence; later checked concern that cleanup could discard an outstanding host handle was also refuted. No current work-loss route was established.",
+          "needs_independent_drop_check": true,
+          "proposed_basis": "Refute only the named precedence/evidence/retained-host-handle hypotheses. Include the potentially work-affecting handle-loss dismissal in the independent register; preserve the remaining uncertainty and the distinct l5 test finding."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": true,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "old-terminal-reload-sentinel-and-create-evidence",
+        "destination": null
+      }
+    },
+    {
+      "key": "g109/l5",
+      "owner": "g109",
+      "id": "l5",
+      "domain": "supervisor-core-integration",
+      "purpose": "supervisor-core-integration: crates/farhelm-supervisor/src/service/core.rs; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 11,
+          "event": {
+            "version": 1,
+            "kind": "lead",
+            "id": "l5",
+            "state": "open",
+            "summary": "Check replacement for deleted read-only Error-reload cleanup oracle",
+            "location": "crates/farhelm-supervisor/src/service/core.rs (deleted reload_restores_error_pane_and_gates_artifact_cleanup)",
+            "detail": "Reviewed commit: dbfc69751215dbf15e1d31d5bed73c3754c4ebc4. TLDR: the deleted tmux reload fixture also tested a surviving generic ownership rule: a read-only reload must retain an already-Error launch's artifacts, and an owning reload removes them without changing the Error outcome. Removing retired tmux Attach assertions may be correct while still losing this independent cleanup oracle. Checks actually made: the complete assigned deletion was read; its read_only_sessions/may_write=false pass asserts both spec and sentinel remain, then its may_write=true pass asserts cleanup. The current production Error branch at core.rs:7017-7030 retains may_write gating and therefore refutes a current production ordering failure, but not by itself test coverage loss. Targeted searches for reload/error, read-only reload and artifact cleanup across core.rs, core/tests and tests/e2e found no replacement by those names. Missing source check: inspect broader surviving reload/sentinel test callers and replacements before concluding this oracle was uniquely lost. Confidence: unresolved source lead, not a verified test gap and not execution-observed. Suggested bucket if confirmed: other/test quality. Could-be-highest: no established direct user-work or security route; a hypothetical future regression could remove another owner's launch evidence, but this record does not allege such a runtime defect. proposed_drop: false while investigating. possible_cover: none in the supplied neighbour records; g108's deleted create/failed-Restart/lone-tab oracles cover different contracts. No prohibited coverage sources, tests, reproductions or checkout changes."
+          }
+        },
+        {
+          "line": 12,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "l5",
+            "state": "open",
+            "summary": "Deleted reload test loses read-only Error-artifact ownership oracle",
+            "location": "crates/farhelm-supervisor/src/service/core.rs:22498 at parent (deleted)",
+            "detail": "Reviewed commit: dbfc69751215dbf15e1d31d5bed73c3754c4ebc4. TLDR: while deleting a retired-terminal fixture, the change also removes the regression check that a read-only startup leaves an already-failed launch's files alone. The retained read-only cleanup test exercises periodic reconciliation rather than startup; owning-startup tests cover deletion, but cannot catch a startup-only ownership gate regression. This is a test-coverage finding, not an established product cleanup error. Details: deleted reload_restores_error_pane_and_gates_artifact_cleanup starts at parent core.rs:22498 (assigned patch 00866-000.patch:roughly 881-1017, full symbol identifies the deletion). It inserted a durable Error row, wrote both launch spec and sentinel, called reload_sessions with may_write=false, and asserted both files remained before calling with true and asserting both were removed without changing Error. The pane/Attach portions are correctly obsolete after retirement; the independent artifact-ownership assertions remain required by core.rs:7008-7022, whose comment explicitly says a read-only reload must not remove files. Production retains that gate, so no runtime authority violation is claimed. Concrete retained-oracle comparison: generation_zero_error_cleanup_preserves_create_replay at reviewed core.rs:37161-37251 covers same-boot/reboot/already-error startup cleanup, but its reload call at :37221 always passes true. reconciliation_error_cleanup_preserves_replay_and_read_only_artifacts at :37254-37309 tests read-only and owning behavior through reconcile_for_test, not reload_sessions. A regression removing only reload's may_write condition leaves this separate observer test unaffected. a_supervisor_without_the_state_dir_claim_reconciles_nothing_durably at :27191-27364 checks a Running row, host identity and pending checkout archive; it creates no Error launch spec/sentinel and never enters the Error cleanup branch. The host reload fixtures at core/tests/host_terminals.rs:1787,1844,1901 also use may_write=true. Searches of all supervisor sources for read-only reload, claimless sentinel/artifacts and reload callers found no replacement false-authority/Error-artifact fixture. Later-range check: every direct reload_sessions call in pinned-tip core.rs remains true; the same read-only test at tip :35352 still calls periodic reconciliation. Thus the source-identified startup oracle was not restored by the later host fixture migration. Suggested fix: keep the generic Error-row/files setup as a terminal-independent reload test, assert artifacts survive a false-authority reload, and then assert the same artifacts are cleaned by a true-authority reload. No tmux fixture or runtime host is needed for this ownership boundary. Contract: read-only state-directory fencing and the retained startup cleanup's own declared invariant; test-authoring requires observables for the mechanism actually under test. Suggested bucket: other/test quality. Could-be-highest: no established direct security or user-work-loss route in this test deletion; a hypothetical future regression affecting another owner's launch evidence is not a current production finding. Confidence: confirmed source and replacement-test comparison, not execution. proposed_drop: false. possible_cover: none in supplied neighbour records; g108's lost create, failed-Restart and lone-tab oracles are different test subjects. Caveat: broad state-directory ownership and periodic read-only cleanup remain meaningfully tested; this is only the lost startup/Error-artifact combination. No tests, mutation experiments or reproductions run. This resolves l5's source lead and is a substantive new discovery this pass; a later discovery pass is required by the charter."
+          }
+        },
+        {
+          "line": 14,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "l5",
+            "state": "open",
+            "summary": "Deleted reload test loses read-only Error-artifact ownership oracle",
+            "location": "crates/farhelm-supervisor/src/service/core.rs:22498 at parent (deleted)",
+            "detail": "Reviewed commit: dbfc69751215dbf15e1d31d5bed73c3754c4ebc4. TLDR: deleting a retired tmux fixture also removes the regression check that read-only startup leaves an already-failed launch's files alone. The surviving read-only cleanup test exercises periodic reconciliation; owning-startup tests cannot catch a startup-only write-authority regression. This is test coverage, not an established product cleanup error. Details: deleted reload_restores_error_pane_and_gates_artifact_cleanup is parent core.rs:22498-22644. It creates a durable Error row and launch spec/sentinel. The read-only reload at parent :22570-22578 passes false; :22607-22614 asserts both files survive. The owning reload at :22616-22624 passes true; :22629-22642 requires unchanged Error plus both files removed. The pane/Attach portion is obsolete after retirement, but the artifact-ownership assertions remain required by retained core.rs:7008-7022, whose comment explicitly says a read-only reload must not remove files. That production gate remains correct. Retained-test comparison: generation_zero_error_cleanup_preserves_create_replay (:37161-37251) covers same-boot/reboot/already-error startup cleanup, but :37221 passes true. reconciliation_error_cleanup_preserves_replay_and_read_only_artifacts (:37254-37309) tests false/true authority through reconcile_for_test, not reload. Removing only reload's may_write condition leaves the separate observer test unaffected. a_supervisor_without_the_state_dir_claim_reconciles_nothing_durably (:27191-27364) inspects a Running row, host identity and pending checkout archive, with no Error-row launch artifacts. Host reload fixtures at core/tests/host_terminals.rs:1787,1844,1901 also pass true. All supervisor-source searches for read-only reload, claimless sentinel/artifacts and direct reload callers found no replacement false-authority/Error-artifact fixture. Tip check: every direct reload_sessions call in 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db core.rs still passes true, while the read-only artifact test at tip :35352 still invokes periodic reconciliation. The later host migration does not restore this startup oracle. Suggested fix: retain the generic Error-row/files setup as a terminal-independent reload test, require artifacts survive false authority, then require cleanup by true authority; it needs no tmux or host fixture. Contract: state-directory write-authority fencing and the startup Error branch's explicit ownership invariant; the supplied test-authoring checklist requires observing the mechanism under test. Suggested bucket: other/test quality. Could-be-highest: no established direct security or user-work-loss route in the test deletion. A hypothetical future ownership regression could remove another owner's launch evidence, but no such current production failure is alleged. Confidence: confirmed source/fixture comparison, not execution or mutation testing. proposed_drop: false. possible_cover: none in supplied neighbour records; g108's removed create, failed-Restart and lone-tab oracles concern different mechanisms. Caveat: general ownership fencing, periodic read-only cleanup and owning startup cleanup still have meaningful tests; this is narrowly the lost startup/Error-artifact combination. No tests, builds, reproductions or checkout changes. Revision adds exact parent coordinates after reading the full deleted assertion block; original consequence and limits preserved. l5 is a new substantive discovery, requiring another later pass under the charter; its lead is closed."
+          }
+        }
+      ],
+      "latest": {
+        "line": 14,
+        "event": {
+          "version": 1,
+          "kind": "finding",
+          "id": "l5",
+          "state": "open",
+          "summary": "Deleted reload test loses read-only Error-artifact ownership oracle",
+          "location": "crates/farhelm-supervisor/src/service/core.rs:22498 at parent (deleted)",
+          "detail": "Reviewed commit: dbfc69751215dbf15e1d31d5bed73c3754c4ebc4. TLDR: deleting a retired tmux fixture also removes the regression check that read-only startup leaves an already-failed launch's files alone. The surviving read-only cleanup test exercises periodic reconciliation; owning-startup tests cannot catch a startup-only write-authority regression. This is test coverage, not an established product cleanup error. Details: deleted reload_restores_error_pane_and_gates_artifact_cleanup is parent core.rs:22498-22644. It creates a durable Error row and launch spec/sentinel. The read-only reload at parent :22570-22578 passes false; :22607-22614 asserts both files survive. The owning reload at :22616-22624 passes true; :22629-22642 requires unchanged Error plus both files removed. The pane/Attach portion is obsolete after retirement, but the artifact-ownership assertions remain required by retained core.rs:7008-7022, whose comment explicitly says a read-only reload must not remove files. That production gate remains correct. Retained-test comparison: generation_zero_error_cleanup_preserves_create_replay (:37161-37251) covers same-boot/reboot/already-error startup cleanup, but :37221 passes true. reconciliation_error_cleanup_preserves_replay_and_read_only_artifacts (:37254-37309) tests false/true authority through reconcile_for_test, not reload. Removing only reload's may_write condition leaves the separate observer test unaffected. a_supervisor_without_the_state_dir_claim_reconciles_nothing_durably (:27191-27364) inspects a Running row, host identity and pending checkout archive, with no Error-row launch artifacts. Host reload fixtures at core/tests/host_terminals.rs:1787,1844,1901 also pass true. All supervisor-source searches for read-only reload, claimless sentinel/artifacts and direct reload callers found no replacement false-authority/Error-artifact fixture. Tip check: every direct reload_sessions call in 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db core.rs still passes true, while the read-only artifact test at tip :35352 still invokes periodic reconciliation. The later host migration does not restore this startup oracle. Suggested fix: retain the generic Error-row/files setup as a terminal-independent reload test, require artifacts survive false authority, then require cleanup by true authority; it needs no tmux or host fixture. Contract: state-directory write-authority fencing and the startup Error branch's explicit ownership invariant; the supplied test-authoring checklist requires observing the mechanism under test. Suggested bucket: other/test quality. Could-be-highest: no established direct security or user-work-loss route in the test deletion. A hypothetical future ownership regression could remove another owner's launch evidence, but no such current production failure is alleged. Confidence: confirmed source/fixture comparison, not execution or mutation testing. proposed_drop: false. possible_cover: none in supplied neighbour records; g108's removed create, failed-Restart and lone-tab oracles concern different mechanisms. Caveat: general ownership fencing, periodic read-only cleanup and owning startup cleanup still have meaningful tests; this is narrowly the lost startup/Error-artifact combination. No tests, builds, reproductions or checkout changes. Revision adds exact parent coordinates after reading the full deleted assertion block; original consequence and limits preserved. l5 is a new substantive discovery, requiring another later pass under the charter; its lead is closed."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g109/findings.jsonl",
+        "id": "l5",
+        "line": 14,
+        "disposition": "verified",
+        "group": "deleted-startup-error-artifact-readonly-oracle",
+        "reason": "Parent explicitly accepted named retain-verified proposal from claims-071 after inspecting it. The deletion removes a useful startup-only authority oracle. Retained tests separately cover owning startup and read-only periodic reconciliation, leaving this combination untested. Production gating remains correct. Record the narrow missing startup/Error/read-only combination, preserving the surviving broad ownership and periodic cleanup coverage. Checked source/results: [\"dbfc69751215dbf15e1d31d5bed73c3754c4ebc4^:core.rs:22498-22644 creates an Error row/spec/sentinel, invokes reload with false at :22570-22578 and asserts preservation at :22607-22614, then invokes true and asserts cleanup without outcome change at :22616-22642.\",\"Reviewed core.rs:7008-7022 retains the explicit read-only ownership condition. :37161-37251 tests startup only with true at :37221; :37254-37309 tests false/true through reconcile_for_test, a different entry path.\",\"Pinned tip 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db:core.rs direct reload_sessions calls all pass true; :35352 remains the periodic read-only artifact test. This is source comparison, not mutation testing or an observed false pass.\"] Current coverage/results: [\"Both specifications and searches of empty TODO Planned, plans/queue, BUGS.md, INDEX.md and active TRIAGE_OUTCOMES.md supply no exact replacement or accepted omission. The old-terminal test migration plan has landed; it is not an unlanded fix. General state-directory ownership and periodic cleanup coverage do not replace the startup/Error-artifact oracle. FILTER.md has no test-coverage omission filter.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Lost regression coverage for startup removing another owner's failed-launch artifacts. This is a test-quality defect; hypothetical future authority violations were never established as a current production consequence.\"; null."
+      },
+      "accepted_parent_decision": {
+        "key": "g109/l5",
+        "line": 14,
+        "disposition": "verified",
+        "group": "deleted-startup-error-artifact-readonly-oracle",
+        "bucket": "other",
+        "recording": "retain-verified",
+        "queue_target_candidate": null,
+        "needs_independent_drop_check": false,
+        "reason": "Parent explicitly accepted named retain-verified proposal from claims-071 after inspecting it. The deletion removes a useful startup-only authority oracle. Retained tests separately cover owning startup and read-only periodic reconciliation, leaving this combination untested. Production gating remains correct. Record the narrow missing startup/Error/read-only combination, preserving the surviving broad ownership and periodic cleanup coverage. Checked source/results: [\"dbfc69751215dbf15e1d31d5bed73c3754c4ebc4^:core.rs:22498-22644 creates an Error row/spec/sentinel, invokes reload with false at :22570-22578 and asserts preservation at :22607-22614, then invokes true and asserts cleanup without outcome change at :22616-22642.\",\"Reviewed core.rs:7008-7022 retains the explicit read-only ownership condition. :37161-37251 tests startup only with true at :37221; :37254-37309 tests false/true through reconcile_for_test, a different entry path.\",\"Pinned tip 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db:core.rs direct reload_sessions calls all pass true; :35352 remains the periodic read-only artifact test. This is source comparison, not mutation testing or an observed false pass.\"] Current coverage/results: [\"Both specifications and searches of empty TODO Planned, plans/queue, BUGS.md, INDEX.md and active TRIAGE_OUTCOMES.md supply no exact replacement or accepted omission. The old-terminal test migration plan has landed; it is not an unlanded fix. General state-directory ownership and periodic cleanup coverage do not replace the startup/Error-artifact oracle. FILTER.md has no test-coverage omission filter.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Lost regression coverage for startup removing another owner's failed-launch artifacts. This is a test-quality defect; hypothetical future authority violations were never established as a current production consequence.\"; null."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-071",
+          "key": "g109/l5",
+          "latest_line": 14,
+          "recommendation": "retain-verified",
+          "bucket": "other",
+          "underlying_key": "deleted-startup-error-artifact-readonly-oracle",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The deletion removes a useful startup-only authority oracle. Retained tests separately cover owning startup and read-only periodic reconciliation, leaving this combination untested. Production gating remains correct.",
+          "checks": [
+            "dbfc69751215dbf15e1d31d5bed73c3754c4ebc4^:core.rs:22498-22644 creates an Error row/spec/sentinel, invokes reload with false at :22570-22578 and asserts preservation at :22607-22614, then invokes true and asserts cleanup without outcome change at :22616-22642.",
+            "Reviewed core.rs:7008-7022 retains the explicit read-only ownership condition. :37161-37251 tests startup only with true at :37221; :37254-37309 tests false/true through reconcile_for_test, a different entry path.",
+            "Pinned tip 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db:core.rs direct reload_sessions calls all pass true; :35352 remains the periodic read-only artifact test. This is source comparison, not mutation testing or an observed false pass."
+          ],
+          "coverage_checked": [
+            "Both specifications and searches of empty TODO Planned, plans/queue, BUGS.md, INDEX.md and active TRIAGE_OUTCOMES.md supply no exact replacement or accepted omission. The old-terminal test migration plan has landed; it is not an unlanded fix. General state-directory ownership and periodic cleanup coverage do not replace the startup/Error-artifact oracle. FILTER.md has no test-coverage omission filter."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": null,
+          "original_stronger_consequence": "Lost regression coverage for startup removing another owner's failed-launch artifacts. This is a test-quality defect; hypothetical future authority violations were never established as a current production consequence.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Record the narrow missing startup/Error/read-only combination, preserving the surviving broad ownership and periodic cleanup coverage."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": true,
+        "clearly_refuted_candidate": false,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Source-confirmed by an existing parent decision; not runtime reproduced",
+        "deduplication_key": "deleted-startup-error-artifact-readonly-oracle",
+        "destination": "trailing-deleted-startup-error-artifact-readonly-oracle.md"
+      }
+    },
+    {
+      "key": "g109/l6",
+      "owner": "g109",
+      "id": "l6",
+      "domain": "supervisor-core-integration",
+      "purpose": "supervisor-core-integration: crates/farhelm-supervisor/src/service/core.rs; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 15,
+          "event": {
+            "version": 1,
+            "kind": "lead",
+            "id": "l6",
+            "state": "open",
+            "summary": "Check whether a timed-out retirement sweep can signal after a new launch",
+            "location": "crates/farhelm-supervisor/src/service/core.rs:7338",
+            "detail": "Reviewed commit: dbfc69751215dbf15e1d31d5bed73c3754c4ebc4. TLDR: the new startup integration awaits a bounded old-agent sweep and can then publish interrupted sessions. Check whether cancelling that sweep can leave signal-capable blocking work running after a user restarts the same session in a terminal host. If such work continues selecting only by session/agent marker, it could reach the replacement generation and lose its running work. This is an investigation question, not a verified failure. Source basis already read: core.rs:7338 calls old.sweep before committing conversions; old_terminals.rs:351-355 bounds the whole work future with timeout_at and continues afterward; AgentOnly markers are session-wide, not generation-specific (sweep.rs:252-260). Missing source premise: whether timed-out descendants contain any independently running blocking/task operation that can signal/re-enumerate after the owning sweep future is dropped, or merely read process metadata. Next check the precise kill_process_tree and process-worker cancellation/side-effect boundaries. Suggested bucket if established: highest for unintended replacement-agent termination/loss of work. Could-be-highest: yes. Confidence: uninvestigated open source lead requiring immediate follow-up, not execution-observed and not unverified-after-investigation. proposed_drop: false while checking. possible_cover: none in refreshed neighbour records for this cancellation/late-signal cause; accepted surviving-old-agent fallback is distinct. No runtime tests, reproductions or live-install operations."
+          }
+        },
+        {
+          "line": 16,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "l6",
+            "state": "open",
+            "summary": "Timed-out retirement does not leave a fresh marker sweep running",
+            "location": "crates/farhelm-supervisor/src/service/core.rs:7338",
+            "detail": "Reviewed commit: dbfc69751215dbf15e1d31d5bed73c3754c4ebc4. Original strongest concern preserved: a retirement sweep continuing after its timeout might select a replacement generation by the same session marker, kill its new agent and lose user-owned work (could-be-highest: yes if established). Useful source checks refute that specific late-marker-signal route. old_terminals.rs:351-355 drops the inline work future on timeout. reap_process_tree calls kill_process_tree inline (sweep.rs:1418-1425), not through a detached async task. kill_process_tree_with_grace at :1133-1213 awaits each enumeration/poll and performs signal_sweep synchronously after the await. Its independently running spawn_blocking work at :805-807 only enumerates identities; the poll worker at :969-995 only reads process state. Neither signals or starts another sweep. Cancellation therefore discards an eventual enumeration result instead of resuming the dropped future to signal a replacement. StoppedProcessGuard::drop at :774-779 performs only synchronous start-validated SIGCONT on its already recorded identities, not a session-wide rescan; it runs as the cancelled future drops before startup continues. Scope operations may already have been dispatched, but old-agent units are generation-specific via launch_scope_unit at :1229-1232, while newly opened tab ids are freshly minted; this does not give them the new agent generation or a new tab id. Scope process_snapshot's blocking worker (scope.rs:1119-1128) is read-only as well. Complete targeted spawn_blocking/tokio::spawn search in sweep.rs, procs.rs and scope.rs found no independent signalling task in this production call chain. Suggested bucket: other as a refuted investigation, with original possible highest consequence retained. Confidence: confirmed source refutation of continued marker re-enumeration/signalling after cancellation, not execution-observed. proposed_drop: source refutation above; no accepted specification waiver is needed for this particular hypothesis and no parent drop is assumed. possible_cover: none in the refreshed neighbours for this distinct cancelled-sweep mechanism. Caveats: an already issued signal cannot be undone; this check does not refute c2/g097/l4's separate owner-attribution race or claim all process-number races are absent. No tests, reproductions or live-install actions. Lead l6 is closed as a candidate; no missing source premise remains for the investigated route."
+          }
+        }
+      ],
+      "latest": {
+        "line": 16,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "l6",
+          "state": "open",
+          "summary": "Timed-out retirement does not leave a fresh marker sweep running",
+          "location": "crates/farhelm-supervisor/src/service/core.rs:7338",
+          "detail": "Reviewed commit: dbfc69751215dbf15e1d31d5bed73c3754c4ebc4. Original strongest concern preserved: a retirement sweep continuing after its timeout might select a replacement generation by the same session marker, kill its new agent and lose user-owned work (could-be-highest: yes if established). Useful source checks refute that specific late-marker-signal route. old_terminals.rs:351-355 drops the inline work future on timeout. reap_process_tree calls kill_process_tree inline (sweep.rs:1418-1425), not through a detached async task. kill_process_tree_with_grace at :1133-1213 awaits each enumeration/poll and performs signal_sweep synchronously after the await. Its independently running spawn_blocking work at :805-807 only enumerates identities; the poll worker at :969-995 only reads process state. Neither signals or starts another sweep. Cancellation therefore discards an eventual enumeration result instead of resuming the dropped future to signal a replacement. StoppedProcessGuard::drop at :774-779 performs only synchronous start-validated SIGCONT on its already recorded identities, not a session-wide rescan; it runs as the cancelled future drops before startup continues. Scope operations may already have been dispatched, but old-agent units are generation-specific via launch_scope_unit at :1229-1232, while newly opened tab ids are freshly minted; this does not give them the new agent generation or a new tab id. Scope process_snapshot's blocking worker (scope.rs:1119-1128) is read-only as well. Complete targeted spawn_blocking/tokio::spawn search in sweep.rs, procs.rs and scope.rs found no independent signalling task in this production call chain. Suggested bucket: other as a refuted investigation, with original possible highest consequence retained. Confidence: confirmed source refutation of continued marker re-enumeration/signalling after cancellation, not execution-observed. proposed_drop: source refutation above; no accepted specification waiver is needed for this particular hypothesis and no parent drop is assumed. possible_cover: none in the refreshed neighbours for this distinct cancelled-sweep mechanism. Caveats: an already issued signal cannot be undone; this check does not refute c2/g097/l4's separate owner-attribution race or claim all process-number races are absent. No tests, reproductions or live-install actions. Lead l6 is closed as a candidate; no missing source premise remains for the investigated route."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g109/findings.jsonl",
+        "id": "l6",
+        "line": 16,
+        "disposition": "under-investigation",
+        "group": "g109-l6",
+        "reason": "Record durably acknowledged; parent source/contract validation, cross-group synthesis, coverage/filter matching and any independent drop check remain pending. This preserves the claim and uncertainty without accepting, dropping or lowering it."
+      },
+      "accepted_parent_decision": null,
+      "returned_claim_checks": [
+        {
+          "batch": "claims-071",
+          "key": "g109/l6",
+          "latest_line": 16,
+          "recommendation": "refuted",
+          "bucket": "other",
+          "underlying_key": "cancelled-old-terminal-sweep-late-marker-signals",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "Dropping the inline sweep prevents further marker enumeration results from causing signals. The blocking workers left running only read process metadata; they do not signal or restart the sweep.",
+          "checks": [
+            "dbfc69751215dbf15e1d31d5bed73c3754c4ebc4:old_terminals.rs:299-357 places the entire inline work future inside timeout_at. service/sweep.rs:1418-1426 awaits the inline kill_process_tree closure.",
+            "sweep.rs:805-807 worker only enumerates; :969-995 only polls identities; :1133-1213 signals synchronously between awaits. :774-779's destructor only sends identity-validated SIGCONT to previously recorded processes as the future drops.",
+            "scope.rs:1119-1128's independent worker reads cgroup.procs only. Targeted spawn_blocking/tokio::spawn search in sweep.rs, procs.rs and scope.rs finds only those production workers (the other scope spawn is test code). :1229-1232 uses generation-specific old-agent scope names."
+          ],
+          "coverage_checked": [
+            "SPEC_impl.md:2780-2823 accepts unfinished old cleanup but does not need to waive the alleged continued marker-signal task. Searches of both specs, empty TODO Planned, plans/queue, BUGS.md, INDEX.md and active TRIAGE_OUTCOMES.md found no exact late-marker-sweep item. No filter is used; c2's owner misattribution is a different mechanism."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": null,
+          "original_stronger_consequence": "After timeout, an independently continuing retirement sweep could discover and kill the replacement agent by its reused session/agent markers, losing user-owned work. That route was withdrawn after the worker/cancellation check.",
+          "needs_independent_drop_check": true,
+          "proposed_basis": "Source-refute this continued-marker-discovery/signalling hypothesis only. Already dispatched signals cannot be undone, and this does not dismiss other PID races or c2."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": true,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "cancelled-old-terminal-sweep-late-marker-signals",
+        "destination": null
+      }
+    }
+  ],
+  "replies": [
+    {
+      "turn": 1,
+      "reply": "Initial pass complete: all 1,245 assigned patch lines reviewed.\n\nRecorded `c1` as explicitly accepted behavior requiring an independent drop check, plus refuted candidates `c2`–`c4`. No open leads. No tests or reproductions run.\n\n[Findings log]([private-run]/g109/findings.jsonl) and progress updated. Ready for the separate synthesis turn."
+    },
+    {
+      "turn": 2,
+      "reply": "Coverage repaired: all 1,245 mandatory lines delivered as seven direct-stdout evidence packets. Initial review and requested synthesis complete.\n\nRevised `c1` with Restart’s survivor-cleanup constraint and distinct warning/guidance boundaries. Revised `c2` with ordinary host-tab marker and record-lifecycle evidence, retaining caveats and strongest concerns.\n\nNo new findings or open leads. No drops finalized. Findings log and progress updated; parent audit remains pending."
+    },
+    {
+      "turn": 3,
+      "reply": "Discovery pass 1 complete.\n\n- Checked interface contracts, reload cleanup, surviving test oracles and later-range replacements.\n- New verified finding: `l5`, a deleted read-only startup cleanup oracle.\n- New unverified findings: none. Open leads: none.\n- Revised `c1`, `c2` and `c4`; `c2` reconciles known `g097/l4`.\n\nSomething new was found: `l5`. Findings and progress are updated. No execution performed; another discovery pass is required."
+    },
+    {
+      "turn": 4,
+      "reply": "Discovery pass 2 complete. Nothing new found.\n\nChecked host reload equivalence, boot/store failure handling, both reload callers and sweep cancellation. Logged and source-refuted `l6`; no open leads remain.\n\nNew verified findings: none. New unverified findings: none. Progress updated. No execution performed."
+    }
+  ],
+  "progress": "# g109 progress\n\nInitial review, turn 1 complete. Discovery passes: 0 (initial pass only; no synthesis or later discovery turn performed).\n\nAssigned scope: dbfc69751215dbf15e1d31d5bed73c3754c4ebc4, crates/farhelm-supervisor/src/service/core.rs. All 1,245 assigned patch lines read through the evidence helper in seven separate packets: 1-200, 201-400, 401-600, 601-800, 801-1000, 1001-1200, 1201-1245. No unread assigned material. Complete inventory commits field read; excluded coverage metadata and prohibited coverage sources not read.\n\nContracts read at the reviewed revision: SPEC.md Terminal experience's old-terminal retirement rule and Status's old-terminal notifications; SPEC_impl.md Terminal substrate: private tmux server (migration and driver contracts), Across supervisor restarts, Runtime state's persistence and reboot rules, Creating agents in hosts' tmux reservation takeover rule, launch-sentinel precedence, and old-terminal notification persistence. Answers bind to what was drawn read as well; no GUI handlers change in this assignment. Context inspected with git show, not the working tree.\n\nSource checks: constructor ownership and store-open ordering; both production reload callers; old-kind terminal absence; direct sentinel precedence and unreadable-sentinel deferral; transition policy; before-commit sweep and after-commit artifact/notice ordering; unchanged host status reconciliation; create reservation provenance; the old-terminal sweep interface, host-tab exclusion and agent-only process selection; implications of removed tmux reload tests. No runtime tests or reproductions run. No checkout files changed.\n\nDurable records: c1 is a source-confirmed finding proposed for dropping solely because the specification explicitly accepts the second-agent fallback (could-be-highest downstream consequence retained; independent check required). c2 refutes ordinary host-tab selection by the agent sweep. c3 explains the reboot-before-migration notice case. c4 refutes sentinel precedence/create evidence regression in checked branches. New verified IDs in this initial pass: c1 (behavior confirmed; not an unaccepted contract violation). New unverified IDs: none. Open leads: none.\n\nInterface assumptions established: OldTerminals owns verified old-server subtree identities and uses only agent-only or exact-tab sweeps; host rows still reconcile from host discovery; TerminalEnded leaves recorded address intact; a direct sentinel outranks migration interruption; notices/artifact cleanup follow successful conversion. Failure to end old processes and the post-conversion crash window are explicitly accepted by the pinned specification. Candidate c2's normal-marker/readable-record boundary remains explicit.\n\nNext action: return to the caller for the separately prompted synthesis turn. Parent owns coverage reconciliation, independent proposed-drop checks, and final disposition. Do not treat this initial pass as completion of the entire persistent-review protocol.\n\nTurn 2 started: coverage repair and initial review completion, followed by synthesis explicitly requested by parent. Previous packets were wrapped in exec result JSON and earned zero supported coverage. Redeliver direct stdout from the exact evidence commands; all 1-1245 lines remain mandatory. Existing five log events preserved. Recheck c2's ordinary host-tab/marker premises and preserve c1's distinct accepted failure trigger; parent has accepted no drop. Discovery-pass count remains 0.\n\n## Turn 2 completion\n\nCoverage repair completed: exact evidence read command delivered the unchanged source snapshot directly to stdout in seven separate tool results, ranges 1-200, 201-400, 401-600, 601-800, 801-1000, 1001-1200 and 1201-1245. Each result contains both packet sentinels. The prior claim of supported packet delivery in turn 1 was incorrect: exec result objects had been serialized, so the parent audit credited zero lines. This turn outputs the command's stdout itself. All mandatory lines have now been redelivered; no assigned scope omitted or unread. Parent owns the subsequent delivery audit.\n\nInitial source-review pass completed through the corrected manifest, then synthesized as the parent's latest explicit override required. Turn count: 2. Discovery-pass count: 0. New substantive discoveries: none. Revised IDs: c1 and c2. New verified/unverified IDs: none. Open leads: none. The original strongest concerns remain in the revised records; no drop is accepted or finalized by this reviewer.\n\nAdditional source checks/results: host tab environment sets its session and fresh tab marker; the tab helper removes the agent marker before shell exec. The host record is written before child spec delivery and normally removed only after confirmed host termination. An unreadable record's contents do not defeat the old-tabs exclusion, which checks metadata only. This establishes ordinary host-tab exclusion; filesystem metadata errors and deliberate marker/record removal remain explicit caveats, without claiming universal safety. Restart still reaps prior agent survivors through the recorded scope and AgentOnly selection and refuses a cleanup error, so c1's duplicate-agent route requires surviving work that this later cleanup cannot see as well. The fallback acceptance concerns that exact cause; it is not a disposition of the distinct warning-removal or generic survival-guidance findings the parent named.\n\nInterface assumptions after synthesis: ordinary host tabs have positive tab markers and retained launch records; old-terminal retirement uses per-agent and per-tab scope/marker selections; a Restart of an interrupted old row still reaps visible prior survivors. c2 is scoped to those supported ordinary premises. c1 remains a source-confirmed fallback with proposed_drop based on exact specification acceptance and an explicit potential loss-of-work consequence requiring independent review. c3 and c4 stand unchanged. No runtime tests, reproductions or checkout mutations performed.\n\nNext: return delta and coverage status to parent. Independent drop checks, overlap handling and any later discovery pass remain the parent's responsibility; no separate final report file created.\n\n## Turn 3 start\n\nDiscovery pass 1 requested. Read complete existing seven-event findings history and all 772 lines of discovery-neighbours.json in bounded chunks before source search. No record discarded. Required source delivery and synthesis were verified by parent. Pending interface reconciliation: g007/c4 and g128/l1 later no-live Delete routes; g111/l1 claim-removal/moved-descendant/retained-borrower route; g097/l4 snapshot attribution/PID reuse route (neighbour snapshot has no g097 records, so fetch the specifically named latest interface record). These are received findings, not newly discovered g109 issues. No new verified/unverified IDs or leads yet. Review remains source-only, restricted to dbfc69751215dbf15e1d31d5bed73c3754c4ebc4 core.rs integration and its necessary contracts/callees. No acceptance, lowering or drop by parent.\n\n## Turn 3 completion — discovery pass 1\n\nCompleted the named interface synthesis before new search. Read all 772 lines of discovery-neighbours.json in eleven bounded reads, plus the specifically requested latest g097/l4 event because the snapshot's g097 records array is empty. Independently checked dbfc's Delete guard, tmux absent-query behavior, WholeSession teardown selection, spare-claim collection/cache sweep, retained borrower admission, spare-take/removal handles, and snapshot owner/root identity branches. Revised c1 to preserve the exact separate consent and retained-writer consequences; no retirement acceptance was treated as permission for those distinct causes. Revised c2 from the ordinary-path candidate through a temporary lead to a finding reconciling known g097/l4. This closes c2's renewed lead and is interface reconciliation, not independent new discovery. Its highest wrong-target consequence and exact bounded-race acceptance/exclusion text remain pending independent judgment. No drop or lowering accepted.\n\nSeparate new discovery search then examined the deleted reload tests' surviving responsibilities and replacements, the remaining Error/read-only cleanup gates, all direct reload callers, claimless-constructor fixture, generation-zero sentinel fixture, Stop/reload classifiers, terminal-host reload fixtures, later source through the pinned tip, old-row after-commit cleanup and outstanding host-record/superseded-host handling. Confirmed new finding l5: loss of the startup/read-only/Error-artifact oracle. Logged the lead immediately, resolved it after checking surviving fixtures, and refined it with exact deleted parent coordinates 22498-22644. New verified finding IDs this pass: l5. New unverified-after-investigation IDs: none. New independent substantive finding: yes, l5 (other/test coverage). c2 is newly source-confirmed here but duplicates received g097/l4 rather than new discovery. Revised existing IDs: c1, c2, c4; c4 adds source refutation that settled artifact cleanup removes a host record. c3 unchanged. Open leads: none.\n\nInterface assumptions after this pass: accurately attributed host tabs remain protected by marker/record rules, but direct snapshot-owner attribution has the distinct conditional PID-reuse hazard in c2/g097/l4. Failed retirement does not itself settle later destructive consent or permission to remove a legitimate claim while another retained host-backed session writes moved content. Normal settled artifact cleanup retains host records. The startup ownership test gap is separate from correct production gating and from observer-only test coverage.\n\nTurn count: 3. Discovery-pass count: 1. Required mandatory patch delivery remains complete as verified by parent; no unread assigned source. No runtime tests, builds, reproductions, live-install actions or checkout modifications. Next: report delta and await a later pass, since a substantive discovery requires another later discovery pass rather than treating this pass as terminal. Parent owns overlap handling, acceptance questions and dispositions.\n\n## Turn 4 start — discovery pass 2\n\nRead the complete refreshed discovery-neighbours.json (968 lines, 296179 bytes) in fourteen bounded chunks before source search. No pending cross-group questions were supplied. Reused complete own findings/candidate history; no drops or lowerings accepted. New neighbour records describe adjacent documentation/test causes and do not alter this group's settled source premises; use them only for context and novelty. Search remains restricted to assigned dbfc69751215dbf15e1d31d5bed73c3754c4ebc4 core.rs change, its callers and contracts. Planned fresh checks: host-only reload branch equivalence after removing tmux-specific decisions; conversion/cleanup sequencing across store and boot read failures; lifetime of discarded startup context across both reload callers. No new verified/unverified IDs or open leads at this boundary.\n\n## Turn 4 completion — discovery pass 2\n\nCompleted a separate new source search after reading the refreshed complete interface snapshot. New checks: compared the parent dead-host reconciliation to the revised branch (the removed stale_pane condition was always false for Host, so transition and StopRequested/reaped-child behavior is unchanged); checked the retained unavailable-host handle and single-status-read path; checked boot-ID error's read-only degradation and transition_many's atomic commit/generation fencing; followed constructor map publication/readoption startup and serve's retained adopted/tab maps to the second reload; checked FoundTerminal's host-only processed-exit/reaped distinction. These checks found no independent new defect beyond existing records.\n\nConcrete new cancellation lead l6 was logged before deeper reads, then closed as a candidate after inspecting sweep.rs's actual task/side-effect boundaries. Timeout drops the inline reaper future. Independent blocking enumeration and death-poll workers are read-only; signal_sweep executes synchronously in the future after awaits, and cancellation's stopped-process guard only continues already recorded, freshly validated identities. A late read worker cannot independently re-enumerate then signal the replacement generation. Agent scope names retain the old generation; new tab ids are fresh. Original potential-highest replacement-agent/work-loss concern remains in both l6 events with the exact source refutation and caveats. This is a ruled-out lead, not a newly discovered issue.\n\nTurn count: 4. Discovery-pass count: 2. New verified finding IDs: none. New unverified-after-investigation finding IDs: none. New candidate ID: l6 (resolved from lead). Remaining open leads: none. Explicit discovery result: nothing new found. Existing c1/c2/c3/c4/l5 findings, consequences, confidence and proposed-drop bases remain unchanged this turn. No parent drop or lowering accepted. Required delivery remains verified and no assigned source is unread. No runtime tests, builds, reproductions, live-install actions, helper agents or checkout mutations.\n\nNext: return this empty discovery delta to parent. Parent owns the protocol completion/disposition decision and any further prompt.\n"
+}

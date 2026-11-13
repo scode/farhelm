@@ -1,0 +1,515 @@
+{
+  "group": {
+    "id": "g016",
+    "domain": "product-contracts",
+    "purpose": "product-contracts: SPEC_impl.md; phases @@ -4687,30 +4637,31 @@ channel records these notices.",
+    "interfaces": [
+      "g001",
+      "g003",
+      "g004",
+      "g005",
+      "g006",
+      "g007",
+      "g008",
+      "g009",
+      "g010",
+      "g011",
+      "g012",
+      "g014",
+      "g015",
+      "g149"
+    ],
+    "sources": [
+      {
+        "path": "[private-run]/prep/parts/01473-002.patch",
+        "ranges": [
+          [
+            1,
+            565
+          ]
+        ],
+        "original_path": "SPEC_impl.md",
+        "commit": "f96dd4363d97dc7e07dea5b8947c96be6bf912e8",
+        "notes": "@@ -4687,30 +4637,31 @@ channel records these notices.; patch character offsets [117708,177656)",
+        "lines": 565,
+        "bytes": 59990,
+        "start": 117708,
+        "end": 177656,
+        "original": "[private-run]/prep/originals/01473.patch"
+      }
+    ],
+    "lines": 565,
+    "bytes": 59990
+  },
+  "records": [
+    {
+      "key": "g016/c1",
+      "owner": "g016",
+      "id": "c1",
+      "domain": "product-contracts",
+      "purpose": "product-contracts: SPEC_impl.md; phases @@ -4687,30 +4637,31 @@ channel records these notices.",
+      "history": [
+        {
+          "line": 1,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c1",
+            "state": "open",
+            "summary": "Host tag scope provenance replaces removed tmux metadata",
+            "location": "SPEC_impl.md:4891",
+            "detail": "Reviewed commit: f96dd4363d97dc7e07dea5b8947c96be6bf912e8\n\n## TLDR\nConsidered whether removing the old tmux-window scope fallback from the cleanup description leaves terminal tabs without a cleanup handle. The host implementation supplies the replacement; no documentation regression established.\n\n## Details\nSPEC_impl.md:4891–4898 replaces tmux-window options and legacy unknown-window fallback with terminal-host tags, startup placeholders, and independent systemd enumeration. At the reviewed revision, service/core/host_tabs.rs:401–425 writes the actual per-tab scope selection into HostRole::Tab; :207–221 initializes an unreadable startup placeholder as scoped=false; :235–243 preserves previously known scope metadata across a failed retry. An unavailable placeholder refuses ordinary close at :929–940. service/core.rs:13372–13383 retains all tab selections and forces incomplete historical discovery to sweep. service/teardown.rs:402–450 combines that selection with SessionHosts facts and independently enumerates tab and launch unit globs; service/session_hosts.rs:551–576 adds false/unavailable selection to require the portable sweep. These replacement sources refute the concern that deleting the old window metadata description by itself removes all cleanup handles. This records only that deletion/replacement assessment, not a claim that every pre-existing cleanup behavior is correct.\n\nSuggested bucket: other (no established impact). Confidence: confirmed source refutation of the considered removal concern. proposed_drop: replacement source supplies the removed contract; not relying on specification acceptance. possible_cover: none (coverage sources not searched). Could-be-highest: no established security or loss-of-work route for this documentation removal; cleanup omissions considered here concern surviving processes. Source analysis only; no execution."
+          }
+        }
+      ],
+      "latest": {
+        "line": 1,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c1",
+          "state": "open",
+          "summary": "Host tag scope provenance replaces removed tmux metadata",
+          "location": "SPEC_impl.md:4891",
+          "detail": "Reviewed commit: f96dd4363d97dc7e07dea5b8947c96be6bf912e8\n\n## TLDR\nConsidered whether removing the old tmux-window scope fallback from the cleanup description leaves terminal tabs without a cleanup handle. The host implementation supplies the replacement; no documentation regression established.\n\n## Details\nSPEC_impl.md:4891–4898 replaces tmux-window options and legacy unknown-window fallback with terminal-host tags, startup placeholders, and independent systemd enumeration. At the reviewed revision, service/core/host_tabs.rs:401–425 writes the actual per-tab scope selection into HostRole::Tab; :207–221 initializes an unreadable startup placeholder as scoped=false; :235–243 preserves previously known scope metadata across a failed retry. An unavailable placeholder refuses ordinary close at :929–940. service/core.rs:13372–13383 retains all tab selections and forces incomplete historical discovery to sweep. service/teardown.rs:402–450 combines that selection with SessionHosts facts and independently enumerates tab and launch unit globs; service/session_hosts.rs:551–576 adds false/unavailable selection to require the portable sweep. These replacement sources refute the concern that deleting the old window metadata description by itself removes all cleanup handles. This records only that deletion/replacement assessment, not a claim that every pre-existing cleanup behavior is correct.\n\nSuggested bucket: other (no established impact). Confidence: confirmed source refutation of the considered removal concern. proposed_drop: replacement source supplies the removed contract; not relying on specification acceptance. possible_cover: none (coverage sources not searched). Could-be-highest: no established security or loss-of-work route for this documentation removal; cleanup omissions considered here concern surviving processes. Source analysis only; no execution."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g016/findings.jsonl",
+        "id": "c1",
+        "line": 1,
+        "disposition": "under-investigation",
+        "group": "g016-c1",
+        "reason": "Record durably acknowledged; parent source/contract validation, cross-group synthesis, coverage/filter matching and any independent drop check remain pending. This preserves the claim and uncertainty without accepting, dropping or lowering it."
+      },
+      "accepted_parent_decision": null,
+      "returned_claim_checks": [
+        {
+          "batch": "claims-007",
+          "key": "g016/c1",
+          "latest_line": 1,
+          "recommendation": "refuted",
+          "bucket": "other",
+          "underlying_key": "spec-tab-cleanup-metadata-host-tag-replacement",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "Removing the tmux-window description did not remove all tab cleanup handles. Host tags, retained tab selections and independent manager enumeration supply the replacement. The distinct pre-existing manager-failure policy gap in g016/l4 remains separate.",
+          "checks": [
+            "At f96dd4363d97dc7e07dea5b8947c96be6bf912e8, SPEC_impl.md:4891-4898 describes the host-tag replacement, unreadable placeholders and independent systemd enumeration.",
+            "crates/farhelm-supervisor/src/service/core/host_tabs.rs:401-417 writes actual scoped selection into HostRole::Tab; :207-221 makes an unread placeholder unscoped; :235-243 preserves known selection on failed readoption; :929-940 refuses ordinary close for an unreadable non-retry tab.",
+            "service/core.rs:13372-13381 retains every tab selection and marks historical discovery incomplete. service/teardown.rs:402-450 adds those handles plus session_hosts facts and independent tab/launch-unit globs. service/session_hosts.rs:554-576 preserves host-tag selections and requires the portable sweep for unavailable provenance.",
+            "These checks refute absence of replacement handles, not every cleanup guarantee. In particular, extend_tab uses derived-name manager policy, examined separately under g016/l4. Source only; no surviving process or runtime cleanup result was observed."
+          ],
+          "coverage_checked": [
+            "Current SPEC_impl.md:2234-2269,4865-4898 and SPEC.md:2075-2115 describe host containment, discovery and fail-closed cleanup. They do not accept missing cleanup handles or settle every manager-failure path.",
+            "TODO.md Planned and plans/queue/INDEX.md are empty. Matching terminal/tmux plans are landed (plans/REPORTS.md:12,29-32). BUGS.md's SSH-helper hang is unrelated.",
+            "Searched queue INDEX/files and active TRIAGE_OUTCOMES.md for tab scope, host tags, cleanup provenance and manager probe policy. unscoped-tab-log-says-scoped.md concerns a diagnostic field, not loss of handles; no exact cover or useful extension. FILTER.md does not cover a persistent missing cleanup handle; no filter proposed."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": "No missing premise for replacement-handle existence. Correctness of every existing cleanup failure policy is expressly unclaimed.",
+          "original_stronger_consequence": "Suspected terminal tabs with no cleanup handle after deleting old tmux-window metadata. Cleanup omissions and surviving processes were considered; no work loss or security exposure was established.",
+          "needs_independent_drop_check": true,
+          "proposed_basis": "Source refutation of the metadata-removal hypothesis only. Flag the drop check because the original cleanup concern could involve surviving user processes; do not absorb g016/l4 into this refutation."
+        }
+      ],
+      "parent_proposals": [
+        {
+          "artifact": "parent-flagged-judgments-007.json",
+          "key": "g016/c1",
+          "proposal": "claim-checks/claims-007/result.json",
+          "parent_proposal": "source-refuted-replacement-tab-cleanup-handles",
+          "final_independent_gate": "required-before-drop",
+          "reason": "Full007actualHostRoleTabscopeselection,placeholderunscoped/retainedknownselectiononfailedreadoption,ordinarycloserefusalforunreadabletab,teardowntabhandles/sessionhostfacts/independentmanagerenumerationsupplyreplacementforretiredwindowmetadata. Refutesabsenceofallcleanuphandles, noteveryreprobe/failurepolicy. Preservepotentialsurvivingprocessharm and distinct016l4derivedpolicygap; freshcheckactualcaller ownership, no absorbedcontraryclaim."
+        }
+      ],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": true,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "spec-tab-cleanup-metadata-host-tag-replacement",
+        "destination": null
+      }
+    },
+    {
+      "key": "g016/l2",
+      "owner": "g016",
+      "id": "l2",
+      "domain": "product-contracts",
+      "purpose": "product-contracts: SPEC_impl.md; phases @@ -4687,30 +4637,31 @@ channel records these notices.",
+      "history": [
+        {
+          "line": 2,
+          "event": {
+            "version": 1,
+            "kind": "lead",
+            "id": "l2",
+            "state": "open",
+            "summary": "Missing host terminal may retry reports contrary to discard wording",
+            "location": "SPEC_impl.md:4644",
+            "detail": "Reviewed commit: f96dd4363d97dc7e07dea5b8947c96be6bf912e8\n\n## TLDR\nThe rewritten contract says a report whose terminal no longer exists is discarded. The host anchor instead returns a retryable error when the published entry has no terminal; checking whether the drain later discards such reports by another condition.\n\n## Details\nSPEC_impl.md:4643–4644 says: 'A report made under an earlier launch, or whose terminal no longer exists, fails the anchor and is discarded.' service/core.rs:15776–15802 host_agent_anchor returns ErrorKind::Internal for a missing terminal as well as an unpublished entry or unreadable anchor; service/report_files.rs:322–324 propagates this error before anchoring. The same specification paragraph describes Internal failures as requeued. Need to inspect the drain and missing/gone host anchor behavior to establish whether a terminal that definitively disappeared can reach this retry path. Suspected consequence is inaccurate implementation documentation about report lifetime and retry, not established product breakage. Suggested bucket: other. Confidence: unresolved source lead. proposed_drop: false. possible_cover: none. Could-be-highest: no; no security or loss-of-work route identified. Source-only; no execution."
+          }
+        },
+        {
+          "line": 3,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "l2",
+            "state": "open",
+            "summary": "Report-discard contract does not match gone host terminals",
+            "location": "SPEC_impl.md:4643",
+            "detail": "Reviewed commit: f96dd4363d97dc7e07dea5b8947c96be6bf912e8\n\n## TLDR\nThe implementation specification now says pending conversation reports are discarded when their terminal no longer exists. Terminal hosts instead retain the launch anchor after disappearing, allowing a valid report to be admitted; if the session has no terminal object, the report is retried. Someone maintaining this logic from the new specification could incorrectly discard a final conversation report and leave Restart pointing at older state. The reviewed change is a documentation error; no current runtime regression or observed loss of conversation is claimed.\n\n## Details\nSPEC_impl.md:4643–4644 replaces the old missing-pane statement with: 'A report made under an earlier launch, or whose terminal no longer exists, fails the anchor and is discarded.' That substitution does not describe the host replacement. At this commit, crates/farhelm-supervisor/src/hosts/terminal.rs:864–881 deliberately keeps the child pid/start anchor for Liveness::Gone as well as Running and Exited; its documentation explicitly says the anchor is kept after exit so a report written before exit may still be applied. HostTerminal::anchor at :2548–2550 exposes that retained anchor. service/core.rs:15776–15802 obtains the current-generation host anchor, returning Internal if there is no terminal object or no readable anchor. service/report_files.rs:320–324 passes an available anchor to procs::anchor_chain; procs.rs:547–580 checks the report's recorded pid/start and chain integrity without requiring the terminal to be alive. A valid final report can therefore pass after the host is gone. With no terminal object, report_files.rs:247–265 instead maps Internal to Disposition::Retry. These are two distinct counterexamples to the new discard wording, established through source rather than execution.\n\nFix the text to distinguish an ancestry mismatch from a vanished terminal, describe the retained post-exit anchor, and describe missing/unreadable current-generation host state as retryable. The source locations above establish the contract without reproducing a bug. Revision of l2: investigation settled the lead; the drain has no extra terminal-gone discard condition.\n\nSuggested bucket: other, for an inaccurate internal contract. Confidence: confirmed by source analysis. proposed_drop: false. possible_cover: none (coverage sources not searched). Could-be-highest: no established shipped security or loss-of-work route; the possible future implementation mistake is motivation for correcting the documentation, not a claim of current highest impact. No runtime tests or reproductions run."
+          }
+        },
+        {
+          "line": 4,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "l2",
+            "state": "open",
+            "summary": "Report-discard contract does not match gone host terminals",
+            "location": "SPEC_impl.md:4643",
+            "detail": "Reviewed commit: f96dd4363d97dc7e07dea5b8947c96be6bf912e8\n\n## TLDR\nThe implementation specification says pending conversation reports are discarded when their terminal no longer exists. Host terminals retain the launch anchor after disappearing, allowing a valid report to be admitted; a missing terminal object instead produces a retryable error. Following the inaccurate contract in a future change could discard a final conversation report and leave Restart pointing at older state. This is a documentation defect, not an established current runtime regression or observed loss of conversation.\n\n## Details\nChanged-source attribution: f96dd4363d97dc7e07dea5b8947c96be6bf912e8, SPEC_impl.md:4643–4644, the added lines in the hunk beginning @@ -4687,30 +4637,31 @@. The parent text at :4693–4694 said 'whose pane no longer exists'; this commit changes that subject to 'whose terminal no longer exists' while changing the surrounding attribution model to terminal-host roots. The unchanged host behavior does not support that generalized assertion. A path-limited diff of this commit against its parent confirms hosts/terminal.rs, service/core.rs, service/report_files.rs and procs.rs have no changes in this commit. The implementation behavior is therefore pre-existing at this documentation revision; the finding concerns the rewritten contract, not introducing or fixing those runtime paths.\n\nAt this revision, crates/farhelm-supervisor/src/hosts/terminal.rs:864–881 keeps the child pid/start anchor for Liveness::Gone as well as Running and Exited. Its comment explicitly retains it so a report written before exit may still be applied. HostTerminal::anchor at :2548–2550 exposes it. service/core.rs:15776–15802 obtains the current-generation host anchor and returns Internal if the terminal object or readable anchor is absent. service/report_files.rs:320–324 passes an available anchor to procs::anchor_chain; procs.rs:547–580 validates the report's recorded pid/start and chain integrity without requiring terminal liveness. A valid final report can therefore pass after the host is gone. With no terminal object, report_files.rs:247–265 maps Internal to Retry. The drain has no additional terminal-gone discard condition. Admission still applies every vendor proof and generation check: host disappearance does not guarantee acceptance, only that disappearance itself is not the claimed rejection rule.\n\nCorrect the wording to distinguish an ancestry mismatch from a vanished terminal, describe the retained post-exit anchor, and describe missing/unreadable current-generation host state as retryable. The earlier hypothesis about discarding a final report is a possible future maintenance consequence, not an observed shipped loss.\n\nSynthesis revision under original ID l2: parent supplied cross-group match g129/l2 for the same documentation assertion. Retain both g016/l2 and g129/l2 with their original review provenance; consolidate them as one defect, not a new discovery. g016 provenance is the full commit above; g129's independent reviewed hash was not supplied in this turn and is not inferred.\n\nSuggested bucket: other, internal documentation accuracy. Confidence: confirmed by source and changed-source analysis. proposed_drop: false. possible_cover: g129/l2, parent-provided cross-group duplicate; no coverage-source search. Could-be-highest: no established shipped security or loss-of-work route. No runtime tests or reproductions run."
+          }
+        },
+        {
+          "line": 5,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "l2",
+            "state": "open",
+            "summary": "Report-discard contract does not match gone host terminals",
+            "location": "SPEC_impl.md:4644",
+            "detail": "Reviewed commit: f96dd4363d97dc7e07dea5b8947c96be6bf912e8\n\n## TLDR\nThe implementation specification says pending conversation reports are discarded when their terminal no longer exists. Host terminals retain the launch anchor after disappearing, allowing a valid report to be admitted; a missing terminal object instead produces a retryable error. Following the inaccurate contract in a future change could discard a final conversation report and leave Restart pointing at older state. This is a documentation defect, not an established current runtime regression or observed loss of conversation.\n\n## Details\nChanged-source attribution: f96dd4363d97dc7e07dea5b8947c96be6bf912e8, SPEC_impl.md:4644–4645, the added lines in the hunk beginning @@ -4687,30 +4637,31 @@. The parent text at :4693–4694 said 'whose pane no longer exists'; this commit changes that subject to 'whose terminal no longer exists' while changing the surrounding attribution model to terminal-host roots. The unchanged host behavior does not support that generalized assertion. A path-limited diff of this commit against its parent confirms hosts/terminal.rs, service/core.rs, service/report_files.rs and procs.rs have no changes in this commit. The implementation behavior is therefore pre-existing at this documentation revision; the finding concerns the rewritten contract, not introducing or fixing those runtime paths.\n\nAt this revision, crates/farhelm-supervisor/src/hosts/terminal.rs:864–881 keeps the child pid/start anchor for Liveness::Gone as well as Running and Exited. Its comment explicitly retains it so a report written before exit may still be applied. HostTerminal::anchor at :2548–2550 exposes it. service/core.rs:15776–15802 obtains the current-generation host anchor and returns Internal if the terminal object or readable anchor is absent. service/report_files.rs:320–324 passes an available anchor to procs::anchor_chain; procs.rs:547–580 validates the report's recorded pid/start and chain integrity without requiring terminal liveness. A valid final report can therefore pass after the host is gone. With no terminal object, report_files.rs:247–265 maps Internal to Retry. The drain has no additional terminal-gone discard condition. Admission still applies every vendor proof and generation check: host disappearance does not guarantee acceptance, only that disappearance itself is not the claimed rejection rule.\n\nCorrect the wording to distinguish an ancestry mismatch from a vanished terminal, describe the retained post-exit anchor, and describe missing/unreadable current-generation host state as retryable. The earlier hypothesis about discarding a final report is a possible future maintenance consequence, not an observed shipped loss.\n\nSynthesis revision under original ID l2: parent supplied cross-group match g129/l2 for the same documentation assertion. Retain both g016/l2 and g129/l2 with their original review provenance; consolidate them as one defect, not a new discovery. g016 provenance is the full commit above; g129's independent reviewed hash was not supplied in this turn and is not inferred.\n\nSuggested bucket: other, internal documentation accuracy. Confidence: confirmed by source and changed-source analysis. proposed_drop: false. possible_cover: g129/l2, parent-provided cross-group duplicate; no coverage-source search. Could-be-highest: no established shipped security or loss-of-work route. No runtime tests or reproductions run.\n\nFurther synthesis checks: numbered source confirms the changed assertion is precisely SPEC_impl.md:4644–4645 (location corrected from the initial hunk-level :4643). report_files.rs:253–261 is the exact Internal-to-Retry branch. Cleanup callers intentionally use different evidence: hosts/terminal.rs:737–797 revalidates current process identity for lifecycle sweep roots, while :872–881 retains historical identity for report attribution. Restart probes its current terminal and derives a live sweep root at service/core.rs:12335–12360; therefore keeping a historical report anchor does not itself authorize signalling a dead or reused process. This interaction adds no separate finding and does not change c1.\n"
+          }
+        },
+        {
+          "line": 6,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "l2",
+            "state": "open",
+            "summary": "Report-discard contract does not match gone host terminals",
+            "location": "SPEC_impl.md:4644",
+            "detail": "Reviewed commit: f96dd4363d97dc7e07dea5b8947c96be6bf912e8\n\n## TLDR\nThe implementation specification says pending conversation reports are discarded when their terminal no longer exists. Host terminals retain the launch anchor after disappearing, allowing a valid report to be admitted; a missing terminal object instead produces a retryable error. Following the inaccurate contract in a future change could discard a final conversation report and leave Restart pointing at older state. This is a documentation defect, not an established current runtime regression or observed loss of conversation.\n\n## Details\nChanged-source attribution: f96dd4363d97dc7e07dea5b8947c96be6bf912e8, SPEC_impl.md:4644–4645, the added lines in the hunk beginning @@ -4687,30 +4637,31 @@. The parent text at :4693–4694 said 'whose pane no longer exists'; this commit changes that subject to 'whose terminal no longer exists' while changing the surrounding attribution model to terminal-host roots. The unchanged host behavior does not support that generalized assertion. A path-limited diff of this commit against its parent confirms hosts/terminal.rs, service/core.rs, service/report_files.rs and procs.rs have no changes in this commit. The implementation behavior is therefore pre-existing at this documentation revision; the finding concerns the rewritten contract, not introducing or fixing those runtime paths.\n\nAt this revision, crates/farhelm-supervisor/src/hosts/terminal.rs:864–881 keeps the child pid/start anchor for Liveness::Gone as well as Running and Exited. Its comment explicitly retains it so a report written before exit may still be applied. HostTerminal::anchor at :2548–2550 exposes it. service/core.rs:15776–15802 obtains the current-generation host anchor and returns Internal if the terminal object or readable anchor is absent. service/report_files.rs:320–324 passes an available anchor to procs::anchor_chain; procs.rs:547–580 validates the report's recorded pid/start and chain integrity without requiring terminal liveness. A valid final report can therefore pass after the host is gone. With no terminal object, report_files.rs:247–265 maps Internal to Retry. The drain has no additional terminal-gone discard condition. Admission still applies every vendor proof and generation check: host disappearance does not guarantee acceptance, only that disappearance itself is not the claimed rejection rule.\n\nCorrect the wording to distinguish an ancestry mismatch from a vanished terminal, describe the retained post-exit anchor, and describe missing/unreadable current-generation host state as retryable. The earlier hypothesis about discarding a final report is a possible future maintenance consequence, not an observed shipped loss.\n\nSynthesis revision under original ID l2: parent supplied cross-group match g129/l2 for the same documentation assertion. Retain both g016/l2 and g129/l2 with their original review provenance; consolidate them as one defect, not a new discovery. g016 provenance is the full commit above; g129's independent reviewed hash was not supplied in this turn and is not inferred.\n\nSuggested bucket: other, internal documentation accuracy. Confidence: confirmed by source and changed-source analysis. proposed_drop: false. possible_cover: g129/l2, parent-provided cross-group duplicate; no coverage-source search. Could-be-highest: no established shipped security or loss-of-work route. No runtime tests or reproductions run.\n\nFurther synthesis checks: numbered source confirms the changed assertion is precisely SPEC_impl.md:4644–4645 (location corrected from the initial hunk-level :4643). report_files.rs:253–261 is the exact Internal-to-Retry branch. Cleanup callers intentionally use different evidence: hosts/terminal.rs:737–797 revalidates current process identity for lifecycle sweep roots, while :872–881 retains historical identity for report attribution. Restart probes its current terminal and derives a live sweep root at service/core.rs:12335–12360; therefore keeping a historical report anchor does not itself authorize signalling a dead or reused process. This interaction adds no separate finding and does not change c1.\n\nFinal readily checkable premises settled: hosts/terminal.rs:4013–4023 changes only status.liveness on a transition to Gone, retaining child_pid and child_start for the historical report anchor. This differs from HostTerminal::gone (:1982–1984), a fresh placeholder built with no prior child fields; the finding does not assume every Gone handle has an anchor. service/capture.rs:108–112 sends every published session entry to apply_report_files without filtering out Gone terminals; report_files.rs:129–170 finds reports by session identity, not terminal liveness. report_files.rs:523–535 puts Retry files back, so the missing-runtime outcome is retention, not an indirect discard. These checks close the runtime-route and caller-filter premises using source only. No new defect discovered in synthesis; g129/l2 remains the parent-reported duplicate with its own provenance.\n"
+          }
+        }
+      ],
+      "latest": {
+        "line": 6,
+        "event": {
+          "version": 1,
+          "kind": "finding",
+          "id": "l2",
+          "state": "open",
+          "summary": "Report-discard contract does not match gone host terminals",
+          "location": "SPEC_impl.md:4644",
+          "detail": "Reviewed commit: f96dd4363d97dc7e07dea5b8947c96be6bf912e8\n\n## TLDR\nThe implementation specification says pending conversation reports are discarded when their terminal no longer exists. Host terminals retain the launch anchor after disappearing, allowing a valid report to be admitted; a missing terminal object instead produces a retryable error. Following the inaccurate contract in a future change could discard a final conversation report and leave Restart pointing at older state. This is a documentation defect, not an established current runtime regression or observed loss of conversation.\n\n## Details\nChanged-source attribution: f96dd4363d97dc7e07dea5b8947c96be6bf912e8, SPEC_impl.md:4644–4645, the added lines in the hunk beginning @@ -4687,30 +4637,31 @@. The parent text at :4693–4694 said 'whose pane no longer exists'; this commit changes that subject to 'whose terminal no longer exists' while changing the surrounding attribution model to terminal-host roots. The unchanged host behavior does not support that generalized assertion. A path-limited diff of this commit against its parent confirms hosts/terminal.rs, service/core.rs, service/report_files.rs and procs.rs have no changes in this commit. The implementation behavior is therefore pre-existing at this documentation revision; the finding concerns the rewritten contract, not introducing or fixing those runtime paths.\n\nAt this revision, crates/farhelm-supervisor/src/hosts/terminal.rs:864–881 keeps the child pid/start anchor for Liveness::Gone as well as Running and Exited. Its comment explicitly retains it so a report written before exit may still be applied. HostTerminal::anchor at :2548–2550 exposes it. service/core.rs:15776–15802 obtains the current-generation host anchor and returns Internal if the terminal object or readable anchor is absent. service/report_files.rs:320–324 passes an available anchor to procs::anchor_chain; procs.rs:547–580 validates the report's recorded pid/start and chain integrity without requiring terminal liveness. A valid final report can therefore pass after the host is gone. With no terminal object, report_files.rs:247–265 maps Internal to Retry. The drain has no additional terminal-gone discard condition. Admission still applies every vendor proof and generation check: host disappearance does not guarantee acceptance, only that disappearance itself is not the claimed rejection rule.\n\nCorrect the wording to distinguish an ancestry mismatch from a vanished terminal, describe the retained post-exit anchor, and describe missing/unreadable current-generation host state as retryable. The earlier hypothesis about discarding a final report is a possible future maintenance consequence, not an observed shipped loss.\n\nSynthesis revision under original ID l2: parent supplied cross-group match g129/l2 for the same documentation assertion. Retain both g016/l2 and g129/l2 with their original review provenance; consolidate them as one defect, not a new discovery. g016 provenance is the full commit above; g129's independent reviewed hash was not supplied in this turn and is not inferred.\n\nSuggested bucket: other, internal documentation accuracy. Confidence: confirmed by source and changed-source analysis. proposed_drop: false. possible_cover: g129/l2, parent-provided cross-group duplicate; no coverage-source search. Could-be-highest: no established shipped security or loss-of-work route. No runtime tests or reproductions run.\n\nFurther synthesis checks: numbered source confirms the changed assertion is precisely SPEC_impl.md:4644–4645 (location corrected from the initial hunk-level :4643). report_files.rs:253–261 is the exact Internal-to-Retry branch. Cleanup callers intentionally use different evidence: hosts/terminal.rs:737–797 revalidates current process identity for lifecycle sweep roots, while :872–881 retains historical identity for report attribution. Restart probes its current terminal and derives a live sweep root at service/core.rs:12335–12360; therefore keeping a historical report anchor does not itself authorize signalling a dead or reused process. This interaction adds no separate finding and does not change c1.\n\nFinal readily checkable premises settled: hosts/terminal.rs:4013–4023 changes only status.liveness on a transition to Gone, retaining child_pid and child_start for the historical report anchor. This differs from HostTerminal::gone (:1982–1984), a fresh placeholder built with no prior child fields; the finding does not assume every Gone handle has an anchor. service/capture.rs:108–112 sends every published session entry to apply_report_files without filtering out Gone terminals; report_files.rs:129–170 finds reports by session identity, not terminal liveness. report_files.rs:523–535 puts Retry files back, so the missing-runtime outcome is retention, not an indirect discard. These checks close the runtime-route and caller-filter premises using source only. No new defect discovered in synthesis; g129/l2 remains the parent-reported duplicate with its own provenance.\n"
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g016/findings.jsonl",
+        "id": "l2",
+        "line": 6,
+        "disposition": "verified",
+        "group": "spec-report-discard-on-terminal-disappearance",
+        "reason": "Parent explicitly accepted named retain-verified proposal from claims-007 after inspecting it. The changed specification makes terminal disappearance a discard condition, while source deliberately retains historical attribution and retries missing/unreadable terminal state. Retain the documentation defect, with no claim of a shipped discard or wrong-conversation regression. The g129 alias is parent-reported in this record's history, not independently checked here. Retain one source-confirmed internal-contract defect, other priority. Reconcile parent-reported g129/l2 under the same underlying key without erasing either provenance; no independent duplicate drop is proposed by this consultation. Checked source/results: [\"f96dd4363d97dc7e07dea5b8947c96be6bf912e8:SPEC_impl.md:4644-4645 says a report 'whose terminal no longer exists' fails and is discarded; parent :4693-4694 said 'whose pane no longer exists'. git log -S over the complete assigned range attributes the terminal wording to f96dd436. The runtime source files named below are unchanged by that documentation commit.\",\"Pinned crates/farhelm-supervisor/src/hosts/terminal.rs:863-881 retains child pid/start for Running, Exited and Gone, but not unreadable state. :4013-4023 changes liveness without clearing those historical fields; :2548-2550 exposes the anchor. This does not assume a fresh Gone placeholder has a prior anchor.\",\"service/core.rs:15776-15793 returns the current-generation host anchor, or Internal for no terminal/unreadable anchor. service/report_files.rs:310-324 applies recorded ancestry to it; procs.rs:547-582 checks recorded pid/start and chain integrity without requiring current liveness. Vendor proof and generation admission remain required.\",\"service/capture.rs:108-112 passes all published entries to the drain; report_files.rs:129-166 finds reports by session identity without filtering Gone. :253-261 maps Internal to Retry; :528-533 puts it back, so retention is not indirect discard.\",\"Historical report attribution does not confer kill authority: hosts/terminal.rs:737-799 rechecks live process identity for lifecycle roots; service/core.rs:12337-12356 probes and obtains the current live sweep root for Restart. No runtime test or report-admission reproduction ran.\"] Current coverage/results: [\"Current SPEC_impl.md:4619-4664 retains the contradiction; :2148-2149 correctly describes waiting for publication but does not repair gone-host wording. SPEC.md:3520-3559,3585-3608 governs explicit reported identity and ancestry/pins; it does not accept inaccurate implementation documentation.\",\"TODO.md Planned and plans/queue/INDEX.md are empty. tmux-drop-from-docs is already landed (plans/REPORTS.md:32), not future repair coverage. BUGS.md is unrelated.\",\"Searched INDEX.md, matching queue files and active TRIAGE_OUTCOMES.md for report discard, gone terminal, retained anchor and final-report scope. claude-plan-abort-removes-established-report-pin.md concerns pin reset on failed Restart and a missing nested producer, not this false universal statement. No exact cover or useful extension found. FILTER.md's runtime diagnostics/status filters do not cover this persistent specification contradiction.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Earlier finding text said following the new contract could discard a final conversation report and leave Restart pointing at older state. Every revision qualifies this as a possible future maintenance mistake, not observed or established shipped loss. Preserve both counterexamples: Gone with retained anchor may pass; absent/unreadable current-generation terminal retries.\"; \"No missing premise for the documentation mismatch. A future maintainer discarding a final report and causing stale Restart selection is hypothetical; no shipped loss of conversation or wrong Resume was established.\"."
+      },
+      "accepted_parent_decision": {
+        "key": "g016/l2",
+        "line": 6,
+        "disposition": "verified",
+        "group": "spec-report-discard-on-terminal-disappearance",
+        "bucket": "other",
+        "recording": "retain-verified",
+        "queue_target_candidate": null,
+        "needs_independent_drop_check": false,
+        "reason": "Parent explicitly accepted named retain-verified proposal from claims-007 after inspecting it. The changed specification makes terminal disappearance a discard condition, while source deliberately retains historical attribution and retries missing/unreadable terminal state. Retain the documentation defect, with no claim of a shipped discard or wrong-conversation regression. The g129 alias is parent-reported in this record's history, not independently checked here. Retain one source-confirmed internal-contract defect, other priority. Reconcile parent-reported g129/l2 under the same underlying key without erasing either provenance; no independent duplicate drop is proposed by this consultation. Checked source/results: [\"f96dd4363d97dc7e07dea5b8947c96be6bf912e8:SPEC_impl.md:4644-4645 says a report 'whose terminal no longer exists' fails and is discarded; parent :4693-4694 said 'whose pane no longer exists'. git log -S over the complete assigned range attributes the terminal wording to f96dd436. The runtime source files named below are unchanged by that documentation commit.\",\"Pinned crates/farhelm-supervisor/src/hosts/terminal.rs:863-881 retains child pid/start for Running, Exited and Gone, but not unreadable state. :4013-4023 changes liveness without clearing those historical fields; :2548-2550 exposes the anchor. This does not assume a fresh Gone placeholder has a prior anchor.\",\"service/core.rs:15776-15793 returns the current-generation host anchor, or Internal for no terminal/unreadable anchor. service/report_files.rs:310-324 applies recorded ancestry to it; procs.rs:547-582 checks recorded pid/start and chain integrity without requiring current liveness. Vendor proof and generation admission remain required.\",\"service/capture.rs:108-112 passes all published entries to the drain; report_files.rs:129-166 finds reports by session identity without filtering Gone. :253-261 maps Internal to Retry; :528-533 puts it back, so retention is not indirect discard.\",\"Historical report attribution does not confer kill authority: hosts/terminal.rs:737-799 rechecks live process identity for lifecycle roots; service/core.rs:12337-12356 probes and obtains the current live sweep root for Restart. No runtime test or report-admission reproduction ran.\"] Current coverage/results: [\"Current SPEC_impl.md:4619-4664 retains the contradiction; :2148-2149 correctly describes waiting for publication but does not repair gone-host wording. SPEC.md:3520-3559,3585-3608 governs explicit reported identity and ancestry/pins; it does not accept inaccurate implementation documentation.\",\"TODO.md Planned and plans/queue/INDEX.md are empty. tmux-drop-from-docs is already landed (plans/REPORTS.md:32), not future repair coverage. BUGS.md is unrelated.\",\"Searched INDEX.md, matching queue files and active TRIAGE_OUTCOMES.md for report discard, gone terminal, retained anchor and final-report scope. claude-plan-abort-removes-established-report-pin.md concerns pin reset on failed Restart and a missing nested producer, not this false universal statement. No exact cover or useful extension found. FILTER.md's runtime diagnostics/status filters do not cover this persistent specification contradiction.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Earlier finding text said following the new contract could discard a final conversation report and leave Restart pointing at older state. Every revision qualifies this as a possible future maintenance mistake, not observed or established shipped loss. Preserve both counterexamples: Gone with retained anchor may pass; absent/unreadable current-generation terminal retries.\"; \"No missing premise for the documentation mismatch. A future maintainer discarding a final report and causing stale Restart selection is hypothetical; no shipped loss of conversation or wrong Resume was established.\"."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-007",
+          "key": "g016/l2",
+          "latest_line": 6,
+          "recommendation": "retain-verified",
+          "bucket": "other",
+          "underlying_key": "spec-report-discard-on-terminal-disappearance",
+          "aliases": [
+            "g129/l2"
+          ],
+          "target_queue_file": null,
+          "why": "The changed specification makes terminal disappearance a discard condition, while source deliberately retains historical attribution and retries missing/unreadable terminal state. Retain the documentation defect, with no claim of a shipped discard or wrong-conversation regression. The g129 alias is parent-reported in this record's history, not independently checked here.",
+          "checks": [
+            "f96dd4363d97dc7e07dea5b8947c96be6bf912e8:SPEC_impl.md:4644-4645 says a report 'whose terminal no longer exists' fails and is discarded; parent :4693-4694 said 'whose pane no longer exists'. git log -S over the complete assigned range attributes the terminal wording to f96dd436. The runtime source files named below are unchanged by that documentation commit.",
+            "Pinned crates/farhelm-supervisor/src/hosts/terminal.rs:863-881 retains child pid/start for Running, Exited and Gone, but not unreadable state. :4013-4023 changes liveness without clearing those historical fields; :2548-2550 exposes the anchor. This does not assume a fresh Gone placeholder has a prior anchor.",
+            "service/core.rs:15776-15793 returns the current-generation host anchor, or Internal for no terminal/unreadable anchor. service/report_files.rs:310-324 applies recorded ancestry to it; procs.rs:547-582 checks recorded pid/start and chain integrity without requiring current liveness. Vendor proof and generation admission remain required.",
+            "service/capture.rs:108-112 passes all published entries to the drain; report_files.rs:129-166 finds reports by session identity without filtering Gone. :253-261 maps Internal to Retry; :528-533 puts it back, so retention is not indirect discard.",
+            "Historical report attribution does not confer kill authority: hosts/terminal.rs:737-799 rechecks live process identity for lifecycle roots; service/core.rs:12337-12356 probes and obtains the current live sweep root for Restart. No runtime test or report-admission reproduction ran."
+          ],
+          "coverage_checked": [
+            "Current SPEC_impl.md:4619-4664 retains the contradiction; :2148-2149 correctly describes waiting for publication but does not repair gone-host wording. SPEC.md:3520-3559,3585-3608 governs explicit reported identity and ancestry/pins; it does not accept inaccurate implementation documentation.",
+            "TODO.md Planned and plans/queue/INDEX.md are empty. tmux-drop-from-docs is already landed (plans/REPORTS.md:32), not future repair coverage. BUGS.md is unrelated.",
+            "Searched INDEX.md, matching queue files and active TRIAGE_OUTCOMES.md for report discard, gone terminal, retained anchor and final-report scope. claude-plan-abort-removes-established-report-pin.md concerns pin reset on failed Restart and a missing nested producer, not this false universal statement. No exact cover or useful extension found. FILTER.md's runtime diagnostics/status filters do not cover this persistent specification contradiction."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": "No missing premise for the documentation mismatch. A future maintainer discarding a final report and causing stale Restart selection is hypothetical; no shipped loss of conversation or wrong Resume was established.",
+          "original_stronger_consequence": "Earlier finding text said following the new contract could discard a final conversation report and leave Restart pointing at older state. Every revision qualifies this as a possible future maintenance mistake, not observed or established shipped loss. Preserve both counterexamples: Gone with retained anchor may pass; absent/unreadable current-generation terminal retries.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Retain one source-confirmed internal-contract defect, other priority. Reconcile parent-reported g129/l2 under the same underlying key without erasing either provenance; no independent duplicate drop is proposed by this consultation."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": true,
+        "clearly_refuted_candidate": false,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Source-confirmed by an existing parent decision; not runtime reproduced",
+        "deduplication_key": "spec-report-discard-on-terminal-disappearance",
+        "destination": "trailing-spec-report-discard-on-terminal-disappearance.md"
+      }
+    },
+    {
+      "key": "g016/l3",
+      "owner": "g016",
+      "id": "l3",
+      "domain": "product-contracts",
+      "purpose": "product-contracts: SPEC_impl.md; phases @@ -4687,30 +4637,31 @@ channel records these notices.",
+      "history": [
+        {
+          "line": 7,
+          "event": {
+            "version": 1,
+            "kind": "lead",
+            "id": "l3",
+            "state": "open",
+            "summary": "Automatic-cleanup wording may omit failed-host-end retries",
+            "location": "SPEC_impl.md:4826",
+            "detail": "Reviewed commit: f96dd4363d97dc7e07dea5b8947c96be6bf912e8\n\n## TLDR\nThe assigned rewrite says automatic tab cleanup proceeds only when the runtime says the shell exited. The previously inspected HostTab::reap_due also permits retrying a failed host end independently of finished(), potentially contradicting that absolute wording.\n\n## Details\nSource basis: SPEC_impl.md assigned hunk @@ -4872,13 +4823,13 @@ introduces an only-while-shell-exited condition. service/core/host_tabs.rs HostTab::reap_due has an end_failed retry-time branch, and close_host_tab checks reap_due for only_if_dead rather than directly checking finished. Need to check the scheduler/caller, failed-close state transition and precise changed lines to determine whether this is a real documentation omission or whether another caller condition requires a new exit observation. Suggested bucket: other if established documentation mismatch. Confidence: unresolved concrete source lead. proposed_drop: false. possible_cover: none among supplied interface findings; no coverage search. Could-be-highest: no current security/loss-of-work route identified; retries might already be authorized by the earlier explicit close. No runtime execution."
+          }
+        },
+        {
+          "line": 8,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "l3",
+            "state": "open",
+            "summary": "Automatic-tab cleanup contract omits failed-close retries",
+            "location": "SPEC_impl.md:4826",
+            "detail": "Reviewed commit: f96dd4363d97dc7e07dea5b8947c96be6bf912e8\n\n## TLDR\nThe rewritten implementation contract says automatic tab cleanup proceeds only when the runtime reports that the shell exited. It also retries previously authorized closes whose host could not be confirmed ended, even when the aborted runtime still reports running or unavailable. Following the new absolute condition would suppress that recovery and could leave failed tab closes unfinished. This is a documentation contradiction; no current runtime cleanup failure is claimed.\n\n## Details\nAssigned changed text at SPEC_impl.md:4826–4827 says 'Automatic tab cleanup goes ahead only while the tab’s runtime says its shell exited, checked under its lifecycle claim before signalling'. The parent hunk instead described rechecking a tmux window; this commit introduces the absolute host-runtime-exit statement. git log -S over the full exclusive 6e423e30068b62c6cfa276c6d720ee35bb70387a through inclusive 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db range attributes that new phrase to this commit. The runtime files are unchanged by this documentation commit. Its only later in-range SPEC_impl.md diff changes unrelated setup wording, not this assertion.\n\nAt the reviewed revision, service/core/host_tabs.rs:146–156 explains that a failed host end aborts the runtime, leaving its old status possibly running forever, so automatic reaping must retry it. :193–199 explicitly checks end_failed/retry_at before finished(); :312–332 marks and schedules those retries. service/ticker.rs:1651–1662 consumes that due list and calls try_close_tab. service/core.rs:13923–13935 takes the lifecycle claim and passes only_if_dead=true through close_tab_claimed; :13989–14012 resolves the same tab and invokes its host close. No caller adds a fresh shell-exit requirement. Back in host_tabs.rs:929–932, end_failed bypasses the unavailable-runtime refusal, and :963–969 checks reap_due again under the claim. The failure path at :1025–1028 marks the tab for precisely this later retry. These checks establish an automatic cleanup path without the specified runtime-exit observation. Independently, finished at :181–185 also admits a gone host, which need not have delivered a shell-exit record.\n\nThe complete Tabs in hosts contract at SPEC_impl.md:2262–2264 correctly describes the exception: 'A close that cannot confirm the end keeps the tab and its record and marks it, and since its stopped runtime announces nothing, the reap closes it again until one does'. That accurate rule and the working runtime do not reconcile the later absolute only-while-exited condition. Qualify :4826 to cover ordinary first-time dead-tab reap plus continuation of a previously authorized failed close. The retry is finishing that earlier close; this finding does not allege it obtains new authority to stop unrelated live work.\n\nRevision closes l3 from lead to finding after checking the scheduler, both destructive-boundary checks, failure marking, full governing host-tab subsection and in-range attribution. Suggested bucket: other, documentation correctness. Confidence: confirmed by source/contract, not execution. proposed_drop: false. possible_cover: none among supplied interface records; no coverage-source search. Could-be-highest: no established shipped security or loss-of-work route; the maintenance consequence is hypothetical and not severity evidence. No runtime tests or reproductions run."
+          }
+        }
+      ],
+      "latest": {
+        "line": 8,
+        "event": {
+          "version": 1,
+          "kind": "finding",
+          "id": "l3",
+          "state": "open",
+          "summary": "Automatic-tab cleanup contract omits failed-close retries",
+          "location": "SPEC_impl.md:4826",
+          "detail": "Reviewed commit: f96dd4363d97dc7e07dea5b8947c96be6bf912e8\n\n## TLDR\nThe rewritten implementation contract says automatic tab cleanup proceeds only when the runtime reports that the shell exited. It also retries previously authorized closes whose host could not be confirmed ended, even when the aborted runtime still reports running or unavailable. Following the new absolute condition would suppress that recovery and could leave failed tab closes unfinished. This is a documentation contradiction; no current runtime cleanup failure is claimed.\n\n## Details\nAssigned changed text at SPEC_impl.md:4826–4827 says 'Automatic tab cleanup goes ahead only while the tab’s runtime says its shell exited, checked under its lifecycle claim before signalling'. The parent hunk instead described rechecking a tmux window; this commit introduces the absolute host-runtime-exit statement. git log -S over the full exclusive 6e423e30068b62c6cfa276c6d720ee35bb70387a through inclusive 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db range attributes that new phrase to this commit. The runtime files are unchanged by this documentation commit. Its only later in-range SPEC_impl.md diff changes unrelated setup wording, not this assertion.\n\nAt the reviewed revision, service/core/host_tabs.rs:146–156 explains that a failed host end aborts the runtime, leaving its old status possibly running forever, so automatic reaping must retry it. :193–199 explicitly checks end_failed/retry_at before finished(); :312–332 marks and schedules those retries. service/ticker.rs:1651–1662 consumes that due list and calls try_close_tab. service/core.rs:13923–13935 takes the lifecycle claim and passes only_if_dead=true through close_tab_claimed; :13989–14012 resolves the same tab and invokes its host close. No caller adds a fresh shell-exit requirement. Back in host_tabs.rs:929–932, end_failed bypasses the unavailable-runtime refusal, and :963–969 checks reap_due again under the claim. The failure path at :1025–1028 marks the tab for precisely this later retry. These checks establish an automatic cleanup path without the specified runtime-exit observation. Independently, finished at :181–185 also admits a gone host, which need not have delivered a shell-exit record.\n\nThe complete Tabs in hosts contract at SPEC_impl.md:2262–2264 correctly describes the exception: 'A close that cannot confirm the end keeps the tab and its record and marks it, and since its stopped runtime announces nothing, the reap closes it again until one does'. That accurate rule and the working runtime do not reconcile the later absolute only-while-exited condition. Qualify :4826 to cover ordinary first-time dead-tab reap plus continuation of a previously authorized failed close. The retry is finishing that earlier close; this finding does not allege it obtains new authority to stop unrelated live work.\n\nRevision closes l3 from lead to finding after checking the scheduler, both destructive-boundary checks, failure marking, full governing host-tab subsection and in-range attribution. Suggested bucket: other, documentation correctness. Confidence: confirmed by source/contract, not execution. proposed_drop: false. possible_cover: none among supplied interface records; no coverage-source search. Could-be-highest: no established shipped security or loss-of-work route; the maintenance consequence is hypothetical and not severity evidence. No runtime tests or reproductions run."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g016/findings.jsonl",
+        "id": "l3",
+        "line": 8,
+        "disposition": "verified",
+        "group": "spec-automatic-tab-reap-omits-failed-close-retry",
+        "reason": "Parent explicitly accepted named retain-verified proposal from claims-007 after inspecting it. The absolute shell-exit condition omits the intentional retry of a previously authorized close whose host could not be confirmed ended. Source and another specification paragraph explicitly require that recovery. This is a documentation contradiction, not evidence of current unauthorized signalling or failed cleanup. Retain as a distinct documentation defect, other priority; clarify the first ordinary reap versus continuation of an already authorized failed close. Checked source/results: [\"f96dd4363d97dc7e07dea5b8947c96be6bf912e8:SPEC_impl.md:4826-4827 introduces the absolute runtime-shell-exited condition. git log -S over the full assigned range names f96dd436 as its introduction; the runtime files are unchanged by this documentation commit.\",\"Pinned crates/farhelm-supervisor/src/service/core/host_tabs.rs:146-164 explains the stopped-runtime stale-status problem. :193-199 admits end_failed/retry_at independently of finished(); :312-332 marks and selects those retries. :181-185 also considers absent hosts finished without needing a shell-exit record.\",\"service/ticker.rs:1651-1662 submits the due list. service/core.rs:13923-13935 claims the session and passes only_if_dead=true; :13989-14012 resolves the tab and calls host close without adding a shell-exit gate. host_tabs.rs:929-932 permits the failed-close continuation even with an unavailable runtime; :963-969 rechecks reap_due under the claim, and :1025-1028 marks a failed host end for that continuation.\",\"Pinned SPEC_impl.md:2234-2269 is the complete Tabs in hosts contract; :2262-2264 explicitly describes retrying that failed close. A retry finishes earlier authorized work, rather than gaining authority over unrelated live work. No runtime reproduction ran.\"] Current coverage/results: [\"Current SPEC_impl.md:2262-2264 and :4826-4829 retain the competing rules. The accurate retry paragraph establishes the contradiction; it does not explicitly accept the later false absolute condition. SPEC.md:2106-2115 and :2150-2169 describes visible failure/retry and ordinary automatic tab removal, not an exception authorizing inaccurate documentation.\",\"TODO.md Planned and plans/queue/INDEX.md are empty; tmux cleanup plans have landed. BUGS.md's SSH-helper issue is unrelated.\",\"Searched INDEX.md, queue files and active TRIAGE_OUTCOMES.md for automatic cleanup, failed closes, tab retry and reap. tab-reap-deadline-excludes-listing-request.md and tab-retry-test-measures-observation-time.md concern test observation boundaries, not this contract. restart-unwind-omits-tree-sweep-failure.md concerns agent Restart failure disposition, not failed tab-close retries. No exact cover or useful extension found; no FILTER.md boundary covers the persistent contradiction.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Following the absolute condition in a future change could suppress recovery and leave failed closes unfinished. The original lead and final finding both keep that maintenance risk separate from current runtime behavior and recognize the earlier close's authority.\"; \"No missing source premise for the documentation mismatch. A future implementation suppressing recovery is hypothetical; no current unfinished close or user-work loss was demonstrated.\"."
+      },
+      "accepted_parent_decision": {
+        "key": "g016/l3",
+        "line": 8,
+        "disposition": "verified",
+        "group": "spec-automatic-tab-reap-omits-failed-close-retry",
+        "bucket": "other",
+        "recording": "retain-verified",
+        "queue_target_candidate": null,
+        "needs_independent_drop_check": false,
+        "reason": "Parent explicitly accepted named retain-verified proposal from claims-007 after inspecting it. The absolute shell-exit condition omits the intentional retry of a previously authorized close whose host could not be confirmed ended. Source and another specification paragraph explicitly require that recovery. This is a documentation contradiction, not evidence of current unauthorized signalling or failed cleanup. Retain as a distinct documentation defect, other priority; clarify the first ordinary reap versus continuation of an already authorized failed close. Checked source/results: [\"f96dd4363d97dc7e07dea5b8947c96be6bf912e8:SPEC_impl.md:4826-4827 introduces the absolute runtime-shell-exited condition. git log -S over the full assigned range names f96dd436 as its introduction; the runtime files are unchanged by this documentation commit.\",\"Pinned crates/farhelm-supervisor/src/service/core/host_tabs.rs:146-164 explains the stopped-runtime stale-status problem. :193-199 admits end_failed/retry_at independently of finished(); :312-332 marks and selects those retries. :181-185 also considers absent hosts finished without needing a shell-exit record.\",\"service/ticker.rs:1651-1662 submits the due list. service/core.rs:13923-13935 claims the session and passes only_if_dead=true; :13989-14012 resolves the tab and calls host close without adding a shell-exit gate. host_tabs.rs:929-932 permits the failed-close continuation even with an unavailable runtime; :963-969 rechecks reap_due under the claim, and :1025-1028 marks a failed host end for that continuation.\",\"Pinned SPEC_impl.md:2234-2269 is the complete Tabs in hosts contract; :2262-2264 explicitly describes retrying that failed close. A retry finishes earlier authorized work, rather than gaining authority over unrelated live work. No runtime reproduction ran.\"] Current coverage/results: [\"Current SPEC_impl.md:2262-2264 and :4826-4829 retain the competing rules. The accurate retry paragraph establishes the contradiction; it does not explicitly accept the later false absolute condition. SPEC.md:2106-2115 and :2150-2169 describes visible failure/retry and ordinary automatic tab removal, not an exception authorizing inaccurate documentation.\",\"TODO.md Planned and plans/queue/INDEX.md are empty; tmux cleanup plans have landed. BUGS.md's SSH-helper issue is unrelated.\",\"Searched INDEX.md, queue files and active TRIAGE_OUTCOMES.md for automatic cleanup, failed closes, tab retry and reap. tab-reap-deadline-excludes-listing-request.md and tab-retry-test-measures-observation-time.md concern test observation boundaries, not this contract. restart-unwind-omits-tree-sweep-failure.md concerns agent Restart failure disposition, not failed tab-close retries. No exact cover or useful extension found; no FILTER.md boundary covers the persistent contradiction.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Following the absolute condition in a future change could suppress recovery and leave failed closes unfinished. The original lead and final finding both keep that maintenance risk separate from current runtime behavior and recognize the earlier close's authority.\"; \"No missing source premise for the documentation mismatch. A future implementation suppressing recovery is hypothetical; no current unfinished close or user-work loss was demonstrated.\"."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-007",
+          "key": "g016/l3",
+          "latest_line": 8,
+          "recommendation": "retain-verified",
+          "bucket": "other",
+          "underlying_key": "spec-automatic-tab-reap-omits-failed-close-retry",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The absolute shell-exit condition omits the intentional retry of a previously authorized close whose host could not be confirmed ended. Source and another specification paragraph explicitly require that recovery. This is a documentation contradiction, not evidence of current unauthorized signalling or failed cleanup.",
+          "checks": [
+            "f96dd4363d97dc7e07dea5b8947c96be6bf912e8:SPEC_impl.md:4826-4827 introduces the absolute runtime-shell-exited condition. git log -S over the full assigned range names f96dd436 as its introduction; the runtime files are unchanged by this documentation commit.",
+            "Pinned crates/farhelm-supervisor/src/service/core/host_tabs.rs:146-164 explains the stopped-runtime stale-status problem. :193-199 admits end_failed/retry_at independently of finished(); :312-332 marks and selects those retries. :181-185 also considers absent hosts finished without needing a shell-exit record.",
+            "service/ticker.rs:1651-1662 submits the due list. service/core.rs:13923-13935 claims the session and passes only_if_dead=true; :13989-14012 resolves the tab and calls host close without adding a shell-exit gate. host_tabs.rs:929-932 permits the failed-close continuation even with an unavailable runtime; :963-969 rechecks reap_due under the claim, and :1025-1028 marks a failed host end for that continuation.",
+            "Pinned SPEC_impl.md:2234-2269 is the complete Tabs in hosts contract; :2262-2264 explicitly describes retrying that failed close. A retry finishes earlier authorized work, rather than gaining authority over unrelated live work. No runtime reproduction ran."
+          ],
+          "coverage_checked": [
+            "Current SPEC_impl.md:2262-2264 and :4826-4829 retain the competing rules. The accurate retry paragraph establishes the contradiction; it does not explicitly accept the later false absolute condition. SPEC.md:2106-2115 and :2150-2169 describes visible failure/retry and ordinary automatic tab removal, not an exception authorizing inaccurate documentation.",
+            "TODO.md Planned and plans/queue/INDEX.md are empty; tmux cleanup plans have landed. BUGS.md's SSH-helper issue is unrelated.",
+            "Searched INDEX.md, queue files and active TRIAGE_OUTCOMES.md for automatic cleanup, failed closes, tab retry and reap. tab-reap-deadline-excludes-listing-request.md and tab-retry-test-measures-observation-time.md concern test observation boundaries, not this contract. restart-unwind-omits-tree-sweep-failure.md concerns agent Restart failure disposition, not failed tab-close retries. No exact cover or useful extension found; no FILTER.md boundary covers the persistent contradiction."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": "No missing source premise for the documentation mismatch. A future implementation suppressing recovery is hypothetical; no current unfinished close or user-work loss was demonstrated.",
+          "original_stronger_consequence": "Following the absolute condition in a future change could suppress recovery and leave failed closes unfinished. The original lead and final finding both keep that maintenance risk separate from current runtime behavior and recognize the earlier close's authority.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Retain as a distinct documentation defect, other priority; clarify the first ordinary reap versus continuation of an already authorized failed close."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": true,
+        "clearly_refuted_candidate": false,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Source-confirmed by an existing parent decision; not runtime reproduced",
+        "deduplication_key": "spec-automatic-tab-reap-omits-failed-close-retry",
+        "destination": "trailing-spec-automatic-tab-reap-omits-failed-close-retry.md"
+      }
+    },
+    {
+      "key": "g016/l4",
+      "owner": "g016",
+      "id": "l4",
+      "domain": "product-contracts",
+      "purpose": "product-contracts: SPEC_impl.md; phases @@ -4687,30 +4637,31 @@ channel records these notices.",
+      "history": [
+        {
+          "line": 9,
+          "event": {
+            "version": 1,
+            "kind": "lead",
+            "id": "l4",
+            "state": "open",
+            "summary": "Delete may not retain scoped-tab manager failure policy",
+            "location": "SPEC_impl.md:4846",
+            "detail": "Reviewed commit: f96dd4363d97dc7e07dea5b8947c96be6bf912e8\n\n## TLDR\nThe assigned scope-policy rewrite says Delete refuses while a recorded tab scope cannot be checked. ScopeUnits::extend_tab keeps tab units derived even when scoped=true, so a session with an unscoped agent but a scoped tab may not earn the manager re-probe/refusal described by the specification. Investigate the full Delete caller and manager cooldown path before deciding whether this is a distinct reportable mismatch.\n\n## Details\nSource basis: SPEC_impl.md scope-probe paragraph at :4846 onward explicitly includes Delete and a tab host tag recording a scope. service/sweep.rs:1312–1315 uses scoped only for needs_sweep and extends derived names; :1465 gives earns_reprobe only to recorded/possible names. Previously inspected teardown.rs uses extend_tab and re-probes directly only for entry.scope.is_some. Need to check manager timeouts versus negative results, other preflights, exact contract and full-range introduction. Suspected established consequence is falsely confirmed cleanup of a tab scope under a stale/unusable manager; surviving process/security consequences are not yet established. Suggested bucket: other provisionally, subject to actual source route. Confidence: unresolved source lead. proposed_drop: false. possible_cover: none in supplied interface snapshot. Could-be-highest: no established route; unknown surviving processes with user-work/security consequences remain a premise to investigate rather than an asserted impact. Source only; no execution."
+          }
+        },
+        {
+          "line": 10,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "l4",
+            "state": "open",
+            "summary": "Scoped-tab Delete policy gap predates the whole review range",
+            "location": "SPEC_impl.md:4848",
+            "detail": "Reviewed commit: f96dd4363d97dc7e07dea5b8947c96be6bf912e8; full-range attribution checked at exclusive base 6e423e30068b62c6cfa276c6d720ee35bb70387a and inclusive tip 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db.\n\n## TLDR\nConsidered whether Delete could report cleanup finished without checking a tab’s recorded scope when the agent itself was unscoped and the supervisor’s manager probe is negative or still in its timeout cooldown. Source confirms the differing Delete policy, but both that implementation and the general fail-closed scope promise already exist at the exclusive range base. Do not report it as a new defect of this assigned terminology rewrite. This is an attribution-only proposed exclusion, not a claim that the existing behavior satisfies the contract.\n\n## Details\nAt reviewed revision, SPEC_impl.md:4848–4855 says Stop/Restart/Delete/tab-close with recorded scope refuse during the one-minute probe cooldown and earn a re-probe after a definite negative. service/teardown.rs:402–450 instead collects tab units through ScopeUnits::extend_tab and re-probes directly only if entry.scope is present. service/session_hosts.rs:554–576 adds known scoped tab tags through the same extend_tab method. sweep.rs:1312–1315 keeps these names derived regardless of scoped=true, which affects only portable-sweep selection. :1465–1503 earns re-probe only from recorded/possible sets and skips derived names with no scope error when the manager is unusable. scope.rs:744–827 makes a timeout return unavailable for the cooldown and a definite negative stay unavailable without allow_reprobe; :1036–1055 makes units_matching fail when unavailable, which teardown explicitly ignores in that case. Thus an unscoped agent plus a scoped tab is not protected by the same manager-failure policy as a directly closed scoped tab. Source supports the narrow policy gap; an actual surviving scrubbed process was not executed or established as a concrete occurrence. Original suspected consequence remains deletion with an unchecked tab scope and possibly surviving processes, not proven work loss or security exposure.\n\nWhole-range check: base SPEC_impl.md:5334–5343 already includes Delete in the same recorded-scope refusal/re-probe promises. Base teardown.rs:498–510 already routes host tags through add_tab_scopes and re-probes only for entry.scope. Base session_hosts.rs:553–585 already converts a true host tag into TabScope::Scoped then calls extend_tab; base sweep.rs:1316–1327 already stores that selection as derived, and :1477–1510 already skips derived names without scope errors for an unusable manager. The in-range 1ed482d change simplifies the selection enum to a bool while retaining this same policy; f96dd436 changes tmux-era examples to host tags without changing the general fail-closed claim. This is unlike a newly added false guarantee: the same general rule and its counterexample were both present before the entire reviewed range.\n\nRevision closes l4 after checking caller preflights, manager caching/cooldown, tag-to-scope conversion and base-to-tip history. Suggested bucket: other for established cleanup/contract policy difference; no current security or work-loss route established. Confidence: confirmed source and attribution; no execution. proposed_drop: out-of-range attribution only, with exact base references above; no acceptance of the policy mismatch or parent-accepted drop is implied. possible_cover: none among supplied interface findings. Could-be-highest: no established highest route; surviving-process consequences would need a concrete supported producer and additional established harmful effect. No runtime tests, reproductions, live-install actions or coverage-source searches."
+          }
+        }
+      ],
+      "latest": {
+        "line": 10,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "l4",
+          "state": "open",
+          "summary": "Scoped-tab Delete policy gap predates the whole review range",
+          "location": "SPEC_impl.md:4848",
+          "detail": "Reviewed commit: f96dd4363d97dc7e07dea5b8947c96be6bf912e8; full-range attribution checked at exclusive base 6e423e30068b62c6cfa276c6d720ee35bb70387a and inclusive tip 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db.\n\n## TLDR\nConsidered whether Delete could report cleanup finished without checking a tab’s recorded scope when the agent itself was unscoped and the supervisor’s manager probe is negative or still in its timeout cooldown. Source confirms the differing Delete policy, but both that implementation and the general fail-closed scope promise already exist at the exclusive range base. Do not report it as a new defect of this assigned terminology rewrite. This is an attribution-only proposed exclusion, not a claim that the existing behavior satisfies the contract.\n\n## Details\nAt reviewed revision, SPEC_impl.md:4848–4855 says Stop/Restart/Delete/tab-close with recorded scope refuse during the one-minute probe cooldown and earn a re-probe after a definite negative. service/teardown.rs:402–450 instead collects tab units through ScopeUnits::extend_tab and re-probes directly only if entry.scope is present. service/session_hosts.rs:554–576 adds known scoped tab tags through the same extend_tab method. sweep.rs:1312–1315 keeps these names derived regardless of scoped=true, which affects only portable-sweep selection. :1465–1503 earns re-probe only from recorded/possible sets and skips derived names with no scope error when the manager is unusable. scope.rs:744–827 makes a timeout return unavailable for the cooldown and a definite negative stay unavailable without allow_reprobe; :1036–1055 makes units_matching fail when unavailable, which teardown explicitly ignores in that case. Thus an unscoped agent plus a scoped tab is not protected by the same manager-failure policy as a directly closed scoped tab. Source supports the narrow policy gap; an actual surviving scrubbed process was not executed or established as a concrete occurrence. Original suspected consequence remains deletion with an unchecked tab scope and possibly surviving processes, not proven work loss or security exposure.\n\nWhole-range check: base SPEC_impl.md:5334–5343 already includes Delete in the same recorded-scope refusal/re-probe promises. Base teardown.rs:498–510 already routes host tags through add_tab_scopes and re-probes only for entry.scope. Base session_hosts.rs:553–585 already converts a true host tag into TabScope::Scoped then calls extend_tab; base sweep.rs:1316–1327 already stores that selection as derived, and :1477–1510 already skips derived names without scope errors for an unusable manager. The in-range 1ed482d change simplifies the selection enum to a bool while retaining this same policy; f96dd436 changes tmux-era examples to host tags without changing the general fail-closed claim. This is unlike a newly added false guarantee: the same general rule and its counterexample were both present before the entire reviewed range.\n\nRevision closes l4 after checking caller preflights, manager caching/cooldown, tag-to-scope conversion and base-to-tip history. Suggested bucket: other for established cleanup/contract policy difference; no current security or work-loss route established. Confidence: confirmed source and attribution; no execution. proposed_drop: out-of-range attribution only, with exact base references above; no acceptance of the policy mismatch or parent-accepted drop is implied. possible_cover: none among supplied interface findings. Could-be-highest: no established highest route; surviving-process consequences would need a concrete supported producer and additional established harmful effect. No runtime tests, reproductions, live-install actions or coverage-source searches."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g016/findings.jsonl",
+        "id": "l4",
+        "line": 10,
+        "disposition": "under-investigation",
+        "group": "g016-l4",
+        "reason": "Record durably acknowledged; parent source/contract validation, cross-group synthesis, coverage/filter matching and any independent drop check remain pending. This preserves the claim and uncertainty without accepting, dropping or lowering it."
+      },
+      "accepted_parent_decision": null,
+      "returned_claim_checks": [
+        {
+          "batch": "claims-007",
+          "key": "g016/l4",
+          "latest_line": 10,
+          "recommendation": "out-of-range",
+          "bucket": "other",
+          "underlying_key": "delete-recorded-tab-scope-kept-derived-under-unusable-manager",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "Source supports the narrow manager-policy discrepancy, but the same host-tag-to-derived-name path and general fail-closed promise already exist at the exclusive range base. The proposed exclusion is attribution only; it does not accept the cleanup policy or erase its conditional consequences.",
+          "checks": [
+            "At f96dd4363d97dc7e07dea5b8947c96be6bf912e8, SPEC_impl.md:4848-4855 promises refusal/reprobe for recorded tab scopes. service/teardown.rs:402-450 directly re-probes only for entry.scope; session_hosts.rs:554-576 adds true tab tags through extend_tab; sweep.rs:1312-1314 stores them as derived. :1465-1502 gives reprobe/error policy to recorded/possible names and skips derived names when unavailable.",
+            "Pinned scope.rs:744-831 returns unavailable during the timed-out-probe cooldown and keeps definite negatives without allow_reprobe; :1036-1055 makes manager enumeration unavailable too. teardown.rs:443-447 ignores enumeration failure in that unavailable state. These checks establish unchecked recorded tab scope policy for an unscoped agent, not an observed escaped daemon.",
+            "At exclusive base 6e423e30068b62c6cfa276c6d720ee35bb70387a, session_hosts.rs:556-585 already converts true host tags to TabScope::Scoped and passes extend_tab; sweep.rs:1319-1326 already places that selection in derived; :1477-1513 already omits derived names without scope errors for unavailable manager. teardown.rs:478-530 already uses those paths and directly re-probes only for entry.scope.",
+            "Base SPEC.md:2059-2067 already requires checking every scope a launch/tab had, expressly forbidding a no-manager belief from excusing a skip. Base SPEC_impl.md:5332-5343,5370-5372 already gives the general refusal/reprobe promise. This product-level statement also covers host tabs despite tmux-specific examples in the old implementation prose. The f96dd436 wording therefore does not introduce the underlying discrepancy.",
+            "The in-range source history includes 1ed482dd's enum-to-bool simplification; reviewed and base extend_tab retain the same derived-name policy. No runtime test, actual surviving scrubbed process or harmful security/work-loss outcome was established."
+          ],
+          "coverage_checked": [
+            "Current SPEC.md:2106-2115 and SPEC_impl.md:4845-4855,4882-4898 require confirmed scoped cleanup; they do not accept this difference. The single/combined-fault and ordinary managerless residuals do not establish coverage of the entire named recorded-scope path.",
+            "TODO.md Planned and plans/queue/INDEX.md are empty. user-tmux-jobs-outlive-cleanup and terminal cleanup plans have landed (plans/REPORTS.md:12,29-32); the former concerns jobs deliberately moved outside scopes, not ignoring a scope Farhelm recorded. BUGS.md is unrelated.",
+            "Searched INDEX.md, matching queue files and active TRIAGE_OUTCOMES.md for recorded tab scope, unavailable manager, probe cooldown/reprobe and Delete. No active exact item/decision found. unscoped-tab-log-says-scoped.md records logging, not this manager policy; its old ledger citation was not followed into the archive. FILTER.md's hung-manager filter cannot cover false-success cleanup, and ordinary status/diagnostic filters do not cover the whole concern."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": "Concrete surviving scrubbed process and an established harmful downstream effect remain missing for a stronger user-work/security consequence. A supported runtime occurrence was not reproduced. The source-level policy mismatch itself is established and pre-range.",
+          "original_stronger_consequence": "Original lead suspected falsely confirmed Delete cleanup with an unchecked recorded tab scope and possibly surviving processes. The final candidate preserves that narrow policy gap, with no demonstrated work loss/security exposure, and proposes exclusion only because the implementation and governing promise predate the entire range.",
+          "needs_independent_drop_check": true,
+          "proposed_basis": "Out-of-range attribution supported by explicit exclusive-base implementation and product-contract references. Independent drop check must judge that narrow exclusion and preserve the surviving-process uncertainty; it must not treat this as source refutation, filter coverage, or acceptance."
+        }
+      ],
+      "parent_proposals": [
+        {
+          "artifact": "parent-flagged-judgments-007.json",
+          "key": "g016/l4",
+          "proposal": "claim-checks/claims-007/result.json",
+          "parent_proposal": "out-of-range",
+          "final_independent_gate": "required-before-drop",
+          "reason": "Full007sourceconfirmsrecordedtabhosttagsconvertedbyextend_tabtoderivednames, unavailablemanageromitsderivedreprobe/errorswhileonlyentry.scopegetsforcecheck. Narrowfailclosedpolicydiscrepancyreal; exactsamefullpathandproductscopecheckpromisealreadyexclusivebase, not merelyassignedparent. f96wordingdoesnotnewlyapplytohosttabsthatwerealreadygovernedbybasegeneralSPEC;1edenum→boolretainssemantics. Proposedattributionexclusiononly, preservesactualuncheckedscopes/possibleprocesssurvival andmissingactualscrubbedharmroute. No hungmanagerfilterbecausefalsecleanupsuccessoutsidethatfilter; freshcheckprebasecontractandcode, notabsenceprooforacceptance."
+        }
+      ],
+      "collection": {
+        "retain": true,
+        "clearly_refuted_candidate": false,
+        "needs_unfinished_gate": true,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "delete-recorded-tab-scope-kept-derived-under-unusable-manager",
+        "destination": "trailing-delete-recorded-tab-scope-kept-derived-under-unusable-manager.md"
+      }
+    }
+  ],
+  "replies": [
+    {
+      "turn": 1,
+      "reply": "Initial review is blocked: the manifest requires 566 lines, but the snapshot has 565, so every evidence read fails.\n\nAwaiting authorization to correct the range. Progress is recorded; no patch text has been reviewed and no findings logged."
+    },
+    {
+      "turn": 2,
+      "reply": "Initial pass complete: all 565 mandatory lines read; no unread scope.\n\n- `l2`: confirmed documentation mismatch about reports from gone terminals; bucket `other`.\n- `c1`: scope-metadata removal concern refuted by replacement source.\n- No open leads.\n\nRecords and progress saved. Source-only review; no tests or reproductions run."
+    },
+    {
+      "turn": 3,
+      "reply": "Revised `l2`: corrected location to `SPEC_impl.md:4644–4645`, confirmed documentation-only attribution, reconciled overlap with `g129/l2`, and verified retained anchors reach admission while missing runtimes retry.\n\nNo new findings. Unresolved leads: none."
+    },
+    {
+      "turn": 4,
+      "reply": "Discovery pass 1 found new verified `l3`: automatic-cleanup wording omits failed-close retries. Scheduler, lifecycle guard, retry path, governing contract and attribution checked.\n\nAlso checked credential injection, window persistence, session leaders, OMP attribution and version holds; no further issues found.\n\nNew unverified IDs: none. Open leads: none. Source-only; no execution."
+    },
+    {
+      "turn": 5,
+      "reply": "Discovery pass 2 found no new reportable issue.\n\nChecked status/cache freshness, notification handling, uninstall behavior and scope failure policy. Recorded `l4` as a candidate: the policy gap and contract both predate the full review range.\n\nNew verified/unverified findings: none. Open leads: none. No execution performed."
+    }
+  ],
+  "progress": "# g016 progress\n\nInitial review, turn 1. Discovery passes: 0.\nAssignment: product-contracts, SPEC_impl.md patch at f96dd4363d97dc7e07dea5b8947c96be6bf912e8.\nFindings log exists and was empty at startup. Brief and complete inventory commits field read; excluded coverage metadata not read. Required priority and feedback-format instruction sections read. Root AGENTS.md End sentinel present.\nInterface assumptions: source-only review of recorded revision; parent owns cross-group coverage. No runtime execution or reproductions.\nCurrent state: mandatory evidence blocked by malformed manifest. Evidence reads 1–160 and 1–100 both returned PERSISTENT_REVIEW_TOOL_FAILED: Invalid source range. No coverage is certified. The manifest requires 1–566; wc -l reports 565 and the file ends in a newline. evidence.ts source() excludes a phantom trailing empty line and manifest() rejects an end beyond the source line count. Snapshot hash matches, since the failure occurs after that validation.\nAsked for permission to correct only the manifest range to 1–565 or use manual inspection, as tooling.md requires. Manifest and snapshot left untouched pending answer.\nNext action: obtain corrected manifest or manual-inspection authorization, then read every assigned patch packet and governing specification context.\nUnread scope: all assigned patch text. No findings, candidates, or leads; no source review performed. New verified/unverified IDs this pass: none.\n\nCoverage repair continuation, turn 2 (initial review; discovery passes still 0). Corrected brief reread fully. Parent corrected manifest endpoints; immutable snapshot unchanged. Findings log preserved. Current action: deliver all required lines 1–565, then analyze changed contracts at pinned commit. Unread scope at continuation start: 1–565.\n\n## Initial pass complete (coverage repair continuation, turn 2)\n\nDiscovery passes: 0. No later synthesis/discovery pass performed.\nMandatory evidence delivered in six successful packets: 1–100, 101–200, 201–300, 301–400, 401–500, 501–565. Snapshot bytes/hash unchanged; corrected manifest accepted. Unread assigned material: none.\nReviewed every assigned hunk at f96dd4363d97dc7e07dea5b8947c96be6bf912e8, with pinned surrounding contracts for report ownership/drain/admission, process cleanup and lifecycle guarantees, terminal hosts and legacy startup ending, credential injection, Podman environment scrubbing, notification/schema history, native window persistence, uninstall prerequisites, version forwarding/holds and running-session compatibility. GUI render-bound consent contract read; no GUI handlers changed in this assignment.\nSource checks included host tab metadata/cleanup, Delete scope enumeration and host selection, retained host anchors and report disposition, window-state restoration/flush, Podman environment filtering, token injection seams and pending version holds. No runtime tests, builds or reproductions; conclusions are source-supported only. No checkout changes.\nNew records this pass: c1 (candidate; removed tmux scope metadata has host replacement); l2 (lead, then revised under the same ID to a confirmed documentation finding). New verified findings: l2. New unverified findings: none. Open leads: none.\nFinding l2: SPEC_impl.md:4643–4644 incorrectly says a report with no remaining terminal is discarded; HostStatus retains its anchor through Gone, and a missing terminal object yields retryable Internal. This is bucket other for documentation accuracy; no runtime loss-of-work route claimed.\nInterface assumptions unchanged: parent owns coverage/queue deduplication and cross-group reconciliation. No prohibited coverage metadata or queue records read.\nNext action: return this initial-pass delta to parent and await its later-turn prompt. The retained findings log is the complete record.\n\n## Synthesis turn 3 in progress\n\nTurn type: later-turn synthesis. Discovery passes: 0. Existing log preserved and reread; mandatory delivery already audited by parent. Current action: reconcile cross-group g016/l2 and g129/l2, exact changed-source attribution, report admission versus cleanup lifecycle interactions. l2 revised immediately after checking its patch attribution: documentation-only change, runtime paths unchanged; parent-provided duplicate preserved without guessing g129's hash. Unread assigned material: none. Open leads: none at start of synthesis.\n\n## Synthesis turn 3 complete\n\nDiscovery-pass count remains 0. Unread assigned scope: none. No new IDs; l2 revised under its original ID with parent-provided duplicate g129/l2, documentation-only changed-source attribution, exact location corrected to SPEC_impl.md:4644–4645, and checked caller/runtime premises. Runtime paths were unchanged by the reviewed commit. Gone transitions retain adopted child identity; fresh Gone placeholders may have no anchor. Capture passes do not filter Gone terminals, and Retry puts reports back. Lifecycle cleanup independently revalidates current process identity, so report anchor retention does not itself authorize signals. c1 remains unchanged; no new substantive concern arose from its interaction with report lifetime.\nNew verified IDs this turn: none (existing l2 strengthened). New unverified IDs: none. Unresolved lead IDs: none. No runtime execution or reproduction; no coverage-source search; no checkout changes. Parent owns cross-group deduplication and retains g129/l2 provenance independently. Next action: return only synthesis delta and await the next prompt.\n\n## Discovery turn 4 in progress\n\nDiscovery pass 1. Read supplied discovery-neighbours.json fully in bounded ranges 1–100, 101–150, 151–200, 201–237 before source search. Interface synthesis: supplied retirement/guard/reassurance concerns concern the earlier migration contracts, while terminal abstraction pointers and input-write guarantees are outside this group's assigned hunks. They do not supply a new finding in the assigned patch. Own c1 and l2 remain known and will not be rediscovered. No named pending questions. Current action: search remaining assigned contract substitutions and relocated desktop state/version paragraphs for distinct source contradictions. Unread assigned mandatory material: none. Open leads: none.\n\n## Discovery turn 4 complete\n\nDiscovery pass count: 1. New substantive finding: l3, logged first as a lead and revised to confirmed finding after source checks. It concerns SPEC_impl.md:4826–4827's new absolute shell-exited prerequisite for automatic tab cleanup, which omits continuation of a previously authorized failed close. Checked HostTab::reap_due, retry marking/backoff, ticker scheduling, lifecycle-claimed automatic close and destructive-boundary recheck; the stopped-runtime retry path is explicit. Exact governing Tabs in hosts text also specifies that recovery. The finding is documentation-only, bucket other; no current unauthorized cleanup or loss-of-work route claimed. Full-range phrase history attributes it to the assigned rewrite; later SPEC_impl changes do not repair it.\nRemaining discovery checks: host child token delivery reaches only ChildSpec.env; window state parsing/fallback/private atomic persistence agrees with the relocated paragraph; those desktop paragraphs already existed in the parent. PTY child setsid agrees with the session-leader wording. OMP root positional exemption/corridor agrees with the rewritten terminology. Pending version holds use the host child's current probe and matching mark. No additional substantive concerns arose from those checks. Known c1/l2 not rediscovered or restated as new.\nNew verified IDs: l3. New unverified-after-investigation IDs: none. Open leads: none. Anything new found: yes, l3. Unread assigned scope: none. No runtime tests, reproductions, live-install actions, checkout edits or prohibited coverage searches. Next action: return discovery delta; a later pass is for the parent to request.\n\n## Discovery turn 5 in progress\n\nDiscovery pass 2. Refreshed interface snapshot read fully in bounded ranges 1–60, 61–110, 111–160, 161–210, 211–255, 256–311. No named pending questions. Synthesis of supplied context: newly supplied migration, diagnostic provenance, launch rollback, terminal input and focus findings belong to different assigned hunks/control paths; preserve their ownership and do not count them as new here. None changes this group's existing candidate/finding consequences. Current action: inspect remaining cache/status, notification, uninstall and scope-policy substitutions in the assigned patch, beyond c1/l2/l3. Unread mandatory scope: none; open leads: none.\n\n## Discovery turn 5 complete\n\nDiscovery-pass count: 2. No new reportable finding. New considered ID l4 was immediately logged as a lead, then closed to candidate after full-range attribution checks. The differing scoped-tab Delete manager policy and its general contract promise both exist at exclusive range base; the assigned tmux-to-host terminology substitution does not introduce the policy difference. Candidate retains the original possible unchecked cleanup/surviving-process consequence and attribution-only proposed exclusion, with no accepted parent drop or lowering implied. No readily checkable lead remains.\nOther useful checks/results: list and rename share entry_info/session_status, deriving terminal evidence and current notification/tab cells; old-terminal notification writer records OldTerminalEnded per converted generation and resolves only the old kind, agreeing with the changed pointer; standalone uninstall's preview matches the rewritten terminal-survival statement, Linux supervisor template uses KillMode=process, and Mac supervisor stop is orderly with no forced kill. No additional mismatch found in those assigned substitutions. A guessed service filename lacked .in and failed read; corrected to the tracked template, which was then read. No failed command used as evidence of a pass.\nNew verified IDs: none. New unverified-after-investigation findings: none. New candidate: l4. Open leads: none. Anything new found: no new finding in assigned scope; one pre-range concern recorded and attributed. Unread mandatory scope: none. No runtime tests, reproductions, live-install actions, checkout changes or coverage-source searches. Next action: return this discovery delta and await the parent's next prompt.\n"
+}

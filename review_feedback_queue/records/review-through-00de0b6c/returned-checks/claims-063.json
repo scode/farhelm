@@ -1,0 +1,170 @@
+[
+  {
+    "key": "g095/l1",
+    "latest_line": 12,
+    "recommendation": "retain-unverified",
+    "bucket": "other",
+    "underlying_key": "legacy-container-delete-conflates-podman-resolution-failure-with-absence",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The cleanup branch is real, but the latest record correctly leaves its supported trigger and contract interpretation unresolved. Genuine missing Podman is explicitly accepted; failure to resolve an installed engine is not expressly distinguished in the specifications. Retain that uncertainty rather than turning either interpretation into a fact. The reported g001/f2 overlap is outside this supplied batch and was not independently checked.",
+    "checks": [
+      "At 04d85f0c98a9b635709d00b056719a0baa7fd3fc, crates/farhelm-supervisor/src/container.rs:170-195 resolves Podman to Option, skips both rm and exists when None, and removes the initialization marker. scope.rs:1233-1281 returns None for absent PATH, relative entries, metadata errors, unusable candidates and unsupported non-UTF-8 locations. This proves process-search failure, not installation-wide engine absence.",
+      "At the same revision, service/teardown.rs:533-590 reconstructs removal authority, acquires the permanent lock, revokes the ticket, calls remove, then performs ordinary process cleanup; :999-1002 settles row removal. Ticket revocation does not itself establish removal of existing storage.",
+      "At 04d85f0c^, container.rs:101-107 resolves the executable before shell startup; service/core.rs:17271-17303 obtains that executable while constructing the runtime and publishes it. container.rs:484-509 serializes the runtime in the ticket. A Podman available only through an agent login shell is therefore not the shipped original-creation producer.",
+      "At 04d85f0c, crates/farhelm-helm/src/units.rs:57-60,94-106,132-160 constructs the supported Linux service PATH from Farhelm and tmux directories plus /usr/local/bin:/usr/bin:/bin. This narrows, but does not prove stability of, the supported deployment environment across upgrades. No affected deployment or metadata failure was observed.",
+      "The range log for container.rs contains 04d85f0c and 1ed482dde220452e424973faf38a5e1318986333; the latter changes only a control-command comment. The missing-engine branch is introduced within the review range. No runtime test, build or reproduction was run."
+    ],
+    "coverage_checked": [
+      "Current SPEC.md:4892-4899 and SPEC_impl.md:8312-8326 explicitly accept missing Podman while requiring other unconfirmed cleanup to retain the session. The same rules were checked at 04d85f0c, SPEC.md:4816-4824 and SPEC_impl.md:8647-8656. They completely cover genuine absence; whether they also mean every pre-spawn resolution failure remains ambiguous.",
+      "Current SPEC.md:5326-5358 makes hand-written/modified remote service setups best effort. Such an edit is not evidence of a supported automatic-update regression. The resolver separately documents unsupported non-UTF-8 tool locations as absent.",
+      "TODO.md:25-27 has an empty Planned bucket. BUGS.md has only the unrelated SSH transfer-helper hang. Searches of active TRIAGE_OUTCOMES.md found no matching legacy-container lookup/forgetting decision; the archive was not read.",
+      "Searched plans/queue for missing/absent Podman, retirement, lookup/resolution, tickets and cleanup. podman-environments.md:284-295,453-455 repeats genuine missing-engine acceptance; its retirement implementation already landed in 04d85f0c. No unlanded work found that remedies lookup ambiguity. The later environment-agent-operations plan concerns requests from new environment hosts.",
+      "Searched INDEX.md and read podman-storage-selection-escapes-lifecycle-lookup.md, podman-remote-routing-host-contract-ambiguity.md, confirmation-rollback-omits-container-cleanup.md and anonymous-container-volumes-survive-removal.md. None matches this executable-resolution trigger. Different storage selection, rollback omission and retained volumes are separate causes, so this is neither exact coverage nor a demonstrated extension.",
+      "FILTER.md:137-156 may cover an older retained container plus an unusual PATH change or metadata fault, and it permits affected-session work loss. The record has not established which supported transition produces its lookup failure, so a blanket classification of every claimed case as an additional rare condition is not established. No other filter fits durable false cleanup/ownership loss."
+    ],
+    "exact_cover_quotes": [
+      "SPEC.md:4896-4897: Missing Podman counts as nothing left to remove.",
+      "SPEC_impl.md:8323-8324: A host without Podman has nothing left to remove. Other unconfirmed cleanup keeps the session for retry."
+    ],
+    "missing_premise": "A supported deployment retaining an old container while hitting a lookup failure outside the intended missing-Podman acceptance; whether that acceptance intentionally includes PATH omissions and inspection failures. A stronger bucket additionally needs an established loss route beyond the destruction Delete already authorizes; process survival, credential exposure and extra work loss were not established.",
+    "original_stronger_consequence": "The initial suspicion was that forgetting a retired session could orphan its container and user-owned processes/work. The later records preserve that possibility but establish only conditional unconfirmed storage cleanup and row loss. Creation under an agent-only login PATH was source-refuted; subsequent supervisor PATH changes or metadata failures remain unobserved. No accepted blanket withdrawal exists.",
+    "needs_independent_drop_check": true,
+    "proposed_basis": "Retain the unresolved remainder. Any dismissal of genuine absence or unsupported non-UTF-8 locations, application of the upgrade filter, or exclusion of the possible process/work consequence still goes to the parent's independent drop register. This consultation is not that approval."
+  },
+  {
+    "key": "g095/c2",
+    "latest_line": 8,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "legacy-container-delayed-creator-after-ticket-revocation",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The source disproves the narrowly stated post-Delete ticket-spending race. Delete and an old helper use the same permanent lock inode, and the old helper reads its positive ticket only after acquiring that lock. This says nothing about removal of an already-existing container in g095/l1.",
+    "checks": [
+      "At 04d85f0c98a9b635709d00b056719a0baa7fd3fc, container.rs:102-117 derives the permanent lock/ticket paths; :128-165 acquires the flock and revokes the ticket without unlinking the lock. A lock timeout errors before removal/forgetting.",
+      "At the same revision, service/teardown.rs:570-590 retains container_guard across revocation, removal and the subsequent sweep. At 04d85f0c^, container.rs:569-579 opens ticket.with_extension(\"lock\"), acquires it, then reads/deserializes the ticket. A waiter after successful revocation sees no ticket; a creator already holding the lock must finish before Delete acquires it.",
+      "The retained test at container.rs:242-268 models shared-inode exclusion and revocation. It was read as supporting source, not run or represented as an old-binary experiment. The 1ed482d container change is comment-only."
+    ],
+    "coverage_checked": [
+      "Current SPEC.md:4892-4899 and SPEC_impl.md:8312-8326 require deletion-only retirement and lock/ticket serialization. They agree with the implemented fence; acceptance of genuine missing Podman is a separate rule.",
+      "TODO Planned is empty; BUGS contains no corresponding creator race. Searches of plans/queue, INDEX.md and active TRIAGE_OUTCOMES.md for legacy container tickets, creation fences, delayed helpers and revocation found no exact item. podman-environments.md:284-295 specifies keeping necessary lock/ticket handling and its retirement code has landed. The existing lookup/storage queue item is a different root.",
+      "No filter is needed for the source refutation. The previously possible loss of processes/work is preserved and requires an independent drop check."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": "No remaining source premise supports creation after successful ticket revocation on this route. This refutation does not prove an existing container was removed when executable resolution fails.",
+    "original_stronger_consequence": "A delayed pre-upgrade helper might recreate a deleted session's container, stranding untracked user-owned processes/work. Both historical events reject that specific recreation route; line 8 expressly narrows the refutation so it cannot dismiss g095/l1's existing-state cleanup ambiguity.",
+    "needs_independent_drop_check": true,
+    "proposed_basis": "Source refutation limited to post-revocation creation through the old positive ticket, subject to the parent's fresh independent drop check."
+  },
+  {
+    "key": "g095/c3",
+    "latest_line": 4,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "legacy-container-canonical-uuid-split-creation-fence",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The suspected split fence requires a noncanonical stored session UUID. The shipped identity allocator already emits canonical UUID strings, including at the range base. Parsing and reformatting that string preserves the old creator's coordinates.",
+    "checks": [
+      "At 04d85f0c98a9b635709d00b056719a0baa7fd3fc, container.rs:90-93 canonicalizes the parsed UUID; :106-123 derives the lock/ticket/initialization paths from it. service/core.rs:2450-2464 allocates with Uuid::new_v4().to_string().",
+      "At base 6e423e30068b62c6cfa276c6d720ee35bb70387a, service/core.rs:2470-2473 already uses the same canonical allocator. At 04d85f0c^, container creation publishes and later consumes the same runtime's ticket under its sibling lock (container.rs:484-509,569-579). No uppercase, compact or braced ID producer was established.",
+      "No hand-edited database-row behavior was exercised or certified. No runtime work was performed."
+    ],
+    "coverage_checked": [
+      "Checked current SPEC.md:4892-4899 and SPEC_impl.md:8312-8326 for legacy deletion/creator serialization. Neither is relied on as accepting a mismatched lock; the disposition rests on the allocator premise being absent.",
+      "TODO Planned is empty; BUGS has no UUID/fence item. Searches of plans/queue, INDEX.md and active TRIAGE_OUTCOMES.md for noncanonical/canonical UUIDs, legacy ticket coordinates and split creation fences found no exact match. podman-environments.md's retirement section supplies context, not a separate fix for this hypothetical.",
+      "No FILTER rule is invoked; an unshipped noncanonical-ID premise is source-refuted rather than dismissed merely because it would be rare."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": "A shipped producer of noncanonical session IDs that existed in old tickets. The checked allocator produces canonical strings; hand-edited rows are outside the asserted source refutation.",
+    "original_stronger_consequence": "Different raw/canonical ticket and lock paths could split the creation fence and allow a forgotten creator or user-owned process to survive Delete. This was only a hypothetical route and was not observed.",
+    "needs_independent_drop_check": true,
+    "proposed_basis": "Source refutation of the shipped allocator-to-mismatched-coordinates route, retaining the explicit hand-edited-row limit, for the parent's independent drop check."
+  },
+  {
+    "key": "g095/c4",
+    "latest_line": 10,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "retired-container-launch-reinterpreted-as-host-execution",
+    "aliases": ["g096/c1"],
+    "target_queue_file": null,
+    "why": "A new binary retains and rejects the old queued container marker before preparation or execution. Removal of ContainerLaunch therefore does not silently reinterpret that queued launch as host execution. The queued-spec branch is the same rejected root considered in g096/c1; that record also checks broader admission/account-authority concerns.",
+    "checks": [
+      "At 04d85f0c98a9b635709d00b056719a0baa7fd3fc, launch.rs:226-230 keeps container as Option<serde_json::Value> with default and skip_serializing, which still deserializes an old object-valued marker. launch.rs:1168-1175 checks is_some immediately after decoding and returns a recorded retirement failure before checkout preparation, cwd entry or exec.",
+      "At 04d85f0c^, service/core.rs:17271-17303 constructs Some(ContainerLaunch) when config exists; absence represents an ordinary launch. The old object intent therefore cannot become None merely because the new executable has removed the old implementation. Null is not the serialized form of a configured ContainerLaunch.",
+      "The regression at launch.rs:3252 onward was inspected but not run. The refutation rests on the production guard. An already-running older binary is a separate case governed by g095/c2's ticket fence."
+    ],
+    "coverage_checked": [
+      "Current SPEC.md:4892-4899 and SPEC_impl.md:8312-8326 require refusal of retired exec/lifecycle paths and no new old-style session. The historical retirement specification at 04d85f0c was also checked. These are constraints that the inspected guard meets, not permission for isolation bypass.",
+      "TODO Planned is empty; BUGS has no queued-container host-execution acceptance. Searched plans/queue, INDEX.md and active TRIAGE_OUTCOMES.md for retired/container host fallback, queued specs, removed account selection and isolation. podman-environments.md:284-295,453-455 requires retirement; no exact open issue or unlanded remedial plan found.",
+      "The existing Podman storage-selection and remote-routing records concern engine selection while the old implementation runs, not decoding a queued launch with a new binary. They do not cover this candidate. FILTER's upgrade rule excludes security/trust-boundary consequences and cannot justify dropping this isolation-bypass hypothesis."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": "No execution route remains through the decoded old object marker: the source guard rejects it. The checked conclusion applies to a new binary consuming the queued spec, not every endpoint or an older binary already executing.",
+    "original_stronger_consequence": "A queued pre-upgrade container launch could execute its agent directly on the outside host, discarding requested isolation. This would be highest if present; no bypass route or runtime occurrence was established.",
+    "needs_independent_drop_check": true,
+    "proposed_basis": "Production compatibility marker plus pre-exec refusal source-refutes the named host-execution route. Ask the parent's independent drop checker to assess that exact scope and preserve the old-binary caveat."
+  },
+  {
+    "key": "g096/c1",
+    "latest_line": 5,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "retired-container-launch-reinterpreted-as-host-execution",
+    "aliases": ["g095/c4"],
+    "target_queue_file": null,
+    "why": "The deleted account/checkout-root helpers are removed with their creation callers, and the inspected queued-launch, create/recovery, retry and Restart routes reject retired launch intent before a host launch can be admitted. g095/c4 is an alias for the queued-spec subclaim, not an independent certification of file/TCP endpoints.",
+    "checks": [
+      "At 04d85f0c98a9b635709d00b056719a0baa7fd3fc, container.rs is removal-only. launch.rs:226-230 retains the old marker and :1168-1175 rejects it before preparation/exec. service/core.rs:3729-3738 defines the active-launch gate; :9281 and :9472 apply it to admitted/recovered and fresh creates. service/handlers.rs:202-210 rejects before reservation authority.",
+      "At the same revision, core.rs:10107-10142 checks the stored retry row's retired launch before fallback or prompt matching, returning RetainedCreateRefusal; :9330-9353 routes that refusal into retained settlement; :17541-17588 retains and republishes the row. The inspected Restart path checks entry.info.launch at :13009-13017 before relaunch work.",
+      "The retirement diff removes the sole container_checkout_root wrapper and ContainerLaunch::publish caller in core.rs rather than replacing their authority selection with ordinary cwd_is_managed. The working_copies.rs diff removes managed_checkout_root and its specific test; cwd_is_managed remains. A git grep over pinned supervisor source finds no managed_checkout_root, choose_account, initialize_account or HostAccount callers.",
+      "These are source conclusions. No test or reproduction was run, and they do not certify every file/TCP/cache/attachment endpoint. The record's reported g074/l2 identity-less-peer cache concern remains outside this named launch-on-host claim."
+    ],
+    "coverage_checked": [
+      "Current SPEC.md:4892-4899 and SPEC_impl.md:8312-8326 require Delete-only retirement, refusal of other lifecycle/terminal/exec paths and removal of account selection once no creation/open path remains. Historical 04d85f0c SPEC.md:4816-4824 and SPEC_impl.md:8647-8656 carry the same obligations.",
+      "TODO Planned is empty; BUGS has no relevant acceptance. Searches of plans/queue, INDEX.md and active TRIAGE_OUTCOMES.md for old container launch fallback, account/checkout-root authority, retained retry and queued specs found no exact existing item. podman-environments.md:284-295 and its retirement acceptance require removal; that implementation is already in the reviewed range, rather than an unlanded plan that will repair a demonstrated bypass.",
+      "Read the nearby existing Podman routing/storage-selection and confirmation-rollback items. Their triggers concern a functioning old implementation or settlement cleanup, not deleted account-selection helpers admitting a host fallback. No useful extension of those items is established. FILTER's upgrade rule cannot dismiss a security or trust-boundary consequence."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": "No path through the inspected new-binary launch/create/retry/Restart routes bypasses the retained retirement marker. The candidate does not assert a complete endpoint audit and does not dispose of a separate file/TCP/cache issue without its own shipped route.",
+    "original_stronger_consequence": "Removing legacy account selection and the bounded container checkout-root helper could execute an old container agent on the outside host or expose a broader host checkout. Both are security-impacting hypotheses. The event history strengthens their source refutation for the named routes and preserves endpoint/older-binary limits; no runtime occurrence was claimed.",
+    "needs_independent_drop_check": true,
+    "proposed_basis": "Source refutation limited to the removed account/helper and guarded launch/admission routes, with the queued-spec alias preserved and broader endpoint caveat intact. Parent independent drop approval remains required."
+  },
+  {
+    "key": "g096/c2",
+    "latest_line": 9,
+    "recommendation": "filtered",
+    "bucket": "highest",
+    "underlying_key": "old-terminal-migration-omits-live-spare-claim-protection-moved-child-removal",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The latest conditional source route is established, including possible borrower-owned work loss; the earlier blanket safety refutation is invalid. The entire named trigger also fits the current upgrade-plus-rare-condition filter: an old tmux preparation survives from an earlier release, migration fails to end it, and its child move races startup removal while a retained borrower uses the allocation. The filter expressly includes affected-session work loss. This is a proposed filter disposition requiring an independent drop check, not an accepted drop. The reported g111/l1 alias was not supplied here and is left for parent reconciliation.",
+    "checks": [
+      "At 1ed482dde220452e424973faf38a5e1318986333, service/core.rs:7837-7866 treats an old-kind row with no runtime as not live without conditioning that conclusion on migration success. service/core/old_terminals.rs:306-318 logs sweep failure and :351-356 proceeds after its deadline. The old-kind exclusion remains at range tip 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db, core.rs:7831-7840.",
+      "At 1ed482d, spare_take.rs:38-40 explicitly takes no cache lock; :156-181 moves children through the held claim-directory handle and only afterwards unlinks the original claim name. spare_checkouts.rs:542-556 selects unprotected claims; :611-618 parks and opens them for recursive removal. Parking alone does not prevent a holder of the directory handle from moving children out.",
+      "At 1ed482d, checkout_trash.rs:320-353 retains child directory handles and deletes their files through those handles. The identity/name recheck is after traversal at :374-380. It can detect a moved child too late to restore deleted contents. The originating take then fails its old-name unlink, so this is not a claim that that origin subsequently reaches its own hook/agent and writes lost work.",
+      "At 1ed482d, store.rs:3389-3393 registers existing managed ancestors for another session; core.rs:12202-12217 expressly permits a borrower to use incomplete contents. Current SPEC.md:3007-3014 preserves sessions already in terminal hosts. Such a retained borrower supplies the independent writer for the conditional loss route.",
+      "The assigned 1ed482d spare/cache changes are comments only, but that is not full-range refutation. dbfc69751215dbf15e1d31d5bed73c3754c4ebc4 is between the exclusive base and inclusive tip and introduces old-terminal migration. At dbfc, core.rs:8126-8137 collects pane states after tmux.rs:3041-3042 forces absence; :4907-4923 returns empty states for definitive absence, causing core.rs:8173-8188 to omit old-claim protection. The later explicit false branch preserves that interaction.",
+      "The cache sweep's lock at repo_cache.rs:120-123 does not serialize a spare take that holds no cache lock. No runtime observation, failing test, timing measurement or reproduction supports a frequency claim; this remains a conditional concurrency/source conclusion."
+    ],
+    "coverage_checked": [
+      "Current SPEC.md:1753-1760 protects live clone claims and discusses adoption of out-of-band replacements inside .farhelm-spares. Current SPEC_impl.md:3807-3814 requires retention on failed or uncertain liveness. Neither is exact acceptance of deleting legitimate moved allocation contents used by a retained borrower.",
+      "Current SPEC.md:2997-3017 and SPEC_impl.md:2780-2823 accept starting despite failure to end old terminals, including a possible second agent on Restart. That does not itself expressly accept borrower checkout deletion. Preserve this contract distinction rather than treating migration fallback as blanket permission.",
+      "TODO Planned is empty. BUGS contains no matching spare/migration loss. Searched INDEX.md and active TRIAGE_OUTCOMES.md for live spare claims, old-terminal migration, moved checkout children, borrower loss and recursive cleanup. The existing spare-ancestry-fallback-skips-destination-recheck.md concerns replacement of an empty target during fetch, not removal through a moved child handle. Active spare FIFO/restoration test decisions and hidden-trash-overlap-migration-result-source-gap.md were read and are unrelated. Archive not read.",
+      "Searched plans/queue for the same trigger. tmux-end-old-terminals.md:70-130 specifies this migration and its failure fallback, already introduced by dbfc; later tmux docs/install/tooling plans do not prescribe protecting surviving claims or serializing the take/remover. No unlanded remedial plan found.",
+      "FILTER.md:137-156 fully matches this specific named route. It requires earlier-release state plus another rare condition and expressly permits affected-session work loss. The route needs an old tmux preparation surviving failed migration plus a move/removal interleaving, and harms files in the checkout used by the affected sessions. It does not allege database corruption, a bricked/unupdatable installation, or crossing a security/trust boundary. A separate non-upgrade live-claim route would require its own assessment and is not filtered by this conclusion."
+    ],
+    "exact_cover_quotes": [
+      "FILTER.md:143-144: The trigger needs something carried across an upgrade from an older Farhelm release: state an older release wrote, a session or agent that kept running through the upgrade, or a hook or report an older release installed.",
+      "FILTER.md:145-147: The trigger also needs another rare condition on top of that: a narrow timing window, a crash or fault at a specific point, or an unusual sequence of user or agent actions.",
+      "FILTER.md:149-150: Unlike the filters above, this one also covers losing user-owned work within the affected sessions, such as resuming the wrong conversation."
+    ],
+    "missing_premise": "No missing source premise remains for the conditional interleaving described, and no runtime occurrence or frequency is established. Filter agreement must be obtained independently because it would dismiss an established possible loss of user-owned work. The reported same-root g111/l1 is not in this supplied batch.",
+    "original_stronger_consequence": "Initially suspected recursive removal of a launch's in-use claimed tree and proposed a comment-only/direct-predicate refutation. Later events withdrew that blanket safety conclusion: omitted old-kind protection permits deletion through a child handle after the child reaches an allocation, potentially losing work written by a retained host-backed borrower. The origin's own later agent/hook work is not the demonstrated writer because its take fails on the parked claim's old-name unlink. Highest remains appropriate before any approved filter drop; rarity does not lower it.",
+    "needs_independent_drop_check": true,
+    "proposed_basis": "Propose the current FILTER.md upgrade-plus-another-rare-condition rule for the complete named migration route. Keep highest and the full conditional loss mechanism in the parent's drop register. The assigned comment-only attribution is true but is not a valid out-of-range or source-refutation basis; dbfc introduces the interaction within the full review range."
+  }
+]

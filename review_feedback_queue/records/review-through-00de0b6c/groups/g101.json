@@ -1,0 +1,452 @@
+{
+  "group": {
+    "id": "g101",
+    "domain": "supervisor-terminal-host-lifecycle",
+    "purpose": "supervisor-terminal-host-lifecycle: crates/farhelm-supervisor/src/terminal_process.rs, crates/farhelm-supervisor/src/service/core/tests/host_terminals.rs; phases complete small per-commit changes",
+    "interfaces": [
+      "g001",
+      "g007",
+      "g008",
+      "g009",
+      "g010",
+      "g011",
+      "g097",
+      "g098",
+      "g100",
+      "g102",
+      "g103",
+      "g104",
+      "g105",
+      "g106",
+      "g107",
+      "g108",
+      "g109",
+      "g110",
+      "g111",
+      "g112",
+      "g113",
+      "g114",
+      "g115",
+      "g116",
+      "g159",
+      "g160",
+      "g161",
+      "g162",
+      "g163",
+      "g164",
+      "g165",
+      "g166",
+      "g167",
+      "g168",
+      "g169",
+      "g170",
+      "g171",
+      "g172",
+      "g173"
+    ],
+    "sources": [
+      {
+        "path": "[private-run]/prep/parts/00950-000.patch",
+        "ranges": [
+          [
+            1,
+            193
+          ]
+        ],
+        "original_path": "crates/farhelm-supervisor/src/terminal_process.rs",
+        "commit": "1ed482dde220452e424973faf38a5e1318986333",
+        "notes": "patch header; patch character offsets [0,10951)",
+        "lines": 193,
+        "bytes": 10955,
+        "start": 0,
+        "end": 10951,
+        "original": "[private-run]/prep/originals/00950.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/01050-000.patch",
+        "ranges": [
+          [
+            1,
+            714
+          ]
+        ],
+        "original_path": "crates/farhelm-supervisor/src/service/core/tests/host_terminals.rs",
+        "commit": "f560058da19e02716e6f943883a9508b447aff4e",
+        "notes": "patch header; patch character offsets [0,31131)",
+        "lines": 714,
+        "bytes": 31131,
+        "start": 0,
+        "end": 31131,
+        "original": "[private-run]/prep/originals/01050.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/01545-000.patch",
+        "ranges": [
+          [
+            1,
+            105
+          ]
+        ],
+        "original_path": "crates/farhelm-supervisor/src/service/core/tests/host_terminals.rs",
+        "commit": "08399d092d20815ced6619c26df2391944ae2b4a",
+        "notes": "patch header; patch character offsets [0,6729)",
+        "lines": 105,
+        "bytes": 6729,
+        "start": 0,
+        "end": 6729,
+        "original": "[private-run]/prep/originals/01545.patch"
+      }
+    ],
+    "lines": 1012,
+    "bytes": 48815
+  },
+  "records": [
+    {
+      "key": "g101/l1",
+      "owner": "g101",
+      "id": "l1",
+      "domain": "supervisor-terminal-host-lifecycle",
+      "purpose": "supervisor-terminal-host-lifecycle: crates/farhelm-supervisor/src/terminal_process.rs, crates/farhelm-supervisor/src/service/core/tests/host_terminals.rs; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 1,
+          "event": {
+            "version": 1,
+            "kind": "lead",
+            "id": "l1",
+            "state": "open",
+            "summary": "Race tests use one yield as proof that stale detach arbitration ran",
+            "location": "crates/farhelm-supervisor/src/service/core/tests/host_terminals.rs:4023",
+            "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e. TLDR: the new takeover regression tests may finish their survival assertions before the stale teardown they intend to exercise has actually run, leaving a regression undetected. Source basis: a_stall_teardown_racing_a_takeover_never_detaches_the_winner and takeover_reason_wins_over_a_held_natural_detach use one tokio::task::yield_now before inspecting the attachment, with comments claiming this establishes teardown order. Checks made: read the complete assigned patch; caller/arbiter and executor contracts remain to be inspected. Exact missing premise: whether a finished forwarder plus FIFO lock ordering or delete-over notification actually guarantees the spawned teardown has queued or executed before assertions. Next source checks: inspect pinned connection report_forwarder_end, detach_stalled, detach_naturally, delete_over, test macro/runtime, and governing specs. Suggested bucket: other (test coverage); could-be-highest: false, no product harm route established. Confidence: unresolved lead, not a finding. proposed_drop: false. possible_cover: none. No execution or reproduction performed."
+          }
+        },
+        {
+          "line": 2,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "l1",
+            "state": "open",
+            "summary": "One-yield teardown synchronization has no established failure in this fixture",
+            "location": "crates/farhelm-supervisor/src/service/core/tests/host_terminals.rs:3765",
+            "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e. TLDR considered: the takeover regression tests could finish survival assertions before stale detach arbitration, missing an attachment-removal regression. Source checks: connection.rs:1272-1326 synchronously spawns the arbiter before GridSender::run returns (grid_stream.rs:936-963); connection.rs:1435-1466 and :1496-1517 have no await before their attachment-lock claim apart from the deliberate delete_over gate; core.rs:851-908 shows dropping the delete mark wakes the natural arbiter. Test macro defaults to a current-thread runtime. Cargo.lock pins Tokio 1.53.2; its task/yield_now.rs uses context::defer, and runtime/scheduler/current_thread/mod.rs:816-887 runs ready tasks before park_yield wakes deferred root futures (:465-476). In the small isolated fixture these give the spawned/woken arbiters a run to the lock; attachment inspection, loser round-trip and later winner output also exercise progress. The stall test checks its intended ordering independently with the loser's exact TakenOver notice, rather than silently passing when the stall wins. Decision: no concrete false-pass or current failure route established from source; do not report a general scheduler-contract hardening suggestion as a defect. Caveat: Tokio's yield_now public docs explicitly disclaim general scheduling-order guarantees, so an explicit arbiter-completion oracle would be stronger under a changed scheduler; this is not evidence of present behavior. Original suspected consequence is preserved above. Suggested bucket: other (test coverage). could-be-highest: false. Confidence: candidate set aside after source investigation, no execution performed. proposed_drop: source analysis above did not substantiate a defect. possible_cover: none."
+          }
+        },
+        {
+          "line": 4,
+          "event": {
+            "version": 1,
+            "kind": "lead",
+            "id": "l1",
+            "state": "open",
+            "summary": "TakenOver notice alone does not witness stale teardown arbitration",
+            "location": "crates/farhelm-supervisor/src/service/core/tests/host_terminals.rs:3785",
+            "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e. Synthesis correction to the previous candidate: the exact TakenOver notice at host_terminals.rs:3785-3790 establishes the takeover won removal of the old attachment; it does not independently prove the old stall arbiter subsequently claimed the lock, inspected the replacement, or completed. A ListSessions round trip orders frames already enqueued on that connection, not a separate unjoined arbiter. Original suspected consequence remains a regression test passing before stale teardown has a chance to remove the winner. The current source and public yield_now contract are distinct: weak public scheduler guarantees alone do not establish a present failure under pinned Tokio 1.53.2. Checks made this turn: reread complete log; read exact race assertions :3735-3803; testtrace/lib.rs:994-1013 runs the body as runtime.block_on's root future and drops its runtime afterwards. Next checks: exact pinned current-thread deferred-wake scheduling, root wake state and FIFO attachment-lock interaction; natural-detach gate wake and exact assertions; confirm cross-commit c2 behavior is unchanged. Suggested bucket: other; could-be-highest: false. Confidence: reopened source-check lead, not a demonstrated failure. proposed_drop: false while checking the narrower premise. possible_cover: none. No execution or reproduction performed."
+          }
+        },
+        {
+          "line": 6,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "l1",
+            "state": "open",
+            "summary": "Takeover notice is an ordering check, not a stale-arbiter completion oracle",
+            "location": "crates/farhelm-supervisor/src/service/core/tests/host_terminals.rs:3764",
+            "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e. Original TLDR considered: regression tests might finish before stale teardown arbitration and miss the removal of the winning viewer. Synthesis result: no present false-pass or failure is established, but narrow the prior refutation: TakenOver alone never proves the stale arbiter ran. handlers.rs:1822-1879 removes and joins the loser and queues that notice before installing the winner (:1903-1939); connection.rs:1435-1466 and :1496-1517 run separate, unjoined arbiters. host_terminals.rs:3785-3790 therefore checks which path first removed the loser, not whether the stale stall path subsequently completed. The natural test's notice is earlier still (:4008-4018), while the delete mark is held. ListSessions round trips drain earlier queued frames; they do not join these arbiters. Source premises actually established: verdict_reported (:3627-3638), together with grid_stream.rs:936-963 and connection.rs:1272-1326, proves the old output task already spawned its arbiter; the stall test holds attachments until after its yield (:3755-3768), so an arbiter that has polled its lock must queue there. Mutex FIFO then orders it before the test's next lock. The natural arbiter waits in core.rs:898-908; dropping the mark closes its sole sender (:851-867), making it runnable, with no additional external-I/O wait before its attachment-lock claim (connection.rs:1502-1508). Pinned execution model checked this turn: Cargo.lock uses Tokio 1.53.2; testtrace/lib.rs:994-1013 runs the test body as runtime.block_on's root future; :1126-1142 builds an ordinary current-thread runtime. Tokio task/yield_now.rs defers the root waker. Its current_thread scheduler pushes local ready tasks FIFO (:339-362 and :709-738), polls scheduled tasks before returning to the root (:816-880), and wakes deferred wakers on a driver turn (:465-476). The normal event interval is 61 (runtime/builder.rs:262-268), so it is inaccurate to generalize this as an unconditional drain of every ready task before resuming the root: a driver turn can also occur at the interval. This concrete mechanism supports the small fixture's intended run-to-lock ordering; it is not a public completion guarantee and the notice does not replace it. Public yield_now docs explicitly allow the yielding task to be polled again before other tasks and permit scheduler-order changes. Decision: retain as a candidate hardening concern, not a present defect; no pinned-fixture ordering was established in which the tests complete their checks before the runnable stale arbiter can execute. An explicit arbiter-completion/queued-at-lock oracle would remove the private-scheduler dependency, but the weaker public contract alone is not evidence of a current failure. Original consequence preserved above. Suggested bucket: other (test coverage); could-be-highest: false. Confidence: source-only candidate after completed checks, not observed behavior. proposed_drop: no present defect substantiated; prior independent-notice-completion rationale expressly withdrawn and replaced by the narrower analysis above. possible_cover: none. No execution or reproduction performed."
+          }
+        }
+      ],
+      "latest": {
+        "line": 6,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "l1",
+          "state": "open",
+          "summary": "Takeover notice is an ordering check, not a stale-arbiter completion oracle",
+          "location": "crates/farhelm-supervisor/src/service/core/tests/host_terminals.rs:3764",
+          "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e. Original TLDR considered: regression tests might finish before stale teardown arbitration and miss the removal of the winning viewer. Synthesis result: no present false-pass or failure is established, but narrow the prior refutation: TakenOver alone never proves the stale arbiter ran. handlers.rs:1822-1879 removes and joins the loser and queues that notice before installing the winner (:1903-1939); connection.rs:1435-1466 and :1496-1517 run separate, unjoined arbiters. host_terminals.rs:3785-3790 therefore checks which path first removed the loser, not whether the stale stall path subsequently completed. The natural test's notice is earlier still (:4008-4018), while the delete mark is held. ListSessions round trips drain earlier queued frames; they do not join these arbiters. Source premises actually established: verdict_reported (:3627-3638), together with grid_stream.rs:936-963 and connection.rs:1272-1326, proves the old output task already spawned its arbiter; the stall test holds attachments until after its yield (:3755-3768), so an arbiter that has polled its lock must queue there. Mutex FIFO then orders it before the test's next lock. The natural arbiter waits in core.rs:898-908; dropping the mark closes its sole sender (:851-867), making it runnable, with no additional external-I/O wait before its attachment-lock claim (connection.rs:1502-1508). Pinned execution model checked this turn: Cargo.lock uses Tokio 1.53.2; testtrace/lib.rs:994-1013 runs the test body as runtime.block_on's root future; :1126-1142 builds an ordinary current-thread runtime. Tokio task/yield_now.rs defers the root waker. Its current_thread scheduler pushes local ready tasks FIFO (:339-362 and :709-738), polls scheduled tasks before returning to the root (:816-880), and wakes deferred wakers on a driver turn (:465-476). The normal event interval is 61 (runtime/builder.rs:262-268), so it is inaccurate to generalize this as an unconditional drain of every ready task before resuming the root: a driver turn can also occur at the interval. This concrete mechanism supports the small fixture's intended run-to-lock ordering; it is not a public completion guarantee and the notice does not replace it. Public yield_now docs explicitly allow the yielding task to be polled again before other tasks and permit scheduler-order changes. Decision: retain as a candidate hardening concern, not a present defect; no pinned-fixture ordering was established in which the tests complete their checks before the runnable stale arbiter can execute. An explicit arbiter-completion/queued-at-lock oracle would remove the private-scheduler dependency, but the weaker public contract alone is not evidence of a current failure. Original consequence preserved above. Suggested bucket: other (test coverage); could-be-highest: false. Confidence: source-only candidate after completed checks, not observed behavior. proposed_drop: no present defect substantiated; prior independent-notice-completion rationale expressly withdrawn and replaced by the narrower analysis above. possible_cover: none. No execution or reproduction performed."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g101/findings.jsonl",
+        "id": "l1",
+        "line": 6,
+        "disposition": "excluded",
+        "group": "host-terminal-takeover-tests-missing-stale-arbiter-completion-witness",
+        "reason": "Parent read full claims066 and actual complete owner event6. Preserve its correction: TakenOver proves the winning removal path, not completion of an unjoined stale arbiter, and roundtrip is no join. But pinned Tokio1.53.2/current-thread fixture analysis establishes the runnable-task/FIFO-lock mechanism supporting intended run-to-lock ordering; no concrete current-fixture ordering reaches all survival assertions before the arbiter. Public yield_now's weaker future-compatible contract alone is not evidence of a present failing oracle, and explicit completion would be hardening. Parent accepts original candidate's lack-of-substantiated-defect judgment rather than focused agent's proposed uncertainty from unshown alternatives; no proof of every hypothetical scheduler's correctness is required. Preserve private implementation reliance,61event-interval caveat, all checked source and what concrete contrary ordering would reopen it. Additional g124/l3 old test also used yield without an explicit completion acknowledgement; no wholly new completion guarantee inferred from porting. No runtime failure/falsepass or highest consequence claimed. No owner uncertainty-label revision is needed because parent does not retain that proposed uncertainty."
+      },
+      "accepted_parent_decision": {
+        "key": "g101/l1",
+        "line": 6,
+        "disposition": "excluded",
+        "group": "host-terminal-takeover-tests-missing-stale-arbiter-completion-witness",
+        "bucket": "other",
+        "recording": "unsupported-pinned-fixture-failure-premise",
+        "needs_independent_drop_check": false,
+        "reason": "Parent read full claims066 and actual complete owner event6. Preserve its correction: TakenOver proves the winning removal path, not completion of an unjoined stale arbiter, and roundtrip is no join. But pinned Tokio1.53.2/current-thread fixture analysis establishes the runnable-task/FIFO-lock mechanism supporting intended run-to-lock ordering; no concrete current-fixture ordering reaches all survival assertions before the arbiter. Public yield_now's weaker future-compatible contract alone is not evidence of a present failing oracle, and explicit completion would be hardening. Parent accepts original candidate's lack-of-substantiated-defect judgment rather than focused agent's proposed uncertainty from unshown alternatives; no proof of every hypothetical scheduler's correctness is required. Preserve private implementation reliance,61event-interval caveat, all checked source and what concrete contrary ordering would reopen it. Additional g124/l3 old test also used yield without an explicit completion acknowledgement; no wholly new completion guarantee inferred from porting. No runtime failure/falsepass or highest consequence claimed. No owner uncertainty-label revision is needed because parent does not retain that proposed uncertainty."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-066",
+          "key": "g101/l1",
+          "latest_line": 6,
+          "recommendation": "retain-unverified",
+          "bucket": "other",
+          "underlying_key": "host-terminal-takeover-tests-missing-stale-arbiter-completion-witness",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The tests depend on scheduler progress rather than observing the stale arbiter's completion. The source confirms that boundary, but the investigation has not established a false-pass execution in the pinned fixture. Preserve this as an investigated test-coverage uncertainty, not a demonstrated product or test failure.",
+          "checks": [
+            "At f560058da19e02716e6f943883a9508b447aff4e, service/core/tests/host_terminals.rs:3755-3778 holds attachments, observes the old forwarder finished, yields once, releases and reacquires the FIFO mutex. Lines 3780-3803 then check the exact takeover notice and new output. Lines 4018-4052 release the natural-detach gate, yield once, inspect the attachment and check later output. Neither test joins the spawned arbiter.",
+            "At the same revision, service/grid_stream.rs:936-963 reports the verdict synchronously before the forwarder finishes; service/connection.rs:1272-1326 spawns the appropriate arbiter. Thus verdict_reported at host_terminals.rs:3627-3638 establishes spawn, not poll or completion.",
+            "At the same revision, service/connection.rs:1435-1466 takes the attachment lock first in the stall arbiter; :1496-1517 first waits for delete_over, then takes that lock. service/core.rs:851-908 makes dropping the mark close the sole watch sender and wake a waiting natural arbiter.",
+            "At the same revision, service/handlers.rs:1822-1879 removes and joins the loser and queues TakenOver before installing the winner at :1903-1939. The notice therefore establishes takeover won removal, not stale-arbiter completion. GridPeer::round_trip at host_terminals.rs:3366-3379 drains frames up to a connection reply; it has no arbiter join.",
+            "At the same revision, Cargo.lock:6278-6281 pins Tokio 1.53.2; farhelm-testtrace/src/lib.rs:994-1013 runs the body as runtime.block_on's root future and drops the runtime afterward; :1126-1142 constructs the configured runtime. Installed matching Tokio source task/yield_now.rs defers the root waker and expressly disclaims scheduling guarantees; runtime/scheduler/current_thread/mod.rs:339-362,465-476,709-738,816-880 uses FIFO local tasks and wakes deferred tasks on driver turns. runtime/builder.rs:262-268 sets the normal event interval to 61. These facts support progress in this small fixture but do not establish a public completion guarantee or an adverse execution.",
+            "git diff 08399d092d20815ced6619c26df2391944ae2b4a..00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db is empty for host_terminals.rs, terminal_process.rs and hosts/terminal.rs. No runtime test or reproduction was performed."
+          ],
+          "coverage_checked": [
+            "SPEC.md:2990-3050 requires takeover ownership and slow-viewer isolation, but does not accept a missing regression-test completion witness. SPEC_impl.md:2551-2585 describes the grid stream and attachment machinery; :2940-3038 describes flow control and detach codes. Neither settles this test-oracle concern.",
+            "TODO.md:25-26 has an empty Planned bucket. Searches of plans/queue for takeover, stale detach, arbiter, yield, GridPeer and host_terminals.rs found no unlanded work that explicitly adds this completion witness. tmux-end-old-terminals.md describes the test migration and terminal-kind removal, not this repair.",
+            "BUGS.md has no matching accepted bug. INDEX.md and queue searches found no matching stale-arbiter completion item. Related test-witness findings concern other triggers and oracles, not these tests. Active TRIAGE_OUTCOMES.md has no matching decision; the archive was not read.",
+            "FILTER.md does not cover a test-oracle gap merely because scheduling is narrow. No filter's complete trigger/consequence boundary matches."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": "A concrete ordering under the pinned current-thread runtime in which the runnable stale arbiter fails to reach the attachment lock before all survival observations complete. The weaker public yield_now contract alone does not supply that ordering.",
+          "original_stronger_consequence": "The takeover regressions could pass before stale teardown arbitration runs and fail to detect removal of the winning viewer. The earlier line-2 proposed drop claimed no concrete false pass and treated TakenOver as independent ordering evidence; line 4 expressly corrected the notice-completion implication, and line 6 preserves only the narrower pinned-scheduler analysis. No present false pass was established or reproduced.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Retain the unresolved test-coverage concern with the missing scheduler premise. Do not turn the corrected notice rationale into a source refutation, and do not describe hypothetical future scheduler changes as a present failure. The established consequence is confined to maintainer test coverage."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": false,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "host-terminal-takeover-tests-missing-stale-arbiter-completion-witness",
+        "destination": null
+      }
+    },
+    {
+      "key": "g101/c2",
+      "owner": "g101",
+      "id": "c2",
+      "domain": "supervisor-terminal-host-lifecycle",
+      "purpose": "supervisor-terminal-host-lifecycle: crates/farhelm-supervisor/src/terminal_process.rs, crates/farhelm-supervisor/src/service/core/tests/host_terminals.rs; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 3,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c2",
+            "state": "open",
+            "summary": "TerminalProbe simplification preserves protection against signaling recycled pids",
+            "location": "crates/farhelm-supervisor/src/terminal_process.rs:14",
+            "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. TLDR considered: deleting TerminalProcess and its stale-pid documentation might let Stop, Restart or tab cleanup kill an unrelated process after a terminal child exits. Source refutation: terminal_process.rs:14-43 carries a pid only in Running and live_pid returns None for Dead and Gone. hosts/terminal.rs:791-832 rechecks the pinned child process start identity before returning Running and treats unreadability as an error; :2557-2583 takes the sweep root from the same pinned identity and rejects a different pid. handlers.rs:865-909 refuses failed probes and obtains sweep_root before recording the stop; core.rs:12377-12397 does the same for Restart; core.rs:14128-14139 roots a tab reap only from Running through sweep_root. Prompt delivery requires Running (core.rs:11944-11958); guarded Delete refuses Running and propagates probe errors (core.rs:13325-13337). The removed foreign-owner result was for the retired tmux backend; no current probe producer needs it, and SPEC_impl.md Terminal host, The terminal switch points states that the supervisor serves no other kind of terminal. Governing runtime contract: SPEC_impl.md Terminal host, A host terminal's runtime says the child is a kill root only while its reported-alive pid has the adoption-pinned start identity, re-read each time. Decision: source refutes the suspected stale-pid regression; retain the candidate for the caller's independent check because the originally considered consequence could be highest. Suggested bucket if true: highest (loss of unrelated user processes). could-be-highest: true. Confidence: confirmed source refutation; no execution performed. proposed_drop: source refutation at the references above, not rarity or specification acceptance alone. possible_cover: none."
+          }
+        },
+        {
+          "line": 5,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c2",
+            "state": "open",
+            "summary": "Cross-batch changes leave the pinned process-identity refutation intact",
+            "location": "crates/farhelm-supervisor/src/terminal_process.rs:14",
+            "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333; interactions checked through f560058da19e02716e6f943883a9508b447aff4e and 08399d092d20815ced6619c26df2391944ae2b4a. Original TLDR considered: Stop, Restart or tab cleanup might kill an unrelated user's process if removing TerminalProcess allowed a dead child's recycled pid to become a kill root. Original potential bucket remains highest (loss of unrelated user processes); could-be-highest: true. Exact source refutation at 1ed482d remains terminal_process.rs:14-43 (only Running carries pid, Dead/Gone yield None); hosts/terminal.rs:791-832 (process state and adoption-pinned start identity checked before Running; read errors refuse), :2557-2583 (sweep_root reuses and verifies pinned identity); handlers.rs:865-909 (Stop probe and sweep_root before intent); core.rs:12377-12397 (Restart), :14128-14139 (tab reap), :11944-11958 (prompt requires Running), :13325-13337 (guarded Delete refuses Running and propagates uncertainty). This turn's cross-revision diffs of terminal_process.rs and hosts/terminal.rs show terminal_process.rs unchanged in both subsequent assigned commits; f560058 only removes wire_kind/tab_info below the sweep-root code, and 08399d0 only revises recorded_address documentation. Thus the tests' grid protocol changes and final comment cleanup do not weaken the checked process-root invariant. Parent reports g098 independently reaches the same probe/root and final-output-classification conclusion; its delivery repair is pending, so this record relies on my checked source and does not treat that report as an audited independent drop approval. Suggested bucket if true: highest. Confidence: confirmed source refutation, source-only. proposed_drop: same exact source refutation above, pending parent's independent assessment; no parent drop accepted. possible_cover: none. No execution or reproduction performed."
+          }
+        }
+      ],
+      "latest": {
+        "line": 5,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c2",
+          "state": "open",
+          "summary": "Cross-batch changes leave the pinned process-identity refutation intact",
+          "location": "crates/farhelm-supervisor/src/terminal_process.rs:14",
+          "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333; interactions checked through f560058da19e02716e6f943883a9508b447aff4e and 08399d092d20815ced6619c26df2391944ae2b4a. Original TLDR considered: Stop, Restart or tab cleanup might kill an unrelated user's process if removing TerminalProcess allowed a dead child's recycled pid to become a kill root. Original potential bucket remains highest (loss of unrelated user processes); could-be-highest: true. Exact source refutation at 1ed482d remains terminal_process.rs:14-43 (only Running carries pid, Dead/Gone yield None); hosts/terminal.rs:791-832 (process state and adoption-pinned start identity checked before Running; read errors refuse), :2557-2583 (sweep_root reuses and verifies pinned identity); handlers.rs:865-909 (Stop probe and sweep_root before intent); core.rs:12377-12397 (Restart), :14128-14139 (tab reap), :11944-11958 (prompt requires Running), :13325-13337 (guarded Delete refuses Running and propagates uncertainty). This turn's cross-revision diffs of terminal_process.rs and hosts/terminal.rs show terminal_process.rs unchanged in both subsequent assigned commits; f560058 only removes wire_kind/tab_info below the sweep-root code, and 08399d0 only revises recorded_address documentation. Thus the tests' grid protocol changes and final comment cleanup do not weaken the checked process-root invariant. Parent reports g098 independently reaches the same probe/root and final-output-classification conclusion; its delivery repair is pending, so this record relies on my checked source and does not treat that report as an audited independent drop approval. Suggested bucket if true: highest. Confidence: confirmed source refutation, source-only. proposed_drop: same exact source refutation above, pending parent's independent assessment; no parent drop accepted. possible_cover: none. No execution or reproduction performed."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g101/findings.jsonl",
+        "id": "c2",
+        "line": 5,
+        "disposition": "under-investigation",
+        "group": "g101-c2",
+        "reason": "Record durably acknowledged; parent source/contract validation, cross-group synthesis, coverage/filter matching and any independent drop check remain pending. This preserves the claim and uncertainty without accepting, dropping or lowering it."
+      },
+      "accepted_parent_decision": null,
+      "returned_claim_checks": [
+        {
+          "batch": "claims-066",
+          "key": "g101/c2",
+          "latest_line": 5,
+          "recommendation": "refuted",
+          "bucket": "highest",
+          "underlying_key": "terminal-probe-simplification-recycled-child-pid-kill-root",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "Removing the old TerminalProcess abstraction does not make a recycled child pid a trusted kill root. The retained producer verifies the adoption-pinned start identity, and the checked lifecycle consumers request that pinned root again before recording intent or sweeping. This proposed dismissal still requires the parent's independent drop check because the original consequence was unrelated user-process loss.",
+          "checks": [
+            "At 1ed482dde220452e424973faf38a5e1318986333, terminal_process.rs:14-43 carries a pid only in Running; Dead and Gone return no live pid. Its documentation expressly requires a pinned sweep root.",
+            "At that revision, hosts/terminal.rs:791-832 reads process state and start identity before returning Running; changed identity, zombie or absence becomes Dead, and read failure is an error. :737-750 propagates uncertainty when obtaining the root; :2557-2583 reuses that pinned identity and rejects a different pid.",
+            "At that revision, service/handlers.rs:865-909 refuses a failed Stop probe and obtains sweep_root before the later stop intent. service/core.rs:12377-12397 does the same for Restart. :14128-14139 obtains a tab reap root only from Running via sweep_root; Dead/Gone supply None. :11944-11958 requires Running for prompt delivery. :13325-13337 propagates failed probes and refuses guarded Delete for Running.",
+            "The cross-revision diff from 1ed482dde220452e424973faf38a5e1318986333 to 08399d092d20815ced6619c26df2391944ae2b4a leaves terminal_process.rs unchanged. hosts/terminal.rs changes only recorded_address wording and removes wire_kind/tab_info after the root implementation. The corresponding diff from 08399d092d20815ced6619c26df2391944ae2b4a to reviewed tip 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db is empty for those files.",
+            "This is a refutation of the specific removed-abstraction regression, not proof that every later signal or process sweep is race-free. No runtime test or reproduction was performed. The primary record's report about g098 is not used as independent approval."
+          ],
+          "coverage_checked": [
+            "SPEC_impl.md:2047-2053 requires an adoption-pinned child start identity re-read whenever a kill root is requested; :2134-2162 says the supervisor serves only host terminals and refuses uncertain lifecycle probes. This corroborates the source invariant rather than accepting wrong-process signals.",
+            "SPEC.md Lifecycle operations:1888-2130 limits process cleanup to attributable work and requires visible refusal when cleanup cannot be confirmed. Its multiple-fault exceptions do not establish coverage for removing identity checks. Both specifications were searched for recycled pid/TerminalProbe/TerminalProcess claims; no exact acceptance of this proposed regression was found.",
+            "TODO.md:25-26 has no Planned item. Plans/queue searches found no unlanded plan repairing a missing child identity check. tmux-end-old-terminals.md:255-295 discusses legacy-server identity and removal of dual-kind machinery, not authorization to trust recycled child numbers.",
+            "INDEX.md:60 and gone-retry-forgets-pinned-foreground-child.md concern losing an already pinned child across recovery and incomplete cleanup. That is a different root and opposite consequence, so it is neither an alias nor exact coverage. Other pid-related queue hits concern desktop ownership and test cleanup, not this simplification. BUGS.md and active TRIAGE_OUTCOMES.md have no matching bug or decision; archive not read.",
+            "FILTER.md's terminal-host verification-to-numeric-signal handoff filter is narrower and concerns the host process, not omitted child identity verification. Its explicit exclusions prevent using it as blanket recycled-pid coverage. No filter is proposed."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": "The original claim would require a lifecycle path that derives a kill-root identity afresh from a dead child's recycled pid after this abstraction removal. The checked source instead uses the adoption-pinned root. No such path was identified.",
+          "original_stronger_consequence": "Stop, Restart or tab cleanup could terminate an unrelated user's process after the terminal child's pid is recycled, losing that process's work. Both primary records propose source refutation while preserving highest potential severity and requiring independent assessment.",
+          "needs_independent_drop_check": true,
+          "proposed_basis": "Propose source refutation only for the claimed regression from TerminalProcess removal, at the explicit reviewed references above. Preserve highest potential consequence for the drop register; this consultation does not authorize the drop."
+        }
+      ],
+      "parent_proposals": [
+        {
+          "artifact": "parent-flagged-judgments-066.json",
+          "key": "g101/c2",
+          "proposal": "claim-checks/claims-066/result.json",
+          "parent_proposal": "source-refuted-removed-TerminalProcess-abstraction-does-not-trust-recycled-child",
+          "final_independent_gate": "required-before-highest-unrelated-work-loss-drop",
+          "reason": "Full flagged066 read. Running-only PID and adoption-pinned start are retained; changed, absent or zombie child is Dead, unreadability errors, requested root must match original PID. Stop/Restart/tab capture that root before async intent/cleanup; guarded Delete refuses Running and propagates uncertainty. Matching implementation contract2047-2053 corroborates the source, not acceptance of wrong-process killing. Refute only alleged omitted identity check caused by abstraction removal; do not infer every later sweep/signal race safe or auto-alias098/100. Original highest unrelated process/work loss remains for gate; handoff filter is expressly narrower."
+        }
+      ],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": true,
+        "provisional_bucket": "highest",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "terminal-probe-simplification-recycled-child-pid-kill-root",
+        "destination": null
+      }
+    },
+    {
+      "key": "g101/c3",
+      "owner": "g101",
+      "id": "c3",
+      "domain": "supervisor-terminal-host-lifecycle",
+      "purpose": "supervisor-terminal-host-lifecycle: crates/farhelm-supervisor/src/terminal_process.rs, crates/farhelm-supervisor/src/service/core/tests/host_terminals.rs; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 7,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c3",
+            "state": "open",
+            "summary": "GridPeer channel bookkeeping does not skip a new catch-up in assigned callers",
+            "location": "crates/farhelm-supervisor/src/service/core/tests/host_terminals.rs:3327",
+            "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e. TLDR considered: splitting attach submission from its reply while retaining per-channel replay/detach flags could let a test skip a replacement attachment's catch-up using an old channel's ReplayComplete, hiding a broken new stream. Source check/result: read GridPeer implementation and searched every attach, attach_session and attach_reply call in the pinned host_terminals.rs. All successful attachments use a fresh peer/channel state. The sole same-peer channel-1 retry at :3510 and :3534 follows an Unavailable refusal, not an earlier successful attachment, so it has neither an old client nor a recorded ReplayComplete to reuse. The two successful attachments on one peer at :3896-3903 use distinct channels 1 and 2. Takeover-race tests use distinct loser and winner peers; send_attach/attach_reply on the winner is one successful attach, not a replacement of its own previous one. Thus no assigned caller exercises the suspected stale-cache route; :3327-3330 installs the new client before subsequent frames are read. Decision: source-refuted for the assigned patch/callers; no new defect. Suggested bucket if true: other (test oracle). could-be-highest: false; no product security/work-loss route. Confidence: source-only caller refutation. proposed_drop: exact caller analysis above, not production correctness or specification acceptance. possible_cover: none. Caveat: GridPeer is not a general reusable-channel test driver and would need per-attachment bookkeeping reset if a future test attaches twice successfully on its own same channel; that hypothetical future use is not a finding. No execution or reproduction performed."
+          }
+        }
+      ],
+      "latest": {
+        "line": 7,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c3",
+          "state": "open",
+          "summary": "GridPeer channel bookkeeping does not skip a new catch-up in assigned callers",
+          "location": "crates/farhelm-supervisor/src/service/core/tests/host_terminals.rs:3327",
+          "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e. TLDR considered: splitting attach submission from its reply while retaining per-channel replay/detach flags could let a test skip a replacement attachment's catch-up using an old channel's ReplayComplete, hiding a broken new stream. Source check/result: read GridPeer implementation and searched every attach, attach_session and attach_reply call in the pinned host_terminals.rs. All successful attachments use a fresh peer/channel state. The sole same-peer channel-1 retry at :3510 and :3534 follows an Unavailable refusal, not an earlier successful attachment, so it has neither an old client nor a recorded ReplayComplete to reuse. The two successful attachments on one peer at :3896-3903 use distinct channels 1 and 2. Takeover-race tests use distinct loser and winner peers; send_attach/attach_reply on the winner is one successful attach, not a replacement of its own previous one. Thus no assigned caller exercises the suspected stale-cache route; :3327-3330 installs the new client before subsequent frames are read. Decision: source-refuted for the assigned patch/callers; no new defect. Suggested bucket if true: other (test oracle). could-be-highest: false; no product security/work-loss route. Confidence: source-only caller refutation. proposed_drop: exact caller analysis above, not production correctness or specification acceptance. possible_cover: none. Caveat: GridPeer is not a general reusable-channel test driver and would need per-attachment bookkeeping reset if a future test attaches twice successfully on its own same channel; that hypothetical future use is not a finding. No execution or reproduction performed."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g101/findings.jsonl",
+        "id": "c3",
+        "line": 7,
+        "disposition": "excluded",
+        "group": "gridpeer-successful-channel-reuse-stale-replay-bookkeeping",
+        "reason": "Parent explicitly accepted named refuted proposal from claims-066 after inspecting it. The helper retains channel flags, but no caller in the reviewed file successfully attaches twice on the same peer/channel. The proposed stale ReplayComplete route therefore has no triggering caller in this patch. Propose source refutation for the existing callers only. Do not assert that GridPeer is safe for arbitrary future same-channel reuse; that hypothetical extension is not a present finding. Checked source/results: [\"At f560058da19e02716e6f943883a9508b447aff4e, service/core/tests/host_terminals.rs:3225-3265 initializes empty per-peer bookkeeping. :3321-3330 installs a fresh client for an Attached reply before subsequent frames are read; :3349-3355 retains replay/detach flags by channel.\",\"Searched every GridPeer::connect, attach, attach_session, send_attach and attach_reply occurrence in that historical file. The same-peer/channel retry at :3510 and :3534 follows an Unavailable refusal, so it has no previous successful client or ReplayComplete. The two successful attachments on one peer at :3894-3906 use distinct channels 1 and 2.\",\"The remaining attach sites at :2491-2493,3441-3443,3559-3570,3597-3599,3669-3680,3741-3780,3829-3831,3973-4009 use fresh peers for each successful channel. The split send_attach/attach_reply on the winner is a single attachment, not reuse of its own earlier successful channel.\",\"No later diff affects this helper/caller file between 08399d092d20815ced6619c26df2391944ae2b4a and reviewed tip 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db. No runtime test or reproduction was performed.\"] Current coverage/results: [\"SPEC.md:3011-3050 governs takeover and reconnect; SPEC_impl.md:2551-2585 governs Attached/catch-up/ReplayComplete. Neither explicitly accepts a stale replay flag in a test helper. Production correctness is not the basis of this caller refutation.\",\"TODO.md:25-26 has an empty Planned bucket. Searches of plans/queue for GridPeer, replay bookkeeping, ReplayComplete and host_terminals.rs found no unlanded repair of this proposed trigger. The migration plan's general test-porting work is not exact coverage.\",\"BUGS.md, INDEX.md plus matching queue searches, and active TRIAGE_OUTCOMES.md have no item or decision for same-peer/channel reuse retaining old replay flags. Related ReplayComplete queue hits concern placeholder re-adoption and live-shell witnesses, with different triggers and consequences. The archive was not read.\",\"No FILTER.md boundary fully matches a hypothetical regression-test false pass. Refutation rests on actual callers, not rarity or filtering.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"A replacement attachment's catch-up could be skipped by reusing an old channel's ReplayComplete, hiding a broken new stream. The primary record explicitly limits its refutation to assigned callers and preserves the caveat that a future general reusable-channel driver would need per-attachment flag resets.\"; \"A current caller must first complete a successful attachment and then successfully reuse that same peer/channel while relying on the retained old replay flag. The reviewed callers do not do so.\"."
+      },
+      "accepted_parent_decision": {
+        "key": "g101/c3",
+        "line": 7,
+        "disposition": "excluded",
+        "group": "gridpeer-successful-channel-reuse-stale-replay-bookkeeping",
+        "bucket": "other",
+        "recording": "refuted",
+        "queue_target_candidate": null,
+        "needs_independent_drop_check": false,
+        "reason": "Parent explicitly accepted named refuted proposal from claims-066 after inspecting it. The helper retains channel flags, but no caller in the reviewed file successfully attaches twice on the same peer/channel. The proposed stale ReplayComplete route therefore has no triggering caller in this patch. Propose source refutation for the existing callers only. Do not assert that GridPeer is safe for arbitrary future same-channel reuse; that hypothetical extension is not a present finding. Checked source/results: [\"At f560058da19e02716e6f943883a9508b447aff4e, service/core/tests/host_terminals.rs:3225-3265 initializes empty per-peer bookkeeping. :3321-3330 installs a fresh client for an Attached reply before subsequent frames are read; :3349-3355 retains replay/detach flags by channel.\",\"Searched every GridPeer::connect, attach, attach_session, send_attach and attach_reply occurrence in that historical file. The same-peer/channel retry at :3510 and :3534 follows an Unavailable refusal, so it has no previous successful client or ReplayComplete. The two successful attachments on one peer at :3894-3906 use distinct channels 1 and 2.\",\"The remaining attach sites at :2491-2493,3441-3443,3559-3570,3597-3599,3669-3680,3741-3780,3829-3831,3973-4009 use fresh peers for each successful channel. The split send_attach/attach_reply on the winner is a single attachment, not reuse of its own earlier successful channel.\",\"No later diff affects this helper/caller file between 08399d092d20815ced6619c26df2391944ae2b4a and reviewed tip 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db. No runtime test or reproduction was performed.\"] Current coverage/results: [\"SPEC.md:3011-3050 governs takeover and reconnect; SPEC_impl.md:2551-2585 governs Attached/catch-up/ReplayComplete. Neither explicitly accepts a stale replay flag in a test helper. Production correctness is not the basis of this caller refutation.\",\"TODO.md:25-26 has an empty Planned bucket. Searches of plans/queue for GridPeer, replay bookkeeping, ReplayComplete and host_terminals.rs found no unlanded repair of this proposed trigger. The migration plan's general test-porting work is not exact coverage.\",\"BUGS.md, INDEX.md plus matching queue searches, and active TRIAGE_OUTCOMES.md have no item or decision for same-peer/channel reuse retaining old replay flags. Related ReplayComplete queue hits concern placeholder re-adoption and live-shell witnesses, with different triggers and consequences. The archive was not read.\",\"No FILTER.md boundary fully matches a hypothetical regression-test false pass. Refutation rests on actual callers, not rarity or filtering.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"A replacement attachment's catch-up could be skipped by reusing an old channel's ReplayComplete, hiding a broken new stream. The primary record explicitly limits its refutation to assigned callers and preserves the caveat that a future general reusable-channel driver would need per-attachment flag resets.\"; \"A current caller must first complete a successful attachment and then successfully reuse that same peer/channel while relying on the retained old replay flag. The reviewed callers do not do so.\"."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-066",
+          "key": "g101/c3",
+          "latest_line": 7,
+          "recommendation": "refuted",
+          "bucket": "other",
+          "underlying_key": "gridpeer-successful-channel-reuse-stale-replay-bookkeeping",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The helper retains channel flags, but no caller in the reviewed file successfully attaches twice on the same peer/channel. The proposed stale ReplayComplete route therefore has no triggering caller in this patch.",
+          "checks": [
+            "At f560058da19e02716e6f943883a9508b447aff4e, service/core/tests/host_terminals.rs:3225-3265 initializes empty per-peer bookkeeping. :3321-3330 installs a fresh client for an Attached reply before subsequent frames are read; :3349-3355 retains replay/detach flags by channel.",
+            "Searched every GridPeer::connect, attach, attach_session, send_attach and attach_reply occurrence in that historical file. The same-peer/channel retry at :3510 and :3534 follows an Unavailable refusal, so it has no previous successful client or ReplayComplete. The two successful attachments on one peer at :3894-3906 use distinct channels 1 and 2.",
+            "The remaining attach sites at :2491-2493,3441-3443,3559-3570,3597-3599,3669-3680,3741-3780,3829-3831,3973-4009 use fresh peers for each successful channel. The split send_attach/attach_reply on the winner is a single attachment, not reuse of its own earlier successful channel.",
+            "No later diff affects this helper/caller file between 08399d092d20815ced6619c26df2391944ae2b4a and reviewed tip 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db. No runtime test or reproduction was performed."
+          ],
+          "coverage_checked": [
+            "SPEC.md:3011-3050 governs takeover and reconnect; SPEC_impl.md:2551-2585 governs Attached/catch-up/ReplayComplete. Neither explicitly accepts a stale replay flag in a test helper. Production correctness is not the basis of this caller refutation.",
+            "TODO.md:25-26 has an empty Planned bucket. Searches of plans/queue for GridPeer, replay bookkeeping, ReplayComplete and host_terminals.rs found no unlanded repair of this proposed trigger. The migration plan's general test-porting work is not exact coverage.",
+            "BUGS.md, INDEX.md plus matching queue searches, and active TRIAGE_OUTCOMES.md have no item or decision for same-peer/channel reuse retaining old replay flags. Related ReplayComplete queue hits concern placeholder re-adoption and live-shell witnesses, with different triggers and consequences. The archive was not read.",
+            "No FILTER.md boundary fully matches a hypothetical regression-test false pass. Refutation rests on actual callers, not rarity or filtering."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": "A current caller must first complete a successful attachment and then successfully reuse that same peer/channel while relying on the retained old replay flag. The reviewed callers do not do so.",
+          "original_stronger_consequence": "A replacement attachment's catch-up could be skipped by reusing an old channel's ReplayComplete, hiding a broken new stream. The primary record explicitly limits its refutation to assigned callers and preserves the caveat that a future general reusable-channel driver would need per-attachment flag resets.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Propose source refutation for the existing callers only. Do not assert that GridPeer is safe for arbitrary future same-channel reuse; that hypothetical extension is not a present finding."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "gridpeer-successful-channel-reuse-stale-replay-bookkeeping",
+        "destination": null
+      }
+    }
+  ],
+  "replies": [
+    {
+      "turn": 1,
+      "reply": "Initial review complete: all 1,012 assigned patch lines reviewed at their recorded revisions.\n\nNo confirmed findings or open leads. Two considered candidates are preserved in `g101/findings.jsonl`, including the source-refuted process-loss concern for independent drop assessment. `progress.md` is updated.\n\nNo tests, reproductions, or checkout changes."
+    },
+    {
+      "turn": 2,
+      "reply": "- Revised `l1`: takeover notice does not prove stale teardown completed. Pinned-scheduler checks establish no present failure; public-contract caveat retained.\n- Revised `c2`: cross-batch changes preserve the source refutation. Original highest process-loss concern remains recorded for independent assessment; no drop accepted.\n- No new findings. Unresolved lead IDs: none."
+    },
+    {
+      "turn": 3,
+      "reply": "Discovery pass 1 complete. No new defect found.\n\nChecked interface records, all attach-helper callers, pause/resume ordering, fresh output/input assertions, terminal-probe documentation references, and the final comment-only patch.\n\n- New verified IDs: none.\n- New unverified IDs: none.\n- Candidate `c3`: recorded and source-refuted.\n- Open leads: none.\n\nProgress updated. No runtime execution or checkout changes."
+    }
+  ],
+  "progress": "Group: g101 supervisor-terminal-host-lifecycle\nState: assigned initial review complete; awaiting caller's later synthesis/discovery prompt.\nTurn: initial review, count 1. Discovery-pass count: 0.\n\nMandatory scope read in full through evidence launcher:\n- 00950-000.patch, lines 1-193, commit 1ed482dde220452e424973faf38a5e1318986333, terminal_process.rs.\n- 01050-000.patch, lines 1-200, 201-400, 401-600, 601-714, commit f560058da19e02716e6f943883a9508b447aff4e, host_terminals.rs.\n- 01545-000.patch, lines 1-105, commit 08399d092d20815ced6619c26df2391944ae2b4a, host_terminals.rs.\nRead brief.md fully and inventory.json commits field only. No excluded coverage metadata or prohibited coverage sources read.\n\nContracts and context checked:\n- Injected root AGENTS.md reached End sentinel; loaded skillette; read queue AGENTS.md, recording.md and machine.md.\n- At 1ed482d: SPEC_impl.md Terminal host, lines 1963-2766, including adopted-child identity, lifecycle switch points, restart, tabs, deletion and grid streams; SPEC.md Lifecycle operations 1884-2124 and Session view through 2174.\n- At f560058: SPEC.md Terminal experience 2855-3177 and Attachments 3178-3212; SPEC_impl.md Grid streams 3009-3109. Broader searches/diff output that clipped was not relied upon; governing sections were subsequently read directly in bounded outputs.\n- At 1ed482d: hosts/terminal.rs 780-845 and 2540-2635; service/terminals.rs 1-240; service/handlers.rs 850-925; service/core.rs 7740-7865, 11915-11985, 12325-12420, 13300-13370, 14100-14185; exhaustive TerminalProbe/live_pid call-site search.\n- At f560058: service/connection.rs 1230-1595; service/core.rs 835-940; service/grid_stream.rs 910-980; host_terminals.rs 3210-3430; service/handlers.rs 2985-3030; macro default runtime and Cargo.lock inspected. Locally cached pinned Tokio 1.53.2 yield_now.rs and current-thread scheduler 400-485, 816-887 checked for race-test synchronization.\n- At 08399d0: StoredSession terminal_address declarations checked against comment-only patch.\n\nInterface assumptions: the supervisor serves terminal hosts only; pinned adoption identity, not a bare pid, anchors sweeps. Grid pause is handled inline, so a later ListSessions reply orders the pause; asynchronous teardown is separate and identity-checked. Parent owns queue matching and independent drop checks. No GUI confirmation code in assigned patches.\n\nDurable records this turn:\n- l1: lead revised to candidate after investigating one-yield synchronization in race tests; no concrete present failure established; scheduler-contract caveat retained. Suggested other, could-be-highest false.\n- c2: candidate refuted by source: TerminalProbe simplification preserves stale-pid protection. Originally considered unrelated-process loss could be highest; retained for parent's independent drop assessment.\nVerified findings: none. Unverified findings: none. Open leads: none.\nOne record call rejected invalid state closed; same event corrected to candidate/open and successfully appended. No log events deleted or rewritten.\n\nValidation: source/contract review only, as assigned; no tests, builds or reproductions. No checkout changes.\nUnread assigned material: none (all 1,012 patch lines delivered). Additional repository areas outside this functional group were not reviewed.\nNext action: return initial-pass result and await caller's later-turn instruction; do not perform synthesis/discovery inside this turn.\n\nSynthesis turn 2 in progress. l1 reopened to distinguish takeover notice from stale-arbiter completion; c2 independent refutation reported by parent, not treated as an accepted drop. No execution. Next: pinned scheduler and lock ordering, cross-commit interactions.\n\nSynthesis turn 2 complete.\nTurn type/count: synthesis, overall turn 2. Discovery-pass count: 0.\nNew verified findings: none. New unverified findings: none. Revised IDs: l1, c2. Open lead IDs: none.\n\nl1: reopened briefly and then returned to candidate after exact scheduler/oracle checks. Correction: the TakenOver notice establishes takeover removal of the old attachment only; it does not prove stale arbitration completed. The natural notice occurs before releasing the delete gate. Round trips drain queued frames and do not join independent arbiters. Pinned Tokio 1.53.2 uses FIFO local runnable tasks and deferred root wake, but driver turns also occur every 61 task polls, so the earlier broad statement that it drains every ready task was too strong. Source supports the fixture's intended scheduling; no present false-pass route established. Preserve public yield_now non-guarantees and private-scheduler dependency as candidate caveats. No asserted execution behavior.\n\nc2: preserved original highest unrelated-process-loss concern and exact source refutation. Cross-batch diffs confirm terminal_process unchanged, host probe/root logic unchanged (later changes remove wire kind helpers or adjust recorded_address comments), and selected caller diffs contain no probe/sweep-root/kill-identity changes. Parent reports g098 independently agrees but its delivery repair is pending; not treated as audited approval, and no parent drop accepted.\n\nAdditional source reads this turn:\n- f560058: testtrace/lib.rs 994-1028, 1126-1170; host_terminals.rs 3610-3655, 3735-3815, 3990-4060; handlers.rs 1820-1948; connection.rs 1427-1518; core.rs 851-910.\n- Pinned local Tokio 1.53.2: task/yield_now.rs 1-80; runtime/scheduler/current_thread/mod.rs 300-376, 450-500, 625-643, 709-750, 816-887; runtime/builder.rs 252-270; sync/mutex.rs 108-123.\n- Cross-revision diffs of terminal_process.rs and hosts/terminal.rs for 1ed482d->f560058->08399d0, plus targeted core.rs/handlers.rs diff checks for liveness/root changes.\n\nInterface assumptions now explicit: a takeover notice is not a stale-arbiter acknowledgement; an old forwarder's completed join proves arbiter spawn, not arbiter completion. FIFO lock ordering applies only once a task actually polls its lock. Product root identity remains pinned at adoption and rechecked at each use; final-output classification is separate from early Dead probing as recorded in initial source reads.\nUnread assigned scope: none. No new mandatory scope, tests, builds, reproductions or checkout changes.\nNext: return this turn's deltas and await caller's next instruction; no discovery pass performed in this synthesis turn.\n\nDiscovery turn 3 started, discovery-pass count 1. Read complete discovery-neighbours.json in bounded chunks (1-160,161-240,241-320,321-400,401-480,481-561); no named pending cross-group questions. Interface records concern separate retirement, host cleanup, doc maps and removed legacy-test responsibilities; no revision to g101 records follows from them alone. Search remains the three assigned per-commit patches.\n\nDiscovery turn 3 complete. Discovery-pass count: 1. Result: no new defect found.\nNew verified finding IDs: none. New unverified-after-investigation finding IDs: none. Open lead IDs: none.\nNew durable candidate: c3, channel replay/detach bookkeeping concern refuted against every assigned GridPeer attach caller. Existing l1/c2 records unchanged; no parent drop or lowering assumed.\n\nFresh checks beyond known records:\n- Read all discovery-neighbours.json records first for interface synthesis/novelty; no named pending question or new g101-specific premise needed resolution. Did not search their logs or prohibited coverage sources.\n- At f560058, searched all GridPeer attach/attach_session/send_attach/attach_reply and replay/detach uses. Each successful same-peer/channel attachment is fresh; the only same-channel retry follows refusal, and the two-session fixture uses distinct channels. c3 records exact refutation before further reads.\n- Read host_terminals.rs 3428-3610, 3654-3708, 3815-3975: retained stream/input test waits for both fresh screen and replay, placeholder refusal demonstrates incumbent output survives before retry, losing-client pause waits for handled input before fresh winner output, continuous-pause test resets through resume round trips, and per-attachment stall test checks both fresh output and received input on its survivor.\n- Read matching connection.rs 1330-1399 and 1546-1584: repeated pause retains its start, resume clears it, ownership selection uses channel plus connection, and each continuous pause sets its own deadline. This is contract/caller analysis, not a runtime observation or mutation test.\n- Checked handlers.rs 2985-3023 and connection.rs around 709-717: PauseOutput/ResumeOutput are awaited inline before the connection dispatches a later request. Thus the test's round trip does witness application of those inline controls; no assertion made that it joins asynchronous teardown (known l1 remains separately recorded).\n- Reread complete terminal_process.rs at 1ed482d and checked hosts/mod.rs re-exports: new documentation references resolve to exported HostStatus/HostTerminal; Running/Dead/Gone and live_pid's branches introduce no additional unexamined outcome.\n- Reread complete 08399d0 assigned diff: comment-only changes preserve assertions and change stored field references to terminal_address; no additional behavior or oracle is deleted there.\n\nInterface assumptions: same pinned host-only terminal and control-protocol contracts as prior turns. Distinct neighbour cleanup/test defects were not adopted as new g101 discoveries or used to dismiss a separate oracle issue.\nUnread assigned scope: none. No runtime tests, builds, reproductions, live-install actions or checkout changes. All conclusions this pass are source/contract checks.\nNext: report this discovery delta; await caller's next pass or completion instruction.\n"
+}

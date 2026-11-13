@@ -1,0 +1,1265 @@
+{
+  "group": {
+    "id": "g097",
+    "domain": "supervisor-terminal-host-lifecycle",
+    "purpose": "supervisor-terminal-host-lifecycle: crates/farhelm-supervisor/src/launch.rs, crates/farhelm-supervisor/src/service/core/host_launch.rs, crates/farhelm-supervisor/src/service/core/host_restart.rs, crates/farhelm-supervisor/src/service/core/host_tabs.rs, crates/farhelm-supervisor/src/hosts/mod.rs, crates/farhelm-supervisor/src/hosts/test_program.rs, crates/farhelm-supervisor/src/service/core/tests/host_terminals.rs, crates/farhelm-supervisor/src/hosts/process.rs; phases complete small per-commit changes",
+    "interfaces": [
+      "g001",
+      "g003",
+      "g005",
+      "g006",
+      "g007",
+      "g008",
+      "g009",
+      "g098",
+      "g099",
+      "g100",
+      "g101",
+      "g102",
+      "g103",
+      "g104",
+      "g105",
+      "g106",
+      "g107",
+      "g108",
+      "g109",
+      "g110",
+      "g111",
+      "g112",
+      "g113",
+      "g114",
+      "g115",
+      "g116",
+      "g149",
+      "g159",
+      "g160",
+      "g161",
+      "g162",
+      "g163",
+      "g164",
+      "g165",
+      "g166",
+      "g167",
+      "g168",
+      "g169",
+      "g170",
+      "g171",
+      "g172",
+      "g173"
+    ],
+    "sources": [
+      {
+        "path": "[private-run]/prep/parts/00293-000.patch",
+        "ranges": [
+          [
+            1,
+            237
+          ]
+        ],
+        "original_path": "crates/farhelm-supervisor/src/launch.rs",
+        "commit": "04d85f0c98a9b635709d00b056719a0baa7fd3fc",
+        "notes": "patch header; patch character offsets [0,11297)",
+        "lines": 237,
+        "bytes": 11303,
+        "start": 0,
+        "end": 11297,
+        "original": "[private-run]/prep/originals/00293.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/00295-000.patch",
+        "ranges": [
+          [
+            1,
+            20
+          ]
+        ],
+        "original_path": "crates/farhelm-supervisor/src/service/core/host_launch.rs",
+        "commit": "04d85f0c98a9b635709d00b056719a0baa7fd3fc",
+        "notes": "patch header; patch character offsets [0,933)",
+        "lines": 20,
+        "bytes": 933,
+        "start": 0,
+        "end": 933,
+        "original": "[private-run]/prep/originals/00295.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/00296-000.patch",
+        "ranges": [
+          [
+            1,
+            15
+          ]
+        ],
+        "original_path": "crates/farhelm-supervisor/src/service/core/host_restart.rs",
+        "commit": "04d85f0c98a9b635709d00b056719a0baa7fd3fc",
+        "notes": "patch header; patch character offsets [0,729)",
+        "lines": 15,
+        "bytes": 729,
+        "start": 0,
+        "end": 729,
+        "original": "[private-run]/prep/originals/00296.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/00297-000.patch",
+        "ranges": [
+          [
+            1,
+            29
+          ]
+        ],
+        "original_path": "crates/farhelm-supervisor/src/service/core/host_tabs.rs",
+        "commit": "04d85f0c98a9b635709d00b056719a0baa7fd3fc",
+        "notes": "patch header; patch character offsets [0,1615)",
+        "lines": 29,
+        "bytes": 1615,
+        "start": 0,
+        "end": 1615,
+        "original": "[private-run]/prep/originals/00297.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/00739-000.patch",
+        "ranges": [
+          [
+            1,
+            42
+          ]
+        ],
+        "original_path": "crates/farhelm-supervisor/src/hosts/mod.rs",
+        "commit": "70bc66a9f285cc2a9984924f389834d118b7cfdc",
+        "notes": "patch header; patch character offsets [0,2231)",
+        "lines": 42,
+        "bytes": 2231,
+        "start": 0,
+        "end": 2231,
+        "original": "[private-run]/prep/originals/00739.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/00740-000.patch",
+        "ranges": [
+          [
+            1,
+            100
+          ]
+        ],
+        "original_path": "crates/farhelm-supervisor/src/hosts/test_program.rs",
+        "commit": "70bc66a9f285cc2a9984924f389834d118b7cfdc",
+        "notes": "patch header; patch character offsets [0,5214)",
+        "lines": 100,
+        "bytes": 5214,
+        "start": 0,
+        "end": 5214,
+        "original": "[private-run]/prep/originals/00740.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/00743-000.patch",
+        "ranges": [
+          [
+            1,
+            17
+          ]
+        ],
+        "original_path": "crates/farhelm-supervisor/src/service/core/host_launch.rs",
+        "commit": "70bc66a9f285cc2a9984924f389834d118b7cfdc",
+        "notes": "patch header; patch character offsets [0,1127)",
+        "lines": 17,
+        "bytes": 1129,
+        "start": 0,
+        "end": 1127,
+        "original": "[private-run]/prep/originals/00743.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/00744-000.patch",
+        "ranges": [
+          [
+            1,
+            182
+          ]
+        ],
+        "original_path": "crates/farhelm-supervisor/src/service/core/tests/host_terminals.rs",
+        "commit": "70bc66a9f285cc2a9984924f389834d118b7cfdc",
+        "notes": "patch header; patch character offsets [0,8642)",
+        "lines": 182,
+        "bytes": 8642,
+        "start": 0,
+        "end": 8642,
+        "original": "[private-run]/prep/originals/00744.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/00764-000.patch",
+        "ranges": [
+          [
+            1,
+            20
+          ]
+        ],
+        "original_path": "crates/farhelm-supervisor/src/hosts/mod.rs",
+        "commit": "647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513",
+        "notes": "patch header; patch character offsets [0,1249)",
+        "lines": 20,
+        "bytes": 1249,
+        "start": 0,
+        "end": 1249,
+        "original": "[private-run]/prep/originals/00764.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/00765-000.patch",
+        "ranges": [
+          [
+            1,
+            31
+          ]
+        ],
+        "original_path": "crates/farhelm-supervisor/src/launch.rs",
+        "commit": "647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513",
+        "notes": "patch header; patch character offsets [0,1637)",
+        "lines": 31,
+        "bytes": 1637,
+        "start": 0,
+        "end": 1637,
+        "original": "[private-run]/prep/originals/00765.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/00767-000.patch",
+        "ranges": [
+          [
+            1,
+            80
+          ]
+        ],
+        "original_path": "crates/farhelm-supervisor/src/service/core/host_launch.rs",
+        "commit": "647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513",
+        "notes": "patch header; patch character offsets [0,4357)",
+        "lines": 80,
+        "bytes": 4357,
+        "start": 0,
+        "end": 4357,
+        "original": "[private-run]/prep/originals/00767.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/00768-000.patch",
+        "ranges": [
+          [
+            1,
+            73
+          ]
+        ],
+        "original_path": "crates/farhelm-supervisor/src/service/core/host_restart.rs",
+        "commit": "647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513",
+        "notes": "patch header; patch character offsets [0,3826)",
+        "lines": 73,
+        "bytes": 3826,
+        "start": 0,
+        "end": 3826,
+        "original": "[private-run]/prep/originals/00768.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/00769-000.patch",
+        "ranges": [
+          [
+            1,
+            124
+          ]
+        ],
+        "original_path": "crates/farhelm-supervisor/src/service/core/host_tabs.rs",
+        "commit": "647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513",
+        "notes": "patch header; patch character offsets [0,7019)",
+        "lines": 124,
+        "bytes": 7019,
+        "start": 0,
+        "end": 7019,
+        "original": "[private-run]/prep/originals/00769.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/00863-000.patch",
+        "ranges": [
+          [
+            1,
+            170
+          ]
+        ],
+        "original_path": "crates/farhelm-supervisor/src/hosts/process.rs",
+        "commit": "dbfc69751215dbf15e1d31d5bed73c3754c4ebc4",
+        "notes": "patch header; patch character offsets [0,7883)",
+        "lines": 170,
+        "bytes": 7883,
+        "start": 0,
+        "end": 7883,
+        "original": "[private-run]/prep/originals/00863.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/00864-000.patch",
+        "ranges": [
+          [
+            1,
+            37
+          ]
+        ],
+        "original_path": "crates/farhelm-supervisor/src/launch.rs",
+        "commit": "dbfc69751215dbf15e1d31d5bed73c3754c4ebc4",
+        "notes": "patch header; patch character offsets [0,2364)",
+        "lines": 37,
+        "bytes": 2364,
+        "start": 0,
+        "end": 2364,
+        "original": "[private-run]/prep/originals/00864.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/00867-000.patch",
+        "ranges": [
+          [
+            1,
+            74
+          ]
+        ],
+        "original_path": "crates/farhelm-supervisor/src/service/core/host_launch.rs",
+        "commit": "dbfc69751215dbf15e1d31d5bed73c3754c4ebc4",
+        "notes": "patch header; patch character offsets [0,4194)",
+        "lines": 74,
+        "bytes": 4194,
+        "start": 0,
+        "end": 4194,
+        "original": "[private-run]/prep/originals/00867.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/00910-000.patch",
+        "ranges": [
+          [
+            1,
+            19
+          ]
+        ],
+        "original_path": "crates/farhelm-supervisor/src/hosts/mod.rs",
+        "commit": "1ed482dde220452e424973faf38a5e1318986333",
+        "notes": "patch header; patch character offsets [0,1159)",
+        "lines": 19,
+        "bytes": 1159,
+        "start": 0,
+        "end": 1159,
+        "original": "[private-run]/prep/originals/00910.patch"
+      }
+    ],
+    "lines": 1270,
+    "bytes": 65484
+  },
+  "records": [
+    {
+      "key": "g097/c1",
+      "owner": "g097",
+      "id": "c1",
+      "domain": "supervisor-terminal-host-lifecycle",
+      "purpose": "supervisor-terminal-host-lifecycle: crates/farhelm-supervisor/src/launch.rs, crates/farhelm-supervisor/src/service/core/host_launch.rs, crates/farhelm-supervisor/src/service/core/host_restart.rs, crates/farhelm-supervisor/src/service/core/host_tabs.rs, crates/farhelm-supervisor/src/hosts/mod.rs, crates/farhelm-supervisor/src/hosts/test_program.rs, crates/farhelm-supervisor/src/service/core/tests/host_terminals.rs, crates/farhelm-supervisor/src/hosts/process.rs; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 1,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c1",
+            "state": "open",
+            "summary": "Ending live legacy terminals at startup is explicitly specified",
+            "location": "crates/farhelm-supervisor/src/hosts/process.rs:476",
+            "detail": "Reviewed commit: dbfc69751215dbf15e1d31d5bed73c3754c4ebc4. TLDR: Startup can terminate agents and shell work still running in terminals created by older releases. Details: the newly generalized terminate_process_within at hosts/process.rs:476-506 sends SIGTERM/SIGCONT then SIGKILL after verifying the pinned identity and socket arguments. Its caller service/core/old_terminals.rs:176-279 applies it to the old private server; that is intentional retirement, not an accidental new host teardown. Suggested bucket: highest if this were unintended loss of processes/work; could-be-highest: yes. Confidence: confirmed from source, not execution. proposed_drop: explicit specification acceptance. SPEC_impl.md at this commit, Terminal substrate: private tmux server, lines 2956-2958: \"This section covers the old terminals: the private tmux server releases before terminal hosts ran every terminal in, which later releases kept running beside terminal hosts. This release ends them at startup (below); every terminal runs in a terminal host\". The same section lines 2995-2998 explicitly says: \"A failure anywhere is logged and never fatal (the maintainer chose to start anyway and treat old sessions as ended, accepting that a Restart could then start a second agent beside one still running)\". possible_cover: none; no coverage sources searched. Caveat: this drop covers the intentional retirement and its explicit failure policy, not bugs in identity selection, signaling, or attribution, which remain under review."
+          }
+        },
+        {
+          "line": 10,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c1",
+            "state": "open",
+            "summary": "Ending live legacy terminals at startup is explicitly specified",
+            "location": "crates/farhelm-supervisor/src/hosts/process.rs:476",
+            "detail": "Reviewed commit: dbfc69751215dbf15e1d31d5bed73c3754c4ebc4. TLDR: Startup can terminate agents and shell work still running in terminals created by older releases. Details: the generalized terminate_process_within at hosts/process.rs:476-506 sends SIGTERM/SIGCONT then SIGKILL after verifying the pinned identity and socket arguments. Its caller service/core/old_terminals.rs:176-279 applies it to the old private server. Suggested bucket: highest if unintended loss of processes/work; could-be-highest: yes. Confidence: confirmed source, no execution. proposed_drop: explicit specification acceptance. SPEC_impl.md, Terminal substrate: private tmux server, lines 2956-2958: \"This section covers the old terminals: the private tmux server releases before terminal hosts ran every terminal in, which later releases kept running beside terminal hosts. This release ends them at startup (below); every terminal runs in a terminal host\". Correction to the first record's line range: failure acceptance is at lines 2998-3000, exact text: \"A failure anywhere is logged and never fatal (the maintainer chose to start anyway and treat old sessions as ended, accepting that a Restart could then start a second agent beside one still running)\". SPEC.md, Terminal experience, also explicitly says the first startup ends the server and everything still running in an old terminal, while host terminals are kept. possible_cover: none; no coverage sources searched. Caveat: the drop covers intentional retirement and its explicit failure policy, not accidental identity selection, signaling or attribution errors."
+          }
+        },
+        {
+          "line": 12,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c1",
+            "state": "open",
+            "summary": "Intentional legacy terminal retirement remains a specification-based drop proposal",
+            "location": "crates/farhelm-supervisor/src/hosts/process.rs:476",
+            "detail": "Reviewed commit: dbfc69751215dbf15e1d31d5bed73c3754c4ebc4. Synthesis revision. TLDR: The first startup of this version terminates user agents and shell work still in legacy terminals and destroys the terminal server's retained screen/history, including final screens for already-ended agents. This is actual source-implied process/history loss, not merely a hypothetical failed cleanup; no execution was performed. Suggested bucket: highest on that original strongest consequence; could-be-highest: yes. Confidence: confirmed source and contract. hosts/process.rs:476-506 supplies the verified SIGTERM/SIGCONT/SIGKILL operation used by service/core/old_terminals.rs:223-257; removal of the server destroys its in-memory terminals. proposed_drop: exact specification acceptance of this intentional retirement only, pending the caller's independent check; no parent drop has been accepted. SPEC_impl.md, Terminal substrate: private tmux server, 2956-2958: \"This section covers the old terminals: the private tmux server releases before terminal hosts ran every terminal in, which later releases kept running beside terminal hosts. This release ends them at startup (below); every terminal runs in a terminal host\". SPEC.md, Terminal experience, explicitly says the first startup ends that server and everything still running in an old terminal, and an already-ended agent keeps its outcome but loses the last screen held in the server. Distinct failure contract, not a universal refutation: SPEC_impl.md:2998-3000 says \"A failure anywhere is logged and never fatal (the maintainer chose to start anyway and treat old sessions as ended, accepting that a Restart could then start a second agent beside one still running)\". That clause specifies proceeding after failure; it does not establish correct process selection, sufficient identification, valid attribution, or adequate warning presentation. Parent's g004/g071 general survival guidance and g033 hidden failure-warning concern are separate causes and are not disposed of by c1. possible_cover: parent reports g099/g110 independently describe the same intentional terminal/history retirement, likely duplicates; no queue coverage sources searched. Caveats: source-only review, and the parent owns reconciliation of those interface findings and independent drop approval."
+          }
+        },
+        {
+          "line": 18,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "c1",
+            "state": "open",
+            "summary": "Intentional legacy terminal retirement remains a specification-based drop proposal",
+            "location": "crates/farhelm-supervisor/src/hosts/process.rs:476",
+            "detail": "Reviewed commit: dbfc69751215dbf15e1d31d5bed73c3754c4ebc4. Synthesis revision. TLDR: The first startup of this version terminates user agents and shell work still in legacy terminals and destroys the terminal server's retained screen/history, including final screens for already-ended agents. This is actual source-implied process/history loss, not merely a hypothetical failed cleanup; no execution was performed. Suggested bucket: highest on that original strongest consequence; could-be-highest: yes. Confidence: confirmed source and contract. hosts/process.rs:476-506 supplies the verified SIGTERM/SIGCONT/SIGKILL operation used by service/core/old_terminals.rs:223-257; removal of the server destroys its in-memory terminals. proposed_drop: exact specification acceptance of this intentional retirement only, pending the caller's independent check; no parent drop has been accepted. SPEC_impl.md, Terminal substrate: private tmux server, 2956-2958: \"This section covers the old terminals: the private tmux server releases before terminal hosts ran every terminal in, which later releases kept running beside terminal hosts. This release ends them at startup (below); every terminal runs in a terminal host\". SPEC.md, Terminal experience, explicitly says the first startup ends that server and everything still running in an old terminal, and an already-ended agent keeps its outcome but loses the last screen held in the server. Distinct failure contract, not a universal refutation: SPEC_impl.md:2998-3000 says \"A failure anywhere is logged and never fatal (the maintainer chose to start anyway and treat old sessions as ended, accepting that a Restart could then start a second agent beside one still running)\". That clause specifies proceeding after failure; it does not establish correct process selection, sufficient identification, valid attribution, or adequate warning presentation. Parent's g004/g071 general survival guidance and g033 hidden failure-warning concern are separate causes and are not disposed of by c1. possible_cover: parent reports g099/g110 independently describe the same intentional terminal/history retirement, likely duplicates; no queue coverage sources searched. Caveats: source-only review, and the parent owns reconciliation of those interface findings and independent drop approval. Discovery turn 3 normalization: kind is now finding, preserving the full original consequence and exact proposed_drop citations above. Parent has accepted no drop or lowering. Neighbour records g099/f1 and g110/f1 describe the same intentional retirement/history consequence, with g008/f1, g113/f2 and several driver-deletion groups also retaining provenance; overlap is not a disposition. Distinct surviving-agent, hidden-tab consent, spare-cleanup, warning and guidance findings remain outside this proposed drop."
+          }
+        }
+      ],
+      "latest": {
+        "line": 18,
+        "event": {
+          "version": 1,
+          "kind": "finding",
+          "id": "c1",
+          "state": "open",
+          "summary": "Intentional legacy terminal retirement remains a specification-based drop proposal",
+          "location": "crates/farhelm-supervisor/src/hosts/process.rs:476",
+          "detail": "Reviewed commit: dbfc69751215dbf15e1d31d5bed73c3754c4ebc4. Synthesis revision. TLDR: The first startup of this version terminates user agents and shell work still in legacy terminals and destroys the terminal server's retained screen/history, including final screens for already-ended agents. This is actual source-implied process/history loss, not merely a hypothetical failed cleanup; no execution was performed. Suggested bucket: highest on that original strongest consequence; could-be-highest: yes. Confidence: confirmed source and contract. hosts/process.rs:476-506 supplies the verified SIGTERM/SIGCONT/SIGKILL operation used by service/core/old_terminals.rs:223-257; removal of the server destroys its in-memory terminals. proposed_drop: exact specification acceptance of this intentional retirement only, pending the caller's independent check; no parent drop has been accepted. SPEC_impl.md, Terminal substrate: private tmux server, 2956-2958: \"This section covers the old terminals: the private tmux server releases before terminal hosts ran every terminal in, which later releases kept running beside terminal hosts. This release ends them at startup (below); every terminal runs in a terminal host\". SPEC.md, Terminal experience, explicitly says the first startup ends that server and everything still running in an old terminal, and an already-ended agent keeps its outcome but loses the last screen held in the server. Distinct failure contract, not a universal refutation: SPEC_impl.md:2998-3000 says \"A failure anywhere is logged and never fatal (the maintainer chose to start anyway and treat old sessions as ended, accepting that a Restart could then start a second agent beside one still running)\". That clause specifies proceeding after failure; it does not establish correct process selection, sufficient identification, valid attribution, or adequate warning presentation. Parent's g004/g071 general survival guidance and g033 hidden failure-warning concern are separate causes and are not disposed of by c1. possible_cover: parent reports g099/g110 independently describe the same intentional terminal/history retirement, likely duplicates; no queue coverage sources searched. Caveats: source-only review, and the parent owns reconciliation of those interface findings and independent drop approval. Discovery turn 3 normalization: kind is now finding, preserving the full original consequence and exact proposed_drop citations above. Parent has accepted no drop or lowering. Neighbour records g099/f1 and g110/f1 describe the same intentional retirement/history consequence, with g008/f1, g113/f2 and several driver-deletion groups also retaining provenance; overlap is not a disposition. Distinct surviving-agent, hidden-tab consent, spare-cleanup, warning and guidance findings remain outside this proposed drop."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g097/findings.jsonl",
+        "id": "c1",
+        "line": 18,
+        "disposition": "under-investigation",
+        "group": "g097-c1",
+        "reason": "Record durably acknowledged; parent source/contract validation, cross-group synthesis, coverage/filter matching and any independent drop check remain pending. This preserves the claim and uncertainty without accepting, dropping or lowering it."
+      },
+      "accepted_parent_decision": null,
+      "returned_claim_checks": [
+        {
+          "batch": "claims-064",
+          "key": "g097/c1",
+          "latest_line": 18,
+          "recommendation": "covered",
+          "bucket": "highest",
+          "underlying_key": "intentional-legacy-tmux-retirement-process-history-loss",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "Source establishes the intentional ending of legacy agents, tabs and retained screens. The specifications explicitly accept that exact consequence. This does not cover selecting a wrong process, mistaken pane attribution, inadequate warnings or surviving-agent guidance. The parent-reported aliases are outside this batch and were not independently matched.",
+          "checks": [
+            "dbfc69751215dbf15e1d31d5bed73c3754c4ebc4:crates/farhelm-supervisor/src/service/core/old_terminals.rs:176-279 connects to and pins the old server, then terminates it; :300-342 sweeps the attributed agents and tabs.",
+            "Same revision:crates/farhelm-supervisor/src/hosts/process.rs:476-506 sends verified SIGTERM, SIGCONT and, after grace, verified SIGKILL. This is source-implied process/history loss, not a reproduction.",
+            "Same revision:SPEC_impl.md:2954-3003 specifies retirement and the separate nonfatal failure policy; the originally mistaken failure-clause line range was corrected in the history to :2998-3000."
+          ],
+          "coverage_checked": [
+            "Current SPEC.md:2998-3013 explicitly accepts ending running old terminals, losing ended agents' last screens, closing old tabs, and proceeding after cleanup failure. Current SPEC_impl.md:2780-2827 states the same startup operation and 15-second budget.",
+            "TODO.md Planned is empty (:25-27). The phase-3 removal entry at :225-232 is Mid term, not Planned. It is not a basis for coverage.",
+            "Searched plans/queue for old/private/legacy terminals and retirement. tmux-end-old-terminals.md:72-109 describes this intentionally destructive behavior; tmux-drop-from-docs.md:32-34 explicitly preserves startup shutdown. No unlanded corrective plan supplies a separate exact fix.",
+            "Searched BUGS.md, queue INDEX and matching retirement terms, and active TRIAGE_OUTCOMES.md; no exact queue/bug/ledger item found. FILTER upgrade-plus-rare does not apply to ordinary retirement without another rare condition."
+          ],
+          "exact_cover_quotes": [
+            "SPEC.md:3000-3002: A supervisor that finds that tmux server when it starts ends it, and with it everything that still ran in an old terminal, without needing a tmux program.",
+            "SPEC.md:3003-3004: one whose agent had already ended keeps its outcome, but its terminal's last screen, which lived in the server, is gone; old tabs are closed.",
+            "SPEC_impl.md:2819-2821: A failure anywhere is logged and never fatal (the maintainer chose to start anyway and treat old sessions as ended, accepting that a Restart could then start a second agent beside one still running)"
+          ],
+          "missing_premise": null,
+          "original_stronger_consequence": "First startup terminates user agents and shell work in legacy terminals and destroys their retained screen/history, including final screens of ended agents. Preserve highest until the independent drop decision.",
+          "needs_independent_drop_check": true,
+          "proposed_basis": "Exact specification acceptance of intentional retirement only; this consultation does not authorize the drop."
+        }
+      ],
+      "parent_proposals": [
+        {
+          "artifact": "parent-flagged-judgments-064.json",
+          "key": "g097/c1",
+          "proposal": "claim-checks/claims-064/result.json",
+          "parent_proposal": "exact-spec-accepted-intentional-old-terminal-process-and-screen-retirement",
+          "final_independent_gate": "required-before-highest-drop",
+          "reason": "Parent read full064 in two bounded halves. Explicit startup retirement terminates old agents/tabs and retained final screens, exactly accepted by product/impl, including separately logged nonfatal cleanup failure. Highest actual process/content consequence preserved until gate. Scope only intended old resources, not wrong server/pane attribution, inadequate warnings or survivor assurance; aliases need actual join. No ordinary-upgrade rarity filter or Mid-term TODO cover."
+        }
+      ],
+      "collection": {
+        "retain": true,
+        "clearly_refuted_candidate": false,
+        "needs_unfinished_gate": true,
+        "provisional_bucket": "highest",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "intentional-legacy-tmux-retirement-process-history-loss",
+        "destination": "trailing-intentional-legacy-tmux-retirement-process-history-loss.md"
+      }
+    },
+    {
+      "key": "g097/l1",
+      "owner": "g097",
+      "id": "l1",
+      "domain": "supervisor-terminal-host-lifecycle",
+      "purpose": "supervisor-terminal-host-lifecycle: crates/farhelm-supervisor/src/launch.rs, crates/farhelm-supervisor/src/service/core/host_launch.rs, crates/farhelm-supervisor/src/service/core/host_restart.rs, crates/farhelm-supervisor/src/service/core/host_tabs.rs, crates/farhelm-supervisor/src/hosts/mod.rs, crates/farhelm-supervisor/src/hosts/test_program.rs, crates/farhelm-supervisor/src/service/core/tests/host_terminals.rs, crates/farhelm-supervisor/src/hosts/process.rs; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 2,
+          "event": {
+            "version": 1,
+            "kind": "lead",
+            "id": "l1",
+            "state": "open",
+            "summary": "Check that real tmux servers retain the argv socket pair",
+            "location": "crates/farhelm-supervisor/src/hosts/process.rs:181",
+            "detail": "Reviewed commit: dbfc69751215dbf15e1d31d5bed73c3754c4ebc4. TLDR: If tmux's process-title handling replaces its original argument vector, startup's new verification could refuse to end the legacy server; existing processes could remain behind the interrupted rows. Source basis: names_tmux_server_socket requires literal consecutive -S and socket arguments (process.rs:181-183), passed by old_terminals.rs:225-230, and refusal leaves the server alone (old_terminals.rs:260-265). The patch's unit test checks manufactured argument vectors only. Checked: complete assigned process patch, verification implementation, caller, and pinned Terminal substrate contract; those assert original arguments remain but do not themselves establish tmux's upstream behavior. Exact missing premise: argv as returned by the existing platform process reader for supported tmux servers after process-title setup. Next check: platform argv reader, server startup command, and primary tmux source. Suggested bucket: other pending route; potentially high if common inability to retire legacy agents; could-be-highest requires an established additional harm route, not yet shown. Confidence: uninvestigated lead, not a finding; no execution. proposed_drop: false. possible_cover: none."
+          }
+        },
+        {
+          "line": 3,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "l1",
+            "state": "open",
+            "summary": "tmux process-title setup does not erase Linux socket argv",
+            "location": "crates/farhelm-supervisor/src/hosts/process.rs:181",
+            "detail": "Reviewed commit: dbfc69751215dbf15e1d31d5bed73c3754c4ebc4. TLDR considered: original concern was failure to retire legacy servers, leaving agents behind interrupted rows if process-title setup erased -S/socket arguments. Source investigation refutes this route for the ordinary supported build: procs.rs:1123-1144 reads Linux /proc/pid/cmdline, while upstream tmux 3.7c server.c:187 calls proc_start and proc.c:183 calls setproctitle. Its compat/setproctitle.c:23-44 implements this with PR_SET_NAME only, which changes the process name without replacing argv; its other-platform fallback at 45-50 does nothing. configure.ac:160-184 uses this compatibility implementation when the platform has no setproctitle. Primary sources: https://raw.githubusercontent.com/tmux/tmux/3.7c/server.c ; https://raw.githubusercontent.com/tmux/tmux/3.7c/proc.c ; https://raw.githubusercontent.com/tmux/tmux/3.7c/compat/setproctitle.c ; https://raw.githubusercontent.com/tmux/tmux/3.7c/configure.ac . Suggested bucket: other for the refuted verification concern; original potentially high consequence preserved above. Could-be-highest: no established security or loss route; concurrent-agent harm was only a possible additional premise, and startup failure policy explicitly accepts a second agent. Confidence: source-supported refutation, no execution. proposed_drop: source refutation, not merely specification acceptance. possible_cover: none. Caveat: a deliberately custom-linked tmux with different process-title implementation was not established as an ordinary supported configuration; no claim of runtime verification or of argv inspection on every packaged tmux variant."
+          }
+        },
+        {
+          "line": 15,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "l1",
+            "state": "open",
+            "summary": "Checked tmux platform implementations preserve socket argv",
+            "location": "crates/farhelm-supervisor/src/hosts/process.rs:181",
+            "detail": "Reviewed commit: dbfc69751215dbf15e1d31d5bed73c3754c4ebc4. Synthesis expands the earlier Linux-only check. Original TLDR/consequence preserved: if process-title setup erased the original -S/socket pair, verification would leave a legacy server/agents behind interrupted rows, potentially a material UX failure. Suggested bucket other for a source-refuted concern, original potentially high consequence retained; could-be-highest: no established further loss/security route for this concern. Confidence: source-supported refutation for the inspected ordinary platform build paths, no execution. Checks/results: pinned .github/release/source-pins.env names tmux 3.7c. scripts/build-private-tmux.sh:73-74 downloads the checksum-pinned upstream release; 94-133 selects musl Linux or aarch64 Darwin and 155-167 configures it without a process-title patch or libbsd injection. Upstream tmux 3.7c and 3.8 compat/setproctitle.c:23-44 use PR_SET_NAME on Linux (glibc or musl), which changes the comm name, not argv; 45-50 is a no-op on the Darwin fallback. configure.ac selects this compatibility implementation when no native setproctitle exists. The currently fetched Homebrew formula uses unpatched upstream tmux 3.8 and does not add libbsd or a process-title patch. Apple's libc _stdlib.h exposes getprogname/setprogname but no setproctitle; together with the upstream fallback this supports the ordinary Homebrew/Darwin inference, not an observation of a running Mac. procs.rs:1721-1755 and parse_procargs2_argv:794-839 read the Darwin argv region, not the process comm name or environment; Linux reads /proc/pid/cmdline. An older upstream 3.2a source check also showed the same PR_SET_NAME/no-op implementation, although that is below this revision's version floor. proposed_drop: source refutation of process-title-induced argv loss in the inspected supported build routes; not justified merely by the nonfatal retirement failure policy. Exact supported-build contract, SPEC.md:5276-5283: \"The supported tmux is either the pinned build Farhelm itself installs or ships, or the stock tmux package of the platform's standard package source (the Linux distribution, or Homebrew on a Mac), at or above the version floor, run as the real binary.\" and \"Anything else is unsupported, including wrapper scripts, custom or patched builds, and configuration or behavior a stock package would not bring.\" Primary sources checked this turn: https://raw.githubusercontent.com/tmux/tmux/3.8/compat/setproctitle.c ; https://raw.githubusercontent.com/tmux/tmux/3.8/configure.ac ; https://raw.githubusercontent.com/Homebrew/homebrew-core/master/Formula/t/tmux.rb ; https://raw.githubusercontent.com/apple-oss-distributions/Libc/main/include/_stdlib.h . Prior event retains the 3.7c URLs. possible_cover: none known. Caveats: no claim that every distro's historic package binary was executed or every future package patch audited. No actual supported variant with argv replacement was identified; a concrete stock package doing so would reopen this ID. Current Homebrew source was checked as an additional supported variant, not misrepresented as the historical package installed on a reviewed user's machine."
+          }
+        }
+      ],
+      "latest": {
+        "line": 15,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "l1",
+          "state": "open",
+          "summary": "Checked tmux platform implementations preserve socket argv",
+          "location": "crates/farhelm-supervisor/src/hosts/process.rs:181",
+          "detail": "Reviewed commit: dbfc69751215dbf15e1d31d5bed73c3754c4ebc4. Synthesis expands the earlier Linux-only check. Original TLDR/consequence preserved: if process-title setup erased the original -S/socket pair, verification would leave a legacy server/agents behind interrupted rows, potentially a material UX failure. Suggested bucket other for a source-refuted concern, original potentially high consequence retained; could-be-highest: no established further loss/security route for this concern. Confidence: source-supported refutation for the inspected ordinary platform build paths, no execution. Checks/results: pinned .github/release/source-pins.env names tmux 3.7c. scripts/build-private-tmux.sh:73-74 downloads the checksum-pinned upstream release; 94-133 selects musl Linux or aarch64 Darwin and 155-167 configures it without a process-title patch or libbsd injection. Upstream tmux 3.7c and 3.8 compat/setproctitle.c:23-44 use PR_SET_NAME on Linux (glibc or musl), which changes the comm name, not argv; 45-50 is a no-op on the Darwin fallback. configure.ac selects this compatibility implementation when no native setproctitle exists. The currently fetched Homebrew formula uses unpatched upstream tmux 3.8 and does not add libbsd or a process-title patch. Apple's libc _stdlib.h exposes getprogname/setprogname but no setproctitle; together with the upstream fallback this supports the ordinary Homebrew/Darwin inference, not an observation of a running Mac. procs.rs:1721-1755 and parse_procargs2_argv:794-839 read the Darwin argv region, not the process comm name or environment; Linux reads /proc/pid/cmdline. An older upstream 3.2a source check also showed the same PR_SET_NAME/no-op implementation, although that is below this revision's version floor. proposed_drop: source refutation of process-title-induced argv loss in the inspected supported build routes; not justified merely by the nonfatal retirement failure policy. Exact supported-build contract, SPEC.md:5276-5283: \"The supported tmux is either the pinned build Farhelm itself installs or ships, or the stock tmux package of the platform's standard package source (the Linux distribution, or Homebrew on a Mac), at or above the version floor, run as the real binary.\" and \"Anything else is unsupported, including wrapper scripts, custom or patched builds, and configuration or behavior a stock package would not bring.\" Primary sources checked this turn: https://raw.githubusercontent.com/tmux/tmux/3.8/compat/setproctitle.c ; https://raw.githubusercontent.com/tmux/tmux/3.8/configure.ac ; https://raw.githubusercontent.com/Homebrew/homebrew-core/master/Formula/t/tmux.rb ; https://raw.githubusercontent.com/apple-oss-distributions/Libc/main/include/_stdlib.h . Prior event retains the 3.7c URLs. possible_cover: none known. Caveats: no claim that every distro's historic package binary was executed or every future package patch audited. No actual supported variant with argv replacement was identified; a concrete stock package doing so would reopen this ID. Current Homebrew source was checked as an additional supported variant, not misrepresented as the historical package installed on a reviewed user's machine."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g097/findings.jsonl",
+        "id": "l1",
+        "line": 15,
+        "disposition": "under-investigation",
+        "group": "g097-l1",
+        "reason": "Record durably acknowledged; parent source/contract validation, cross-group synthesis, coverage/filter matching and any independent drop check remain pending. This preserves the claim and uncertainty without accepting, dropping or lowering it."
+      },
+      "accepted_parent_decision": null,
+      "returned_claim_checks": [
+        {
+          "batch": "claims-064",
+          "key": "g097/l1",
+          "latest_line": 15,
+          "recommendation": "refuted",
+          "bucket": "other",
+          "underlying_key": "legacy-tmux-retirement-argv-process-title-hypothesis",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The investigated process-title mechanism preserves argv in the pinned upstream implementation and inspected ordinary platform routes. No supported binary replacing the socket argv was identified. This refutes the named hypothesis within those routes, not every historical package patch.",
+          "checks": [
+            "dbfc69751215dbf15e1d31d5bed73c3754c4ebc4:hosts/process.rs:173-183 requires consecutive -S/socket arguments; old_terminals.rs:223-277 leaves a mismatched server unswept.",
+            "Same revision:procs.rs:1123-1146 reads Linux /proc/pid/cmdline; :1721-1755 and :794-839 read Darwin KERN_PROCARGS2's argv region, not comm.",
+            "Same revision:.github/release/source-pins.env pins tmux 3.7c; scripts/build-private-tmux.sh:73-74,94-133,150-168 builds the upstream tarball for musl Linux/Darwin without a title patch or libbsd injection.",
+            "Primary upstream source checked: https://raw.githubusercontent.com/tmux/tmux/3.7c/server.c:187 calls proc_start; https://raw.githubusercontent.com/tmux/tmux/3.7c/proc.c:183 calls setproctitle; compat/setproctitle.c:23-50 in both 3.7c and 3.8 uses PR_SET_NAME or a no-op. configure.ac:160-184 selects the compatibility implementation when native setproctitle is absent.",
+            "Current https://raw.githubusercontent.com/Homebrew/homebrew-core/master/Formula/t/tmux.rb uses upstream 3.8 without a title patch/libbsd dependency. Apple's current Libc include/_stdlib.h has getprogname/setprogname, no setproctitle. This supports the ordinary Darwin inference; it is not a historical-package or running-Mac observation."
+          ],
+          "coverage_checked": [
+            "Current SPEC.md:2998-3013 and SPEC_impl.md:2780-2827 specify retirement and nonfatal failure, but do not independently refute argv loss. Historical SPEC.md:5277-5283 bounds supported tmux to pinned/stock real binaries and excludes arbitrary custom builds.",
+            "Searched both current specifications and TODO Planned, plans/queue, BUGS.md, INDEX/matching queue text, active TRIAGE_OUTCOMES.md for socket argv, process titles and retirement refusal. Planned is empty; no exact additional cover found. The tmux removal plans preserve startup retirement.",
+            "FILTER was read in full. No filter is needed for this source refutation; no concrete supported variant losing argv was established."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": "To reopen: identify a supported stock/pinned tmux build whose process-title implementation replaces the original -S/socket argv returned by Farhelm's platform reader. Historic distro variants were not exhaustively audited or executed.",
+          "original_stronger_consequence": "Verification could leave old agents behind interrupted rows, potentially a material/high legacy-retirement failure; no additional work-loss or security route was established. Earlier Linux-only reasoning was expanded to the inspected Darwin route.",
+          "needs_independent_drop_check": true,
+          "proposed_basis": "Narrow source refutation of process-title-induced argv loss, retaining historical-package limitations and the original potential high consequence."
+        }
+      ],
+      "parent_proposals": [
+        {
+          "artifact": "parent-flagged-judgments-064.json",
+          "key": "g097/l1",
+          "proposal": "claim-checks/claims-064/result.json",
+          "parent_proposal": "source-refuted-ordinary-tmux-process-title-destroys-socket-argv",
+          "final_independent_gate": "required-before-original-high-retirement-failure-drop",
+          "reason": "Full064 pinned upstream3.7c/3.8 title implementation uses PR_SET_NAME/no-op rather than overwriting argv; inspected Linuxcmdline/DarwinKERN_PROCARGS2 read argv, stock build scripts add no title patch/libbsd injection. CurrentHomebrew/Apple primary source supports ordinaryDarwin inference, not every historical package. Refute named supported-route process-title mismatch only, preserve historical distro limitation and old-agent survival/highUX consequence; nonfatal spec failure policy is not proof of matching argv."
+        }
+      ],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": true,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "legacy-tmux-retirement-argv-process-title-hypothesis",
+        "destination": null
+      }
+    },
+    {
+      "key": "g097/c2",
+      "owner": "g097",
+      "id": "c2",
+      "domain": "supervisor-terminal-host-lifecycle",
+      "purpose": "supervisor-terminal-host-lifecycle: crates/farhelm-supervisor/src/launch.rs, crates/farhelm-supervisor/src/service/core/host_launch.rs, crates/farhelm-supervisor/src/service/core/host_restart.rs, crates/farhelm-supervisor/src/service/core/host_tabs.rs, crates/farhelm-supervisor/src/hosts/mod.rs, crates/farhelm-supervisor/src/hosts/test_program.rs, crates/farhelm-supervisor/src/service/core/tests/host_terminals.rs, crates/farhelm-supervisor/src/hosts/process.rs; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 4,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c2",
+            "state": "open",
+            "summary": "Retired container launch commands remain fenced from host execution",
+            "location": "crates/farhelm-supervisor/src/launch.rs:1171",
+            "detail": "Reviewed commit: 04d85f0c98a9b635709d00b056719a0baa7fd3fc. TLDR considered: deleting container preparation/exec support must not make a queued container command run on the outside host. Details: LaunchSpec.container at launch.rs:226-230 retains old non-null JSON as Option<Value>; exec_launch_spec_with_seam at 1158-1175 refuses it before checkout preparation (1193), directory entry (1212), or agent exec (1236), and writes the ordinary failure sentinel. New prepare_launch specs explicitly set container: None (service/core.rs:17059-17060). require_active_launch at core.rs:3731-3739 fences retired SessionLaunch values; its callers include create validation (9281,9472), lifecycle actions (12662,13017), tab admission (15555), and attach/exec paths. validate_retry at 10116-10127 retains a retired pending create instead of rewriting it as an ordinary one. Repository-wide LaunchSpec references reveal no production deserialize-and-reserialize path that could drop this compatibility marker. Suggested bucket: highest if outside-host execution were reachable; could-be-highest: yes. Confidence: confirmed source refutation of the considered route; no execution. proposed_drop: source refutation. Contract: SPEC.md at this revision, Retired containerized sessions, lines 4818-4824: old model is retired, existing sessions support Delete only, and opening tabs/Restart/etc are refused. possible_cover: none; no coverage sources searched. Caveat: this is limited to the assigned launch-helper removals and their directly related gates; it is not a claim that all container retirement code was reviewed."
+          }
+        },
+        {
+          "line": 20,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c2",
+            "state": "open",
+            "summary": "Retired container launch commands remain fenced from host execution",
+            "location": "crates/farhelm-supervisor/src/launch.rs:1171",
+            "detail": "Reviewed commit: 04d85f0c98a9b635709d00b056719a0baa7fd3fc. TLDR considered: deleting container preparation/exec support must not make a queued container command run on the outside host. Details: LaunchSpec.container at launch.rs:226-230 retains old non-null JSON as Option<Value>; exec_launch_spec_with_seam at 1158-1175 refuses it before checkout preparation (1193), directory entry (1212), or agent exec (1236), and writes the ordinary failure sentinel. New prepare_launch specs explicitly set container: None (service/core.rs:17059-17060). require_active_launch at core.rs:3731-3739 fences retired SessionLaunch values; its callers include create validation (9281,9472), lifecycle actions (12662,13017), tab admission (15555), and attach/exec paths. validate_retry at 10116-10127 retains a retired pending create instead of rewriting it as an ordinary one. Repository-wide LaunchSpec references reveal no production deserialize-and-reserialize path that could drop this compatibility marker. Suggested bucket: highest if outside-host execution were reachable; could-be-highest: yes. Confidence: confirmed source refutation of the considered route; no execution. proposed_drop: source refutation. Contract: SPEC.md at this revision, Retired containerized sessions, lines 4818-4824: old model is retired, existing sessions support Delete only, and opening tabs/Restart/etc are refused. possible_cover: none; no coverage sources searched. Caveat: this is limited to the assigned launch-helper removals and their directly related gates; it is not a claim that all container retirement code was reviewed. Discovery turn 3 separately checked the new regression test oracle, rather than inferring test quality from correct production code. Considered whether its deliberately missing working directory and checkout make no-exec assertions vacuous. launch.rs:3307-3309 additionally requires the exact RETIRED_MESSAGE from the child result, and :3317-3320 requires a retirement sentinel, so an ordinary failed preparation/directory/exec path cannot satisfy the full oracle merely by failing for another reason. run_exec_failure_child:2566-2587 also requires successful helper exit and an actual result file from the exact ignored helper. The fixture asserts both marker and preparation-state absence before the action at :3303. proposed_drop for this distinct test-oracle suspicion: source refutation; no production-ordering assumption is needed. Could-be-highest for that test-only concern: no established runtime loss/security route. No execution performed; the original outside-host-execution consequence and full production guard analysis remain intact above."
+          }
+        }
+      ],
+      "latest": {
+        "line": 20,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c2",
+          "state": "open",
+          "summary": "Retired container launch commands remain fenced from host execution",
+          "location": "crates/farhelm-supervisor/src/launch.rs:1171",
+          "detail": "Reviewed commit: 04d85f0c98a9b635709d00b056719a0baa7fd3fc. TLDR considered: deleting container preparation/exec support must not make a queued container command run on the outside host. Details: LaunchSpec.container at launch.rs:226-230 retains old non-null JSON as Option<Value>; exec_launch_spec_with_seam at 1158-1175 refuses it before checkout preparation (1193), directory entry (1212), or agent exec (1236), and writes the ordinary failure sentinel. New prepare_launch specs explicitly set container: None (service/core.rs:17059-17060). require_active_launch at core.rs:3731-3739 fences retired SessionLaunch values; its callers include create validation (9281,9472), lifecycle actions (12662,13017), tab admission (15555), and attach/exec paths. validate_retry at 10116-10127 retains a retired pending create instead of rewriting it as an ordinary one. Repository-wide LaunchSpec references reveal no production deserialize-and-reserialize path that could drop this compatibility marker. Suggested bucket: highest if outside-host execution were reachable; could-be-highest: yes. Confidence: confirmed source refutation of the considered route; no execution. proposed_drop: source refutation. Contract: SPEC.md at this revision, Retired containerized sessions, lines 4818-4824: old model is retired, existing sessions support Delete only, and opening tabs/Restart/etc are refused. possible_cover: none; no coverage sources searched. Caveat: this is limited to the assigned launch-helper removals and their directly related gates; it is not a claim that all container retirement code was reviewed. Discovery turn 3 separately checked the new regression test oracle, rather than inferring test quality from correct production code. Considered whether its deliberately missing working directory and checkout make no-exec assertions vacuous. launch.rs:3307-3309 additionally requires the exact RETIRED_MESSAGE from the child result, and :3317-3320 requires a retirement sentinel, so an ordinary failed preparation/directory/exec path cannot satisfy the full oracle merely by failing for another reason. run_exec_failure_child:2566-2587 also requires successful helper exit and an actual result file from the exact ignored helper. The fixture asserts both marker and preparation-state absence before the action at :3303. proposed_drop for this distinct test-oracle suspicion: source refutation; no production-ordering assumption is needed. Could-be-highest for that test-only concern: no established runtime loss/security route. No execution performed; the original outside-host-execution consequence and full production guard analysis remain intact above."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g097/findings.jsonl",
+        "id": "c2",
+        "line": 20,
+        "disposition": "under-investigation",
+        "group": "g097-c2",
+        "reason": "Record durably acknowledged; parent source/contract validation, cross-group synthesis, coverage/filter matching and any independent drop check remain pending. This preserves the claim and uncertainty without accepting, dropping or lowering it."
+      },
+      "accepted_parent_decision": null,
+      "returned_claim_checks": [
+        {
+          "batch": "claims-064",
+          "key": "g097/c2",
+          "latest_line": 20,
+          "recommendation": "refuted",
+          "bucket": "other",
+          "underlying_key": "retired-container-launch-outside-host-isolation-hypothesis",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "Old non-null container JSON survives decoding and is refused before preparation or execution. The named regression also requires the exact retirement explanation, so missing directories cannot satisfy its whole oracle by themselves.",
+          "checks": [
+            "04d85f0c98a9b635709d00b056719a0baa7fd3fc:crates/farhelm-supervisor/src/launch.rs:226-230 retains container as Option<Value>; :1158-1175 decodes and refuses it before later launch work.",
+            "Same revision:service/core.rs:3731-3739 refuses retired SessionLaunch values; :10117-10127 retains a retired pending create on retry; :17059-17060 constructs new specs with container: None.",
+            "Same revision:launch.rs:3293-3320 injects non-null legacy JSON, establishes absent markers before acting, requires RETIRED_MESSAGE and a retirement sentinel, and asserts no preparation/exec marker. :2566-2587 requires the exact child helper to exit successfully and leave its report. Source checks only; no test was run."
+          ],
+          "coverage_checked": [
+            "Current SPEC.md:4892-4900 Retired containerized sessions requires Delete-only legacy sessions and refusal of execution/lifecycle actions. This is the intended guard contract, not acceptance of outside-host execution.",
+            "Searched both specifications, empty TODO Planned, plans/queue, BUGS.md, INDEX/matching container terms, and active TRIAGE_OUTCOMES.md for retired/queued container specs, outside-host execution and marker loss. No exact queued/planned accepted defect found; podman-environments material concerns retirement/new container architecture rather than a remaining executable queued-spec bypass.",
+            "No FILTER boundary is needed or established. The original hypothetical isolation failure would not be dismissed merely because upgrading is involved."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": "An actual production route that drops a non-null old container marker before this executor would be needed to establish the original outside-host execution consequence; none was established in this named claim.",
+          "original_stronger_consequence": "Removing container preparation could execute queued container argv directly on the outside host, with possible highest security/user-work consequences. The separate test-oracle suspicion was test-only and also source-refuted.",
+          "needs_independent_drop_check": true,
+          "proposed_basis": "Source refutation of the assigned launch-removal route and, separately, of the claimed vacuous regression oracle. Preserve the original isolation consequence for independent drop review."
+        }
+      ],
+      "parent_proposals": [
+        {
+          "artifact": "parent-flagged-judgments-064.json",
+          "key": "g097/c2",
+          "proposal": "claim-checks/claims-064/result.json",
+          "parent_proposal": "source-refuted-queued-container-host-fallback-and-specific-vacuous-test-oracle",
+          "final_independent_gate": "required-before-highest-isolation-drop",
+          "reason": "Full064 old nonnull JSON marker survives decode and refuses before prepare/exec, active/retry guards retain it; new specs intentionallyNone do not eraseoldones. Separate regression establishes absent markers, requires exact RETIRED_MESSAGE/sentinel and child helper successful report, so missing directories alone cannot satisfy full oracle. Production correctness and test discrimination are separate proofs. Preserve outside-host isolation/work/security consequence, not every endpoint/oldbinary tested or certified."
+        }
+      ],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": true,
+        "provisional_bucket": "highest",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "retired-container-launch-outside-host-isolation-hypothesis",
+        "destination": null
+      }
+    },
+    {
+      "key": "g097/l2",
+      "owner": "g097",
+      "id": "l2",
+      "domain": "supervisor-terminal-host-lifecycle",
+      "purpose": "supervisor-terminal-host-lifecycle: crates/farhelm-supervisor/src/launch.rs, crates/farhelm-supervisor/src/service/core/host_launch.rs, crates/farhelm-supervisor/src/service/core/host_restart.rs, crates/farhelm-supervisor/src/service/core/host_tabs.rs, crates/farhelm-supervisor/src/hosts/mod.rs, crates/farhelm-supervisor/src/hosts/test_program.rs, crates/farhelm-supervisor/src/service/core/tests/host_terminals.rs, crates/farhelm-supervisor/src/hosts/process.rs; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 5,
+          "event": {
+            "version": 1,
+            "kind": "lead",
+            "id": "l2",
+            "state": "open",
+            "summary": "Two converted consent fixtures replace a real host without ending it",
+            "location": "crates/farhelm-supervisor/src/service/core/tests/host_terminals.rs:4457",
+            "detail": "Reviewed commit: 70bc66a9f285cc2a9984924f389834d118b7cfdc. TLDR: Two tests switched to real host creation may leave an extra terminal host/process after swapping their session to a stand-in. Source basis: changed tests at host_terminals.rs:4457 and 4519 now use host_supervisor/host_seams; their shared host_agent_with_an_earlier_start creates a session at 4371, replaces its stored terminal address at 4398-4405 and its live entry at 4406-4426, without retaining or shutting down the created terminal. The same patch explicitly ends the created host in the other converted helper at 4159-4167. Exact missing premise: whether automatic HostTerminal drop or StateDir teardown reliably ends this original host despite its live/store reference being replaced. Next checks: runtime drop semantics, StateDir guard cleanup and actual test launch argv. Suggested bucket: other, test resource cleanup; could-be-highest: no established user-owned-work route, scope is maintainer tests. Confidence: uninvestigated lead, source only. proposed_drop: false. possible_cover: none."
+          }
+        },
+        {
+          "line": 6,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "l2",
+            "state": "open",
+            "summary": "Converted consent fixtures retain socket-based teardown for the extra host",
+            "location": "crates/farhelm-supervisor/src/service/core/tests/host_terminals.rs:4457",
+            "detail": "Reviewed commit: 70bc66a9f285cc2a9984924f389834d118b7cfdc. TLDR considered: replacing a newly created real host with a stand-in might leak the original process between tests. Checked: host_agent_with_an_earlier_start at host_terminals.rs:4371-4426 does drop the original handle rather than explicitly end it; HostTerminal docs at hosts/terminal.rs:1218-1221 confirm dropping leaves the host running. However both callers own StateDir, whose inner farhelm_teststate::TestDir scans socket paths at teardown independently of the database and live entry: StateDir at core.rs:20045-20069; TestDir::drop at farhelm-teststate/src/lib.rs:794-817 invokes stop_hosts_within, and hosts.rs:94-130 collects and stops every host socket. A failed cleanup keeps the state directory for retry instead of losing the socket. The old host socket was not removed by the replacement. The original child here also uses dummy_exe (/nonexistent/farhelm), so this is a terminal final-screen host rather than the scripted sleep process used by the stand-ins. Suggested bucket: other, tests only. Could-be-highest: no, no established user-work route. Confidence: confirmed source refutation of the leak concern; no execution. proposed_drop: source refutation: test teardown deliberately handles hosts without session-entry references. possible_cover: none. Caveat: the extra host remains until fixture teardown and could add a small bounded resource cost; that alone is not a substantive bug."
+          }
+        }
+      ],
+      "latest": {
+        "line": 6,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "l2",
+          "state": "open",
+          "summary": "Converted consent fixtures retain socket-based teardown for the extra host",
+          "location": "crates/farhelm-supervisor/src/service/core/tests/host_terminals.rs:4457",
+          "detail": "Reviewed commit: 70bc66a9f285cc2a9984924f389834d118b7cfdc. TLDR considered: replacing a newly created real host with a stand-in might leak the original process between tests. Checked: host_agent_with_an_earlier_start at host_terminals.rs:4371-4426 does drop the original handle rather than explicitly end it; HostTerminal docs at hosts/terminal.rs:1218-1221 confirm dropping leaves the host running. However both callers own StateDir, whose inner farhelm_teststate::TestDir scans socket paths at teardown independently of the database and live entry: StateDir at core.rs:20045-20069; TestDir::drop at farhelm-teststate/src/lib.rs:794-817 invokes stop_hosts_within, and hosts.rs:94-130 collects and stops every host socket. A failed cleanup keeps the state directory for retry instead of losing the socket. The old host socket was not removed by the replacement. The original child here also uses dummy_exe (/nonexistent/farhelm), so this is a terminal final-screen host rather than the scripted sleep process used by the stand-ins. Suggested bucket: other, tests only. Could-be-highest: no, no established user-work route. Confidence: confirmed source refutation of the leak concern; no execution. proposed_drop: source refutation: test teardown deliberately handles hosts without session-entry references. possible_cover: none. Caveat: the extra host remains until fixture teardown and could add a small bounded resource cost; that alone is not a substantive bug."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g097/findings.jsonl",
+        "id": "l2",
+        "line": 6,
+        "disposition": "excluded",
+        "group": "converted-consent-fixture-extra-real-host-cleanup-hypothesis",
+        "reason": "Parent explicitly accepted named refuted proposal from claims-064 after inspecting it. Replacing the live/database handle leaves the original real host running only until the owned test directory's socket scan ends it. That cleanup does not rely on either replaced reference. A separate queued stand-in-listener teardown issue is not this alleged lost real-host reference. Source refutation of the lost-reference cleanup hypothesis, limited to the retained original socket and TestDir cleanup mechanism; no promise that every possible teardown fault succeeds. Checked source/results: [\"70bc66a9f285cc2a9984924f389834d118b7cfdc:service/core/tests/host_terminals.rs:4371-4426 creates and replaces the real terminal handle/address; :4454-4459 supplies an owned StateDir and a multithread runtime.\",\"Same revision:hosts/terminal.rs:1218-1221 explicitly leaves a host running on final-handle drop. service/core.rs:20045-20069 wraps farhelm_teststate::TestDir.\",\"Same revision:farhelm-teststate/src/lib.rs:794-817 calls socket-based host cleanup before directory removal and retains the directory if cleanup is uncertain. hosts.rs:94-130 scans every host socket independently of session rows. The replacement does not remove the original socket. No runtime cleanup was observed.\"] Current coverage/results: [\"Current SPEC_impl.md:2590-2601 specifies socket-based TestDir cleanup/retention. Searched SPEC.md too; no separate acceptance of losing owned hosts.\",\"Searched empty TODO Planned, plans/queue, BUGS.md, INDEX and active TRIAGE_OUTCOMES.md for converted consent fixtures, extra hosts and teardown. Read review_feedback_queue/blocking-test-cleanup-prevents-async-listener-release.md in full: it concerns an aborted stand-in listener on a current-thread executor, not losing the original real host after these replacements. No exact duplicate or extension is established.\",\"FILTER does not supply this disposition; bounded fixture-lifetime resource retention alone is not the originally alleged leak.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Two converted consent tests might leak an extra terminal host/process after replacing its stored and live references. Maintainer-test cleanup only; no user-owned-work route was claimed.\"; null."
+      },
+      "accepted_parent_decision": {
+        "key": "g097/l2",
+        "line": 6,
+        "disposition": "excluded",
+        "group": "converted-consent-fixture-extra-real-host-cleanup-hypothesis",
+        "bucket": "other",
+        "recording": "refuted",
+        "queue_target_candidate": null,
+        "needs_independent_drop_check": false,
+        "reason": "Parent explicitly accepted named refuted proposal from claims-064 after inspecting it. Replacing the live/database handle leaves the original real host running only until the owned test directory's socket scan ends it. That cleanup does not rely on either replaced reference. A separate queued stand-in-listener teardown issue is not this alleged lost real-host reference. Source refutation of the lost-reference cleanup hypothesis, limited to the retained original socket and TestDir cleanup mechanism; no promise that every possible teardown fault succeeds. Checked source/results: [\"70bc66a9f285cc2a9984924f389834d118b7cfdc:service/core/tests/host_terminals.rs:4371-4426 creates and replaces the real terminal handle/address; :4454-4459 supplies an owned StateDir and a multithread runtime.\",\"Same revision:hosts/terminal.rs:1218-1221 explicitly leaves a host running on final-handle drop. service/core.rs:20045-20069 wraps farhelm_teststate::TestDir.\",\"Same revision:farhelm-teststate/src/lib.rs:794-817 calls socket-based host cleanup before directory removal and retains the directory if cleanup is uncertain. hosts.rs:94-130 scans every host socket independently of session rows. The replacement does not remove the original socket. No runtime cleanup was observed.\"] Current coverage/results: [\"Current SPEC_impl.md:2590-2601 specifies socket-based TestDir cleanup/retention. Searched SPEC.md too; no separate acceptance of losing owned hosts.\",\"Searched empty TODO Planned, plans/queue, BUGS.md, INDEX and active TRIAGE_OUTCOMES.md for converted consent fixtures, extra hosts and teardown. Read review_feedback_queue/blocking-test-cleanup-prevents-async-listener-release.md in full: it concerns an aborted stand-in listener on a current-thread executor, not losing the original real host after these replacements. No exact duplicate or extension is established.\",\"FILTER does not supply this disposition; bounded fixture-lifetime resource retention alone is not the originally alleged leak.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Two converted consent tests might leak an extra terminal host/process after replacing its stored and live references. Maintainer-test cleanup only; no user-owned-work route was claimed.\"; null."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-064",
+          "key": "g097/l2",
+          "latest_line": 6,
+          "recommendation": "refuted",
+          "bucket": "other",
+          "underlying_key": "converted-consent-fixture-extra-real-host-cleanup-hypothesis",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "Replacing the live/database handle leaves the original real host running only until the owned test directory's socket scan ends it. That cleanup does not rely on either replaced reference. A separate queued stand-in-listener teardown issue is not this alleged lost real-host reference.",
+          "checks": [
+            "70bc66a9f285cc2a9984924f389834d118b7cfdc:service/core/tests/host_terminals.rs:4371-4426 creates and replaces the real terminal handle/address; :4454-4459 supplies an owned StateDir and a multithread runtime.",
+            "Same revision:hosts/terminal.rs:1218-1221 explicitly leaves a host running on final-handle drop. service/core.rs:20045-20069 wraps farhelm_teststate::TestDir.",
+            "Same revision:farhelm-teststate/src/lib.rs:794-817 calls socket-based host cleanup before directory removal and retains the directory if cleanup is uncertain. hosts.rs:94-130 scans every host socket independently of session rows. The replacement does not remove the original socket. No runtime cleanup was observed."
+          ],
+          "coverage_checked": [
+            "Current SPEC_impl.md:2590-2601 specifies socket-based TestDir cleanup/retention. Searched SPEC.md too; no separate acceptance of losing owned hosts.",
+            "Searched empty TODO Planned, plans/queue, BUGS.md, INDEX and active TRIAGE_OUTCOMES.md for converted consent fixtures, extra hosts and teardown. Read review_feedback_queue/blocking-test-cleanup-prevents-async-listener-release.md in full: it concerns an aborted stand-in listener on a current-thread executor, not losing the original real host after these replacements. No exact duplicate or extension is established.",
+            "FILTER does not supply this disposition; bounded fixture-lifetime resource retention alone is not the originally alleged leak."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": null,
+          "original_stronger_consequence": "Two converted consent tests might leak an extra terminal host/process after replacing its stored and live references. Maintainer-test cleanup only; no user-owned-work route was claimed.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Source refutation of the lost-reference cleanup hypothesis, limited to the retained original socket and TestDir cleanup mechanism; no promise that every possible teardown fault succeeds."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "converted-consent-fixture-extra-real-host-cleanup-hypothesis",
+        "destination": null
+      }
+    },
+    {
+      "key": "g097/c3",
+      "owner": "g097",
+      "id": "c3",
+      "domain": "supervisor-terminal-host-lifecycle",
+      "purpose": "supervisor-terminal-host-lifecycle: crates/farhelm-supervisor/src/launch.rs, crates/farhelm-supervisor/src/service/core/host_launch.rs, crates/farhelm-supervisor/src/service/core/host_restart.rs, crates/farhelm-supervisor/src/service/core/host_tabs.rs, crates/farhelm-supervisor/src/hosts/mod.rs, crates/farhelm-supervisor/src/hosts/test_program.rs, crates/farhelm-supervisor/src/service/core/tests/host_terminals.rs, crates/farhelm-supervisor/src/hosts/process.rs; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 7,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c3",
+            "state": "open",
+            "summary": "Unit-test host launcher deliberately supports glibc Linux only",
+            "location": "crates/farhelm-supervisor/src/hosts/test_program.rs:47",
+            "detail": "Reviewed commit: 70bc66a9f285cc2a9984924f389834d118b7cfdc. TLDR considered: unit tests that require a real host now fail on macOS or musl because their test binary has no host initializer. Details: hosts/test_program.rs:41-43 always returns the test binary, but its entry module is cfg(all(target_os = linux, target_env = gnu)) at 47; the initializer checks exactly the four expected arguments and forwards only --socket/path to terminal_host::main_entry (73-93). The real host launcher supplies exactly this argv and clears the child environment (hosts/spawn.rs:350-359). The separate exec before loader initialization precedes libtest's threads, satisfying terminal-host/src/spawn.rs:30-32's single-threaded contract. This does not put a fork in a test-runner worker. Suggested bucket: other, maintainer test portability. Could-be-highest: no. Confidence: confirmed source, no execution. proposed_drop: explicit specification acceptance. SPEC_impl.md at this commit lines 2311-2317, Turning terminal hosts on: \"The supervisor crate's own unit tests have no `farhelm`, so their test binary is its own host program: started with a host's command line (`internal terminal-host --socket <path>`), a loader initializer in it runs the host crate's entry point before libtest's `main` starts any thread, and exits (`hosts::test_program`). It is registered on glibc Linux only; elsewhere every host start from a unit test is refused (libtest rejects the arguments), so those tests fail by name rather than run on another kind of terminal.\" possible_cover: none. Caveat: this disposition covers the explicit platform limitation and threading boundary, not every conceivable pre-main Rust initialization issue."
+          }
+        },
+        {
+          "line": 21,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c3",
+            "state": "open",
+            "summary": "Unit-test host launcher deliberately supports glibc Linux only",
+            "location": "crates/farhelm-supervisor/src/hosts/test_program.rs:47",
+            "detail": "Reviewed commit: 70bc66a9f285cc2a9984924f389834d118b7cfdc. TLDR considered: unit tests that require a real host now fail on macOS or musl because their test binary has no host initializer. Details: hosts/test_program.rs:41-43 always returns the test binary, but its entry module is cfg(all(target_os = linux, target_env = gnu)) at 47; the initializer checks exactly the four expected arguments and forwards only --socket/path to terminal_host::main_entry (73-93). The real host launcher supplies exactly this argv and clears the child environment (hosts/spawn.rs:350-359). The separate exec before loader initialization precedes libtest's threads, satisfying terminal-host/src/spawn.rs:30-32's single-threaded contract. This does not put a fork in a test-runner worker. Suggested bucket: other, maintainer test portability. Could-be-highest: no. Confidence: confirmed source, no execution. proposed_drop: explicit specification acceptance. SPEC_impl.md at this commit lines 2311-2317, Turning terminal hosts on: \"The supervisor crate's own unit tests have no `farhelm`, so their test binary is its own host program: started with a host's command line (`internal terminal-host --socket <path>`), a loader initializer in it runs the host crate's entry point before libtest's `main` starts any thread, and exits (`hosts::test_program`). It is registered on glibc Linux only; elsewhere every host start from a unit test is refused (libtest rejects the arguments), so those tests fail by name rather than run on another kind of terminal.\" possible_cover: none. Caveat: this disposition covers the explicit platform limitation and threading boundary, not every conceivable pre-main Rust initialization issue. Discovery turn 3 checked the separate pre-main signal/runtime concern against actual startup code. The initializer passes only --socket/path and does not enter libtest for that command; second_stage in terminal-host/src/spawn.rs installs host signal dispositions before binding/child startup/readiness reporting, and host.rs:1392-1413 explicitly ignores SIGPIPE. Thus a readiness-pipe write after the first stage exits follows the same EPIPE/abandon path despite Rust main not having installed its usual SIGPIPE disposition. First-stage startup failure remains a refused start; no distinct host-lifetime or test-oracle defect was established. This source refutation is separate from the explicit unsupported-platform limitation. Numbered-source correction: in this commit unit_test_host_program is at test_program.rs:45-47 and the entry cfg is at :50, not :47 as an earlier detail loosely cited. Confidence remains source-only; no runtime observation. No blanket claim is made about arbitrary external loader initializers or uninspected instrumentation."
+          }
+        }
+      ],
+      "latest": {
+        "line": 21,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c3",
+          "state": "open",
+          "summary": "Unit-test host launcher deliberately supports glibc Linux only",
+          "location": "crates/farhelm-supervisor/src/hosts/test_program.rs:47",
+          "detail": "Reviewed commit: 70bc66a9f285cc2a9984924f389834d118b7cfdc. TLDR considered: unit tests that require a real host now fail on macOS or musl because their test binary has no host initializer. Details: hosts/test_program.rs:41-43 always returns the test binary, but its entry module is cfg(all(target_os = linux, target_env = gnu)) at 47; the initializer checks exactly the four expected arguments and forwards only --socket/path to terminal_host::main_entry (73-93). The real host launcher supplies exactly this argv and clears the child environment (hosts/spawn.rs:350-359). The separate exec before loader initialization precedes libtest's threads, satisfying terminal-host/src/spawn.rs:30-32's single-threaded contract. This does not put a fork in a test-runner worker. Suggested bucket: other, maintainer test portability. Could-be-highest: no. Confidence: confirmed source, no execution. proposed_drop: explicit specification acceptance. SPEC_impl.md at this commit lines 2311-2317, Turning terminal hosts on: \"The supervisor crate's own unit tests have no `farhelm`, so their test binary is its own host program: started with a host's command line (`internal terminal-host --socket <path>`), a loader initializer in it runs the host crate's entry point before libtest's `main` starts any thread, and exits (`hosts::test_program`). It is registered on glibc Linux only; elsewhere every host start from a unit test is refused (libtest rejects the arguments), so those tests fail by name rather than run on another kind of terminal.\" possible_cover: none. Caveat: this disposition covers the explicit platform limitation and threading boundary, not every conceivable pre-main Rust initialization issue. Discovery turn 3 checked the separate pre-main signal/runtime concern against actual startup code. The initializer passes only --socket/path and does not enter libtest for that command; second_stage in terminal-host/src/spawn.rs installs host signal dispositions before binding/child startup/readiness reporting, and host.rs:1392-1413 explicitly ignores SIGPIPE. Thus a readiness-pipe write after the first stage exits follows the same EPIPE/abandon path despite Rust main not having installed its usual SIGPIPE disposition. First-stage startup failure remains a refused start; no distinct host-lifetime or test-oracle defect was established. This source refutation is separate from the explicit unsupported-platform limitation. Numbered-source correction: in this commit unit_test_host_program is at test_program.rs:45-47 and the entry cfg is at :50, not :47 as an earlier detail loosely cited. Confidence remains source-only; no runtime observation. No blanket claim is made about arbitrary external loader initializers or uninspected instrumentation."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g097/findings.jsonl",
+        "id": "c3",
+        "line": 21,
+        "disposition": "excluded",
+        "group": "unit-test-host-launcher-glibc-platform-limitation",
+        "reason": "Parent explicitly accepted named covered proposal from claims-064 after inspecting it. The platform limitation is explicit in the implementation specification. The separately investigated pre-main SIGPIPE hypothesis is source-refuted by signal installation before host readiness reporting. Exact specification acceptance of platform scope; separate source refutation of the named pre-main signal concern. Checked source/results: [\"70bc66a9f285cc2a9984924f389834d118b7cfdc:hosts/test_program.rs:45-50 returns the test executable on all platforms and registers entry only for glibc Linux; :74-93 checks exactly internal terminal-host --socket/path and enters the host before libtest.\",\"Same revision:hosts/spawn.rs:350-359 supplies exactly that argv with a cleared environment; this is a fresh exec before libtest starts threads, not a fork from a running test worker.\",\"Same revision:terminal-host/src/spawn.rs:137-182 installs host signal handlers before binding/startup; host.rs:1392-1413 ignores SIGPIPE; spawn.rs:185-203 handles failed readiness writes by abandoning the start. No runtime observation or arbitrary-loader-initializer proof is claimed.\",\"The history's location correction is valid: unit_test_host_program is :45-47, entry cfg :50, not the initial approximate :47 citation.\"] Current coverage/results: [\"Historical SPEC_impl.md:2311-2317 and current SPEC_impl.md:2166-2172 explicitly say the initializer is glibc Linux only and host-dependent tests fail by name elsewhere. SPEC.md has no conflicting test-platform promise found.\",\"Searched empty TODO Planned, plans/queue, BUGS.md, INDEX/matching unit-test-host/glibc terms, and active TRIAGE_OUTCOMES.md; no additional exact cover or alias found.\",\"No FILTER applied.\"] Exact cited cover: [\"Current SPEC_impl.md:2168-2170: It is registered on glibc Linux only; elsewhere every host start from a unit test is refused (libtest rejects the arguments), so those tests fail by name rather than run on another kind of terminal.\"] Original stronger consequence and missing premise remain preserved: \"Real-host unit tests fail on macOS/musl without the loader initializer. A separate concern about running before Rust's signal setup was investigated, with no distinct host-lifetime defect established. Maintainer-test scope only.\"; null."
+      },
+      "accepted_parent_decision": {
+        "key": "g097/c3",
+        "line": 21,
+        "disposition": "excluded",
+        "group": "unit-test-host-launcher-glibc-platform-limitation",
+        "bucket": "other",
+        "recording": "covered",
+        "queue_target_candidate": null,
+        "needs_independent_drop_check": false,
+        "reason": "Parent explicitly accepted named covered proposal from claims-064 after inspecting it. The platform limitation is explicit in the implementation specification. The separately investigated pre-main SIGPIPE hypothesis is source-refuted by signal installation before host readiness reporting. Exact specification acceptance of platform scope; separate source refutation of the named pre-main signal concern. Checked source/results: [\"70bc66a9f285cc2a9984924f389834d118b7cfdc:hosts/test_program.rs:45-50 returns the test executable on all platforms and registers entry only for glibc Linux; :74-93 checks exactly internal terminal-host --socket/path and enters the host before libtest.\",\"Same revision:hosts/spawn.rs:350-359 supplies exactly that argv with a cleared environment; this is a fresh exec before libtest starts threads, not a fork from a running test worker.\",\"Same revision:terminal-host/src/spawn.rs:137-182 installs host signal handlers before binding/startup; host.rs:1392-1413 ignores SIGPIPE; spawn.rs:185-203 handles failed readiness writes by abandoning the start. No runtime observation or arbitrary-loader-initializer proof is claimed.\",\"The history's location correction is valid: unit_test_host_program is :45-47, entry cfg :50, not the initial approximate :47 citation.\"] Current coverage/results: [\"Historical SPEC_impl.md:2311-2317 and current SPEC_impl.md:2166-2172 explicitly say the initializer is glibc Linux only and host-dependent tests fail by name elsewhere. SPEC.md has no conflicting test-platform promise found.\",\"Searched empty TODO Planned, plans/queue, BUGS.md, INDEX/matching unit-test-host/glibc terms, and active TRIAGE_OUTCOMES.md; no additional exact cover or alias found.\",\"No FILTER applied.\"] Exact cited cover: [\"Current SPEC_impl.md:2168-2170: It is registered on glibc Linux only; elsewhere every host start from a unit test is refused (libtest rejects the arguments), so those tests fail by name rather than run on another kind of terminal.\"] Original stronger consequence and missing premise remain preserved: \"Real-host unit tests fail on macOS/musl without the loader initializer. A separate concern about running before Rust's signal setup was investigated, with no distinct host-lifetime defect established. Maintainer-test scope only.\"; null."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-064",
+          "key": "g097/c3",
+          "latest_line": 21,
+          "recommendation": "covered",
+          "bucket": "other",
+          "underlying_key": "unit-test-host-launcher-glibc-platform-limitation",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The platform limitation is explicit in the implementation specification. The separately investigated pre-main SIGPIPE hypothesis is source-refuted by signal installation before host readiness reporting.",
+          "checks": [
+            "70bc66a9f285cc2a9984924f389834d118b7cfdc:hosts/test_program.rs:45-50 returns the test executable on all platforms and registers entry only for glibc Linux; :74-93 checks exactly internal terminal-host --socket/path and enters the host before libtest.",
+            "Same revision:hosts/spawn.rs:350-359 supplies exactly that argv with a cleared environment; this is a fresh exec before libtest starts threads, not a fork from a running test worker.",
+            "Same revision:terminal-host/src/spawn.rs:137-182 installs host signal handlers before binding/startup; host.rs:1392-1413 ignores SIGPIPE; spawn.rs:185-203 handles failed readiness writes by abandoning the start. No runtime observation or arbitrary-loader-initializer proof is claimed.",
+            "The history's location correction is valid: unit_test_host_program is :45-47, entry cfg :50, not the initial approximate :47 citation."
+          ],
+          "coverage_checked": [
+            "Historical SPEC_impl.md:2311-2317 and current SPEC_impl.md:2166-2172 explicitly say the initializer is glibc Linux only and host-dependent tests fail by name elsewhere. SPEC.md has no conflicting test-platform promise found.",
+            "Searched empty TODO Planned, plans/queue, BUGS.md, INDEX/matching unit-test-host/glibc terms, and active TRIAGE_OUTCOMES.md; no additional exact cover or alias found.",
+            "No FILTER applied."
+          ],
+          "exact_cover_quotes": [
+            "Current SPEC_impl.md:2168-2170: It is registered on glibc Linux only; elsewhere every host start from a unit test is refused (libtest rejects the arguments), so those tests fail by name rather than run on another kind of terminal."
+          ],
+          "missing_premise": null,
+          "original_stronger_consequence": "Real-host unit tests fail on macOS/musl without the loader initializer. A separate concern about running before Rust's signal setup was investigated, with no distinct host-lifetime defect established. Maintainer-test scope only.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Exact specification acceptance of platform scope; separate source refutation of the named pre-main signal concern."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": false,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "unit-test-host-launcher-glibc-platform-limitation",
+        "destination": null
+      }
+    },
+    {
+      "key": "g097/l3",
+      "owner": "g097",
+      "id": "l3",
+      "domain": "supervisor-terminal-host-lifecycle",
+      "purpose": "supervisor-terminal-host-lifecycle: crates/farhelm-supervisor/src/launch.rs, crates/farhelm-supervisor/src/service/core/host_launch.rs, crates/farhelm-supervisor/src/service/core/host_restart.rs, crates/farhelm-supervisor/src/service/core/host_tabs.rs, crates/farhelm-supervisor/src/hosts/mod.rs, crates/farhelm-supervisor/src/hosts/test_program.rs, crates/farhelm-supervisor/src/service/core/tests/host_terminals.rs, crates/farhelm-supervisor/src/hosts/process.rs; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 8,
+          "event": {
+            "version": 1,
+            "kind": "lead",
+            "id": "l3",
+            "state": "open",
+            "summary": "Check absolute socket spelling against older tmux launch commands",
+            "location": "crates/farhelm-supervisor/src/hosts/process.rs:483",
+            "detail": "Reviewed commit: dbfc69751215dbf15e1d31d5bed73c3754c4ebc4. TLDR: A legacy server started with a relative state/socket path could fail the new byte-for-byte absolute-path verification and survive retirement. Source basis: terminate_process_within makes socket absolute at process.rs:483, while names_tmux_server_socket compares argv bytes at 181-183. Missing premise: whether shipped older tmux launch code always made the -S argument absolute, including supervisor run with a relative state directory. Existing source comment asserts the separate -S argument shape but not this path normalization. Next: inspect pinned predecessor tmux construction and command construction and state-directory CLI normalization. Suggested bucket: other until trigger established, potentially high legacy retirement failure; could-be-highest: no established additional security/loss route. Confidence: uninvestigated lead, source only. proposed_drop: false. possible_cover: none."
+          }
+        },
+        {
+          "line": 9,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "l3",
+            "state": "open",
+            "summary": "Supervisor canonicalizes the old server socket directory before launch",
+            "location": "crates/farhelm-supervisor/src/hosts/process.rs:483",
+            "detail": "Reviewed commit: dbfc69751215dbf15e1d31d5bed73c3754c4ebc4. TLDR considered: relative legacy socket argv could cause verification to miss a live server and leave old agents behind interrupted rows. Source checks refute this route: at the predecessor dbfc69751215dbf15e1d31d5bed73c3754c4ebc4^, service/core.rs:6297-6304 canonicalizes state_dir before TmuxDriver::new_with_program at 6420; tmux.rs:2357-2359 stores that directory's tmux.sock and command at 2493-2499 supplies it as a separate -S argument. The range base 6e423e30068b62c6cfa276c6d720ee35bb70387a also canonicalizes at core.rs:6507. The reviewed revision canonicalizes at 6308 before end_private_server at 6434. Thus ordinary launches and retirement use the same absolute spelling even for relative CLI state-dir input. Suggested bucket: other for the refuted concern; original potentially high legacy-retirement consequence preserved above. Could-be-highest: no established security/loss route. Confidence: confirmed from source, no execution. proposed_drop: source refutation. possible_cover: none. Caveat: hand-replacing or repointing reserved state paths was not established as a supported accidental trigger; this does not assert all historic pre-range releases were individually inspected."
+          }
+        },
+        {
+          "line": 17,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "l3",
+            "state": "open",
+            "summary": "Canonical socket spelling and peer identity constrain old-server selection",
+            "location": "crates/farhelm-supervisor/src/hosts/process.rs:483",
+            "detail": "Reviewed commit: dbfc69751215dbf15e1d31d5bed73c3754c4ebc4. Synthesis revision. Original TLDR/consequence preserved: relative legacy socket argv could make verification miss a live server and leave old agents behind interrupted rows, potentially a material legacy-retirement failure. Suggested bucket other for the refuted path concern; original potentially high consequence remains recorded. Could-be-highest: no established further loss/security route for relative path spelling. Confidence: confirmed source, not execution. proposed_drop: source refutation. At the predecessor revision, core.rs:6297-6304 canonicalizes state_dir before TmuxDriver construction at 6420, tmux.rs:2357-2359 stores that canonical directory's tmux.sock, and command:2493-2499 passes its absolute spelling as a separate -S argument. The range base also canonicalizes at core.rs:6507. The reviewed revision canonicalizes at 6308 before end_private_server:6434. Thus process.rs:483's absolute conversion does not invent a new spelling for ordinary launches, including relative CLI input. Cross-check with l1: preserving original argv is useful because original argv already contains this canonical path. Caller guard is stronger than any process merely mentioning -S/path: old_terminals.rs:178-201 first connects to that private socket, requires this user's peer credentials and pins the listener's process identity. process.rs:551-575 rereads the pinned identity before and after argv, and termination redoes verification before SIGKILL at 498. Old-server attribution at old_terminals.rs:234-277 discards the snapshot if that peer was AlreadyGone, mismatched, unreadable or timed out; only a verified-and-signalled server can contribute snapshot roots. Existing terminal-host callers continue to supply names_socket, not the tmux matcher. These checks do not refute l4's separate child-PID-to-owner race, nor g033's parent-reported warning concern. possible_cover: none known for this refuted path-spelling concern. Caveats: reserved path manipulation by hand was not established as a supported accidental trigger; the small final read-to-signal race remains governed by the separate PID-reuse rule, and no claim is made to inspecting every pre-range historic binary."
+          }
+        }
+      ],
+      "latest": {
+        "line": 17,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "l3",
+          "state": "open",
+          "summary": "Canonical socket spelling and peer identity constrain old-server selection",
+          "location": "crates/farhelm-supervisor/src/hosts/process.rs:483",
+          "detail": "Reviewed commit: dbfc69751215dbf15e1d31d5bed73c3754c4ebc4. Synthesis revision. Original TLDR/consequence preserved: relative legacy socket argv could make verification miss a live server and leave old agents behind interrupted rows, potentially a material legacy-retirement failure. Suggested bucket other for the refuted path concern; original potentially high consequence remains recorded. Could-be-highest: no established further loss/security route for relative path spelling. Confidence: confirmed source, not execution. proposed_drop: source refutation. At the predecessor revision, core.rs:6297-6304 canonicalizes state_dir before TmuxDriver construction at 6420, tmux.rs:2357-2359 stores that canonical directory's tmux.sock, and command:2493-2499 passes its absolute spelling as a separate -S argument. The range base also canonicalizes at core.rs:6507. The reviewed revision canonicalizes at 6308 before end_private_server:6434. Thus process.rs:483's absolute conversion does not invent a new spelling for ordinary launches, including relative CLI input. Cross-check with l1: preserving original argv is useful because original argv already contains this canonical path. Caller guard is stronger than any process merely mentioning -S/path: old_terminals.rs:178-201 first connects to that private socket, requires this user's peer credentials and pins the listener's process identity. process.rs:551-575 rereads the pinned identity before and after argv, and termination redoes verification before SIGKILL at 498. Old-server attribution at old_terminals.rs:234-277 discards the snapshot if that peer was AlreadyGone, mismatched, unreadable or timed out; only a verified-and-signalled server can contribute snapshot roots. Existing terminal-host callers continue to supply names_socket, not the tmux matcher. These checks do not refute l4's separate child-PID-to-owner race, nor g033's parent-reported warning concern. possible_cover: none known for this refuted path-spelling concern. Caveats: reserved path manipulation by hand was not established as a supported accidental trigger; the small final read-to-signal race remains governed by the separate PID-reuse rule, and no claim is made to inspecting every pre-range historic binary."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g097/findings.jsonl",
+        "id": "l3",
+        "line": 17,
+        "disposition": "under-investigation",
+        "group": "g097-l3",
+        "reason": "Record durably acknowledged; parent source/contract validation, cross-group synthesis, coverage/filter matching and any independent drop check remain pending. This preserves the claim and uncertainty without accepting, dropping or lowering it."
+      },
+      "accepted_parent_decision": null,
+      "returned_claim_checks": [
+        {
+          "batch": "claims-064",
+          "key": "g097/l3",
+          "latest_line": 17,
+          "recommendation": "refuted",
+          "bucket": "other",
+          "underlying_key": "legacy-tmux-retirement-relative-socket-spelling-hypothesis",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "Ordinary predecessor launches already derive tmux.sock from a canonical absolute state directory and pass that spelling after -S. Making the retirement socket absolute does not introduce the suspected mismatch. Server identity checks constrain server selection but do not settle the separate pane-owner race.",
+          "checks": [
+            "dbfc69751215dbf15e1d31d5bed73c3754c4ebc4^:service/core.rs:6297-6304 canonicalizes state_dir before TmuxDriver construction :6420-6422; tmux.rs:2357-2359 stores state_dir/tmux.sock and :2493-2499 passes it as a separate -S argument.",
+            "dbfc69751215dbf15e1d31d5bed73c3754c4ebc4:hosts/process.rs:483 makes the socket absolute. old_terminals.rs:178-201 requires this user's peer and pinned listener; :223-277 accepts subtree attribution only after verified signalling, discarding AlreadyGone/mismatch/timeout.",
+            "Same revision:hosts/process.rs:551-575 rechecks pinned start identity around the argv read; :498 repeats verification before SIGKILL. These facts refute the named path-spelling route, not every last read-to-signal race or child-owner attribution."
+          ],
+          "coverage_checked": [
+            "Current SPEC.md:2998-3013 and SPEC_impl.md:2780-2827 govern retirement and explicitly leave host terminals intact. Their nonfatal failure policy is not the basis for refuting relative argv.",
+            "Searched both specifications, empty TODO Planned, plans/queue, BUGS.md, INDEX/matching socket-spelling/canonicalization/retirement terms, and active TRIAGE_OUTCOMES.md. No exact additional cover found. Parent-reported warning findings and g097/l4 have different causes.",
+            "No FILTER applied. Deliberate repointing of reserved paths was never established as an ordinary trigger; historic releases before the checked predecessor were not exhaustively inspected."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": "A shipped supported predecessor that passes a relative or otherwise different socket spelling despite supervisor canonicalization would reopen this concern.",
+          "original_stronger_consequence": "A relative legacy socket argv could survive retirement and leave old agents behind interrupted rows, potentially a high UX failure. No additional loss/security route was established.",
+          "needs_independent_drop_check": true,
+          "proposed_basis": "Narrow source refutation of ordinary relative-CLI path mismatch; preserve the original potential high consequence and all separate attribution/signal caveats."
+        }
+      ],
+      "parent_proposals": [
+        {
+          "artifact": "parent-flagged-judgments-064.json",
+          "key": "g097/l3",
+          "proposal": "claim-checks/claims-064/result.json",
+          "parent_proposal": "source-refuted-ordinary-predecessor-relative-tmux-socket-argv-mismatch",
+          "final_independent_gate": "required-before-original-high-retirement-failure-drop",
+          "reason": "Full064 predecessor canonicalizes state dir before driver, stores absolute tmux.sock and passes exact separate-S spelling. New absolute retirement probe therefore doesn't introduce ordinary relative mismatch. Same-user pinned server/subtree checks bound selection but don't settle last-read/signal or pane-owner race097l4. Preserve unsupported deliberate reserved-path replacement/historical uninspected release limits and original high survival consequence for fresh gate; no blanket signal safety."
+        }
+      ],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": true,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "legacy-tmux-retirement-relative-socket-spelling-hypothesis",
+        "destination": null
+      }
+    },
+    {
+      "key": "g097/c4",
+      "owner": "g097",
+      "id": "c4",
+      "domain": "supervisor-terminal-host-lifecycle",
+      "purpose": "supervisor-terminal-host-lifecycle: crates/farhelm-supervisor/src/launch.rs, crates/farhelm-supervisor/src/service/core/host_launch.rs, crates/farhelm-supervisor/src/service/core/host_restart.rs, crates/farhelm-supervisor/src/service/core/host_tabs.rs, crates/farhelm-supervisor/src/hosts/mod.rs, crates/farhelm-supervisor/src/hosts/test_program.rs, crates/farhelm-supervisor/src/service/core/tests/host_terminals.rs, crates/farhelm-supervisor/src/hosts/process.rs; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 11,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c4",
+            "state": "open",
+            "summary": "Removing the host restart excerpt argument does not remove host diagnostics",
+            "location": "crates/farhelm-supervisor/src/service/core/host_restart.rs:543",
+            "detail": "Reviewed commit: 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513. TLDR considered: dropping launch_excerpt from restart publication might lose the failed agent's diagnostic or reuse a previous run's output. Details: both changed Relaunched constructions previously supplied None, and the field is removed consistently from Relaunched and publish_relaunched (core.rs:4134-4158,13689-13695). relaunched_entry still creates a new empty excerpt cell (core.rs:3473), preserving the generation boundary. Host diagnostics do not use that tmux fence: service/launch_artifacts.rs:78-95 checks the host's processed final state and reads its final screen directly; the fence is only read in the tmux arm at 101-115. The complete Restarting a host agent and Moving an old session into a host contract bullets were checked against the publication caller. Suggested bucket: other for the refuted diagnostic concern. Could-be-highest: no established security/loss route. Confidence: confirmed from source, no execution. proposed_drop: source refutation. possible_cover: none. Caveat: unrelated tmux diagnostic behavior is outside this small field-removal review."
+          }
+        }
+      ],
+      "latest": {
+        "line": 11,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c4",
+          "state": "open",
+          "summary": "Removing the host restart excerpt argument does not remove host diagnostics",
+          "location": "crates/farhelm-supervisor/src/service/core/host_restart.rs:543",
+          "detail": "Reviewed commit: 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513. TLDR considered: dropping launch_excerpt from restart publication might lose the failed agent's diagnostic or reuse a previous run's output. Details: both changed Relaunched constructions previously supplied None, and the field is removed consistently from Relaunched and publish_relaunched (core.rs:4134-4158,13689-13695). relaunched_entry still creates a new empty excerpt cell (core.rs:3473), preserving the generation boundary. Host diagnostics do not use that tmux fence: service/launch_artifacts.rs:78-95 checks the host's processed final state and reads its final screen directly; the fence is only read in the tmux arm at 101-115. The complete Restarting a host agent and Moving an old session into a host contract bullets were checked against the publication caller. Suggested bucket: other for the refuted diagnostic concern. Could-be-highest: no established security/loss route. Confidence: confirmed from source, no execution. proposed_drop: source refutation. possible_cover: none. Caveat: unrelated tmux diagnostic behavior is outside this small field-removal review."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g097/findings.jsonl",
+        "id": "c4",
+        "line": 11,
+        "disposition": "excluded",
+        "group": "host-restart-removed-launch-excerpt-field-hypothesis",
+        "reason": "Parent explicitly accepted named refuted proposal from claims-064 after inspecting it. The removed restart-publication field carried None in both host constructors. Host diagnostics read the current generation's final host screen directly; the field served the old tmux fence. Source refutation limited to the removed field and host diagnostic path. Checked source/results: [\"647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513:service/core/host_restart.rs diff removes launch_excerpt: None from both Relaunched constructors (:542 and :572 contexts), rather than removing populated host diagnostic data.\",\"Same revision:service/core.rs:3473 initializes a fresh empty excerpt cell on relaunch; :4134-4158 and :13689-13695 consistently omit the removed result field.\",\"Same revision:service/launch_artifacts.rs:78-95 uses host.evidence dead and host.screen_tail directly; :101-115 reads launch_excerpt only for the tmux arm. This preserves the generation/final-output boundary without claiming correctness of unrelated diagnostics.\"] Current coverage/results: [\"Current SPEC_impl.md:2134-2150 and :2603-2635 require processed-exit evidence before final-screen inference and a blank Restart screen; SPEC.md's terminal/restart rules provide no acceptance of quoting a previous run. No defect established against those contracts.\",\"Searched empty TODO Planned, plans/queue, BUGS.md, INDEX/matching excerpt/diagnostic/restart terms, and active TRIAGE_OUTCOMES.md. No exact cover or alias found. restart-unwind-omits-tree-sweep-failure is about restoration after cleanup failure, not excerpt field removal.\",\"No FILTER applied; a specific rare diagnostic trigger was not established.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Removing launch_excerpt could lose a failed agent's diagnostic or reuse the previous run's output. No security or work-loss route was established.\"; null."
+      },
+      "accepted_parent_decision": {
+        "key": "g097/c4",
+        "line": 11,
+        "disposition": "excluded",
+        "group": "host-restart-removed-launch-excerpt-field-hypothesis",
+        "bucket": "other",
+        "recording": "refuted",
+        "queue_target_candidate": null,
+        "needs_independent_drop_check": false,
+        "reason": "Parent explicitly accepted named refuted proposal from claims-064 after inspecting it. The removed restart-publication field carried None in both host constructors. Host diagnostics read the current generation's final host screen directly; the field served the old tmux fence. Source refutation limited to the removed field and host diagnostic path. Checked source/results: [\"647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513:service/core/host_restart.rs diff removes launch_excerpt: None from both Relaunched constructors (:542 and :572 contexts), rather than removing populated host diagnostic data.\",\"Same revision:service/core.rs:3473 initializes a fresh empty excerpt cell on relaunch; :4134-4158 and :13689-13695 consistently omit the removed result field.\",\"Same revision:service/launch_artifacts.rs:78-95 uses host.evidence dead and host.screen_tail directly; :101-115 reads launch_excerpt only for the tmux arm. This preserves the generation/final-output boundary without claiming correctness of unrelated diagnostics.\"] Current coverage/results: [\"Current SPEC_impl.md:2134-2150 and :2603-2635 require processed-exit evidence before final-screen inference and a blank Restart screen; SPEC.md's terminal/restart rules provide no acceptance of quoting a previous run. No defect established against those contracts.\",\"Searched empty TODO Planned, plans/queue, BUGS.md, INDEX/matching excerpt/diagnostic/restart terms, and active TRIAGE_OUTCOMES.md. No exact cover or alias found. restart-unwind-omits-tree-sweep-failure is about restoration after cleanup failure, not excerpt field removal.\",\"No FILTER applied; a specific rare diagnostic trigger was not established.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Removing launch_excerpt could lose a failed agent's diagnostic or reuse the previous run's output. No security or work-loss route was established.\"; null."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-064",
+          "key": "g097/c4",
+          "latest_line": 11,
+          "recommendation": "refuted",
+          "bucket": "other",
+          "underlying_key": "host-restart-removed-launch-excerpt-field-hypothesis",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The removed restart-publication field carried None in both host constructors. Host diagnostics read the current generation's final host screen directly; the field served the old tmux fence.",
+          "checks": [
+            "647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513:service/core/host_restart.rs diff removes launch_excerpt: None from both Relaunched constructors (:542 and :572 contexts), rather than removing populated host diagnostic data.",
+            "Same revision:service/core.rs:3473 initializes a fresh empty excerpt cell on relaunch; :4134-4158 and :13689-13695 consistently omit the removed result field.",
+            "Same revision:service/launch_artifacts.rs:78-95 uses host.evidence dead and host.screen_tail directly; :101-115 reads launch_excerpt only for the tmux arm. This preserves the generation/final-output boundary without claiming correctness of unrelated diagnostics."
+          ],
+          "coverage_checked": [
+            "Current SPEC_impl.md:2134-2150 and :2603-2635 require processed-exit evidence before final-screen inference and a blank Restart screen; SPEC.md's terminal/restart rules provide no acceptance of quoting a previous run. No defect established against those contracts.",
+            "Searched empty TODO Planned, plans/queue, BUGS.md, INDEX/matching excerpt/diagnostic/restart terms, and active TRIAGE_OUTCOMES.md. No exact cover or alias found. restart-unwind-omits-tree-sweep-failure is about restoration after cleanup failure, not excerpt field removal.",
+            "No FILTER applied; a specific rare diagnostic trigger was not established."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": null,
+          "original_stronger_consequence": "Removing launch_excerpt could lose a failed agent's diagnostic or reuse the previous run's output. No security or work-loss route was established.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Source refutation limited to the removed field and host diagnostic path."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "host-restart-removed-launch-excerpt-field-hypothesis",
+        "destination": null
+      }
+    },
+    {
+      "key": "g097/l4",
+      "owner": "g097",
+      "id": "l4",
+      "domain": "supervisor-terminal-host-lifecycle",
+      "purpose": "supervisor-terminal-host-lifecycle: crates/farhelm-supervisor/src/launch.rs, crates/farhelm-supervisor/src/service/core/host_launch.rs, crates/farhelm-supervisor/src/service/core/host_restart.rs, crates/farhelm-supervisor/src/service/core/host_tabs.rs, crates/farhelm-supervisor/src/hosts/mod.rs, crates/farhelm-supervisor/src/hosts/test_program.rs, crates/farhelm-supervisor/src/service/core/tests/host_terminals.rs, crates/farhelm-supervisor/src/hosts/process.rs; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 13,
+          "event": {
+            "version": 1,
+            "kind": "lead",
+            "id": "l4",
+            "state": "open",
+            "summary": "Check pane-owner attribution across a child PID reuse window",
+            "location": "crates/farhelm-supervisor/src/service/core/old_terminals.rs:464",
+            "detail": "Reviewed commit: dbfc69751215dbf15e1d31d5bed73c3754c4ebc4. Synthesis interaction lead, source only. TLDR suspected: if a pane PID is reused after the process snapshot but before its environment is read, a new terminal's markers might cause the old-server cleanup to target that new terminal's session/tab. Source basis: snapshot_panes takes table identities at old_terminals.rs:457, then reads each direct child's current environment by bare PID at 464 and assigns table roots to that owner at 473-476. old_tabs includes owner keys at 369-375 without the scope-discovery host-record exclusion, and sweep uses that session/tab marker at 329-342. Verification later pins the server, not the child being attributed. Missing premises: process reader's identity guarantees, scope/marker sweep behavior for stale roots, and whether the governing short-PID-reuse acceptance explicitly covers this attribution window. Next source checks: read_environ and snapshot implementation, reap_process_tree root and marker selection, and the exact PID-reuse contract. Suggested bucket: highest if wrong new-terminal process termination is established; could-be-highest: yes. Confidence: uninvestigated lead, not a confirmed finding. proposed_drop: false. possible_cover: unknown; parent owns broader old-terminal implementation coverage."
+          }
+        },
+        {
+          "line": 14,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "l4",
+            "state": "open",
+            "summary": "Pane-owner PID reuse has a bounded route and an explicit acceptance rule",
+            "location": "crates/farhelm-supervisor/src/service/core/old_terminals.rs:464",
+            "detail": "Reviewed commit: dbfc69751215dbf15e1d31d5bed73c3754c4ebc4. Synthesis resolution; source only, no reproduction. TLDR: A pane PID recycled during the startup snapshot can theoretically be attributed using a new terminal process's session/tab markers; cleanup could then stop that new terminal's processes. Preserve that strongest consequence: suggested bucket highest; could-be-highest yes. Source route is established conditionally on PID recycling: old_terminals.rs:457 snapshots pid/ppid/start; 464 reads the current environment without revalidating that child; 473-476 stores old identities under the new markers. A Tab owner flows through old_tabs:369-375 and sweep:329-342 to that tab's scope and marker selection. Revalidating old roots is not a refutation: sweep.rs:1595-1646 discards changed roots as Ok(None), and reap_process_tree_with_sweep:1475-1539 still checks the named scope or scans markers; Tab claims the exact session/tab at 252-260. The server itself must still pass its pinned verification before any subtree is retained (old_terminals.rs:223-277), so recycling the server PID does not establish this route. The consequential child attribution window is bounded by end_server's absolute 15-second startup deadline: snapshot output that arrives after timeout is discarded at 204-216, and termination that cannot finish within the same deadline returns no panes at 273-277. proposed_drop: specification acceptance of short bounded PID reuse, for independent review; this is an interpretation of that named acceptance and not an already-approved parent drop. Exact SPEC_impl.md:5431-5435: \"Process-number reuse inside a short window is accepted, for now.\" and \"Code that signals or adopts a process by its number may lose the race in which that process exits and the kernel hands the number to an unrelated process within a short, bounded window: between reading a number and checking it, between reaping a child and signalling its group, while a watchdog fires just as its child finishes, or during a polling loop of at most a few seconds.\" Exact exclusion at 5438-5439: \"What is not accepted is carrying a bare number across unbounded waits or asynchronous work, or storing it for later.\" Material caveat: the outer budget is 15 seconds, rather than the few-second polling example, and the independent check must decide whether this bounded synchronous snapshot is within the named rule. This is not dropped merely because reuse is rare. Confidence: confirmed conditional source route and exact contract; acceptance interpretation remains for independent check. possible_cover: unknown; broader old-terminal attribution group may cover it, no queue sources searched."
+          }
+        },
+        {
+          "line": 16,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "l4",
+            "state": "open",
+            "summary": "Pane-owner PID reuse can select a new host tab; bounded-race acceptance needs independent check",
+            "location": "crates/farhelm-supervisor/src/service/core/old_terminals.rs:464",
+            "detail": "Reviewed commit: dbfc69751215dbf15e1d31d5bed73c3754c4ebc4. Synthesis resolution; source only, no execution. TLDR: If a legacy pane PID is recycled during startup's process snapshot for a newly started host tab, old-terminal cleanup can attribute the old pane to the new tab and stop that new tab's processes, including work under another supervisor running as the same user. Suggested bucket: highest; could-be-highest: yes. This preserves the original strongest consequence, rather than reducing it to a stale-root or harmless cleanup concern. Source route: old_terminals.rs:457 snapshots pid/ppid/start, 464 reads the child's current environment without checking its start identity, and 473-476 stores the old subtree identities under the newly read owner. Shipped host tabs do carry the required markers: service/core.rs:14690-14697 injects the real session and tab UUIDs; host_tabs.rs:629-641 puts them in the child's initial environment. The wrongly read Tab owner enters both the sessions set at old_terminals.rs:321-327 and old_tabs' direct list at 369-375, bypassing the host-record exclusion used only for scope-discovered tabs at 399-402. sweep:329-342 then names that new tab's possible scope and exact session/tab marker. Root revalidation does not prevent it: sweep.rs:1595-1646 drops changed roots as Ok(None), while 1475-1539 still checks the named scope or scans markers; the Tab marker claims at 252-260 match that new tab. No need to assume an agent for a nonexistent database row: direct snapshot Tab owners are used without such a row. Server verification does constrain this: no subtree is retained unless the pinned server passes verification and is signalled; AlreadyGone, mismatch and timeout discard it (old_terminals.rs:223-277). That guards server-PID reuse, not this child attribution. Consequential attribution is bounded by the same absolute 15-second startup deadline: snapshot output arriving after timeout is discarded at 204-216 and termination timing out discards it at 273-277. proposed_drop: specification acceptance of short bounded PID reuse, for the caller's independent interpretation/check; no parent drop is accepted. Exact SPEC_impl.md:5431-5435: \"Process-number reuse inside a short window is accepted, for now.\" and \"Code that signals or adopts a process by its number may lose the race in which that process exits and the kernel hands the number to an unrelated process within a short, bounded window: between reading a number and checking it, between reaping a child and signalling its group, while a watchdog fires just as its child finishes, or during a polling loop of at most a few seconds.\" Exact exclusion at 5438-5439: \"What is not accepted is carrying a bare number across unbounded waits or asynchronous work, or storing it for later.\" Material caveat for independent review: the outer bound here is 15 seconds, longer than the few-second polling example, while child PID-to-owner attribution occurs synchronously inside that bounded snapshot result. Acceptance is an interpretation, not a source refutation or a rarity-based downgrade. Confidence: confirmed conditional source route; independent acceptance judgment outstanding. possible_cover: unknown; parent owns broader old-terminal attribution coverage, and no queue sources were searched."
+          }
+        },
+        {
+          "line": 19,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "l4",
+            "state": "open",
+            "summary": "Pane-owner PID reuse can select a new host tab; bounded-race acceptance needs independent check",
+            "location": "crates/farhelm-supervisor/src/service/core/old_terminals.rs:464",
+            "detail": "Reviewed commit: dbfc69751215dbf15e1d31d5bed73c3754c4ebc4. Synthesis resolution; source only, no execution. TLDR: If a legacy pane PID is recycled during startup's process snapshot for a newly started host tab, old-terminal cleanup can attribute the old pane to the new tab and stop that new tab's processes, including work under another supervisor running as the same user. Suggested bucket: highest; could-be-highest: yes. This preserves the original strongest consequence, rather than reducing it to a stale-root or harmless cleanup concern. Source route: old_terminals.rs:457 snapshots pid/ppid/start, 464 reads the child's current environment without checking its start identity, and 473-476 stores the old subtree identities under the newly read owner. Shipped host tabs do carry the required markers: service/core.rs:14690-14697 injects the real session and tab UUIDs; host_tabs.rs:629-641 puts them in the child's initial environment. The wrongly read Tab owner enters both the sessions set at old_terminals.rs:321-327 and old_tabs' direct list at 369-375, bypassing the host-record exclusion used only for scope-discovered tabs at 399-402. sweep:329-342 then names that new tab's possible scope and exact session/tab marker. Root revalidation does not prevent it: sweep.rs:1595-1646 drops changed roots as Ok(None), while 1475-1539 still checks the named scope or scans markers; the Tab marker claims at 252-260 match that new tab. No need to assume an agent for a nonexistent database row: direct snapshot Tab owners are used without such a row. Server verification does constrain this: no subtree is retained unless the pinned server passes verification and is signalled; AlreadyGone, mismatch and timeout discard it (old_terminals.rs:223-277). That guards server-PID reuse, not this child attribution. Consequential attribution is bounded by the same absolute 15-second startup deadline: snapshot output arriving after timeout is discarded at 204-216 and termination timing out discards it at 273-277. proposed_drop: specification acceptance of short bounded PID reuse, for the caller's independent interpretation/check; no parent drop is accepted. Exact SPEC_impl.md:5431-5435: \"Process-number reuse inside a short window is accepted, for now.\" and \"Code that signals or adopts a process by its number may lose the race in which that process exits and the kernel hands the number to an unrelated process within a short, bounded window: between reading a number and checking it, between reaping a child and signalling its group, while a watchdog fires just as its child finishes, or during a polling loop of at most a few seconds.\" Exact exclusion at 5438-5439: \"What is not accepted is carrying a bare number across unbounded waits or asynchronous work, or storing it for later.\" Material caveat for independent review: the outer bound here is 15 seconds, longer than the few-second polling example, while child PID-to-owner attribution occurs synchronously inside that bounded snapshot result. Acceptance is an interpretation, not a source refutation or a rarity-based downgrade. Confidence: confirmed conditional source route; independent acceptance judgment outstanding. possible_cover: unknown; parent owns broader old-terminal attribution coverage, and no queue sources were searched. Discovery turn 3 normalization: kind is now finding with the same highest consequence and exact proposed_drop basis, pending independent review. Preserve both interpretive caveats: the deadline is 15 seconds rather than the few-second example, and the rule excludes carrying a bare number across unbounded waits or asynchronous work. Neighbour g162/l4 concerns the separate back-to-back SIGTERM-to-SIGCONT window, with no intervening await; it does not settle this child snapshot-to-environment attribution and later marker/scope sweep. No parent drop or lowering has been accepted. All earlier history remains append-only."
+          }
+        }
+      ],
+      "latest": {
+        "line": 19,
+        "event": {
+          "version": 1,
+          "kind": "finding",
+          "id": "l4",
+          "state": "open",
+          "summary": "Pane-owner PID reuse can select a new host tab; bounded-race acceptance needs independent check",
+          "location": "crates/farhelm-supervisor/src/service/core/old_terminals.rs:464",
+          "detail": "Reviewed commit: dbfc69751215dbf15e1d31d5bed73c3754c4ebc4. Synthesis resolution; source only, no execution. TLDR: If a legacy pane PID is recycled during startup's process snapshot for a newly started host tab, old-terminal cleanup can attribute the old pane to the new tab and stop that new tab's processes, including work under another supervisor running as the same user. Suggested bucket: highest; could-be-highest: yes. This preserves the original strongest consequence, rather than reducing it to a stale-root or harmless cleanup concern. Source route: old_terminals.rs:457 snapshots pid/ppid/start, 464 reads the child's current environment without checking its start identity, and 473-476 stores the old subtree identities under the newly read owner. Shipped host tabs do carry the required markers: service/core.rs:14690-14697 injects the real session and tab UUIDs; host_tabs.rs:629-641 puts them in the child's initial environment. The wrongly read Tab owner enters both the sessions set at old_terminals.rs:321-327 and old_tabs' direct list at 369-375, bypassing the host-record exclusion used only for scope-discovered tabs at 399-402. sweep:329-342 then names that new tab's possible scope and exact session/tab marker. Root revalidation does not prevent it: sweep.rs:1595-1646 drops changed roots as Ok(None), while 1475-1539 still checks the named scope or scans markers; the Tab marker claims at 252-260 match that new tab. No need to assume an agent for a nonexistent database row: direct snapshot Tab owners are used without such a row. Server verification does constrain this: no subtree is retained unless the pinned server passes verification and is signalled; AlreadyGone, mismatch and timeout discard it (old_terminals.rs:223-277). That guards server-PID reuse, not this child attribution. Consequential attribution is bounded by the same absolute 15-second startup deadline: snapshot output arriving after timeout is discarded at 204-216 and termination timing out discards it at 273-277. proposed_drop: specification acceptance of short bounded PID reuse, for the caller's independent interpretation/check; no parent drop is accepted. Exact SPEC_impl.md:5431-5435: \"Process-number reuse inside a short window is accepted, for now.\" and \"Code that signals or adopts a process by its number may lose the race in which that process exits and the kernel hands the number to an unrelated process within a short, bounded window: between reading a number and checking it, between reaping a child and signalling its group, while a watchdog fires just as its child finishes, or during a polling loop of at most a few seconds.\" Exact exclusion at 5438-5439: \"What is not accepted is carrying a bare number across unbounded waits or asynchronous work, or storing it for later.\" Material caveat for independent review: the outer bound here is 15 seconds, longer than the few-second polling example, while child PID-to-owner attribution occurs synchronously inside that bounded snapshot result. Acceptance is an interpretation, not a source refutation or a rarity-based downgrade. Confidence: confirmed conditional source route; independent acceptance judgment outstanding. possible_cover: unknown; parent owns broader old-terminal attribution coverage, and no queue sources were searched. Discovery turn 3 normalization: kind is now finding with the same highest consequence and exact proposed_drop basis, pending independent review. Preserve both interpretive caveats: the deadline is 15 seconds rather than the few-second example, and the rule excludes carrying a bare number across unbounded waits or asynchronous work. Neighbour g162/l4 concerns the separate back-to-back SIGTERM-to-SIGCONT window, with no intervening await; it does not settle this child snapshot-to-environment attribution and later marker/scope sweep. No parent drop or lowering has been accepted. All earlier history remains append-only."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g097/findings.jsonl",
+        "id": "l4",
+        "line": 19,
+        "disposition": "under-investigation",
+        "group": "g097-l4",
+        "reason": "Record durably acknowledged; parent source/contract validation, cross-group synthesis, coverage/filter matching and any independent drop check remain pending. This preserves the claim and uncertainty without accepting, dropping or lowering it."
+      },
+      "accepted_parent_decision": null,
+      "returned_claim_checks": [
+        {
+          "batch": "claims-064",
+          "key": "g097/l4",
+          "latest_line": 19,
+          "recommendation": "retain-verified",
+          "bucket": "highest",
+          "underlying_key": "legacy-tmux-pane-owner-pid-reuse-marker-sweep",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The conditional wrong-tab termination route is established in source. Whether the general short-PID-reuse acceptance covers this attribution-and-later-sweep route remains ambiguous. Retain unless the required independent check agrees to the narrowly stated spec-based drop. This is distinct from server PID verification and back-to-back signal races.",
+          "checks": [
+            "dbfc69751215dbf15e1d31d5bed73c3754c4ebc4:old_terminals.rs:456-476 snapshots pid/parent/start, then reads each direct child's environment by bare pid without checking that child's start token; old identities are grouped under the newly read owner.",
+            "Same revision:service/core.rs:14690-14697 supplies real session/tab markers; host_tabs.rs:629-641 puts them in the new tab child's initial environment. Thus a recycled pid can identify an actual new host tab without assuming a nonexistent database row.",
+            "Same revision:old_terminals.rs:321-342 includes direct snapshot tab owners and sweeps their scope/markers; :369-375 admits them without the host-record exclusion applied only to scope discovery at :399-402.",
+            "Same revision:service/sweep.rs:1444-1450 and :1595-1646 discard changed root identities, but :1475-1539 still kills the named scope or runs marker discovery; :252-260 permits the exact session/tab marker. Root revalidation does not undo a wrong owner key.",
+            "Same revision:old_terminals.rs:204-216,223-277 bounds accepted snapshot/server termination by the shared deadline and discards unverified/timed-out server subtrees. SPEC_impl.md:3001 specifies 15 seconds. No PID recycling was reproduced or measured."
+          ],
+          "coverage_checked": [
+            "Historical SPEC_impl.md:5431-5443 and current :4944-4957 accept short bounded PID reuse but exclude bare numbers across unbounded waits or asynchronous work or storage for later. The 15-second outer bound exceeds the few-second polling example; attributing markers then sweeping later is not an unambiguous match.",
+            "Current SPEC.md:2998-3013 and SPEC_impl.md:2780-2827 explicitly preserve existing host terminals. Intentional retirement acceptance does not itself cover this new-host victim.",
+            "TODO Planned is empty. Searched plans/queue, BUGS.md, INDEX/matching pane-owner/PID-reuse/old-terminal terms, and active TRIAGE_OUTCOMES.md; no exact cover found. The tmux plans preserve retirement rather than fixing this attribution.",
+            "FILTER's terminal-host verification-to-signal rule is a different handoff. Upgrade-plus-rare is not a clear full match: the victim can be a new host tab, including under another supervisor, rather than work confined to the legacy sessions carried across upgrade. Do not omit on rarity alone."
+          ],
+          "exact_cover_quotes": [
+            "Candidate cover, SPEC_impl.md:4944: Process-number reuse inside a short window is accepted, for now.",
+            "Candidate cover, SPEC_impl.md:4944-4948: Code that signals or adopts a process by its number may lose the race in which that process exits and the kernel hands the number to an unrelated process within a short, bounded window: between reading a number and checking it, between reaping a child and signalling its group, while a watchdog fires just as its child finishes, or during a polling loop of at most a few seconds.",
+            "Exclusion, SPEC_impl.md:4951-4952: What is not accepted is carrying a bare number across unbounded waits or asynchronous work, or storing it for later."
+          ],
+          "missing_premise": "Runtime occurrence/frequency is unobserved. The source route is conditional on pane-pid recycling before its environment read; that is a trigger, not a missing shipped-control route. The unresolved question is acceptance scope, not whether stale-root rejection alone prevents the sweep.",
+          "original_stronger_consequence": "Old-terminal cleanup can stop a newly started host tab's user processes/work, including under another supervisor of the same user, after a recycled pane pid supplies that new tab's markers. Preserve highest; no parent drop/lowering was accepted in the history.",
+          "needs_independent_drop_check": true,
+          "proposed_basis": "Retain the conditional source-confirmed finding. Any spec-based dismissal needs an independent judgment on both the 15-second bound and the exclusion for carrying bare numbers across asynchronous work."
+        }
+      ],
+      "parent_proposals": [
+        {
+          "artifact": "parent-flagged-judgments-064.json",
+          "key": "g097/l4",
+          "proposal": "claim-checks/claims-064/result.json",
+          "parent_proposal": "retain-highest-pane-owner-PID-reuse-marker-sweep-pending-acceptance-scope",
+          "final_independent_gate": "required-before-any-spec-filter-drop-or-lowering",
+          "reason": "Full064 conditional source route snapshots pane PID/start then reads environment by barePID without child-token check; recycled newhosttab contributes real session/tab markers. Later sweep rejects changed old root but still acts on wrong owner scope/marker, including another same-user supervisor. Fifteen-second server deadline does not restore lost owner identity. Intentional retirement preserves hostterminals, accepted verification-to-signal handoff filter is different, upgradefilter not clearly confined oldaffectedwork. General shortPIDrace clause versus asynchronous/later-work exclusion is ambiguous; retain highest until fresh exact-scope verdict, not lower on rarity. Runtimeincidence unobserved, reusedPID trigger is not a missing shipped producer."
+        }
+      ],
+      "collection": {
+        "retain": true,
+        "clearly_refuted_candidate": false,
+        "needs_unfinished_gate": true,
+        "provisional_bucket": "highest",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "legacy-tmux-pane-owner-pid-reuse-marker-sweep",
+        "destination": "trailing-legacy-tmux-pane-owner-pid-reuse-marker-sweep.md"
+      }
+    }
+  ],
+  "replies": [
+    {
+      "turn": 1,
+      "reply": "Initial review complete: all 17 assigned patch parts reviewed.\n\nNo confirmed findings or unresolved leads. Seven candidates with proposed drops are preserved in [findings.jsonl]([private-run]/g097/findings.jsonl). Progress is updated.\n\nSource-only review; no tests or reproductions run. Ready for the later synthesis turn."
+    },
+    {
+      "turn": 2,
+      "reply": "Revised `c1`, `l1`, and `l3` with narrower acceptance boundaries and additional platform/caller evidence.\n\nAdded `l4`: a source-supported PID-reuse route could terminate a new host tab’s work. Recorded as a highest candidate; the proposed drop requires independent interpretation of the bounded-race rule against the 15-second window.\n\nSynthesis complete. Log and progress updated. Unresolved lead IDs: none."
+    },
+    {
+      "turn": 3,
+      "reply": "Discovery pass 1 complete. Nothing new found.\n\nChecked compatibility-test oracles, pre-main host startup/signals, status-wait callers, removed-helper references, environment filtering, and full-range path history.\n\nNormalized `c1`/`l4`; added check results under `c2`/`c3`. Log and progress updated.\n\nNew verified IDs: none. New unverified-after-investigation IDs: none. Open leads: none."
+    }
+  ],
+  "progress": "# g097 progress\n\nInitial review turn 1 completed. Discovery-pass count: 0 (initial pass; no later discovery or synthesis turn performed). The complete brief and inventory commits field were read. All 17 assigned patch parts, 1,270 lines, were delivered through the evidence reader in 18 bounded packets. No assigned patch material remains unread. Source was inspected at each assigned revision; context included direct callers and pinned governing contract bullets/sections. No checkout files were changed. No runtime tests, builds or reproductions were run; conclusions are from source and contract analysis.\n\nNo confirmed findings. Durable candidate IDs: c1, c2, c3, c4, l1, l2, l3. The l-prefixed events began as leads and were revised to candidates after investigation. No leads remain open. New verified bug IDs: none. New unverified bug IDs: none. Candidates are retained for the caller's drop review, including c1's explicitly could-be-highest consequence accepted by the specification. Every candidate retains its source basis, proposed drop and caveats in findings.jsonl.\n\nInterface conclusions: retired container specs retain a decode-only marker and are refused before host preparation/exec; outer create/retry/tab/restart gates reject retired intent. The unit-test host launcher runs after a separate exec and before libtest threads, on its explicitly specified glibc Linux platform. StateDir's socket scan cleans up a host even when the test replaced its session entry. Host diagnostics read the final host screen without the removed tmux excerpt argument. Generic termination retains the prior pinned identity and signal checks; its tmux caller uses an absolute socket spelling consistent with supervisor canonicalization. Upstream tmux 3.7c primary source supports the original-argv assumption for its ordinary Linux build. Intentional termination of legacy terminals and the nonfatal startup failure policy are explicit specification decisions.\n\nNext action: await the caller's later synthesis/discovery prompt. Initial pass covered every assigned commit patch, including intermediate revisions; broader interface groups and queue coverage remain the caller's responsibility. No excluded coverage metadata or queue/triage/TODO/plan records were consulted.\n\nSynthesis turn 2 in progress. Revisit process verification across Linux/musl/macOS and old-server subtree attribution; distinguish intentional retirement from startup-failure behavior and warning visibility. Parent reports c1 overlap with g099/g110 and separate concerns in g004/g071/g033. No parent drop has been accepted. Existing leads all had candidate revisions; check readily available remaining platform premises before concluding this turn.\n\nSynthesis turn 2 completed. Discovery-pass count remains 0; this was the caller-requested synthesis, not a separate discovery turn. No assigned patch material is unread. Revisited canonical path generation, the peer/UID/start-identity-to-argv verification chain, the post-signal snapshot-use gate, supported tmux platform build routes, and old-server child attribution through scope/marker sweeping. No runtime work or checkout edits.\n\nThis turn revised c1, l1 and l3, and added then resolved l4 from lead to candidate. c1 now preserves the strongest actual intentional process/history-loss consequence, notes parent-reported likely overlap with g099/g110, and explicitly does not dispose of g004/g071 or g033. l1 expands source checks to pinned musl/Darwin builds, upstream 3.8 and current Homebrew configuration; ordinary inspected implementations retain argv, without claiming to have executed package variants. l3 records how canonical paths, peer identity and post-signal snapshot gating combine, and distinguishes child attribution from server verification.\n\nNew source-supported conditional route: l4, highest candidate. If a direct old-pane PID is recycled for a real host tab during the bounded snapshot, its new session/tab markers can select that tab's scope and marker sweep despite stale-root rejection, including a tab under another supervisor of this Unix user. All readily checkable source premises were traced. Proposed drop is the explicit short bounded PID-reuse acceptance, preserving the exact text, the 15-second outer bound, and the distinction between source evidence and interpretation. That interpretation needs the caller's independent check; no parent drop has been accepted. This substantive new candidate calls for the caller's later follow-up pass under the brief's protocol.\n\nNew verified finding IDs: none finalized. New verified conditional candidate ID: l4. New unverified bug IDs: none. Unresolved lead IDs: none (l4 has a complete candidate revision; independent drop interpretation is outstanding). Existing durable candidates remain open pending the caller's disposition. Next: await caller's next prompt, with l4 and specification-based drops available for independent checking. No separate final report was written.\n\nDiscovery turn 3 started; discovery-pass count 1. Read discovery-neighbours.json completely through ten 18,000-byte chunks (last short), including re-delivery of the initially clipped line-based preview. Normalized c1/l4 to findings with original IDs, strongest consequences, exact specification bases and independent-check caveats preserved. Synthesized pending g162/l4 input as a separate back-to-back SIGCONT race, not this group's child-attribution route. No accepted parent drops/lowerings. New search now stays within the assigned 17 patch parts and their direct contracts/callers, focusing on independent fixture-oracle, pre-main launcher, compatibility-field and environment contracts rather than known retirement issues.\n\nDiscovery turn 3 completed. Discovery-pass count: 1. Result: no new issue found beyond known records. New verified IDs: none. New unverified-after-investigation IDs: none. Open lead IDs: none. No scope was omitted.\n\nUseful fresh checks: reread the compatibility guard's new test and exact isolated-child result path, independently checking its oracle against competing preparation/cwd/exec errors; exact retirement diagnostic plus sentinel distinguish the intended mechanism, not just final no-exec state. Recorded this considered/refuted test-oracle concern as a c2 revision. Checked the complete pre-main host initializer and full-range file diff; it is unchanged after introduction. Traced signal installation before readiness writes to verify that missing Rust-main SIGPIPE setup does not create a separate running-host behavior; recorded the considered/refuted concern and a source-line correction under c3. Rechecked changed wait_for implementation and its new cross-module caller: the caller waits for processed Exited status, which is the watch channel's actual boundary, rather than using status changes to await unrelated screen text. Checked the removed tab-shell child helper has no surviving references at the removal revision. Rechecked changed child-environment fixture/merge order and tab ChildSpec path; exact-vector assertions still independently cover exclusion of FARHELM_TMUX and preservation of the chosen ordinary FARHELM variable. Inspected full-range history of the test-program/process/host-terminal test paths to avoid treating an immediate-parent comparison as full-range attribution.\n\nRequired pre-search reconciliation: c1/l4 normalized from candidate to finding under original IDs, retaining highest consequences, exact proposed-drop citations, 15-second/few-second distinction and async-work exclusion caveat. The neighbour back-to-back SIGCONT race stays a separate cause. No parent or independent drop accepted. Remaining independent checks are disposition of existing proposed drops, not uninvestigated source leads. Source-only review; no runtime tests, builds, reproductions or live-install actions. Next: return discovery result and await caller direction.\n"
+}

@@ -1,0 +1,630 @@
+{
+  "group": {
+    "id": "g100",
+    "domain": "supervisor-terminal-host-lifecycle",
+    "purpose": "supervisor-terminal-host-lifecycle: crates/farhelm-supervisor/src/service/core/tests/host_terminals.rs, crates/farhelm-supervisor/src/service/launch_artifacts.rs, crates/farhelm-supervisor/src/service/core/host_launch.rs, crates/farhelm-supervisor/src/scope.rs; phases complete small per-commit changes",
+    "interfaces": [
+      "g001",
+      "g006",
+      "g007",
+      "g008",
+      "g009",
+      "g097",
+      "g098",
+      "g099",
+      "g101",
+      "g102",
+      "g103",
+      "g104",
+      "g105",
+      "g106",
+      "g107",
+      "g108",
+      "g109",
+      "g110",
+      "g111",
+      "g112",
+      "g113",
+      "g114",
+      "g115",
+      "g116",
+      "g159",
+      "g160",
+      "g161",
+      "g162",
+      "g163",
+      "g164",
+      "g165",
+      "g166",
+      "g167",
+      "g168",
+      "g169",
+      "g170",
+      "g171",
+      "g172",
+      "g173",
+      "g013"
+    ],
+    "sources": [
+      {
+        "path": "[private-run]/prep/parts/00930-000.patch",
+        "ranges": [
+          [
+            1,
+            815
+          ]
+        ],
+        "original_path": "crates/farhelm-supervisor/src/service/core/tests/host_terminals.rs",
+        "commit": "1ed482dde220452e424973faf38a5e1318986333",
+        "notes": "patch header; patch character offsets [0,39193)",
+        "lines": 815,
+        "bytes": 39193,
+        "start": 0,
+        "end": 39193,
+        "original": "[private-run]/prep/originals/00930.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/00934-000.patch",
+        "ranges": [
+          [
+            1,
+            342
+          ]
+        ],
+        "original_path": "crates/farhelm-supervisor/src/service/launch_artifacts.rs",
+        "commit": "1ed482dde220452e424973faf38a5e1318986333",
+        "notes": "patch header; patch character offsets [0,17458)",
+        "lines": 342,
+        "bytes": 17476,
+        "start": 0,
+        "end": 17458,
+        "original": "[private-run]/prep/originals/00934.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/01543-000.patch",
+        "ranges": [
+          [
+            1,
+            55
+          ]
+        ],
+        "original_path": "crates/farhelm-supervisor/src/service/core/host_launch.rs",
+        "commit": "08399d092d20815ced6619c26df2391944ae2b4a",
+        "notes": "patch header; patch character offsets [0,3524)",
+        "lines": 55,
+        "bytes": 3524,
+        "start": 0,
+        "end": 3524,
+        "original": "[private-run]/prep/originals/01543.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/01548-000.patch",
+        "ranges": [
+          [
+            1,
+            13
+          ]
+        ],
+        "original_path": "crates/farhelm-supervisor/src/service/launch_artifacts.rs",
+        "commit": "08399d092d20815ced6619c26df2391944ae2b4a",
+        "notes": "patch header; patch character offsets [0,940)",
+        "lines": 13,
+        "bytes": 940,
+        "start": 0,
+        "end": 940,
+        "original": "[private-run]/prep/originals/01548.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/01599-000.patch",
+        "ranges": [
+          [
+            1,
+            30
+          ]
+        ],
+        "original_path": "crates/farhelm-supervisor/src/scope.rs",
+        "commit": "4b489b4f2eeade14f119b186ecb16eeaaf027021",
+        "notes": "patch header; patch character offsets [0,1762)",
+        "lines": 30,
+        "bytes": 1772,
+        "start": 0,
+        "end": 1762,
+        "original": "[private-run]/prep/originals/01599.patch"
+      }
+    ],
+    "lines": 1255,
+    "bytes": 62905
+  },
+  "records": [
+    {
+      "key": "g100/c1",
+      "owner": "g100",
+      "id": "c1",
+      "domain": "supervisor-terminal-host-lifecycle",
+      "purpose": "supervisor-terminal-host-lifecycle: crates/farhelm-supervisor/src/service/core/tests/host_terminals.rs, crates/farhelm-supervisor/src/service/launch_artifacts.rs, crates/farhelm-supervisor/src/service/core/host_launch.rs, crates/farhelm-supervisor/src/scope.rs; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 1,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c1",
+            "state": "open",
+            "summary": "Launch excerpts remain fenced to the failed host's final output",
+            "location": "crates/farhelm-supervisor/src/service/launch_artifacts.rs:59",
+            "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. TLDR: considered whether removing the asynchronous tmux capture fence could quote a running or previous agent's screen as the launch failure. Source checks refute that route: append_launch_excerpt at lines 59-78 requires HostEvidence::Owned { dead: true }; hosts/terminal.rs:838-850 returns that evidence only for Liveness::Exited, after the processed exit record, and each host runs only one child. status.rs:630-652 calls it only after the dead terminal/unconsumed spec/no-sentinel classification; handlers.rs:988-1044 waits for final state before that inference. SPEC_impl.md:2219-2235 states: 'A launch that never started is classified, and quoted from the emulator’s screen ... only once the host’s exit record has been processed'; its Launch failure classification at 2752-2766 also requires final-screen output and a blank new screen after Restart. This is source-supported, not execution-observed. Suggested bucket if real: other (incorrect diagnostic); could-be-highest: no established security or loss-of-work consequence. Confidence: confirmed refutation of this proposed route. proposed_drop: code refutes it through final exit evidence and per-host child identity. possible_cover: none. Caveat: this does not prove every host/runtime transition in neighboring groups; this record covers the excerpt helper and its two callers."
+          }
+        },
+        {
+          "line": 6,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c1",
+            "state": "open",
+            "summary": "Final exit evidence fences the excerpt without relying on a bare child PID",
+            "location": "crates/farhelm-supervisor/src/service/launch_artifacts.rs:59",
+            "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333; synthesis cross-check at range tip 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db. TLDR: the moved excerpt helper does not classify a merely reaped child as a completed failed terminal, and cannot quote a previous host run. New checks: current handlers.rs:864-912 uses probe only to select the lifecycle branch and captures the adoption-pinned sweep root immediately for a live child; its dead-child path at 988-1044 waits for holds_final_state before inferring a startup failure. Current status.rs:562-636 instead derives terminal_dead from HostEvidence, not the process-table probe. HostStatus::evidence at terminal.rs:838-850 marks dead only for the processed Exited record; Runtime::on_exited at 3914-3923 flushes any synchronized update and publishes the screen before setting Exited. The excerpt's own fresh evidence check still requires dead at launch_artifacts.rs:68-72. A later diff check showed these semantics and both caller paths unchanged through the tip; only unrelated wire/report metadata changed. Source caveat clarified: terminal.rs:3911-3913 explicitly says output after the child exit from descendants retaining the pty is still fed, so 'final screen' does not mean an immutable frozen frame forever. That does not redirect this helper to a different launch: the HostTerminal handle still owns one host/child lifetime, and Restart creates another host rather than reusing it. Exact governing SPEC_impl.md text at 2759-2763: 'A host runs one child for its whole life, so everything on its screen is this launch’s output; the screen is quoted only once the host’s exit record has been processed, which follows the child’s drained output, and a Restart’s new host starts with a blank screen, so no quote reaches back into the previous run.' The original quote risk remains refuted by source rather than by an assumed immutable screen or a pid-liveness test. Suggested bucket if real: other (incorrect diagnostic); could-be-highest: no established security or loss-of-work consequence. Confidence: confirmed refutation of the stated attribution/premature-quote route, source-only. proposed_drop: code refutes it through processed exit evidence and per-host launch identity. possible_cover: none. No execution. This does not assert that every asynchronous classification outside the excerpt helper has been reviewed."
+          }
+        },
+        {
+          "line": 7,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c1",
+            "state": "open",
+            "summary": "Final exit evidence fences the excerpt without relying on a bare child PID",
+            "location": "crates/farhelm-supervisor/src/service/launch_artifacts.rs:59",
+            "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333; synthesis cross-check at range tip 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db. TLDR: the moved excerpt helper does not classify a merely reaped child as a completed failed terminal, and cannot quote a previous host run. New checks: current handlers.rs:864-912 uses probe only to select the lifecycle branch and captures the adoption-pinned sweep root immediately for a live child; its dead-child path at 988-1044 waits for holds_final_state before inferring a startup failure. Current status.rs:562-636 instead derives terminal_dead from HostEvidence, not the process-table probe. HostStatus::evidence at terminal.rs:838-850 marks dead only for the processed Exited record; Runtime::on_exited at 3914-3923 flushes any synchronized update and publishes the screen before setting Exited. The excerpt's own fresh evidence check still requires dead at launch_artifacts.rs:68-72. A later diff check showed these semantics and both caller paths unchanged through the tip; only unrelated wire/report metadata changed. Source caveat clarified: terminal.rs:3911-3913 explicitly says output after the child exit from descendants retaining the pty is still fed, so 'final screen' does not mean an immutable frozen frame forever. That does not redirect this helper to a different launch: the HostTerminal handle still owns one host/child lifetime, and Restart creates another host rather than reusing it. Exact governing SPEC_impl.md text at 2759-2763: 'A host runs one child for its whole life, so everything on its screen is this launch's output; the screen is quoted only once the host's exit record has been processed, which follows the child's drained output, and a Restart's new host starts with a blank screen, so no quote reaches back into the previous run.' The original quote risk remains refuted by source rather than by an assumed immutable screen or a pid-liveness test. Suggested bucket if real: other (incorrect diagnostic); could-be-highest: no established security or loss-of-work consequence. Confidence: confirmed refutation of the stated attribution/premature-quote route, source-only. proposed_drop: code refutes it through processed exit evidence and per-host launch identity. possible_cover: none. No execution. This does not assert that every asynchronous classification outside the excerpt helper has been reviewed."
+          }
+        },
+        {
+          "line": 10,
+          "event": {
+            "version": 1,
+            "kind": "lead",
+            "id": "c1",
+            "state": "open",
+            "summary": "Check resize promotion of inherited Restart history into a launch-error excerpt",
+            "location": "crates/farhelm-supervisor/src/service/launch_artifacts.rs:72",
+            "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. New cross-group input from g013/f2:11 reports that alacritty grow_lines can promote inherited Restart history into the initially blank screen when a viewer increases height, before the new login shell consumes its launch spec; a later shell startup failure would then quote those previous-run rows. This is a concrete conditional route that invalidates a global refutation based only on one-child host identity and a blank seed. Original c1 consequence retained: a failed launch may quote previous-run messages as its own diagnostic; earlier proposed_drop basis was processed final-exit evidence plus per-host lifetime identity. That basis proves the timing/lifetime boundaries but does not yet exclude imported history moving onto the visible screen. Checks pending: exact seed/reflow behavior, viewer-attach publication ordering, unread spec and later failure path, whole pinned-range attribution and explicit acceptance wording. g013 owns the broader behavior/promise-introduction investigation; this group will inspect only the helper's contract/caller interaction and revise this original ID. Suggested bucket: other for incorrect diagnostic unless a stronger route is established; could-be-highest: no established security or loss-of-work consequence. Confidence: source-conditional lead from another group, not yet independently settled here. proposed_drop: false pending checks; no parent drop accepted. possible_cover: g013/f2 may be the same contamination cause; exact deduplication belongs to parent. No execution or reproduction."
+          }
+        },
+        {
+          "line": 11,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "c1",
+            "state": "open",
+            "summary": "Resize can promote inherited Restart history into the failed launch's quoted screen",
+            "location": "crates/farhelm-supervisor/src/service/launch_artifacts.rs:44-72",
+            "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. TLDR: after Restart, increasing terminal height while the login shell is still starting can make a later startup error quote a previous run's message as that failed launch's last output. This is a source-confirmed conditional interaction, not observed execution. Details: the seed intentionally carries old primary history above a blank visible screen (terminal-emulator snapshot/v1/mod.rs:242-268). Vendor grid/resize.rs:25-28 invokes grow_lines for a height increase; :46-71 promotes min(history_size, lines_added) history rows into the visible grid. term/mod.rs:756-758 enables that primary-grid resize. host_launch.rs:508-518 supplies initial_snapshot to the new host, :579-625 waits for host readiness/adoption, then :639-645 tracks the still-pending launch spec and returns. host_restart.rs:294-305 confirms the socket; :363-388 publishes it before returning, without waiting for the login shell to consume its launch spec. Thus a viewer may resize this new terminal during ordinary shell initialization; handlers.rs:2081 forwards owned viewer resizes to the resolved HostTerminal, whose resize request/record is applied to the emulator (terminal.rs:3872-3885,4063-4070). If the shell subsequently exits without consuming the spec or overwriting all promoted rows, status.rs:630-652 recognizes the unconsumed-spec/no-sentinel failure and calls the excerpt helper. screen.rs:50-96 includes those visible rows, and launch_artifacts.rs:97-105 selects the last five nonblank rows, so blank rows below the promoted old output do not protect attribution. No row provenance check distinguishes inherited history from this launch's output. The helper still requires processed exit evidence; that proves output ordering, not provenance of cells imported by the seed. Original c1 consequence and earlier proposed-drop basis preserved: the concern was quoting a running/previous agent's screen, and earlier revisions proposed a drop based on processed final-exit evidence, one-child host lifetime and blank Restart seed. Those checks correctly refute premature process-probe quoting, but do not refute this history-promotion route; the general source-refuted conclusion is withdrawn. Contract: SPEC.md:2890-2893 requires omitting an excerpt that cannot safely be attributed to the launch. SPEC_impl.md:2759-2763 and the newly rewritten helper docstring at :44-56 claim the blank new screen prevents quotes from previous runs; resize makes that invariant false. Remedy direction: track inherited-history provenance through promotion, or conservatively omit the excerpt once inherited content may have entered the screen. Whole-range attribution checked: the excluded base 6e423e30068b62c6cfa276c6d720ee35bb70387a already has the same host screen quote and blank-seed rationale in launch_artifacts.rs:52-101; grid/resize.rs has no diff from that base to this commit, and only comments differ in the history encoder. Therefore do not claim this helper move newly introduced the runtime route. The assigned rewrite retains/reasserts the false attribution rationale while moving the helper, and g013/f2 independently owns the later in-range SPEC caveat-removal/promise change at f96dd4363d97dc7e07dea5b8947c96be6bf912e8. Parent should reconcile that shared cause and attribution rather than count this as a separate newly introduced bug. Suggested bucket: other (misleading durable launch diagnostic). Could-be-highest: no established security or loss-of-work route. Confidence: confirmed conditional source/control-flow route; requires retained old history, a height increase after publication and before classification, and shell startup failure leaving a promoted row visible. No special seam, second failure or runtime reproduction was used. proposed_drop: false; earlier proposed source refutation is withdrawn and no parent drop accepted. possible_cover: g013/f2 is the same source contamination route; no forbidden coverage sources searched. Distinct l1 bounded excerpt-copying finding remains unchanged. No unresolved readily checkable premise remains for this conditional route."
+          }
+        }
+      ],
+      "latest": {
+        "line": 11,
+        "event": {
+          "version": 1,
+          "kind": "finding",
+          "id": "c1",
+          "state": "open",
+          "summary": "Resize can promote inherited Restart history into the failed launch's quoted screen",
+          "location": "crates/farhelm-supervisor/src/service/launch_artifacts.rs:44-72",
+          "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. TLDR: after Restart, increasing terminal height while the login shell is still starting can make a later startup error quote a previous run's message as that failed launch's last output. This is a source-confirmed conditional interaction, not observed execution. Details: the seed intentionally carries old primary history above a blank visible screen (terminal-emulator snapshot/v1/mod.rs:242-268). Vendor grid/resize.rs:25-28 invokes grow_lines for a height increase; :46-71 promotes min(history_size, lines_added) history rows into the visible grid. term/mod.rs:756-758 enables that primary-grid resize. host_launch.rs:508-518 supplies initial_snapshot to the new host, :579-625 waits for host readiness/adoption, then :639-645 tracks the still-pending launch spec and returns. host_restart.rs:294-305 confirms the socket; :363-388 publishes it before returning, without waiting for the login shell to consume its launch spec. Thus a viewer may resize this new terminal during ordinary shell initialization; handlers.rs:2081 forwards owned viewer resizes to the resolved HostTerminal, whose resize request/record is applied to the emulator (terminal.rs:3872-3885,4063-4070). If the shell subsequently exits without consuming the spec or overwriting all promoted rows, status.rs:630-652 recognizes the unconsumed-spec/no-sentinel failure and calls the excerpt helper. screen.rs:50-96 includes those visible rows, and launch_artifacts.rs:97-105 selects the last five nonblank rows, so blank rows below the promoted old output do not protect attribution. No row provenance check distinguishes inherited history from this launch's output. The helper still requires processed exit evidence; that proves output ordering, not provenance of cells imported by the seed. Original c1 consequence and earlier proposed-drop basis preserved: the concern was quoting a running/previous agent's screen, and earlier revisions proposed a drop based on processed final-exit evidence, one-child host lifetime and blank Restart seed. Those checks correctly refute premature process-probe quoting, but do not refute this history-promotion route; the general source-refuted conclusion is withdrawn. Contract: SPEC.md:2890-2893 requires omitting an excerpt that cannot safely be attributed to the launch. SPEC_impl.md:2759-2763 and the newly rewritten helper docstring at :44-56 claim the blank new screen prevents quotes from previous runs; resize makes that invariant false. Remedy direction: track inherited-history provenance through promotion, or conservatively omit the excerpt once inherited content may have entered the screen. Whole-range attribution checked: the excluded base 6e423e30068b62c6cfa276c6d720ee35bb70387a already has the same host screen quote and blank-seed rationale in launch_artifacts.rs:52-101; grid/resize.rs has no diff from that base to this commit, and only comments differ in the history encoder. Therefore do not claim this helper move newly introduced the runtime route. The assigned rewrite retains/reasserts the false attribution rationale while moving the helper, and g013/f2 independently owns the later in-range SPEC caveat-removal/promise change at f96dd4363d97dc7e07dea5b8947c96be6bf912e8. Parent should reconcile that shared cause and attribution rather than count this as a separate newly introduced bug. Suggested bucket: other (misleading durable launch diagnostic). Could-be-highest: no established security or loss-of-work route. Confidence: confirmed conditional source/control-flow route; requires retained old history, a height increase after publication and before classification, and shell startup failure leaving a promoted row visible. No special seam, second failure or runtime reproduction was used. proposed_drop: false; earlier proposed source refutation is withdrawn and no parent drop accepted. possible_cover: g013/f2 is the same source contamination route; no forbidden coverage sources searched. Distinct l1 bounded excerpt-copying finding remains unchanged. No unresolved readily checkable premise remains for this conditional route."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g100/findings.jsonl",
+        "id": "c1",
+        "line": 11,
+        "disposition": "duplicate",
+        "group": "launch-excerpt-inherited-history-provenance",
+        "reason": "Parent read full claims065 and compared canonical g013/f2event16/prior parent judgment. The runtime resize-promotes-inherited-history path and code rationale already exist at exclusive base; retain the newly authored1ed482 SPEC_impl blanket blank-screen provenance proof as the in-range authoritative documentation defect. f96dd436's removed old-terminal exception is not acceptance of the host mechanism and does not introduce that runtime failure. Same false provenance guarantee/counterexample as g013/f2 and g009/l1, with all owner IDs retained, no extra item. Diagnostic-filter ambiguity does not cover the new false proof. No highest consequence or observed execution. Source resize/launch-unwind/diagnostic-selection evidence is preserved; correct processed-exit ordering alone is not provenance."
+      },
+      "accepted_parent_decision": {
+        "key": "g100/c1",
+        "line": 11,
+        "disposition": "duplicate",
+        "group": "launch-excerpt-inherited-history-provenance",
+        "bucket": "other",
+        "recording": "retain-verified",
+        "needs_independent_drop_check": false,
+        "reason": "Parent read full claims065 and compared canonical g013/f2event16/prior parent judgment. The runtime resize-promotes-inherited-history path and code rationale already exist at exclusive base; retain the newly authored1ed482 SPEC_impl blanket blank-screen provenance proof as the in-range authoritative documentation defect. f96dd436's removed old-terminal exception is not acceptance of the host mechanism and does not introduce that runtime failure. Same false provenance guarantee/counterexample as g013/f2 and g009/l1, with all owner IDs retained, no extra item. Diagnostic-filter ambiguity does not cover the new false proof. No highest consequence or observed execution. Source resize/launch-unwind/diagnostic-selection evidence is preserved; correct processed-exit ordering alone is not provenance."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-065",
+          "key": "g100/c1",
+          "latest_line": 11,
+          "recommendation": "needs-parent",
+          "bucket": "other",
+          "underlying_key": "restart-seed-history-promoted-into-launch-error-excerpt",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The resize route defeats the blanket provenance claim. Its runtime mechanism and helper rationale predate the range, while an in-range SPEC change removes an old-terminal exception and retains the unconditional host guarantee. Parent must reconcile the separate owner and range attribution.",
+          "checks": [
+            "1ed482dde220452e424973faf38a5e1318986333:terminal-emulator/src/snapshot/v1/mod.rs:242-268 seeds primary history above a blank screen. vendor/alacritty_terminal/src/grid/resize.rs:25-28,46-71 grows the visible area using history. service/handlers.rs:2074-2082 forwards owned viewer resize; hosts/terminal.rs:3872-3885 applies it to the emulator.",
+            "Same revision host_restart.rs:294-305,363-388 confirms/publishes the replacement without a launch-spec-consumption barrier. status.rs:630-652 classifies unconsumed spec/no sentinel and calls append_launch_excerpt. launch_artifacts.rs:44-72,97-105 checks processed exit and takes nonblank screen rows without provenance.",
+            "Exclusive base 6e423e3:launch_artifacts.rs:52-101 already has the host screen quote and blank-seed no-previous-run rationale. This invalidates treating the helper move as a new runtime introduction.",
+            "f96dd4363d97dc7e07dea5b8947c96be6bf912e8 SPEC.md diff removes the rare old-terminal previous-run-excerpt paragraph and leaves the safe-attribution promise. This is an in-range contract edit, but its removed exception explicitly concerned old terminals; it was not exact acceptance of terminal-host history promotion. No execution."
+          ],
+          "coverage_checked": [
+            "SPEC.md:2890-2893 requires omitting unsafe-attribution excerpts. SPEC_impl.md:2658-2667 expressly claims the blank new screen prevents previous-run quotes. Neither accepts the host-history promotion mechanism.",
+            "TODO Planned empty; BUGS and active TRIAGE_OUTCOMES searches for excerpt, blank screen, restart history and attribution found no exact match. INDEX.md has no matching excerpt-provenance record. Landed tmux cleanup plans provide no unlanded coverage.",
+            "FILTER.md session-status/history-after-partial-failure could cover the misleading diagnostic runtime consequence when ordinary lifecycle operations remain usable. It does not clearly cover the persistent false code/spec provenance explanation. Retain that ambiguity; do not filter the whole record silently.",
+            "g013/f2 is mentioned in the supplied history but not supplied as a named record; exact same-root matching must be done by the parent. No other primary logs searched."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": "Parent must match g013/f2 and choose a single recording that identifies the in-range documentation/contract defect without claiming a newly introduced runtime route. The exact adverse execution was not observed.",
+          "original_stronger_consequence": "Failed launch may quote previous-run messages. Earlier source refutation based on processed exit, one-child lifetime and blank initial screen is withdrawn: those establish lifetime/timing, not provenance after inherited history enters the screen. No security or loss-of-work consequence was alleged.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Keep the source-confirmed conditional provenance contradiction available for parent reconciliation. Distinguish old runtime mechanism, changed/reasserted documentation and possible diagnostic-filter coverage."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": true,
+        "clearly_refuted_candidate": false,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "launch-excerpt-inherited-history-provenance",
+        "destination": "trailing-launch-excerpt-inherited-history-provenance.md"
+      }
+    },
+    {
+      "key": "g100/l1",
+      "owner": "g100",
+      "id": "l1",
+      "domain": "supervisor-terminal-host-lifecycle",
+      "purpose": "supervisor-terminal-host-lifecycle: crates/farhelm-supervisor/src/service/core/tests/host_terminals.rs, crates/farhelm-supervisor/src/service/launch_artifacts.rs, crates/farhelm-supervisor/src/service/core/host_launch.rs, crates/farhelm-supervisor/src/scope.rs; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 2,
+          "event": {
+            "version": 1,
+            "kind": "lead",
+            "id": "l1",
+            "state": "open",
+            "summary": "Check transient cost of the new excerpt reducer on a maximum-size screen",
+            "location": "crates/farhelm-supervisor/src/service/launch_artifacts.rs:96",
+            "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. TLDR: a failed launch with a very wide terminal may make the supervisor allocate and escape far more text than the 500-byte diagnostic retains. The new helper collects all row slices, then builds all five retained rows before trimming. The removed implementation at parent tmux.rs:180-299 bounded each line and pending whitespace incrementally. Source checks made so far: the patch, old reducer, two call sites and final-exit contract; no execution. Exact missing premise: the maximum terminal dimensions and text per cell exposed by screen_tail, and whether that creates a material incremental resource cost beyond the already-required screen read. Next check: host dimension limit, emulator screen-tail implementation and input size admission. Suggested bucket: other unless a material host-wide impact is established; could-be-highest: no established security or work-loss route. Confidence: unresolved lead, not a finding. proposed_drop: false. possible_cover: none. No runtime reproduction is requested or planned."
+          }
+        },
+        {
+          "line": 3,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "l1",
+            "state": "open",
+            "summary": "Excerpt reduction has finite extra cost; no material regression established",
+            "location": "crates/farhelm-supervisor/src/service/launch_artifacts.rs:96",
+            "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. TLDR: investigated whether the replacement reducer could cause unbounded allocations when a launch fails; the suspected unbounded route is refuted. Checks: protocol.rs:100-145 caps each dimension at 10,000; screen.rs:50-96 emits one line per row and base plus combining marks per cell; vendor/alacritty_terminal/src/term/cell.rs:46-56,362-368 caps combining marks at 16 per cell; hosts/terminal.rs:2233-2240 already reads the whole visible screen, as the parent version's append_launch_excerpt did. The new lines vector has at most 10,000 row slices. Escaping copies only five rows, each at most 10,000 cells and 17 characters per cell (at most 8.5 MB of escaped character text before String capacity overhead with the conservative 10-byte escape bound), followed by truncation to 500 bytes. This is more transient copying than the old 500-byte incremental reducer, but bounded and confined to terminal-based launch failure. No source route to a material UX, security or work-loss failure was established beyond the whole-screen extraction that already existed. Suggested bucket if reported: other (bounded transient cost). Could-be-highest: no. Confidence: confirmed bounds from source; no runtime measurements. proposed_drop: source refutes unbounded growth; no established user-facing defect from this bounded extra allocation. possible_cover: none. Original suspected consequence preserved: a very wide failed terminal builds much more than the retained diagnostic; that finite cost remains, but this review does not claim it causes a failure. Lead settled; no missing premise needed to decide the unbounded-growth concern."
+          }
+        },
+        {
+          "line": 4,
+          "event": {
+            "version": 1,
+            "kind": "lead",
+            "id": "l1",
+            "state": "open",
+            "summary": "Reassess the bounded excerpt-copying regression against explicit resource contracts",
+            "location": "crates/farhelm-supervisor/src/service/launch_artifacts.rs:96",
+            "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. Synthesis correction: the original concern was extra allocation and escaping far beyond a 500-byte diagnostic, not only unboundedness. The previous candidate disposition proved finite dimensions but did not by itself refute that bounded resource regression. Preserve the established consequence: the new helper collects all screen-row slices and copies and escapes the five retained rows before trimming, whereas the previous reducer retained bounded suffixes while scanning. Supported host dimensions are up to 10,000 by 10,000; the cell limit is 16 combining marks plus a base. The conservative derived upper bound is 8.5 MB of escaped text for five maximally wide rows before String-capacity overhead, separate from the already-existing full-screen extraction. No latency, OOM or work-loss consequence has been measured or established. Checks now needed: applicable explicit emulator/supervisor resource limits and whether they narrow reachable row width, text/escaping bounds and the two callers' scheduling contexts. Suggested bucket: other for the established resource regression unless stronger impact is supported. Could-be-highest: no established security or loss-of-work route. Confidence: confirmed extra copying by source, open contract/disposition check. proposed_drop: false pending this check; the earlier proposed drop has not been accepted. possible_cover: none. Source-only investigation; no execution or reproduction."
+          }
+        },
+        {
+          "line": 5,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "l1",
+            "state": "open",
+            "summary": "Launch-error reduction now allocates full rows before enforcing its tiny result limit",
+            "location": "crates/farhelm-supervisor/src/service/launch_artifacts.rs:96-124",
+            "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. TLDR: when a launch fails before its agent starts, assembling its 500-byte error excerpt now makes temporary allocations proportional to the terminal's height and the full width of its last five nonblank rows. The prior reducer kept those temporary text buffers bounded while reading the same full screen. This is a source-confirmed bounded resource regression; this finding does not claim measured latency, OOM or loss of work. Details: launch_excerpt_of_text at lines 97-105 collects every nonblank row slice before selecting five; lines 107-117 append and escape all characters of those five rows; only lines 119-124 trim to LAUNCH_EXCERPT_BYTES=500. The replaced parent tmux.rs:180-299 reducer keeps at most five suffixes, trims line/whitespace buffers on each append, and trims the joined result. The existing full-screen extraction in append_launch_excerpt line 72 and hosts/terminal.rs:2233-2240 remains an independent cost: it does not eliminate this newly added vector and escaped-row allocation. Explicit bounds checked: terminal-host protocol.rs:100-145 permits 10,000 columns and 10,000 rows; host_launch.rs:513-514 clamps creates to that bound, not to the ordinary 200-column measurement size. screen.rs:50-96 emits one row per screen row and base plus combining marks; vendor cell.rs:46-56,362-368 caps marks at 16 per cell. Therefore row references are bounded by 10,000, and a conservative ceiling for the five-row temporary string is 5*10,000*17*10+12 = 8,500,012 bytes of escaped text before String-capacity overhead (10 is the maximum char::escape_default spelling length, 12 the four separators). That is an upper bound, not a claim every cell can simultaneously realize that spelling; ignored-format filtering and the 64 MiB extra-storage cap can narrow content. The ordinary 80 MiB / hostile about 190 MiB memory figures in SPEC_impl.md:2869-2878 and emulator lib.rs:47-104 are conditional on 200 columns and full scrollback, not a separate global width admission limit. The 500-byte excerpt contract at SPEC_impl.md:2756-2766 is still met by the returned text; no hard RSS-limit breach is alleged. The two callers run synchronously within async observation/Stop processing (status.rs:652; handlers.rs:1039), so the extra work is paid by those paths, but its wall time was not measured and material user-visible latency is not asserted. A correction can retain only the suffix needed for the escaped 500-byte result and the last five nonblank rows, as the prior reducer did, without changing output. Suggested bucket: other, for the established bounded allocation/work regression; could-be-highest: no established security or work-loss route. Confidence: confirmed from source; no execution. proposed_drop: false (supersedes the earlier proposed drop based only on finite bounds and lack of an observed failure). possible_cover: none. Caveats: full-screen extraction predates this patch; this is neither an unbounded-memory finding nor a claim that the documented terminal memory budgets are necessarily exceeded."
+          }
+        }
+      ],
+      "latest": {
+        "line": 5,
+        "event": {
+          "version": 1,
+          "kind": "finding",
+          "id": "l1",
+          "state": "open",
+          "summary": "Launch-error reduction now allocates full rows before enforcing its tiny result limit",
+          "location": "crates/farhelm-supervisor/src/service/launch_artifacts.rs:96-124",
+          "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. TLDR: when a launch fails before its agent starts, assembling its 500-byte error excerpt now makes temporary allocations proportional to the terminal's height and the full width of its last five nonblank rows. The prior reducer kept those temporary text buffers bounded while reading the same full screen. This is a source-confirmed bounded resource regression; this finding does not claim measured latency, OOM or loss of work. Details: launch_excerpt_of_text at lines 97-105 collects every nonblank row slice before selecting five; lines 107-117 append and escape all characters of those five rows; only lines 119-124 trim to LAUNCH_EXCERPT_BYTES=500. The replaced parent tmux.rs:180-299 reducer keeps at most five suffixes, trims line/whitespace buffers on each append, and trims the joined result. The existing full-screen extraction in append_launch_excerpt line 72 and hosts/terminal.rs:2233-2240 remains an independent cost: it does not eliminate this newly added vector and escaped-row allocation. Explicit bounds checked: terminal-host protocol.rs:100-145 permits 10,000 columns and 10,000 rows; host_launch.rs:513-514 clamps creates to that bound, not to the ordinary 200-column measurement size. screen.rs:50-96 emits one row per screen row and base plus combining marks; vendor cell.rs:46-56,362-368 caps marks at 16 per cell. Therefore row references are bounded by 10,000, and a conservative ceiling for the five-row temporary string is 5*10,000*17*10+12 = 8,500,012 bytes of escaped text before String-capacity overhead (10 is the maximum char::escape_default spelling length, 12 the four separators). That is an upper bound, not a claim every cell can simultaneously realize that spelling; ignored-format filtering and the 64 MiB extra-storage cap can narrow content. The ordinary 80 MiB / hostile about 190 MiB memory figures in SPEC_impl.md:2869-2878 and emulator lib.rs:47-104 are conditional on 200 columns and full scrollback, not a separate global width admission limit. The 500-byte excerpt contract at SPEC_impl.md:2756-2766 is still met by the returned text; no hard RSS-limit breach is alleged. The two callers run synchronously within async observation/Stop processing (status.rs:652; handlers.rs:1039), so the extra work is paid by those paths, but its wall time was not measured and material user-visible latency is not asserted. A correction can retain only the suffix needed for the escaped 500-byte result and the last five nonblank rows, as the prior reducer did, without changing output. Suggested bucket: other, for the established bounded allocation/work regression; could-be-highest: no established security or work-loss route. Confidence: confirmed from source; no execution. proposed_drop: false (supersedes the earlier proposed drop based only on finite bounds and lack of an observed failure). possible_cover: none. Caveats: full-screen extraction predates this patch; this is neither an unbounded-memory finding nor a claim that the documented terminal memory budgets are necessarily exceeded."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g100/findings.jsonl",
+        "id": "l1",
+        "line": 5,
+        "disposition": "verified",
+        "group": "launch-excerpt-full-row-allocation-before-500-byte-trim",
+        "reason": "Parent explicitly accepted named retain-verified proposal from claims-065 after inspecting it. The replacement reducer retains row references for the full screen and escapes five full rows before trimming. Finite admission bounds do not refute that added allocation/work. Retain other for the source-confirmed bounded allocation/work regression, explicitly preserving pre-existing full-screen cost and unmeasured stronger impacts. Checked source/results: [\"1ed482dde220452e424973faf38a5e1318986333:service/launch_artifacts.rs:97-124 collects all nonblank row slices, appends/escapes five full rows, then trims to 500 bytes. Parent revision tmux.rs:180-299 incrementally bounds line/whitespace suffixes and keeps at most five lines.\",\"Same revision terminal-host/src/protocol.rs:100-145 permits each dimension up to 10,000; host_launch.rs:508-518 clamps to that bound. terminal-emulator/src/screen.rs:50-96 emits base and combining characters for visible cells. vendor cell.rs:46-56,362-368 caps marks at 16 per cell.\",\"Conservative escaped-text ceiling for the five-row intermediate is 5*10000*17*10+12 = 8,500,012 bytes before capacity overhead. This is an upper bound, not a demonstrated simultaneous cell payload. Full-screen extraction already existed and is a separate cost. No latency or memory-failure measurement.\"] Current coverage/results: [\"Both specifications searched for excerpt limits and memory budgets. Current SPEC_impl.md:2658-2667 limits returned text, not these intermediates. Memory budget at :2769-2778 is conditional on 200 columns/full scrollback, not a narrower admission limit.\",\"TODO Planned empty; BUGS, active TRIAGE_OUTCOMES, plans/queue and INDEX searched for excerpt allocation/reduction and launch-error resource cost. No exact coverage found. The tmux-end-old-terminals helper-move instruction is landed, not an outstanding implementation plan.\",\"FILTER.md rare diagnostic/session-status filters do not cover extra supervisor allocation/work. Rare failure context alone is insufficient.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"The initial concern was extra allocation far beyond the retained diagnostic. A later candidate proposed dropping it after proving finite dimensions; that proposed drop was withdrawn because it answered unboundedness rather than the original regression. Retain bounded cost only.\"; \"Material UX latency, OOM, a violated hard RSS bound, security impact and work loss are not established.\"."
+      },
+      "accepted_parent_decision": {
+        "key": "g100/l1",
+        "line": 5,
+        "disposition": "verified",
+        "group": "launch-excerpt-full-row-allocation-before-500-byte-trim",
+        "bucket": "other",
+        "recording": "retain-verified",
+        "queue_target_candidate": null,
+        "needs_independent_drop_check": false,
+        "reason": "Parent explicitly accepted named retain-verified proposal from claims-065 after inspecting it. The replacement reducer retains row references for the full screen and escapes five full rows before trimming. Finite admission bounds do not refute that added allocation/work. Retain other for the source-confirmed bounded allocation/work regression, explicitly preserving pre-existing full-screen cost and unmeasured stronger impacts. Checked source/results: [\"1ed482dde220452e424973faf38a5e1318986333:service/launch_artifacts.rs:97-124 collects all nonblank row slices, appends/escapes five full rows, then trims to 500 bytes. Parent revision tmux.rs:180-299 incrementally bounds line/whitespace suffixes and keeps at most five lines.\",\"Same revision terminal-host/src/protocol.rs:100-145 permits each dimension up to 10,000; host_launch.rs:508-518 clamps to that bound. terminal-emulator/src/screen.rs:50-96 emits base and combining characters for visible cells. vendor cell.rs:46-56,362-368 caps marks at 16 per cell.\",\"Conservative escaped-text ceiling for the five-row intermediate is 5*10000*17*10+12 = 8,500,012 bytes before capacity overhead. This is an upper bound, not a demonstrated simultaneous cell payload. Full-screen extraction already existed and is a separate cost. No latency or memory-failure measurement.\"] Current coverage/results: [\"Both specifications searched for excerpt limits and memory budgets. Current SPEC_impl.md:2658-2667 limits returned text, not these intermediates. Memory budget at :2769-2778 is conditional on 200 columns/full scrollback, not a narrower admission limit.\",\"TODO Planned empty; BUGS, active TRIAGE_OUTCOMES, plans/queue and INDEX searched for excerpt allocation/reduction and launch-error resource cost. No exact coverage found. The tmux-end-old-terminals helper-move instruction is landed, not an outstanding implementation plan.\",\"FILTER.md rare diagnostic/session-status filters do not cover extra supervisor allocation/work. Rare failure context alone is insufficient.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"The initial concern was extra allocation far beyond the retained diagnostic. A later candidate proposed dropping it after proving finite dimensions; that proposed drop was withdrawn because it answered unboundedness rather than the original regression. Retain bounded cost only.\"; \"Material UX latency, OOM, a violated hard RSS bound, security impact and work loss are not established.\"."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-065",
+          "key": "g100/l1",
+          "latest_line": 5,
+          "recommendation": "retain-verified",
+          "bucket": "other",
+          "underlying_key": "launch-excerpt-full-row-allocation-before-500-byte-trim",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The replacement reducer retains row references for the full screen and escapes five full rows before trimming. Finite admission bounds do not refute that added allocation/work.",
+          "checks": [
+            "1ed482dde220452e424973faf38a5e1318986333:service/launch_artifacts.rs:97-124 collects all nonblank row slices, appends/escapes five full rows, then trims to 500 bytes. Parent revision tmux.rs:180-299 incrementally bounds line/whitespace suffixes and keeps at most five lines.",
+            "Same revision terminal-host/src/protocol.rs:100-145 permits each dimension up to 10,000; host_launch.rs:508-518 clamps to that bound. terminal-emulator/src/screen.rs:50-96 emits base and combining characters for visible cells. vendor cell.rs:46-56,362-368 caps marks at 16 per cell.",
+            "Conservative escaped-text ceiling for the five-row intermediate is 5*10000*17*10+12 = 8,500,012 bytes before capacity overhead. This is an upper bound, not a demonstrated simultaneous cell payload. Full-screen extraction already existed and is a separate cost. No latency or memory-failure measurement."
+          ],
+          "coverage_checked": [
+            "Both specifications searched for excerpt limits and memory budgets. Current SPEC_impl.md:2658-2667 limits returned text, not these intermediates. Memory budget at :2769-2778 is conditional on 200 columns/full scrollback, not a narrower admission limit.",
+            "TODO Planned empty; BUGS, active TRIAGE_OUTCOMES, plans/queue and INDEX searched for excerpt allocation/reduction and launch-error resource cost. No exact coverage found. The tmux-end-old-terminals helper-move instruction is landed, not an outstanding implementation plan.",
+            "FILTER.md rare diagnostic/session-status filters do not cover extra supervisor allocation/work. Rare failure context alone is insufficient."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": "Material UX latency, OOM, a violated hard RSS bound, security impact and work loss are not established.",
+          "original_stronger_consequence": "The initial concern was extra allocation far beyond the retained diagnostic. A later candidate proposed dropping it after proving finite dimensions; that proposed drop was withdrawn because it answered unboundedness rather than the original regression. Retain bounded cost only.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Retain other for the source-confirmed bounded allocation/work regression, explicitly preserving pre-existing full-screen cost and unmeasured stronger impacts."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": true,
+        "clearly_refuted_candidate": false,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Source-confirmed by an existing parent decision; not runtime reproduced",
+        "deduplication_key": "launch-excerpt-full-row-allocation-before-500-byte-trim",
+        "destination": "trailing-launch-excerpt-full-row-allocation-before-500-byte-trim.md"
+      }
+    },
+    {
+      "key": "g100/c2",
+      "owner": "g100",
+      "id": "c2",
+      "domain": "supervisor-terminal-host-lifecycle",
+      "purpose": "supervisor-terminal-host-lifecycle: crates/farhelm-supervisor/src/service/core/tests/host_terminals.rs, crates/farhelm-supervisor/src/service/launch_artifacts.rs, crates/farhelm-supervisor/src/service/core/host_launch.rs, crates/farhelm-supervisor/src/scope.rs; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 8,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c2",
+            "state": "open",
+            "summary": "The host-only probe still preserves adoption-pinned identity through Stop's async sweep",
+            "location": "crates/farhelm-supervisor/src/service/core/tests/host_terminals.rs:258-270",
+            "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333; caller synthesis checked at 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db, whose relevant HostStatus/probe/sweep_root semantics have not changed. TLDR: considered whether changing the test and host-only interface from TerminalProbe::Owned to TerminalProbe::Running(pid) loses process identity, so Stop could later kill an unrelated process that reused the child's PID, or an unreadable host could falsely report its tree cleaned. Current source refutes that route. HostStatus::pinned_child at hosts/terminal.rs:791-799 compares the process table with the root/start time pinned at adoption. Its probe at 818-832 returns a bare PID only after that check; live_root at 737-751 refuses Unavailable and process-read failures, and HostTerminal::sweep_root at 2571-2583 reuses the pinned root and checks its PID against the probe. handlers.rs:864-912 captures that root before durable I/O and refuses on errors. sweep.rs:2008-2035 carries the pair through recording StopRequested into reap_process_tree; reap_process_tree_with_sweep at 1431-1439 revalidates it after the async gap. validate_root_identity/root_from_read at 1574-1625 admits only the same start time, drops a missing or changed identity, and returns an error on an unreadable process row. Delete intentionally differs from Stop: session_hosts.rs:510-541 uses pinned_child_root or a fresh over-connection pin_child for known hosts, so an unavailable host need not hide a still-running child; HostStatus::pinned_child_root at terminal.rs:773-784 still matches adoption start identity before returning it. The changed test continues to force unreadability after the probe and requires sweep_root(live).is_err(). This conclusion is source-supported, not execution-observed. Suggested bucket if the suspected route existed: highest, because it could kill unrelated user processes; could-be-highest: yes. Confidence: confirmed refutation of the bare-PID/async-gap route. proposed_drop: source refutes the route via adoption-pinned start identities, immediate root capture, and revalidation; no specification exception is needed for this refutation. possible_cover: none. Caveat: this is not a claim to eliminate the distinct non-atomic read/signal race or globally equal start timestamps; those were not the suspected regression here. Parent owns any independent drop check; no drop has been accepted by the parent."
+          }
+        },
+        {
+          "line": 9,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c2",
+            "state": "open",
+            "summary": "Lifecycle callers carry pinned process identities through their async cleanup",
+            "location": "crates/farhelm-supervisor/src/service/core/tests/host_terminals.rs:258-270",
+            "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333; caller synthesis at range tip 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db, whose relevant HostStatus/probe/sweep_root semantics have not changed. TLDR: considered whether the host-only TerminalProbe::Running(pid) interface and corresponding test rewrite lose identity, permitting a later Stop/Restart/tab cleanup to kill unrelated work through a reused PID, or treating an unreadable live child as gone. That route is source-refuted. HostStatus::pinned_child (terminal.rs:791-799) compares the process table with the adoption-pinned root/start time; probe (818-832) returns its PID, live_root (737-751) refuses unreadability, and sweep_root (2571-2583) returns the pinned pair after checking the probe PID. Stop captures that pair before its durable write (handlers.rs:864-912); Restart captures it before settle_outstanding_launches can wait and passes it to stop_live_agent (core.rs:12336-12417); tab cleanup probes and captures it before reap_tab_processes (core.rs:14072-14123). stop_live_agent carries the pair through its StopRequested write (sweep.rs:2008-2035). The shared reap revalidates every root after those awaits (1431-1439); validate_root_identity/root_from_read (1574-1625) drops changed/missing identities and refuses unreadable rows. Delete intentionally bypasses the live-host requirement but preserves identity: teardown.rs:320-344 uses pinned_child_root for the agent, session_hosts.rs:510-541 uses it for tab runtimes or pin_child over a recorded host's connection, and HostStatus::pinned_child_root (terminal.rs:773-784) still requires the adoption-pinned start time. Thus a stopped/unreadable host does not hide its still-identical child from unconditional Delete; a guarded Delete refuses that uncertainty earlier. The changed test retains its after-probe unreadability transition and requires sweep_root(live).is_err(). Suggested bucket if the suspected route existed: highest, because unrelated user processes could be killed; could-be-highest: yes. Confidence: confirmed source refutation, no execution. proposed_drop: code refutes the bare-PID/async-gap route with pinned start identities, root capture before async work, and shared revalidation; no specification exception is needed. possible_cover: none. Caveat: this does not eliminate the distinct non-atomic identity-read/signal window or equal start timestamps; neither is claimed as a regression here. Parent owns the independent drop check; no drop has been accepted by the parent."
+          }
+        }
+      ],
+      "latest": {
+        "line": 9,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c2",
+          "state": "open",
+          "summary": "Lifecycle callers carry pinned process identities through their async cleanup",
+          "location": "crates/farhelm-supervisor/src/service/core/tests/host_terminals.rs:258-270",
+          "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333; caller synthesis at range tip 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db, whose relevant HostStatus/probe/sweep_root semantics have not changed. TLDR: considered whether the host-only TerminalProbe::Running(pid) interface and corresponding test rewrite lose identity, permitting a later Stop/Restart/tab cleanup to kill unrelated work through a reused PID, or treating an unreadable live child as gone. That route is source-refuted. HostStatus::pinned_child (terminal.rs:791-799) compares the process table with the adoption-pinned root/start time; probe (818-832) returns its PID, live_root (737-751) refuses unreadability, and sweep_root (2571-2583) returns the pinned pair after checking the probe PID. Stop captures that pair before its durable write (handlers.rs:864-912); Restart captures it before settle_outstanding_launches can wait and passes it to stop_live_agent (core.rs:12336-12417); tab cleanup probes and captures it before reap_tab_processes (core.rs:14072-14123). stop_live_agent carries the pair through its StopRequested write (sweep.rs:2008-2035). The shared reap revalidates every root after those awaits (1431-1439); validate_root_identity/root_from_read (1574-1625) drops changed/missing identities and refuses unreadable rows. Delete intentionally bypasses the live-host requirement but preserves identity: teardown.rs:320-344 uses pinned_child_root for the agent, session_hosts.rs:510-541 uses it for tab runtimes or pin_child over a recorded host's connection, and HostStatus::pinned_child_root (terminal.rs:773-784) still requires the adoption-pinned start time. Thus a stopped/unreadable host does not hide its still-identical child from unconditional Delete; a guarded Delete refuses that uncertainty earlier. The changed test retains its after-probe unreadability transition and requires sweep_root(live).is_err(). Suggested bucket if the suspected route existed: highest, because unrelated user processes could be killed; could-be-highest: yes. Confidence: confirmed source refutation, no execution. proposed_drop: code refutes the bare-PID/async-gap route with pinned start identities, root capture before async work, and shared revalidation; no specification exception is needed. possible_cover: none. Caveat: this does not eliminate the distinct non-atomic identity-read/signal window or equal start timestamps; neither is claimed as a regression here. Parent owns the independent drop check; no drop has been accepted by the parent."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g100/findings.jsonl",
+        "id": "c2",
+        "line": 9,
+        "disposition": "under-investigation",
+        "group": "g100-c2",
+        "reason": "Record durably acknowledged; parent source/contract validation, cross-group synthesis, coverage/filter matching and any independent drop check remain pending. This preserves the claim and uncertainty without accepting, dropping or lowering it."
+      },
+      "accepted_parent_decision": null,
+      "returned_claim_checks": [
+        {
+          "batch": "claims-065",
+          "key": "g100/c2",
+          "latest_line": 9,
+          "recommendation": "refuted",
+          "bucket": "highest",
+          "underlying_key": "host-probe-bare-pid-loss-of-adoption-pinned-sweep-root",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The bare-PID interface does not discard the adoption-pinned start identity. Callers capture that pair before async cleanup and the sweep checks it again.",
+          "checks": [
+            "1ed482dde220452e424973faf38a5e1318986333:hosts/terminal.rs:737-751,773-799,818-832 rejects unreadable live roots and verifies pinned start identity; :2571-2583 returns that pair only for the probe PID. host_terminals.rs:258-270 retains the post-probe unreadability transition and expects sweep_root to fail.",
+            "Same revision handlers.rs:864-912 captures the pinned pair before Stop's durable I/O. Tip 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db:service/core.rs:12336-12417 captures it before outstanding-launch settling and passes it to stop_live_agent. Tab reaping at 1ed482d:core.rs:14120-14180 captures before reaping.",
+            "1ed482d:service/sweep.rs:1431-1439 revalidates roots; :1574-1625 admits only matching start identity, drops missing/changed rows, and errors on unreadability. Source checks do not eliminate the separate identity-read/signal window or coincident start timestamps. No execution."
+          ],
+          "coverage_checked": [
+            "Both specifications searched for lifecycle root identity/unreadability. Their conservative cleanup contract agrees with the pinned-root implementation; no acceptance exception is needed.",
+            "TODO Planned empty; BUGS, active TRIAGE_OUTCOMES, unlanded plans and INDEX searched for host probe, pinned child, PID reuse and cleanup identity. No exact bare-PID async-gap coverage found.",
+            "FILTER.md terminal-host process-number signal-handoff rule is a different verification-to-signal window; it expressly excludes bare numbers across other async waits and cannot cover this candidate. No filter proposed."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": "Independent source-refutation agreement remains required for the possible unrelated-process kill. Delete-specific caller synthesis was not independently reread in full, so this verdict is confined to the stated probe/Stop/Restart/tab async-gap mechanism.",
+          "original_stronger_consequence": "A reused child PID could make cleanup kill unrelated user processes, or unreadability could be mistaken for absence. Preserve highest for the proposed drop check. This is distinct from non-atomic identity verification/signaling and equal start timestamps.",
+          "needs_independent_drop_check": true,
+          "proposed_basis": "Refute the specific loss-of-pinned-identity route using adoption identity, pre-await capture and post-await revalidation. Do not infer global process-signaling safety."
+        }
+      ],
+      "parent_proposals": [
+        {
+          "artifact": "parent-flagged-judgments-065.json",
+          "key": "g100/c2",
+          "proposal": "claim-checks/claims-065/result.json",
+          "parent_proposal": "source-refuted-specific-probe-loss-of-adoption-pinned-root",
+          "final_independent_gate": "required-before-highest-unrelated-process-loss-drop",
+          "reason": "Full065 checks show matching adoption-pinned start identity, pre-await capture for Stop/Restart/tab and later matching-root validation; unreadability refuses. Bound agreement to the named probe simplification and those consumers, not blanket Delete or signaling safety. Equal timestamps and final identity-read-to-signal gap remain outside this refutation; original highest survives pending gate."
+        }
+      ],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": true,
+        "provisional_bucket": "highest",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "host-probe-bare-pid-loss-of-adoption-pinned-sweep-root",
+        "destination": null
+      }
+    },
+    {
+      "key": "g100/c3",
+      "owner": "g100",
+      "id": "c3",
+      "domain": "supervisor-terminal-host-lifecycle",
+      "purpose": "supervisor-terminal-host-lifecycle: crates/farhelm-supervisor/src/service/core/tests/host_terminals.rs, crates/farhelm-supervisor/src/service/launch_artifacts.rs, crates/farhelm-supervisor/src/service/core/host_launch.rs, crates/farhelm-supervisor/src/scope.rs; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 12,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c3",
+            "state": "open",
+            "summary": "Host-versus-child cgroup wording is inherited from the excluded range base",
+            "location": "crates/farhelm-supervisor/src/service/core/host_launch.rs:36",
+            "detail": "Reviewed commit: 08399d092d20815ced6619c26df2391944ae2b4a. TLDR: considered a documentation defect in the changed module introduction: 'The host’s child stays in the supervisor’s own control group' can confuse the terminal-host process, which stays there, with its scoped agent child. Actual per-launch scope behavior does not refute that wording ambiguity. Source/contract: this module's opening says the host's child executes the command with the systemd wrapper, and SPEC_impl.md Creating agents in hosts distinguishes the agent's launch scope from the host living in the supervisor's control group. Whole-range attribution check: excluded base 6e423e30068b62c6cfa276c6d720ee35bb70387a:host_launch.rs:40-44 already makes the same 'host’s child stays in the supervisor’s own control group' claim. The assigned patch only removes the old tmux analogy and updates historical wording; it does not change that actor or the scope guarantee. Thus the ambiguity is pre-existing before the entire pinned range, not merely before this assigned commit. Suggested bucket if separately addressed: other (developer-documentation accuracy); could-be-highest: no established security or loss-of-work consequence from the wording. Confidence: confirmed baseline/source comparison, no execution. proposed_drop: attribution-only, this assigned edit does not introduce or substantively alter the ambiguous host/child cgroup claim and the exact same claim is present at the excluded range base; not a claim that correct production code fixes bad documentation. possible_cover: none; no prohibited coverage sources searched. No parent drop is accepted. This is a considered candidate, not an independent new bug in scoped execution."
+          }
+        },
+        {
+          "line": 13,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c3",
+            "state": "open",
+            "summary": "Host-versus-child cgroup wording is inherited from the excluded range base",
+            "location": "crates/farhelm-supervisor/src/service/core/host_launch.rs:36",
+            "detail": "Reviewed commit: 08399d092d20815ced6619c26df2391944ae2b4a. TLDR: considered a documentation defect in the changed module introduction: 'The host's child stays in the supervisor's own control group' can confuse the terminal-host process, which stays there, with its scoped agent child. Actual per-launch scope behavior does not refute that wording ambiguity. Source/contract: this module's opening says the host's child executes the command with the systemd wrapper, and SPEC_impl.md Creating agents in hosts distinguishes the agent's launch scope from the host living in the supervisor's control group. Whole-range attribution check: excluded base 6e423e30068b62c6cfa276c6d720ee35bb70387a:host_launch.rs:40-44 already makes the same 'host's child stays in the supervisor's own control group' claim. The assigned patch only removes the old tmux analogy and updates historical wording; it does not change that actor or the scope guarantee. Thus the ambiguity is pre-existing before the entire pinned range, not merely before this assigned commit. Suggested bucket if separately addressed: other (developer-documentation accuracy); could-be-highest: no established security or loss-of-work consequence from the wording. Confidence: confirmed baseline/source comparison, no execution. proposed_drop: attribution-only, this assigned edit does not introduce or substantively alter the ambiguous host/child cgroup claim and the exact same claim is present at the excluded range base; not a claim that correct production code fixes bad documentation. possible_cover: none; no prohibited coverage sources searched. No parent drop is accepted. This is a considered candidate, not an independent new bug in scoped execution."
+          }
+        }
+      ],
+      "latest": {
+        "line": 13,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c3",
+          "state": "open",
+          "summary": "Host-versus-child cgroup wording is inherited from the excluded range base",
+          "location": "crates/farhelm-supervisor/src/service/core/host_launch.rs:36",
+          "detail": "Reviewed commit: 08399d092d20815ced6619c26df2391944ae2b4a. TLDR: considered a documentation defect in the changed module introduction: 'The host's child stays in the supervisor's own control group' can confuse the terminal-host process, which stays there, with its scoped agent child. Actual per-launch scope behavior does not refute that wording ambiguity. Source/contract: this module's opening says the host's child executes the command with the systemd wrapper, and SPEC_impl.md Creating agents in hosts distinguishes the agent's launch scope from the host living in the supervisor's control group. Whole-range attribution check: excluded base 6e423e30068b62c6cfa276c6d720ee35bb70387a:host_launch.rs:40-44 already makes the same 'host's child stays in the supervisor's own control group' claim. The assigned patch only removes the old tmux analogy and updates historical wording; it does not change that actor or the scope guarantee. Thus the ambiguity is pre-existing before the entire pinned range, not merely before this assigned commit. Suggested bucket if separately addressed: other (developer-documentation accuracy); could-be-highest: no established security or loss-of-work consequence from the wording. Confidence: confirmed baseline/source comparison, no execution. proposed_drop: attribution-only, this assigned edit does not introduce or substantively alter the ambiguous host/child cgroup claim and the exact same claim is present at the excluded range base; not a claim that correct production code fixes bad documentation. possible_cover: none; no prohibited coverage sources searched. No parent drop is accepted. This is a considered candidate, not an independent new bug in scoped execution."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g100/findings.jsonl",
+        "id": "c3",
+        "line": 13,
+        "disposition": "excluded",
+        "group": "host-launch-module-comment-child-in-supervisor-cgroup",
+        "reason": "Parent explicitly accepted named out-of-range proposal from claims-065 after inspecting it. The host-versus-child cgroup ambiguity is already present at the exclusive base. Removing the tmux analogy does not change the named actor or guarantee. Out of range by identical excluded-base actor/guarantee wording; do not call the comment accurate merely because runtime scope behavior is correct. Checked source/results: [\"Exclusive base 6e423e30068b62c6cfa276c6d720ee35bb70387a:service/core/host_launch.rs:40-44 already says the host's child stays in the supervisor's control group while the agent keeps a per-launch scope.\",\"08399d092d20815ced6619c26df2391944ae2b4a:service/core/host_launch.rs:36-39 retains the same host's-child claim and removes the tmux comparison. Current SPEC_impl.md Creating agents in hosts:2185-2190 explicitly distinguishes the agent's scope from the host in the supervisor's group. Correct production behavior does not repair misleading wording. No execution.\"] Current coverage/results: [\"SPEC.md and SPEC_impl.md searched for host/child scopes and control groups. No acceptance of false actor wording; exact implementation distinction read.\",\"TODO Planned empty; BUGS and active TRIAGE_OUTCOMES no matching wording issue. plans/queue tmux-drop-from-docs is already landed (REPORTS.md:32); no unlanded exact fix. INDEX.md has no same-root comment record; unscoped-tab-log-says-scoped concerns a runtime log and different actor.\",\"No FILTER.md rule applies to this developer documentation ambiguity.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Incorrect developer-facing host/child cgroup explanation. No unsafe production scope behavior, security impact or loss-of-work consequence was established.\"; null."
+      },
+      "accepted_parent_decision": {
+        "key": "g100/c3",
+        "line": 13,
+        "disposition": "excluded",
+        "group": "host-launch-module-comment-child-in-supervisor-cgroup",
+        "bucket": "other",
+        "recording": "out-of-range",
+        "queue_target_candidate": null,
+        "needs_independent_drop_check": false,
+        "reason": "Parent explicitly accepted named out-of-range proposal from claims-065 after inspecting it. The host-versus-child cgroup ambiguity is already present at the exclusive base. Removing the tmux analogy does not change the named actor or guarantee. Out of range by identical excluded-base actor/guarantee wording; do not call the comment accurate merely because runtime scope behavior is correct. Checked source/results: [\"Exclusive base 6e423e30068b62c6cfa276c6d720ee35bb70387a:service/core/host_launch.rs:40-44 already says the host's child stays in the supervisor's control group while the agent keeps a per-launch scope.\",\"08399d092d20815ced6619c26df2391944ae2b4a:service/core/host_launch.rs:36-39 retains the same host's-child claim and removes the tmux comparison. Current SPEC_impl.md Creating agents in hosts:2185-2190 explicitly distinguishes the agent's scope from the host in the supervisor's group. Correct production behavior does not repair misleading wording. No execution.\"] Current coverage/results: [\"SPEC.md and SPEC_impl.md searched for host/child scopes and control groups. No acceptance of false actor wording; exact implementation distinction read.\",\"TODO Planned empty; BUGS and active TRIAGE_OUTCOMES no matching wording issue. plans/queue tmux-drop-from-docs is already landed (REPORTS.md:32); no unlanded exact fix. INDEX.md has no same-root comment record; unscoped-tab-log-says-scoped concerns a runtime log and different actor.\",\"No FILTER.md rule applies to this developer documentation ambiguity.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Incorrect developer-facing host/child cgroup explanation. No unsafe production scope behavior, security impact or loss-of-work consequence was established.\"; null."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-065",
+          "key": "g100/c3",
+          "latest_line": 13,
+          "recommendation": "out-of-range",
+          "bucket": "other",
+          "underlying_key": "host-launch-module-comment-child-in-supervisor-cgroup",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The host-versus-child cgroup ambiguity is already present at the exclusive base. Removing the tmux analogy does not change the named actor or guarantee.",
+          "checks": [
+            "Exclusive base 6e423e30068b62c6cfa276c6d720ee35bb70387a:service/core/host_launch.rs:40-44 already says the host's child stays in the supervisor's control group while the agent keeps a per-launch scope.",
+            "08399d092d20815ced6619c26df2391944ae2b4a:service/core/host_launch.rs:36-39 retains the same host's-child claim and removes the tmux comparison. Current SPEC_impl.md Creating agents in hosts:2185-2190 explicitly distinguishes the agent's scope from the host in the supervisor's group. Correct production behavior does not repair misleading wording. No execution."
+          ],
+          "coverage_checked": [
+            "SPEC.md and SPEC_impl.md searched for host/child scopes and control groups. No acceptance of false actor wording; exact implementation distinction read.",
+            "TODO Planned empty; BUGS and active TRIAGE_OUTCOMES no matching wording issue. plans/queue tmux-drop-from-docs is already landed (REPORTS.md:32); no unlanded exact fix. INDEX.md has no same-root comment record; unscoped-tab-log-says-scoped concerns a runtime log and different actor.",
+            "No FILTER.md rule applies to this developer documentation ambiguity."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": null,
+          "original_stronger_consequence": "Incorrect developer-facing host/child cgroup explanation. No unsafe production scope behavior, security impact or loss-of-work consequence was established.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Out of range by identical excluded-base actor/guarantee wording; do not call the comment accurate merely because runtime scope behavior is correct."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": false,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "host-launch-module-comment-child-in-supervisor-cgroup",
+        "destination": null
+      }
+    }
+  ],
+  "replies": [
+    {
+      "turn": 1,
+      "reply": "Initial review complete: all five assigned patches read, with no assigned material unread.\n\nNo confirmed findings or unresolved leads. Recorded candidate `c1` and settled lead `l1` in [findings.jsonl]([private-run]/g100/findings.jsonl). [Progress and coverage]([private-run]/g100/progress.md) updated.\n\nSource-only review; no tests or reproductions ran."
+    },
+    {
+      "turn": 2,
+      "reply": "- `l1`: revised to a confirmed `other` finding for bounded extra allocation and copying; no measured latency or OOM claim.\n- `c1`: updated with current callers and exit-publication ordering; attribution concern remains source-refuted.\n- `c2`: recorded the source-refuted PID-reuse concern across lifecycle callers as could-be-highest, with a proposed drop for parent review.\n\nUnresolved lead IDs: none."
+    },
+    {
+      "turn": 3,
+      "reply": "Discovery pass complete.\n\n- Checked neighbour input, resize/history promotion, publication ordering, excerpt callers, changed test assertions, and comment-only patches.\n- `c1`: verified the supplied contamination route; withdrew the earlier refutation and preserved pre-range attribution.\n- `c3`: recorded a documentation candidate with an attribution-only proposed drop.\n- New independent findings: none.\n- New unverified findings: none. Open leads: none.\n\nNo runtime execution. Progress and findings logs updated."
+    }
+  ],
+  "progress": "# g100 progress\n\nInitial review complete, turn 1. Discovery passes: 0 (initial pass only; no later-turn synthesis or discovery performed).\n\nScope: supervisor-terminal-host-lifecycle. All five assigned patches read in full through the evidence tool, 1,255 lines / 62,905 bytes. No assigned patch material remains unread. Complete inventory commits field read; excluded coverage metadata and prohibited coverage sources were not read.\n\nRecords: c1 is a source-refuted candidate about final-screen attribution. l1 was recorded as a resource-cost lead and revised to a candidate after checking terminal dimensions and per-cell combining-character limits. No verified findings, no unverified findings, no unresolved leads. No tests, builds or reproductions ran. No checkout files changed.\n\nInterface assumptions: neighboring groups own launch construction, host recovery, status/runtime internals and protocol implementations. Those sources were read only as context for these patches. The excerpt helper acts only on final exit evidence from a single-child host; generation-fenced entries and the two caller classifications retain launch identity. Later-generation sessions keep incomplete historical-tab discovery and the portable cleanup sweep. The later host-launch, artifact and scope patches change comments only.\n\nMandatory evidence delivered:\n- 00930-000.patch: 1-180, 181-360, 361-540, 541-720, 721-815.\n- 00934-000.patch: 1-175, 176-342.\n- 01543-000.patch: 1-55.\n- 01548-000.patch: 1-13.\n- 01599-000.patch: 1-30.\n\nSource context read (line ranges at the named revisions):\n- 1ed482dde220452e424973faf38a5e1318986333: SPEC.md 1884-2126, 2855-3024; SPEC_impl.md 1963-2766, 2880-2991, 4966-5153.\n- Same revision: service/status.rs 496-692; service/handlers.rs 919-1080; service/core.rs 13363-13456, 15775-15875; hosts/terminal.rs 780-872, 2186-2270, 2528-2638; service/core/tests/host_terminals.rs 1-136, 225-359, 417-532; terminal emulator screen.rs 1-220; terminal-host protocol.rs 88-152; vendored terminal cell.rs 38-60, 350-371.\n- Parent of 1ed482dde220452e424973faf38a5e1318986333: tmux.rs 134-308, for the removed reducer and its replacement's contract.\n- 08399d092d20815ced6619c26df2391944ae2b4a: service/core/host_launch.rs 1-241, 404-494, 1082-1165; service/launch_artifacts.rs 437-509; SPEC_impl.md 2171-2236, 7995-8040.\n- 4b489b4f2eeade14f119b186ecb16eeaaf027021: scope.rs 1-180; SPEC_impl.md 4834-4959.\n\nInstruction files: injected root AGENTS.md reached End sentinel; brief read in full; machine.md, queue AGENTS.md, recording.md, skillette, scripts skillette and scode-voice read. Initial combined instruction output clipped part of queue AGENTS.md; all 249 lines were subsequently redelivered in two bounded calls, and recording.md redelivered separately. A broad specification-diff search clipped; no conclusion relies on its unread portions, and relevant later-revision contract text was then read directly in bounded calls. The first c1 recording attempt used an unsupported state and failed without appending; corrected to state open and recorded successfully. Both considered candidates now exist durably in findings.jsonl.\n\nNext action: return initial-pass status to caller; await the caller's later synthesis/discovery prompt. No private final-report file was made.\n\n## Current state after synthesis, turn 2\n\nLater-turn synthesis complete. Discovery passes: 0. All assigned source remains fully read; no unread assigned scope and no unresolved leads.\n\nThis turn revised l1 from candidate back through lead to a confirmed other-bucket finding: bounded extra allocation and escaping in the excerpt reducer. Finite protocol dimensions refute unbounded growth but do not erase the source-confirmed regression from incremental 500-byte buffers to complete row storage. The record retains 10,000-by-10,000 supported dimensions and the conservative 8,500,012-byte escaped-text ceiling before capacity overhead; it explicitly disclaims measured latency, OOM, work loss, and a hard RSS-budget breach. The standard 80/190 MiB budget is conditional on a 200-column terminal, not an independent live-width limit.\n\nc1 was revised to include current callers and the actual on_exited publication order. Its attribution route remains source-refuted. Descendants may continue output after the child-exit record, so the record now distinguishes final-child-output evidence from an immutable screen. The second same-turn c1 revision corrected apostrophes in the exact spec quote; both events remain append-only.\n\nc2 is a new source-refuted candidate for the process-loss consequence of carrying a bare PID through async cleanup. Current Stop, Restart and tab cleanup capture adoption-pinned start identities; the shared reap revalidates them after awaits. Delete deliberately takes a pinned child even from an unreadable runtime, with matching start time, because its unconditional path ends the host. c2 is marked could-be-highest and proposed_drop with the source refutation; no parent drop is accepted and the parent owns independent drop handling.\n\nInterface assumptions checked this turn: process-table probe death and processed host-exit evidence have separate callers and meanings; neither caller substitutes a bare PID for the excerpt's final-exit check. The helper, root APIs and caller semantics examined are unchanged between the main assigned behavioral patch and the range tip. No new material latency claim or unrelated implementation defect was inferred.\n\nAdditional context read:\n- At 1ed482dde220452e424973faf38a5e1318986333: SPEC_impl.md 2767-2879; emulator lib.rs 1-240 (file ends before 240); launch_artifacts.rs 37-132; proto text.rs 1-93. Targeted searches found resource bounds and dimension admissions. Diffs through tip checked the excerpt helper, root APIs and both excerpt callers.\n- At 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db: hosts/terminal.rs 704-872, 2555-2612, 3898-3942; handlers.rs 764-921, 950-1077; status.rs 557-652; session_hosts.rs 470-541; sweep.rs 1416-1455, 1566-1644, 1986-2119; core.rs 12301-12435, 14050-14123; teardown.rs 303-376; SPEC_impl.md 2638-2668. All outputs were delivered without truncation this turn.\n\nSource-only synthesis. No tests, builds, reproductions or checkout writes. Next: return only this turn's deltas and unresolved lead IDs, then await the caller's next prompt.\n\n## Current state after discovery, turn 3\n\nDiscovery pass count: 1. Separate discovery pass complete after required cross-group synthesis. All five assigned patches remain fully read; no assigned scope omitted. Read discovery-neighbours.json in bounded ranges 1-160, 161-240, 241-320, 321-400, 401-480, 481-560, 561-585; no output was truncated. Neighbour records were used for interfaces/novelty only, not mandatory source credit or parent-approved dispositions.\n\nCross-group revision: c1 changed from candidate through lead to a confirmed conditional source finding. Independently checked g013/f2's resize/history-promotion route against the assigned helper: seeded primary history can move into the visible screen on growth, the new host is published before spec consumption, viewer resize reaches it, and the nonblank excerpt reducer can quote promoted old rows after later shell-start failure. The previous general attribution refutation is withdrawn under the original ID. Processed-exit timing remains correct but is insufficient for row provenance. Exact runtime route is already known in g013/f2, not a new independent discovery. Whole-range attribution: base already has the same host excerpt and seed rationale, grid resize is unchanged, history-encoder differences are comments only. Do not attribute new runtime introduction to this helper move; parent should reconcile the helper's newly rewritten rationale with g013's later in-range specification change. No parent drop accepted.\n\nIndependent discovery checks beyond known issues: re-scanned every changed assertion/probe/terminal conversion in host_terminals.rs against its complete patch and the retained host-only types. Re-read the final-state wait/late-exit tests at 755-885, including premise assertions, pending wait before host exit and the direct-sentinel path. Checked that replacing Some(Terminal::Host) matches with Option<HostTerminal> does not by itself remove a distinguishable kind assertion, and that the host-only old-kind hook-anchor test still exercises a definitive stored-kind refusal. Reviewed the later comment-only patches for actor/lifecycle wording and the artifact address rename against their governing contracts. No independent new in-range behavioral or test-oracle defect was established by this search.\n\nNew candidate c3 records a cgroup actor-wording ambiguity in host_launch.rs. It is demonstrably present at excluded base 6e423e30068b62c6cfa276c6d720ee35bb70387a, so its proposed drop is attribution-only; correct implementation is not used to refute a documentation issue. A second same-turn c3 event normalized the source quote's apostrophes. No parent drop accepted.\n\nNew verified finding IDs: none independently new; c1 is newly verified/revised from the supplied cross-group route. New unverified-after-investigation finding IDs: none. New candidate ID: c3. Remaining lead IDs: none. Known l1 bounded copying and c2 identity-boundary records are unchanged; no independent fresh cause was found beyond them.\n\nAdditional context reads at 1ed482dde220452e424973faf38a5e1318986333: vendor grid/resize.rs 1-113, vendor term/mod.rs 720-779, snapshot/v1/mod.rs 226-278, host_launch.rs 494-650, host_restart.rs 288-389, handlers.rs 1870-1898, 2050-2085, 1898-1924, hosts/terminal.rs 2350-2385, 3858-3890, 4050-4090, 2337-2356, and host_terminals.rs 755-885. Source searches located attach/resize call sites. At excluded base: launch_artifacts.rs 39-103, host_launch.rs 28-43, targeted product-spec attribution text. Compared base-to-reviewed relevant file diffs and in-range histories to avoid mistaking a pre-range route for a new implementation regression.\n\nNo runtime tests, builds, reproductions, live-install actions, prohibited coverage searches or checkout writes. Next: report only this turn's checks/results and record deltas, then await the parent.\n"
+}

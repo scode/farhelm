@@ -1,0 +1,395 @@
+[
+  {
+    "key": "g052/c1",
+    "latest_line": 10,
+    "recommendation": "covered",
+    "bucket": "other",
+    "underlying_key": "raster-default-native-opening-policy",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The exact extension expansion and warning exemption are explicitly accepted. This does not establish that arbitrary image bytes or native handlers are safe. No exploit or unconsented native-open route was established; the earlier possible-highest consequence must still receive an independent drop check.",
+    "checks": [
+      "6d610d435dd12bbe8458b1a31b0988d95ff7338c:crates/farhelm-proto/src/open_extensions.rs:1-12,118-128: DEFAULT adds precisely png/jpg/jpeg/gif/webp/bmp/avif; warning_kind exempts those same formats and retains SVG's HTML warning. The module explicitly disclaims file safety.",
+      "6d610d435dd12bbe8458b1a31b0988d95ff7338c:SPEC.md:4877-4897 contains the dated amendment and explicit modifier-click authority. Source only; no image handler or downloaded file was exercised."
+    ],
+    "coverage_checked": {
+      "SPEC.md": "Current Security, Local authority and trust between hosts, 4950-4966, expressly accepts this extension set and image warning exemption; Settings and Downloads repeat it.",
+      "SPEC_impl.md": "Searched opening/default-extension policy. Older md/txt/json wording is not an acceptance of image-handler safety and does not override the explicit dated product amendment.",
+      "TODO.md Planned": "Empty bucket at 25-26.",
+      "plans/queue": "INDEX.md contains no unlanded plan. cmd-click-images is listed as landed in plans/REPORTS.md:26; its retained file is not unlanded coverage.",
+      "BUGS.md": "Only the unrelated SSH transfer-output hang is recorded.",
+      "INDEX.md and queue": "Searched raster, image types, opening extensions, OpenExtensions and native file opening; no exact queued claim.",
+      "TRIAGE_OUTCOMES.md": "Searched the same opening/extension terms; no exact active decision.",
+      "FILTER.md": "No applicable boundary; native-handler security effects would exclude the general rare-glitch filter."
+    },
+    "exact_cover_quotes": [
+      "SPEC.md:4954-4955: '(amended 2026-11-12 at the maintainer's request: the default also lists .png, .jpg, .jpeg, .gif, .webp, .bmp and .avif).'",
+      "SPEC.md:4959-4961: 'The click authorizes this transfer across the host boundary, including for agent-controlled files.' Listed types outside the named text formats and 'the default's image types' get the warning."
+    ],
+    "missing_premise": "A concrete executable-image/handler exploit or a route opening without the specified modifier-click was never established. The policy check has no unresolved extension-set premise.",
+    "original_stronger_consequence": "An unauthorized expansion of agent-controlled files opened by native handlers across hosts could be security-impacting (original possible highest). No such exploit was reproduced or established.",
+    "needs_independent_drop_check": true,
+    "proposed_basis": "Drop only the assertion that adding these exact default extensions and exempting their settings warnings is unauthorized. Do not generalize this acceptance to arbitrary image safety."
+  },
+  {
+    "key": "g052/c2",
+    "latest_line": 8,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "retired-container-decode-erases-isolation-marker",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "Decoding retains the container object's presence, and execution refuses that marker. The original route from historical isolated command to ordinary outside-host execution is source-refuted. The initial exact-byte-preservation assertion was withdrawn and corrected, not verified.",
+    "checks": [
+      "04d85f0c98a9b635709d00b056719a0baa7fd3fc:crates/farhelm-proto/src/launch.rs:600-606,642-669: container remains Option<ContainerConfig>; image_file is accepted as IgnoredAny and discarded. The marker survives even though archive path and exact bytes do not.",
+      "04d85f0c98a9b635709d00b056719a0baa7fd3fc:crates/farhelm-proto/src/launcher.rs:655-674: Some(Some(container)) is refused before cloning/applying the draft.",
+      "04d85f0c98a9b635709d00b056719a0baa7fd3fc:crates/farhelm-supervisor/src/launch.rs:1150-1182: a deserialized launch spec with container.is_some() returns a recorded failure before argv checks or execution.",
+      "ContainerConfig.validate remains a historical structural validator, not an admission grant. No runtime decode, launch or deletion was run."
+    ],
+    "coverage_checked": {
+      "SPEC.md": "Retired containerized sessions, 4892-4900, requires Delete-only retirement and refusal or removal of retired choices.",
+      "SPEC_impl.md": "Searched retired-container decoding and lifecycle policy; Rootless Podman sessions states retired selections must be dropped or refused. No acceptance of erasing isolation and executing outside was found.",
+      "TODO.md Planned": "Empty.",
+      "plans/queue": "No unlanded plans in INDEX.md. podman-environments is landed (REPORTS.md:21).",
+      "BUGS.md": "No matching known bug.",
+      "INDEX.md and queue": "Searched retired containers, image_file, containerized sessions and launch markers. template-container-off-on-discards-editor-values.md was read: it concerns temporary unsaved editor buffers, not decode-to-outside-host execution.",
+      "TRIAGE_OUTCOMES.md": "No exact active decision for this execution route.",
+      "FILTER.md": "No applicable filter; isolation loss would be a security/trust-boundary effect."
+    },
+    "exact_cover_quotes": [
+      "SPEC.md:4895-4899: 'Existing sessions support Delete only.' 'Stored sessions still decode their old container configuration, including `image_file`.' 'Using them drops or refuses the retired choice with an explanation and cannot create another old-style session.'"
+    ],
+    "missing_premise": "The alleged erased marker is contradicted by the decoder. No claim is made about exact historical fingerprints or unrelated deletion correctness.",
+    "original_stronger_consequence": "If historical isolation were erased while the command survived, executing it on the outside host could expose credentials or user-owned work; original possible highest. Initial 'retains its serialized bytes' wording was corrected because image_file is discarded.",
+    "needs_independent_drop_check": true,
+    "proposed_basis": "Refute only the launch-authority route: marker presence survives and is refused before execution. Do not treat the corrected byte-retention assertion as verified."
+  },
+  {
+    "key": "g052/c3",
+    "latest_line": 7,
+    "recommendation": "needs-parent",
+    "bucket": "highest",
+    "underlying_key": "environment-approval-symbolic-place-retargeting",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The original old-card/standing-permission bypass is refuted, but the record expressly preserves a separate physical-endpoint authority defect owned by g020/l1. The fields and immediate caller do not bind the physical container host. Parent must consolidate with that owner rather than discard this record as a blanket authorization refutation.",
+    "checks": [
+      "190d844e58c96cf197aa838d0b0eea8062f48435:crates/farhelm-proto/src/approvals.rs:195-228,336-343: LaunchEnvironment has a distinct tag and unconditionally requires direct Allow.",
+      "190d844e58c96cf197aa838d0b0eea8062f48435:crates/farhelm-helm/src/approvals.rs:439-473,790-813: standing permissions do not bypass direct-Allow actions, and AlwaysAllow is refused.",
+      "190d844e58c96cf197aa838d0b0eea8062f48435:crates/farhelm-proto/src/environment.rs:18-29: Place::PodmanHost is only a registry i64.",
+      "190d844e58c96cf197aa838d0b0eea8062f48435:crates/farhelm-helm/src/agent_requests.rs:4485-4550: captures place_name before approved(), revalidates only clone source ownership afterward, then submits the same symbolic place. No physical-place snapshot is present at this boundary. Full provisioning/credential route was not re-reviewed or reproduced."
+    ],
+    "coverage_checked": {
+      "SPEC.md": "Agents and environments, 4253-4305: direct Allow is required and the card names recipe/place. This supports the narrow gating result, not endpoint retargeting.",
+      "SPEC_impl.md": "Agent requests and environments, 6167-6210; Launch templates' accepted old approval-list refusal, 8687-8692; Permission prompts, 9090-9098, separately requires dispatch to match the shown machine.",
+      "TODO.md Planned": "Empty.",
+      "plans/queue": "No unlanded plans in INDEX.md; environment-agent-operations and podman-environments are landed. Their broad feature scope is not exact pending coverage.",
+      "BUGS.md": "No matching known bug.",
+      "INDEX.md and queue": "Searched environment approvals, endpoint/place retargeting, LaunchEnvironment and container approval. No exact existing item identified. update-preplanning-retarget-consent wording in INDEX concerns Update preplanning, a different confirmation boundary.",
+      "TRIAGE_OUTCOMES.md": "No exact active decision. Recipe credential-delivery decisions concern how credentials are installed, not permission to send them to a changed machine.",
+      "FILTER.md": "Wrong-machine execution and credential delivery cannot use the general race/glitch filters."
+    },
+    "exact_cover_quotes": [
+      "SPEC.md:4294: 'Each of these always shows its own card, whatever the requesting host's permissions say, with Allow and Deny only.'",
+      "SPEC_impl.md:8688-8690: 'its approval-list decoder fails the whole list while such a card waits and keeps showing its last successfully decoded list; this is the accepted older-UI behavior'.",
+      "SPEC_impl.md:9090,9096-9098: 'What a card shows is what an approval does.' 'A launch is also refused if the target host's connection changed while the card waited, since the approval was for the machine the card named.' This is a requirement, not coverage of the endpoint defect."
+    ],
+    "missing_premise": "The full cold-place retarget and recipe-credential route is owned by g020/l1 and supplied by the caller; this consultation confirms the wire/caller boundary only. A private provisioning snapshot could repair it without changing the wire fields.",
+    "original_stronger_consequence": "Unconfirmed billed creation or execution beyond the creation confirmation could be highest. Latest history adds the independently owned changed-endpoint command/recipe-credential consequence and explicitly does not withdraw it.",
+    "needs_independent_drop_check": true,
+    "proposed_basis": "Independent check may drop only the ordinary-card/standing-permission bypass and accept the explicitly specified unknown-card list refusal. Retain/consolidate the endpoint consequence with g020/l1; it is not accepted by those clauses."
+  },
+  {
+    "key": "g052/c4",
+    "latest_line": 9,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "environment-delete-unasked-marker-missing-consumer",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The foundation page could not opt into the new Delete path. The later immediate API consumer recognizes the exact typed marker and separates session deletion from whole-environment deletion. This refutes missing protocol-marker consumption, not every later confirmation handler.",
+    "checks": [
+      "222bf6253bcd168db04bcbb1df20180c88306998:crates/farhelm-ui/src/api.rs:4248-4257: delete_url emits only ordinary deletion guards, never delete_environment_session.",
+      "222bf6253bcd168db04bcbb1df20180c88306998:crates/farhelm-helm/src/sessions.rs:3635-3658: new path is explicitly query-gated and refuses simultaneous whole/session opt-ins or ordinary guards.",
+      "222bf6253bcd168db04bcbb1df20180c88306998:crates/farhelm-proto/src/http.rs:86-96: typed marker promises a warned fallback, never automatic deletion.",
+      "2ef10815f12ed719ab6c51c6e3ac6fcd3f8bc1fa:crates/farhelm-ui/src/api/sandbox_sessions.rs:144-198: only exact 409/header/value becomes Unasked; 404 is Gone; Session and Whole use distinct opt-ins. No HTTP/browser execution or complete UI handler review."
+    ],
+    "coverage_checked": {
+      "SPEC.md": "Searched environment Delete, fallback and confirmations; no policy accepts omitting the warned fallback once reachable.",
+      "SPEC_impl.md": "Environment Delete and the seal, 6106-6153, explicitly documents old-page opt-in refusal and the warned whole-environment fallback after no decision.",
+      "TODO.md Planned": "Empty.",
+      "plans/queue": "No unlanded plan in INDEX.md. Environment Delete feature work is already landed.",
+      "BUGS.md": "No matching known bug.",
+      "INDEX.md and queue": "Searched unasked, ENVIRONMENT_UNASKED, fallback and environment Delete. No exact queued missing-consumer item.",
+      "TRIAGE_OUTCOMES.md": "No exact active decision for the marker/consumer claim.",
+      "FILTER.md": "No filter applied. Any separate automatic wider-deletion route would be outside the rare-glitch boundary."
+    },
+    "exact_cover_quotes": [
+      "SPEC_impl.md:6137-6139: 'the new path is opted into by a query only new pages send; a plain DELETE of a session on a session-owned host is still refused, so an older page cannot reach it'. This is a gate requirement, not acceptance of missing fallback in an opted-in page."
+    ],
+    "missing_premise": "No unresolved protocol-consumer premise. Full confirmation rendering/action binding belongs to the UI owners. Unauthorized automatic whole-environment escalation was never established by this candidate.",
+    "original_stronger_consequence": "Ignoring the marker on a reachable session Delete could leave the user without the stated warned fallback. The histories expressly preserve that concern while restricting the refutation to the actual marker consumer; a different unauthorized wider Delete could lose work but is not refuted here.",
+    "needs_independent_drop_check": true,
+    "proposed_basis": "Drop only the missing-marker-consumer suspicion. Do not use the intermediate-page gate or typed enum documentation as proof of all later destructive confirmation behavior."
+  },
+  {
+    "key": "g052/c5",
+    "latest_line": 11,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "native-lifecycle-busy-header-cors-filtering",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The hypothesized CORS filtering premise does not hold for native lifecycle requests: they use Rust reqwest. Browser lifecycle requests use the served helm origin. Restricted webview CORS concerns separate browser operations.",
+    "checks": [
+      "ba7cc0264028eebb39647deb1d25b055e6886935:crates/farhelm-ui/src/api.rs:2085-2098: native_desktop constructs a native no_proxy reqwest client.",
+      "ba7cc0264028eebb39647deb1d25b055e6886935:crates/farhelm-ui/src/api.rs:5677-5700: post_lifecycle uses that client and reads the exact HOST_BUSY_HEADER/HOST_BUSY_OPERATION pair; transport errors are never busy.",
+      "ba7cc0264028eebb39647deb1d25b055e6886935:crates/farhelm-helm/src/lib.rs:1074-1115: suspend/resume are ordinary protected routes; the separate device-validation router gets desktop_webview_cors without widening ordinary REST.",
+      "ba7cc0264028eebb39647deb1d25b055e6886935:crates/farhelm-helm/src/middleware.rs:364-372 exposes only the build stamp, but this does not browser-filter native reqwest responses. No desktop or browser request was run."
+    ],
+    "coverage_checked": {
+      "SPEC.md": "Searched suspension, wake and busy-host retry policy; no acceptance of a missing retry marker found.",
+      "SPEC_impl.md": "Host lifecycle wake policy around 6733 explicitly names x-farhelm-host-busy; desktop CORS is a separate browser-operation boundary.",
+      "TODO.md Planned": "Empty.",
+      "plans/queue": "No unlanded plans; sandbox-suspend-overlap is landed (REPORTS.md:23).",
+      "BUGS.md": "No matching known bug.",
+      "INDEX.md and queue": "Searched HOST_BUSY, CORS, lifecycle markers and busy retry; no exact matching item.",
+      "TRIAGE_OUTCOMES.md": "No exact active marker/CORS decision.",
+      "FILTER.md": "No filter needed; source refutes the transport premise."
+    },
+    "exact_cover_quotes": [],
+    "missing_premise": "A shipped ordinary lifecycle client subject to cross-origin browser response-header filtering was not found; native transport contradicts it.",
+    "original_stronger_consequence": "Missing busy classification could prevent a launch from retrying a lifecycle refusal that waiting can clear. The history alleges no security, process or user-data loss.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Refute the ordinary lifecycle-header CORS route only. This is not a blanket CORS audit or a later-handler verdict."
+  },
+  {
+    "key": "g052/l6",
+    "latest_line": 13,
+    "recommendation": "retain-verified",
+    "bucket": "other",
+    "underlying_key": "clone-protocol-docs-omit-environment-hostless-contract",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The protocol documentation says missing clone hosts exist only to decode and refuse old requests, while the newly supported environment-clone path requires omission. Correct fail-closed execution does not refute inaccurate caller documentation.",
+    "checks": [
+      "190d844e58c96cf197aa838d0b0eea8062f48435:crates/farhelm-proto/src/lib.rs:2064-2079: Clone summary requires an explicitly named host and host=None is described as old-wire refusal only.",
+      "190d844e58c96cf197aa838d0b0eea8062f48435:crates/farhelm-helm/src/agent_requests.rs:3871-3884 routes a session-owned source before requiring an ordinary target host; 4313-4328 refuses Some(host), cwd and keys; 4368-4390 proceeds to environment launch.",
+      "The 190d844e parent/child patch changes parsed Clone.host from required to optional and adds that branch. The quoted comment exists in exclusive base 6e423e30068b62c6cfa276c6d720ee35bb70387a, when the new behavior was absent; new behavior makes it false in range.",
+      "00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db:crates/farhelm-proto/src/lib.rs:1940-1956 retains the false exclusivity. No runtime execution."
+    ],
+    "coverage_checked": {
+      "SPEC.md": "Agents and environments explicitly requires environment clone to omit --host and --cwd; this establishes the contradiction, not acceptance of the stale documentation.",
+      "SPEC_impl.md": "Agent requests and environments describes clone following source recipe/place; no acceptance of the obsolete exclusive host rule.",
+      "TODO.md Planned": "Empty.",
+      "plans/queue": "No unlanded plans. Landed environment-agent-operations is not future corrective coverage.",
+      "BUGS.md": "No matching known bug.",
+      "INDEX.md and queue": "Searched Clone protocol/docs, AgentVerb::Clone and omitted/missing target host; no exact existing item. clone-read-overwrites-manual-recipe-choice.md concerns a GUI draft race, not this wire comment.",
+      "TRIAGE_OUTCOMES.md": "No active decision for this stale host contract.",
+      "FILTER.md": "Not a diagnostic/glitch; this is persistent internal API documentation. No filter applies."
+    },
+    "exact_cover_quotes": [],
+    "missing_premise": "None for the documentation defect. Caller-supplied g090/c3:13 is a handoff, not proof of a duplicate queue record.",
+    "original_stronger_consequence": "Following the documented host requirement makes a valid environment-clone request fail. No successful wrong-host execution, security effect or loss of work is alleged.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Record one internal protocol-documentation finding. Preserve ordinary clone's host requirement while documenting the environment exception; parent may consolidate the handoff with g090 without duplicating its separate runtime concern."
+  },
+  {
+    "key": "g052/l7",
+    "latest_line": 15,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "environment-create-supported-producer-loses-idempotency-key",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "No supported producer silently discards a supplied key while constructing explicit environment-create. Raw hand-written JSON with an invented intent_key is still ignored by the permissive enum; that fact is preserved and must not be described as a receiver refusal.",
+    "checks": [
+      "190d844e58c96cf197aa838d0b0eea8062f48435:crates/farhelm-proto/src/lib.rs:1937-1940,2105-2112: AgentVerb is permissive and CreateEnvironment has no intent_key. Ignoring an unknown raw property is a source/serde conclusion, not an executed decoder observation.",
+      "190d844e58c96cf197aa838d0b0eea8062f48435:crates/farhelm/src/main.rs:337-343: --recipe conflicts with idempotency_key. At 712-728 only ordinary Create carries that typed key.",
+      "190d844e58c96cf197aa838d0b0eea8062f48435:crates/farhelm-helm/src/agent_requests.rs:1996-2008 and 4313-4315 refuse typed keys on template-environment create and environment clone.",
+      "190d844e58c96cf197aa838d0b0eea8062f48435:crates/farhelm-proto/src/lib.rs:209-228 documents ignorable additive fields and strict launch/template exceptions. No runtime or handwritten payload reproduction."
+    ],
+    "coverage_checked": {
+      "SPEC.md": "Agents and environments describes supported create/clone flags and refusal of idempotency keys; the inspected supported paths satisfy it.",
+      "SPEC_impl.md": "Agent requests and environments, 6205-6208, requires keyed environment launches be refused. No clause explicitly promises arbitrary unknown JSON keys become known semantic fields.",
+      "TODO.md Planned": "Empty.",
+      "plans/queue": "No unlanded plans.",
+      "BUGS.md": "No matching known bug.",
+      "INDEX.md and queue": "Searched CreateEnvironment, unknown intent_key, environment idempotency and retry-safety mismatch; no exact item.",
+      "TRIAGE_OUTCOMES.md": "No exact active decision.",
+      "FILTER.md": "No filter applied; refutation is limited to the supported-producer premise, not an input-never-sent blanket filter."
+    },
+    "exact_cover_quotes": [],
+    "missing_premise": "A supported key-bearing explicit-environment producer, or an explicit contract treating this unknown raw property as supported intent, was never established. Unknown raw-key tolerance remains true and is not certified retry-safe.",
+    "original_stronger_consequence": "If someone supplied a meaningful key that was silently lost and then retried, another environment or bill could result. No security or user-work-loss route was established.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Drop only the alleged shipped producer losing a key. Do not say raw JSON is rejected or that arbitrary protocol clients are retry-safe. A future supported producer would need a typed key and refusal."
+  },
+  {
+    "key": "g052/l8",
+    "latest_line": 17,
+    "recommendation": "retain-verified",
+    "bucket": "other",
+    "underlying_key": "agent-template-catalog-comments-stale-after-environment-launches",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "Shared template-context documentation incorrectly excludes all agent recipe catalogs. Ordinary fleet creates now pass those catalogs so earlier recipe templates remain applicable even when later placement selects an installed host. Spawn retains its separate restricted path.",
+    "checks": [
+      "190d844e58c96cf197aa838d0b0eea8062f48435:crates/farhelm-proto/src/launcher.rs:600-602 says agent callers supply no recipes.",
+      "190d844e58c96cf197aa838d0b0eea8062f48435:crates/farhelm-helm/src/agent_launch.rs:145-151,176-180,233-238 distinguishes empty-catalog resolve from resolve_placed and constructs TemplateContext with placement.known_recipes/known_places.",
+      "190d844e58c96cf197aa838d0b0eea8062f48435:crates/farhelm-helm/src/agent_requests.rs:2447-2475 reads the saved catalogs for ordinary non-spawn creates; its comment explains a recipe template followed by an installed-host template.",
+      "Exclusive base 6e423e30068b62c6cfa276c6d720ee35bb70387a:launcher.rs:588-589 already has the wording. The 190d844e patch changes hardcoded empty recipe/place slices to placement inputs. Endpoint 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db:launcher.rs:600-601 retains the stale comment. No runtime tests."
+    ],
+    "coverage_checked": {
+      "SPEC.md": "Agents and environments permits recipe template launches and ordinary ordered template application; no acceptance of excluding every agent catalog.",
+      "SPEC_impl.md": "Agent requests and environments and shared Launch templates describe the supported behavior; the inaccurate internal caller rule is not accepted.",
+      "TODO.md Planned": "Empty.",
+      "plans/queue": "No unlanded plans. The introducing environment-agent-operations work is landed.",
+      "BUGS.md": "No matching known bug.",
+      "INDEX.md and queue": "Searched known_recipes, TemplateContext, agent recipe catalogs and stale caller documentation. No exact existing queued item. clone-read-overwrites-manual-recipe-choice.md was read and concerns GUI draft ownership, not this contract.",
+      "TRIAGE_OUTCOMES.md": "No exact active decision.",
+      "FILTER.md": "Persistent internal caller-contract error; no filter boundary matches."
+    },
+    "exact_cover_quotes": [],
+    "missing_premise": "None for this field's documentation defect. Caller-supplied g018/f2 concerns the same stale agent-catalog distinction in helm Placement documentation plus a separate unresolved helper link; parent must inspect that named record before deciding consolidation.",
+    "original_stronger_consequence": "Following the false empty-catalog rule would refuse an otherwise valid template stack. Current execution supplies the catalogs correctly; no runtime failure or security/work-loss claim is made.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Retain the proto-field manifestation, preferably consolidated with g018/f2's same caller-rule defect if its record agrees. It adds a distinct source location requiring wording repair, not a new runtime defect."
+  },
+  {
+    "key": "g053/c1",
+    "latest_line": 18,
+    "recommendation": "retain-verified",
+    "bucket": "highest",
+    "underlying_key": "legacy-byte-browser-paste-reinterpreted-as-grid-input",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The source establishes a successful input transformation beyond the originally considered misdraw/detach: a complete small JSON-shaped literal paste can decode as Text and turn escaped controls into program input without paste wrapping. The spec explicitly accepts stale-page misdrawing and malformed-input detachment, but does not clearly accept this successful reinterpretation. Ambiguous coverage means retain.",
+    "checks": [
+      "f560058da19e02716e6f943883a9508b447aff4e^:crates/farhelm-ui/src/session_view.rs:3817-3853 and assets/terminal.js:4651-4666: a listing lacking terminal kind can build a fresh xterm surface. terminal.js:5622-5640,5717-5730,5876-5932 treats no stream notice as bytes; a retained host/grid surface instead fails explicitly.",
+      "Parent terminal.js:2220-2235,2650-2675,4628-4634 routes text paste through sanitizer to term.paste; term-bytes.js:55-56 removes literal ESC, not JSON escapes. Parent vendor/xterm.js paste helper normalizes line ends, conditionally brackets, and emits once; its default bracketedPasteMode is false.",
+      "Parent terminal.js:4157-4159,4191-4196 sends each text callback as one binary message. f560:crates/farhelm-helm/src/terminal.rs:760-777 forwards that message unchanged.",
+      "f560:crates/farhelm-proto/src/grid.rs:1565-1566,1610-1612,1650-1655,1686-1693 decodes JSON Text and bounds length, without excluding decoded control bytes. service/grid_stream.rs:1064-1095 decodes before encoding; grid_input.rs:175-176 writes Text data bytes directly, unlike Paste.",
+      "Parent reconnect.rs:150-165 offers manual reconnect after build mismatch; skew.rs:116-130 gates unattended behavior. Source-only conditional route; no payload or runtime reproduction."
+    ],
+    "coverage_checked": {
+      "SPEC.md": "Searched terminal upgrade, input/paste authority, old page and compatibility. No explicit acceptance of reinterpreting a literal document into control input found.",
+      "SPEC_impl.md": "Grid streams, 2937-2955, explicitly accepts reload-only stale-page behavior, describing misdrawing and attachment termination on malformed input. Successful decoding/control reinterpretation is not named; coverage scope is ambiguous.",
+      "TODO.md Planned": "Empty.",
+      "plans/queue": "No unlanded plans. tmux-end-old-terminals and tmux-drop-from-docs are landed; broad removal plans are not a pending fix.",
+      "BUGS.md": "No matching known bug.",
+      "INDEX.md and queue": "Searched raw/grid input, literal JSON paste, stale/legacy page and reinterpretation. No exact existing item. legacy-page-server-rebinding-source-gap.md was read: it concerns the unrelated local maintainer static server.",
+      "TRIAGE_OUTCOMES.md": "No exact active decision. The legacy-page-server discard at 1558-1569 concerns that unrelated static server, not the product terminal page.",
+      "FILTER.md": "Upgrade plus another rare condition cannot filter a security/trust-boundary effect; ordinary rare-glitch filters also exclude transformed command input and work loss. No filter applied."
+    },
+    "exact_cover_quotes": [
+      "SPEC_impl.md:2950: 'A page loaded from the previous helm and left open across the update must be reloaded; nothing keeps it working.'",
+      "SPEC_impl.md:2953-2955 describes grid messages drawn as terminal output and says 'what is typed into it ends the attachment as malformed input.' 'Keeping the stream notice for such pages was considered and not done: a reload is the whole remedy.' These quotes do not unambiguously cover successful literal-document reinterpretation."
+    ],
+    "missing_premise": "Requires a stale page, fresh unknown-kind xterm surface, a complete valid small JSON paste and no active xterm paste wrapper. The JSON/control transformation is directly established. Caller-supplied g196/l1 owns the complete stale-page interface synthesis; no browser observation is claimed. If xterm already has bracketed paste enabled, its wrapper defeats this exact complete-JSON route.",
+    "original_stronger_consequence": "Original high consequence: stale page misdraws grid output and detaches on ordinary malformed input until reload. Latest revision strengthens to possible command/control input and user-work loss after literal JSON reinterpretation. The earlier no-established-highest assessment is expressly superseded, not evidence to drop the stronger consequence.",
+    "needs_independent_drop_check": true,
+    "proposed_basis": "Retain highest with source-only trigger conditions. Parent should consolidate with caller-supplied g196/l1 (and its g082/c2/g083/c5 corroboration), not create an extra independent report. Any proposal to cover or lower the input-authority consequence needs a fresh independent check of the exact acceptance scope."
+  },
+  {
+    "key": "g053/f1",
+    "latest_line": 16,
+    "recommendation": "covered",
+    "bucket": "highest",
+    "underlying_key": "deliberate-old-tmux-terminal-retirement",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "Ending old processes, tabs and retained screens is an established deliberate consequence, explicitly accepted by both specifications. Keep highest for the work/process/content consequence until an independent drop check agrees to this narrow acceptance. This is distinct from installer survival wording and hidden failure/duplicate-agent claims.",
+    "checks": [
+      "dbfc69751215dbf15e1d31d5bed73c3754c4ebc4:crates/farhelm-supervisor/src/service/core.rs:6426-6439 calls end_private_server under the state claim before reload. service/core/old_terminals.rs:176-279 checks peer ownership/identity, terminates and removes files on success; it logs and continues on failure.",
+      "dbfc:service/core.rs:7098-7115 converts launching/running/stop-requested tmux rows without a sentinel through Transition::TerminalEnded, irrespective of successful server termination.",
+      "f560058da19e02716e6f943883a9508b447aff4e:SPEC.md:3000-3017 explicitly accepts the lost terminals, agents, tabs and last screens, including the failure/second-agent residual. The protocol patch removes byte/terminal-kind negotiation.",
+      "The cited 647f0227^..08399d09 source diff under crates/terminal-host/src and supervisor hosts/client.rs is empty; f560 hosts/terminal.rs removes only reply-side kind helpers. Existing terminal-host compatibility is not relaxed. No retirement was executed."
+    ],
+    "coverage_checked": {
+      "SPEC.md": "Current Terminal experience, 2998-3018, explicitly accepts deliberate retirement and failure/duplicate-agent residual.",
+      "SPEC_impl.md": "Ending the old private tmux server, 2780-2823, requires the same startup termination/conversion and accepted continuation on failure.",
+      "TODO.md Planned": "Empty. The later phase-3 removal in Mid term is not Planned coverage or a remedy for the intended migration consequence.",
+      "plans/queue": "No unlanded plans. tmux-end-old-terminals and followers are landed (REPORTS.md:29-32).",
+      "BUGS.md": "No matching known bug.",
+      "INDEX.md and queue": "Searched old terminal/tmux retirement, lost screens and byte-stream removal; no exact existing item. Distinct restart/history/grid findings do not cover deliberate retirement.",
+      "TRIAGE_OUTCOMES.md": "No exact active decision apart from specification acceptance.",
+      "FILTER.md": "No filter applied: ordinary upgrade alone is not upgrade plus another rare condition, and established work/process loss excludes general filters."
+    },
+    "exact_cover_quotes": [
+      "Current SPEC.md:3000-3004: 'A supervisor that finds that tmux server when it starts ends it, and with it everything that still ran in an old terminal, without needing a tmux program.'",
+      "Current SPEC.md:3003-3004: 'one whose agent had already ended keeps its outcome, but its terminal's last screen, which lived in the server, is gone; old tabs are closed.'",
+      "Current SPEC.md:3008-3011: 'A failure to end the server or to stop what ran there is logged and never stops the supervisor from starting; those sessions are treated as ended all the same, accepting that a Restart could then start a second agent beside one still running.'"
+    ],
+    "missing_premise": "None for intended retirement/process/screen loss. This is not a complete independent review of cleanup implementation, installer assurances (caller-supplied g004/f1), or the failure-hidden duplicate-agent issue (g033/r1).",
+    "original_stronger_consequence": "Updating ends live old agents and tabs and destroys their retained terminal screens. Original highest is preserved across all wording revisions; the failure branch can leave an old agent running while Restart starts another.",
+    "needs_independent_drop_check": true,
+    "proposed_basis": "Drop only the deliberate-retirement consequence as exact specification acceptance after independent agreement. Do not alias it to g004/f1 or g033/r1, and do not excuse incompatible terminal-host wire changes with page reload or protocol 77."
+  },
+  {
+    "key": "g053/c2",
+    "latest_line": 10,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "protocol77-admits-pre77-supervisor-stream",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The new helm and an older supervisor cannot pass their hello with different protocol versions. Removed negotiation therefore does not make this cross-peer renderer/input route reachable. This does not settle the distinct stale browser route or terminal-host compatibility.",
+    "checks": [
+      "f560058da19e02716e6f943883a9508b447aff4e:crates/farhelm-proto/src/lib.rs:255 pins 77; io.rs:581-655 requires Hello and returns success only on exact PROTOCOL_VERSION, otherwise version skew.",
+      "The cited 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513^..08399d092d20815ced6619c26df2391944ae2b4a diff under crates/terminal-host/src and supervisor hosts/client.rs has no changes. f560 hosts/terminal.rs only removes reply-side kind helpers.",
+      "Pinned crates/terminal-host/SPEC.md was read in full (529 lines): raw Input/Output and 64 KiB input limit are a separate permanent negotiated protocol. No handshake or stream was exercised."
+    ],
+    "coverage_checked": {
+      "SPEC.md": "Searched upgrade compatibility/version mismatch; requires incompatible peers to refuse, not silently reinterpret streams.",
+      "SPEC_impl.md": "Grid streams, 2937-2950, states protocol 77's bump and hello refusal. This supports the source result; its separate old-page acceptance is not terminal-host or older-supervisor compatibility.",
+      "TODO.md Planned": "Empty.",
+      "plans/queue": "No unlanded plans.",
+      "BUGS.md": "No matching known bug.",
+      "INDEX.md and queue": "Searched removed streams, StreamKind, protocol skew and terminal-kind negotiation. No exact item for older-supervisor admission.",
+      "TRIAGE_OUTCOMES.md": "No exact active decision.",
+      "FILTER.md": "No filter applied; unreachable route is source-refuted."
+    },
+    "exact_cover_quotes": [
+      "SPEC_impl.md:2947-2948: 'a helm and supervisor of different protocols refuse each other at the hello, so a remote host shows Needs update until it is updated.'",
+      "f560:crates/terminal-host/SPEC.md, Change policy: 'Every client must keep working with every host version ever shipped, because hosts outlive the programs that start them.'"
+    ],
+    "missing_premise": "Admission of a mismatched older supervisor is contradicted by handshake source. No full audit of unchanged terminal-host code is claimed.",
+    "original_stronger_consequence": "Originally considered high/material UX: old raw output drawn as grids or JSON input sent to an old terminal. It was explicitly scoped to the helm-supervisor edge; browser-edge reinterpretation in g053/c1 is separate and remains highest.",
+    "needs_independent_drop_check": true,
+    "proposed_basis": "Refute only the mismatched helm-supervisor route. Marked for conservative independent checking because cross-wire input interpretation can implicate work; do not use this refutation to lower g053/c1."
+  },
+  {
+    "key": "g053/c3",
+    "latest_line": 9,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "removed-terminal-kind-breaks-cached-session-json",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "Stored session JSON is decoded directly into tolerant SessionInfo/TabInfo structs. Removed terminal-kind keys are ignored, and no new migration or strict decoder was introduced. Source refutes loss of cached listing visibility through these keys.",
+    "checks": [
+      "f560058da19e02716e6f943883a9508b447aff4e:crates/farhelm-proto/src/lib.rs:926-929,1680-1694: SessionInfo and TabInfo derive Deserialize without deny_unknown_fields.",
+      "f560:lib.rs:7449-7509, a_session_cached_with_terminal_kinds_still_decodes, explicitly inserts the removed agent_terminal/supervisor_creates_host_terminals/tab kind fields and asserts the same SessionInfo. Test inspected, not executed.",
+      "f560:crates/farhelm-helm/src/store.rs:9531-9570,9614-9689: cached_sessions and cached_slice use serde_json::from_str::<SessionInfo>; unchanged id/created_at guards do not reject the removed unknown fields.",
+      "No database upgrade or runtime test was run. This is source/serde validation, not observed end-to-end cache persistence."
+    ],
+    "coverage_checked": {
+      "SPEC.md": "Searched unreachable-host cache visibility and upgrade compatibility; no accepted disappearance of cached listings was found.",
+      "SPEC_impl.md": "Grid streams, 2948-2950, explicitly requires pre-77 SessionInfo JSON to remain readable via unknown-field tolerance.",
+      "TODO.md Planned": "Empty.",
+      "plans/queue": "No unlanded plans.",
+      "BUGS.md": "No matching known bug.",
+      "INDEX.md and queue": "Searched cached SessionInfo decoding, agent_terminal and terminal-kind removal; no exact existing item.",
+      "TRIAGE_OUTCOMES.md": "No exact active decision.",
+      "FILTER.md": "No filter applied; source refutes the unknown-field decode premise."
+    },
+    "exact_cover_quotes": [
+      "SPEC_impl.md:2948-2950: 'The helm keeps the last listing of each host in helm.db as SessionInfo JSON, whose decode ignores unknown fields, so rows cached before 77 still read.'"
+    ],
+    "missing_premise": "The proposed rejection of removed unknown keys contradicts the structs and actual readers. A full database upgrade test was not run, and unrelated cache damage is outside this record.",
+    "original_stronger_consequence": "Originally considered high/material UX: cached listings from unreachable hosts disappear. Sessions, files and processes remain on those hosts; no deletion or loss of user-owned work was alleged.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Refute disappearance caused specifically by the removed terminal-kind JSON keys. Do not generalize to every database upgrade or cache failure."
+  }
+]

@@ -1,0 +1,73 @@
+[
+  {
+    "key": "g067/l5",
+    "latest_line": 23,
+    "recommendation": "retain-verified",
+    "bucket": "other",
+    "underlying_key": "podman-lost-session-create-test-misses-presend-store-witness",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The test promises that login/install facts are durable before sending creation, but observes those facts only after create returns. Its fake send has no enabled session-state oracle. The established consequence is missing regression assurance for that temporal contract; current production ordering is correct.",
+    "checks": [
+      {
+        "source": "g067/findings.jsonl:21-23",
+        "result": "Read the complete named history; the file ends at line 23. The lead became a source-confirmed finding, without withdrawal or a stronger shipped consequence. Latest record is line 23."
+      },
+      {
+        "source": "56659839785691f76da3af5d8f51b511cff4ba8b:crates/farhelm-helm/src/environment/podman/tests.rs:248-346",
+        "result": "The comment claims pre-run persistence. The test sets only lost_run, observes an absent login before create, and checks saved login, pending marker and prepared facts after create returns. The retry and run-count assertions establish no second send, not persistence during the first send."
+      },
+      {
+        "source": "56659839785691f76da3af5d8f51b511cff4ba8b:crates/farhelm-helm/src/environment/podman/tests.rs:14-25,50-117,157-192,198-204",
+        "result": "helper_oracle defaults false. Its conditional send-time reads concern recipe-builder ownership and build_started_at; the adjacent helper test explicitly enables it, while the named session test does not. Scripted lost_run and absent-container replies do not depend on session login/install facts."
+      },
+      {
+        "source": "56659839785691f76da3af5d8f51b511cff4ba8b:crates/farhelm-helm/src/environment/podman.rs:148-184,295-321,421-470,1103-1147",
+        "result": "Production currently awaits the atomic prepared-create write before run. The send lowers the place route and selected arguments without asserting this session's saved facts. Moving that write after awaiting run but before inspecting/processing its result would preserve the named test's post-return observations and retry refusal. This is a source counterfactual, not an executed mutation."
+      },
+      {
+        "source": "56659839785691f76da3af5d8f51b511cff4ba8b:SPEC_impl.md:6408-6432; 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db:SPEC_impl.md:5951-5953; .agents/test-authoring.md",
+        "result": "The reviewed and pinned-tip contract requires atomically recording full login identity, prepared facts and pending-send marker before creation is sent. The test-authoring checklist requires an observable distinguishing competing mechanisms. Correct production order does not supply that observable to the test."
+      },
+      {
+        "source": "git log 6e423e30068b62c6cfa276c6d720ee35bb70387a..00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db -- crates/farhelm-helm/src/environment/podman/tests.rs; git diff 56659839785691f76da3af5d8f51b511cff4ba8b 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db -- same path",
+        "result": "The sole in-range file change is its introduction at 56659839785691f76da3af5d8f51b511cff4ba8b; the reviewed-to-tip diff is empty. The gap is introduced in range and persists through the review tip."
+      }
+    ],
+    "coverage_checked": [
+      {
+        "source": "SPEC.md, Container sessions, current lines 4806-4891; SPEC_impl.md, Disposable environments and Podman places, creation and images, current lines 5929-5953 and 6058-6093",
+        "result": "The specifications require ownership and pre-send persistence; neither accepts a test claiming to witness that boundary without observing it. No exact accepted-behavior cover."
+      },
+      {
+        "source": "TODO.md:25-27",
+        "result": "The current Planned bucket is empty. No coverage."
+      },
+      {
+        "source": "plans/queue/INDEX.md; targeted searches of plans/queue/*.md",
+        "result": "The current index has no unlanded plans. Retained plan files were searched for the named test, pre-send boundary, login/install facts and pending-send marker; no work targeting this test-oracle gap was found."
+      },
+      {
+        "source": "BUGS.md",
+        "result": "Its sole accepted bug concerns a stalled SSH transfer; it does not cover this test boundary."
+      },
+      {
+        "source": "review_feedback_queue/INDEX.md in full; targeted queue searches; review_feedback_queue/rebuild-order-test-misses-persistence-boundary.md",
+        "result": "No exact test or session-send-state item was found. The rebuild-order item also concerns a missing persistence witness, but targets Tensorlake snapshot replacement and a different fake boundary. It is neither an alias nor coverage of this Podman session-create test. No useful extension to an existing item was established."
+      },
+      {
+        "source": "TRIAGE_OUTCOMES.md targeted searches; lines 1325-1336",
+        "result": "No decision covers the named test or contract. The static-oracle discard found by search concerns launcher subscriptions and is limited to that fixture, not a general acceptance of oracle gaps. Archive not read."
+      },
+      {
+        "source": "review_feedback_queue/FILTER.md in full",
+        "result": "No filter matches the whole trigger and consequence. This is a test's unwitnessed temporal guarantee, not a rare self-correcting display/diagnostic failure or another listed filtered route."
+      }
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": "No missing source premise for the narrow test-assurance claim. No runtime or mutation experiment was run. A shipped ordering bug, real crash, actual orphan, process loss or user-work loss has not been established and must not be inferred from the test counterfactual.",
+    "original_stronger_consequence": "None alleged beyond test assurance. Events 21-23 explain that a hypothetical run-then-persist implementation could pass while a crash during run leaves facts absent; they explicitly do not claim that current production has that order or that any crash/work loss occurred. No withdrawal or consequence lowering appears in this named history.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Retain as other with source-confirmed confidence and the execution caveat. A session-send oracle can inspect this host's saved login, prepared facts and pending marker before returning the fake outcome; alternatively narrow the test comment to the post-return persistence/retry guarantee it currently observes. This consultation makes no parent disposition and is not an independent drop check."
+  }
+]

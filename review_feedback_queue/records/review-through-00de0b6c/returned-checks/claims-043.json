@@ -1,0 +1,257 @@
+[
+  {
+    "key": "g067/l3",
+    "latest_line": 12,
+    "recommendation": "needs-parent",
+    "bucket": "other",
+    "underlying_key": "podman-test-payload-producer-consumer-tmux-mismatch",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The intermediate defect is source-established, and its later repair is also established. Preserve both facts; this is not a current-tip startup failure. The available disposition vocabulary has no repaired-in-range category.",
+    "checks": [
+      "500548b9253b07a26fd03119679184b69544e31d:crates/farhelm/tests/e2e/podman_environments.rs:175-195 requires same-revision payloads and asserts both the farhelm archive and tmux file exist.",
+      "500548b9253b07a26fd03119679184b69544e31d:scripts/build-podman-test-payloads.sh patch removes every tmux build/staging/existence operation, retains mkdir -p for the reusable output directory, and only requires the farhelm archive. Fresh output therefore lacks the required tmux file; stale output can conceal it.",
+      "d751ff1633bb479c7bf53920f2e4ea4ba932a1c2 patch replaces the consumer's two-file loop with the single archive assertion. At reviewed tip 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db:podman_environments.rs:190-196 the corrected assertion remains. No test execution was performed."
+    ],
+    "coverage_checked": [
+      "SPEC.md Container sessions and SPEC_impl.md Disposable environments/Testing contain no acceptance of inconsistent test payloads.",
+      "TODO.md Planned is empty. Searches of plans/queue found tmux-drop-from-install's payload-removal work; plans/REPORTS.md:30 records that plan as landed, so it is not an unlanded repair covering a retained defect.",
+      "BUGS.md, review_feedback_queue/INDEX.md and active TRIAGE_OUTCOMES.md searches for payload/tmux/Podman staging found no exact trigger/consequence/scope cover. FILTER.md has no full-boundary match: fresh-output startup failure is not a rare safe failure."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": "No source premise is missing for the historical mismatch or repair. Parent must reconcile the supplied g093/f1 producer-side identity; that record is outside this named batch and was not inspected.",
+    "original_stronger_consequence": "Freshly prepared payloads cause the real Podman suite to fail before resources are created. No product work-loss consequence was claimed.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Keep the historical finding and explicit repair in the recording audit. Do not silently refute it from correct tip code or describe it as still actionable. Parent decides whether repaired-in-range findings belong in its resulting queue."
+  },
+  {
+    "key": "g067/c2",
+    "latest_line": 16,
+    "recommendation": "needs-parent",
+    "bucket": "other",
+    "underlying_key": "podman-proxy-tests-formatting-versus-environment-generator-boundary",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The limited test boundary is established. It does not itself establish a separate misleading-evidence defect, and it does not refute the supplied product persistence finding. The formatter oracle and docstring must remain visible when the parent handles that finding.",
+    "checks": [
+      "56659839785691f76da3af5d8f51b511cff4ba8b:crates/farhelm-helm/src/environment/podman/tests.rs:542-575 asserts generated environment.d text, including HTTP_PROXY=\"\", and shell-export spelling. It never invokes an environment generator.",
+      "Same revision:tests.rs:578-637 executes the real private-input wrapper in a local shell and verifies bytes, empty versus absent shell variables, and private-file cleanup. Its docstring explicitly bounds this to the byte/cleanup boundary.",
+      "The first test's docstring at 542-544 states an intended login-manager contract; its text assertions alone do not prove that contract across reboot. This review did not execute or independently verify Ubuntu systemd's empty-assignment behavior."
+    ],
+    "coverage_checked": [
+      "Current SPEC.md:4877-4879 and SPEC_impl.md:6082-6085 require deterministic inheritance through environment.d; they do not accept dropping empty values or claim these local tests execute a reboot.",
+      "TODO.md Planned is empty. plans/queue/podman-environments.md:242-244 describes deterministic proxy inheritance, but plans/REPORTS.md:21 records it as landed. No unlanded matching repair found.",
+      "BUGS.md, queue INDEX plus proxy-related search results, and active TRIAGE_OUTCOMES.md contain no exact cover for these formatter/input tests. Privacy-scrubber findings concern different inputs and consequences. FILTER.md has no applicable full boundary."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": "A separate oracle defect needs the actual environment.d semantics and exact false expectation checked. The supplied g065/l1:14 product conclusion is outside this named batch; do not treat it as independently verified here.",
+    "original_stronger_consequence": "The tests cannot establish persistence through the in-container user manager after reboot. The supplied product issue says an empty proxy is lost there; that consequence is preserved, not dismissed by these tests passing.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "No separate finding for an assertion that these tests perform a reboot, since they make no such assertion. Carry the formatter expectation and its broader docstring as useful test-fix context for the parent's g065 persistence record. Do not call that product finding covered or refuted here."
+  },
+  {
+    "key": "g067/c3",
+    "latest_line": 17,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "podman-probe-notification-registration-gap",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The specific lost-completion route is refuted by enabling notification before reading the in-flight state, combined with publishing the result and removing the state before notifying.",
+    "checks": [
+      "56659839785691f76da3af5d8f51b511cff4ba8b:crates/farhelm-helm/src/environment/podman_probe.rs:391-400 starts refresh, enables Notified, then checks refreshing. Completion before registration is observed through the cleared state; completion after the check wakes the enabled waiter.",
+      "Same file:458-472 publishes the route-bound result before Refreshing drops; 485-493 removes the in-flight host before notify_waiters. runtime:346-348 likewise enables before its state reads. No runtime experiment was performed."
+    ],
+    "coverage_checked": [
+      "SPEC.md Container sessions and SPEC_impl.md Podman places require background probes; neither accepts lost completion, and neither is the proposed refutation basis.",
+      "TODO.md Planned is empty; searches of unlanded plans, BUGS.md, queue INDEX and active TRIAGE_OUTCOMES.md for probe notification/registration/completion found no exact cover. Landed podman-environments is context only.",
+      "FILTER.md was read; no filter is needed for this source refutation."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": null,
+    "original_stronger_consequence": "A fast probe could allegedly leave launch waiting until its bounded timeout. No security or user-owned-work consequence was claimed.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Close only the concrete start-before-notification-registration hypothesis. This does not certify every cache interleaving."
+  },
+  {
+    "key": "g068/l1",
+    "latest_line": 8,
+    "recommendation": "refuted",
+    "bucket": "high",
+    "underlying_key": "podman-helper-publication-versus-place-removal-transaction",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The original lost-cleanup race is source-refuted only at helper ownership admission and afterwards. The separately supplied stale-approval route precedes that admission and remains unaffected. Because the original concern included owned processes, any proposed dismissal requires the independent drop check.",
+    "checks": [
+      "56659839785691f76da3af5d8f51b511cff4ba8b:environment/podman/build.rs:488-500,538-565 publishes helper identity using the observed HostRow before run. tensorlake/build.rs:330-364 rechecks kind, entry UUID and destination under an immediate transaction and publishes state in that transaction.",
+      "Same revision:store/podman.rs:215-250 checks all referring rows and recipe needs_cleanup. environment/recipes.rs:66-74 includes builder/preparer identities. store.rs:7567 and 8046 invokes that refusal inside destination-update and removal transactions. A winning publication blocks endpoint loss; a winning mutation rejects stale publication.",
+      "At 190d844e58c96cf197aa838d0b0eea8062f48435:agent_requests.rs:4485-4515 captures place name and numeric place before approval, approved:2865-2886 rechecks only origin, and 4541-4549 dispatches the numeric place afterwards. store/podman.rs:364-394 registration has no expected endpoint parameter. This is a different, earlier boundary.",
+      "At that later revision:provisioning/credential_delivery.rs:434-440 resolves current access; 603-608 installs Codex auth bytes and 631-652 installs an enabled GitHub token. These support the supplied separate execution/credential-delivery consequence; no runtime disclosure was observed."
+    ],
+    "coverage_checked": [
+      "Current SPEC.md:4869-4872 and SPEC_impl.md:5964-5967 require keeping the cleanup route once rows/artifacts exist. They do not extend that guard to pending approval cards.",
+      "190d844e58c96cf197aa838d0b0eea8062f48435:SPEC_impl.md:9548-9556 binds approval to the machine shown. Current Permission prompts preserves the origin-binding contract; no acceptance of stale environment-place consent found.",
+      "TODO.md Planned is empty. Searches of unlanded plans, BUGS.md, INDEX and active TRIAGE_OUTCOMES.md found no exact post-publication helper-race cover or pending-container-place approval cover. podman-environments and environment-agent-operations are landed per plans/REPORTS.md:21,28. FILTER.md supplies no security cover."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": "No missing premise for the narrow transactional refutation. Parent must keep g020/l1's pre-publication approval record; its complete history is outside this batch.",
+    "original_stronger_consequence": "A first build could strand a helper at an old or forgotten host, losing cleanup access and possibly owned processes. The later record additionally preserves the distinct highest-severity execution/credential delivery to a retargeted machine before resource registration.",
+    "needs_independent_drop_check": true,
+    "proposed_basis": "Propose source refutation only for the original helper-publication/removal race. Do not drop or lower the separate stale-consent finding. Bucket high describes the original lost-cleanup hypothesis if it had been established; no user-visible defect is established for that exact race.",
+    "new_interface_evidence": "The checked ownership transaction starts at resource publication, not at card creation. The independently checked 190d844 approval caller and provisioning/credential_delivery.rs route support the supplied g020/l1 boundary distinction; a post-publication guard is not a rebuttal to that record."
+  },
+  {
+    "key": "g068/l2",
+    "latest_line": 6,
+    "recommendation": "covered",
+    "bucket": "high",
+    "underlying_key": "podman-ordinary-wal-tail-loss-of-create-ownership",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The integrated route uses ordinary durability, and ordinary helm WAL tail loss on OS crash or power loss is explicitly accepted. Source supports lost normal association and manual recovery, not automatic destruction of surviving work. This proposed coverage and consequence limit need independent checking.",
+    "checks": [
+      "56659839785691f76da3af5d8f51b511cff4ba8b:store/podman.rs:268-278,373-394,422-432 writes prepared/pending facts, registration and canonical identity through ordinary Db::call. farhelm-supervisor/src/db.rs:94-117 selects NORMAL in WAL; call:230-245 adds no durability barrier. Full sync is a separately selected operation at 247-266.",
+      "Same revision:environment/podman.rs:1103-1125 awaits recording before external run. provisioning/tensorlake_add.rs:388-398,555-605,981-1013 integrates registration, creation, credential delivery and session launch. Thus the missing-caller argument from an earlier foundation revision does not apply.",
+      "Same revision:environment/podman.rs:1071-1093 refuses adopting an unrecorded collision; destroy:1298-1302 returns never-created if both ownership markers are absent. leftovers:771-835 discovers labels at usable/referenced places, and delete_leftover:725-765 requires ownership and explicit deletion. A crash can require manual recovery; the checked source does not show irreversible destruction. No power-loss experiment was run."
+    ],
+    "coverage_checked": [
+      "Historical SPEC_impl.md:5668-5672 explicitly accepts ordinary OS-crash/power-loss commit loss. Current equivalent is SPEC_impl.md:5182-5198, including the enumerated trust-changing exceptions. Container create ownership is not among those exceptions.",
+      "Historical SPEC_impl.md:6683-6685 and 6840-6841 explicitly retain ordinary ownership durability and require explicit cleanup after lost ID/pending facts; current equivalents are 6302-6305 and 6458-6461. Current Disposable environments:6095-6104 shares the sandbox ownership contract, without a new durability exception. SPEC.md Container sessions requires discoverable explicit cleanup but does not promise power-loss fsync for these writes.",
+      "TODO.md Planned is empty. Searches of plans/queue, BUGS.md, INDEX and active TRIAGE_OUTCOMES.md found no different exact cover. Automatic-update opt-out durability concerns a trust setting and is not an alias. FILTER.md is not the proposed basis."
+    ],
+    "exact_cover_quotes": [
+      {"source": "SPEC_impl.md:5188-5189 at recording main 24bc058066fd57848e788b465719b0e6da2f98f7", "quote": "This accepts losing the last commits on an OS crash or power loss without weakening database consistency; process crashes preserve commits."},
+      {"source": "SPEC_impl.md:6304-6305 at recording main", "quote": "A legacy row or a power loss that lost both records cannot recover by name: remove that host entry, then handle the leftover explicitly."},
+      {"source": "SPEC_impl.md:6460-6461 at recording main", "quote": "Ordinary write durability is retained: a legacy row or power loss that loses both the ID and pending marker requires explicit cleanup."}
+    ],
+    "missing_premise": "Irreversible work/process loss or a silent destructive recovery route was not established. The accepted loss of the normal UI/cleanup association is established conditionally on lost WAL tail commits.",
+    "original_stronger_consequence": "Power loss could erase ownership facts while remote work/processes survive, potentially leaving user work unaccounted for or inaccessible. Later wording narrows established consequence to lost normal association/manual recovery; it does not erase the original possible work-loss concern.",
+    "needs_independent_drop_check": true,
+    "proposed_basis": "Exact ordinary-durability specification acceptance, applied to the integrated caller. Do not use the earlier foundation revision's absent production caller as the drop basis. Independent check must also assess the proposed limit to association loss rather than irreversible loss."
+  },
+  {
+    "key": "g068/c3",
+    "latest_line": 9,
+    "recommendation": "refuted",
+    "bucket": "high",
+    "underlying_key": "podman-refused-create-second-resolution-settlement-generation",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "Timestamp equality alone is not a unique generation, but the hypothesized old refusal settling a newer create has no overlapping production route through this caller. The full episode is awaited under the environment provisioning lock.",
+    "checks": [
+      "56659839785691f76da3af5d8f51b511cff4ba8b:store/podman.rs:439-463 guards identity, binding, pending timestamp and unadmitted state; the timestamp alone can repeat and is not credited with uniqueness.",
+      "git grep at that revision finds the sole production setter and clearer in environment/podman.rs:1107,1139. create:1116-1145 awaits run, then inspection, then clears only a typed CreateRefused with absence; it spawns no independent settlement task.",
+      "The sole production provider.create caller is provisioning/tensorlake_add.rs:555. start_session_environment acquires host_provision_lock at 452 and moves its guard through the spawned task at 472-484 into finish_session_launch:981-1044. Thus another ordinary create cannot settle during the previous create/refusal episode. No runtime overlap was tested."
+    ],
+    "coverage_checked": [
+      "SPEC_impl.md Disposable environments requires atomic selected facts/pending-send before create; it does not promise a unique wall-clock timestamp or accept stale settlement. Refutation is from the serialized caller, not specification acceptance.",
+      "TODO.md Planned is empty. Searches of plans/queue, BUGS.md, INDEX and active TRIAGE_OUTCOMES.md for refused create, pending marker, same-second settlement and Podman ownership found no exact match. sandbox-timestamp-wire-contract is a different timestamp display/wire question.",
+      "FILTER.md has no relevant full-boundary match and is not used."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": null,
+    "original_stronger_consequence": "A delayed refusal could allegedly clear a newer marker and lose cleanup association, possibly causing loss of user processes/work. That production ordering is source-refuted; arbitrary unsynchronized private store calls are outside the established caller contract.",
+    "needs_independent_drop_check": true,
+    "proposed_basis": "Narrow source refutation from the sole awaited production create and retained per-environment provisioning guard. Do not infer that second-resolution timestamps are unique. Independent check is required because the original hypothetical involved user-owned work."
+  },
+  {
+    "key": "g069/c1",
+    "latest_line": 5,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "podman-recipe-build-date-runner-timezone",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The build-date formatter uses UTC arithmetic, so changing the runner timezone cannot change this expected date.",
+    "checks": [
+      "350a4b33b6d4476f4a78e43cea124bc2b828f462:e2e/tests/podman-environments.spec.ts:840 supplies built_at=1700000000 and :923 expects Built 2023-11-14. Earlier history's 843-844 and 922 references are superseded by these exact lines.",
+      "Same revision:crates/farhelm-ui/src/tensorlake/recipes.rs:139-149 documents UTC and implements civil_from_days(secs.div_euclid(86400)) plus UTC-labelled time, with no local timezone lookup. No runtime test was run."
+    ],
+    "coverage_checked": [
+      "SPEC.md Container sessions and SPEC_impl.md shared recipes/Testing do not accept timezone-dependent tests; no coverage rule is needed because source refutes the premise.",
+      "TODO.md Planned is empty. Searches of plans/queue, BUGS.md, INDEX and active TRIAGE_OUTCOMES.md for this assertion, build date, UTC and timezone found no exact cover or pending repair. FILTER.md was read and is not the basis."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": null,
+    "original_stronger_consequence": "The delayed-probe Recipes test could allegedly fail solely because of the runner timezone. No broader probe-refresh conclusion is made.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Close only runner-timezone sensitivity of the fixed build date, using the formatter implementation as well as its docstring."
+  },
+  {
+    "key": "g069/c2",
+    "latest_line": 2,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "podman-delete-browser-fixture-declared-helm-response-boundary",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The test explicitly asserts the browser's confirmation, request and outcome handling against a supplied helm-shaped reply. Its lack of a real Podman backend does not contradict that declared boundary or establish a false assertion.",
+    "checks": [
+      "2ef10815f12ed719ab6c51c6e3ac6fcd3f8bc1fa:e2e/tests/podman-environments.spec.ts:620-629 explicitly says the ordinary remote host is presented as a container and the helm-shaped answer is supplied after actual owned-session deletion.",
+      "Same file:643-665 owns two sessions, rewrites only the browser hosts response, records the selected DELETE query, deletes only gone through APIRequestContext and returns environment_remaining=1. Assertions:672-686 require the container warning, no snapshot promise, no request before confirmation, exact protected query, remaining count and survival of kept.",
+      "helpers/fleet.ts cleanupSession stops/deletes only the supplied ID through request API. No real Podman deletion was executed or claimed as evidence here."
+    ],
+    "coverage_checked": [
+      "Current SPEC.md:4838-4850 states the product Delete contract. The fixture observes its browser boundary, while SPEC_impl.md Environment Delete and the seal governs the backend. Production correctness is not used to refute a possible test defect.",
+      "TODO.md Planned is empty. Searches of plans/queue, BUGS.md, INDEX and active TRIAGE_OUTCOMES.md for this test and simulated container Delete found no exact accepted defect or pending repair. Landed environment-agent-operations is context, not cover. FILTER.md is not used."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": "No concrete incorrect oracle or claim of real Podman execution was identified. Backend Podman execution remains outside this test's evidence.",
+    "original_stronger_consequence": "A browser-only container Delete fixture might misleadingly imply real backend coverage. The explicit fixture comment and actual assertions bound it to the helm response interface; no product deletion or user-work-loss defect was established.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Close the alleged boundary-misrepresentation concern only. Do not promote this test into evidence of real Podman backend deletion or use correct backend behavior to excuse a test-oracle defect."
+  },
+  {
+    "key": "g069/l1",
+    "latest_line": 7,
+    "recommendation": "retain-verified",
+    "bucket": "other",
+    "underlying_key": "podman-browser-owned-fixtures-created-before-cleanup-guard",
+    "aliases": [],
+    "target_queue_file": "review_feedback_queue/switcher-second-create-failure-leaks-first-session.md",
+    "why": "Conditional setup failure can bypass all local cleanup after a real session or template has already been acquired. Shared browser/worker teardown does not delete these API-owned fixtures. This is useful additional scope for the existing acquired-before-guard item, not exact coverage of these tests.",
+    "checks": [
+      "350a4b33b6d4476f4a78e43cea124bc2b828f462:e2e/tests/podman-environments.spec.ts:111-119 creates a source before fallible listing assertions; try begins at 245 and cleanupSession is at 292. Further sources at 501 and 555 precede awaited route setup and their guards. Template save at 689-702 precedes route setup and try at 741.",
+      "Same revision:helpers/fleet.ts:408-435 creates a real API session, :165-175 chooses the basic agent, and :576-589 explicitly stops/deletes that ID. farhelm-fixtures/src/fake_agent.rs:1675-1697 waits for stdin/quit. Closing a browser is not the session's lifetime boundary.",
+      "Same revision:helpers/evidence.ts:46-110 tears down evidence/browser observation, with no session/template deletion. playwright.config.ts:119-134,160-169 keeps stacks across serial tests/projects and requires restoration. The source and raw-wait instances remain at reviewed tip 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db. No failure injection, observed cascade or indefinite process leak is claimed."
+    ],
+    "coverage_checked": [
+      "SPEC.md and SPEC_impl.md Testing contain no acceptance of per-test fixture leaks; ordinary product/container cleanup rules do not cover test fixture ownership mistakes.",
+      "TODO.md Planned is empty. Searches of plans/queue, BUGS.md and active TRIAGE_OUTCOMES.md found no exact trigger/consequence/scope acceptance or pending repair.",
+      "INDEX matches were read in full: switcher-second-create-failure-leaks-first-session.md covers the same acquisition-before-guard structure in quick-switcher and terminal-migration, but not these Podman tests or template fixture. orphan-test-setup-precedes-cleanup-guard.md covers account/recipe setup in tensorlake-tunnels; resume-launch-test-records-session-after-assertion.md loses the ID before finally; route-retirement-failure-skips-owned-session-cleanup.md fails during teardown. None removes these causes. Proposed extension is useful new scope, not duplicate coverage.",
+      "FILTER.md rare-safe-failure does not cover running fixture/resource state that persists into subsequent tests. Eventual stack reset/shutdown bounds the consequence but does not make it a transient display or a safe failed operation."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": "Actual failure incidence, survivor lifetime until a later suite reset, and downstream test failures were not measured. They are not required for the conditional ownership gap.",
+    "original_stronger_consequence": "Setup failure can leave a fixture agent running and contaminate later tests. Latest history adds the saved-template fixture. Normal success and failures after guard entry clean up; wider stack reset/shutdown eventually reclaims fixtures. No user installation, security or catastrophic tooling impact is claimed.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Retain all source/session/template instances and caveats. Extend the acquired-before-guard queue item with this separately named scope, or keep a dedicated item if its expanded title would be misleading. Do not mark the new scope covered merely because other tests have the same ownership mistake."
+  },
+  {
+    "key": "g069/c3",
+    "latest_line": 9,
+    "recommendation": "retain-verified",
+    "bucket": "other",
+    "underlying_key": "podman-browser-raw-route-arrival-promise-bypasses-finally-on-timeout",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "A test-runner deadline does not cancel a pending application-owned promise. If the expected request never arrives, the guarded test body remains suspended and cannot enter its finally; fixture teardown supplies no replacement deletion of its real source session.",
+    "checks": [
+      "350a4b33b6d4476f4a78e43cea124bc2b828f462:e2e/tests/podman-environments.spec.ts:501 creates the ordinary-folder source, :510-515 releases reached only when the remote history callback runs, :521 enters try, :530 awaits reached.wait(), and :539-545 owns source cleanup. The Recent publish helper likewise awaits reached at 437, with release/route cleanup only later or in :483-488.",
+      "Same revision:helpers/route-gate.ts:10-16 returns a plain resolve-only Promise; no local rejection, deadline or cancellation input exists. Page closure does not resolve it. package-lock.json pins @playwright/test/playwright to 1.64.0; playwright.config.ts:137 supplies the 60-second runner deadline.",
+      "Checked official v1.64.0 https://raw.githubusercontent.com/microsoft/playwright/v1.64.0/packages/playwright/src/worker/timeoutManager.ts:83-114,128-132: the timed wrapper races callback and separate timeout promise; the timer rejects the latter. https://raw.githubusercontent.com/microsoft/playwright/v1.64.0/packages/playwright/src/worker/workerMain.ts:384-388 invokes test.fn inside that wrapper, then proceeds to hooks/fixtures. This establishes reporting timeout without unwinding the suspended callback's finally.",
+      "helpers/evidence.ts:46-110 and playwright.config.ts:119-134,160-169 show no API-session cleanup at browser/worker disposal and a reused stack. The ordinary-folder path remains at reviewed tip :501-544. No runtime timeout, leak, cascade or runner hang was observed."
+    ],
+    "coverage_checked": [
+      "SPEC.md/SPEC_impl.md searches found no acceptance of raw readiness waits bypassing test cleanup. Testing defines real owned stacks, but no provision that runtime deadlines cancel arbitrary promises.",
+      "TODO.md Planned is empty. plans/queue/nonblocking-session-actions.md:94-95 uses route gates for controlled replies, but it is landed per plans/REPORTS.md:16 and is not an unlanded fix for missing request arrival. No matching unlanded repair, BUGS.md entry or active TRIAGE_OUTCOMES.md decision found.",
+      "INDEX plus matching cleanup queue files were checked. g069/l1 is a distinct pre-try gap. Existing route-retirement, sequential-cleanup and premature-owned-ID-snapshot items assume cleanup has started; none fixes this raw promise before finally. No exact cover or alias established.",
+      "FILTER.md has no full match: the conditional consequence includes persistent fixture state and skipped owned cleanup, beyond transient diagnostics or safe retry."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": "The trigger is an absent expected route callback. Runtime frequency and actual subsequent contamination were not measured. The conclusion does not depend on a separately hypothesized stuck route drain.",
+    "original_stronger_consequence": "The initial event proposed dismissal based on the runner deadline and release-before-drain ordering. Event 8 reopened it; event 9 retracts that dismissal with pinned runner source. Preserve the original suspected cleanup obstruction and its reversal. Latest consequence is skipped owned test cleanup until a later reset/shutdown, not an indefinite runner hang or user-install leak.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Retain the conditional source finding. Replace raw request-arrival waits with locally rejecting readiness assertions so missing arrival throws through the entered cleanup guard; response-gate release before drain remains independently necessary and correct."
+  }
+]

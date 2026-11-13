@@ -1,0 +1,562 @@
+{
+  "group": {
+    "id": "g125",
+    "domain": "supervisor-request-admission",
+    "purpose": "supervisor-request-admission: crates/farhelm-supervisor/src/service/handlers.rs; phases complete small per-commit changes",
+    "interfaces": [
+      "g001",
+      "g007",
+      "g008",
+      "g009",
+      "g018",
+      "g019",
+      "g020",
+      "g021",
+      "g052",
+      "g053",
+      "g054",
+      "g102",
+      "g103",
+      "g104",
+      "g105",
+      "g106",
+      "g107",
+      "g108",
+      "g109",
+      "g110",
+      "g111",
+      "g112",
+      "g113",
+      "g114",
+      "g115",
+      "g116",
+      "g122",
+      "g123",
+      "g124",
+      "g126"
+    ],
+    "sources": [
+      {
+        "path": "[private-run]/prep/parts/00933-000.patch",
+        "ranges": [
+          [
+            1,
+            1135
+          ]
+        ],
+        "original_path": "crates/farhelm-supervisor/src/service/handlers.rs",
+        "commit": "1ed482dde220452e424973faf38a5e1318986333",
+        "notes": "patch header; patch character offsets [0,59539)",
+        "lines": 1135,
+        "bytes": 59625,
+        "start": 0,
+        "end": 59539,
+        "original": "[private-run]/prep/originals/00933.patch"
+      }
+    ],
+    "lines": 1135,
+    "bytes": 59625
+  },
+  "records": [
+    {
+      "key": "g125/c1",
+      "owner": "g125",
+      "id": "c1",
+      "domain": "supervisor-request-admission",
+      "purpose": "supervisor-request-admission: crates/farhelm-supervisor/src/service/handlers.rs; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 1,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c1",
+            "state": "open",
+            "summary": "Removal of legacy tmux stop and attachment paths follows the explicit retirement contract",
+            "location": "crates/farhelm-supervisor/src/service/handlers.rs:865",
+            "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. TLDR: older tmux terminals are no longer viewable or separately operable through the supervisor after this upgrade; running work in them is deliberately ended during startup. Details: the assigned handlers patch removes foreign-pane ownership probing from Stop (new lines 865-906), all tmux attach setup (1696-1966), and tmux resize operations (2076-2084). Could-be-highest: yes, retiring a running terminal can terminate user-owned processes and discard its screen. Suggested bucket if this were unintended: highest. Confidence: confirmed specification acceptance for this removal; source-only, no execution. proposed_drop: exact specification acceptance, SPEC.md at this commit, Terminal experience, lines 3004-3015: 'This release ends them: the first time a host’s supervisor of this release starts, it ends that tmux server, and with it everything that still ran in an old terminal, without needing a tmux program.' The same paragraph explicitly accepts a startup cleanup failure leaving a second agent possible after Restart, and says already-ended agents lose their old screen. SPEC_impl.md lines 2210-2235 explicitly limit the terminal switch points to host runtimes and require grid-only attaches; lines 2236-2238 say every terminal is created in a host. This is not an independent finding about the retired implementation. possible_cover: none; no coverage sources searched. Caveat: this candidate addresses the requested removal contracts, not whether startup retirement correctly implements them; startup retirement is outside this assigned handlers group."
+          }
+        },
+        {
+          "line": 2,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c1",
+            "state": "open",
+            "summary": "Removal of legacy tmux stop and attachment paths follows the explicit retirement contract",
+            "location": "crates/farhelm-supervisor/src/service/handlers.rs:865",
+            "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. TLDR: older tmux terminals are no longer viewable or separately operable through the supervisor after this upgrade; running work in them is deliberately ended during startup. Details: the assigned handlers patch removes foreign-pane ownership probing from Stop (new lines 865-906), all tmux attach setup (1696-1966), and tmux resize operations (2076-2084). Could-be-highest: yes, retiring a running terminal can terminate user-owned processes and discard its screen. Suggested bucket if this were unintended: highest. Confidence: confirmed specification acceptance for this removal; source-only, no execution. proposed_drop: exact specification acceptance, SPEC.md at this commit, Terminal experience, lines 3004-3015: 'This release ends them: the first time a host's supervisor of this release starts, it ends that tmux server, and with it everything that still ran in an old terminal, without needing a tmux program.' The same paragraph explicitly accepts a startup cleanup failure leaving a second agent possible after Restart, and says already-ended agents lose their old screen. SPEC_impl.md lines 2210-2235 explicitly limit the terminal switch points to host runtimes and require grid-only attaches; lines 2236-2238 say every terminal is created in a host. This is not an independent finding about the retired implementation. possible_cover: none; no coverage sources searched. Caveat: this candidate addresses the requested removal contracts, not whether startup retirement correctly implements them; startup retirement is outside this assigned handlers group."
+          }
+        },
+        {
+          "line": 7,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "c1",
+            "state": "open",
+            "summary": "Legacy terminal removal can end running work; specification explicitly accepts it",
+            "location": "crates/farhelm-supervisor/src/service/handlers.rs:865",
+            "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. TLDR: after this upgrade, sessions left in old tmux terminals lose their running processes and terminal screens; the supervisor no longer offers the old Stop, attach, or resize paths. Details: the assigned handlers patch removes foreign-pane ownership probing from Stop (new lines 865-906), all tmux attach setup (1696-1966), and tmux resize operations (2076-2084). The shipped retirement premise is the same commit's service/core/old_terminals implementation and startup integration, specified in SPEC_impl.md lines 2891-2929: startup ends the old server and reload gives old-kind rows no terminal. Could-be-highest: yes, this terminates user-owned processes and discards terminal state. Suggested bucket: highest (loss of work), retained for the parent's independent specification-acceptance check. Confidence: confirmed source/contract analysis; no execution. proposed_drop: explicit specification acceptance only, not rarity or lack of impact. Exact acceptance, SPEC.md at this commit, Terminal experience, lines 3006-3007: 'This release ends them: the first time a host's supervisor of this release starts, it ends that tmux server, and with it everything that still ran in an old terminal, without needing a tmux program.' Lines 3008-3010 retain ended-agent outcomes but discard their screens and close old tabs; lines 3014-3016 also explicitly accept a cleanup failure allowing Restart beside an old surviving agent. SPEC_impl.md lines 2210-2235 limit the terminal switch points to host runtimes and grid attaches. possible_cover: parent supplied likely analogous records g099/g113/g118/g130; no coverage sources searched and no duplicate disposition asserted. Caveats: the retirement is deliberate per the quoted contract, so this record asks for independent acceptance verification, not a behavior reversal; startup retirement's correctness is outside this handlers group. Prior candidate classification was insufficient and is superseded by this finding revision under the same ID. No parent drop accepted."
+          }
+        },
+        {
+          "line": 9,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "c1",
+            "state": "open",
+            "summary": "Legacy terminal removal can end running work; specification explicitly accepts it",
+            "location": "crates/farhelm-supervisor/src/service/handlers.rs:865",
+            "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. TLDR: after this upgrade, sessions left in old tmux terminals lose their running processes and terminal screens; the supervisor no longer offers the old Stop, attach, or resize paths. Details: the assigned handlers patch removes foreign-pane ownership probing from Stop (new lines 865-906), all tmux attach setup (1696-1966), and tmux resize operations (2076-2084). The shipped route is verified in source: service/core.rs lines 6142-6151 invoke OldTerminals::end_private_server for the state-directory owner before reload; service/core/old_terminals.rs lines 162-164 invoke end_server, whose lines 223-251 terminate the verified server and remove its files; service/core.rs lines 6675-6679 no longer look up a tmux row's address and give it no terminal. This establishes deliberate process termination and loss of the server-held terminal state, not merely a hypothetical client capability failure. Could-be-highest: yes, this terminates user-owned processes and discards terminal state. Suggested bucket: highest (loss of work), retained for the parent's independent specification-acceptance check. Confidence: confirmed source/contract analysis; no execution. proposed_drop: explicit specification acceptance only, not rarity or lack of impact. Exact acceptance, SPEC.md at this commit, Terminal experience, lines 3006-3007: 'This release ends them: the first time a host's supervisor of this release starts, it ends that tmux server, and with it everything that still ran in an old terminal, without needing a tmux program.' Lines 3008-3010 retain ended-agent outcomes but discard their screens and close old tabs; lines 3014-3016 also explicitly accept a cleanup failure allowing Restart beside an old surviving agent. SPEC_impl.md lines 2210-2235 limit the terminal switch points to host runtimes and grid attaches. possible_cover: parent supplied likely analogous records g099/g113/g118/g130; no coverage sources searched and no duplicate disposition asserted. Caveats: the retirement is deliberate per the quoted contract, so this record asks for independent acceptance verification, not a behavior reversal. Startup source was inspected only to validate this removal's shipped premise, not for an independent review of that group's implementation. This finding revision supersedes the earlier candidate classification and adds the completed source checks. No parent drop accepted."
+          }
+        }
+      ],
+      "latest": {
+        "line": 9,
+        "event": {
+          "version": 1,
+          "kind": "finding",
+          "id": "c1",
+          "state": "open",
+          "summary": "Legacy terminal removal can end running work; specification explicitly accepts it",
+          "location": "crates/farhelm-supervisor/src/service/handlers.rs:865",
+          "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. TLDR: after this upgrade, sessions left in old tmux terminals lose their running processes and terminal screens; the supervisor no longer offers the old Stop, attach, or resize paths. Details: the assigned handlers patch removes foreign-pane ownership probing from Stop (new lines 865-906), all tmux attach setup (1696-1966), and tmux resize operations (2076-2084). The shipped route is verified in source: service/core.rs lines 6142-6151 invoke OldTerminals::end_private_server for the state-directory owner before reload; service/core/old_terminals.rs lines 162-164 invoke end_server, whose lines 223-251 terminate the verified server and remove its files; service/core.rs lines 6675-6679 no longer look up a tmux row's address and give it no terminal. This establishes deliberate process termination and loss of the server-held terminal state, not merely a hypothetical client capability failure. Could-be-highest: yes, this terminates user-owned processes and discards terminal state. Suggested bucket: highest (loss of work), retained for the parent's independent specification-acceptance check. Confidence: confirmed source/contract analysis; no execution. proposed_drop: explicit specification acceptance only, not rarity or lack of impact. Exact acceptance, SPEC.md at this commit, Terminal experience, lines 3006-3007: 'This release ends them: the first time a host's supervisor of this release starts, it ends that tmux server, and with it everything that still ran in an old terminal, without needing a tmux program.' Lines 3008-3010 retain ended-agent outcomes but discard their screens and close old tabs; lines 3014-3016 also explicitly accept a cleanup failure allowing Restart beside an old surviving agent. SPEC_impl.md lines 2210-2235 limit the terminal switch points to host runtimes and grid attaches. possible_cover: parent supplied likely analogous records g099/g113/g118/g130; no coverage sources searched and no duplicate disposition asserted. Caveats: the retirement is deliberate per the quoted contract, so this record asks for independent acceptance verification, not a behavior reversal. Startup source was inspected only to validate this removal's shipped premise, not for an independent review of that group's implementation. This finding revision supersedes the earlier candidate classification and adds the completed source checks. No parent drop accepted."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g125/findings.jsonl",
+        "id": "c1",
+        "line": 9,
+        "disposition": "under-investigation",
+        "group": "g125-c1",
+        "reason": "Record durably acknowledged; parent source/contract validation, cross-group synthesis, coverage/filter matching and any independent drop check remain pending. This preserves the claim and uncertainty without accepting, dropping or lowering it."
+      },
+      "accepted_parent_decision": null,
+      "returned_claim_checks": [
+        {
+          "batch": "claims-079",
+          "key": "g125/c1",
+          "latest_line": 9,
+          "recommendation": "covered",
+          "bucket": "highest",
+          "underlying_key": "specified-private-tmux-startup-retirement-loss",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The process/screen loss is real by source and explicitly accepted by the product contract. This proposal is exact specification coverage, subject to the parent's independent drop check because user-owned running work is ended.",
+          "checks": [
+            "1ed482d:service/core.rs:6142-6151 invokes old-server termination before reload for the state-directory owner; core/old_terminals.rs:162-164,223-251 invokes verified process termination and removes server files; core.rs:6675-6679 gives old tmux rows no terminal. Thus this is not merely removal of a client feature.",
+            "1ed482d:SPEC.md:3003-3016 explicitly ends the server and its old work, discards ended agents' screens, closes tabs, and accepts cleanup failure permitting a second agent after Restart. SPEC_impl.md:2210-2235 serves host runtimes and requires grid-capable attachment. Current SPEC.md:2998-3011 retains the same retirement rule; current SPEC_impl.md:2780-2801 describes startup shutdown."
+          ],
+          "coverage_checked": [
+            "Exact SPEC.md coverage at reviewed and current revisions; the trigger, consequence and old-terminal scope match. This does not accept terminating a current terminal host or unrelated process.",
+            "TODO.md Planned is empty. Searched plans/queue, BUGS.md, INDEX.md and active TRIAGE_OUTCOMES.md for private-tmux retirement, old-terminal startup termination and screen loss. No additional exact open cover; the tmux retirement plan is landed per plans/REPORTS.md:29. FILTER.md is unnecessary and no rare-upgrade inference is used."
+          ],
+          "exact_cover_quotes": [
+            {
+              "source": "1ed482dde220452e424973faf38a5e1318986333:SPEC.md:3006-3007",
+              "quote": "This release ends them: the first time a host's supervisor of this release starts, it ends that tmux server, and with it everything that still ran in an old terminal, without needing a tmux program."
+            },
+            {
+              "source": "current SPEC.md:3000-3004",
+              "quote": "A supervisor that finds that tmux server when it starts ends it, and with it everything that still ran in an old terminal, without needing a tmux program."
+            }
+          ],
+          "missing_premise": "None for this deliberate retirement consequence. Startup retirement's correctness against other processes is a separate question, not reviewed here.",
+          "original_stronger_consequence": "Terminates user-owned processes and discards old terminal state. Earlier candidate labels are superseded by a finding explicitly retained as highest for independent specification-acceptance checking. No parent drop was accepted.",
+          "needs_independent_drop_check": true,
+          "proposed_basis": "Exact specification acceptance of old-private-server retirement only. Parent-supplied g099/g113/g118/g130 analogies were not inspected or silently treated as aliases because they are outside this batch."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": true,
+        "clearly_refuted_candidate": false,
+        "needs_unfinished_gate": true,
+        "provisional_bucket": "highest",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "specified-private-tmux-startup-retirement-loss",
+        "destination": "trailing-specified-private-tmux-startup-retirement-loss.md"
+      }
+    },
+    {
+      "key": "g125/c2",
+      "owner": "g125",
+      "id": "c2",
+      "domain": "supervisor-request-admission",
+      "purpose": "supervisor-request-admission: crates/farhelm-supervisor/src/service/handlers.rs; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 3,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c2",
+            "state": "open",
+            "summary": "Joining displaced grid senders under the attachment mutex does not wait on that mutex",
+            "location": "crates/farhelm-supervisor/src/service/handlers.rs:1865",
+            "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. TLDR: the new sequential cleanup loop initially looked capable of stalling all terminal attachments during takeover, but the replacement sender has a cancellation branch that does not acquire the attachment mutex. Details: handlers.rs lines 1865-1886 request shutdown of every displaced sender before awaiting any join. service/grid_stream.rs lines 937-963 select shutdown.changed() before the stream future and invoke report_forwarder_end synchronously after it. The sender holds no external process. service/terminals.rs lines 478-482 await only that task and log join errors. Source refutation: unlike the removed tmux forwarder, there is no external control client or reaping barrier to wait for here. Could-be-highest: no established security or loss-of-work route; the considered effect was cross-session terminal responsiveness (high if established). Suggested bucket: other, not reportable. Confidence: confirmed from source; no execution. proposed_drop: false positive refuted by the sender shutdown path; its reporting caller is checked separately below before closing the pass. possible_cover: none. Caveat: no claim about panic recovery beyond the removed external-resource barrier, or unrelated grid input behavior."
+          }
+        },
+        {
+          "line": 5,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c2",
+            "state": "open",
+            "summary": "Joining displaced grid senders under the attachment mutex does not wait on that mutex",
+            "location": "crates/farhelm-supervisor/src/service/handlers.rs:1865",
+            "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. TLDR: the new sequential cleanup loop initially looked capable of stalling all terminal attachments during takeover, but the replacement sender has a cancellation branch that does not acquire the attachment mutex. Details: handlers.rs lines 1865-1886 request shutdown of every displaced sender before awaiting any join. service/grid_stream.rs lines 937-963 select shutdown.changed() before the stream future and invoke report_forwarder_end synchronously after it. The sender holds no external process. service/terminals.rs lines 478-482 await only that task and log join errors. Follow-up caller check completed: service/connection.rs lines 1272-1328 implement report_forwarder_end as a synchronous dispatcher; Requested is a no-op and the other verdicts delegate detach work rather than awaiting attachments. Unlike the removed tmux forwarder, there is no external control client or reaping barrier to wait for here. Could-be-highest: no established security or loss-of-work route; the considered consequence was cross-session terminal unresponsiveness (high if established). Suggested bucket: other, not reportable. Confidence: confirmed from source; no execution. proposed_drop: false positive refuted by the complete sender shutdown and verdict-reporting paths. possible_cover: none. Caveat: this does not certify unrelated runtime or grid-input code; it resolves the cleanup-loop lead introduced by this handlers diff."
+          }
+        },
+        {
+          "line": 11,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c2",
+            "state": "open",
+            "summary": "Joining displaced grid senders under the attachment mutex does not wait on that mutex",
+            "location": "crates/farhelm-supervisor/src/service/handlers.rs:1865",
+            "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. TLDR: the cleanup loop's considered cross-session terminal-unresponsiveness consequence is refuted by the sender shutdown path. Details retained: handlers.rs 1865-1886 requests shutdown of all displaced output tasks before joining; grid_stream.rs 937-963 races shutdown before streaming and reports synchronously; connection.rs 1272-1328 dispatches Requested as a no-op and delegates natural-detach work. No output task waits for attachments, and no external tmux control-client reap remains. Suggested bucket: other, not reportable for this considered deadlock. Could-be-highest: no established security or loss-of-work route for this output-join suspicion. Confidence: confirmed source analysis, no execution. proposed_drop: false positive refuted by the sender shutdown and verdict-dispatch paths; unchanged basis, no parent disposition assumed. possible_cover: none for the considered deadlock. Discovery-turn interface synthesis: g124/l1 is a DISTINCT input-lifetime finding, not refuted by c2. Pinned connection.rs 1510-1516 keeps partially moved old.input alive past drop(attachments), whereas HostAttach::drop at grid_stream.rs 1169-1175 sends pump cancellation. Its original potential-highest stale-input/command-mixing consequence remains owned by g124/l1, including the accepted-API versus bundled-GUI dimension-trigger caveat supplied by that group. This group checked its corresponding paths: handlers.rs 1877-1886 scopes each partial old to the for iteration, so old.input drops before replacement installation at 1956 and map unlock at 1968; explicit handle_detach scopes a to the if block at 2000-2006 before the outer attachment guard drops at 2007. Thus these handler scopes do not reproduce the newly reported cancellation-after-map-unlock interval. This does not prove cancellation preempts an already-polled pump, does not claim runtime-accepted input is revoked, and does not lower or drop g124/l1. Caveat: the candidate resolves only the original output-join concern; the natural-detach interface finding and the separately supplied already-polled handover issue retain independent provenance."
+          }
+        }
+      ],
+      "latest": {
+        "line": 11,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c2",
+          "state": "open",
+          "summary": "Joining displaced grid senders under the attachment mutex does not wait on that mutex",
+          "location": "crates/farhelm-supervisor/src/service/handlers.rs:1865",
+          "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. TLDR: the cleanup loop's considered cross-session terminal-unresponsiveness consequence is refuted by the sender shutdown path. Details retained: handlers.rs 1865-1886 requests shutdown of all displaced output tasks before joining; grid_stream.rs 937-963 races shutdown before streaming and reports synchronously; connection.rs 1272-1328 dispatches Requested as a no-op and delegates natural-detach work. No output task waits for attachments, and no external tmux control-client reap remains. Suggested bucket: other, not reportable for this considered deadlock. Could-be-highest: no established security or loss-of-work route for this output-join suspicion. Confidence: confirmed source analysis, no execution. proposed_drop: false positive refuted by the sender shutdown and verdict-dispatch paths; unchanged basis, no parent disposition assumed. possible_cover: none for the considered deadlock. Discovery-turn interface synthesis: g124/l1 is a DISTINCT input-lifetime finding, not refuted by c2. Pinned connection.rs 1510-1516 keeps partially moved old.input alive past drop(attachments), whereas HostAttach::drop at grid_stream.rs 1169-1175 sends pump cancellation. Its original potential-highest stale-input/command-mixing consequence remains owned by g124/l1, including the accepted-API versus bundled-GUI dimension-trigger caveat supplied by that group. This group checked its corresponding paths: handlers.rs 1877-1886 scopes each partial old to the for iteration, so old.input drops before replacement installation at 1956 and map unlock at 1968; explicit handle_detach scopes a to the if block at 2000-2006 before the outer attachment guard drops at 2007. Thus these handler scopes do not reproduce the newly reported cancellation-after-map-unlock interval. This does not prove cancellation preempts an already-polled pump, does not claim runtime-accepted input is revoked, and does not lower or drop g124/l1. Caveat: the candidate resolves only the original output-join concern; the natural-detach interface finding and the separately supplied already-polled handover issue retain independent provenance."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g125/findings.jsonl",
+        "id": "c2",
+        "line": 11,
+        "disposition": "excluded",
+        "group": "grid-output-join-under-attachments-mutex-deadlock-suspicion",
+        "reason": "Parent explicitly accepted named refuted proposal from claims-079 after inspecting it. All displaced output tasks receive shutdown before any join, and their shutdown/reporting path does not wait for the attachment mutex. The proposed output-join deadlock is source-refuted. This leaves g124/l1's separate input lifetime intact. Refute only the suspected output-task/attachment-lock cycle, using the complete shutdown and synchronous verdict-dispatch path. Checked source/results: [\"1ed482d:service/handlers.rs:1865-1886 requests every doomed output shutdown before joining. grid_stream.rs:937-963 prioritizes shutdown, reports synchronously and owns no external control process. connection.rs:1272-1328 ignores Requested and schedules natural-detach work rather than awaiting attachments.\",\"handlers.rs:1877-1886 scopes old attachments to loop iterations before replacement installation at :1956 and unlock at :1968. This is not the changed natural-detach partial-local lifetime at connection.rs:1510-1519. No runtime test was run.\"] Current coverage/results: [\"SPEC.md Terminal experience requires responsive independent viewers; SPEC_impl.md Grid streams specifies per-attachment senders. Neither excuses a deadlock, but the suspected dependency cycle is absent in source.\",\"Searched both specifications, empty TODO.md Planned, plans/queue, BUGS.md, INDEX.md and active TRIAGE_OUTCOMES.md for displaced sender joins, attachment-mutex deadlock and output shutdown. No exact coverage or alias; FILTER.md is not the basis for this refutation.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Cross-session terminal unresponsiveness during takeover, high if established. No security or user-work-loss route was alleged for this output-join suspicion. The interface synthesis explicitly preserves l1's potentially highest input consequence.\"; \"No output-task dependency on the held attachment mutex was found; a separate runtime/scheduler failure cannot be assumed.\"."
+      },
+      "accepted_parent_decision": {
+        "key": "g125/c2",
+        "line": 11,
+        "disposition": "excluded",
+        "group": "grid-output-join-under-attachments-mutex-deadlock-suspicion",
+        "bucket": "other",
+        "recording": "refuted",
+        "queue_target_candidate": null,
+        "needs_independent_drop_check": false,
+        "reason": "Parent explicitly accepted named refuted proposal from claims-079 after inspecting it. All displaced output tasks receive shutdown before any join, and their shutdown/reporting path does not wait for the attachment mutex. The proposed output-join deadlock is source-refuted. This leaves g124/l1's separate input lifetime intact. Refute only the suspected output-task/attachment-lock cycle, using the complete shutdown and synchronous verdict-dispatch path. Checked source/results: [\"1ed482d:service/handlers.rs:1865-1886 requests every doomed output shutdown before joining. grid_stream.rs:937-963 prioritizes shutdown, reports synchronously and owns no external control process. connection.rs:1272-1328 ignores Requested and schedules natural-detach work rather than awaiting attachments.\",\"handlers.rs:1877-1886 scopes old attachments to loop iterations before replacement installation at :1956 and unlock at :1968. This is not the changed natural-detach partial-local lifetime at connection.rs:1510-1519. No runtime test was run.\"] Current coverage/results: [\"SPEC.md Terminal experience requires responsive independent viewers; SPEC_impl.md Grid streams specifies per-attachment senders. Neither excuses a deadlock, but the suspected dependency cycle is absent in source.\",\"Searched both specifications, empty TODO.md Planned, plans/queue, BUGS.md, INDEX.md and active TRIAGE_OUTCOMES.md for displaced sender joins, attachment-mutex deadlock and output shutdown. No exact coverage or alias; FILTER.md is not the basis for this refutation.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Cross-session terminal unresponsiveness during takeover, high if established. No security or user-work-loss route was alleged for this output-join suspicion. The interface synthesis explicitly preserves l1's potentially highest input consequence.\"; \"No output-task dependency on the held attachment mutex was found; a separate runtime/scheduler failure cannot be assumed.\"."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-079",
+          "key": "g125/c2",
+          "latest_line": 11,
+          "recommendation": "refuted",
+          "bucket": "other",
+          "underlying_key": "grid-output-join-under-attachments-mutex-deadlock-suspicion",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "All displaced output tasks receive shutdown before any join, and their shutdown/reporting path does not wait for the attachment mutex. The proposed output-join deadlock is source-refuted. This leaves g124/l1's separate input lifetime intact.",
+          "checks": [
+            "1ed482d:service/handlers.rs:1865-1886 requests every doomed output shutdown before joining. grid_stream.rs:937-963 prioritizes shutdown, reports synchronously and owns no external control process. connection.rs:1272-1328 ignores Requested and schedules natural-detach work rather than awaiting attachments.",
+            "handlers.rs:1877-1886 scopes old attachments to loop iterations before replacement installation at :1956 and unlock at :1968. This is not the changed natural-detach partial-local lifetime at connection.rs:1510-1519. No runtime test was run."
+          ],
+          "coverage_checked": [
+            "SPEC.md Terminal experience requires responsive independent viewers; SPEC_impl.md Grid streams specifies per-attachment senders. Neither excuses a deadlock, but the suspected dependency cycle is absent in source.",
+            "Searched both specifications, empty TODO.md Planned, plans/queue, BUGS.md, INDEX.md and active TRIAGE_OUTCOMES.md for displaced sender joins, attachment-mutex deadlock and output shutdown. No exact coverage or alias; FILTER.md is not the basis for this refutation."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": "No output-task dependency on the held attachment mutex was found; a separate runtime/scheduler failure cannot be assumed.",
+          "original_stronger_consequence": "Cross-session terminal unresponsiveness during takeover, high if established. No security or user-work-loss route was alleged for this output-join suspicion. The interface synthesis explicitly preserves l1's potentially highest input consequence.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Refute only the suspected output-task/attachment-lock cycle, using the complete shutdown and synchronous verdict-dispatch path."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "grid-output-join-under-attachments-mutex-deadlock-suspicion",
+        "destination": null
+      }
+    },
+    {
+      "key": "g125/c3",
+      "owner": "g125",
+      "id": "c3",
+      "domain": "supervisor-request-admission",
+      "purpose": "supervisor-request-admission: crates/farhelm-supervisor/src/service/handlers.rs; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 4,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c3",
+            "state": "open",
+            "summary": "Stop comment overstates the full-screen final-frame rule",
+            "location": "crates/farhelm-supervisor/src/service/handlers.rs:945",
+            "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. TLDR: an internal comment says a stopped full-screen program's last frame is not retained, although a terminal host can keep that frame; this does not establish incorrect user-visible behavior. Details: the changed comment at handlers.rs lines 945-948 attributes a blanket non-retention rule to SPEC.md. SPEC.md Terminal experience, lines 2895-2899, distinguishes programs that leave their alternate screen on exit from ones killed without doing so, whose frame remains in the same terminal. SPEC_impl.md Launch failure classification, lines 2703-2708, says the supervisor must take no snapshot before stopping and must paint none into a restarted terminal, while the host keeps its last screen. The executable handler agrees: it takes no snapshot, leaves the host and attachment intact, and at lines 1144-1150 explicitly says the host keeps the final screen. Could-be-highest: no; no source route from this comment to lost work or security impact. Suggested bucket: other. Confidence: confirmed documentation discrepancy, source-only. proposed_drop: narrow internal-comment discrepancy with no established behavior defect; do not treat it as a failure to retain a stopped terminal. possible_cover: none. Caveat: the useful part of the comment, that Stop does not capture and store a frame, remains correct."
+          }
+        },
+        {
+          "line": 6,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c3",
+            "state": "open",
+            "summary": "Stop comment overstates the full-screen final-frame rule",
+            "location": "crates/farhelm-supervisor/src/service/handlers.rs:945",
+            "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. TLDR: an internal comment says a stopped full-screen program's last frame is not retained, although a terminal host can keep that frame; this does not establish incorrect user-visible behavior. Details: the changed comment at handlers.rs lines 945-948 attributes a blanket non-retention rule to SPEC.md. SPEC.md Terminal experience, lines 2897-2901, distinguishes programs that leave their alternate screen on exit from ones killed without doing so, whose frame remains in the same terminal. SPEC_impl.md Launch failure classification, lines 2703-2708, says the supervisor must take no snapshot before stopping and must paint none into a restarted terminal, while the host keeps its last screen. The executable handler agrees: it takes no snapshot, leaves the host and attachment intact, and at lines 1144-1150 explicitly says the host keeps the final screen. Could-be-highest: no; no source route from this comment to lost work or security impact. Suggested bucket: other. Confidence: confirmed documentation discrepancy, source-only. proposed_drop: narrow internal-comment discrepancy with no established behavior defect; do not treat it as a failure to retain a stopped terminal. possible_cover: none. Caveat: the useful part of the comment, that Stop does not capture and store a frame, remains correct."
+          }
+        },
+        {
+          "line": 8,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "c3",
+            "state": "open",
+            "summary": "Stop comment incorrectly says full-screen final frames are never retained",
+            "location": "crates/farhelm-supervisor/src/service/handlers.rs:945",
+            "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. TLDR: the internal explanation of Stop tells future developers that a full-screen program's final frame must not remain after exit, although the product deliberately keeps it when the program does not leave its alternate screen. Details: changed handlers.rs lines 945-948 say SPEC.md states 'a full-screen program’s last frame is not retained after it exits and no snapshot of it is taken or stored.' The first half is false for the host-only terminal model this patch introduces. SPEC.md Terminal experience, lines 2897-2901, explicitly says a program that does not leave its full-screen display, 'because it was killed, say', leaves that frame showing in the same terminal and keeps it across supervisor restarts. SPEC_impl.md Launch failure classification, lines 2703-2708, distinguishes retaining the original terminal from taking a snapshot and painting it into a restarted terminal. The executable handler does not capture a snapshot and correctly leaves the original host and attachment intact; lines 1144-1150 even explain that the host keeps the final screen. The concrete misinformation is a nonexistent blanket ban on retaining the existing terminal's last frame, which could misdirect lifecycle maintenance or tests toward clearing a frame the product promises to keep. Suggested bucket: other (documentation correctness). Could-be-highest: no established security or loss-of-work route from this comment. Confidence: confirmed source/contract discrepancy; no execution. proposed_drop: false; lack of an executable behavior defect does not refute this bounded documentation issue. possible_cover: parent supplied g117c3 as an analogous stale lifecycle explanation; no coverage sources searched and no duplicate disposition asserted. Caveats: this is not a claim that stopped frames currently disappear, and the comment's separate rule against taking/storing a pre-stop snapshot remains correct. This finding revision supersedes the prior proposed drop under the same ID; no parent drop accepted."
+          }
+        },
+        {
+          "line": 10,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "c3",
+            "state": "open",
+            "summary": "Stop comment incorrectly says full-screen final frames are never retained",
+            "location": "crates/farhelm-supervisor/src/service/handlers.rs:945",
+            "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. TLDR: the internal explanation of Stop tells future developers that a full-screen program's final frame must not remain after exit, although the product deliberately keeps it when the program does not leave its alternate screen. Details: changed handlers.rs lines 944-947 say SPEC.md states 'a full-screen program's last frame is not retained after it exits and no snapshot of it is taken or stored.' The first half is false for the host-only terminal model this patch introduces. SPEC.md Terminal experience, lines 2897-2901, explicitly says a program that does not leave its full-screen display, 'because it was killed, say', leaves that frame showing in the same terminal and keeps it across supervisor restarts. SPEC_impl.md Launch failure classification, lines 2703-2708, distinguishes retaining the original terminal from taking a snapshot and painting it into a restarted terminal. The executable handler does not capture a snapshot and correctly leaves the original host and attachment intact; lines 1144-1149 even explain that the host keeps the final screen. The concrete misinformation is a nonexistent blanket ban on retaining the existing terminal's last frame, which could misdirect lifecycle maintenance or tests toward clearing a frame the product promises to keep. Suggested bucket: other (documentation correctness). Could-be-highest: no established security or loss-of-work route from this comment. Confidence: confirmed source/contract discrepancy; no execution. proposed_drop: false; lack of an executable behavior defect does not refute this bounded documentation issue. possible_cover: parent supplied g117c3 as an analogous stale lifecycle explanation; no coverage sources searched and no duplicate disposition asserted. Caveats: this is not a claim that stopped frames currently disappear. The comment's separate rule against taking/storing a pre-stop snapshot remains correct. The old comment also carried the blanket non-retention claim, but the reviewed patch rewrites and retains it while removing its final qualification that the dead pane shows whatever tmux still holds. This finding revision supersedes the prior proposed drop under the same ID and corrects the exact source span; no parent drop accepted."
+          }
+        }
+      ],
+      "latest": {
+        "line": 10,
+        "event": {
+          "version": 1,
+          "kind": "finding",
+          "id": "c3",
+          "state": "open",
+          "summary": "Stop comment incorrectly says full-screen final frames are never retained",
+          "location": "crates/farhelm-supervisor/src/service/handlers.rs:945",
+          "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. TLDR: the internal explanation of Stop tells future developers that a full-screen program's final frame must not remain after exit, although the product deliberately keeps it when the program does not leave its alternate screen. Details: changed handlers.rs lines 944-947 say SPEC.md states 'a full-screen program's last frame is not retained after it exits and no snapshot of it is taken or stored.' The first half is false for the host-only terminal model this patch introduces. SPEC.md Terminal experience, lines 2897-2901, explicitly says a program that does not leave its full-screen display, 'because it was killed, say', leaves that frame showing in the same terminal and keeps it across supervisor restarts. SPEC_impl.md Launch failure classification, lines 2703-2708, distinguishes retaining the original terminal from taking a snapshot and painting it into a restarted terminal. The executable handler does not capture a snapshot and correctly leaves the original host and attachment intact; lines 1144-1149 even explain that the host keeps the final screen. The concrete misinformation is a nonexistent blanket ban on retaining the existing terminal's last frame, which could misdirect lifecycle maintenance or tests toward clearing a frame the product promises to keep. Suggested bucket: other (documentation correctness). Could-be-highest: no established security or loss-of-work route from this comment. Confidence: confirmed source/contract discrepancy; no execution. proposed_drop: false; lack of an executable behavior defect does not refute this bounded documentation issue. possible_cover: parent supplied g117c3 as an analogous stale lifecycle explanation; no coverage sources searched and no duplicate disposition asserted. Caveats: this is not a claim that stopped frames currently disappear. The comment's separate rule against taking/storing a pre-stop snapshot remains correct. The old comment also carried the blanket non-retention claim, but the reviewed patch rewrites and retains it while removing its final qualification that the dead pane shows whatever tmux still holds. This finding revision supersedes the prior proposed drop under the same ID and corrects the exact source span; no parent drop accepted."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g125/findings.jsonl",
+        "id": "c3",
+        "line": 10,
+        "disposition": "verified",
+        "group": "stop-comment-falsely-bans-retaining-original-final-screen",
+        "reason": "Parent explicitly accepted named retain-verified proposal from claims-079 after inspecting it. The changed comment attributes a blanket final-frame non-retention rule to the specification, which explicitly preserves the original terminal's frame when a program does not leave its alternate screen. This is a documentation defect; correct runtime retention does not refute it. Retain the bounded internal documentation finding at other. Do not describe it as a runtime frame-loss bug or merge it with unspecified analogous lifecycle comments. Checked source/results: [\"1ed482d:service/handlers.rs:944-947 says a full-screen program's last frame is not retained after exit. Its :1144-1149 instead correctly says the host keeps the final screen and leaves the attachment intact. The inaccurate comment remains at pinned tip :944-947.\",\"1ed482d:SPEC.md:2897-2901 preserves the frame of a program killed without leaving its full-screen display, across supervisor restarts. SPEC_impl.md:2703-2708 distinguishes keeping the original screen from capturing and repainting a snapshot in another terminal.\",\"The parent comment at handlers.rs:1013-1024 already includes the blanket claim, but qualifies it with whatever tmux itself still holds. The assigned diff rewrites that explanation for hosts and removes the qualification. Attribution is the newly rewritten, unqualified host-lifecycle explanation, not first invention of the blanket phrase.\"] Current coverage/results: [\"Current SPEC.md:2889-2898 retains the original-screen versus no-painted-snapshot distinction. It contradicts this comment, rather than accepting it.\",\"Searched both specifications, empty TODO.md Planned, plans/queue, BUGS.md, INDEX.md and active TRIAGE_OUTCOMES.md for full-screen frame retention, stopped-host final screens and lifecycle comment drift. No exact queued/decided cover. tmux-drop-from-docs's broad comment audit is already landed (plans/REPORTS.md:32), so it is not an unlanded cover. No FILTER.md boundary matches ordinary source-comment misinformation.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Misdirecting future lifecycle maintenance or tests into clearing a frame the product promises to keep. Lines 4 and 6 proposed dropping the bounded comment issue for lack of runtime impact; lines 8 and 10 explicitly supersede that drop. The no-snapshot/no-repaint part remains correct.\"; \"None for the source/contract discrepancy. No current disappearing frame, security consequence or user-work-loss route is established.\"."
+      },
+      "accepted_parent_decision": {
+        "key": "g125/c3",
+        "line": 10,
+        "disposition": "verified",
+        "group": "stop-comment-falsely-bans-retaining-original-final-screen",
+        "bucket": "other",
+        "recording": "retain-verified",
+        "queue_target_candidate": null,
+        "needs_independent_drop_check": false,
+        "reason": "Parent explicitly accepted named retain-verified proposal from claims-079 after inspecting it. The changed comment attributes a blanket final-frame non-retention rule to the specification, which explicitly preserves the original terminal's frame when a program does not leave its alternate screen. This is a documentation defect; correct runtime retention does not refute it. Retain the bounded internal documentation finding at other. Do not describe it as a runtime frame-loss bug or merge it with unspecified analogous lifecycle comments. Checked source/results: [\"1ed482d:service/handlers.rs:944-947 says a full-screen program's last frame is not retained after exit. Its :1144-1149 instead correctly says the host keeps the final screen and leaves the attachment intact. The inaccurate comment remains at pinned tip :944-947.\",\"1ed482d:SPEC.md:2897-2901 preserves the frame of a program killed without leaving its full-screen display, across supervisor restarts. SPEC_impl.md:2703-2708 distinguishes keeping the original screen from capturing and repainting a snapshot in another terminal.\",\"The parent comment at handlers.rs:1013-1024 already includes the blanket claim, but qualifies it with whatever tmux itself still holds. The assigned diff rewrites that explanation for hosts and removes the qualification. Attribution is the newly rewritten, unqualified host-lifecycle explanation, not first invention of the blanket phrase.\"] Current coverage/results: [\"Current SPEC.md:2889-2898 retains the original-screen versus no-painted-snapshot distinction. It contradicts this comment, rather than accepting it.\",\"Searched both specifications, empty TODO.md Planned, plans/queue, BUGS.md, INDEX.md and active TRIAGE_OUTCOMES.md for full-screen frame retention, stopped-host final screens and lifecycle comment drift. No exact queued/decided cover. tmux-drop-from-docs's broad comment audit is already landed (plans/REPORTS.md:32), so it is not an unlanded cover. No FILTER.md boundary matches ordinary source-comment misinformation.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Misdirecting future lifecycle maintenance or tests into clearing a frame the product promises to keep. Lines 4 and 6 proposed dropping the bounded comment issue for lack of runtime impact; lines 8 and 10 explicitly supersede that drop. The no-snapshot/no-repaint part remains correct.\"; \"None for the source/contract discrepancy. No current disappearing frame, security consequence or user-work-loss route is established.\"."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-079",
+          "key": "g125/c3",
+          "latest_line": 10,
+          "recommendation": "retain-verified",
+          "bucket": "other",
+          "underlying_key": "stop-comment-falsely-bans-retaining-original-final-screen",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The changed comment attributes a blanket final-frame non-retention rule to the specification, which explicitly preserves the original terminal's frame when a program does not leave its alternate screen. This is a documentation defect; correct runtime retention does not refute it.",
+          "checks": [
+            "1ed482d:service/handlers.rs:944-947 says a full-screen program's last frame is not retained after exit. Its :1144-1149 instead correctly says the host keeps the final screen and leaves the attachment intact. The inaccurate comment remains at pinned tip :944-947.",
+            "1ed482d:SPEC.md:2897-2901 preserves the frame of a program killed without leaving its full-screen display, across supervisor restarts. SPEC_impl.md:2703-2708 distinguishes keeping the original screen from capturing and repainting a snapshot in another terminal.",
+            "The parent comment at handlers.rs:1013-1024 already includes the blanket claim, but qualifies it with whatever tmux itself still holds. The assigned diff rewrites that explanation for hosts and removes the qualification. Attribution is the newly rewritten, unqualified host-lifecycle explanation, not first invention of the blanket phrase."
+          ],
+          "coverage_checked": [
+            "Current SPEC.md:2889-2898 retains the original-screen versus no-painted-snapshot distinction. It contradicts this comment, rather than accepting it.",
+            "Searched both specifications, empty TODO.md Planned, plans/queue, BUGS.md, INDEX.md and active TRIAGE_OUTCOMES.md for full-screen frame retention, stopped-host final screens and lifecycle comment drift. No exact queued/decided cover. tmux-drop-from-docs's broad comment audit is already landed (plans/REPORTS.md:32), so it is not an unlanded cover. No FILTER.md boundary matches ordinary source-comment misinformation."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": "None for the source/contract discrepancy. No current disappearing frame, security consequence or user-work-loss route is established.",
+          "original_stronger_consequence": "Misdirecting future lifecycle maintenance or tests into clearing a frame the product promises to keep. Lines 4 and 6 proposed dropping the bounded comment issue for lack of runtime impact; lines 8 and 10 explicitly supersede that drop. The no-snapshot/no-repaint part remains correct.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Retain the bounded internal documentation finding at other. Do not describe it as a runtime frame-loss bug or merge it with unspecified analogous lifecycle comments."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": true,
+        "clearly_refuted_candidate": false,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Source-confirmed by an existing parent decision; not runtime reproduced",
+        "deduplication_key": "stop-comment-falsely-bans-retaining-original-final-screen",
+        "destination": "trailing-stop-comment-falsely-bans-retaining-original-final-screen.md"
+      }
+    },
+    {
+      "key": "g125/l4",
+      "owner": "g125",
+      "id": "l4",
+      "domain": "supervisor-request-admission",
+      "purpose": "supervisor-request-admission: crates/farhelm-supervisor/src/service/handlers.rs; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 12,
+          "event": {
+            "version": 1,
+            "kind": "lead",
+            "id": "l4",
+            "state": "open",
+            "summary": "Listing error documentation may describe a launch-sentinel read the listing no longer performs",
+            "location": "crates/farhelm-supervisor/src/service/handlers.rs:620",
+            "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. TLDR: changed internal documentation says a failed session listing can be driven by an unreadable launch sentinel; initial source search suggests listing only reads retained entry state and checkout metadata. Suggested bucket: other if confirmed (documentation correctness), not a runtime classification bug. Could-be-highest: no identified security or user-work route. Source basis: assigned handlers.rs 620-622 rewrites the failed-list fixture explanation to name an unreadable launch sentinel or checkout registry, and 653-657 repeats those as request-fatal failures. Targeted pinned listing.rs search for observe/entry_info/list_all found list_all at 94 and entry_info at 135, but no observation helper. Missing premise: whether the full list_all path or any helper it awaits still reads the launch sentinel and propagates a failure. Next checks: read the bounded full listing implementation and its invoked helpers, then compare parent and full-range history before deciding attribution or recording a bounded defect. Confidence: concrete source lead; not yet settled. proposed_drop: false pending investigation. possible_cover: none in supplied neighbour context for this specific error-contract statement. No execution, build or reproduction."
+          }
+        },
+        {
+          "line": 13,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "l4",
+            "state": "open",
+            "summary": "Listing error comments falsely claim unreadable launch sentinels fail the request",
+            "location": "crates/farhelm-supervisor/src/service/handlers.rs:620",
+            "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. TLDR: developers are told a session-list request can fail because a launch-sentinel file cannot be read, although launch-file failures are deliberately handled by the background ticker and leave listings available. This misstates the error boundary and can steer a failure fixture or maintenance change toward the wrong operation. Details: assigned handlers.rs 620-622 rewrites list_reply's testability explanation to say a genuinely failing listing takes an unreadable launch sentinel or checkout registry. Lines 653-657 repeat the sentinel as a request-fatal failure and cite list_all's documentation as justification. The bounded full list_all source at service/listing.rs 88-153 directly contradicts this: its contract at 90-93 states 'Lists never sample screens, apply reports, read launch artifacts or commit outcomes' and 'A launch artifact read failure leaves lists available; the ticker logs and retries it.' Its complete function snapshots and projects entries; the sole fallible await is store.project_checkout_metadata at 139, and it performs no launch-file observation. entry_info is the previously checked synchronous retained-state projection. Suggested bucket: other (internal error-contract documentation). Could-be-highest: no established or suspected security or user-work-loss route from this comment. Confidence: confirmed pinned source/contract discrepancy; no execution. proposed_drop: false; correct listing behavior is not a refutation of the distinct documentation defect. possible_cover: none in the supplied neighbour records for this specific error-boundary claim; no prohibited coverage search. Caveats: checkout metadata failures can genuinely fail a listing, so the whole comment need not disappear; replace the fictitious sentinel example and align its rationale with the actual checkout projection. The parent revision's list_all already separates ticker-owned launch evidence, so history of the stale sentinel claim across the full pinned range is being checked before final attribution; this finding does not yet claim the assigned commit first introduced the stale clause."
+          }
+        },
+        {
+          "line": 14,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "l4",
+            "state": "open",
+            "summary": "Listing error comments falsely claim unreadable launch sentinels fail the request",
+            "location": "crates/farhelm-supervisor/src/service/handlers.rs:620",
+            "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333; full range attribution checked against exclusive base 6e423e30068b62c6cfa276c6d720ee35bb70387a and pinned tip 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db. TLDR: developers are told a session-list request can fail because a launch-sentinel file cannot be read, although launch-file failures are deliberately handled by the background ticker and leave listings available. This misstates the error boundary and can steer a failure fixture or maintenance change toward the wrong operation. Details: assigned handlers.rs 620-622 rewrites list_reply's testability explanation to say a genuinely failing listing takes an unreadable launch sentinel or checkout registry. Lines 653-657 repeat the sentinel as a request-fatal failure and cite list_all's documentation as justification. The full listing.rs 88-153 contradicts this: 90-93 states 'Lists never sample screens, apply reports, read launch artifacts or commit outcomes' and 'A launch artifact read failure leaves lists available; the ticker logs and retries it.' Its complete function snapshots and projects entries, with its sole fallible await store.project_checkout_metadata at 139. The latter's complete body at store.rs 3557-3605 performs database-only working-copy membership projection and transaction commit, not launch-file reads. status.rs 339-344 explicitly states replies never touch launch artifacts; entry_info reads retained cells. Attribution: the old inline sentinel-error clause already exists at the exclusive base, handlers.rs 619-623, while base listing.rs 90-215 already keeps launch-file reads out of lists. In-range 47f33bbdbd5ff4a6e437e97a800f9083be43096e moves that old clause into list_reply and introduces a helper docstring whose real-failure example is tmux. The assigned 1ed482d patch newly rewrites that docstring to prescribe an unreadable launch sentinel as an actual failure mechanism and retains/updates the internal clause. Thus the broad stale clause predates the range, but the explicit false failure-fixture guidance is added by this assigned patch. Pinned-tip handlers.rs 620-622 and 653-657 retain it; later scoped diff removes grid/terminal-kind fields, not this comment. Suggested bucket: other (internal error-contract documentation). Could-be-highest: no established or suspected security or user-work-loss route from this comment. Confidence: confirmed source/contract and full-range attribution analysis; no execution. proposed_drop: false; correct listing behavior is not a refutation of the distinct newly rewritten documentation, and the earlier stale clause is disclosed rather than misattributed. possible_cover: none among supplied neighbour records for this specific error-boundary claim; no prohibited coverage search. Caveats: checkout metadata failures can genuinely fail a listing, so retain that real failure example. No claim that lists actually fail on a sentinel or that production availability regressed. Useful fix: remove the fictitious sentinel failure from the two changed explanations and describe the checkout projection as the actual fallible dependency. All readily checkable premises resolved; l4 is a finding, not an unresolved lead."
+          }
+        }
+      ],
+      "latest": {
+        "line": 14,
+        "event": {
+          "version": 1,
+          "kind": "finding",
+          "id": "l4",
+          "state": "open",
+          "summary": "Listing error comments falsely claim unreadable launch sentinels fail the request",
+          "location": "crates/farhelm-supervisor/src/service/handlers.rs:620",
+          "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333; full range attribution checked against exclusive base 6e423e30068b62c6cfa276c6d720ee35bb70387a and pinned tip 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db. TLDR: developers are told a session-list request can fail because a launch-sentinel file cannot be read, although launch-file failures are deliberately handled by the background ticker and leave listings available. This misstates the error boundary and can steer a failure fixture or maintenance change toward the wrong operation. Details: assigned handlers.rs 620-622 rewrites list_reply's testability explanation to say a genuinely failing listing takes an unreadable launch sentinel or checkout registry. Lines 653-657 repeat the sentinel as a request-fatal failure and cite list_all's documentation as justification. The full listing.rs 88-153 contradicts this: 90-93 states 'Lists never sample screens, apply reports, read launch artifacts or commit outcomes' and 'A launch artifact read failure leaves lists available; the ticker logs and retries it.' Its complete function snapshots and projects entries, with its sole fallible await store.project_checkout_metadata at 139. The latter's complete body at store.rs 3557-3605 performs database-only working-copy membership projection and transaction commit, not launch-file reads. status.rs 339-344 explicitly states replies never touch launch artifacts; entry_info reads retained cells. Attribution: the old inline sentinel-error clause already exists at the exclusive base, handlers.rs 619-623, while base listing.rs 90-215 already keeps launch-file reads out of lists. In-range 47f33bbdbd5ff4a6e437e97a800f9083be43096e moves that old clause into list_reply and introduces a helper docstring whose real-failure example is tmux. The assigned 1ed482d patch newly rewrites that docstring to prescribe an unreadable launch sentinel as an actual failure mechanism and retains/updates the internal clause. Thus the broad stale clause predates the range, but the explicit false failure-fixture guidance is added by this assigned patch. Pinned-tip handlers.rs 620-622 and 653-657 retain it; later scoped diff removes grid/terminal-kind fields, not this comment. Suggested bucket: other (internal error-contract documentation). Could-be-highest: no established or suspected security or user-work-loss route from this comment. Confidence: confirmed source/contract and full-range attribution analysis; no execution. proposed_drop: false; correct listing behavior is not a refutation of the distinct newly rewritten documentation, and the earlier stale clause is disclosed rather than misattributed. possible_cover: none among supplied neighbour records for this specific error-boundary claim; no prohibited coverage search. Caveats: checkout metadata failures can genuinely fail a listing, so retain that real failure example. No claim that lists actually fail on a sentinel or that production availability regressed. Useful fix: remove the fictitious sentinel failure from the two changed explanations and describe the checkout projection as the actual fallible dependency. All readily checkable premises resolved; l4 is a finding, not an unresolved lead."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g125/findings.jsonl",
+        "id": "l4",
+        "line": 14,
+        "disposition": "verified",
+        "group": "list-reply-doc-prescribes-nonexistent-sentinel-read-failure",
+        "reason": "Parent explicitly accepted named retain-verified proposal from claims-079 after inspecting it. The patch newly prescribes unreadable launch sentinels as a real way to make a session listing fail, although listing does no launch-file reads. The older inline stale clause predates the range; the new failure-fixture guidance is in range and remains at the tip. Retain the in-range error-contract documentation defect at other, distinguishing it from correct listing behavior and from the pre-range stale inline wording. Checked source/results: [\"1ed482d:service/handlers.rs:620-622 adds the unreadable-launch-sentinel failure-fixture example; :653-657 repeats it as request-fatal and cites list_all. The scoped patch confirms the new helper doc replaces a tmux-failure example. Both claims remain at pinned tip.\",\"1ed482d:service/listing.rs:88-153 explicitly says launch-artifact read failure leaves lists available. The complete function projects retained state; its only fallible await is store.project_checkout_metadata. The complete store.rs:3557-3605 helper performs database working-copy projection and transaction commit, not launch-file reads.\",\"Current SPEC_impl.md:4280-4288 assigns unreadable launch evidence to ticker retry and explicitly says it does not fail lists. No execution or listing failure was observed.\"] Current coverage/results: [\"Searched SPEC.md and SPEC_impl.md for list errors, launch sentinels and launch-artifact reads; the current implementation contract contradicts the comment. No product-spec acceptance of the false guidance.\",\"TODO.md Planned is empty. Searched plans/queue, BUGS.md, INDEX.md and active TRIAGE_OUTCOMES.md for sentinel failure, list_reply, listing error boundary and checkout projection. No exact cover. tmux-drop-from-docs's already-landed general audit is not unlanded-plan coverage. FILTER.md's rare diagnostic rule does not cover ordinary test-authoring guidance in a source comment.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Misleading maintainers or tests about which operation fails and where the error boundary lies. The existing checkout-metadata failure example is real and should remain. The broad stale inline sentinel clause is disclosed as pre-range, not newly attributed to this patch.\"; \"None for the new false fixture guidance. This does not claim listings actually read sentinels, fail because of them, or have regressed in availability.\"."
+      },
+      "accepted_parent_decision": {
+        "key": "g125/l4",
+        "line": 14,
+        "disposition": "verified",
+        "group": "list-reply-doc-prescribes-nonexistent-sentinel-read-failure",
+        "bucket": "other",
+        "recording": "retain-verified",
+        "queue_target_candidate": null,
+        "needs_independent_drop_check": false,
+        "reason": "Parent explicitly accepted named retain-verified proposal from claims-079 after inspecting it. The patch newly prescribes unreadable launch sentinels as a real way to make a session listing fail, although listing does no launch-file reads. The older inline stale clause predates the range; the new failure-fixture guidance is in range and remains at the tip. Retain the in-range error-contract documentation defect at other, distinguishing it from correct listing behavior and from the pre-range stale inline wording. Checked source/results: [\"1ed482d:service/handlers.rs:620-622 adds the unreadable-launch-sentinel failure-fixture example; :653-657 repeats it as request-fatal and cites list_all. The scoped patch confirms the new helper doc replaces a tmux-failure example. Both claims remain at pinned tip.\",\"1ed482d:service/listing.rs:88-153 explicitly says launch-artifact read failure leaves lists available. The complete function projects retained state; its only fallible await is store.project_checkout_metadata. The complete store.rs:3557-3605 helper performs database working-copy projection and transaction commit, not launch-file reads.\",\"Current SPEC_impl.md:4280-4288 assigns unreadable launch evidence to ticker retry and explicitly says it does not fail lists. No execution or listing failure was observed.\"] Current coverage/results: [\"Searched SPEC.md and SPEC_impl.md for list errors, launch sentinels and launch-artifact reads; the current implementation contract contradicts the comment. No product-spec acceptance of the false guidance.\",\"TODO.md Planned is empty. Searched plans/queue, BUGS.md, INDEX.md and active TRIAGE_OUTCOMES.md for sentinel failure, list_reply, listing error boundary and checkout projection. No exact cover. tmux-drop-from-docs's already-landed general audit is not unlanded-plan coverage. FILTER.md's rare diagnostic rule does not cover ordinary test-authoring guidance in a source comment.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Misleading maintainers or tests about which operation fails and where the error boundary lies. The existing checkout-metadata failure example is real and should remain. The broad stale inline sentinel clause is disclosed as pre-range, not newly attributed to this patch.\"; \"None for the new false fixture guidance. This does not claim listings actually read sentinels, fail because of them, or have regressed in availability.\"."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-079",
+          "key": "g125/l4",
+          "latest_line": 14,
+          "recommendation": "retain-verified",
+          "bucket": "other",
+          "underlying_key": "list-reply-doc-prescribes-nonexistent-sentinel-read-failure",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The patch newly prescribes unreadable launch sentinels as a real way to make a session listing fail, although listing does no launch-file reads. The older inline stale clause predates the range; the new failure-fixture guidance is in range and remains at the tip.",
+          "checks": [
+            "1ed482d:service/handlers.rs:620-622 adds the unreadable-launch-sentinel failure-fixture example; :653-657 repeats it as request-fatal and cites list_all. The scoped patch confirms the new helper doc replaces a tmux-failure example. Both claims remain at pinned tip.",
+            "1ed482d:service/listing.rs:88-153 explicitly says launch-artifact read failure leaves lists available. The complete function projects retained state; its only fallible await is store.project_checkout_metadata. The complete store.rs:3557-3605 helper performs database working-copy projection and transaction commit, not launch-file reads.",
+            "Current SPEC_impl.md:4280-4288 assigns unreadable launch evidence to ticker retry and explicitly says it does not fail lists. No execution or listing failure was observed."
+          ],
+          "coverage_checked": [
+            "Searched SPEC.md and SPEC_impl.md for list errors, launch sentinels and launch-artifact reads; the current implementation contract contradicts the comment. No product-spec acceptance of the false guidance.",
+            "TODO.md Planned is empty. Searched plans/queue, BUGS.md, INDEX.md and active TRIAGE_OUTCOMES.md for sentinel failure, list_reply, listing error boundary and checkout projection. No exact cover. tmux-drop-from-docs's already-landed general audit is not unlanded-plan coverage. FILTER.md's rare diagnostic rule does not cover ordinary test-authoring guidance in a source comment."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": "None for the new false fixture guidance. This does not claim listings actually read sentinels, fail because of them, or have regressed in availability.",
+          "original_stronger_consequence": "Misleading maintainers or tests about which operation fails and where the error boundary lies. The existing checkout-metadata failure example is real and should remain. The broad stale inline sentinel clause is disclosed as pre-range, not newly attributed to this patch.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Retain the in-range error-contract documentation defect at other, distinguishing it from correct listing behavior and from the pre-range stale inline wording."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": true,
+        "clearly_refuted_candidate": false,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Source-confirmed by an existing parent decision; not runtime reproduced",
+        "deduplication_key": "list-reply-doc-prescribes-nonexistent-sentinel-read-failure",
+        "destination": "trailing-list-reply-doc-prescribes-nonexistent-sentinel-read-failure.md"
+      }
+    }
+  ],
+  "replies": [
+    {
+      "turn": 1,
+      "reply": "Initial review complete: all 1,135 assigned patch lines reviewed. No reportable bugs or unresolved leads.\n\nRecorded candidates c1–c3 and updated progress.md. Candidate c1 preserves the potentially highest-impact legacy-terminal retirement for the caller’s independent specification-acceptance check.\n\nNo tests, reproductions, or checkout changes."
+    },
+    {
+      "turn": 2,
+      "reply": "Coverage repair and synthesis complete. All 1,135 assigned lines delivered as six direct stdout evidence packets; no unread scope remains.\n\nRevised c1 to a highest-impact finding with specification-based proposed_drop, and c3 to a bounded documentation finding. c2 remains source-refuted. No new IDs or open leads.\n\nUpdated progress.md. No runtime execution or checkout changes."
+    },
+    {
+      "turn": 3,
+      "reply": "Discovery pass 1 complete. New verified finding: **l4**, incorrect listing-error documentation, confirmed through source and full-range history checks.\n\nChecked the g124 input-lifetime question and remaining assigned handler changes. Revised c2 to distinguish that issue from its output-join concern.\n\nNew unverified IDs: none. Open leads: none. **Something new was found.** No runtime execution or checkout changes."
+    },
+    {
+      "turn": 4,
+      "reply": "Discovery pass 2 complete. Checked the refreshed neighbour context, host-adapter equivalence, process identity handling, exit-state waiting, resize and attachment dispatch.\n\nNew verified IDs: none. New unverified IDs: none. Open leads: none. **Nothing new found.**\n\nUpdated progress.md; findings unchanged. No runtime execution or checkout changes."
+    }
+  ],
+  "progress": "Group g125: supervisor-request-admission.\nTurn type/count: coverage repair and initial review completion / 2, followed by synthesis in this same turn under the parent's explicit override. Discovery-pass count: 0.\nState: complete for this turn. No unread assigned material and no unresolved leads. No new stable IDs. Revised finding IDs this turn: c1 and c3, both confirmed by source/contract analysis. c2 remains a source-refuted candidate; no parent disposition has been accepted.\n\nCoverage repair: reread current brief.md fully. The prior turn's patch packets were JSON-wrapped in tool results and the parent credited zero coverage; the earlier statement that evidence delivery was complete was therefore wrong. This turn delivered prep/parts/00933-000.patch lines 1-1135 through the current evidence manifest, each in its own shell call with direct stdout: 1-190, 191-380, 381-570, 571-760, 761-950, 951-1135. All returned complete versioned packets, with no rejection or truncation. Source hash remained cf80634ce7cccf8294326dc5367d2b11c0859251501ad967b717b56fd44d8fcc. Final audit remains the caller's responsibility. The complete inventory commits field was read in turn 1; excluded metadata was not read.\n\nGoverning contracts were also delivered again as direct stdout evidence from the pinned supplemental snapshots: SPEC.md Lifecycle operations 1884-2126 and Terminal experience 2855-3187; SPEC_impl.md Answers bind to what was drawn with context 1060-1108, terminal switch points and host tab/restart interfaces 2196-2365, Launch failure classification 2701-2766, and Terminal substrate 2880-2991. These context packets use contracts.json, separate from the unchanged assigned manifest. Root instructions include their End sentinel; priority buckets and feedback-file requirements remain in context from turn 1.\n\nSynthesis and checks since the previous reply: the entire assigned patch was re-examined against those contracts. Attach still validates before takeover, revalidates the session generation/runtime under the attachment mutex, preserves the lease-wide sweep, replies before starting grid output, and authorizes resize/detach with channel plus connection identity. The removed output-reaping barrier belongs to the retired tmux clients; the replacement sender's shutdown and synchronous verdict reporting do not await the attachment mutex (c2). Host Stop continues to refuse unavailable process evidence, pin sweep roots, and wait for final exit evidence before inferred launch classification. No additional correctness or security defect emerged.\n\nc1 was revised from candidate to finding, highest for its established loss-of-work consequence, with proposed_drop based only on the exact specification acceptance. Its shipped premise was checked in pinned source: core.rs 6142-6151 invokes retirement before reload; core/old_terminals.rs 162-164 and 223-251 terminate the verified old server and remove its files; core.rs 6675-6679 makes tmux rows terminal-less. This is premise validation of the assigned deletion, not an independent review of the startup group. Parent-supplied possible overlap g099/g113/g118/g130 is recorded without asserting duplication or reading coverage records.\n\nc3 was revised from proposed-drop candidate to a bounded other-bucket documentation finding. handlers.rs 944-947 incorrectly attributes a blanket final-frame non-retention rule to SPEC.md; SPEC.md 2897-2901 and SPEC_impl.md 2703-2708 instead distinguish retaining the original host's screen from capturing and painting a snapshot into a new terminal. handlers.rs 1144-1149 itself explains the original host keeps its screen. No executable frame-loss claim is made. The old comment also contained the misleading assertion; this patch rewrites and retains it. Parent-supplied analogous g117c3 is recorded without a duplicate disposition.\n\nNo tests, builds, or reproductions run. All conclusions are source/contract analysis. No checkout files changed and no live install or unrelated process touched. Findings log remains append-only with original events preserved. Next action: return delta and coverage status to caller; await its next turn if any.\n\nDiscovery turn 3 started. Discovery-pass count 1. Complete neighbour snapshot read in bounded chunks; reviewing natural-detach input lifetime separately from c2 output-join concern. Existing finding history preserved. No source reads yet in this pass.\n\nDiscovery turn 3 completed. Discovery-pass count: 1. Result: one new confirmed finding, l4; no new unverified-after-investigation IDs and no remaining open leads. l4's initial lead was revised to a finding and its range-attribution checks completed under the same ID. Existing c1/c3 findings and proposed-drop bases are unchanged. c2 received only an interface-synthesis revision, preserving its original output-join consequence/refutation and distinguishing g124/l1's input-lifetime issue.\n\nPrerequisites and interface synthesis: read all 454 lines of discovery-neighbours.json in bounded chunks; the first overly large read was clipped, then fully superseded by chunks 1-45, 46-90, 91-135, 136-180, 181-225, 226-270, 271-315, 316-360, 361-405, 406-454. Read the full ten-event pre-discovery findings history. Before the new search, checked g124/l1 against pinned connection.rs 1450-1517, grid_stream.rs 1169-1278, and handlers.rs 1855-2007. Natural detach indeed holds partially moved old.input past map unlock; the assigned takeover and explicit-detach paths scope that remainder inside the still-locked loop/if block. c2 does not refute or lower that separate potential-highest input-mixing finding, its accepted-API trigger, or its bundled-GUI caveat. No duplicate issue was manufactured here.\n\nDiscovery search/checks: revisited list/rename reply construction and admission, Attach validation/revalidation/lease sweep, Stop's consent/root/classification paths, explicit Detach and Resize ownership, removed teardown-error mappings, and the changed stop-race test explanation with its fixture premise. Read the invoked listing implementation, retained-state status projection, checkout metadata projection and host-tab Stop guard to test those boundaries. The remaining pass after finding l4 included dead-stop evidence/cleanup, rename reply construction, resize routing, exhaustive teardown errors and the stop-race test. No additional issue emerged from those checks.\n\nNew l4: assigned handlers.rs 620-622 newly changes the genuinely failing listing example from tmux to an unreadable launch sentinel or checkout registry. Its error-arm comment at 653-657 repeats the supposed sentinel dependency. Complete listing.rs 88-153 shows no launch-artifact read and explicitly promises ticker-owned launch-file failures leave lists available; store.rs 3557-3605 confirms its sole fallible await projects database checkout metadata. status.rs 339-344 and entry_info's body confirm replies read retained state. Full-range attribution check: the broad stale inline sentinel clause already exists at exclusive base 6e423e3:handlers.rs 619-623, and base listing.rs 90-215 already separates launch-file reads. In-range 47f33bbd moves that clause into list_reply but its docstring still names tmux. The assigned 1ed482d newly adds the false sentinel failure-fixture instruction while retaining the stale clause. Pinned-tip handlers.rs 620-622 and 653-657 still contain it; later scoped diff changes only grid/terminal-kind material. l4 is bounded internal documentation correctness, other bucket, confirmed source-only, proposed_drop false. It does not claim a production listing failure or misattribute the older clause.\n\nNo unread assigned scope. Required patch delivery remains the parent-verified prior turn; no new mandatory range was introduced. No runtime tests, builds, reproductions, live-install actions or checkout modifications. All conclusions are source/contract analysis. Next action: return discovery delta; because this pass found a substantive new issue, a later pass remains the caller's scheduling decision under the charter.\n\nDiscovery turn 4 started; discovery-pass count 2. Read refreshed neighbour snapshot fully in bounded ranges 1-45 through 676-695; sha256 4e825d72131158be2d174e9073364254edefedc0e7b42372b15cc098ef455910. Complete earlier history reused; four discovery-turn events refreshed. No named pending questions. New search remains assigned 00933-000 handler patch only.\n\nDiscovery turn 4 completed. Discovery-pass count: 2. Result: empty discovery. New verified IDs: none. New unverified-after-investigation IDs: none. Remaining open leads: none. No finding/candidate disposition or existing consequence changed, and no additional events were appended to findings.jsonl in this pass.\n\nRefreshed context was read first: all 695 lines of discovery-neighbours.json in 45-line bounded chunks (last 676-695), hash 4e825d72131158be2d174e9073364254edefedc0e7b42372b15cc098ef455910. No truncation in these reads. The full earlier candidate/finding history remains in context and the last four events were refreshed. There were no named pending questions. The additional neighbour records were used for novelty/context only; no independent review of their groups was started and no parent drop/lowering was inferred.\n\nNew-search checks: compared the assigned handler's host-only Stop adaptation against the removed host dispatch adapters and the probe type change. Parent HostStatus::probe returned Owned { pid: Some(root.pid), dead: false } or Owned { pid: None, dead: true }; the reviewed Running/Dead/Gone cases preserve these decisions and the unreadable-error branch. Parent Terminal::live_root's host branch and reviewed HostTerminal::sweep_root preserve the pinned identity check and mismatched-pid refusal. Parent Terminal::holds_final_state's host branch and reviewed HostTerminal::holds_final_state use the same processed-exit predicate, status subscription and timeout behavior. Parent dead_pane_exit_code's host branch directly returned host.exit_code, matching the new direct handler call. Parent Terminal::resize's host branch directly queued the same Size through HostTerminal::resize, preserving invalid/ended refusal and asynchronous application rather than adding a wait under attachments. Checked current ActiveAttach shutdown/join shape and handler Attach/Resize/Pause/Resume/Detach dispatch for mismatched argument or channel ownership routing; no additional issue found. Revisited the create-field cap explanation, grid-refusal helper/dispatch contract and the small pre-storage-refusal test-construction wording in this assigned patch; no new discrepancy was established.\n\nThese checks concern mechanical replacement equivalence and changed caller contracts beyond the already-recorded findings. They do not reopen or dismiss the neighbouring diagnostic-provenance, natural-detach-input, migration-consent, or test-fixture findings. Source/contract evidence only: no runtime tests, builds, reproductions, local live-install inspection or state changes. No checkout modifications or prohibited coverage-source searches. No unread assigned material. Next action: return empty discovery delta to caller.\n"
+}

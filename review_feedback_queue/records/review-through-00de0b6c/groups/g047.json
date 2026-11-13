@@ -1,0 +1,442 @@
+{
+  "group": {
+    "id": "g047",
+    "domain": "host-provisioning-lifecycle",
+    "purpose": "host-provisioning-lifecycle: crates/farhelm-helm/src/provisioning.rs, crates/farhelm-helm/src/provisioning/tests/macos_real_tests.rs; phases @@ -9861,216 +9710,27 @@ mod tests {",
+    "interfaces": [
+      "g006",
+      "g012",
+      "g022",
+      "g023",
+      "g024",
+      "g025",
+      "g026",
+      "g027",
+      "g028",
+      "g029",
+      "g043",
+      "g044",
+      "g045",
+      "g046",
+      "g048",
+      "g055",
+      "g056",
+      "g057"
+    ],
+    "sources": [
+      {
+        "path": "[private-run]/prep/parts/01267-001.patch",
+        "ranges": [
+          [
+            1,
+            1406
+          ]
+        ],
+        "original_path": "crates/farhelm-helm/src/provisioning.rs",
+        "commit": "500548b9253b07a26fd03119679184b69544e31d",
+        "notes": "@@ -9861,216 +9710,27 @@ mod tests {; patch character offsets [52607,112314)",
+        "lines": 1406,
+        "bytes": 59731,
+        "start": 52607,
+        "end": 112314,
+        "original": "[private-run]/prep/originals/01267.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/01278-000.patch",
+        "ranges": [
+          [
+            1,
+            61
+          ]
+        ],
+        "original_path": "crates/farhelm-helm/src/provisioning/tests/macos_real_tests.rs",
+        "commit": "500548b9253b07a26fd03119679184b69544e31d",
+        "notes": "patch header; patch character offsets [0,3311)",
+        "lines": 61,
+        "bytes": 3311,
+        "start": 0,
+        "end": 3311,
+        "original": "[private-run]/prep/originals/01278.patch"
+      }
+    ],
+    "lines": 1467,
+    "bytes": 63042
+  },
+  "records": [
+    {
+      "key": "g047/c1",
+      "owner": "g047",
+      "id": "c1",
+      "domain": "host-provisioning-lifecycle",
+      "purpose": "host-provisioning-lifecycle: crates/farhelm-helm/src/provisioning.rs, crates/farhelm-helm/src/provisioning/tests/macos_real_tests.rs; phases @@ -9861,216 +9710,27 @@ mod tests {",
+      "history": [
+        {
+          "line": 1,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c1",
+            "state": "open",
+            "summary": "Removed orphan-tmux retry test matches the accepted uninstall boundary",
+            "location": "crates/farhelm-helm/src/provisioning.rs:12857",
+            "detail": "Reviewed commit: 500548b9253b07a26fd03119679184b69544e31d. TLDR: uninstall can leave an old private tmux server running if it outlived a supervisor stopped before uninstall; deleting its regression test initially raised a lifecycle-coverage concern. Source: assigned patch 01267-001.patch:828-1043 deletes wait_private_tmux_gone and uninstall_retry_ends_tmux_after_systemd_forgets_the_inactive_unit; the replacement context starts at provisioning.rs:12857. Contract: SPEC.md:213-219 expressly says, 'Uninstall has no tmux step of its own: stopping the supervisor’s service ends whatever still runs under it, an earlier release’s private tmux server included, but one that outlived a supervisor stopped before uninstall (on a host never updated to a release that ends it at startup, say) keeps running, which the maintainer accepted on 2026-11-11.' The source uses an ASCII apostrophe in supervisor's. SPEC_impl.md:7858-7867 likewise accepts the residual and requires explicit termination of terminal hosts instead. Suggested bucket: other (test-coverage concern only; residual-process behavior is expressly accepted). Confidence: confirmed by source and contract, not execution. proposed_drop: deletion of an assertion requiring unsupported orphan-tmux cleanup is consistent with the exact accepted residual above. possible_cover: none beyond cited specification acceptance; coverage sources not searched. Could-be-highest: no; this candidate alleges omitted cleanup/test coverage, not destruction of user work or a security route. Caveat: remaining terminal-host teardown and removal ordering still require review."
+          }
+        },
+        {
+          "line": 4,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c1",
+            "state": "open",
+            "summary": "Removed orphan-tmux retry test matches the accepted uninstall boundary",
+            "location": "crates/farhelm-helm/src/provisioning.rs:12857",
+            "detail": "Reviewed commit: 500548b9253b07a26fd03119679184b69544e31d. Revision: correct the quotation to use the source's exact ASCII apostrophe. TLDR: uninstall can leave an old private tmux server running if it outlived a supervisor stopped before uninstall; deleting its regression test initially raised a lifecycle-coverage concern. Source: assigned patch 01267-001.patch:828-1043 deletes wait_private_tmux_gone and uninstall_retry_ends_tmux_after_systemd_forgets_the_inactive_unit; the replacement context starts at provisioning.rs:12857. Contract: SPEC.md, Topology, expressly says, \"Uninstall has no tmux step of its own: stopping the supervisor's service ends whatever still runs under it, an earlier release's private tmux server included, but one that outlived a supervisor stopped before uninstall (on a host never updated to a release that ends it at startup, say) keeps running, which the maintainer accepted on 2026-11-11.\" SPEC_impl.md, Provisioning, likewise accepts the residual and requires explicit termination of terminal hosts instead. Suggested bucket: other (test-coverage concern only; residual-process behavior is expressly accepted). Confidence: confirmed by source and contract, not execution. proposed_drop: deletion of an assertion requiring unsupported orphan-tmux cleanup is consistent with the exact accepted residual above. possible_cover: none beyond cited specification acceptance; coverage sources not searched. Could-be-highest: no; this candidate alleges omitted cleanup/test coverage, not destruction of user work or a security route. Caveat: terminal-host teardown remains required and was separately source-checked in c3."
+          }
+        },
+        {
+          "line": 8,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c1",
+            "state": "open",
+            "summary": "Deleted retry test concerns only the accepted previously orphaned tmux server",
+            "location": "crates/farhelm-helm/src/provisioning.rs:12857",
+            "detail": "# Deleted retry test targets the expressly accepted orphan-server residual\n\nReviewed commit: 500548b9253b07a26fd03119679184b69544e31d\n\n## TLDR\n\nUninstall may leave an earlier private tmux server running when its supervisor had already been stopped and its unit forgotten. The deleted regression test required uninstall to end that exact residual, which the reviewed specification expressly accepts.\n\n## Details\n\nRevision narrows the proposed drop after reading the caller-supplied g048 c1 and l1 records. Assigned patch 01267-001.patch:828-1043 deletes wait_private_tmux_gone and uninstall_retry_ends_tmux_after_systemd_forgets_the_inactive_unit. The deleted test first stops its process-only service, removes its unit, reloads systemd and establishes that the service is inactive and its tmux server still answers before invoking stop again. Its tested precondition is therefore the previously stopped-supervisor residual, not ordinary Add over an answering supervisor, nor stop of a currently active unit. SPEC.md, Topology, exact acceptance: \"Uninstall has no tmux step of its own: stopping the supervisor's service ends whatever still runs under it, an earlier release's private tmux server included, but one that outlived a supervisor stopped before uninstall (on a host never updated to a release that ends it at startup, say) keeps running, which the maintainer accepted on 2026-11-11.\" SPEC_impl.md, Provisioning, accepts the same residual, including an earlier startup ending that failed followed by a supervisor stop.\n\nCross-batch assumption checked: service.rs:2238-2311 re-probes original/planned Add coordinates at confirmation, adopts a compatible answering supervisor via UseAsIs, also adopts a skewed answering supervisor, and executes only on Absent. This agrees with g048/l1 and is a separate source refutation of ordinary Add removing tmux beneath an answering old supervisor. The orphan-uninstall acceptance must not be extended to justify hypothetical Add disruption or loss of work; this record makes no such proposal.\n\nSuggested bucket: other (original residual process-cleanup and deleted-test concern). Confidence: confirmed by source and contract, not execution. proposed_drop: exact specification acceptance, limited to deletion of the regression assertion requiring cleanup of an already orphaned private server after its supervisor was previously stopped. possible_cover: same underlying residual as caller-supplied g048/c1; no queue coverage search performed. Could-be-highest: no established security or loss-of-work route; leaving this server alive is an omitted cleanup, not termination of user work. Material caveat: active-unit termination, terminal-host cleanup, Add adoption and update safety retain their separate contracts; this proposed drop covers none of their potential violations. Parent has accepted no drop."
+          }
+        }
+      ],
+      "latest": {
+        "line": 8,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c1",
+          "state": "open",
+          "summary": "Deleted retry test concerns only the accepted previously orphaned tmux server",
+          "location": "crates/farhelm-helm/src/provisioning.rs:12857",
+          "detail": "# Deleted retry test targets the expressly accepted orphan-server residual\n\nReviewed commit: 500548b9253b07a26fd03119679184b69544e31d\n\n## TLDR\n\nUninstall may leave an earlier private tmux server running when its supervisor had already been stopped and its unit forgotten. The deleted regression test required uninstall to end that exact residual, which the reviewed specification expressly accepts.\n\n## Details\n\nRevision narrows the proposed drop after reading the caller-supplied g048 c1 and l1 records. Assigned patch 01267-001.patch:828-1043 deletes wait_private_tmux_gone and uninstall_retry_ends_tmux_after_systemd_forgets_the_inactive_unit. The deleted test first stops its process-only service, removes its unit, reloads systemd and establishes that the service is inactive and its tmux server still answers before invoking stop again. Its tested precondition is therefore the previously stopped-supervisor residual, not ordinary Add over an answering supervisor, nor stop of a currently active unit. SPEC.md, Topology, exact acceptance: \"Uninstall has no tmux step of its own: stopping the supervisor's service ends whatever still runs under it, an earlier release's private tmux server included, but one that outlived a supervisor stopped before uninstall (on a host never updated to a release that ends it at startup, say) keeps running, which the maintainer accepted on 2026-11-11.\" SPEC_impl.md, Provisioning, accepts the same residual, including an earlier startup ending that failed followed by a supervisor stop.\n\nCross-batch assumption checked: service.rs:2238-2311 re-probes original/planned Add coordinates at confirmation, adopts a compatible answering supervisor via UseAsIs, also adopts a skewed answering supervisor, and executes only on Absent. This agrees with g048/l1 and is a separate source refutation of ordinary Add removing tmux beneath an answering old supervisor. The orphan-uninstall acceptance must not be extended to justify hypothetical Add disruption or loss of work; this record makes no such proposal.\n\nSuggested bucket: other (original residual process-cleanup and deleted-test concern). Confidence: confirmed by source and contract, not execution. proposed_drop: exact specification acceptance, limited to deletion of the regression assertion requiring cleanup of an already orphaned private server after its supervisor was previously stopped. possible_cover: same underlying residual as caller-supplied g048/c1; no queue coverage search performed. Could-be-highest: no established security or loss-of-work route; leaving this server alive is an omitted cleanup, not termination of user work. Material caveat: active-unit termination, terminal-host cleanup, Add adoption and update safety retain their separate contracts; this proposed drop covers none of their potential violations. Parent has accepted no drop."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g047/findings.jsonl",
+        "id": "c1",
+        "line": 8,
+        "disposition": "under-investigation",
+        "group": "g047-c1",
+        "reason": "Record durably acknowledged; parent source/contract validation, cross-group synthesis, coverage/filter matching and any independent drop check remain pending. This preserves the claim and uncertainty without accepting, dropping or lowering it."
+      },
+      "accepted_parent_decision": null,
+      "returned_claim_checks": [
+        {
+          "batch": "claims-030",
+          "key": "g047/c1",
+          "latest_line": 8,
+          "recommendation": "covered",
+          "bucket": "other",
+          "underlying_key": "uninstall-previously-orphaned-legacy-private-tmux-survives",
+          "aliases": [
+            "g048/c1"
+          ],
+          "target_queue_file": null,
+          "why": "The deleted retry test demanded termination of exactly the already orphaned private tmux server the specification accepts surviving. That acceptance does not cover active-unit or terminal-host teardown, or Add over an answering supervisor.",
+          "checks": [
+            "500548b9253b07a26fd03119679184b69544e31d^:crates/farhelm-helm/src/provisioning.rs:13270-13446 creates private tmux under a process-only unit, stops the unit, removes/reloads it, proves the server remains, then calls stop and demands server exit. The test is absent after 500548b9253b07a26fd03119679184b69544e31d.",
+            "500548b9253b07a26fd03119679184b69544e31d:SPEC.md:211-220 and SPEC_impl.md:7853-7868 expressly accept this residual while preserving terminal-host termination.",
+            "Same revision provisioning/service.rs:2213-2311 returns UseAsIs for compatible or skewed answering supervisors; execute is reached only for Absent. This separates the deleted test from g048/l1. No execution performed."
+          ],
+          "coverage_checked": {
+            "SPEC.md": "Current Topology, lines 209-218, retains exact orphan-server acceptance.",
+            "SPEC_impl.md": "Current Provisioning, lines 7813-7849, retains the same acceptance and mandatory terminal-host stop/retry contract.",
+            "TODO.md Planned": "Empty, lines 25-27. Mid-term phase-3 startup removal is different and is not Planned coverage.",
+            "plans/queue": "Matching install/docs/tooling/product tmux plans are landed per plans/REPORTS.md:29-32; no unlanded same-trigger fix found.",
+            "BUGS.md": "No tmux/orphan-server item; its pipe-holder hang is unrelated.",
+            "INDEX.md and matching queue files": "No private-server/orphan-tmux/deleted-retry item found in full index and exact-term queue search.",
+            "TRIAGE_OUTCOMES.md": "No matching active tmux/orphan-server/deleted-test decision; archive not read.",
+            "FILTER.md": "Not used; exact specification acceptance is sufficient."
+          },
+          "exact_cover_quotes": [
+            {
+              "source": "SPEC.md:212-215 at recording-time main",
+              "quote": "Uninstall has no tmux step of its own: stopping the supervisor's service ends whatever still runs under it, an earlier release's private tmux server included, but one that outlived a supervisor stopped before uninstall (on a host never updated to a release that ends it at startup, say) keeps running, which the maintainer accepted on 2026-11-11."
+            },
+            {
+              "source": "SPEC_impl.md:7824-7827 at recording-time main",
+              "quote": "Uninstall has no tmux step: a private tmux server that outlived a supervisor stopped before uninstall (a host never updated to a release that ends it at startup, or one whose startup ending failed and whose supervisor was later stopped) keeps running. The maintainer accepted that residual on 2026-11-11 when the step was removed."
+            }
+          ],
+          "missing_premise": null,
+          "original_stronger_consequence": "Uninstall can leave an old private tmux server and its jobs running after its supervisor was stopped earlier; deleting its regression test raised a lifecycle-coverage concern. Earlier records did not establish destruction of work or security harm.",
+          "needs_independent_drop_check": true,
+          "proposed_basis": "Exact specification acceptance, limited to the deleted orphan-server assertion. Conservatively register the proposed dismissal because the source concerns user-owned processes; this consultation does not authorize a drop."
+        }
+      ],
+      "parent_proposals": [
+        {
+          "artifact": "parent-flagged-judgments-030.json",
+          "key": "g047/c1",
+          "proposal": "claim-checks/claims-030/result.json",
+          "parent_proposal": "exact-spec-retired-positive-orphan-server-retry-oracle",
+          "final_independent_gate": "required-by-conservative-user-process-flag",
+          "reason": "Parent read full030 andactualSPEC178-220 orphanacceptance. Deletedtestexplicitlystops/removesprocessonlyunit, provesoldprivateserversurvives, thenrequiresstopstepkillit; exactacceptedresidualnolongersupportedtestrequirement. Notretirementmandatoryactiveunit/terminalhostterminationnorordinaryAddoveransweringserver. Same048c1/046f1residualwithseparatelostoracleprovenance; preserveallhistories/possibleworkframingfreshgate."
+        }
+      ],
+      "collection": {
+        "retain": true,
+        "clearly_refuted_candidate": false,
+        "needs_unfinished_gate": true,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "uninstall-previously-orphaned-legacy-private-tmux-survives",
+        "destination": "trailing-uninstall-previously-orphaned-legacy-private-tmux-survives.md"
+      }
+    },
+    {
+      "key": "g047/c2",
+      "owner": "g047",
+      "id": "c2",
+      "domain": "host-provisioning-lifecycle",
+      "purpose": "host-provisioning-lifecycle: crates/farhelm-helm/src/provisioning.rs, crates/farhelm-helm/src/provisioning/tests/macos_real_tests.rs; phases @@ -9861,216 +9710,27 @@ mod tests {",
+      "history": [
+        {
+          "line": 2,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c2",
+            "state": "open",
+            "summary": "Remaining SSH test comment still mentions a private server",
+            "location": "crates/farhelm-helm/src/provisioning.rs:13481",
+            "detail": "Reviewed commit: 500548b9253b07a26fd03119679184b69544e31d. TLDR: the SSH integration test's existing summary still says uninstall ends the private server although this patch removes its tmux fixture and assertions. Details: provisioning.rs:13481-13484 retains that description; the changed test now creates terminal-host sessions and verifies their disappearance at :13319-13330 and :13439-13448. This is stale test prose, not a demonstrated product failure or a missing supported teardown oracle. The supported distinction is explicit in SPEC.md, Topology, and SPEC_impl.md, Provisioning: terminal hosts are ended explicitly, while some orphan legacy tmux servers may remain. Suggested bucket: other. Confidence: confirmed from source, not execution. proposed_drop: no product consequence established; the remaining real terminal-host assertions cover the supported resources this fixture creates, and the stale phrase alone is outside this security/correctness pass's substantive findings. possible_cover: none; coverage sources not searched. Could-be-highest: no. Caveat: the comment should eventually say terminal hosts only, but no checkout edit is authorized by this review."
+          }
+        },
+        {
+          "line": 5,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "c2",
+            "state": "open",
+            "summary": "SSH integration test still claims private-tmux teardown coverage",
+            "location": "crates/farhelm-helm/src/provisioning.rs:13481",
+            "detail": "# SSH test promises private-server coverage it no longer supplies\n\nReviewed commit: 500548b9253b07a26fd03119679184b69544e31d\n\n## TLDR\n\nA maintainer reading the SSH provisioning test is told it verifies uninstall ends the private tmux server, but the changed fixture no longer starts or observes that server. This overstates what a passing test proves.\n\n## Details\n\nThe retained test docstring at provisioning.rs:13481-13484 says UNINSTALL ends its terminal hosts 'and the private server'. The assigned change removes debug_tmux, the tmux payload, the tmux socket, and wait_private_tmux_gone from real_provisioning_case (assigned patch 01267-001.patch:1046-1118). The fixture creates terminal-host sessions and checks their own sockets instead. Its terminal-host coverage does not establish private-tmux server absence. SPEC.md and SPEC_impl.md, Provisioning, distinguish terminal-host termination from the accepted residual legacy server that outlived a previously stopped supervisor. Update the test documentation to describe the resources and assertions it actually exercises.\n\nSuggested bucket: other (incorrect maintainer test documentation). Confidence: confirmed from source, not execution. proposed_drop: false; the prior proposal based on lacking product effect or the charter's emphasis is retracted. possible_cover: none; parent owns queue filters and non-spec coverage. Could-be-highest: no established security or loss-of-work consequence. Caveat: this is a documentation correctness finding, not evidence that product uninstall leaks a currently owned terminal host or private server. Revision promotes c2 from candidate and preserves its original stale-prose consequence."
+          }
+        }
+      ],
+      "latest": {
+        "line": 5,
+        "event": {
+          "version": 1,
+          "kind": "finding",
+          "id": "c2",
+          "state": "open",
+          "summary": "SSH integration test still claims private-tmux teardown coverage",
+          "location": "crates/farhelm-helm/src/provisioning.rs:13481",
+          "detail": "# SSH test promises private-server coverage it no longer supplies\n\nReviewed commit: 500548b9253b07a26fd03119679184b69544e31d\n\n## TLDR\n\nA maintainer reading the SSH provisioning test is told it verifies uninstall ends the private tmux server, but the changed fixture no longer starts or observes that server. This overstates what a passing test proves.\n\n## Details\n\nThe retained test docstring at provisioning.rs:13481-13484 says UNINSTALL ends its terminal hosts 'and the private server'. The assigned change removes debug_tmux, the tmux payload, the tmux socket, and wait_private_tmux_gone from real_provisioning_case (assigned patch 01267-001.patch:1046-1118). The fixture creates terminal-host sessions and checks their own sockets instead. Its terminal-host coverage does not establish private-tmux server absence. SPEC.md and SPEC_impl.md, Provisioning, distinguish terminal-host termination from the accepted residual legacy server that outlived a previously stopped supervisor. Update the test documentation to describe the resources and assertions it actually exercises.\n\nSuggested bucket: other (incorrect maintainer test documentation). Confidence: confirmed from source, not execution. proposed_drop: false; the prior proposal based on lacking product effect or the charter's emphasis is retracted. possible_cover: none; parent owns queue filters and non-spec coverage. Could-be-highest: no established security or loss-of-work consequence. Caveat: this is a documentation correctness finding, not evidence that product uninstall leaks a currently owned terminal host or private server. Revision promotes c2 from candidate and preserves its original stale-prose consequence."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g047/findings.jsonl",
+        "id": "c2",
+        "line": 5,
+        "disposition": "verified",
+        "group": "ssh-provisioning-test-private-server-coverage-docstring",
+        "reason": "Parent explicitly accepted named retain-verified proposal from claims-030 after inspecting it. The retained SSH test documentation promises private-server teardown coverage although its changed fixture creates and observes terminal hosts only. Correct supported product teardown does not repair this documentation defect. The earlier proposed drop was expressly retracted. Record as other: source-confirmed overstatement of test coverage, with no demonstrated product failure. Checked source/results: [\"500548b9253b07a26fd03119679184b69544e31d:crates/farhelm-helm/src/provisioning.rs:13481-13483 says UNINSTALL ends terminal hosts 'and the private server'.\",\"Same revision provisioning.rs:13194-13208,13316-13332,13438-13446 creates terminal-host sessions and checks terminal-host listeners; the deleted private-tmux fixture/test at parent revision :13270-13446 no longer supplies that observation.\",\"00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db:provisioning.rs:13481-13483 still has the claim; recording-time main also retains it. The change makes an existing description stale within the review range. No test run or product teardown failure is alleged.\"] Current coverage/results: {\"SPEC.md and SPEC_impl.md\":\"Topology and Provisioning distinguish mandatory terminal-host teardown from accepted legacy orphan-tmux survival; neither accepts inaccurate test documentation.\",\"TODO.md Planned\":\"Empty, lines 25-27.\",\"plans/queue\":\"tmux-drop-from-docs criterion 5 promised a comment audit, but plans/REPORTS.md:32 records that plan already landed; it cannot cover this surviving omission as unlanded work.\",\"BUGS.md\":\"Only the distinct provisioning pipe-holder hang; no match.\",\"INDEX.md and matching queue files\":\"Full index plus searches for the exact test, real_provisioning_case, private server and tmux found no same-root item. Other test-documentation records concern different tests and promises.\",\"TRIAGE_OUTCOMES.md\":\"No active decision for this SSH-test documentation consequence; archive not read.\",\"FILTER.md\":\"No whole boundary applies: this is persistent test documentation, not a rare transient diagnostic.\"} Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Stale test prose tells maintainers a pass proves private-tmux teardown. First record proposed dropping it for lack of product effect; line 5 retracts that proposal and retains the same documentation consequence. No stronger security or work-loss route was claimed.\"; null."
+      },
+      "accepted_parent_decision": {
+        "key": "g047/c2",
+        "line": 5,
+        "disposition": "verified",
+        "group": "ssh-provisioning-test-private-server-coverage-docstring",
+        "bucket": "other",
+        "recording": "retain-verified",
+        "queue_target_candidate": null,
+        "needs_independent_drop_check": false,
+        "reason": "Parent explicitly accepted named retain-verified proposal from claims-030 after inspecting it. The retained SSH test documentation promises private-server teardown coverage although its changed fixture creates and observes terminal hosts only. Correct supported product teardown does not repair this documentation defect. The earlier proposed drop was expressly retracted. Record as other: source-confirmed overstatement of test coverage, with no demonstrated product failure. Checked source/results: [\"500548b9253b07a26fd03119679184b69544e31d:crates/farhelm-helm/src/provisioning.rs:13481-13483 says UNINSTALL ends terminal hosts 'and the private server'.\",\"Same revision provisioning.rs:13194-13208,13316-13332,13438-13446 creates terminal-host sessions and checks terminal-host listeners; the deleted private-tmux fixture/test at parent revision :13270-13446 no longer supplies that observation.\",\"00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db:provisioning.rs:13481-13483 still has the claim; recording-time main also retains it. The change makes an existing description stale within the review range. No test run or product teardown failure is alleged.\"] Current coverage/results: {\"SPEC.md and SPEC_impl.md\":\"Topology and Provisioning distinguish mandatory terminal-host teardown from accepted legacy orphan-tmux survival; neither accepts inaccurate test documentation.\",\"TODO.md Planned\":\"Empty, lines 25-27.\",\"plans/queue\":\"tmux-drop-from-docs criterion 5 promised a comment audit, but plans/REPORTS.md:32 records that plan already landed; it cannot cover this surviving omission as unlanded work.\",\"BUGS.md\":\"Only the distinct provisioning pipe-holder hang; no match.\",\"INDEX.md and matching queue files\":\"Full index plus searches for the exact test, real_provisioning_case, private server and tmux found no same-root item. Other test-documentation records concern different tests and promises.\",\"TRIAGE_OUTCOMES.md\":\"No active decision for this SSH-test documentation consequence; archive not read.\",\"FILTER.md\":\"No whole boundary applies: this is persistent test documentation, not a rare transient diagnostic.\"} Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Stale test prose tells maintainers a pass proves private-tmux teardown. First record proposed dropping it for lack of product effect; line 5 retracts that proposal and retains the same documentation consequence. No stronger security or work-loss route was claimed.\"; null."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-030",
+          "key": "g047/c2",
+          "latest_line": 5,
+          "recommendation": "retain-verified",
+          "bucket": "other",
+          "underlying_key": "ssh-provisioning-test-private-server-coverage-docstring",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The retained SSH test documentation promises private-server teardown coverage although its changed fixture creates and observes terminal hosts only. Correct supported product teardown does not repair this documentation defect. The earlier proposed drop was expressly retracted.",
+          "checks": [
+            "500548b9253b07a26fd03119679184b69544e31d:crates/farhelm-helm/src/provisioning.rs:13481-13483 says UNINSTALL ends terminal hosts 'and the private server'.",
+            "Same revision provisioning.rs:13194-13208,13316-13332,13438-13446 creates terminal-host sessions and checks terminal-host listeners; the deleted private-tmux fixture/test at parent revision :13270-13446 no longer supplies that observation.",
+            "00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db:provisioning.rs:13481-13483 still has the claim; recording-time main also retains it. The change makes an existing description stale within the review range. No test run or product teardown failure is alleged."
+          ],
+          "coverage_checked": {
+            "SPEC.md and SPEC_impl.md": "Topology and Provisioning distinguish mandatory terminal-host teardown from accepted legacy orphan-tmux survival; neither accepts inaccurate test documentation.",
+            "TODO.md Planned": "Empty, lines 25-27.",
+            "plans/queue": "tmux-drop-from-docs criterion 5 promised a comment audit, but plans/REPORTS.md:32 records that plan already landed; it cannot cover this surviving omission as unlanded work.",
+            "BUGS.md": "Only the distinct provisioning pipe-holder hang; no match.",
+            "INDEX.md and matching queue files": "Full index plus searches for the exact test, real_provisioning_case, private server and tmux found no same-root item. Other test-documentation records concern different tests and promises.",
+            "TRIAGE_OUTCOMES.md": "No active decision for this SSH-test documentation consequence; archive not read.",
+            "FILTER.md": "No whole boundary applies: this is persistent test documentation, not a rare transient diagnostic."
+          },
+          "exact_cover_quotes": [],
+          "missing_premise": null,
+          "original_stronger_consequence": "Stale test prose tells maintainers a pass proves private-tmux teardown. First record proposed dropping it for lack of product effect; line 5 retracts that proposal and retains the same documentation consequence. No stronger security or work-loss route was claimed.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Record as other: source-confirmed overstatement of test coverage, with no demonstrated product failure."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": true,
+        "clearly_refuted_candidate": false,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Source-confirmed by an existing parent decision; not runtime reproduced",
+        "deduplication_key": "ssh-provisioning-test-private-server-coverage-docstring",
+        "destination": "trailing-ssh-provisioning-test-private-server-coverage-docstring.md"
+      }
+    },
+    {
+      "key": "g047/c3",
+      "owner": "g047",
+      "id": "c3",
+      "domain": "host-provisioning-lifecycle",
+      "purpose": "host-provisioning-lifecycle: crates/farhelm-helm/src/provisioning.rs, crates/farhelm-helm/src/provisioning/tests/macos_real_tests.rs; phases @@ -9861,216 +9710,27 @@ mod tests {",
+      "history": [
+        {
+          "line": 3,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c3",
+            "state": "open",
+            "summary": "Removing tmux guard cleanup does not remove terminal-host teardown",
+            "location": "crates/farhelm-helm/src/provisioning.rs:12074",
+            "detail": "Reviewed commit: 500548b9253b07a26fd03119679184b69544e31d. TLDR: removing private-tmux cleanup from the test guard initially raised a concern that failing tests could strand their terminal processes. Source checks: provisioning.rs:11970-12234 retains nonce unit ownership, whole-unit kill, removal and checked disablement, end_fixture_hosts, listener verification, and evidence retention when a host cannot be confirmed ended. real_provisioning_case at :12861-13070 now provides only a Farhelm payload; :13189-13279 verifies a terminal-host session remains operable across update; :13319-13330 captures the ended host's live socket before uninstall and :13439-13448 asserts it no longer listens afterwards. The only standalone real tmux fixture in the assigned deletion is removed along with its test. Contract: SPEC_impl.md, Provisioning, requires terminal hosts to be ended and the fixture does still do so; legacy orphan tmux cleanup is separately accepted as absent (c1). Suggested bucket: other, maintainer test-resource cleanup. Confidence: confirmed from source, not execution. proposed_drop: code refutes loss of terminal-host teardown, and the deleted guard action targeted a fixture resource no longer created by the changed test. possible_cover: none; coverage sources not searched. Could-be-highest: no established security or user-work-loss route; the concern was a fixture leak under its own nonce state path. Caveat: this does not claim runtime cleanup has been observed, only that its source paths and assertions remain."
+          }
+        },
+        {
+          "line": 6,
+          "event": {
+            "version": 1,
+            "kind": "lead",
+            "id": "c3",
+            "state": "open",
+            "summary": "Check fixture premises behind update survival and failure teardown",
+            "location": "crates/farhelm-helm/src/provisioning.rs:13194",
+            "detail": "# Resolve what the changed fixture actually establishes\n\nReviewed commit: 500548b9253b07a26fd03119679184b69544e31d\n\n## TLDR\n\nThe retained integration fixture has strong post-update live-output and pre-uninstall listener checks, but the previous c3 record overstated its proof of host survival and cleanup after failure.\n\n## Details\n\nSource checks this turn: provisioning.rs:12649-12756 waits for live session status, attaches its own terminal, waits for ReplayComplete, sends a fresh random lowercase token through an uppercase-transforming command and observes the uppercase result. This excludes replay and ordinary input echo as substitutes for live output. :13194-13208 receives the create result before Update but does not itself inspect the socket or send pre-update input. Need check create success contract and reload behavior to establish whether a passing post-update operation proves an already-live host survived rather than being newly created on recovery. :12771-12858 uses the kernel listener table, independent of unlinked socket files, and the supervisor database's host kind/address. The planted-failure test :13510-13572 starts only sleep in a nonce service; no terminal host is created. Need distinguish retained cleanup implementation from regression evidence for host cleanup after partial failure.\n\nSuggested bucket: other if only a test coverage claim; no shipped loss/security route established. Confidence: unresolved lead under investigation, source-only. proposed_drop: undecided; previous c3 proposed drop requires narrower evidence and is not accepted. possible_cover: none. Could-be-highest: no established route; original concern was leaking fixture processes, not destroying user work. Next checks: create reply readiness, supervisor terminal-host recovery, and test callers covering guard failure. No runtime reproduction requested or performed."
+          }
+        },
+        {
+          "line": 7,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c3",
+            "state": "open",
+            "summary": "Terminal-host survival and cleanup code remain; failure-test evidence is narrower",
+            "location": "crates/farhelm-helm/src/provisioning.rs:12098",
+            "detail": "# Separate fixture cleanup implementation from what its tests prove\n\nReviewed commit: 500548b9253b07a26fd03119679184b69544e31d\n\n## TLDR\n\nThe removed tmux guard actions do not remove the fixture's terminal-host cleanup. The integration test can establish terminal-host survival across Update and listener disappearance after uninstall on self-directed runs. It does not establish host cleanup after an injected partial uninstall failure.\n\n## Details\n\nRevision resolves the c3 lead and narrows the initial record's coverage claims. Source checks: create_session_with_key returns SessionCreated; proto/lib.rs:3151-3163 promises the session and terminal exist, without promising the agent's later exec succeeded. The real create path awaits spawn_agent_in_host (service/core.rs:11319-11349); host_launch.rs:579-625 waits for first-stage readiness and successful Fresh adoption before returning the host. Thus successful create establishes an actual terminal before Update, not merely a row or planned launch. SPEC_impl.md, Terminal host, Across supervisor restarts (:2405-2503), requires discovery/adoption of existing hosts rather than new launches; core.rs:6675-6715 handles adopted/unavailable/absent host rows accordingly. The post-update helper at provisioning.rs:12649-12756 waits for live status, obtains its own attachment, consumes ReplayComplete, sends a fresh random lowercase token through an uppercase-transforming command, and observes the uppercase output. Replay or input echo cannot satisfy it. This establishes session operability after update on current source/contracts, though the test does not independently pin host PID/socket identity or a pre-update shell variable to catch a hypothetical future auto-respawn implementation.\n\nBefore uninstall, :13316-13332 checks the ended session remains listed and, only for self-directed runs, resolves its database host kind/address and asserts its listener is live. :12771-12858 consults /proc/net/unix, including unlinked listeners; :13438-13446 checks that captured listener and all fixture host listeners disappear before teardown. The remote-container leg omits these liveness/absence checks and proves the registry, unit, library and retained-data outcomes, relying on the production stop exit contract for hosts. It must not be reported as independent remote host-process termination evidence.\n\nPartial failure: UnitGuard::cleanup and Drop retain end_fixture_hosts and listener checks (:12098-12109, :12186-12229); failed cleanup sets the shared keep flag, and FixtureRoot preserves the state. The parent revision also has these paths (:12560-12572), so this patch does not introduce their semantics. The changed teardown_guard_runs_on_failure (:13515-13572) creates only a sleep service, not a terminal host; planted_failure (:12180-12183) invokes cleanup before producing its error. It proves the nonce unit is gone after an error return, not host teardown after injected partial failure or successful Drop cleanup under panic. No such injected host-failure case exists among the callers found by git grep for planted_failure, end_fixture_hosts and UnitGuard. That is a precise limit of existing evidence, not evidence that retained cleanup fails.\n\nSuggested bucket: other for the original concern about leaked fixture processes. Confidence: confirmed source/contract analysis, no runtime observation. proposed_drop: source refutation narrowly limited to the claim that deleting tmux cleanup also deleted cleanup of the terminal hosts this fixture creates. This candidate does not claim the failure test proves terminal-host cleanup; no new broken cleanup route or removed terminal-host failure case was established by the assigned patch. possible_cover: none; parent owns queue coverage/filters. Could-be-highest: no established security or user-work-loss route; original concern was fixture resource leakage. Caveats above preserve the remote and partial-failure test limits rather than treating passing-test claims as observed behavior."
+          }
+        }
+      ],
+      "latest": {
+        "line": 7,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c3",
+          "state": "open",
+          "summary": "Terminal-host survival and cleanup code remain; failure-test evidence is narrower",
+          "location": "crates/farhelm-helm/src/provisioning.rs:12098",
+          "detail": "# Separate fixture cleanup implementation from what its tests prove\n\nReviewed commit: 500548b9253b07a26fd03119679184b69544e31d\n\n## TLDR\n\nThe removed tmux guard actions do not remove the fixture's terminal-host cleanup. The integration test can establish terminal-host survival across Update and listener disappearance after uninstall on self-directed runs. It does not establish host cleanup after an injected partial uninstall failure.\n\n## Details\n\nRevision resolves the c3 lead and narrows the initial record's coverage claims. Source checks: create_session_with_key returns SessionCreated; proto/lib.rs:3151-3163 promises the session and terminal exist, without promising the agent's later exec succeeded. The real create path awaits spawn_agent_in_host (service/core.rs:11319-11349); host_launch.rs:579-625 waits for first-stage readiness and successful Fresh adoption before returning the host. Thus successful create establishes an actual terminal before Update, not merely a row or planned launch. SPEC_impl.md, Terminal host, Across supervisor restarts (:2405-2503), requires discovery/adoption of existing hosts rather than new launches; core.rs:6675-6715 handles adopted/unavailable/absent host rows accordingly. The post-update helper at provisioning.rs:12649-12756 waits for live status, obtains its own attachment, consumes ReplayComplete, sends a fresh random lowercase token through an uppercase-transforming command, and observes the uppercase output. Replay or input echo cannot satisfy it. This establishes session operability after update on current source/contracts, though the test does not independently pin host PID/socket identity or a pre-update shell variable to catch a hypothetical future auto-respawn implementation.\n\nBefore uninstall, :13316-13332 checks the ended session remains listed and, only for self-directed runs, resolves its database host kind/address and asserts its listener is live. :12771-12858 consults /proc/net/unix, including unlinked listeners; :13438-13446 checks that captured listener and all fixture host listeners disappear before teardown. The remote-container leg omits these liveness/absence checks and proves the registry, unit, library and retained-data outcomes, relying on the production stop exit contract for hosts. It must not be reported as independent remote host-process termination evidence.\n\nPartial failure: UnitGuard::cleanup and Drop retain end_fixture_hosts and listener checks (:12098-12109, :12186-12229); failed cleanup sets the shared keep flag, and FixtureRoot preserves the state. The parent revision also has these paths (:12560-12572), so this patch does not introduce their semantics. The changed teardown_guard_runs_on_failure (:13515-13572) creates only a sleep service, not a terminal host; planted_failure (:12180-12183) invokes cleanup before producing its error. It proves the nonce unit is gone after an error return, not host teardown after injected partial failure or successful Drop cleanup under panic. No such injected host-failure case exists among the callers found by git grep for planted_failure, end_fixture_hosts and UnitGuard. That is a precise limit of existing evidence, not evidence that retained cleanup fails.\n\nSuggested bucket: other for the original concern about leaked fixture processes. Confidence: confirmed source/contract analysis, no runtime observation. proposed_drop: source refutation narrowly limited to the claim that deleting tmux cleanup also deleted cleanup of the terminal hosts this fixture creates. This candidate does not claim the failure test proves terminal-host cleanup; no new broken cleanup route or removed terminal-host failure case was established by the assigned patch. possible_cover: none; parent owns queue coverage/filters. Could-be-highest: no established security or user-work-loss route; original concern was fixture resource leakage. Caveats above preserve the remote and partial-failure test limits rather than treating passing-test claims as observed behavior."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g047/findings.jsonl",
+        "id": "c3",
+        "line": 7,
+        "disposition": "excluded",
+        "group": "provisioning-fixture-terminal-host-cleanup-retained",
+        "reason": "Parent explicitly accepted named refuted proposal from claims-030 after inspecting it. Removing tmux cleanup did not remove fixture terminal-host cleanup. The narrowed latest record correctly separates the remaining code from the smaller evidence supplied by the planted-failure test. Refute only that tmux cleanup removal also removed cleanup of the terminal hosts created by this fixture. Preserve remote-process, identity-witness and injected-failure evidence limits; do not call those limits observed failures. Checked source/results: [\"500548b9253b07a26fd03119679184b69544e31d:crates/farhelm-helm/src/provisioning.rs:12028-12109 and :12186-12229 retain nonce-unit cleanup, end_fixture_hosts, listener checks and keep-root behavior. :12113-12177 retains verified fallback termination of fixture-owned listeners.\",\"Same revision provisioning.rs:12180-12183 explicitly calls cleanup before returning the planted error; :13515-13565 creates only a sleep service. It does not prove terminal-host cleanup after injected partial uninstall failure or panic/Drop success.\",\"Same revision farhelm-proto/src/lib.rs:3151-3163 promises a real session and terminal at successful create. farhelm-supervisor/src/service/core.rs:11319-11349 awaits host spawn; service/core/host_launch.rs:579-625 waits for first-stage completion and Fresh adoption. core.rs:6675-6715 adopts existing hosts rather than launching replacements on reload.\",\"Same revision provisioning.rs:12649-12756 consumes ReplayComplete then observes a fresh uppercase-transformed token, establishing post-update live operability under current source/contracts. :13326-13332 and :13438-13446 prove listener pre/post premises only on self-directed runs. The remote-container leg omits them. These are inspected assertions, not executed observations.\"] Current coverage/results: {\"SPEC.md and SPEC_impl.md\":\"Current Topology/Provisioning requires terminal-host termination; SPEC_impl.md:2403-2500 Across supervisor restarts describes adoption and host continuity. None accepts missing test cleanup, but the named deletion concern is source-refuted.\",\"TODO.md Planned\":\"Empty, lines 25-27.\",\"plans/queue\":\"Matching tmux product/install/tooling/docs plans are already landed per plans/REPORTS.md:29-32; no unlanded fixture-teardown fix found.\",\"BUGS.md\":\"No fixture-teardown item; pipe-holder hang is unrelated.\",\"INDEX.md and matching queue files\":\"No UnitGuard/end_fixture_hosts/real_provisioning_case/teardown_guard same-root item found; distinct Mac cleanup and test-host leaks do not cover these named paths.\",\"TRIAGE_OUTCOMES.md\":\"No active named-fixture cleanup/partial-failure decision found; archive not read.\",\"FILTER.md\":\"Not used; no complete boundary matches this fixture-cleanup claim.\"} Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Initial concern: deleting tmux guard cleanup might strand failing tests' terminal processes. Initial source summary overstated survival/failure-cleanup proof; line 6 reopened those premises and line 7 narrowed the proposed refutation. Original harm remains fixture leakage, not destruction of user work.\"; \"No new failing terminal-host cleanup route or deleted terminal-host partial-failure test was established. A future auto-respawn regression would need a stronger host identity or pre-update state witness than the present operability helper.\"."
+      },
+      "accepted_parent_decision": {
+        "key": "g047/c3",
+        "line": 7,
+        "disposition": "excluded",
+        "group": "provisioning-fixture-terminal-host-cleanup-retained",
+        "bucket": "other",
+        "recording": "refuted",
+        "queue_target_candidate": null,
+        "needs_independent_drop_check": false,
+        "reason": "Parent explicitly accepted named refuted proposal from claims-030 after inspecting it. Removing tmux cleanup did not remove fixture terminal-host cleanup. The narrowed latest record correctly separates the remaining code from the smaller evidence supplied by the planted-failure test. Refute only that tmux cleanup removal also removed cleanup of the terminal hosts created by this fixture. Preserve remote-process, identity-witness and injected-failure evidence limits; do not call those limits observed failures. Checked source/results: [\"500548b9253b07a26fd03119679184b69544e31d:crates/farhelm-helm/src/provisioning.rs:12028-12109 and :12186-12229 retain nonce-unit cleanup, end_fixture_hosts, listener checks and keep-root behavior. :12113-12177 retains verified fallback termination of fixture-owned listeners.\",\"Same revision provisioning.rs:12180-12183 explicitly calls cleanup before returning the planted error; :13515-13565 creates only a sleep service. It does not prove terminal-host cleanup after injected partial uninstall failure or panic/Drop success.\",\"Same revision farhelm-proto/src/lib.rs:3151-3163 promises a real session and terminal at successful create. farhelm-supervisor/src/service/core.rs:11319-11349 awaits host spawn; service/core/host_launch.rs:579-625 waits for first-stage completion and Fresh adoption. core.rs:6675-6715 adopts existing hosts rather than launching replacements on reload.\",\"Same revision provisioning.rs:12649-12756 consumes ReplayComplete then observes a fresh uppercase-transformed token, establishing post-update live operability under current source/contracts. :13326-13332 and :13438-13446 prove listener pre/post premises only on self-directed runs. The remote-container leg omits them. These are inspected assertions, not executed observations.\"] Current coverage/results: {\"SPEC.md and SPEC_impl.md\":\"Current Topology/Provisioning requires terminal-host termination; SPEC_impl.md:2403-2500 Across supervisor restarts describes adoption and host continuity. None accepts missing test cleanup, but the named deletion concern is source-refuted.\",\"TODO.md Planned\":\"Empty, lines 25-27.\",\"plans/queue\":\"Matching tmux product/install/tooling/docs plans are already landed per plans/REPORTS.md:29-32; no unlanded fixture-teardown fix found.\",\"BUGS.md\":\"No fixture-teardown item; pipe-holder hang is unrelated.\",\"INDEX.md and matching queue files\":\"No UnitGuard/end_fixture_hosts/real_provisioning_case/teardown_guard same-root item found; distinct Mac cleanup and test-host leaks do not cover these named paths.\",\"TRIAGE_OUTCOMES.md\":\"No active named-fixture cleanup/partial-failure decision found; archive not read.\",\"FILTER.md\":\"Not used; no complete boundary matches this fixture-cleanup claim.\"} Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Initial concern: deleting tmux guard cleanup might strand failing tests' terminal processes. Initial source summary overstated survival/failure-cleanup proof; line 6 reopened those premises and line 7 narrowed the proposed refutation. Original harm remains fixture leakage, not destruction of user work.\"; \"No new failing terminal-host cleanup route or deleted terminal-host partial-failure test was established. A future auto-respawn regression would need a stronger host identity or pre-update state witness than the present operability helper.\"."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-030",
+          "key": "g047/c3",
+          "latest_line": 7,
+          "recommendation": "refuted",
+          "bucket": "other",
+          "underlying_key": "provisioning-fixture-terminal-host-cleanup-retained",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "Removing tmux cleanup did not remove fixture terminal-host cleanup. The narrowed latest record correctly separates the remaining code from the smaller evidence supplied by the planted-failure test.",
+          "checks": [
+            "500548b9253b07a26fd03119679184b69544e31d:crates/farhelm-helm/src/provisioning.rs:12028-12109 and :12186-12229 retain nonce-unit cleanup, end_fixture_hosts, listener checks and keep-root behavior. :12113-12177 retains verified fallback termination of fixture-owned listeners.",
+            "Same revision provisioning.rs:12180-12183 explicitly calls cleanup before returning the planted error; :13515-13565 creates only a sleep service. It does not prove terminal-host cleanup after injected partial uninstall failure or panic/Drop success.",
+            "Same revision farhelm-proto/src/lib.rs:3151-3163 promises a real session and terminal at successful create. farhelm-supervisor/src/service/core.rs:11319-11349 awaits host spawn; service/core/host_launch.rs:579-625 waits for first-stage completion and Fresh adoption. core.rs:6675-6715 adopts existing hosts rather than launching replacements on reload.",
+            "Same revision provisioning.rs:12649-12756 consumes ReplayComplete then observes a fresh uppercase-transformed token, establishing post-update live operability under current source/contracts. :13326-13332 and :13438-13446 prove listener pre/post premises only on self-directed runs. The remote-container leg omits them. These are inspected assertions, not executed observations."
+          ],
+          "coverage_checked": {
+            "SPEC.md and SPEC_impl.md": "Current Topology/Provisioning requires terminal-host termination; SPEC_impl.md:2403-2500 Across supervisor restarts describes adoption and host continuity. None accepts missing test cleanup, but the named deletion concern is source-refuted.",
+            "TODO.md Planned": "Empty, lines 25-27.",
+            "plans/queue": "Matching tmux product/install/tooling/docs plans are already landed per plans/REPORTS.md:29-32; no unlanded fixture-teardown fix found.",
+            "BUGS.md": "No fixture-teardown item; pipe-holder hang is unrelated.",
+            "INDEX.md and matching queue files": "No UnitGuard/end_fixture_hosts/real_provisioning_case/teardown_guard same-root item found; distinct Mac cleanup and test-host leaks do not cover these named paths.",
+            "TRIAGE_OUTCOMES.md": "No active named-fixture cleanup/partial-failure decision found; archive not read.",
+            "FILTER.md": "Not used; no complete boundary matches this fixture-cleanup claim."
+          },
+          "exact_cover_quotes": [],
+          "missing_premise": "No new failing terminal-host cleanup route or deleted terminal-host partial-failure test was established. A future auto-respawn regression would need a stronger host identity or pre-update state witness than the present operability helper.",
+          "original_stronger_consequence": "Initial concern: deleting tmux guard cleanup might strand failing tests' terminal processes. Initial source summary overstated survival/failure-cleanup proof; line 6 reopened those premises and line 7 narrowed the proposed refutation. Original harm remains fixture leakage, not destruction of user work.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Refute only that tmux cleanup removal also removed cleanup of the terminal hosts created by this fixture. Preserve remote-process, identity-witness and injected-failure evidence limits; do not call those limits observed failures."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "provisioning-fixture-terminal-host-cleanup-retained",
+        "destination": null
+      }
+    }
+  ],
+  "replies": [
+    {
+      "turn": 1,
+      "reply": "Initial review complete: all 1,467 assigned patch lines and the complete commits field read.\n\nNo substantive findings or unresolved leads. Three candidates were recorded and set aside with source/specification evidence. Findings log and progress record updated.\n\nSource-only review; no tests, reproductions, or checkout changes performed."
+    },
+    {
+      "turn": 2,
+      "reply": "- **c2 promoted to finding:** the SSH test still claims private-tmux teardown coverage it no longer provides.\n- **c1 narrowed:** proposed drop covers only the explicitly accepted orphan-server residual, not Add adoption.\n- **c3 resolved and narrowed:** cleanup code remains, but the failure test does not establish terminal-host teardown after partial failure.\n\nRecords and progress updated. Unresolved lead IDs: **none**."
+    },
+    {
+      "turn": 3,
+      "reply": "Discovery pass 1 complete. Nothing new found.\n\nChecked removal-test premises, plan ordering, upload/install arguments and integrity assertions, payload snapshot tests, and Mac fixture guards.\n\nNew verified IDs: none. New unverified IDs: none. Open leads: none. Progress updated; source-only, with no runtime execution."
+    }
+  ],
+  "progress": "# g047 review progress\n\nGroup: host-provisioning-lifecycle.\nReviewed revision: 500548b9253b07a26fd03119679184b69544e31d, within the charter's pinned range.\nTurn type/count: initial/1. Discovery-pass count: 0 (no later discovery turn performed).\nState: initial assigned pass complete; awaiting caller's later synthesis prompt.\nNew verified findings: none. New unverified findings: none. Candidates: c1, c2, c3. Open leads: none.\n\nMandatory coverage: 01267-001.patch lines 1-1406, delivered in eight individual evidence packets; 01278-000.patch lines 1-61, delivered in one evidence packet. All 1,467 assigned patch lines read. Complete inventory commits field read; excluded inventory metadata never read. No assigned scope unread.\n\nContracts read at the reviewed revision: SPEC.md Topology 73-356 (provisioning/uninstall paragraphs and continuation), Ownership during cleanup and provisioning 5179-5249, Supported host setup 5343-5376; SPEC_impl.md Provisioning 7771-8152 in two bounded packets, Testing 8173-8240, and Answers bind to what was drawn 1069-1089 (plus GUI opening 177-234). Root AGENTS.md including its End sentinel was injected. Priority buckets and feedback template read from the governing review instructions. Machine instructions and scode-voice read before artifact writes.\n\nAdditional source checks at the reviewed revision: provisioning.rs module/test imports 1-110; launcher 270-337; uninstall script fixture 9440-9783; UnitGuard, FixtureRoot and end_fixture_hosts 11950-12240; real provisioning fixture 12855-13512; planted-failure test 13510-13578; directory-payload extraction 13672-13818 and private snapshots 14020-14122. backend.rs stop and remove_file 3250-3430; plan.rs platform split and removal ordering 740-885; service.rs degraded warnings 2645-2705 and remove-file action 2764-2798. Mac fixture 1-82, executable path guard 200-325, reboot upload/install callers 1030-1128. Searches established the payload source API and action sites. These were git-show context reads, not extra mandatory coverage.\n\nInterface assumptions: the group owns the assigned test hunks only; production modules were read as callers/replacements, not independently swept for unrelated defects. The new removal is private lib/tmux, follows Linux start/restart, never enters the Mac plan, and backend failures degrade to warnings. The test guard still ends terminal hosts and retains failed cleanup evidence. Legacy orphan tmux servers that outlived a previously stopped supervisor are expressly accepted as remaining. Parent owns non-spec coverage checks. No queue, excluded coverage metadata, TODO, plans, bugs or triage records read.\n\nNo runtime tests, builds, reproductions, checkout edits or live-install actions were performed. Conclusions are source/contract analysis only. Evidence recording initially rejected c1's unsupported state 'closed'; no event was appended then, and the event was immediately corrected to 'open' and successfully recorded. All durable records now use the supported schema.\n\nNext action: caller-directed later synthesis turn; inspect only changes/questions requested then. Durable findings log is the complete record, with c1 revised to quote the specification exactly; no separate report file created.\n\n## Synthesis turn 2\n\nTurn type/count: synthesis/2. Discovery-pass count remains 0. Initial delivery audited by caller: all 1,467 lines, no gaps/rejections/unfinished/unrecognized. Assigned material unread: none. No new runtime execution, builds, reproductions, checkout edits, or live-install actions.\n\nDeltas: c2 promoted from candidate to finding (other, confirmed source-only, proposed_drop false): retained SSH test documentation claims private-server teardown although the fixture no longer starts or observes tmux. Prior drop based on lack of product effect/charter emphasis retracted; queue filters remain the parent's job. c3 temporarily revised to lead, then resolved back to candidate with narrower source-refuted scope and explicit evidence limits. c1 revised to isolate the exact accepted previously stopped-supervisor residual and keep ordinary Add adoption separate. All histories preserved; parent has accepted no drop. Latest counts: one finding (c2), two candidates (c1/c3), no open leads.\n\nCross-batch check: caller supplied g048 findings lines 4-5 read exactly. service.rs:2234-2319 independently confirms compatible/skewed answering supervisors take UseAsIs during Add confirmation; Execute requires Absent. c1's proposed drop does not cover ordinary Add disruption.\n\nFixture-premise synthesis: create's return is backed by host first-stage readiness plus fresh adoption (proto/lib.rs:3140-3170, handlers.rs:419-485, core.rs:11280-11375, host_launch.rs:527-655). Post-update assert_session_operable (:12649-12756) uses its own attachment after ReplayComplete and fresh transformed random output, excluding replay and input echo. Reload adopts existing hosts or represents absent/unavailable ones (core.rs:6660-6750); specification Terminal host/Across supervisor restarts preserves that contract. No independent PID/socket pin or pre-update shell state assertion exists; claim is bounded to the reviewed source/contracts. Before uninstall, :13316-13332 establishes the ended host is listed and, for !remote, is an actual host row with a live listener. Kernel listener checks :12771-12858 survive path unlinking; :13438-13446 checks disappearance before cleanup. Remote-container tests omit those independent liveness/absence observations.\n\nPartial-failure synthesis: :13515-13572 creates only the sleep service. planted_failure (:12180-12183) calls cleanup before the planted error. It does not exercise a terminal host stranded by partial uninstall failure or successful Drop cleanup after panic. The terminal-host fallback, post-unlink listener search and evidence-retention flag remain in cleanup/Drop (:12080-12118, :12176-12235), and parent source (:12300-12355, :12540-12596) already had them. c3's proposed drop is limited to refuting that the assigned deletion removes terminal-host cleanup; it no longer claims the failure test supplies terminal-host regression proof.\n\nAdditional source/contract reads this turn: provisioning.rs:12565-12861, 13185-13288, 13287-13490; service/core.rs:11140-11260, 11435-11530 and 7350-7490; host launch/adoption and protocol snippets above. SPEC_impl.md Terminal host:1888-2070 (reread in smaller chunks after the initial combined output was clipped), complete Creating agents in hosts bullet :2179-2235, complete Across supervisor restarts bullet :2405-2503. Source searches located relevant create and host handover sites. No new independently unsupported findings retained.\n\nNext action: caller-directed later pass. Open/uninvestigated leads: none. All readily checkable premises raised during this synthesis resolved from source and contracts; runtime outcomes are not claimed.\n\n## Discovery turn 3\n\nTurn type/count: discovery/3. Discovery-pass count: 1. Result: empty; no new substantive finding, candidate or unresolved lead. New verified IDs: none. New unverified-after-investigation IDs: none. Open leads: none. Findings log remains at 8 events; no prior record, consequence, proposed drop or severity was changed this turn. Parent has accepted no drops/lowerings. Assigned mandatory scope remains fully read/audited; nothing assigned is unread.\n\nRead discovery-neighbours.json lines 1-213 in three bounded context reads before source search. These records supplied novelty/interface context only; no other group's issues were adopted or independently expanded. There were no named pending questions. Existing candidate histories remain in this group's complete log.\n\nNew search checks beyond the recorded issues, all at 500548b9253b07a26fd03119679184b69544e31d:\n\n- provisioning.rs:9780-9906: removal test exercises remote stand-in and local unlink; constructs present, absent, dangling-link, live-link and directory cases; preserves a link target; captures PermissionDenied before the action, restores its private directory permissions before assertions, and names the root-only skip. No process-global environment mutation or shared machine resource introduced.\n- provisioning.rs:10080-10165: Linux plan test checks both Add/Update, startup-before-removal order, exact trailing actions and exactly one private lib/tmux target. No new test-oracle failure established.\n- backend.rs:2820-2875 plus upload/install signature search: removal of PayloadKind from the assigned calls retains the staged payload path/hash, destination, temporary and mode. Local install and remote split install use the same PreparedPayload contract.\n- provisioning.rs:11445-11684 and 11735-11795: upload-error and wrong-digest cases still distinguish corrupt successful transport from valid bytes; retain installed-content and nonce-cleanup assertions. Tampering is asserted at the nonce before install; immutable local snapshot is checked after replacing its source. No assigned-call simplification invalidates these oracles.\n- payloads.rs:230-296 and provisioning.rs:13719-13775,14020-14068: architecture-selected archive extraction remains per-call private; changed tests still verify returned asset shape, bytes, executable output, unchanged source bytes/mode, and prior snapshot survival after replacing a same-named archive. No defect found in the assigned removal of the second payload's assertions.\n- macos_real_tests.rs:227-316 and 1075-1108: after removing the obsolete payload-kind parameter, Mac architecture, frozen binary/state paths, private upload temporaries, service label/domain/plist and rejection of unexpected Linux actions remain checked. Reboot install still passes the staged payload and explicit 0755 mode before signature/readiness checks.\n\nPinned-range attribution discipline: no new concern required attribution. A range-bounded path history query for the Mac test showed the assigned commit plus earlier route/protocol changes; those unrelated patches were not broadened into this group's review.\n\nNo runtime tests, reproductions, builds or live-install actions. All results are source/contract checks, not execution observations. Next: caller-directed follow-up or completion; no additional discovery pass performed inside this turn.\n"
+}

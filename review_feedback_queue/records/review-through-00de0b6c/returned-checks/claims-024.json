@@ -1,0 +1,246 @@
+[
+  {
+    "key": "g039/c1",
+    "latest_line": 10,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "settings-hint-test-backend-acknowledgment",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The changed test requires its own real backend 204, independently of the coincidentally equal initial/final value. Successful drain precedes restoration. This refutes the named missing-acknowledgment claim, not every failed-transport cleanup scenario.",
+    "checks": [
+      "350a4b33b6d4476f4a78e43cea124bc2b828f462:e2e/tests/settings.spec.ts:282-289 requires outgoing [true,false], awaits route.fetch(), asserts 204, then releases latestCommitted; :310-318 requires browser status and latestCommitted before reading preferences.",
+      "Same revision settings.spec.ts:103-117 navigates away, releases/drains routes, then restores through cleanupOwnedSteps; :327-331 releases all hold gates and invokes both route stops. e2e/tests/helpers/drained-route.ts:19-43 tracks the callback through its fetch/fulfill and drains tracked promises. This supports ordinary successful cleanup only.",
+      "The commit diff replaces route.continue/body finished with route.fetch/backend acknowledgment. No runtime tests or reproductions were performed."
+    ],
+    "coverage_checked": [
+      "Current SPEC.md:2285-2305 and shared-preference discussion; SPEC_impl.md Settings and acknowledgment search: helm ownership supports requiring the backend acknowledgment; no acceptance of a missing acknowledgment.",
+      "TODO.md Planned is empty. plans/queue searches found no exact acknowledgment-oracle repair. BUGS.md contains only the unrelated escaped-SSH-helper install hang.",
+      "INDEX.md and matching failed-test-response-does-not-fence-settings-write.md and held-preference-reply-blocks-fixture-restoration.md were checked. They concern failed/unawaited transport and separate caller gates, not a missing successful backend acknowledgment here. No extension is established by this check.",
+      "TRIAGE_OUTCOMES.md:1184-1230 records observed-flake/trivial-fix decisions for those different failure mechanisms. It does not cover this successful-path oracle. FILTER.md does not supply the refutation."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": "None for the narrow acknowledgment refutation. A failed navigation, failed drain or timed-out admitted writer is outside the successful-cleanup conclusion; no universal retirement claim is established.",
+    "original_stronger_consequence": "A preference-save test could pass without its newest save reaching the helm because initial and final values are both false; cleanup could permit a later owned save to overwrite restored fixture preferences.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Source refutation confined to this test's own acknowledged write and successful owned drain; not a drop of existing queue items about failure paths."
+  },
+  {
+    "key": "g039/l1",
+    "latest_line": 9,
+    "recommendation": "retain-verified",
+    "bucket": "other",
+    "underlying_key": "settings-container-tensorlake-order-contract",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The changed ordered assertion enforces Containers before Tensorlake, matching the UI but contradicting both specifications. The established consequence is minor navigation contract drift, not a currently failing browser test.",
+    "checks": [
+      "350a4b33b6d4476f4a78e43cea124bc2b828f462:e2e/tests/settings.spec.ts:31 puts recipes, containers, tensorlake; :969 uses ordered toHaveText. crates/farhelm-ui/src/settings.rs:62-75 supplies that order in SETTINGS_SECTIONS.",
+      "The same revision SPEC.md:2255-2257 and SPEC_impl.md:939-941 explicitly put Tensorlake before Containers. Current SPEC.md:2295-2297 and SPEC_impl.md:940-942 retain that order.",
+      "The reviewed commit diff newly adds recipes and containers to the test array. At exclusive base 6e423e30068b62c6cfa276c6d720ee35bb70387a:e2e/tests/settings.spec.ts:31 neither was in the array. Thus the newly enforced wrong relative order is in range, even without attributing when production ordering first changed.",
+      "plans/queue/podman-environments.md:777-778 and :838-840 authorize updating the test for extra sections; they do not specify Containers before Tensorlake or override the specifications. No execution was performed."
+    ],
+    "coverage_checked": [
+      "Both current specifications explicitly require the reverse order; no matching ordering exception found by settings/navigation/order and Containers/Tensorlake searches.",
+      "TODO.md Planned is empty. Matching podman-environments plan sections concern extra sections and retired choices, not accepting a reversed order; plans/REPORTS.md:21 identifies that plan as already landed. No unlanded exact repair found.",
+      "BUGS.md has no matching issue. INDEX.md and queue searches for section/navigation order and both provider names found no same-root item. Active TRIAGE_OUTCOMES.md search found no ordering decision. FILTER.md has no boundary matching a persistent ordinary navigation-order contract inconsistency."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": "None for test/spec drift. The precise commit first changing the UI is not established here and need not be claimed; no browser failure or operational loss is established.",
+    "original_stronger_consequence": "Initial lead allowed either deterministic failure against a correct UI or a test enforcing a specification deviation. Source settles the latter: UI and test currently agree, so the deterministic-failure alternative is withdrawn.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Record the test and UI ordering mismatch together as other; correct both arrays or obtain an intentional contract change."
+  },
+  {
+    "key": "g039/c2",
+    "latest_line": 12,
+    "recommendation": "covered",
+    "bucket": "other",
+    "underlying_key": "retired-container-positive-ui-test-removal",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The removed positive legacy-container behavior is explicitly retired. The replacement checks refusal without changing the draft and explicit removal from stored fields. This is narrower than certifying all historical migration or isolation paths.",
+    "checks": [
+      "04d85f0c98a9b635709d00b056719a0baa7fd3fc:e2e/tests/templates.spec.ts:1032-1065 wraps setup/body in try/finally, retains the historical object, checks application refusal and unchanged title, then checks actual stored-field removal; the replacement installs no routes requiring unrouteAll.",
+      "Same revision crates/farhelm-proto/src/launcher.rs:666-670 rejects a nonnull container field before cloning/mutating the launcher state. e2e/tests/github-checkout-composer.spec.ts:129-154 checks absent legacy controls and an ordinary intercepted payload without launch.container.",
+      "Same revision SPEC.md:4816-4823 explicitly retires the supervisor-outside-container model. Current SPEC.md:4892-4899 and SPEC_impl.md:8317-8328 retain that contract. No runtime or historical-store migration test was run."
+    ],
+    "coverage_checked": [
+      "Exact cover is the retired-containerized-sessions product rule and corresponding implementation rule; new Podman environments are a different supported isolation model.",
+      "TODO.md Planned is empty; podman-environments plan's matching historical-template sections agree with retirement, and plans/REPORTS.md:21 says it landed. No unlanded plan is needed as a drop basis. BUGS.md has no match.",
+      "INDEX.md and container-template-replacement-test-reuses-old-config.md concern an older positive replacement oracle, not preserving retired launch support. No exact same-root queue alias. Active TRIAGE_OUTCOMES.md searches found no additional retirement-test decision. FILTER.md is not the basis."
+    ],
+    "exact_cover_quotes": [
+      "SPEC.md:4894-4895: The earlier experimental model, whose supervisor stayed outside the container and bind-mounted a host checkout, is retired.",
+      "SPEC.md:4898-4899: Templates, recent setups and history with that choice still load. Using them drops or refuses the retired choice with an explanation and cannot create another old-style session.",
+      "SPEC_impl.md:8319-8322 requires refusing other retired lifecycle/terminal/exec paths and dropping or refusing retired stored selections with explanation; no path creates another old-style session."
+    ],
+    "missing_premise": "An actual product fallback launching on the host despite retained requested isolation would establish the stronger security concern. The inspected all-or-nothing application rejects that field; the assigned test edits do not establish such a fallback. Cleanup can still fail; no universal backend-writer retirement claim is made.",
+    "original_stronger_consequence": "Losing a still-supported isolated-launch guarantee might permit an ordinary host launch where isolation was requested. The latest history narrows the established scope to retirement/test cleanup and leaves that security route unestablished.",
+    "needs_independent_drop_check": true,
+    "proposed_basis": "Propose coverage only for deleting positive tests of the explicitly retired model and source refutation of silent template fallback in the inspected caller. Send the original isolation consequence and this basis to the independent drop check."
+  },
+  {
+    "key": "g039/l2",
+    "latest_line": 8,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "guarded-help-fixture-uncontrolled-sandbox-key",
+    "aliases": [],
+    "target_queue_file": null,
+    "recording_check_revision_history": [
+      {
+        "recommendation": "retain-unverified",
+        "why": "The conditional fixture limitation is real, but a supported preceding setup/test path leaving a key is missing. An empty-stack contract and representative cleanup are insufficient to refute every failure path. Preserve the investigated lead with that missing premise.",
+        "proposed_basis": "Retain unverified after source investigation; do not silently convert absence of a demonstrated preceding-owner path into a universal source refutation.",
+        "revision_reason": "Withdraw this recording recommendation: it required proving absence of unspecified earlier failures rather than establishing the suspected regression's antecedent. All primary record histories remain unchanged in claims.json."
+      }
+    ],
+    "why": "Narrowly reject the suspected regression: the fixture's conditional dependence on an empty account is real, but no concrete earlier key leak is established. My prior retain-unverified recommendation improperly relied on not disproving every possible earlier failure. Rejecting this suspicion does not require that proof. The conditional observation itself is not source-refuted.",
+    "checks": [
+      "350a4b33b6d4476f4a78e43cea124bc2b828f462:e2e/tests/guarded-permissions.spec.ts:19 mocks only environment-places and :36 requires Runs on absent.",
+      "Same revision crates/farhelm-ui/src/list/create_form.rs:3207-3243 fetches places separately from recipes/account settings; environment_ui.rs:437-447 derives sandboxes from api_key_set, and :492-496 renders Runs on when either provider is available. Thus a saved key defeats the asserted absence despite [] places.",
+      "Same revision e2e/start-stack.sh:146 creates a fresh state directory; :624-631 runs that helm against it. e2e/playwright.config.ts:119-135 serializes work per shared stack. This supplies a clean initial state, not proof that every preceding test restores account state.",
+      "Clarification check of the primary reviewer's named paths at this same revision: credentials-settings.spec.ts:126-129 clears the key after navigation in finally; tensorlake-settings.spec.ts:85-100 clears it in restore; tensorlake-hosts.spec.ts:341-344,766-774,942-945,1407-1410 contain account clearing. These are concrete restoration attempts, not a proof that failures never occur.",
+      "The named tensorlake-settings.spec.ts case at :512-550 saves GOOD_KEY before its try, then checks the build stamp and installs feed/route observers. This identifies a cleanup boundary that could leave the key if those preparations throw. No supported concrete throw after that acknowledged save, or actual subsequent guarded-help execution with the retained key, was established. Merely observing that awaited setup or sequential cleanup could fail does not establish the proposed cross-test antecedent.",
+      "No actual new source evidence establishes a concrete prior key-leak sequence. No omitted named path was found that settles that antecedent without adding another hypothetical failure. No runtime reproduction was performed. Latest line 8 already retains the missing premise and makes no universal cleanup claim; this clarification does not reinstate the older blanket reassurance."
+    ],
+    "coverage_checked": [
+      "Both specifications were searched for provider/account availability and guarded help; no rule makes an independently saved sandbox account disappear when places is empty, and no acceptance of this conditional fixture contamination was found.",
+      "TODO.md Planned is empty. plans/queue searches for guarded help, api_key_set, saved-key fixtures and Runs on found no exact repair. BUGS.md has no match.",
+      "INDEX.md and queue searches found no guarded-help retained-key item. Existing failed-test-response/held-preference cleanup findings concern other state and do not supply this missing preceding-key path. Active TRIAGE_OUTCOMES.md has no matching guarded-help/key decision. No FILTER.md boundary justifies omission of an unresolved persistent shared-fixture-state condition."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": "An exact supported earlier test/setup sequence leaves api_key_set true before this case. The named owner's pre-try save and sequential finally operations identify places a separate failure could strand the key, but no concrete source-supported failure producer or run evidence establishes that antecedent. Universal cleanup correctness need not be proved to reject this suspicion.",
+    "original_stronger_consequence": "A saved Tensorlake key from prior shared-stack use can make the new Runs on absence assertion fail or allow sandbox discovery to disturb tooltip geometry. This is conditional fixture stability, not a demonstrated regression.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Revised proposal: do not record this narrowly rejected suspicion. The unchanged primary record and my original retention rationale remain in claims.json and this clarification. The refuted enum here concerns the allegation of an established regression, not the true conditional statement that a saved key would render Runs on. No runtime failure, universal restoration theorem, coverage dismissal or filter match is claimed."
+  },
+  {
+    "key": "g039/c3",
+    "latest_line": 11,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "window-chrome-readiness-observation",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The wait observes the selected session's own mounted, matching, open, revealed and focused attachment. It does not focus or click the terminal. The later native header double-click remains the behavior being tested.",
+    "checks": [
+      "97811d0edb33c207dd9faca24544e181e09ba2a5:e2e/tests/window-chrome.spec.ts:174-178 requires exactly one selected row and passes its ID to waitForSessionReady; :187 double-clicks the version and checks actual selected version text.",
+      "Same revision e2e/tests/helpers/terminal-readiness.ts:121-183 derives session/tab identity from the socket URL and checks the real input's focus. :207-258 bounds polling and reports the final primitive observation. :359-380 accepts only mounted/matching/open/revealed/focused; no focus or click occurs.",
+      "Current SPEC.md Desktop window chrome:3340-3354 requires controls/text retain native interactions; Where focus rests:3243-3256 permits terminal focus when nothing else owns it. This does not certify every preceding test's cleanup or actual cross-engine completion. No test was run."
+    ],
+    "coverage_checked": [
+      "Both specifications' chrome/focus sections support the settled-header premise; no acceptance of a false readiness witness is needed.",
+      "TODO.md Planned is empty; matching plans/queue/version-dblclick-flake.md was read in full. Its Decisions explicitly authorize test-only waiting after terminal-focus diagnosis and leave late-reveal selection behavior unchanged. plans/REPORTS.md:25 says it landed, so it is context rather than an unlanded repair cover.",
+      "BUGS.md has no match. INDEX.md and matching header/readiness search found no exact test-wait issue. Active TRIAGE_OUTCOMES.md has no matching header-selection wait decision. FILTER.md is not the basis."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": "None for the claimed observation-versus-manufacture distinction. Runtime timeout/completion and universal preceding-cleanup correctness remain unobserved; they are not claimed.",
+    "original_stronger_consequence": "A readiness wait might mask a focus bug or accept unrelated terminal state, weakening the header-selection regression. The assigned wait instead fails visibly when its selected attachment is not ready.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Source refutation of focus manufacture and unrelated-session substitution; preserve the narrower settled-header scope and no-runtime caveat."
+  },
+  {
+    "key": "g039/c4",
+    "latest_line": 13,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "approval-block-passive-fact-batching",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The rewrite retains each block's tabindex, accessible-label and overflow assertions. The specific empty-loop limitation exists already at the exclusive range base. It does not establish that the whole approval audit or every asynchronous style transition is covered.",
+    "checks": [
+      "9ff03ce91f191ea59f3ce16cefbd0b76d7fe599d:e2e/tests/approval-layout.spec.ts:559-588 checks card identity/kind, both answers, geometry and visible answers, then evaluates the same .approval-card-block elements together and asserts tabindex 0, nonempty label and overflowY auto.",
+      "The commit diff shows the previous .all() loop tested the same three facts. Both loops can be empty; the new read replaces retrying per-element matchers with immediate snapshot assertions, so runtime timing equivalence is not proved merely by assertion equivalence.",
+      "6e423e30068b62c6cfa276c6d720ee35bb70387a:e2e/tests/approval-layout.spec.ts:565-569 already has the empty-capable per-block loop without a block-count requirement. Thus that precise vacuity is not newly introduced anywhere in this review range. No execution was performed."
+    ],
+    "coverage_checked": [
+      "Both specifications were searched for approval scrolling/accessibility contracts; no explicit acceptance of a vacuous oracle is used. Current queue item approval-scrollports-lack-keyboard-entry.md addresses different horizontal fact/body targets and tabStop=false, not the preserved block tabindex assertions.",
+      "TODO.md Planned is empty. Matching approval-cards-fit plan concerns card geometry/scroll structure; plans/REPORTS.md:5 says it landed. No unlanded exact batching repair found. BUGS.md has no match.",
+      "INDEX.md, approval-copy-test-assumes-clipboard-object.md and approval-scrollports-lack-keyboard-entry.md do not cover the named batching/vacuity concern. Active TRIAGE_OUTCOMES.md searches found no exact block-batching decision. FILTER.md is not the basis."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": "An actual supported rendering/style transition needing the former matcher retry would be needed for a separate timing regression. None is established. Existing missing block-count coverage is outside this range, as verified against its exclusive base.",
+    "original_stronger_consequence": "Batching might make the audit vacuous or remove an accessibility/scrolling requirement. Narrow source comparison refutes newly introduced vacuity or deleted facts; it does not assert timing behavior was executed.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Refute only loss of the named assertions and attribution of empty-loop vacuity to this range. Preserve the immediate-snapshot versus retry distinction as an unestablished timing caveat."
+  },
+  {
+    "key": "g040/c1",
+    "latest_line": 4,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "retired-host-premise-test-plumbing-removal",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The fabricated-session option and watcher are removed together with their fixture API. The lifecycle-progress fixture does not require live terminal readiness, and the second welcome client tests shared dismissal only.",
+    "checks": [
+      "f560058da19e02716e6f943883a9508b447aff4e diff of e2e/tests/helpers/evidence.ts removes fabricatedTerminals, hostPremise and observeContext watcher registration together; the restart test removes its now-absent option and welcome removes the deleted watcher import/call.",
+      "Same revision e2e/tests/restart-replace-progress.spec.ts:23-77 fabricates listing/detail state; :93-110 holds a POST and returns a fixture refusal, with no supervisor seeing it. These are progress/card premises rather than live-terminal input premises.",
+      "Same revision e2e/tests/welcome.spec.ts:60-74 creates an authentication-only context, asserts shared welcome suppression and closes that context in finally. It does not assert that second client's terminal revealed.",
+      "Current SPEC_impl.md:1693-1701 says every browser terminal uses the supervisor-interpreted grid island. The deleted kind watcher no longer checks a distinction present in this protocol. No execution was performed."
+    ],
+    "coverage_checked": [
+      "Both specifications' terminal-host/grid and shared-welcome sections support the remaining test contracts; this is source refutation of synchronized API removal, not blanket acceptance of lost terminal identity coverage.",
+      "TODO.md Planned is empty; plans/queue tmux removal matches are historical migration context, not a separate unlanded defect repair. BUGS.md has no match.",
+      "INDEX.md and queue searches for host-premise/fabricatedTerminals/welcome watcher found no same-root item. Active TRIAGE_OUTCOMES.md has no exact removal decision. FILTER.md is not the basis."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": "None for the removed fixture option/watcher dependency. No universal route teardown claim or second-client live readiness claim is made.",
+    "original_stronger_consequence": "Removing fabricated-session exceptions and the second-client watcher could break fixtures or silently accept an inappropriate terminal kind. The synchronized API retirement and remaining assertions refute that narrow concern.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Source refutation limited to deletion implications; it does not certify independent defects in the retired watcher or every surrounding test."
+  },
+  {
+    "key": "g040/c2",
+    "latest_line": 7,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "grid-only-browser-oracle-migration",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The retained handles/selectors match the mounted grid and preserve the old grid-branch assertions. The distinct absence of an independently matched replacement socket URL predates the exclusive range base.",
+    "checks": [
+      "f560058da19e02716e6f943883a9508b447aff4e:crates/farhelm-ui/assets/grid-terminal.js:341-368 constructs the retained grid/screen/input classes; :828-834 paints default colors on the grid element. terminal.js:4659-4673 publishes __farhelmGrid and __farhelmWs together for the primary agent mount; :4848-4849 removes them on teardown.",
+      "Same commit diff e2e/tests/appearance.spec.ts:181-197,294-300 preserves component identity, palette and computed backgrounds; sidebar-resize.spec.ts:84 and sidebar.spec.ts:4343 retain the actual screen/input selectors; tooltip-coverage.spec.ts:138 still excludes the hidden real grid input.",
+      "Same diff replace.spec.ts:867-869,929-947 retains the source marker, defined-different component, OPEN socket and subsequent READY/no-marker reads for the grid branch. No independent replacement socket URL comparison is present.",
+      "6e423e30068b62c6cfa276c6d720ee35bb70387a:e2e/tests/replace.spec.ts:861-870,920-946 already has the source sentinel, defined-different component/OPEN guard and READY/no-marker reads without matching the replacement socket URL. That precise identity-oracle limitation is outside this range. Correct production mapping is not used to refute a test-oracle defect. No runtime observation is claimed."
+    ],
+    "coverage_checked": [
+      "Both current specifications were searched for grid terminal/identity/appearance contracts. SPEC_impl.md:1693-1701 explicitly defines the grid-only path; no acceptance of arbitrary replacement-identity false passes is claimed.",
+      "TODO.md Planned is empty; plans/queue tmux removal context does not repair or accept an independent replacement-URL oracle gap. BUGS.md has no match.",
+      "INDEX.md and queue searches for replacement identity/socket URL, grid-only assertions and appearance found no exact same-root item. Existing replace-cleanup/selection items concern different mechanisms. Active TRIAGE_OUTCOMES.md has no exact oracle-migration decision. FILTER.md is not the basis."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": "None for deletion preserving the old grid branch. A separate product wrong-session route is not established; the pre-existing test limitation should not be conflated with proof that sentinel inequality alone proves arbitrary replacement identity.",
+    "original_stronger_consequence": "Deleting old-renderer alternatives might weaken/break identity, palette, focus or hit-target checks. Later synthesis identifies a distinct independent replacement-identity-oracle limitation; latest history preserves it but attributes it before this range.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Refute the deletion-induced regression narrowly. Treat the separately discussed missing URL comparison as out of range based on explicit exclusive-base source, not on production correctness."
+  },
+  {
+    "key": "g040/c3",
+    "latest_line": 6,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "grid-wrap-and-ended-notice-comment-contracts",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The edited commentary matches the retained previous-row wrapped convention and ended-terminal notice. The notification test still asserts one allowed docs link beside a foreign URL and the exact external-opener call. This does not refute separately queued lossy space reconstruction.",
+    "checks": [
+      "f560058da19e02716e6f943883a9508b447aff4e:e2e/tests/helpers/real-agent.ts:131-167 joins according to the previous row's wrapped flag; crates/farhelm-ui/assets/grid-buffer.js:159-178 uses that same preceding-row convention. The test's terminology change does not introduce a wrap oracle/control-flow change.",
+      "61e632323dbc6b4a35ed27bf5b9833102ffd5a4e diff for notifications.spec.ts, sidebar.spec.ts and replace.spec.ts is commentary only. notifications.spec.ts:456-488 still requires exactly one docs href beside the foreign URL and records exactly [docs] through the external opener.",
+      "Current SPEC.md:2804-2825 describes the ended-terminal successor notice and restricts clickable notification addresses to Farhelm docs; SPEC_impl.md's OldTerminalEnded discussion agrees. The real-agent helper's trailing-space trim is a distinct existing queue finding, not evidence that the previous-row terminology is wrong. No execution was performed."
+    ],
+    "coverage_checked": [
+      "Both specifications' grid client, notification and keyboard-input contracts were searched; matching current ended-notice and allowlist sections were read. They support the prose, not an unrestricted claim that all helper reconstruction is correct.",
+      "TODO.md Planned is empty; matching plans/queue/tmux-drop-from-docs.md is terminology cleanup context. No unlanded exact defect repair needed or found. BUGS.md has no match.",
+      "INDEX.md and agent-text-helper-removes-wrap-boundary-spaces.md were checked: that item's per-row trailing-space removal is already separately retained and is not an exact alias of incorrect wrapped-flag commentary. No extension is established. Active TRIAGE_OUTCOMES.md has no exact terminology/notice decision. FILTER.md is not the basis."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": "None for the narrow terminology and retained notification-link assertions. Runtime teardown, every input frame and complete lossless logical-line reconstruction are not certified by this check.",
+    "original_stronger_consequence": "Renamed terminology could conceal a test behavior mismatch, including wrong wrap reconstruction or an inappropriate notification-link contract. Later history preserves that concern while proposing source refutation; no parent drop is assumed.",
+    "needs_independent_drop_check": true,
+    "proposed_basis": "Refute the named commentary mismatch only. Because the notification portion touches a supervisor-to-client link trust boundary, preserve the original concern and send that narrow refutation to the independent drop check; do not drop the separately queued wrap-space defect."
+  }
+]

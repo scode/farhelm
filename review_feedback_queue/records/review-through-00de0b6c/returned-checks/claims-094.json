@@ -1,0 +1,197 @@
+[
+  {
+    "key": "g147/c1",
+    "latest_line": 8,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "archive-worker-nextest-config-and-environment-handoff",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The named setup/config/environment losses do not occur on the checked archive route. This says nothing about the later payload-content mismatch in c4 or the generic recorder's evidence quality.",
+    "checks": [
+      "04d85f0c98a9b635709d00b056719a0baa7fd3fc:scripts/tensorlake/run-rust-shard.sh:87-108 removes only the build-fixtures definition and matching hook, preserves setup-scripts when another definition remains, and passes --config-file without --runner.",
+      "Same revision .config/nextest.toml:60-66,74-89 keeps the extended Podman timeout and a separate podman-payloads setup/hook.",
+      "Same revision scripts/record-test-run.py:1284-1291,1920 retains explicitly requested Farhelm environment names; :1994-2017 prepares/replaces an adapter command only when args.runner is set. The worker requests both payload selector and skip variable. Source checks only; no execution."
+    ],
+    "coverage_checked": [
+      "SPEC_impl.md:8163-8230 Testing requires real-stack coverage and accepts single-user/single-command tooling assumptions; no acceptance of missing archive setup found. SPEC.md searches found no relevant archive configuration exception.",
+      "TODO.md Planned is empty (:25-27). BUGS.md has only an unrelated stopped SSH-transfer hang. Active TRIAGE_OUTCOMES.md searches found no matching setup/config claim.",
+      "plans/queue searches found landed tmux-drop-from-tooling's removal work, not coverage of lost Podman hooks; plans/REPORTS.md:31 confirms it landed. INDEX.md and matching worker queue searches found no exact item. FILTER.md does not supply the basis; source refutation does."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": null,
+    "original_stronger_consequence": "Archive workers might remove required real-container setup, substitute an ordinary config through the recorder, or scrub its required inputs, preventing meaningful container testing. Both recorded iterations refute these specific routes; neither asserted security or user-work loss.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Source-refuted at the named revision, limited to the exact retained configuration and generic recorder path; hypothetical future regex formatting changes are not established defects."
+  },
+  {
+    "key": "g147/l1",
+    "latest_line": 9,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "browser-worker-nonrecursive-spec-discovery",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "Discovery is shallower than Playwright's, but no nested spec exists at the reviewed revision and no nested spec path was changed anywhere in the review range. The patch retains the existing discovery depth.",
+    "checks": [
+      "647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513:scripts/tensorlake/sandbox-tests.ts:153-158,212-214 reads direct entry names; e2e/playwright.config.ts:37-50 recursively discovers specs and :109-114 derives the corresponding engine/file names.",
+      "Same commit's parent sandbox-tests.ts:168-172,246-248 already uses direct entries and the suffix filter.",
+      "git ls-tree -r --name-only at 647f0227 filtered for nested e2e/tests/**/*.spec.ts returned no matches. git log --name-only over 6e423e30..00de0b6c for e2e/tests likewise contained no nested spec path. Source/tree inspection only."
+    ],
+    "coverage_checked": [
+      "Both specifications searched for nested browser/spec discovery; no acceptance or recursive-worker promise found. SPEC_impl.md Testing:8163-8230 establishes general real-stack verification, not an affected nested file.",
+      "TODO.md Planned empty; BUGS.md unrelated. Active ledger, queue index/files and plans searches found no exact nested-spec omission coverage. Existing catalog-unencoded-file-url.md concerns URL parsing, not discovery depth. FILTER.md not used."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": "An actual nested spec within the reviewed range is absent. Adding one in a future change would change the assessment.",
+    "original_stronger_consequence": "A default distributed browser run could omit nested tests while claiming all projects. The lead was withdrawn as a present defect after checking the exact tree; the conditional future consequence remains true.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "No present affected input in the checked range, with the discovery assumption predating the assigned patch. This is not a claim that recursive discovery is implemented."
+  },
+  {
+    "key": "g147/c2",
+    "latest_line": 11,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "worker-retired-pinned-tmux-removal-compatibility",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "At d751ff1 the worker and recorder agree, distro tmux is installed for the surviving fixture tests, and the Podman fixture requires only the payload the producer stages. This endpoint does not refute c4's intermediate failure.",
+    "checks": [
+      "d751ff1633bb479c7bf53920f2e4ea4ba932a1c2:scripts/record-test-run.py:223-254 defines no --tmux and rejects unknown options. scripts/tensorlake/run-rust-shard.sh:104-109 and scripts/test_hunt.py:201-206 omit the retired flag.",
+      "Same revision scripts/tensorlake/bootstrap.sh:22-27 installs distro tmux; run-rust-shard.sh:80-81 reports its absence instead of claiming all fixture prerequisites were supplied.",
+      "Same revision podman_environments.rs:190-196 requires only farhelm-<target>.tar.gz; build-podman-test-payloads.sh:40-64 stages/validates that archive. Source only; no suite pass or template inspection observed."
+    ],
+    "coverage_checked": [
+      "SPEC.md Supported user environments:5247-5260 says Farhelm neither requires nor looks for tmux; SPEC_impl.md Testing:8163-8230 describes terminal-host stacks. Neither waives surviving fixture prerequisites.",
+      "plans/queue/tmux-drop-from-tooling.md:35-64 explicitly requires machine tmux for surviving tests, visible skips without it, retirement of recorder tmux mode and worker bundling. plans/REPORTS.md:31 says this plan landed, so it is context rather than unlanded coverage.",
+      "TODO.md Planned empty; BUGS.md unrelated; active ledger and queue searches have no exact final-revision missing-prerequisite item. FILTER.md not used."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": null,
+    "original_stronger_consequence": "Removing pinned tmux might break worker invocation or silently remove required legacy-fixture coverage. Old templates without distro tmux can still skip those fixtures, with a warning; the record never established catastrophic tooling failure or user-work loss.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Source refutes incompatibility in the selected same-revision worker/recorder/fixture pair; preserve missing-package skip caveat and intermediate c4 separately."
+  },
+  {
+    "key": "g147/c3",
+    "latest_line": 5,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "test-hunt-planner-retired-tmux-input-removal",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The removed source pin is no longer a build input at this revision. The planner still widens live workspace policy inputs and sends unowned paths to manual review.",
+    "checks": [
+      "d751ff1633bb479c7bf53920f2e4ea4ba932a1c2:scripts/plan-test-hunts.py:159-164 widens Cargo, toolchain and nextest paths; :178-182 puts unowned paths in manual_review_paths.",
+      "git ls-tree -r --name-only at d751ff1 under .github/release and scripts found no source-pins, pinned-tmux or private-tmux path. The same revision's payload producer stages only farhelm (:40-64). No runtime checks."
+    ],
+    "coverage_checked": [
+      "Both specifications searched for source pins/planner inputs; SPEC_impl.md Testing supplies general coverage intent but no contrary live-input requirement.",
+      "TODO.md Planned empty; BUGS.md unrelated; active ledger, INDEX.md and queue searches have no exact planner/source-pin item. Landed tmux-drop-from-tooling.md:35-58 explicitly removes those pins/readers; REPORTS.md:31 confirms landing. No unlanded matching plan found. FILTER.md not used."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": null,
+    "original_stronger_consequence": "Changed-test planning might silently miss a shared live build input and underselect validation. The claim was rejected only for this removed tmux input, not for unrelated planner mappings.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "The named input was removed and the unknown-input fallback remains explicit."
+  },
+  {
+    "key": "g147/c4",
+    "latest_line": 10,
+    "recommendation": "retain-verified",
+    "bucket": "other",
+    "underlying_key": "podman-test-producer-drops-tmux-before-consumer",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The intermediate defect is established, and its repair within the review range is also established. Retain this historical evidence for the parent's disposition; do not describe it as a current outstanding failure.",
+    "checks": [
+      "500548b9253b07a26fd03119679184b69544e31d:scripts/build-podman-test-payloads.sh:40-49 emits only the farhelm archive and :59-64 validates/exports only it. Same revision crates/farhelm/tests/e2e/podman_environments.rs:185-194 nevertheless requires tmux-<target> too.",
+      "d751ff1633bb479c7bf53920f2e4ea4ba932a1c2:podman_environments.rs:190-196 explicitly replaces the two-file assertion with the archive-only assertion, matching producer :40-64.",
+      "04d85f0c98a9b635709d00b056719a0baa7fd3fc producer:37-52,62-68 emitted/validated both files; rust-tests.ts:62-63,89-90 archives/extracts producer contents without manufacturing missing files. The original narrow no-layout-mismatch conclusion remains valid. No runtime observation."
+    ],
+    "coverage_checked": [
+      "Both specifications searched; SPEC_impl.md Testing:8163-8230 does not accept producer/consumer prerequisite disagreement. Product tmux retirement does not refute a test-oracle defect.",
+      "TODO.md Planned empty; BUGS.md unrelated; active ledger, INDEX.md and matching queue searches found no exact payload mismatch item. tmux-drop-from-install.md and tmux-drop-from-tooling.md are landed (REPORTS.md:30-31), not unlanded cover.",
+      "FILTER.md does not match: a fresh payload directory fails repeatedly until source changes or an operator supplies the retired file. The input reports a same-root g093/f1 alias, but that record is outside this batch and was not inspected; parent must reconcile it rather than treating the alias as independently checked."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": "No premise missing for the conditional intermediate failure. Parent must decide handling of an already repaired historical defect and reconcile the reported external alias.",
+    "original_stronger_consequence": "Freshly prepared real-container tests fail before their scenario because setup omits a file still demanded by the consumer. Earlier c4 refuted layout/scope mismatch only at 04d85f0; later records established the 500548b mismatch and d751ff1 repair. Existing output or explicit directories retaining tmux conceal it.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Source-confirmed intermediate maintainer-test failure, repaired later in range. No established security or user-work-loss route."
+  },
+  {
+    "key": "g147/l2",
+    "latest_line": 13,
+    "recommendation": "retain-verified",
+    "bucket": "other",
+    "underlying_key": "rust-worker-trims-explicit-payload-directory",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The producer accepts an explicit absolute existing directory ending in whitespace, while the new packer strips that whitespace before passing its path to tar. When the stripped sibling does not exist, staging fails.",
+    "checks": [
+      "04d85f0c98a9b635709d00b056719a0baa7fd3fc:scripts/build-podman-test-payloads.sh:26,55-68 preserves explicit directory spelling, rejects CR/LF but not final spaces or tabs, verifies required files and prints exactly the path plus newline.",
+      "Same revision scripts/tensorlake/rust-tests.ts:46-49 explicitly supports operator-supplied matching directories; :62 trims the whole output and :63 uses the changed value as tar's -C argument. The parent pack():47-56 had no such producer parsing.",
+      "Pinned tip 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db:rust-tests.ts:62-63 retains the same trim/tar call. Range log lists only 04d85f0 and d751ff1 for this file. Conditional source conclusion only; no affected directory inspected or command reproduced."
+    ],
+    "coverage_checked": [
+      "SPEC_impl.md Testing:8163-8230 single-user/single-command assumptions do not waive path preservation; provisioning :8038-8052 accepts operator-staged directories. SPEC.md searches found no tooling path grammar exclusion.",
+      "TODO.md Planned empty; BUGS.md unrelated; active ledger and plans searches found no exact final-whitespace payload-directory item. INDEX.md and matching queue files were checked: rust-sandbox-staging-misquotes-checkout-path.md concerns checkout path shell quoting, rust-sandbox-pack-ignores-cargo-target-dir.md concerns build output selection, catalog-unencoded-file-url.md concerns browser module URL conversion. None covers this producer-output parsing defect.",
+      "FILTER.md rare-safe-failure rule does not fully match: retrying the same accepted override repeats the failure; it needs path/source repair. No other filter applies."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": null,
+    "original_stronger_consequence": "Distributed Rust test staging fails for a valid explicit payload directory ending in trim-eligible whitespace. Default generated directories end in the architecture name and do not trigger it. No security or user-work-loss consequence was asserted.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Retain as source-verified maintainer-tool path handling, with the exact input shape and no runtime claim."
+  },
+  {
+    "key": "g147/c5",
+    "latest_line": 14,
+    "recommendation": "out-of-range",
+    "bucket": "other",
+    "underlying_key": "rust-worker-tun-check-independent-of-podman-optout",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The unconditional tun requirement exists at the whole review baseline. The added opt-out promises skipping the payload build and forwarding the choice, not running on a different worker substrate.",
+    "checks": [
+      "6e423e30068b62c6cfa276c6d720ee35bb70387a:scripts/tensorlake/run-rust-shard.sh:43-50 already unconditionally chmods /dev/net/tun and records setup failure if that fails.",
+      "04d85f0c98a9b635709d00b056719a0baa7fd3fc:run-rust-shard.sh:44-55 keeps that tun check while adding the image-check opt-out. rust-tests.ts:46-49,59-60,118-120 states/implements skipping the local payload build and forwarding the variable. A failed tun chmod still refuses the entire worker run; this consequence is preserved."
+    ],
+    "coverage_checked": [
+      "Both specifications searched for SKIP_PODMAN, tun and test substrate; SPEC_impl.md Testing does not declare alternate worker substrate support. Current .agents/tensorlake.md:63-71 promises avoiding this build and forwarding the choice, consistent with the source.",
+      "TODO.md Planned empty; BUGS.md unrelated; active ledger, plans, index and matching queue searches found no exact opt-out/tun item. No FILTER.md boundary is used; the basis is unchanged baseline behavior and the narrow added contract."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": "A new supported worker configuration that the opt-out promises to admit despite missing tun, or another within-range change creating that obligation, was not established.",
+    "original_stronger_consequence": "A clone unable to chmod tun refuses all tests even with Podman opted out. That is real conditional behavior, but unchanged from the whole-range baseline and outside the opt-out's stated build/image scope.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Whole-range-baseline comparison, not merely predating the assigned patch. No security or user-owned-work consequence."
+  },
+  {
+    "key": "g147/c6",
+    "latest_line": 15,
+    "recommendation": "retain-unverified",
+    "bucket": "other",
+    "underlying_key": "tensorlake-current-driver-historical-repo-worker-protocol",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The ordinary documented procedure uses a tested revision's own scripts, but current metadata contains a concrete historical --repo caller omitted from the proposed-drop basis. Its plan already landed before the removals; an outstanding supported failing invocation remains unestablished. Retain the uncertainty for parent/reviewer resolution.",
+    "checks": [
+      "d751ff1633bb479c7bf53920f2e4ea4ba932a1c2:scripts/tensorlake/sandbox-tests.ts:30,49-54,84-85 packs --repo's tree while staging worker scripts beside the executing driver. This permits the mixed pair; it does not prove a compatibility promise.",
+      "Same revision removes .ci-tmux from packing and --tmux from run-shard.sh:129-132. At historical 3ca47a1d, recorder:230 defaults --tmux to warn, so omission alone does not establish parser failure. No runtime mixed-version execution was performed.",
+      "Current .agents/tensorlake.md:33-47,63-73 starts builds at the tested revision and invokes its scripts. However plans/queue/version-dblclick-flake.md:98-106 explicitly directs sandbox-tests.ts --repo <workspace> to pack historical 3ca47a1d; :65-74 authorizes historical comparison on Tensorlake if local reproduction fails. plans/REPORTS.md:25 says that plan landed 2026-11-12 in #3350."
+    ],
+    "coverage_checked": [
+      "Both specifications searched for historical worker/checkout contracts; SPEC_impl.md Testing does not settle version-independent worker scripts. No explicit accepted incompatibility found.",
+      "TODO.md Planned empty; BUGS.md unrelated; active ledger and queue searches found no exact mixed-version-worker record. catalog-unencoded-file-url.md concerns another --repo boundary, not version compatibility. The version-dblclick plan is a historical caller, not unlanded coverage repairing this concern. Landed tmux-drop-from-tooling does not settle historical-run compatibility. FILTER.md not applied because a persistent incompatibility would not self-correct on retry."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": "An outstanding supported mixed-version invocation and the exact failure or lost required coverage from the newer worker are still missing. A plan that already completed is evidence against 'no caller', not proof of a current regression.",
+    "original_stronger_consequence": "A new worker targeting an older checkout through --repo might fail or lose required legacy coverage after terminal-selector/tmux removal. Same-revision flow is not shown broken. The related deflake historical-base record named in the input was not inspected and is not treated as an alias or cover.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Preserve as investigated uncertainty instead of approving the broad no-caller drop. Parent should return the concrete historical caller to the owning reviewer; no product security or user-work-loss route is asserted.",
+    "new_interface_evidence": "Current plans/queue/version-dblclick-flake.md:98-106 explicitly prescribes sandbox-tests.ts --repo <workspace> for historical 3ca47a1d. REPORTS.md:25 records the plan as landed before d751ff1. This narrows the no-supported-caller premise but does not establish a post-removal failure."
+  }
+]

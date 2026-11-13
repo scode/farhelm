@@ -1,0 +1,352 @@
+[
+  {
+    "key": "g155/c5",
+    "latest_line": 13,
+    "recommendation": "retain-verified",
+    "bucket": "other",
+    "underlying_key": "647f0227-removes-supported-tmux-pending-cleanup-request-oracles",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The two deterministic request-level cleanup oracles disappear while old terminals are still served. Retain the intermediate test-suite gap; retirement later in this range limits its duration but does not refute it. No product failure is established. g156/l1 concerns different removed recovery scenarios, not these Close/Restart assertions.",
+    "checks": [
+      "647f0227^:crates/farhelm/tests/e2e/terminal_tabs.rs:1044-1100 and 1761-1802 configure forwarder_cleanup_gate and assert TabClosed plus tab absence, or failed Restart plus restoration of an exited row. The 647f0227 diff deletes both tests.",
+      "git grep at 647f0227 across crates/farhelm/tests and crates/farhelm-supervisor/src finds forwarder_cleanup_gate only at service/core.rs:900 and service/connection.rs:1575; no surviving test configures it.",
+      "647f0227:service/core.rs:13885-13906 and 15124-15198 retain pending-cleanup notice/error behavior. service/terminals.rs:3207-3338 uses synthetic watch-channel results, not Close/Restart requests held at cleanup publication.",
+      "647f0227:SPEC_impl.md:2370-2411 and 2956-2963 still support mixed old/host terminals. dbfc6975:service/core.rs:6426-6438 ends the old server and disables the driver; :6965-6969 ignores old-kind terminal addresses. The old sink/reap/gate symbols are absent in crates at 00de0b6c (grep exit 1)."
+    ],
+    "coverage_checked": {
+      "SPEC.md / SPEC_impl.md": "Current Session view and Terminal host/Ending the old private tmux server sections describe hosts and later retirement; they do not accept removing these integration assertions before retirement. Current test-footing text retains known-gap qualifications, not this exact acceptance.",
+      "TODO.md Planned": "Empty at recording-time main.",
+      "plans/queue": "INDEX.md has no unlanded plans. Matching retained tmux-end-old-terminals and tmux-drop-from-docs plan text describes retirement/sweeping, not an unlanded repair of this intermediate gap.",
+      "BUGS.md": "Only an SSH transfer-helper hang is recorded; no match.",
+      "INDEX.md / matching queue files": "Searches for tmux, sink, forwarder, pending cleanup and terminal-test coverage find no exact item. The conformance management-permit item is a different test and trigger.",
+      "TRIAGE_OUTCOMES.md": "No matching cleanup-oracle decision; the generic conformance-test discard is unrelated. Archive not read.",
+      "FILTER.md": "No filter matches loss of regression protection. This is not a transient product diagnostic or a rare upgrade failure."
+    },
+    "exact_cover_quotes": [],
+    "missing_premise": "None for the bounded missing-oracle conclusion. A shipped cleanup/consent failure would require separate evidence and is not inferred.",
+    "original_stronger_consequence": "Initial concern included loss of all tab cleanup, consent, dead-open and restart-survival protection. Retained host tests and synthetic barrier/registry tests refute that breadth. The first proposed drop based on retained coverage/no runtime defect was superseded; the specific old-terminal request oracles remain missing at the intermediate revision.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Record test-only intermediate regression-protection loss, preserving later retirement and surviving lower-layer/host coverage. No product-loss consequence was established or lowered."
+  },
+  {
+    "key": "g155/c6",
+    "latest_line": 15,
+    "recommendation": "retain-verified",
+    "bucket": "other",
+    "underlying_key": "terminal-tabs-shell-harness-docs-retain-deleted-conformance-caller",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The deletion makes the retained shell helper's explanation dangle, and it remains wrong at tip. This is test documentation, independently of runtime correctness. c8 is related stale prose on a different helper and could share a correction, but is not exact coverage.",
+    "checks": [
+      "647f0227:crates/farhelm/tests/e2e/terminal_tabs.rs:25-39 describes conformance callers; after deletion the actual call is the /bin/bash Close/SIGTERM test at :490.",
+      "6e423e30:terminal_tabs.rs:28-58 has the same prose and its tmux sibling; grep locates terminal_conformance_holds_for_the_agent_and_for_a_tab at :1937 using that sibling at :1938. Thus the wording is old but its described battery disappears in range.",
+      "00de0b6c:terminal_tabs.rs:24-39 retains the conformance rationale, while grep finds only its definition at :32 and the bash caller at :489. The close test's rationale at :469-489 is SIGTERM/hangup latency, not agent/tab conformance."
+    ],
+    "coverage_checked": {
+      "SPEC.md / SPEC_impl.md": "Session view, Terminal host/test-footing and Testing sections supply launch/test context but no acceptance of inaccurate helper documentation.",
+      "TODO.md Planned": "Empty.",
+      "plans/queue": "No unlanded index entries. The retained tmux-drop-from-docs comment/final-audit criteria are historical context, not an unlanded fix; the prose remains at tip.",
+      "BUGS.md": "No match.",
+      "INDEX.md / matching queue files": "No shell-helper/conformance-caller documentation item. Read conformance-test-never-admits-management-candidates.md: it concerns saturated management permits, not this deleted battery.",
+      "TRIAGE_OUTCOMES.md": "The matching conformance heading at :1351 records discard of the management-permit test issue; scope does not match. No helper-doc decision found.",
+      "FILTER.md": "Stale developer explanation has no qualifying rare/transient diagnostic trigger."
+    },
+    "exact_cover_quotes": [],
+    "missing_premise": null,
+    "original_stronger_consequence": "The initial lead also questioned dead-at-open caller prose. The host dead-open replacement has its own seams, but it does not restore the deleted conformance battery. Established impact is misleading maintainer guidance, not product failure or work loss.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Record persistent in-range dangling helper rationale, with its sole surviving bash/Close caller."
+  },
+  {
+    "key": "g155/c7",
+    "latest_line": 16,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "host-tab-shell-pid-helper-does-not-switch-to-host-pid",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The helper continues returning the host's child_pid for host tabs; it does not start observing the outer terminal-host PID. This refutes the specific changed-observation claim only.",
+    "checks": [
+      "647f0227^:crates/farhelm/tests/e2e/terminal_tabs.rs:429-436 returns host.status().child_pid before its tmux fallback.",
+      "647f0227:terminal_tabs.rs:283-292 returns the identical status().child_pid and panics when the host is missing. :507-527 completes a shell round trip and independently checks the chosen bash child's SIGTERM-ignore mask."
+    ],
+    "coverage_checked": {
+      "SPEC.md / SPEC_impl.md": "Host-tab and Testing sections distinguish the host from its child. Tooling's within-run PID allowance is not needed for this source refutation.",
+      "TODO.md Planned": "Empty.",
+      "plans/queue": "No unlanded index entries; no matching PID-observation repair.",
+      "BUGS.md": "No match.",
+      "INDEX.md / matching queue files": "tab-survival-missing-live-exchange.md concerns a different successor liveness witness, not substituting host PID for shell PID here. No exact match.",
+      "TRIAGE_OUTCOMES.md": "No matching helper-PID decision.",
+      "FILTER.md": "Not used; the suspected substitution is absent."
+    },
+    "exact_cover_quotes": [],
+    "missing_premise": "The alleged changed PID field does not occur. This does not certify bare-PID lifetime/reuse assumptions or all cleanup assertions.",
+    "original_stronger_consequence": "Simplification might observe the terminal host instead of the shell and weaken close/delete cleanup tests. Both versions return child_pid for the host-backed callers; no runtime security or user-work-loss route was alleged.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Narrow source refutation of the test-helper PID substitution; no build or runtime observation."
+  },
+  {
+    "key": "g155/c8",
+    "latest_line": 19,
+    "recommendation": "retain-verified",
+    "bucket": "other",
+    "underlying_key": "terminal-tabs-shared-gate-docs-retain-removed-local-hook-installations",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The shared constructor still claims two hooks are installed in its file after every local installation is deleted. The remaining consumer is in host_tabs. This differs from c6's obsolete conformance-helper rationale.",
+    "checks": [
+      "647f0227:crates/farhelm/tests/e2e/terminal_tabs.rs:162-173 says 'The two hooks this file installs' and 'two boundaries in this file'. Local hook search leaves only notifying_gate's definition; no remaining local gate installation.",
+      "6e423e30:terminal_tabs.rs grep finds tab_settle_gate at :121/:779 and forwarder_cleanup_gate at :1051/:1767, so deletion newly invalidates those ownership statements.",
+      "647f0227:host_tabs.rs:417-420 constructs and installs the shared settle gate. At 00de0b6c the import is :20 and use :407/:410, while terminal_tabs.rs:161-172 still claims local ownership and names the retired forwarder gate."
+    ],
+    "coverage_checked": {
+      "SPEC.md / SPEC_impl.md": "Host-tab/test-footing and Testing sections do not accept obsolete local-hook ownership documentation.",
+      "TODO.md Planned": "Empty.",
+      "plans/queue": "No unlanded entries; retained comment-sweep plan is not a pending repair.",
+      "BUGS.md": "No match.",
+      "INDEX.md / matching queue files": "Hook, gate, forwarder, helper documentation and terminal-test searches find no exact existing item. Generic conformance test coverage is different.",
+      "TRIAGE_OUTCOMES.md": "No matching shared-gate documentation decision.",
+      "FILTER.md": "No rare/transient diagnostic filter applies to this always-stale maintainer description."
+    },
+    "exact_cover_quotes": [],
+    "missing_premise": null,
+    "original_stronger_consequence": "Initial lead questioned whether any local hook calls remained and whether wording persisted. Source settles both. It does not assert gate runtime failure or duplicate c5's missing pending-cleanup oracle.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Record the persistent false local-ownership claims on the shared gate constructor; possible joint documentation fix with c6 is not exact-claim coverage."
+  },
+  {
+    "key": "g155/c9",
+    "latest_line": 18,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "removed-terminal-test-helpers-have-no-dangling-named-rust-references",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "Pinned searches confirm removal of the named callers/imports with their helpers and module. This refutes the named dangling-reference candidate, not every possible compile failure.",
+    "checks": [
+      "git grep across crates at 647f0227 for DeniedDirectory, window_rows, wait_for_dead_tab_pane, pane_pid_of and harness_with_shell_tmux returns no matches (exit 1).",
+      "git grep across crates at 1ed482dd for terminal_backpressure:: and mod terminal_backpressure returns no matches (exit 1).",
+      "1ed482dd diff removes the terminal_backpressure module declaration and terminal_tabs.rs's explicit drain_for import. terminal_tabs retains use crate::harness::*; harness.rs:2067 defines pub(crate) async fn drain_for. No compilation was run."
+    ],
+    "coverage_checked": {
+      "SPEC.md / SPEC_impl.md": "Current test-footing/Testing context has no exact defect acceptance; source refutation does not depend on coverage.",
+      "TODO.md Planned": "Empty.",
+      "plans/queue": "No unlanded entries; no matching dangling-reference repair.",
+      "BUGS.md": "No match.",
+      "INDEX.md / matching queue files": "No matching deleted-helper/module reference item.",
+      "TRIAGE_OUTCOMES.md": "No matching decision.",
+      "FILTER.md": "Not used; named unresolved references are absent."
+    },
+    "exact_cover_quotes": [],
+    "missing_premise": "No surviving reference to the named removed symbols was found. The claim does not provide or refute unrelated compilation failures.",
+    "original_stronger_consequence": "Deleting exported helpers or the backpressure module might strand Rust tests with unresolved references. Exact named searches and import/module edits refute that route only; no build execution or catastrophic tooling consequence is claimed.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Narrow, pinned source-search refutation of the specified dangling references."
+  },
+  {
+    "key": "g155/c10",
+    "latest_line": 22,
+    "recommendation": "out-of-range",
+    "bucket": "other",
+    "underlying_key": "pre-base-host-tab-chdir-diagnostic-and-entry-denial-oracle-gap",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The host startup diagnostic can lack cwd detail and the host entry-denial oracle is absent, but both host omissions predate the exclusive base. The removed test explicitly used the forced-tmux creation path, which the assigned change retires. Do not describe the host omissions as fixed or accepted.",
+    "checks": [
+      "647f0227^:crates/farhelm/tests/e2e/terminal_tabs.rs:98-163 explicitly calls this an old-terminal test, installs SupervisorSeams::tmux_terminals(), denies actual entry, and requires a path-naming refusal, no published tab, and a live agent.",
+      "647f0227:crates/terminal-host/src/spawn.rs:524-527 formats program plus errno; :577-578 fails chdir before exec. service/core/host_tabs.rs:638-648 supplies cwd, :686-704 preserves finish errors, and :808-815 adds session identity rather than cwd. This supports a conditional pathless startup error, not wrong-directory execution.",
+      "Base-to-647f0227 diff of terminal-host/spawn.rs and host_tabs.rs leaves those relevant error/spawn bodies unchanged. Base SPEC_impl.md:2014-2018 and 2284-2296 already puts shipped/default launches in hosts; :2373 onward defines host tabs under that selector.",
+      "Pinned base and tip searches of host-tabs/create tests, supervisor host-terminal tests and terminal-host tests for denied-directory/cannot-enter/permission fixtures found no matching entry-denial oracle. The removed forced-tmux test never observed this host-start path. The retained vanished-directory case has a different, earlier metadata-failure premise."
+    ],
+    "coverage_checked": {
+      "SPEC.md / SPEC_impl.md": "Current SPEC.md:2136-2145 requires a clear error naming the directory. SPEC_impl.md:2173-2177 explicitly records the host directory-entry diagnostic as a known gap; this acknowledges the omission but does not make the contradictory product rule acceptable.",
+      "TODO.md Planned": "Empty.",
+      "plans/queue": "No unlanded entries. Historical tmux-end-old-terminals test-footing text directs known-gap tests to be deleted/reported when hosts do not meet SPEC; it is context, not a new unlanded repair.",
+      "BUGS.md": "No entry-denial diagnostic item.",
+      "INDEX.md / matching queue files": "Read tab-helper-can-fail-after-open-succeeds.md. Its trigger is delayed helper chdir after an accepted open, losing the error; this claim fails in the host before exec/open success. Related directory requirement, different failure stage and consequence, so no exact duplicate or proposed extension here.",
+      "TRIAGE_OUTCOMES.md": "No matching host pre-exec entry-denial diagnostic/oracle decision.",
+      "FILTER.md": "Not used for attribution. No rare condition beyond ordinary entry denial was established; do not filter solely because it is a diagnostic."
+    },
+    "exact_cover_quotes": [],
+    "missing_premise": "No in-range introduction of the host diagnostic or missing host oracle. The diagnostic remains a source-only conditional conclusion for a non-root process denied entry to a stat-able directory.",
+    "original_stronger_consequence": "Initial concern was deletion of the present-but-unenterable tab-directory regression; investigation additionally found a possible pathless host startup error. Both host limitations remain real candidates outside this range. Failed chdir exits before the requested program executes; no wrong-directory execution, security or user-work-loss route was established.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Whole-range attribution only: exclude the pre-base host omissions from newly introduced findings, and distinguish them from retirement of a forced-tmux creation test."
+  },
+  {
+    "key": "g156/l1",
+    "latest_line": 8,
+    "recommendation": "retain-verified",
+    "bucket": "other",
+    "underlying_key": "647f0227-removes-supported-tmux-transport-sink-crash-recovery-oracles",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "Real old-terminal transport/recovery integration tests are removed before that runtime stops being supported. Retain the bounded intermediate coverage loss. The earlier proposed drop based solely on absence of a demonstrated product bug was withdrawn. c5 concerns other deleted pending-cleanup request tests, not an exact alias.",
+    "checks": [
+      "647f0227 diff of terminal_tabs.rs deletes input_client_failure_safely_reaps_queued_output_before_reattach, connection_loss_safely_reaps_queued_output_before_reattach, takeover_reason_wins_over_a_gated_natural_detach, a_killed_session_sink_comes_back_while_its_terminals_stay_attached, concurrent_first_attaches_share_one_sink_and_orphan_nothing, and a_killed_supervisor_leaves_no_orphaned_sink_client. Parent names occur at :2612, :2716, :2821, :2936, :3081 and :3152.",
+      "647f0227:SPEC_impl.md:2956-2963 still says old tabs remain in tmux until closed and the path changes only for bug fixes.",
+      "647f0227:service/terminals.rs:4068-4110 retries failing injected opens; :4172-4248 tests stand-in process reap/EOF; :4690-4799 measures a stand-in sink's backoff with later opens failing. These are useful lower-layer oracles, not the removed successful real-tmux recovery/attachment tests.",
+      "dbfc6975:core.rs:6426-6438 ends the old server and unconditionally disables the driver; :6965-6969 does not rediscover old terminals. Tip grep finds no old sink/reap symbols. Tip core/tests/host_terminals.rs:3939-4047 supplies a held-natural-detach takeover test with a winner-output witness, so generic arbitration is not asserted to remain uncovered at tip."
+    ],
+    "coverage_checked": {
+      "SPEC.md / SPEC_impl.md": "Current old-terminal and Ending the old private tmux server sections establish later retirement, not retroactive acceptance of the preceding coverage interval. Testing specifies test footing without accepting this exact gap.",
+      "TODO.md Planned": "Empty.",
+      "plans/queue": "No unlanded entries. Historical retirement plan explains test deletion but does not repair the earlier supported-runtime interval.",
+      "BUGS.md": "No match.",
+      "INDEX.md / matching queue files": "No exact removed old-terminal transport/sink/crash regression item. Generic management-conformance coverage has a different trigger and contract.",
+      "TRIAGE_OUTCOMES.md": "No matching retirement/recovery-test decision. The conformance management-permit discard is unrelated.",
+      "FILTER.md": "No filter covers missing maintainer regression protection. This is not a runtime rare-upgrade or transient-display claim."
+    },
+    "exact_cover_quotes": [],
+    "missing_premise": "None for deletion before retirement. No live runtime defect, frequency or catastrophic test-tooling consequence is established.",
+    "original_stronger_consequence": "The original lead asked about safety/reattachment coverage while old terminals still run. The initial intentional-retirement/no-product-defect proposed drop was expressly withdrawn. Retained registry/barrier/readability/retry tests refute total coverage loss only. Later retirement and the later host arbitration test limit current relevance; migration-test and lower-layer concerns reported from g152/g151 are related but not proven aliases in this batch.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Record intermediate loss of distinguishing recovery regression tests as other. Preserve surviving unit coverage and later subject retirement; do not infer a shipped loss-of-work bug."
+  },
+  {
+    "key": "g156/c2",
+    "latest_line": 10,
+    "recommendation": "out-of-range",
+    "bucket": "other",
+    "underlying_key": "pre-base-terminal-host-cleanup-module-guide-says-hosts-not-started-yet",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The module guide is stale, but the exact false statement is already false at the exclusive base. The changed comment correctly replaces future host creation with present behavior. Comment-only execution neutrality alone would not refute the documentation defect.",
+    "checks": [
+      "6e423e30:crates/farhelm/tests/e2e/terminal_host_cleanup.rs:14-18 already says nothing in a supervisor starts hosts yet; :158-161 already speaks in the future tense.",
+      "Base SPEC_impl.md:2284-2296 already says real/default supervisors and default seams create hosts, establishing pre-base inaccuracy independently of the immediate parent.",
+      "Whole-range git log for this file reports only 08399d09. Its diff changes the lower comment to 'since supervisors start hosts' and removes the retired tmux teardown rationale; it does not change the inaccurate module statement or the test body.",
+      "The inspected fixture still plants a guarded host, drops the fixture, waits for that host's process to disappear and checks state removal. This does not certify every unchanged cleanup helper."
+    ],
+    "coverage_checked": {
+      "SPEC.md / SPEC_impl.md": "Current host/default test-footing context agrees with the corrected comment; no acceptance of the stale module statement.",
+      "TODO.md Planned": "Empty.",
+      "plans/queue": "No unlanded entries; historical comment sweep is not a pending fix.",
+      "BUGS.md": "No match.",
+      "INDEX.md / matching queue files": "Terminal host cleanup, module prose and helper-doc searches find no exact item; other fixture cleanup mechanism items are different claims.",
+      "TRIAGE_OUTCOMES.md": "No matching not-yet-hosts module-guide decision.",
+      "FILTER.md": "Not used. Pre-base attribution, not execution neutrality or a diagnostic filter, is the proposed basis."
+    },
+    "exact_cover_quotes": [],
+    "missing_premise": "No in-range introduction or newly invalidated contract was found for the module-guide statement.",
+    "original_stronger_consequence": "The first proposed drop said the wording-only patch could not affect cleanup execution; that does not settle prose accuracy. Subsequent investigation established an actual contradiction, then traced it before the whole range. The stale guide remains inaccurate and is not certified by this exclusion.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Exclude only the already-stale pre-base developer guidance; the in-range replacement comment is accurate."
+  },
+  {
+    "key": "g156/c3",
+    "latest_line": 3,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "removed-suite-tmux-timeout-floors-do-not-shorten-host-replay-budget",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The removed floors affect only retired tmux fields, while the host replay budget remains thirty seconds. No shorter host timeout is introduced by this constructor replacement.",
+    "checks": [
+      "1ed482dd^:crates/farhelm/tests/e2e/harness.rs:2486-2502 floors only tmux_exchange, tmux_pane_list and sink_ready.",
+      "1ed482dd:service/core.rs:375-436 has no such fields. harness.rs:1800-1808 builds supervisor_on with the same launch binary/default seams and default remaining timeouts; :305-348 retains ATTACH_LIVE_REPLAY_BUDGET_SECS=30.",
+      "1ed482dd:tab_lifecycle_edges.rs:418-491 verifies a live pre-restart shell, uses retire_supervisor, compares child PID and recovers pre-restart output. No runtime test was run; this is not a general flake certification."
+    ],
+    "coverage_checked": {
+      "SPEC.md / SPEC_impl.md": "Session-view tab survival and host test-footing supply the contract; they do not require the retired tmux timeout fields for host replay.",
+      "TODO.md Planned": "Empty.",
+      "plans/queue": "No unlanded entries; no exact timeout repair.",
+      "BUGS.md": "No match.",
+      "INDEX.md / matching queue files": "Read tab-survival-missing-live-exchange.md: it concerns absent successor liveness evidence, not shortened budgets. final-stack-drop-claim-window.md concerns another restart-gap fixture's ownership race. Neither covers this hypothesis.",
+      "TRIAGE_OUTCOMES.md": "No matching shortened host-replay timeout decision.",
+      "FILTER.md": "Not used; the alleged timeout reduction is absent in source."
+    },
+    "exact_cover_quotes": [],
+    "missing_premise": "No host timeout field shortened by the removed floor was identified. The surviving test's other oracle limitations are separate.",
+    "original_stronger_consequence": "Removing loaded-machine timeout floors might reintroduce a flaky host attach. The changed floors were exclusively tmux-facing, so that particular regression route is refuted; no product loss consequence was alleged.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Narrow source refutation of timeout-budget regression, preserving the separate existing successor-liveness finding."
+  },
+  {
+    "key": "g156/c4",
+    "latest_line": 12,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "retired-tmux-query-removal-keeps-host-refusal-and-close-notice-oracles",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The surviving assertions observe the active host creation route, and the named close-notice helper remains its actual caller path. This refutes the specific removed-query/helper-reference concerns, without certifying all lifecycle-race oracles.",
+    "checks": [
+      "1ed482dd:crates/farhelm/tests/e2e/tab_lifecycle_edges.rs:83-108 still checks no tab launch record and no host process after restart-gap refusal.",
+      "1ed482dd:service/core.rs:13715-13791 refuses missing/Gone/unreadable agent hosts before spawning the owned open_host_tab task. host_tabs.rs:396-424 is the accepted host creation route.",
+      "1ed482dd:host_tabs.rs:995-1000 calls detach_closed_tab before ending the host. core.rs:14072-14100 removes the tab attachment, joins its forwarder and sends TabClosed. tab_lifecycle_edges.rs:153-189 explicitly checks that channel's detach code."
+    ],
+    "coverage_checked": {
+      "SPEC.md / SPEC_impl.md": "Current Session view, host-tab and every-terminal-in-a-host contracts match these retained observations; no still-supported tmux creation route requires the removed query.",
+      "TODO.md Planned": "Empty.",
+      "plans/queue": "No unlanded entries; no exact removed-query repair.",
+      "BUGS.md": "No match.",
+      "INDEX.md / matching queue files": "Read final-stack-drop-claim-window.md: its possible ownership-window false failure is separate from loss of no-side-effect assertions. No exact helper-reference item.",
+      "TRIAGE_OUTCOMES.md": "No matching query/helper-reference decision.",
+      "FILTER.md": "Not used; source retains the relevant assertion and helper path."
+    },
+    "exact_cover_quotes": [],
+    "missing_premise": "No active tab creation mechanism is lost from the retained no-side-effect observation. Broader cleanup-race limitations belong to c5 and are not refuted here.",
+    "original_stronger_consequence": "Removing the tmux-session absence query might weaken refusal side-effect coverage, and rewritten close-notice commentary might name a removed helper. Source refutes those narrow hypotheses. No actual consent, process-loss or security defect was asserted.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Source refutation limited to the retired creation query and the actual host close-notice path."
+  },
+  {
+    "key": "g156/c5",
+    "latest_line": 11,
+    "recommendation": "out-of-range",
+    "bucket": "other",
+    "underlying_key": "pre-base-open-delete-race-oracle-omits-markerless-host-exit",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The test indeed lacks an independent terminal-host-exit oracle, but that limitation exists at the exclusive base with host-backed defaults. Updating the old substrate noun does not introduce it. No actual orphaning bug is established or refuted.",
+    "checks": [
+      "1ed482dd:crates/farhelm/tests/e2e/tab_lifecycle_edges.rs:655-714 checks Delete success and row absence, then calls wait_for_tab_race_cleanup; :14-28 scans marked_pids only. :681-683 states the intended no-host/no-process outcome without adding a host assertion.",
+      "6e423e30:tab_lifecycle_edges.rs:894-944 already has the same open/delete body, listing check and marker-cleanup call (:935); helper grep finds the marker-only implementation at :54-57. Baseline SPEC_impl.md:2284-2296 establishes default host terminals.",
+      "1ed482dd:hosts/spawn.rs:350-354 clears the outer host's environment. Host-tab docs identify markers as child-only. A session-marker scan therefore cannot by itself observe that host's disappearance. Production cleanup and fixture fallback are not equivalent test oracles."
+    ],
+    "coverage_checked": {
+      "SPEC.md / SPEC_impl.md": "Host-tab and Session-view cleanup contracts require the intended cleanup; no explicit acceptance of this missing test observation. Host-backed baseline context establishes attribution.",
+      "TODO.md Planned": "Empty.",
+      "plans/queue": "No unlanded entries; no exact host-exit oracle repair.",
+      "BUGS.md": "No match.",
+      "INDEX.md / matching queue files": "No exact open/delete race markerless-host oracle item. Other host cleanup mechanism and successor-liveness tests have different triggers/assertions.",
+      "TRIAGE_OUTCOMES.md": "No matching markerless-host oracle decision.",
+      "FILTER.md": "Not used; this is pre-base test sensitivity, not an accepted product cleanup failure."
+    },
+    "exact_cover_quotes": [],
+    "missing_premise": "No in-range introduction of the missing observation. A markerless host could escape these assertions, but a production sequence creating one is not established by this claim.",
+    "original_stronger_consequence": "The changed comment says no tab host may remain, while the oracle only sees rows and marked processes. That limitation is real and already pre-base. The named external g166/c5 concerns a product Delete host-confirmation route, which this test-attribution conclusion does not refute or duplicate.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Whole-range attribution of a maintainer-test gap only; do not use correct production cleanup or fallback teardown as proof of test sensitivity."
+  },
+  {
+    "key": "g157/c1",
+    "latest_line": 5,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "old-terminal-linux-process-tests-are-not-built-on-macos",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The module is compiled only on Linux, so the named /proc/setsid portability failure cannot run on macOS. This says nothing about production old-terminal cleanup on macOS.",
+    "checks": [
+      "dbfc6975:crates/farhelm/tests/e2e/main.rs:110-111 places mod old_terminals immediately under cfg(target_os = linux). The earlier history's :126-127 coordinate is corrected by the latest record.",
+      "dbfc6975:main.rs:4-5 explains Linux-only process-lifetime oracles. :133-140 builds e2e_requires_linux_process_oracles on non-Linux and prints an explicit SKIPPED message. The old_terminals module's real-server fixtures are therefore not compiled there."
+    ],
+    "coverage_checked": {
+      "SPEC.md / SPEC_impl.md": "Current Testing describes Linux real-stack integration and separate host-crate macOS coverage. No acceptance is needed because the alleged non-Linux test execution route is absent.",
+      "TODO.md Planned": "Empty.",
+      "plans/queue": "No unlanded entries; no exact old-terminal test portability repair.",
+      "BUGS.md": "No match.",
+      "INDEX.md / matching queue files": "No exact old-terminal /proc-on-macOS test failure item; other Mac process cleanup/tool-format findings concern different executed paths.",
+      "TRIAGE_OUTCOMES.md": "No matching module-platform-gating decision.",
+      "FILTER.md": "Not used; unreachable unsupported-platform test execution is source-refuted."
+    },
+    "exact_cover_quotes": [],
+    "missing_premise": "There is no non-Linux compilation/execution route for this module in the reviewed test target.",
+    "original_stronger_consequence": "The new old-terminal tests might fail on Macs because they use setsid and /proc. Linux module gating refutes the test portability candidate only; it does not establish production cleanup correctness or Mac test coverage.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Narrow source refutation via the module's compile-time platform gate and explicit non-Linux skip."
+  }
+]

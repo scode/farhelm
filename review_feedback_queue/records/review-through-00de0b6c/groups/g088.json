@@ -1,0 +1,1063 @@
+{
+  "group": {
+    "id": "g088",
+    "domain": "gui-terminal-attachment",
+    "purpose": "gui-terminal-attachment: crates/farhelm-ui/src/session_view.rs, crates/farhelm-ui/src/attachments.rs, crates/farhelm-ui/src/tabs.rs, crates/farhelm-ui/src/tunnels.rs; phases complete small per-commit changes",
+    "interfaces": [
+      "g001",
+      "g002",
+      "g005",
+      "g007",
+      "g009",
+      "g010",
+      "g011",
+      "g038",
+      "g079",
+      "g080",
+      "g081",
+      "g082",
+      "g083",
+      "g084",
+      "g089",
+      "g196"
+    ],
+    "sources": [
+      {
+        "path": "[private-run]/prep/parts/00249-000.patch",
+        "ranges": [
+          [
+            1,
+            95
+          ]
+        ],
+        "original_path": "crates/farhelm-ui/src/session_view.rs",
+        "commit": "350a4b33b6d4476f4a78e43cea124bc2b828f462",
+        "notes": "patch header; patch character offsets [0,6992)",
+        "lines": 95,
+        "bytes": 6992,
+        "start": 0,
+        "end": 6992,
+        "original": "[private-run]/prep/originals/00249.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/00320-000.patch",
+        "ranges": [
+          [
+            1,
+            135
+          ]
+        ],
+        "original_path": "crates/farhelm-ui/src/session_view.rs",
+        "commit": "04d85f0c98a9b635709d00b056719a0baa7fd3fc",
+        "notes": "patch header; patch character offsets [0,7586)",
+        "lines": 135,
+        "bytes": 7592,
+        "start": 0,
+        "end": 7586,
+        "original": "[private-run]/prep/originals/00320.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/00520-000.patch",
+        "ranges": [
+          [
+            1,
+            33
+          ]
+        ],
+        "original_path": "crates/farhelm-ui/src/session_view.rs",
+        "commit": "1d24c6af0b6fdbbec854623ff53f90281b8271ab",
+        "notes": "patch header; patch character offsets [0,2573)",
+        "lines": 33,
+        "bytes": 2573,
+        "start": 0,
+        "end": 2573,
+        "original": "[private-run]/prep/originals/00520.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/00575-000.patch",
+        "ranges": [
+          [
+            1,
+            160
+          ]
+        ],
+        "original_path": "crates/farhelm-ui/src/session_view.rs",
+        "commit": "b3d6b3eff6b7508e0b1fb6ec5b5cde31d27ebabe",
+        "notes": "patch header; patch character offsets [0,7831)",
+        "lines": 160,
+        "bytes": 7831,
+        "start": 0,
+        "end": 7831,
+        "original": "[private-run]/prep/originals/00575.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/00721-000.patch",
+        "ranges": [
+          [
+            1,
+            229
+          ]
+        ],
+        "original_path": "crates/farhelm-ui/src/session_view.rs",
+        "commit": "2ef10815f12ed719ab6c51c6e3ac6fcd3f8bc1fa",
+        "notes": "patch header; patch character offsets [0,14683)",
+        "lines": 229,
+        "bytes": 14683,
+        "start": 0,
+        "end": 14683,
+        "original": "[private-run]/prep/originals/00721.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/00876-000.patch",
+        "ranges": [
+          [
+            1,
+            78
+          ]
+        ],
+        "original_path": "crates/farhelm-ui/src/session_view.rs",
+        "commit": "dbfc69751215dbf15e1d31d5bed73c3754c4ebc4",
+        "notes": "patch header; patch character offsets [0,3971)",
+        "lines": 78,
+        "bytes": 3997,
+        "start": 0,
+        "end": 3971,
+        "original": "[private-run]/prep/originals/00876.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/01105-000.patch",
+        "ranges": [
+          [
+            1,
+            25
+          ]
+        ],
+        "original_path": "crates/farhelm-ui/src/attachments.rs",
+        "commit": "f560058da19e02716e6f943883a9508b447aff4e",
+        "notes": "patch header; patch character offsets [0,1466)",
+        "lines": 25,
+        "bytes": 1472,
+        "start": 0,
+        "end": 1466,
+        "original": "[private-run]/prep/originals/01105.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/01121-000.patch",
+        "ranges": [
+          [
+            1,
+            112
+          ]
+        ],
+        "original_path": "crates/farhelm-ui/src/tabs.rs",
+        "commit": "f560058da19e02716e6f943883a9508b447aff4e",
+        "notes": "patch header; patch character offsets [0,5233)",
+        "lines": 112,
+        "bytes": 5253,
+        "start": 0,
+        "end": 5233,
+        "original": "[private-run]/prep/originals/01121.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/01122-000.patch",
+        "ranges": [
+          [
+            1,
+            18
+          ]
+        ],
+        "original_path": "crates/farhelm-ui/src/tunnels.rs",
+        "commit": "f560058da19e02716e6f943883a9508b447aff4e",
+        "notes": "patch header; patch character offsets [0,1191)",
+        "lines": 18,
+        "bytes": 1191,
+        "start": 0,
+        "end": 1191,
+        "original": "[private-run]/prep/originals/01122.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/01503-000.patch",
+        "ranges": [
+          [
+            1,
+            30
+          ]
+        ],
+        "original_path": "crates/farhelm-ui/src/session_view.rs",
+        "commit": "61e632323dbc6b4a35ed27bf5b9833102ffd5a4e",
+        "notes": "patch header; patch character offsets [0,1713)",
+        "lines": 30,
+        "bytes": 1717,
+        "start": 0,
+        "end": 1713,
+        "original": "[private-run]/prep/originals/01503.patch"
+      }
+    ],
+    "lines": 915,
+    "bytes": 53301
+  },
+  "records": [
+    {
+      "key": "g088/c1",
+      "owner": "g088",
+      "id": "c1",
+      "domain": "gui-terminal-attachment",
+      "purpose": "gui-terminal-attachment: crates/farhelm-ui/src/session_view.rs, crates/farhelm-ui/src/attachments.rs, crates/farhelm-ui/src/tabs.rs, crates/farhelm-ui/src/tunnels.rs; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 1,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c1",
+            "state": "open",
+            "summary": "Environment header Delete preserves the answered deletion scope",
+            "location": "crates/farhelm-ui/src/session_view.rs:2797",
+            "detail": "Reviewed commit: 2ef10815f12ed719ab6c51c6e3ac6fcd3f8bc1fa. TLDR: considered whether a connection change could silently turn Delete session into destruction of the entire environment. Details: session_view.rs:745-755 stores DeleteScope in the confirmation key; :2789-2799 carries the rendered token and uses delete.with_scope(*shown_delete.key()), rather than the current host-derived scope. SPEC_impl.md:1071-1081 requires answers to bind to the render; :6587-6589 distinguishes session deletion from warned whole-environment deletion. The scope is retained through subsequent host refreshes; captured environment_delete supplies the host identity but with_scope overrides its recomputed lane. Suggested bucket: other (refuted candidate). Confidence: confirmed by source, no execution. proposed_drop: source refutation; the answer explicitly replaces the fresh scope with the rendered token's scope. Could-be-highest: yes, if scope could widen, because that would delete unconsented sessions and files; the examined path does not widen it. possible_cover: none; coverage sources not consulted. Caveat: adjacent request routing and server contracts still need review as interfaces, and host absence may cause refusal rather than deletion."
+          }
+        },
+        {
+          "line": 10,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c1",
+            "state": "open",
+            "summary": "Environment header Delete preserves the answered deletion scope",
+            "location": "crates/farhelm-ui/src/session_view.rs:2797",
+            "detail": "Reviewed commit: 2ef10815f12ed719ab6c51c6e3ac6fcd3f8bc1fa; downstream API checked at f560058da19e02716e6f943883a9508b447aff4e during synthesis. TLDR: considered whether a connection change silently turns Delete session into destruction of the whole environment. Details: session_view.rs:745-755 stores DeleteScope in the confirmation key; :2789-2799 carries the rendered token and sends delete.with_scope(*shown_delete.key()). Exact source: delete.with_scope(*shown_delete.key()). This overrides the host-derived current lane with the rendered answer's scope. The list-owned request at 2ef10815 list/view.rs:2980-2985 passes environment.scope to delete_in_environment without recomputing it. At f560058 api/sandbox_sessions.rs:193-197 exhaustively maps Session to delete_environment_session=true and Whole to delete_sandbox=true; :214-234 sends one request and returns Unasked rather than retrying under a wider scope. Thus the caller/encoder preserves consent as well. Contract: SPEC_impl.md:1071-1081 requires answers to bind to what was drawn; :6587-6589 distinguishes ordinary session deletion from warned whole-environment destruction. Suggested bucket: other (refuted candidate). Confidence: confirmed source analysis, no execution. proposed_drop: source refutation, with the exact with_scope expression and exhaustive query mappings above. Could-be-highest: yes if a scope widened, because that would destroy unconsented sessions/files; examined UI/caller/API path does not widen. possible_cover: none known; no coverage source consulted. Caveat: this is not a new full server deletion review; that remains an adjacent-group responsibility. A missing host cannot produce wider scope in this API."
+          }
+        }
+      ],
+      "latest": {
+        "line": 10,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c1",
+          "state": "open",
+          "summary": "Environment header Delete preserves the answered deletion scope",
+          "location": "crates/farhelm-ui/src/session_view.rs:2797",
+          "detail": "Reviewed commit: 2ef10815f12ed719ab6c51c6e3ac6fcd3f8bc1fa; downstream API checked at f560058da19e02716e6f943883a9508b447aff4e during synthesis. TLDR: considered whether a connection change silently turns Delete session into destruction of the whole environment. Details: session_view.rs:745-755 stores DeleteScope in the confirmation key; :2789-2799 carries the rendered token and sends delete.with_scope(*shown_delete.key()). Exact source: delete.with_scope(*shown_delete.key()). This overrides the host-derived current lane with the rendered answer's scope. The list-owned request at 2ef10815 list/view.rs:2980-2985 passes environment.scope to delete_in_environment without recomputing it. At f560058 api/sandbox_sessions.rs:193-197 exhaustively maps Session to delete_environment_session=true and Whole to delete_sandbox=true; :214-234 sends one request and returns Unasked rather than retrying under a wider scope. Thus the caller/encoder preserves consent as well. Contract: SPEC_impl.md:1071-1081 requires answers to bind to what was drawn; :6587-6589 distinguishes ordinary session deletion from warned whole-environment destruction. Suggested bucket: other (refuted candidate). Confidence: confirmed source analysis, no execution. proposed_drop: source refutation, with the exact with_scope expression and exhaustive query mappings above. Could-be-highest: yes if a scope widened, because that would destroy unconsented sessions/files; examined UI/caller/API path does not widen. possible_cover: none known; no coverage source consulted. Caveat: this is not a new full server deletion review; that remains an adjacent-group responsibility. A missing host cannot produce wider scope in this API."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g088/findings.jsonl",
+        "id": "c1",
+        "line": 10,
+        "disposition": "under-investigation",
+        "group": "g088-c1",
+        "reason": "Record durably acknowledged; parent source/contract validation, cross-group synthesis, coverage/filter matching and any independent drop check remain pending. This preserves the claim and uncertainty without accepting, dropping or lowering it."
+      },
+      "accepted_parent_decision": null,
+      "returned_claim_checks": [
+        {
+          "batch": "claims-058",
+          "key": "g088/c1",
+          "latest_line": 10,
+          "recommendation": "refuted",
+          "bucket": "other",
+          "underlying_key": "header-environment-delete-preserves-rendered-scope",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The examined header, persistent request owner and API encoder preserve the answered Delete scope. A connection change does not widen Session to Whole along this path.",
+          "checks": [
+            "2ef10815f12ed719ab6c51c6e3ac6fcd3f8bc1fa session_view.rs:745-755 stores DeleteScope in ConfirmSlot; :2789-2799 consumes the rendered token and applies delete.with_scope(*shown_delete.key()).",
+            "2ef10815 list/view.rs:2978-2985 sends environment.scope unchanged to delete_in_environment.",
+            "f560058da19e02716e6f943883a9508b447aff4e api/sandbox_sessions.rs:186-234 exhaustively encodes Session as delete_environment_session=true and Whole as delete_sandbox=true; a refusal returns without a wider retry.",
+            "Source-only check. This is not an independent review of server deletion, identity binding or unrelated delayed handlers. Host absence does not widen this encoder's scope."
+          ],
+          "coverage_checked": [
+            "SPEC.md:1510-1541 and SPEC_impl.md:6086-6158 distinguish ordinary session deletion from warned whole-environment destruction; SPEC_impl.md:1069-1096 binds answers to the rendered question. These are contracts supporting the refutation, not acceptance of unconsented destruction.",
+            "Current TODO.md Planned is empty; plans/queue/INDEX.md contains no unlanded plan entries. BUGS.md concerns only a retained local SSH output pipe. Current queue INDEX and active TRIAGE_OUTCOMES searches show no exact scope-widening claim. Nearby sandbox lifecycle-token items concern different handlers/triggers."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": null,
+          "original_stronger_consequence": "If the scope widened, unconsented sessions, processes and files could be destroyed. Both history records retain that highest-capable hypothetical; source refutes this examined route only.",
+          "needs_independent_drop_check": true,
+          "proposed_basis": "Source refutation of the named scope-widening path; obtain the independent drop verdict before dismissal because its original consequence involves user-owned work."
+        }
+      ],
+      "parent_proposals": [
+        {
+          "artifact": "parent-flagged-judgments-058.json",
+          "key": "g088/c1",
+          "proposal": "claim-checks/claims-058/result.json",
+          "parent_proposal": "source-refuted-header-Delete-refresh-widens-rendered-scope",
+          "final_independent_gate": "required-before-highest-unconsented-destruction-drop",
+          "reason": "Parent read full058 flagged records. Header ConfirmSlot captures scope, exact shown token consumed and with_scope replaces any refreshed scope; persistent owner sends it unchanged and API exhaustively selects Session/Whole query, no wider retry on refusal/host absence. Refute this header/encoder widening only, not server deletion, broader identity or other delayed handlers. Original unconfirmed sessions/process/files loss stays for fresh gate; nearby lifecycle-token item is a distinct control."
+        }
+      ],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": true,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "header-environment-delete-preserves-rendered-scope",
+        "destination": null
+      }
+    },
+    {
+      "key": "g088/c2",
+      "owner": "g088",
+      "id": "c2",
+      "domain": "gui-terminal-attachment",
+      "purpose": "gui-terminal-attachment: crates/farhelm-ui/src/session_view.rs, crates/farhelm-ui/src/attachments.rs, crates/farhelm-ui/src/tabs.rs, crates/farhelm-ui/src/tunnels.rs; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 2,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c2",
+            "state": "open",
+            "summary": "Deleting environments already disable the remaining header lifecycle controls",
+            "location": "crates/farhelm-ui/src/session_view.rs:2443",
+            "detail": "Reviewed commit: 2ef10815f12ed719ab6c51c6e3ac6fcd3f8bc1fa. TLDR: considered whether Stop, Restart and Replace remain usable while an environment is being destroyed because their disabled expressions do not mention environment_deleting. Details: session_view.rs:1990 derives sandbox_frozen from sandbox_sessions::frozen; sandbox_sessions.rs:95-103 includes HostPhase::Deleting. Stop (:2443), Stop and suspend (:2494), Restart (:2552) and Replace (:2653) use sandbox_frozen; Clone and Delete add the distinct environment_deleting guard. SPEC_impl.md:6650-6651 requires actions unavailable during Deleting. Suggested bucket: other (refuted candidate). Confidence: confirmed by source, no execution. proposed_drop: source refutation; Deleting is included in the common frozen predicate. Could-be-highest: no established route to unauthorized loss; an ongoing deletion already has consent, and the suspected issue was enabled controls during that operation. possible_cover: none; coverage sources not consulted. Caveat: this checks rendered availability, not every delayed handler or server race."
+          }
+        }
+      ],
+      "latest": {
+        "line": 2,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c2",
+          "state": "open",
+          "summary": "Deleting environments already disable the remaining header lifecycle controls",
+          "location": "crates/farhelm-ui/src/session_view.rs:2443",
+          "detail": "Reviewed commit: 2ef10815f12ed719ab6c51c6e3ac6fcd3f8bc1fa. TLDR: considered whether Stop, Restart and Replace remain usable while an environment is being destroyed because their disabled expressions do not mention environment_deleting. Details: session_view.rs:1990 derives sandbox_frozen from sandbox_sessions::frozen; sandbox_sessions.rs:95-103 includes HostPhase::Deleting. Stop (:2443), Stop and suspend (:2494), Restart (:2552) and Replace (:2653) use sandbox_frozen; Clone and Delete add the distinct environment_deleting guard. SPEC_impl.md:6650-6651 requires actions unavailable during Deleting. Suggested bucket: other (refuted candidate). Confidence: confirmed by source, no execution. proposed_drop: source refutation; Deleting is included in the common frozen predicate. Could-be-highest: no established route to unauthorized loss; an ongoing deletion already has consent, and the suspected issue was enabled controls during that operation. possible_cover: none; coverage sources not consulted. Caveat: this checks rendered availability, not every delayed handler or server race."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g088/findings.jsonl",
+        "id": "c2",
+        "line": 2,
+        "disposition": "excluded",
+        "group": "deleting-environment-header-controls-use-frozen-predicate",
+        "reason": "Parent explicitly accepted named refuted proposal from claims-058 after inspecting it. Deleting is already included in the shared frozen predicate used by the remaining header lifecycle controls. Direct source refutation through the predicate the disabled expressions call. Checked source/results: [\"2ef10815f12ed719ab6c51c6e3ac6fcd3f8bc1fa sandbox_sessions.rs:95-103 includes HostPhase::Deleting in frozen.\",\"The same revision session_view.rs:1990-1992 derives sandbox_frozen from that predicate; Stop :2443, Stop and suspend :2494, Restart :2552 and Replace :2653 disable from it.\",\"No runtime observation. This settles rendered ordinary controls, not answers retained from an earlier render or every server race.\"] Current coverage/results: [\"SPEC.md:1527-1529 and SPEC_impl.md:6151-6158 require actions unavailable during deletion. Current queue frozen-sandbox-retains-header-lifecycle-answers describes already-open answers and the interrupted card, a distinct trigger from the ordinary controls examined here.\",\"Both specs searched; TODO Planned empty; unlanded plans index empty; BUGS and active TRIAGE_OUTCOMES contain no exact ordinary-header-enable claim. Queue INDEX read and relevant frozen-control entries distinguished.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Stop, Restart and Replace might remain usable while deletion runs. No unauthorized destruction or work-loss route was alleged or established.\"; null."
+      },
+      "accepted_parent_decision": {
+        "key": "g088/c2",
+        "line": 2,
+        "disposition": "excluded",
+        "group": "deleting-environment-header-controls-use-frozen-predicate",
+        "bucket": "other",
+        "recording": "refuted",
+        "queue_target_candidate": null,
+        "needs_independent_drop_check": false,
+        "reason": "Parent explicitly accepted named refuted proposal from claims-058 after inspecting it. Deleting is already included in the shared frozen predicate used by the remaining header lifecycle controls. Direct source refutation through the predicate the disabled expressions call. Checked source/results: [\"2ef10815f12ed719ab6c51c6e3ac6fcd3f8bc1fa sandbox_sessions.rs:95-103 includes HostPhase::Deleting in frozen.\",\"The same revision session_view.rs:1990-1992 derives sandbox_frozen from that predicate; Stop :2443, Stop and suspend :2494, Restart :2552 and Replace :2653 disable from it.\",\"No runtime observation. This settles rendered ordinary controls, not answers retained from an earlier render or every server race.\"] Current coverage/results: [\"SPEC.md:1527-1529 and SPEC_impl.md:6151-6158 require actions unavailable during deletion. Current queue frozen-sandbox-retains-header-lifecycle-answers describes already-open answers and the interrupted card, a distinct trigger from the ordinary controls examined here.\",\"Both specs searched; TODO Planned empty; unlanded plans index empty; BUGS and active TRIAGE_OUTCOMES contain no exact ordinary-header-enable claim. Queue INDEX read and relevant frozen-control entries distinguished.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Stop, Restart and Replace might remain usable while deletion runs. No unauthorized destruction or work-loss route was alleged or established.\"; null."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-058",
+          "key": "g088/c2",
+          "latest_line": 2,
+          "recommendation": "refuted",
+          "bucket": "other",
+          "underlying_key": "deleting-environment-header-controls-use-frozen-predicate",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "Deleting is already included in the shared frozen predicate used by the remaining header lifecycle controls.",
+          "checks": [
+            "2ef10815f12ed719ab6c51c6e3ac6fcd3f8bc1fa sandbox_sessions.rs:95-103 includes HostPhase::Deleting in frozen.",
+            "The same revision session_view.rs:1990-1992 derives sandbox_frozen from that predicate; Stop :2443, Stop and suspend :2494, Restart :2552 and Replace :2653 disable from it.",
+            "No runtime observation. This settles rendered ordinary controls, not answers retained from an earlier render or every server race."
+          ],
+          "coverage_checked": [
+            "SPEC.md:1527-1529 and SPEC_impl.md:6151-6158 require actions unavailable during deletion. Current queue frozen-sandbox-retains-header-lifecycle-answers describes already-open answers and the interrupted card, a distinct trigger from the ordinary controls examined here.",
+            "Both specs searched; TODO Planned empty; unlanded plans index empty; BUGS and active TRIAGE_OUTCOMES contain no exact ordinary-header-enable claim. Queue INDEX read and relevant frozen-control entries distinguished."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": null,
+          "original_stronger_consequence": "Stop, Restart and Replace might remain usable while deletion runs. No unauthorized destruction or work-loss route was alleged or established.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Direct source refutation through the predicate the disabled expressions call."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "deleting-environment-header-controls-use-frozen-predicate",
+        "destination": null
+      }
+    },
+    {
+      "key": "g088/l1",
+      "owner": "g088",
+      "id": "l1",
+      "domain": "gui-terminal-attachment",
+      "purpose": "gui-terminal-attachment: crates/farhelm-ui/src/session_view.rs, crates/farhelm-ui/src/attachments.rs, crates/farhelm-ui/src/tabs.rs, crates/farhelm-ui/src/tunnels.rs; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 3,
+          "event": {
+            "version": 1,
+            "kind": "lead",
+            "id": "l1",
+            "state": "open",
+            "summary": "Check whether retirement can erase a mounted view's unobserved Restart completion",
+            "location": "crates/farhelm-ui/src/session_view.rs:1031",
+            "detail": "Reviewed commit: b3d6b3eff6b7508e0b1fb6ec5b5cde31d27ebabe. TLDR: checking whether fast detail/listing retirement can prevent an already mounted terminal from processing a successful Restart. Details: session_view.rs:1031-1044 clears Lifecycle.restart after a confirming detail read, and list/view.rs:1798 now retires outcomes on confirming listings; session_ops.rs:176-222 retains a separate revision and restart_revision. Need inspect use_restart_observation and actual scheduling contract to determine whether completion survives clearing restart. Suspected consequence: no terminal remount or lingering interruption view. Suggested bucket: high if established. Confidence: unresolved lead, source-only. proposed_drop: false pending source check. Could-be-highest: no established security or work-loss route; suspect terminal presentation only. possible_cover: none. Checks so far: located retirement and lifecycle state definitions. Missing premise: what the mounted observer keys on and whether it still reacts when restart becomes None. Next: inspect observer and its tests, without executing or reproducing."
+          }
+        },
+        {
+          "line": 4,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "l1",
+            "state": "open",
+            "summary": "Retiring Restart payload does not erase the remount obligation",
+            "location": "crates/farhelm-ui/src/session_view.rs:535",
+            "detail": "Reviewed commit: b3d6b3eff6b7508e0b1fb6ec5b5cde31d27ebabe. TLDR: the suspected failure to reattach after a fast refresh is prevented by a separate completion revision. Details: use_restart_observation at session_view.rs:535-565 compares Lifecycle.restart_revision, not the optional restart payload, and increments mount_generation even when that payload has already been cleared. The changed test at :3955-4015 models clearing the payload before the observer runs, asserts the observer has not run, and checks exactly one remount for successful and refused outcomes. session_ops.rs:187-199 advances restart_revision at finish_restart, while retirement at :219-240 changes only restart. Original suspected consequence: no terminal remount or lingering interruption view after successful Restart. The remount route is refuted; if sidebar retirement precedes detail, the current view can retain old Interrupted presentation until its ordinary post-boundary detail read, but this is not an established persistent failure. SPEC_impl.md, GUI: Dioxus, requires reattachment after every Restart result; that requirement is preserved. Suggested bucket: other (refuted candidate). Confidence: confirmed source analysis; test inspected, not run. proposed_drop: source refutation; durable completion revision survives payload retirement and independently remounts. Could-be-highest: no established security or loss-of-work route. possible_cover: none; coverage sources not consulted. Open checks: none for this lead."
+          }
+        },
+        {
+          "line": 7,
+          "event": {
+            "version": 1,
+            "kind": "lead",
+            "id": "l1",
+            "state": "open",
+            "summary": "Reopened: Restart retirement may prevent the terminal surface from mounting",
+            "location": "crates/farhelm-ui/src/session_view.rs:535",
+            "detail": "Reviewed commit: b3d6b3eff6b7508e0b1fb6ec5b5cde31d27ebabe, with later interaction at f560058da19e02716e6f943883a9508b447aff4e to inspect. TLDR: a successful Restart may leave an interrupted-session card over a running agent if a listing clears its success before the view observes it. Details: parent supplied cross-group leads g036/l1 and g037/f3, g038/l1, g089/l1. Prior l1 refutation established only that mount_generation increments; it did not establish that keep_terminal_surface permits a surface to exist when current remains Interrupted and relaunched was never set true. Reopened to inspect sidebar retirement, independent detail admission, ReadGate ordering, observer and recovery reads. Original consequence retained: missing terminal remount or lingering interruption presentation after a successful Restart. Suggested bucket: high if established. Confidence: unresolved source lead; no execution. proposed_drop: false, previous drop withdrawn pending this check. Could-be-highest: no established security or work-loss route. possible_cover: parent-supplied related records g036/l1, g037/f3, g038/l1, g089/l1; no coverage sources read. Missing premises: exact admissible event ordering and whether any subsequent view read necessarily corrects the presentation. Next: inspect both pinned revisions and callers, without reproductions."
+          }
+        },
+        {
+          "line": 8,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "l1",
+            "state": "open",
+            "summary": "Sidebar retirement can suppress the terminal after a successful Restart",
+            "location": "crates/farhelm-ui/src/session_view.rs:559",
+            "detail": "Reviewed commit: b3d6b3eff6b7508e0b1fb6ec5b5cde31d27ebabe; also checked the changed representation at f560058da19e02716e6f943883a9508b447aff4e. TLDR: after Restart succeeds, the session view can still show the interrupted-session card instead of attaching to its running agent because a sidebar refresh consumes the success before the view observes it. Details: correcting the prior l1 candidate: preserving restart_revision and incrementing mount_generation does not establish that a terminal surface exists. At b3d6b3e session_view.rs:559-564 sets relaunched only from the optional success payload, then independently increments the generation; :3711-3732 rejects the terminal surface when current is Interrupted and relaunched is false. The sidebar now clears the same payload in list/view.rs:1798 via session_ops::retire_confirmed_restarts, independently of the view's current detail. A qualifying later listing can consume it before queued effects observe it, without making the view's own Interrupted detail current. f560058 changes the payload to restart_succeeded and removes the listing-generation floor: session_ops.rs:79-80 treats a stale Interrupted row as confirming, :215-224 clears success on an accepted listing, while session_view.rs:559-563 sets relaunched only if that flag survived. list/view.rs:3416-3419 records completion and releases its request before a delayed listing can commit. Thus a pre-Restart stale response is another route to losing success before the view effect. Original consequence retained: missing terminal mounting or lingering Interrupted presentation after successful Restart; remount-generation increment alone was not a full refutation. Suggested bucket: high for losing access to the restarted terminal until independent correction. Confidence: confirmed source mechanism; precise recovery duration and full stale-response admission route still being checked, not observed in execution. proposed_drop: false; previous proposed source refutation is withdrawn. Could-be-highest: no established security or irreversible work-loss route; an additional Restart is server-guarded and no claim of killing an unseen agent is made. possible_cover: parent-supplied g036/l1, g037/f3, g038/l1, g089/l1 likely describe this interaction; no coverage source inspected. Caveats: a later successful current detail can repair the surface; no permanent failure or lost agent work is claimed. Next checks: exact ReadGate acceptance, independent detail admission and recovery scheduling, and whether the existing test observes terminal visibility rather than only generation."
+          }
+        },
+        {
+          "line": 9,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "l1",
+            "state": "open",
+            "summary": "Sidebar retirement can suppress the terminal after a successful Restart",
+            "location": "crates/farhelm-ui/src/session_view.rs:559",
+            "detail": "Reviewed commits: b3d6b3eff6b7508e0b1fb6ec5b5cde31d27ebabe (new sidebar retirement interacting with this group's changed view/test) and f560058da19e02716e6f943883a9508b447aff4e (removes its generation floor while preserving the surface bug). TLDR: Restart can succeed while its session still shows the interrupted-session card and offers Restart instead of displaying the running agent. A sidebar response can consume the success before the session view uses it to mount the terminal. Details: the prior l1 proposed drop is retracted: a surviving remount-generation increment is insufficient when the terminal surface itself is conditional. At b3d6b3e, session_view.rs:559-564 sets relaunched only from state.restart.filter(succeeded), then advances mount_generation regardless; :3711-3732 returns Interrupted/false for an Interrupted current detail with relaunched=false. list/view.rs:1798 now retires the shared payload from a sidebar listing independently of that current detail. session_ops.rs:92-106 admits any post-floor, nonpending read satisfying stale || status!=Interrupted, and :219-233 erases the payload. Consequently a qualifying newer sidebar response before queued observer effects can remove the success without updating the session view's own Interrupted status. f560058 exposes a stronger pre-Restart-response route: (1) a sidebar read snapshots a stale Interrupted session; (2) the independently read session detail becomes fresh Interrupted and the header admits Restart (session_view.rs:982-1044, :2178-2187); (3) the POST succeeds, list/view.rs:3416-3419 sets restart_succeeded and ends the request without fencing listing_reads; (4) the old successful sidebar reply arrives before any newer listing success and before the view's observer effect. accepts_listing (:756-769) uses ReadGate.accept_success, which compares against applied, not newest started (ops.rs:182-187), so the refresh requested on completion does not itself reject that old response. session_ops.rs:79-80 treats stale=true as confirming, :91-105 requires only no pending request and a true flag, and :215-224 clears success; f560058 removed b3d6b3e's restart_listing_floor. (5) session_view.rs:549-563 sees the changed restart_revision but false success, never sets relaunched, and :1709-1710 supplies an empty terminal specification because :3701-3721 still rejects fresh Interrupted. This is absence of a terminal, not merely a missed generation update. The existing test at b3d6b3e session_view.rs:3955-4015 / f560058 :3912-3960 explicitly permits completion payload retirement before observer effects, but asserts only generation and never observes relaunched or keep_terminal_surface. Contract: b3d6b3e SPEC_impl.md:1133-1138 and f560058 :1134-1140 require that Restart completion reattach the terminal and that a mounted view observe it; SPEC.md Session view requires the real live TUI. Suggested fix direction: preserve completion success independently of retention for future mounts, or let sidebar retirement retire only the future-mount seed while each mounted view consumes its own completion; maintain a read/lifecycle floor for stale pre-Restart replies. Suggested bucket: high, because a successful recovery can leave the terminal unavailable and still invite recovery actions, particularly while the next detail/status read is slow. Confidence: confirmed by source/contract analysis; no execution or reproduction. proposed_drop: false. Could-be-highest: no established security or irreversible work-loss consequence; no claim that another click kills the running agent. possible_cover: parent-supplied g036/l1, g037/f3, g038/l1 and g089/l1 are likely the same interaction; no coverage source inspected. Recovery and limits: session_view.rs:1475-1487 still requests a post-boundary detail read, and :1082-1115 retries failed reads. A later current detail with a non-Interrupted status repairs the surface. A Restart reply alone need not yield that status: helm session_cache.rs:143-146 retains the previous Interrupted status when incoming status is Unknown until an actual host refresh supplies a definite status. Neither sidebar retirement nor mount_generation copies its newer row into this view's current state; :1257-1262 follows only title. Thus the residual is real but not claimed permanent, with duration determined by independent status/detail progress. The b3 route requires a qualifying newer listing before effects; the stale old-response route specifically appears after f560058 removes the floor. Readily checkable premises resolved; no open source lead remains."
+          }
+        },
+        {
+          "line": 12,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "l1",
+            "state": "open",
+            "summary": "Sidebar retirement can suppress the terminal after a successful Restart",
+            "location": "crates/farhelm-ui/src/session_view.rs:559",
+            "detail": "Reviewed commits: b3d6b3eff6b7508e0b1fb6ec5b5cde31d27ebabe and f560058da19e02716e6f943883a9508b447aff4e. TLDR: after successful Restart the open view can still show its interrupted-session card until a fresh live detail arrives, because sidebar retirement erases success before the view observes it. Synthesis correction: the prior event incorrectly suggested helm session_cache::merged_status could keep a newly issued connected detail Interrupted. Direct source check at f560058 sessions.rs:3052-3095 and :3162-3231 establishes that connected detail calls manager::drain_sessions and sets stale=false; only the no-client branch reads cached metadata. Remove that cache premise. The relevant old Interrupted is the mounted view's already accepted current, not a newly fetched connected result. A successful new live detail normally repairs it. The original temporary missing-surface consequence remains; no permanence or work loss is claimed. Exact surviving source route: b3d6b3e session_view.rs:559-564 increments mount_generation but sets relaunched only from surviving Lifecycle.restart success; :3711-3732 rejects the terminal when current remains Interrupted and relaunched is false. A qualifying newer sidebar listing at list/view.rs:1798 clears that optional payload through session_ops.rs:92-106, :219-233 without changing current. f560058 removes the listing floor and changes it to restart_succeeded: an older stale sidebar response can pass ops.rs:182-187's applied-generation gate after list/view.rs:3416-3419 records completion and releases pending. session_ops.rs:79-80 accepts stale as confirming and :215-224 clears the flag; session_view.rs:549-563 then advances generation without setting relaunched; :1709-1710 supplies [] because :3701-3721 rejects Interrupted. Independent current/title-only selection handling remains at :1257-1262. Prior l1 records preserve the full trigger comparison and inspected generation-only test (:3912-3960); that test never establishes a mounted terminal. Contract: SPEC_impl.md:1134-1140 requires Restart completion reattachment and observation by mounted views. Suggested bucket: high as previously recorded for delayed terminal recovery, with temporary presentation/attachment failure the only established consequence. Neighbours g038/g089 suggest other; no parent lowering has been accepted and severity remains for adjudication. Confidence: confirmed source path; delivery-before-observer ordering is permitted, incidence unmeasured and not observed in execution. proposed_drop: false; the old generation-survival refutation remains withdrawn. Could-be-highest: no established security or irreversible work-loss route. possible_cover: supplied g036/l1 (post-floor optional-kind route), g037/f3, g038/l1 and g089/l1 (f560 stale-response route). Caveats: next detail is requested at :1475-1487 and failed reads retry at :1082-1115; a later live result heals the surface, so no cache-induced prolonged state is asserted. No runtime test/reproduction; no open source premise remains for this narrowed route."
+          }
+        }
+      ],
+      "latest": {
+        "line": 12,
+        "event": {
+          "version": 1,
+          "kind": "finding",
+          "id": "l1",
+          "state": "open",
+          "summary": "Sidebar retirement can suppress the terminal after a successful Restart",
+          "location": "crates/farhelm-ui/src/session_view.rs:559",
+          "detail": "Reviewed commits: b3d6b3eff6b7508e0b1fb6ec5b5cde31d27ebabe and f560058da19e02716e6f943883a9508b447aff4e. TLDR: after successful Restart the open view can still show its interrupted-session card until a fresh live detail arrives, because sidebar retirement erases success before the view observes it. Synthesis correction: the prior event incorrectly suggested helm session_cache::merged_status could keep a newly issued connected detail Interrupted. Direct source check at f560058 sessions.rs:3052-3095 and :3162-3231 establishes that connected detail calls manager::drain_sessions and sets stale=false; only the no-client branch reads cached metadata. Remove that cache premise. The relevant old Interrupted is the mounted view's already accepted current, not a newly fetched connected result. A successful new live detail normally repairs it. The original temporary missing-surface consequence remains; no permanence or work loss is claimed. Exact surviving source route: b3d6b3e session_view.rs:559-564 increments mount_generation but sets relaunched only from surviving Lifecycle.restart success; :3711-3732 rejects the terminal when current remains Interrupted and relaunched is false. A qualifying newer sidebar listing at list/view.rs:1798 clears that optional payload through session_ops.rs:92-106, :219-233 without changing current. f560058 removes the listing floor and changes it to restart_succeeded: an older stale sidebar response can pass ops.rs:182-187's applied-generation gate after list/view.rs:3416-3419 records completion and releases pending. session_ops.rs:79-80 accepts stale as confirming and :215-224 clears the flag; session_view.rs:549-563 then advances generation without setting relaunched; :1709-1710 supplies [] because :3701-3721 rejects Interrupted. Independent current/title-only selection handling remains at :1257-1262. Prior l1 records preserve the full trigger comparison and inspected generation-only test (:3912-3960); that test never establishes a mounted terminal. Contract: SPEC_impl.md:1134-1140 requires Restart completion reattachment and observation by mounted views. Suggested bucket: high as previously recorded for delayed terminal recovery, with temporary presentation/attachment failure the only established consequence. Neighbours g038/g089 suggest other; no parent lowering has been accepted and severity remains for adjudication. Confidence: confirmed source path; delivery-before-observer ordering is permitted, incidence unmeasured and not observed in execution. proposed_drop: false; the old generation-survival refutation remains withdrawn. Could-be-highest: no established security or irreversible work-loss route. possible_cover: supplied g036/l1 (post-floor optional-kind route), g037/f3, g038/l1 and g089/l1 (f560 stale-response route). Caveats: next detail is requested at :1475-1487 and failed reads retry at :1082-1115; a later live result heals the surface, so no cache-induced prolonged state is asserted. No runtime test/reproduction; no open source premise remains for this narrowed route."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g088/findings.jsonl",
+        "id": "l1",
+        "line": 12,
+        "disposition": "rejected",
+        "group": "restart-retirement-two-filtered-trigger-subsets",
+        "reason": "Parent read complete claims058 and compares prior g032/c4 old-stale-listing and g036/l1 newer-eligible-listing judgments. This owner records BOTH subsets. Preserve separate introducing revisions, read-age-floor versus consumption fix boundaries, high suggestion, generation-only refutation withdrawal and live-detail correction. Both established consequences are narrow scheduling-dependent temporary interrupted/empty-terminal presentation, repaired by independent live detail or ordinary reopen. No durable mutation/false success/wrong target/security/work loss. FILTER rare self-correcting display boundary quoted in claims058 fully matches each bounded subset; no blanket runtime refutation. Composite audit group keeps both canonical references without collapsing their distinct trigger/fix scopes; no new queue defect."
+      },
+      "accepted_parent_decision": {
+        "key": "g088/l1",
+        "line": 12,
+        "disposition": "rejected",
+        "group": "restart-retirement-two-filtered-trigger-subsets",
+        "bucket": "other",
+        "recording": "filtered",
+        "needs_independent_drop_check": false,
+        "reason": "Parent read complete claims058 and compares prior g032/c4 old-stale-listing and g036/l1 newer-eligible-listing judgments. This owner records BOTH subsets. Preserve separate introducing revisions, read-age-floor versus consumption fix boundaries, high suggestion, generation-only refutation withdrawal and live-detail correction. Both established consequences are narrow scheduling-dependent temporary interrupted/empty-terminal presentation, repaired by independent live detail or ordinary reopen. No durable mutation/false success/wrong target/security/work loss. FILTER rare self-correcting display boundary quoted in claims058 fully matches each bounded subset; no blanket runtime refutation. Composite audit group keeps both canonical references without collapsing their distinct trigger/fix scopes; no new queue defect."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-058",
+          "key": "g088/l1",
+          "latest_line": 12,
+          "recommendation": "filtered",
+          "bucket": "other",
+          "underlying_key": "restart-success-retired-before-mounted-observer",
+          "aliases": [
+            "g089/l1 (same f560058 stale-response route; this record also includes the earlier eligible-new-listing route)"
+          ],
+          "target_queue_file": null,
+          "why": "The conditional missing-terminal mechanism is source-supported. Its whole established consequence is a temporary incorrect recovery card, repaired by independent live detail or ordinary reopening. The rare self-correcting display filter applies; rarity alone is not the basis.",
+          "checks": [
+            "b3d6b3eff6b7508e0b1fb6ec5b5cde31d27ebabe session_ops.rs:92-106,215-233 permits an eligible post-floor sidebar listing to clear restart before the observer; session_view.rs:549-564 sets relaunched and terminal-kind override only from surviving success, although it always increments mount_generation; :3711-3732 refuses an Interrupted terminal without relaunched.",
+            "f560058da19e02716e6f943883a9508b447aff4e session_ops.rs:77-105,215-226 removes the read-age floor and lets stale rows clear restart_succeeded. list/view.rs:1976-1985 retires it independently of the view detail; :3416-3419 finishes Restart, queues refresh and releases pending without fencing the listing.",
+            "f560058 ops.rs:182-190 accepts any success newer than applied, and reader.rs:405-458,644-680 leaves an existing read alive while recording a new refresh demand. aggregate.rs:547-578 snapshots host state before awaiting cached_slice, and :357 derives stale from that snapshot. This permits an older stale reply after completion.",
+            "f560058 session_view.rs:549-564 can therefore advance generation without setting relaunched; :1709-1710,3701-3722 produces no terminal for its existing Interrupted current. :1245-1273 follows only title and requests detail, not sidebar status. :1475-1487 independently requests post-boundary detail.",
+            "f560058 helm sessions.rs:3052-3095,3162-3227 serves cached Interrupted only without a client; connected detail drains live sessions. The earlier claim that merged_status prolongs newly fetched connected detail is withdrawn and source-refuted. Later live detail repairs the surface. No runtime delivery order or incidence was observed.",
+            "History preserved: line 4's generation-survival refutation was withdrawn at lines 7-9 because a generation increment does not establish terminal admission. The newer-listing route with the floor intact and the later old-stale-response route have different trigger/fix boundaries."
+          ],
+          "coverage_checked": [
+            "SPEC.md:1890-1904 and SPEC_impl.md:1134-1164 require mounted Restart observation and reattachment, not this temporary omission. No specification acceptance found.",
+            "TODO Planned empty; plans/queue/INDEX.md has no unlanded entries. The historical session-action-leftovers plan is landed and is not current repair coverage.",
+            "BUGS has no matching trigger. Queue INDEX and retained-restart-hides-reboot-card.md read: that item concerns too-long retention after a second reboot, the opposite retention boundary; it does not cover premature retirement before a mounted consumer. Active TRIAGE_OUTCOMES has no exact claim.",
+            "FILTER.md, Rare, self-correcting glitches and imprecise diagnostics: a narrow reply/effect ordering causes only a wrong temporary display and attachment presentation, repaired by the next successful live detail or reopening. No wrong-target operation, false mutation success, durable wrong record, work loss or security effect is established."
+          ],
+          "exact_cover_quotes": [
+            "FILTER.md: The trigger is rare: a narrow timing window, a crash or interruption at a specific point, or an input the shipped clients never send.",
+            "FILTER.md: a display that is briefly wrong and corrects itself on the next refresh, retry or reconnect, or when the user leaves the view"
+          ],
+          "missing_premise": "The response-before-observer ordering remains conditional and unobserved. No source route to permanent terminal loss, killing an unseen agent, or lost user work was established. Framework scheduling was reported by the reviewer but not independently rechecked here.",
+          "original_stronger_consequence": "Initially high for missing remount or lingering interruption presentation; line 12 preserves high pending parent adjudication. The latest source-supported scope is temporary inability to see the restarted agent until fresh detail. Preserve the withdrawn generation-only refutation and the withdrawn cache-prolongation premise; no highest consequence was alleged.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Apply the complete rare self-correcting display filter to the narrowed consequence. The high-versus-other disagreement remains explicit; this is a proposed recording disposition, not a parent decision."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": true,
+        "clearly_refuted_candidate": false,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "high",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "restart-retirement-two-filtered-trigger-subsets",
+        "destination": "trailing-restart-retirement-two-filtered-trigger-subsets.md"
+      }
+    },
+    {
+      "key": "g088/c3",
+      "owner": "g088",
+      "id": "c3",
+      "domain": "gui-terminal-attachment",
+      "purpose": "gui-terminal-attachment: crates/farhelm-ui/src/session_view.rs, crates/farhelm-ui/src/attachments.rs, crates/farhelm-ui/src/tabs.rs, crates/farhelm-ui/src/tunnels.rs; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 5,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c3",
+            "state": "open",
+            "summary": "Removing terminal-kind tab projection preserves tab identity and tunnel focus",
+            "location": "crates/farhelm-ui/src/tabs.rs:168",
+            "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e. TLDR: considered whether deleting the tab-kind projection and the old terminal focus selector can target the wrong shell or leave terminals unfocused. Details: the deleted visible_tab_infos wrapper projected the IDs from visible_tabs and added TerminalKind. Its replacement in session_view.rs:1712-1718 directly uses visible_tabs and keeps the same selection membership and MAX_MOUNTED_TAB_ISLANDS cap; :1763-1780 still derives element IDs and websocket tab arguments from those IDs. terminal.js:4313 now always calls farhelmGridTerminal.create; grid-terminal.js:367-368 creates the textarea with class grid-terminal-input, matching tunnels.rs:388's remaining focus selector. SPEC_impl.md:1504-1514 and :1835-1845 establish a grid island for every terminal. Suggested bucket: other (refuted candidate). Confidence: confirmed by source, no execution. proposed_drop: source refutation; removed projection carried obsolete kinds, not independent order/identity, and the only remaining renderer has the retained focus target. Could-be-highest: no established loss route; tab routing continues to use stable opaque IDs. possible_cover: none; coverage sources not consulted. Caveat: this covers the assigned tabs/tunnels/attachment documentation changes and necessary replacement interfaces, not a full review of terminal.js or the migration teardown owned by other groups."
+          }
+        }
+      ],
+      "latest": {
+        "line": 5,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c3",
+          "state": "open",
+          "summary": "Removing terminal-kind tab projection preserves tab identity and tunnel focus",
+          "location": "crates/farhelm-ui/src/tabs.rs:168",
+          "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e. TLDR: considered whether deleting the tab-kind projection and the old terminal focus selector can target the wrong shell or leave terminals unfocused. Details: the deleted visible_tab_infos wrapper projected the IDs from visible_tabs and added TerminalKind. Its replacement in session_view.rs:1712-1718 directly uses visible_tabs and keeps the same selection membership and MAX_MOUNTED_TAB_ISLANDS cap; :1763-1780 still derives element IDs and websocket tab arguments from those IDs. terminal.js:4313 now always calls farhelmGridTerminal.create; grid-terminal.js:367-368 creates the textarea with class grid-terminal-input, matching tunnels.rs:388's remaining focus selector. SPEC_impl.md:1504-1514 and :1835-1845 establish a grid island for every terminal. Suggested bucket: other (refuted candidate). Confidence: confirmed by source, no execution. proposed_drop: source refutation; removed projection carried obsolete kinds, not independent order/identity, and the only remaining renderer has the retained focus target. Could-be-highest: no established loss route; tab routing continues to use stable opaque IDs. possible_cover: none; coverage sources not consulted. Caveat: this covers the assigned tabs/tunnels/attachment documentation changes and necessary replacement interfaces, not a full review of terminal.js or the migration teardown owned by other groups."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g088/findings.jsonl",
+        "id": "c3",
+        "line": 5,
+        "disposition": "under-investigation",
+        "group": "g088-c3",
+        "reason": "Record durably acknowledged; parent source/contract validation, cross-group synthesis, coverage/filter matching and any independent drop check remain pending. This preserves the claim and uncertainty without accepting, dropping or lowering it."
+      },
+      "accepted_parent_decision": null,
+      "returned_claim_checks": [
+        {
+          "batch": "claims-058",
+          "key": "g088/c3",
+          "latest_line": 5,
+          "recommendation": "refuted",
+          "bucket": "other",
+          "underlying_key": "removed-tab-kind-projection-preserves-ids-order-focus",
+          "aliases": [
+            "g089/c2 (identity/order/cap subset)"
+          ],
+          "target_queue_file": null,
+          "why": "The removed wrapper preserves exactly the IDs and order of its replacement helper; it adds kind metadata only. The surviving focus selector matches the only renderer's input field.",
+          "checks": [
+            "f560058da19e02716e6f943883a9508b447aff4e^ tabs.rs:156-168 constructs visible IDs; :198-216 maps precisely those IDs to Tab { id, kind } without reordering. f560058 session_view.rs:1712-1718 uses the same IDs for selection and the same MAX_MOUNTED_TAB_ISLANDS prefix, and :1763-1780 derives tab element and socket paths from them.",
+            "f560058 terminal.js:3387-3393 creates the grid unconditionally. grid-terminal.js:367-368 gives its textarea class grid-terminal-input; tunnels.rs:388 focuses that same selected terminal input.",
+            "No runtime focus or routing observation. This is the local projection/focus contract, not a full transport or migration review."
+          ],
+          "coverage_checked": [
+            "Both specs searched. SPEC_impl.md:1692-1707,1844 describes the grid island for every terminal; :2943-2958 removes terminal kinds at protocol 77. These support the replacement design, not acceptance of wrong-shell routing.",
+            "TODO Planned empty; unlanded plans index empty; BUGS, queue INDEX and active TRIAGE_OUTCOMES contain no exact projection-induced identity/order/focus defect. Existing tab transport/test items have different triggers."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": null,
+          "original_stronger_consequence": "Considered targeting the wrong shell or leaving terminals unfocused; stable opaque IDs remain unchanged. No destructive operation or user-work loss was established.",
+          "needs_independent_drop_check": true,
+          "proposed_basis": "Source refutation. Conservatively request a drop check for the original wrong-shell-target concern, even though no harmful target change was found."
+        }
+      ],
+      "parent_proposals": [
+        {
+          "artifact": "parent-flagged-judgments-058.json",
+          "key": "g088/c3",
+          "proposal": "claim-checks/claims-058/result.json",
+          "parent_proposal": "source-refuted-removed-tab-kind-map-changes-identity-order-cap-or-grid-focus",
+          "final_independent_gate": "required-by-conservative-wrong-shell-flag",
+          "reason": "Full058 old kind wrapper maps the exact visible ID sequence without reorder; replacement uses same IDs/selected membership/mount prefix and tab socket/element identity. Only remaining renderer creates grid with textarea selector used by focus. Refute local projection/focus premise, not full transport/migration or runtime focus geometry. Same089c2 identity/order/cap subset with this extra focus check; preserve original wrong-shell/high UX concern for fresh gate."
+        }
+      ],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": true,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "removed-tab-kind-projection-preserves-ids-order-focus",
+        "destination": null
+      }
+    },
+    {
+      "key": "g088/c4",
+      "owner": "g088",
+      "id": "c4",
+      "domain": "gui-terminal-attachment",
+      "purpose": "gui-terminal-attachment: crates/farhelm-ui/src/session_view.rs, crates/farhelm-ui/src/attachments.rs, crates/farhelm-ui/src/tabs.rs, crates/farhelm-ui/src/tunnels.rs; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 6,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c4",
+            "state": "open",
+            "summary": "Stop and suspend intentionally avoids the page-wide registry token",
+            "location": "crates/farhelm-ui/src/session_view.rs:2420",
+            "detail": "Reviewed commit: 1d24c6af0b6fdbbec854623ff53f90281b8271ab. TLDR: considered whether removing the composer claim lets Stop and suspend race an unrelated launch and freeze its environment without the intended exclusion. Details: session_view.rs:2420-2437 changes the disabled state to composer_ops.launch_targets(host) and checks launch_targets_now(host) before consuming the rendered stop token. The confirmed no-tabs and ended guards are captured from the answered render. The list-owned path at list/view.rs:2452-2518 admits the session operation and calls api::stop_and_suspend with these guards. SPEC_impl.md:1144-1151 states exactly: \"Suspend and Resume, from Hosts or a sandbox session (Stop and suspend included), are not registry mutations and never claim it.\" It also specifies that \"those controls are refused while it names their host, at the click and again at the answer.\" The patch follows that host-targeted exclusion rather than locking unrelated launches. Suggested bucket: other (accepted intended contract). Confidence: confirmed source/contract analysis, no execution. proposed_drop: explicit specification acceptance plus source implementing the required target check; quoted text above is the acceptance basis. Could-be-highest: no established security or irreversible loss route; environment suspension retains processes and files. possible_cover: none; coverage sources not consulted. Caveat: this does not claim cross-page exclusion or lock ownership through the entire asynchronous Stop request; the cited contract requires this page's admission checks."
+          }
+        }
+      ],
+      "latest": {
+        "line": 6,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c4",
+          "state": "open",
+          "summary": "Stop and suspend intentionally avoids the page-wide registry token",
+          "location": "crates/farhelm-ui/src/session_view.rs:2420",
+          "detail": "Reviewed commit: 1d24c6af0b6fdbbec854623ff53f90281b8271ab. TLDR: considered whether removing the composer claim lets Stop and suspend race an unrelated launch and freeze its environment without the intended exclusion. Details: session_view.rs:2420-2437 changes the disabled state to composer_ops.launch_targets(host) and checks launch_targets_now(host) before consuming the rendered stop token. The confirmed no-tabs and ended guards are captured from the answered render. The list-owned path at list/view.rs:2452-2518 admits the session operation and calls api::stop_and_suspend with these guards. SPEC_impl.md:1144-1151 states exactly: \"Suspend and Resume, from Hosts or a sandbox session (Stop and suspend included), are not registry mutations and never claim it.\" It also specifies that \"those controls are refused while it names their host, at the click and again at the answer.\" The patch follows that host-targeted exclusion rather than locking unrelated launches. Suggested bucket: other (accepted intended contract). Confidence: confirmed source/contract analysis, no execution. proposed_drop: explicit specification acceptance plus source implementing the required target check; quoted text above is the acceptance basis. Could-be-highest: no established security or irreversible loss route; environment suspension retains processes and files. possible_cover: none; coverage sources not consulted. Caveat: this does not claim cross-page exclusion or lock ownership through the entire asynchronous Stop request; the cited contract requires this page's admission checks."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g088/findings.jsonl",
+        "id": "c4",
+        "line": 6,
+        "disposition": "excluded",
+        "group": "stop-and-suspend-host-scoped-launch-exclusion",
+        "reason": "Parent explicitly accepted named covered proposal from claims-058 after inspecting it. The product expressly accepts host-scoped Suspend/Resume exclusion instead of the page-wide registry token. The changed header checks the target host at render and answer time. Exact specification acceptance of the named exclusion boundary, supported by the changed handler. Checked source/results: [\"1d24c6af0b6fdbbec854623ff53f90281b8271ab session_view.rs:2420-2437 disables Stop and suspend for composer_ops.launch_targets(host), rechecks launch_targets_now(host), then consumes the rendered Stop token and sends captured no-tabs/ended guards.\",\"The accepted contract is admission on this page, not cross-page exclusion or holding a launch token through the entire asynchronous Stop. No runtime test was run.\"] Current coverage/results: [\"SPEC.md:1338-1348 and SPEC_impl.md:1144-1151 explicitly cover Stop and suspend and the same-host click/answer checks. This is exact accepted behavior.\",\"TODO Planned empty; plans/queue/INDEX.md contains no unlanded plans. Historical sandbox-suspend-overlap is already reflected in the accepted specs. BUGS, queue INDEX and active TRIAGE_OUTCOMES have no different exact claim requiring extension.\"] Exact cited cover: [\"SPEC_impl.md: Suspend and Resume, from Hosts or a sandbox session (Stop and suspend included), are not registry mutations and never claim it.\",\"SPEC_impl.md: those controls are refused while it names their host, at the click and again at the answer.\"] Original stronger consequence and missing premise remain preserved: \"Considered whether Stop and suspend could race an unrelated launch and freeze its environment. The accepted rule deliberately permits work on other hosts and preserves this page's same-host check; suspension retains processes and files.\"; null."
+      },
+      "accepted_parent_decision": {
+        "key": "g088/c4",
+        "line": 6,
+        "disposition": "excluded",
+        "group": "stop-and-suspend-host-scoped-launch-exclusion",
+        "bucket": "other",
+        "recording": "covered",
+        "queue_target_candidate": null,
+        "needs_independent_drop_check": false,
+        "reason": "Parent explicitly accepted named covered proposal from claims-058 after inspecting it. The product expressly accepts host-scoped Suspend/Resume exclusion instead of the page-wide registry token. The changed header checks the target host at render and answer time. Exact specification acceptance of the named exclusion boundary, supported by the changed handler. Checked source/results: [\"1d24c6af0b6fdbbec854623ff53f90281b8271ab session_view.rs:2420-2437 disables Stop and suspend for composer_ops.launch_targets(host), rechecks launch_targets_now(host), then consumes the rendered Stop token and sends captured no-tabs/ended guards.\",\"The accepted contract is admission on this page, not cross-page exclusion or holding a launch token through the entire asynchronous Stop. No runtime test was run.\"] Current coverage/results: [\"SPEC.md:1338-1348 and SPEC_impl.md:1144-1151 explicitly cover Stop and suspend and the same-host click/answer checks. This is exact accepted behavior.\",\"TODO Planned empty; plans/queue/INDEX.md contains no unlanded plans. Historical sandbox-suspend-overlap is already reflected in the accepted specs. BUGS, queue INDEX and active TRIAGE_OUTCOMES have no different exact claim requiring extension.\"] Exact cited cover: [\"SPEC_impl.md: Suspend and Resume, from Hosts or a sandbox session (Stop and suspend included), are not registry mutations and never claim it.\",\"SPEC_impl.md: those controls are refused while it names their host, at the click and again at the answer.\"] Original stronger consequence and missing premise remain preserved: \"Considered whether Stop and suspend could race an unrelated launch and freeze its environment. The accepted rule deliberately permits work on other hosts and preserves this page's same-host check; suspension retains processes and files.\"; null."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-058",
+          "key": "g088/c4",
+          "latest_line": 6,
+          "recommendation": "covered",
+          "bucket": "other",
+          "underlying_key": "stop-and-suspend-host-scoped-launch-exclusion",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The product expressly accepts host-scoped Suspend/Resume exclusion instead of the page-wide registry token. The changed header checks the target host at render and answer time.",
+          "checks": [
+            "1d24c6af0b6fdbbec854623ff53f90281b8271ab session_view.rs:2420-2437 disables Stop and suspend for composer_ops.launch_targets(host), rechecks launch_targets_now(host), then consumes the rendered Stop token and sends captured no-tabs/ended guards.",
+            "The accepted contract is admission on this page, not cross-page exclusion or holding a launch token through the entire asynchronous Stop. No runtime test was run."
+          ],
+          "coverage_checked": [
+            "SPEC.md:1338-1348 and SPEC_impl.md:1144-1151 explicitly cover Stop and suspend and the same-host click/answer checks. This is exact accepted behavior.",
+            "TODO Planned empty; plans/queue/INDEX.md contains no unlanded plans. Historical sandbox-suspend-overlap is already reflected in the accepted specs. BUGS, queue INDEX and active TRIAGE_OUTCOMES have no different exact claim requiring extension."
+          ],
+          "exact_cover_quotes": [
+            "SPEC_impl.md: Suspend and Resume, from Hosts or a sandbox session (Stop and suspend included), are not registry mutations and never claim it.",
+            "SPEC_impl.md: those controls are refused while it names their host, at the click and again at the answer."
+          ],
+          "missing_premise": null,
+          "original_stronger_consequence": "Considered whether Stop and suspend could race an unrelated launch and freeze its environment. The accepted rule deliberately permits work on other hosts and preserves this page's same-host check; suspension retains processes and files.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Exact specification acceptance of the named exclusion boundary, supported by the changed handler."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": false,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "stop-and-suspend-host-scoped-launch-exclusion",
+        "destination": null
+      }
+    },
+    {
+      "key": "g088/l2",
+      "owner": "g088",
+      "id": "l2",
+      "domain": "gui-terminal-attachment",
+      "purpose": "gui-terminal-attachment: crates/farhelm-ui/src/session_view.rs, crates/farhelm-ui/src/attachments.rs, crates/farhelm-ui/src/tabs.rs, crates/farhelm-ui/src/tunnels.rs; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 11,
+          "event": {
+            "version": 1,
+            "kind": "lead",
+            "id": "l2",
+            "state": "open",
+            "summary": "Check stale-page terminal mounting and interactive input after terminal-kind removal",
+            "location": "crates/farhelm-ui/src/session_view.rs:1760",
+            "detail": "Reviewed commits to inspect: 04d85f0c98a9b635709d00b056719a0baa7fd3fc and b3d6b3eff6b7508e0b1fb6ec5b5cde31d27ebabe (old page terminal-kind selection) against f560058da19e02716e6f943883a9508b447aff4e (kind removal). TLDR: parent-supplied g196/l1 reports a potential stale-page path where a missing kind mounts an interactive xterm surface against the current grid endpoint, and bracketed pasted JSON could become executable inner control bytes. Details: this group's task is to settle session_view/App caller preconditions: missing agent_terminal defaults, agent_spec_kind, keep_terminal_surface, unavailable/frozen handling, and global build-skew/capability effects. Owner g196 is checking API note_build and input decoding. Suggested bucket: preserve potential highest until the complete shipped route is settled, since redirected input could execute text/control bytes. Confidence: unresolved source lead; no reproduction or execution. proposed_drop: false. Could-be-highest: yes, conditional on actual interactive mount and effective input reaching a running shell; neither is yet established by this reviewer. possible_cover: parent-supplied g196/l1; no coverage search. Missing premises: which old page can receive the new listing, whether skew removes/disables its terminal surface before mounting, and whether unavailable or kind gates prevent interaction. Next: read complete neighbour context then inspect pinned caller/guard source, without broadening to a full input decoder review."
+          }
+        },
+        {
+          "line": 13,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "l2",
+            "state": "open",
+            "summary": "Old-page caller guards permit the interactive unknown-kind mount in g196/l1",
+            "location": "crates/farhelm-ui/src/session_view.rs:1771",
+            "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e, comparing the previous page at its parent. TLDR: a browser page left open through the grid-only update can still open an interactive legacy terminal against the new grid endpoint. This supplies the caller/mount premise for parent-supplied g196/l1: a pasted JSON document can be interpreted as input instructions instead of literal text, potentially executing inner control bytes. Details within this group's caller scope: parent lib.rs:520-527 defaults missing agent_terminal to None and missing supervisor_creates_host_terminals to false. parent session_view.rs:1771-1776 calls agent_spec_kind; :3839-3849 preserves null outside an active Restart; :1809 and :1840 send that unknown kind to terminal.js. For a live ordinary nonretired Running session, parent keep_terminal_surface at :3793-3814 returns true; :1786 sets unavailable only from session.stale, so a fresh live response does not suppress mounting. The lease mount at :906-913 accepts a successfully minted lease without a local skew veto. Parent AppBody lib.rs:2042-2098 renders the BuildSkewNotice and retains the authenticated tree; :2272-2282 still mounts SessionView by selected session ID. skew.rs:30-35 explicitly documents no render blocking, and its notice at :286-293 is a PeerLine, not a modal/input cover. Thus neither actual App rendering nor the shared skew signal blocks this fresh mount. The session view only consults helm_is_current for reconnect_policy, not keep_terminal_surface. That policy disables automatic attempts and heartbeat, leaving manual connection available (reconnect.rs:186-224). Parent terminal.js:4650-4665 calls buildXtermSurface for unknown kind; :5721-5724 and :5891-5915 interpret missing stream notice as bytes. Its old input path at :4158-4159 and :4191-4195 sends UTF-8 raw data whenever the socket is OPEN, without checking skew or negotiated input type; :4628-4634 installs term.paste with that socket-open liveness. :5631-5650 accepts replay_complete without a stream notice and ends catch-up; :5725-5763 writes the binary frames as bytes rather than refusing. No guard in these caller paths disproves g196's interactive-mount premise. An ordinary shell tab in a previously open page provides a running-shell target without assuming an agent is itself a shell. Unknown tab.kind is passed directly at :1840. The source permits this stale page use; no runtime schedule or paste was executed. Suggested bucket: preserve highest/security or loss-of-work concern supplied by g196, since the established caller can send raw pasted text to the JSON-decoding endpoint; full input reinterpretation route and control-byte consequence are documented by owner g196/l1, not independently re-reviewed beyond this caller scope. Confidence: confirmed caller/mount and lack-of-guard premises; full consequence remains likely with g196's stated small valid-Text-JSON paste and fresh default paste-mode premises. proposed_drop: false; broad stale-page acceptance is not accepted here as permission to reinterpret document contents as commands. Exact potentially applicable specification text at reviewed SPEC_impl.md:3022-3027: 'A page loaded from the previous helm and left open across the update must be reloaded; nothing keeps it working.' It then describes that 'what is typed into it ends the attachment as malformed input' and 'a reload is the whole remedy.' These accept broken drawing/attachment and require independent judgment for the different successful input-execution consequence, rather than source-refuting it. Could-be-highest: yes, conditional on g196's exact shipped paste/decoder route; this review establishes its previously missing UI premise. possible_cover: supplied g196/l1 is the same concern, retained for parent consolidation, not a separate independent discovery. Caveats: automatic reconnection is withdrawn after build skew; existing known-host grid mounts need not take the raw branch; a fresh unknown-kind mount and valid grid-shaped paste before other invalid input are needed. No open caller/guard premise remains; decoder provenance is intentionally left with assigned owner g196. No tests, builds or reproductions."
+          }
+        }
+      ],
+      "latest": {
+        "line": 13,
+        "event": {
+          "version": 1,
+          "kind": "finding",
+          "id": "l2",
+          "state": "open",
+          "summary": "Old-page caller guards permit the interactive unknown-kind mount in g196/l1",
+          "location": "crates/farhelm-ui/src/session_view.rs:1771",
+          "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e, comparing the previous page at its parent. TLDR: a browser page left open through the grid-only update can still open an interactive legacy terminal against the new grid endpoint. This supplies the caller/mount premise for parent-supplied g196/l1: a pasted JSON document can be interpreted as input instructions instead of literal text, potentially executing inner control bytes. Details within this group's caller scope: parent lib.rs:520-527 defaults missing agent_terminal to None and missing supervisor_creates_host_terminals to false. parent session_view.rs:1771-1776 calls agent_spec_kind; :3839-3849 preserves null outside an active Restart; :1809 and :1840 send that unknown kind to terminal.js. For a live ordinary nonretired Running session, parent keep_terminal_surface at :3793-3814 returns true; :1786 sets unavailable only from session.stale, so a fresh live response does not suppress mounting. The lease mount at :906-913 accepts a successfully minted lease without a local skew veto. Parent AppBody lib.rs:2042-2098 renders the BuildSkewNotice and retains the authenticated tree; :2272-2282 still mounts SessionView by selected session ID. skew.rs:30-35 explicitly documents no render blocking, and its notice at :286-293 is a PeerLine, not a modal/input cover. Thus neither actual App rendering nor the shared skew signal blocks this fresh mount. The session view only consults helm_is_current for reconnect_policy, not keep_terminal_surface. That policy disables automatic attempts and heartbeat, leaving manual connection available (reconnect.rs:186-224). Parent terminal.js:4650-4665 calls buildXtermSurface for unknown kind; :5721-5724 and :5891-5915 interpret missing stream notice as bytes. Its old input path at :4158-4159 and :4191-4195 sends UTF-8 raw data whenever the socket is OPEN, without checking skew or negotiated input type; :4628-4634 installs term.paste with that socket-open liveness. :5631-5650 accepts replay_complete without a stream notice and ends catch-up; :5725-5763 writes the binary frames as bytes rather than refusing. No guard in these caller paths disproves g196's interactive-mount premise. An ordinary shell tab in a previously open page provides a running-shell target without assuming an agent is itself a shell. Unknown tab.kind is passed directly at :1840. The source permits this stale page use; no runtime schedule or paste was executed. Suggested bucket: preserve highest/security or loss-of-work concern supplied by g196, since the established caller can send raw pasted text to the JSON-decoding endpoint; full input reinterpretation route and control-byte consequence are documented by owner g196/l1, not independently re-reviewed beyond this caller scope. Confidence: confirmed caller/mount and lack-of-guard premises; full consequence remains likely with g196's stated small valid-Text-JSON paste and fresh default paste-mode premises. proposed_drop: false; broad stale-page acceptance is not accepted here as permission to reinterpret document contents as commands. Exact potentially applicable specification text at reviewed SPEC_impl.md:3022-3027: 'A page loaded from the previous helm and left open across the update must be reloaded; nothing keeps it working.' It then describes that 'what is typed into it ends the attachment as malformed input' and 'a reload is the whole remedy.' These accept broken drawing/attachment and require independent judgment for the different successful input-execution consequence, rather than source-refuting it. Could-be-highest: yes, conditional on g196's exact shipped paste/decoder route; this review establishes its previously missing UI premise. possible_cover: supplied g196/l1 is the same concern, retained for parent consolidation, not a separate independent discovery. Caveats: automatic reconnection is withdrawn after build skew; existing known-host grid mounts need not take the raw branch; a fresh unknown-kind mount and valid grid-shaped paste before other invalid input are needed. No open caller/guard premise remains; decoder provenance is intentionally left with assigned owner g196. No tests, builds or reproductions."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g088/findings.jsonl",
+        "id": "l2",
+        "line": 13,
+        "disposition": "under-investigation",
+        "group": "g088-l2",
+        "reason": "Record durably acknowledged; parent source/contract validation, cross-group synthesis, coverage/filter matching and any independent drop check remain pending. This preserves the claim and uncertainty without accepting, dropping or lowering it."
+      },
+      "accepted_parent_decision": null,
+      "returned_claim_checks": [
+        {
+          "batch": "claims-058",
+          "key": "g088/l2",
+          "latest_line": 13,
+          "recommendation": "retain-unverified",
+          "bucket": "highest",
+          "underlying_key": "legacy-unknown-kind-page-raw-json-paste-to-grid-input",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The caller/mount premise is source-established. Keep this as supporting evidence for the parent-supplied g196/l1 concern, preserving its conditional command-execution consequence until the decoder owner supplies the remaining route. Do not create a second independent discovery from this contribution.",
+          "checks": [
+            "f560058da19e02716e6f943883a9508b447aff4e^ lib.rs:520-527 defaults missing agent_terminal to None and host-terminal capability to false. session_view.rs:1771-1776,1833-1840 passes unknown agent/tab kind into specs; :3793-3814 permits a nonretired, fresh Running terminal; :3839-3849 preserves null outside active Restart.",
+            "The same parent lib.rs:2042-2098 renders the mismatch notice while retaining the authenticated tree; :2272-2282 still renders SessionView. skew.rs:30-35 deliberately does not block rendering; :286-293 is only a PeerLine. reconnect.rs:186-224 disables unattended heartbeat/reconnect on skew but explicitly preserves manual reconnect.",
+            "The parent terminal.js:4650-4665 builds xterm for unknown kind. :5631-5650 accepts replay_complete without a stream notice as bytes; :5721-5724 and :5891-5915 likewise permit the bytes path. :4158-4159,4191-4195 sends raw UTF-8 on an open socket and :4628-4634 supplies term.paste without a skew/input-format veto.",
+            "This establishes an interactive old-page raw-input mount, not the full current grid decoder or exact pasted payload consequence. No paste, runtime schedule or shell command was executed. Known-host grid mounts need not take this branch; fresh unknown kind and a valid grid-shaped JSON paste before invalid input remain required."
+          ],
+          "coverage_checked": [
+            "Both specifications searched. SPEC_impl.md:2943-2958 explicitly accepts an old page misdrawing and typed input ending its attachment as malformed; that is not exact acceptance of successful reinterpretation of JSON document contents into commands. SPEC.md:2855-2858 says typing reaches the real TUI.",
+            "TODO Planned empty; unlanded plans index empty. BUGS has no related input issue. Current queue INDEX and active TRIAGE_OUTCOMES have no exact legacy-raw-JSON reinterpretation claim. auth-skew-remount-retains-row-operation-count and take-control-skips-recovery-terminals have different triggers/consequences.",
+            "FILTER.md upgrade-plus-rare-condition explicitly excludes security/trust-boundary consequences. No filter covers the alleged input-execution consequence merely because an old page is involved."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": "The current grid decoder's acceptance of the supplied small Text JSON paste, its default paste-mode handling, exact control-byte delivery and command execution remain with g196/l1. They were not independently established by this caller-only consultation. Parent must consolidate that evidence before finalizing confidence/severity; preserve highest meanwhile.",
+          "original_stronger_consequence": "A document pasted into a stale legacy surface may become input instructions containing executable control bytes against a live shell, with potential security or user-work loss. The earlier unresolved lead and latest caller confirmation retain that consequence conditionally; no withdrawal or lowering occurred.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Retain the named contribution with confirmed mount premises and explicit missing decoder premises. No proposed dismissal, upgrade filter or consequence lowering.",
+          "new_interface_evidence": "For g196/l1: parent session_view.rs:3839-3849 returns null kind outside Restart; lib.rs:2085-2098 keeps the authenticated tree on build skew, and terminal.js:4158-4159 gates raw UTF-8 only on socket-open state. These confirm the caller-side opportunity; they do not prove the decoder consequence."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": true,
+        "clearly_refuted_candidate": false,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "highest",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "legacy-unknown-kind-page-raw-json-paste-to-grid-input",
+        "destination": "trailing-legacy-unknown-kind-page-raw-json-paste-to-grid-input.md"
+      }
+    },
+    {
+      "key": "g088/l3",
+      "owner": "g088",
+      "id": "l3",
+      "domain": "gui-terminal-attachment",
+      "purpose": "gui-terminal-attachment: crates/farhelm-ui/src/session_view.rs, crates/farhelm-ui/src/attachments.rs, crates/farhelm-ui/src/tabs.rs, crates/farhelm-ui/src/tunnels.rs; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 14,
+          "event": {
+            "version": 1,
+            "kind": "lead",
+            "id": "l3",
+            "state": "open",
+            "summary": "Check whether the unasked header Delete handoff can lose its refusal feedback",
+            "location": "crates/farhelm-ui/src/session_view.rs:781",
+            "detail": "Reviewed commit: 2ef10815f12ed719ab6c51c6e3ac6fcd3f8bc1fa. TLDR: checking whether a Delete that could not ask the environment can silently lose both its follow-up confirmation and error if navigation or another action intervenes before the view consumes the handoff. Details: new session_view.rs:781-796 takes operations.warned_delete and clears it even when it names another view or lifecycle.claim_guard refuses. The prior examined list owner removes the ordinary error before publishing the handoff. Need inspect exact follow-up selection/admission rules, navigation lifetime and contract to distinguish an intentionally cancelled prompt from lost operation outcome. Suspected consequence is missing explanation for a Delete that changed nothing, not unconsented destruction. Suggested bucket: other or high if persistent/common impact established. Confidence: concrete unresolved source lead; no execution. proposed_drop: false pending caller/contract checks. Could-be-highest: no established security or work-loss route; no Delete is sent from a discarded handoff. possible_cover: none known from supplied neighbours, no coverage search. Missing premise: whether another durable notice/error survives or the product explicitly accepts cancelling that handoff after the user moves on. Next: inspect list unasked_follow_up, failure settlement and relevant GUI completion contract."
+          }
+        },
+        {
+          "line": 15,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "l3",
+            "state": "open",
+            "summary": "A discarded header Delete handoff loses the refusal reason",
+            "location": "crates/farhelm-ui/src/session_view.rs:788",
+            "detail": "Reviewed commit: 2ef10815f12ed719ab6c51c6e3ac6fcd3f8bc1fa. TLDR: when Delete cannot ask the environment's Farhelm, navigating away between its reply and the follow-up question can leave the session undeleted with no explanation of the failure. Details: list/view.rs:3022-3034 first releases the Delete's session claim, then chooses HeaderQuestion if selected still names its source. :3052-3054 removes that source's persistent error and publishes only its ID to warned_delete; the failure branch's ordinary Error alternative at :3056-3057 otherwise records the reason. The new SessionView effect at :784-793 clears warned_delete before checking either that it names this view or that lifecycle.claim_guard succeeds. If navigation changes the keyed view before that effect consumes it, the newly mounted view clears the mismatched handoff and does nothing; if the source acquired a new claim in that interval, the same-view effect likewise consumes without opening. No refusal reason is carried in the handoff (session_ops.rs:135-141), so neither discarded case can reconstruct the deleted error. Cancelling a late question is appropriate; discarding the failed operation's only explanation is the defect. Original suspected consequence retained: Delete changes nothing and silently loses both its warned follow-up and refusal feedback; no unauthorized deletion is alleged. Contract: SPEC_impl.md:1157-1164 requires settlement to record failures/unknown outcomes/partial results while leaving navigation as the user chose. The caller's own unasked_follow_up docs at list/view.rs:920-926 explicitly say that when a header no longer shows the session, 'the reason goes on the row', and the branch at :940-941 implements that fallback only at reply time, not at handoff consumption. The new effect's exact comment :781-783 deliberately drops a handover for a gone view so it cannot pop up later, but neither that comment nor the product contract authorizes erasing its failure reason. Suggested bucket: other, narrow diagnostics/outcome-retention defect. Confidence: confirmed conditional source route; the completion/navigation/effect ordering is permitted by the asynchronous handoff, occurrence not observed. proposed_drop: false. Could-be-highest: no security or work-loss route; nothing was deleted and wider Delete is never sent. possible_cover: none in supplied exact neighbour context; no prohibited coverage sources searched. Caveats: if navigation happened before the completion's selected check, the existing Error branch correctly records the reason; the gap is specifically after HeaderQuestion publication and before effect consumption. The ordinary next listing can show the still-present session but cannot restore why this request failed (:3060-3065). Fix direction: retain the refusal reason until the target header successfully admits the warned question, or preserve a row error when the one-shot handoff is discarded or cannot claim. No runtime test, reproduction or build. Readily checkable remaining work: inspect notice publication and pinned-tip persistence to rule out another durable feedback channel and identify any in-range repair."
+          }
+        },
+        {
+          "line": 16,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "l3",
+            "state": "open",
+            "summary": "A discarded header Delete handoff loses the refusal reason",
+            "location": "crates/farhelm-ui/src/session_view.rs:788",
+            "detail": "Reviewed commit: 2ef10815f12ed719ab6c51c6e3ac6fcd3f8bc1fa; persistence checked through 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db. TLDR: when Delete cannot ask an environment's Farhelm, navigating away between its reply and the follow-up question can leave the session undeleted with no explanation. Details: list/view.rs:3022-3034 releases the Delete claim and chooses HeaderQuestion if the source is selected at that instant. :3052-3054 removes the persistent error and publishes only the source ID; the alternate Error branch :3056-3057 otherwise keeps the refusal on the row. The new SessionView effect :784-793 clears warned_delete before checking that it names this keyed view and before claiming it. If navigation replaces the view before effect consumption, the replacement view consumes the mismatched ID and opens nothing. If another action has claimed the same source first, the same-view effect also consumes without opening. The handoff carries no refusal text (session_ops.rs:135-141), so the removed error cannot be reconstructed. Exact drop point: operations.warned_delete.set(None) precedes both checks. Cancelling the late question is appropriate; discarding the failed operation's only explanation is the defect. Original consequence retained: Delete changes nothing and loses both its warned follow-up and refusal feedback. A source still selected until consumption, with no intervening claim, correctly gets the question. Contract: SPEC_impl.md:1157-1164 requires settlement to record failures/unknown outcomes/partial results while preserving the user's navigation. Caller docs at list/view.rs:920-926 explicitly say a header no longer showing the session cannot ask, 'so the reason goes on the row'; :940-941 implements that fallback only at reply time, not consumption. The new effect's :781-783 comment deliberately drops gone-view handovers but supplies no failure-recording exception. Additional source checks resolved: list/view.rs:3004-3014 publishes delete notices only for successes and does nothing for Err, so there is no parallel durable notice for this refusal. The listing refresh at :3060-3065 can show the session remains but cannot restore this request's discarded reason. At pinned tip session_view.rs:773-783 still clears before matching/claiming, and list/view.rs:3015-3021 still removes error before setting the ID-only handoff. The in-range path history after the reviewed commit contains only dbfc6975, f560058 and 61e6323 edits for these files; pinned-tip source establishes no repair. Suggested bucket: other, narrow diagnostics/outcome-retention defect. Confidence: confirmed conditional source route; no observed occurrence or reproduction. proposed_drop: false. Could-be-highest: no security or work-loss route; nothing was deleted and wider Delete is never sent. possible_cover: none in supplied exact neighbour context; no prohibited coverage sources searched. Caveats: navigation before the completion's selected check correctly selects Error; this gap is after HeaderQuestion publication but before its effect consumption. Runtime frequency is unmeasured. Fix direction: keep the refusal until the target header successfully admits the question, or restore a row error when the one-shot handoff is discarded or cannot claim. No runtime tests, builds or reproductions. No readily checkable missing premise or open lead remains."
+          }
+        }
+      ],
+      "latest": {
+        "line": 16,
+        "event": {
+          "version": 1,
+          "kind": "finding",
+          "id": "l3",
+          "state": "open",
+          "summary": "A discarded header Delete handoff loses the refusal reason",
+          "location": "crates/farhelm-ui/src/session_view.rs:788",
+          "detail": "Reviewed commit: 2ef10815f12ed719ab6c51c6e3ac6fcd3f8bc1fa; persistence checked through 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db. TLDR: when Delete cannot ask an environment's Farhelm, navigating away between its reply and the follow-up question can leave the session undeleted with no explanation. Details: list/view.rs:3022-3034 releases the Delete claim and chooses HeaderQuestion if the source is selected at that instant. :3052-3054 removes the persistent error and publishes only the source ID; the alternate Error branch :3056-3057 otherwise keeps the refusal on the row. The new SessionView effect :784-793 clears warned_delete before checking that it names this keyed view and before claiming it. If navigation replaces the view before effect consumption, the replacement view consumes the mismatched ID and opens nothing. If another action has claimed the same source first, the same-view effect also consumes without opening. The handoff carries no refusal text (session_ops.rs:135-141), so the removed error cannot be reconstructed. Exact drop point: operations.warned_delete.set(None) precedes both checks. Cancelling the late question is appropriate; discarding the failed operation's only explanation is the defect. Original consequence retained: Delete changes nothing and loses both its warned follow-up and refusal feedback. A source still selected until consumption, with no intervening claim, correctly gets the question. Contract: SPEC_impl.md:1157-1164 requires settlement to record failures/unknown outcomes/partial results while preserving the user's navigation. Caller docs at list/view.rs:920-926 explicitly say a header no longer showing the session cannot ask, 'so the reason goes on the row'; :940-941 implements that fallback only at reply time, not consumption. The new effect's :781-783 comment deliberately drops gone-view handovers but supplies no failure-recording exception. Additional source checks resolved: list/view.rs:3004-3014 publishes delete notices only for successes and does nothing for Err, so there is no parallel durable notice for this refusal. The listing refresh at :3060-3065 can show the session remains but cannot restore this request's discarded reason. At pinned tip session_view.rs:773-783 still clears before matching/claiming, and list/view.rs:3015-3021 still removes error before setting the ID-only handoff. The in-range path history after the reviewed commit contains only dbfc6975, f560058 and 61e6323 edits for these files; pinned-tip source establishes no repair. Suggested bucket: other, narrow diagnostics/outcome-retention defect. Confidence: confirmed conditional source route; no observed occurrence or reproduction. proposed_drop: false. Could-be-highest: no security or work-loss route; nothing was deleted and wider Delete is never sent. possible_cover: none in supplied exact neighbour context; no prohibited coverage sources searched. Caveats: navigation before the completion's selected check correctly selects Error; this gap is after HeaderQuestion publication but before its effect consumption. Runtime frequency is unmeasured. Fix direction: keep the refusal until the target header successfully admits the question, or restore a row error when the one-shot handoff is discarded or cannot claim. No runtime tests, builds or reproductions. No readily checkable missing premise or open lead remains."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g088/findings.jsonl",
+        "id": "l3",
+        "line": 16,
+        "disposition": "duplicate",
+        "group": "warned-delete-handoff-clears-error-before-view-admission",
+        "reason": "Parent read full claims058 and prior g036/l2. Same2ef10815 ID-only warned_delete publication removes persistent refusal before destination-view admission. Narrow publication/navigation/effect interval can discard only failed Delete's reason/offer; unselected completion already preserves Error. Nothing destructive sent, false success, security or work loss. Full FILTER rare lost-diagnostic boundary matches and does not waive whole-environment consent. Preserve unresolved timing and limited competing-claim variant, exact navigation-only established route and all prior source checks under canonical filtered group."
+      },
+      "accepted_parent_decision": {
+        "key": "g088/l3",
+        "line": 16,
+        "disposition": "duplicate",
+        "group": "warned-delete-handoff-clears-error-before-view-admission",
+        "bucket": "other",
+        "recording": "filtered",
+        "needs_independent_drop_check": false,
+        "reason": "Parent read full claims058 and prior g036/l2. Same2ef10815 ID-only warned_delete publication removes persistent refusal before destination-view admission. Narrow publication/navigation/effect interval can discard only failed Delete's reason/offer; unselected completion already preserves Error. Nothing destructive sent, false success, security or work loss. Full FILTER rare lost-diagnostic boundary matches and does not waive whole-environment consent. Preserve unresolved timing and limited competing-claim variant, exact navigation-only established route and all prior source checks under canonical filtered group."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-058",
+          "key": "g088/l3",
+          "latest_line": 16,
+          "recommendation": "filtered",
+          "bucket": "other",
+          "underlying_key": "header-unasked-delete-handoff-discards-only-refusal-reason",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The lost-refusal mechanism is source-supported, but its entire consequence is a lost diagnostic for a Delete that changed nothing. It requires a narrow publication-to-effect navigation/claim ordering and fully matches the rare lost-diagnostic filter.",
+          "checks": [
+            "2ef10815f12ed719ab6c51c6e3ac6fcd3f8bc1fa list/view.rs:3022-3034 releases the request claim and selects HeaderQuestion from current selection; :3052-3054 removes its persistent error and publishes only the ID. :3004-3014 publishes notices only on success, so this refusal has no parallel notice.",
+            "The new session_view.rs:781-796 clears warned_delete before checking the view ID or claim_guard; a replacement view or intervening claim loses the handoff. f560058 session_ops.rs:135-141 stores only the source ID, with no refusal text to reconstruct.",
+            "00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db session_view.rs:773-783 and list/view.rs:3015-3021 retain both sides of the gap. Navigation before completion correctly selects the Error branch; only navigation/claim after publication is affected. The later listing cannot restore this request's reason. No actual occurrence was observed."
+          ],
+          "coverage_checked": [
+            "SPEC.md:1901-1904 and SPEC_impl.md:1155-1164 require source outcomes to persist; they do not accept losing the explanation. Both specifications searched for the handoff/refusal boundary.",
+            "TODO Planned empty; unlanded plans index empty; BUGS, current queue INDEX and active TRIAGE_OUTCOMES contain no exact ID-only header handoff loss. Row-menu transient ownership and delayed-refusal reopening items describe different triggers and are not exact coverage.",
+            "FILTER.md Rare, self-correcting glitches and imprecise diagnostics covers a narrow timing trigger whose whole consequence is a diagnostic that is lost. No deletion is sent from the discarded handoff and no wrong-target, work-loss, security or false-success result is established."
+          ],
+          "exact_cover_quotes": [
+            "FILTER.md: The trigger is rare: a narrow timing window, a crash or interruption at a specific point, or an input the shipped clients never send.",
+            "FILTER.md: an error message, log line or other diagnostic that is imprecise, misleading, missing detail, or lost."
+          ],
+          "missing_premise": "The publication/navigation/effect schedule is conditional and its frequency unmeasured; the source route itself is established. No destructive consequence was alleged.",
+          "original_stronger_consequence": "Delete remains undone while both its follow-up question and only refusal explanation disappear. Initial other-or-high was narrowed to other diagnostics after investigation, without any security or user-work-loss claim.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Apply the complete rare lost-diagnostic filter. Do not use cancellation of the late question alone as specification acceptance of losing its refusal reason."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": true,
+        "clearly_refuted_candidate": false,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "warned-delete-handoff-clears-error-before-view-admission",
+        "destination": "trailing-warned-delete-handoff-clears-error-before-view-admission.md"
+      }
+    },
+    {
+      "key": "g088/c5",
+      "owner": "g088",
+      "id": "c5",
+      "domain": "gui-terminal-attachment",
+      "purpose": "gui-terminal-attachment: crates/farhelm-ui/src/session_view.rs, crates/farhelm-ui/src/attachments.rs, crates/farhelm-ui/src/tabs.rs, crates/farhelm-ui/src/tunnels.rs; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 17,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c5",
+            "state": "open",
+            "summary": "The tab-absence comment distinguishes a failed attach from an already-live tab disappearing",
+            "location": "crates/farhelm-ui/src/session_view.rs:298",
+            "detail": "Reviewed commit: 61e632323dbc6b4a35ed27bf5b9833102ffd5a4e. TLDR: considered whether the changed comment incorrectly promises a visible missing-terminal explanation even though a closed or reaped tab is deliberately silent. Details: session_view.rs:298-304 says a tab whose terminal host is already gone has its attach fail with a detach explanation, while a shell that exits is reaped and disappears. The immediate terminal.js caller distinguishes these phases: :4123 says exactly 'if (tabClosed && attachProved) silentDetach = true;' and :4148 shows the detach banner only when !silentDetach. Its module comment at :174 explicitly says the failed attach as nonexistent keeps its explanation. Thus silence applies to a previously proven live attachment being withdrawn, whereas a first attach to an already missing terminal retains the explanation the new comment describes. Suggested bucket: other (refuted documentation candidate). Confidence: confirmed source-phase distinction, no execution. proposed_drop: source refutation, with exact attachProved guard above; the comment does not promise a banner for every later closure of a previously live tab. Could-be-highest: no suspected security or work-loss route; documentation accuracy was the entire concern. possible_cover: none; no prohibited sources searched. Caveat: this checks the changed comment and local notice-rendering contract, not a fresh full terminal transport review. No unresolved premise or source lead remains."
+          }
+        }
+      ],
+      "latest": {
+        "line": 17,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c5",
+          "state": "open",
+          "summary": "The tab-absence comment distinguishes a failed attach from an already-live tab disappearing",
+          "location": "crates/farhelm-ui/src/session_view.rs:298",
+          "detail": "Reviewed commit: 61e632323dbc6b4a35ed27bf5b9833102ffd5a4e. TLDR: considered whether the changed comment incorrectly promises a visible missing-terminal explanation even though a closed or reaped tab is deliberately silent. Details: session_view.rs:298-304 says a tab whose terminal host is already gone has its attach fail with a detach explanation, while a shell that exits is reaped and disappears. The immediate terminal.js caller distinguishes these phases: :4123 says exactly 'if (tabClosed && attachProved) silentDetach = true;' and :4148 shows the detach banner only when !silentDetach. Its module comment at :174 explicitly says the failed attach as nonexistent keeps its explanation. Thus silence applies to a previously proven live attachment being withdrawn, whereas a first attach to an already missing terminal retains the explanation the new comment describes. Suggested bucket: other (refuted documentation candidate). Confidence: confirmed source-phase distinction, no execution. proposed_drop: source refutation, with exact attachProved guard above; the comment does not promise a banner for every later closure of a previously live tab. Could-be-highest: no suspected security or work-loss route; documentation accuracy was the entire concern. possible_cover: none; no prohibited sources searched. Caveat: this checks the changed comment and local notice-rendering contract, not a fresh full terminal transport review. No unresolved premise or source lead remains."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g088/findings.jsonl",
+        "id": "c5",
+        "line": 17,
+        "disposition": "excluded",
+        "group": "missing-tab-initial-attach-explanation-versus-live-tab-reap",
+        "reason": "Parent explicitly accepted named refuted proposal from claims-058 after inspecting it. The comment's failed-first-attach explanation and the silent removal of a previously working tab concern different phases. Source refutation from the attachProved phase guard, rather than production correctness as a blanket answer to a comment defect. Checked source/results: [\"61e632323dbc6b4a35ed27bf5b9833102ffd5a4e session_view.rs:298-304 discusses a terminal host already gone when attachment is attempted, then separately describes reaping an exited shell.\",\"The same revision terminal.js:4119-4123 sets silentDetach only for tabClosed && attachProved; :4148 shows the decision banner otherwise. A refused first attach retains the explanation, while an already-working attachment disappearing is silent. No runtime behavior was tested.\"] Current coverage/results: [\"Both specs searched for tab disappearance/attachment. SPEC_impl.md Grid streams and terminal-widget contracts distinguish detach explanations and shell-tab reaping; neither requires a banner for every later closure.\",\"TODO Planned empty; unlanded plans index empty; BUGS, queue INDEX and active TRIAGE_OUTCOMES contain no exact first-attach-versus-proven-attachment documentation mismatch. Existing tab-helper and delete-reader notice items concern different failures.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"The changed comment might wrongly promise a missing-terminal explanation for a deliberately silent closed/reaped tab. Documentation accuracy only; no security or work-loss consequence.\"; null."
+      },
+      "accepted_parent_decision": {
+        "key": "g088/c5",
+        "line": 17,
+        "disposition": "excluded",
+        "group": "missing-tab-initial-attach-explanation-versus-live-tab-reap",
+        "bucket": "other",
+        "recording": "refuted",
+        "queue_target_candidate": null,
+        "needs_independent_drop_check": false,
+        "reason": "Parent explicitly accepted named refuted proposal from claims-058 after inspecting it. The comment's failed-first-attach explanation and the silent removal of a previously working tab concern different phases. Source refutation from the attachProved phase guard, rather than production correctness as a blanket answer to a comment defect. Checked source/results: [\"61e632323dbc6b4a35ed27bf5b9833102ffd5a4e session_view.rs:298-304 discusses a terminal host already gone when attachment is attempted, then separately describes reaping an exited shell.\",\"The same revision terminal.js:4119-4123 sets silentDetach only for tabClosed && attachProved; :4148 shows the decision banner otherwise. A refused first attach retains the explanation, while an already-working attachment disappearing is silent. No runtime behavior was tested.\"] Current coverage/results: [\"Both specs searched for tab disappearance/attachment. SPEC_impl.md Grid streams and terminal-widget contracts distinguish detach explanations and shell-tab reaping; neither requires a banner for every later closure.\",\"TODO Planned empty; unlanded plans index empty; BUGS, queue INDEX and active TRIAGE_OUTCOMES contain no exact first-attach-versus-proven-attachment documentation mismatch. Existing tab-helper and delete-reader notice items concern different failures.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"The changed comment might wrongly promise a missing-terminal explanation for a deliberately silent closed/reaped tab. Documentation accuracy only; no security or work-loss consequence.\"; null."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-058",
+          "key": "g088/c5",
+          "latest_line": 17,
+          "recommendation": "refuted",
+          "bucket": "other",
+          "underlying_key": "missing-tab-initial-attach-explanation-versus-live-tab-reap",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The comment's failed-first-attach explanation and the silent removal of a previously working tab concern different phases.",
+          "checks": [
+            "61e632323dbc6b4a35ed27bf5b9833102ffd5a4e session_view.rs:298-304 discusses a terminal host already gone when attachment is attempted, then separately describes reaping an exited shell.",
+            "The same revision terminal.js:4119-4123 sets silentDetach only for tabClosed && attachProved; :4148 shows the decision banner otherwise. A refused first attach retains the explanation, while an already-working attachment disappearing is silent. No runtime behavior was tested."
+          ],
+          "coverage_checked": [
+            "Both specs searched for tab disappearance/attachment. SPEC_impl.md Grid streams and terminal-widget contracts distinguish detach explanations and shell-tab reaping; neither requires a banner for every later closure.",
+            "TODO Planned empty; unlanded plans index empty; BUGS, queue INDEX and active TRIAGE_OUTCOMES contain no exact first-attach-versus-proven-attachment documentation mismatch. Existing tab-helper and delete-reader notice items concern different failures."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": null,
+          "original_stronger_consequence": "The changed comment might wrongly promise a missing-terminal explanation for a deliberately silent closed/reaped tab. Documentation accuracy only; no security or work-loss consequence.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Source refutation from the attachProved phase guard, rather than production correctness as a blanket answer to a comment defect."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "missing-tab-initial-attach-explanation-versus-live-tab-reap",
+        "destination": null
+      }
+    }
+  ],
+  "replies": [
+    {
+      "turn": 1,
+      "reply": "Initial review complete: all 10 assigned patches (915 lines) reviewed. No confirmed findings or unresolved leads.\n\nFive ruled-out candidates are recorded in [findings.jsonl]([private-run]/g088/findings.jsonl). Progress is updated. No checkout changes, tests, or reproductions performed."
+    },
+    {
+      "turn": 2,
+      "reply": "- Revised `l1` to a confirmed **high** finding: sidebar retirement can erase Restart success before the view observes it, leaving no terminal mounted despite the generation increment. Validated both revision-specific routes and documented recovery limits.\n- Revised `c1` with caller/API checks confirming deletion scope remains unchanged.\n- Unresolved lead IDs: **none**.\n\nSource-only synthesis complete; records and progress updated."
+    },
+    {
+      "turn": 3,
+      "reply": "Discovery pass 1 complete. **One distinct new finding:** `l3` — a discarded header Delete handoff can lose its refusal reason; source-confirmed, bucket `other`.\n\nChecks covered handoff settlement/notices, pinned-tip persistence, retirement gates, provider presentation, terminal focus and sizing.\n\n- `l2`: corroborated the supplied `g196/l1` caller premise.\n- `l1`: corrected its connected-detail cache premise.\n- New verified distinct IDs: `l3`.\n- New unverified-after-investigation IDs: none.\n- Open leads: none.\n\nLogs and progress updated. No execution or reproductions."
+    },
+    {
+      "turn": 4,
+      "reply": "Discovery pass 2 complete. **Nothing new found.**\n\nChecked confirmation snapshots and guards, retired-session surfaces, changed test assertions, tab ordering, and detach/documentation contracts. Recorded source-refuted candidate `c5`.\n\n- New verified IDs: none.\n- New unverified-after-investigation IDs: none.\n- Open leads: none.\n\nLogs and progress updated. Source-only; no execution."
+    }
+  ],
+  "progress": "Group g088 — gui-terminal-attachment\nTurn type/count: initial review / 1. Discovery-pass count: 0 (no later-turn discovery requested).\nState: initial assigned pass complete. All 10 assigned patches, 915 lines, read through the evidence command in bounded packets; complete inventory commits field read without excluded coverage metadata. Root End sentinel present. Required priority/recording sections read. Pinned contracts and replacement/caller source inspected.\nResult: no confirmed findings. Durable candidate IDs: c1, c2, c3, c4; l1 was appended as a lead then revised to a source-refuted candidate. No open leads. New verified/unverified finding IDs this pass: none.\nInterface assumptions: environment deletion uses rendered DeleteScope and immutable host IDs; parent owns full server deletion routing and adjacent groups. Terminal-kind removal assessed through stable visible_tabs IDs and the replacement grid input/render path, not unrelated terminal.js logic. Restart retirement assessed with its separate completion revision and inspected test; no execution claims. Stop-and-suspend page-token removal matches the pinned target-specific exclusion contract.\nCoverage: no omitted or unread assigned patches. Governing pinned contract text read for drawn consent, environment deletion/seal and suspension, retired container sessions, restart/durability, session view, attachments and grid replacement. No prohibited queue/coverage sources consulted. No checkout edits, tests, builds or reproductions.\nNext action: return to caller for the later synthesis/discovery turn; do not run that protocol within the initial turn.\nDelivery correction: initial evidence stdout was wrapped in the shell result object. Re-delivered every mandatory patch range with stdout directly surfaced, one packet per tool call; these later packets are the audit evidence. The c4 event initially failed JSON parsing because its quoted specification text was not escaped; corrected the private event and successfully appended it. Final findings counter: active 0, candidates 5, leads 0. Parent still owns transcript coverage audit.\nTurn 2 started: later-turn synthesis; discovery-pass count remains 0. findings.jsonl exists. Reopened l1 based on parent cross-group evidence: surviving generation increment is insufficient when terminal surface is conditionally absent. Next inspect b3d6b3e and f560058 retirement/admission/observer interactions and resolve recovery guarantees. Other candidates remain pending parent disposition; no drop accepted by parent.\nTurn 2 complete: later-turn synthesis / total turns 2; discovery-pass count 0. l1 revised from candidate through reopened lead to confirmed finding (high): retirement preserves generation but can erase success before a still-Interrupted view mounts any terminal. Resolved b3 newer eligible listing route and f560 old stale-response route through applied-generation ReadGate; inspected independent detail admission, request-claim release, absence predicate and existing generation-only test. Recovery exists through post-boundary detail retry and later definite status, so no permanence or work loss claimed. Parent-provided g036/l1, g037/f3, g038/l1, g089/l1 likely overlap; no parent drops assumed.\nAdditional synthesis: c1 revised with list/API caller corroboration (scope is passed unchanged and encoded exhaustively; Unasked returns rather than escalating). c4's host target signal and stop-and-suspend API also rechecked: page target lives until OpGuard drops, and API preserves rendered no-tabs/ended fields; no changed conclusion. c2/c3 interactions retain their initial source refutations. No new local IDs. New verified finding this turn: l1; unverified: none; unresolved lead IDs: none.\nNo unread assigned material; parent already verified supported delivery. No tests, builds, reproductions, checkout mutations or other group log/coverage reads. Next: return delta for caller reconciliation; await later requested pass.\nTurn 3 started: discovery pass 1 (after required interface synthesis). findings.jsonl verified through successful append. Reopened no old candidate; new parent-supplied source lead l2 records stale-page terminal-kind/input preconditions before investigation. Neighbour file initial 1-160 delivery clipped; reread in smaller bounded packets before source search. Also verify neighbour correction to l1's connected-detail/cache recovery premise, preserving the residual and original severity until checked. No new verified finding yet.\nTurn 3 complete: interface synthesis plus separate discovery pass 1. Complete discovery-neighbours.json read in bounded packets (1-45, 46-92, 93-158, 159-202) after replacing the initial clipped delivery. No scope expansion or prohibited coverage-source reads.\nInterface synthesis changes: l1 corrected by direct connected GET detail source: it drains live supervisor state, so the prior cache/merged_status premise is withdrawn; temporary existing-current suppression remains, original consequence/severity and no-parent-drop status retained. l2 closed from lead to finding as caller corroboration of supplied g196/l1, not an independent new defect: parent-page default kinds, AppBody/BuildSkewNotice, lease/surface/reconnect and raw-input installation permit a fresh interactive unknown-kind mount. All assigned UI guard premises settled; full paste/decoder consequence remains with g196, preserving potential-highest and explicit stale-page specification-acceptance caveat for independent judgment.\nDiscovery checks beyond known issues: inspected environment Delete failure handoff/notice/state retention and current-tip persistence, provider labels/marks/resource escaping, retired-session terminal/tunnel/seen gating and tests, grid focus selector and hidden-pane sizing/documentation. New distinct finding l3 (other) confirmed: HeaderQuestion clears the refusal error, then the effect can discard its ID-only handoff on navigation/admission failure, leaving no question or reason; no parallel failure notice and no in-range repair through pinned tip. This completes the assigned discovery sweep after the finding, not an early stop at discovery.\nNew verified distinct IDs: l3. New interface-corrobating ID: l2 (same concern as supplied g196/l1, caller path confirmed; no independent reproduction). New unverified-after-investigation IDs: none. Open leads: none. Explicit result: yes, one distinct new issue found (l3). No omitted/unread assigned patches, no tests/builds/reproductions/live-install or checkout changes.\nNext: return delta for caller reconciliation and a later requested discovery pass, since this pass found a substantive new issue. Do not execute that later pass within this turn.\nTurn 4 started: discovery pass 2. Complete refreshed neighbour context read in bounded packets through line 231; no named pending questions. findings.jsonl exists, all own original/revised IDs and candidates remain in context. Search restricted to assigned patches, their contracts and immediate callers; known l1/l2/l3 and supplied findings excluded from novelty. Next examine consent-render snapshots, retained claims/surface lifecycle, and changed test/documentation assertions for any distinct defect. No new lead or finding at startup.\nTurn 4 complete: discovery pass 2, with refreshed neighbours fully read through line 231 before source search. No pending cross-group questions were supplied. Examined changed Stop-and-suspend render-bound guards and routing snapshot, environment Delete consequence/scope/guard alignment, retired-session withdrawal across strip/panes/controls, changed retired/restart/interruption test premises and assertions, tab helper/order assertions, and the revised missing-host/shell-exit documentation against detach handling. All source checks at the named pinned revisions; no runtime observations inferred.\nNew durable record: c5, source-refuted documentation candidate. The changed tab comment's failed first-attach explanation is consistent with terminal.js's explicit attachProved distinction from silent closure of a previously live tab. No new verified finding IDs; no new unverified-after-investigation IDs; no open leads. Explicit result: nothing new found beyond existing findings. Existing IDs/consequences/proposed-drop bases remain unchanged; no parent drop/lowering assumed.\nCoverage: no unread/omitted assigned patches, no prohibited coverage-source search, no tests/builds/reproductions/live-install action or checkout mutation. Next: return this empty-discovery delta to caller and await any further requested pass.\n"
+}

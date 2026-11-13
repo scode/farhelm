@@ -1,0 +1,763 @@
+{
+  "group": {
+    "id": "g069",
+    "domain": "podman-environments",
+    "purpose": "podman-environments: e2e/tests/podman-environments.spec.ts; phases complete small per-commit changes",
+    "interfaces": [
+      "g022",
+      "g023",
+      "g024",
+      "g025",
+      "g026",
+      "g027",
+      "g028",
+      "g029",
+      "g055",
+      "g056",
+      "g057",
+      "g058",
+      "g059",
+      "g060",
+      "g068",
+      "g070"
+    ],
+    "sources": [
+      {
+        "path": "[private-run]/prep/parts/00262-000.patch",
+        "ranges": [
+          [
+            1,
+            948
+          ]
+        ],
+        "original_path": "e2e/tests/podman-environments.spec.ts",
+        "commit": "350a4b33b6d4476f4a78e43cea124bc2b828f462",
+        "notes": "patch header; patch character offsets [0,44298)",
+        "lines": 948,
+        "bytes": 44300,
+        "start": 0,
+        "end": 44298,
+        "original": "[private-run]/prep/originals/00262.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/00723-000.patch",
+        "ranges": [
+          [
+            1,
+            95
+          ]
+        ],
+        "original_path": "e2e/tests/podman-environments.spec.ts",
+        "commit": "2ef10815f12ed719ab6c51c6e3ac6fcd3f8bc1fa",
+        "notes": "patch header; patch character offsets [0,5574)",
+        "lines": 95,
+        "bytes": 5574,
+        "start": 0,
+        "end": 5574,
+        "original": "[private-run]/prep/originals/00723.patch"
+      }
+    ],
+    "lines": 1043,
+    "bytes": 49874
+  },
+  "records": [
+    {
+      "key": "g069/c1",
+      "owner": "g069",
+      "id": "c1",
+      "domain": "podman-environments",
+      "purpose": "podman-environments: e2e/tests/podman-environments.spec.ts; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 1,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c1",
+            "state": "open",
+            "summary": "Fixed build-date assertion is independent of the runner timezone",
+            "location": "e2e/tests/podman-environments.spec.ts:922",
+            "detail": "Reviewed commit: 350a4b33b6d4476f4a78e43cea124bc2b828f462. TLDR: Considered whether the delayed-probe Recipes test could fail merely because the runner uses a different timezone; source refutes that concern. Details: the fixture supplies built_at=1700000000 at lines 843-844 and asserts Built 2023-11-14 at line 922. crates/farhelm-ui/src/tensorlake/recipes.rs:139 documents the formatter as a labelled UTC date and minute, so the expected date does not depend on local timezone. Suggested bucket: other (test tooling only). Confidence: confirmed from source; no execution. proposed_drop: timezone concern refuted by the UTC formatter contract. Could-be-highest: false; no security or user-owned-work consequence. possible_cover: none. Caveat: this settles only timezone sensitivity, not the full probe-refresh test."
+          }
+        },
+        {
+          "line": 5,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c1",
+            "state": "open",
+            "summary": "Fixed build-date assertion is independent of the runner timezone",
+            "location": "e2e/tests/podman-environments.spec.ts:923",
+            "detail": "Reviewed commit: 350a4b33b6d4476f4a78e43cea124bc2b828f462\n\n## TLDR\nConsidered whether the delayed-probe Recipes test could fail merely because the runner uses a different timezone; source refutes that concern.\n\n## Details\nThe fixture supplies built_at=1700000000 and asserts Built 2023-11-14 at line 923. crates/farhelm-ui/src/tensorlake/recipes.rs:139-150 documents and implements a UTC formatter: \"A UTC date and minute, `2026-11-03 14:02 UTC`. UTC and labelled, for the reason `activity::utc_stamp` gives.\" The implementation obtains civil days by secs.div_euclid(86400), without a local timezone lookup. Suggested bucket: other (test tooling only). Confidence: confirmed from source; no execution. proposed_drop: timezone concern refuted by the quoted UTC formatter contract and implementation. Could-be-highest: false; no security or user-owned-work consequence. possible_cover: none. Caveat: this settles only timezone sensitivity, not the full probe-refresh test. This revision corrects the original assertion line reference and supplies the exact contract and complete record format."
+          }
+        }
+      ],
+      "latest": {
+        "line": 5,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c1",
+          "state": "open",
+          "summary": "Fixed build-date assertion is independent of the runner timezone",
+          "location": "e2e/tests/podman-environments.spec.ts:923",
+          "detail": "Reviewed commit: 350a4b33b6d4476f4a78e43cea124bc2b828f462\n\n## TLDR\nConsidered whether the delayed-probe Recipes test could fail merely because the runner uses a different timezone; source refutes that concern.\n\n## Details\nThe fixture supplies built_at=1700000000 and asserts Built 2023-11-14 at line 923. crates/farhelm-ui/src/tensorlake/recipes.rs:139-150 documents and implements a UTC formatter: \"A UTC date and minute, `2026-11-03 14:02 UTC`. UTC and labelled, for the reason `activity::utc_stamp` gives.\" The implementation obtains civil days by secs.div_euclid(86400), without a local timezone lookup. Suggested bucket: other (test tooling only). Confidence: confirmed from source; no execution. proposed_drop: timezone concern refuted by the quoted UTC formatter contract and implementation. Could-be-highest: false; no security or user-owned-work consequence. possible_cover: none. Caveat: this settles only timezone sensitivity, not the full probe-refresh test. This revision corrects the original assertion line reference and supplies the exact contract and complete record format."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g069/findings.jsonl",
+        "id": "c1",
+        "line": 5,
+        "disposition": "excluded",
+        "group": "podman-recipe-build-date-runner-timezone",
+        "reason": "Parent explicitly accepted named refuted proposal from claims-043 after inspecting it. The build-date formatter uses UTC arithmetic, so changing the runner timezone cannot change this expected date. Close only runner-timezone sensitivity of the fixed build date, using the formatter implementation as well as its docstring. Checked source/results: [\"350a4b33b6d4476f4a78e43cea124bc2b828f462:e2e/tests/podman-environments.spec.ts:840 supplies built_at=1700000000 and :923 expects Built 2023-11-14. Earlier history's 843-844 and 922 references are superseded by these exact lines.\",\"Same revision:crates/farhelm-ui/src/tensorlake/recipes.rs:139-149 documents UTC and implements civil_from_days(secs.div_euclid(86400)) plus UTC-labelled time, with no local timezone lookup. No runtime test was run.\"] Current coverage/results: [\"SPEC.md Container sessions and SPEC_impl.md shared recipes/Testing do not accept timezone-dependent tests; no coverage rule is needed because source refutes the premise.\",\"TODO.md Planned is empty. Searches of plans/queue, BUGS.md, INDEX and active TRIAGE_OUTCOMES.md for this assertion, build date, UTC and timezone found no exact cover or pending repair. FILTER.md was read and is not the basis.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"The delayed-probe Recipes test could allegedly fail solely because of the runner timezone. No broader probe-refresh conclusion is made.\"; null."
+      },
+      "accepted_parent_decision": {
+        "key": "g069/c1",
+        "line": 5,
+        "disposition": "excluded",
+        "group": "podman-recipe-build-date-runner-timezone",
+        "bucket": "other",
+        "recording": "refuted",
+        "queue_target_candidate": null,
+        "needs_independent_drop_check": false,
+        "reason": "Parent explicitly accepted named refuted proposal from claims-043 after inspecting it. The build-date formatter uses UTC arithmetic, so changing the runner timezone cannot change this expected date. Close only runner-timezone sensitivity of the fixed build date, using the formatter implementation as well as its docstring. Checked source/results: [\"350a4b33b6d4476f4a78e43cea124bc2b828f462:e2e/tests/podman-environments.spec.ts:840 supplies built_at=1700000000 and :923 expects Built 2023-11-14. Earlier history's 843-844 and 922 references are superseded by these exact lines.\",\"Same revision:crates/farhelm-ui/src/tensorlake/recipes.rs:139-149 documents UTC and implements civil_from_days(secs.div_euclid(86400)) plus UTC-labelled time, with no local timezone lookup. No runtime test was run.\"] Current coverage/results: [\"SPEC.md Container sessions and SPEC_impl.md shared recipes/Testing do not accept timezone-dependent tests; no coverage rule is needed because source refutes the premise.\",\"TODO.md Planned is empty. Searches of plans/queue, BUGS.md, INDEX and active TRIAGE_OUTCOMES.md for this assertion, build date, UTC and timezone found no exact cover or pending repair. FILTER.md was read and is not the basis.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"The delayed-probe Recipes test could allegedly fail solely because of the runner timezone. No broader probe-refresh conclusion is made.\"; null."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-043",
+          "key": "g069/c1",
+          "latest_line": 5,
+          "recommendation": "refuted",
+          "bucket": "other",
+          "underlying_key": "podman-recipe-build-date-runner-timezone",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The build-date formatter uses UTC arithmetic, so changing the runner timezone cannot change this expected date.",
+          "checks": [
+            "350a4b33b6d4476f4a78e43cea124bc2b828f462:e2e/tests/podman-environments.spec.ts:840 supplies built_at=1700000000 and :923 expects Built 2023-11-14. Earlier history's 843-844 and 922 references are superseded by these exact lines.",
+            "Same revision:crates/farhelm-ui/src/tensorlake/recipes.rs:139-149 documents UTC and implements civil_from_days(secs.div_euclid(86400)) plus UTC-labelled time, with no local timezone lookup. No runtime test was run."
+          ],
+          "coverage_checked": [
+            "SPEC.md Container sessions and SPEC_impl.md shared recipes/Testing do not accept timezone-dependent tests; no coverage rule is needed because source refutes the premise.",
+            "TODO.md Planned is empty. Searches of plans/queue, BUGS.md, INDEX and active TRIAGE_OUTCOMES.md for this assertion, build date, UTC and timezone found no exact cover or pending repair. FILTER.md was read and is not the basis."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": null,
+          "original_stronger_consequence": "The delayed-probe Recipes test could allegedly fail solely because of the runner timezone. No broader probe-refresh conclusion is made.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Close only runner-timezone sensitivity of the fixed build date, using the formatter implementation as well as its docstring."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "podman-recipe-build-date-runner-timezone",
+        "destination": null
+      }
+    },
+    {
+      "key": "g069/c2",
+      "owner": "g069",
+      "id": "c2",
+      "domain": "podman-environments",
+      "purpose": "podman-environments: e2e/tests/podman-environments.spec.ts; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 2,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c2",
+            "state": "open",
+            "summary": "Container Delete fixture deliberately stops at the helm response boundary",
+            "location": "e2e/tests/podman-environments.spec.ts:620",
+            "detail": "Reviewed commit: 2ef10815f12ed719ab6c51c6e3ac6fcd3f8bc1fa\n\n## TLDR\nThe container Delete test does not exercise a real container's supervisor, but it explicitly tests the browser's request, confirmation and outcome at the helm boundary. This is not evidence of broken product deletion.\n\n## Details\nThe new test rewrites the owned stack's ordinary remote host to Podman only in the browser's hosts response. It intercepts the selected session's DELETE, records the exact query, really deletes that owned session through APIRequestContext, then supplies environment_remaining=1. Its comment states: \"its helm would refuse the environment Delete for what is really an ordinary host, so the answer is given here in the helm's shape, after the session is really deleted so the next listing agrees with it.\" The APIRequestContext cleanup bypasses page routing; e2e/tests/helpers/fleet.ts:576-589 stops/deletes only the captured id. The test checks ?delete_environment_session=true, both confirmation outcomes, container wording, no snapshot claim, the remaining-count notice and survival of the other owned session. Shared source in crates/farhelm-ui/src/list/view.rs:943-991 removes only the selected session for DeleteScope::Session and renders the provider's remaining-count wording. The named sandbox companion tests at lines 848, 929 and 986 cover unasked fallback, bulk requests and being-deleted state. Suggested bucket: other, limited to test coverage if this boundary were misrepresented. Confidence: confirmed from source; no execution. proposed_drop: explicit, adequately asserted browser fixture boundary; quoted fixture contract above. Could-be-highest: false for this test-coverage concern; no established product security or loss-of-work route. possible_cover: companion test coverage named by the changed test's own comment; no queue/coverage metadata read. Caveat: neither this test nor this review demonstrates real Podman backend execution."
+          }
+        }
+      ],
+      "latest": {
+        "line": 2,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c2",
+          "state": "open",
+          "summary": "Container Delete fixture deliberately stops at the helm response boundary",
+          "location": "e2e/tests/podman-environments.spec.ts:620",
+          "detail": "Reviewed commit: 2ef10815f12ed719ab6c51c6e3ac6fcd3f8bc1fa\n\n## TLDR\nThe container Delete test does not exercise a real container's supervisor, but it explicitly tests the browser's request, confirmation and outcome at the helm boundary. This is not evidence of broken product deletion.\n\n## Details\nThe new test rewrites the owned stack's ordinary remote host to Podman only in the browser's hosts response. It intercepts the selected session's DELETE, records the exact query, really deletes that owned session through APIRequestContext, then supplies environment_remaining=1. Its comment states: \"its helm would refuse the environment Delete for what is really an ordinary host, so the answer is given here in the helm's shape, after the session is really deleted so the next listing agrees with it.\" The APIRequestContext cleanup bypasses page routing; e2e/tests/helpers/fleet.ts:576-589 stops/deletes only the captured id. The test checks ?delete_environment_session=true, both confirmation outcomes, container wording, no snapshot claim, the remaining-count notice and survival of the other owned session. Shared source in crates/farhelm-ui/src/list/view.rs:943-991 removes only the selected session for DeleteScope::Session and renders the provider's remaining-count wording. The named sandbox companion tests at lines 848, 929 and 986 cover unasked fallback, bulk requests and being-deleted state. Suggested bucket: other, limited to test coverage if this boundary were misrepresented. Confidence: confirmed from source; no execution. proposed_drop: explicit, adequately asserted browser fixture boundary; quoted fixture contract above. Could-be-highest: false for this test-coverage concern; no established product security or loss-of-work route. possible_cover: companion test coverage named by the changed test's own comment; no queue/coverage metadata read. Caveat: neither this test nor this review demonstrates real Podman backend execution."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g069/findings.jsonl",
+        "id": "c2",
+        "line": 2,
+        "disposition": "excluded",
+        "group": "podman-delete-browser-fixture-declared-helm-response-boundary",
+        "reason": "Parent explicitly accepted named refuted proposal from claims-043 after inspecting it. The test explicitly asserts the browser's confirmation, request and outcome handling against a supplied helm-shaped reply. Its lack of a real Podman backend does not contradict that declared boundary or establish a false assertion. Close the alleged boundary-misrepresentation concern only. Do not promote this test into evidence of real Podman backend deletion or use correct backend behavior to excuse a test-oracle defect. Checked source/results: [\"2ef10815f12ed719ab6c51c6e3ac6fcd3f8bc1fa:e2e/tests/podman-environments.spec.ts:620-629 explicitly says the ordinary remote host is presented as a container and the helm-shaped answer is supplied after actual owned-session deletion.\",\"Same file:643-665 owns two sessions, rewrites only the browser hosts response, records the selected DELETE query, deletes only gone through APIRequestContext and returns environment_remaining=1. Assertions:672-686 require the container warning, no snapshot promise, no request before confirmation, exact protected query, remaining count and survival of kept.\",\"helpers/fleet.ts cleanupSession stops/deletes only the supplied ID through request API. No real Podman deletion was executed or claimed as evidence here.\"] Current coverage/results: [\"Current SPEC.md:4838-4850 states the product Delete contract. The fixture observes its browser boundary, while SPEC_impl.md Environment Delete and the seal governs the backend. Production correctness is not used to refute a possible test defect.\",\"TODO.md Planned is empty. Searches of plans/queue, BUGS.md, INDEX and active TRIAGE_OUTCOMES.md for this test and simulated container Delete found no exact accepted defect or pending repair. Landed environment-agent-operations is context, not cover. FILTER.md is not used.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"A browser-only container Delete fixture might misleadingly imply real backend coverage. The explicit fixture comment and actual assertions bound it to the helm response interface; no product deletion or user-work-loss defect was established.\"; \"No concrete incorrect oracle or claim of real Podman execution was identified. Backend Podman execution remains outside this test's evidence.\"."
+      },
+      "accepted_parent_decision": {
+        "key": "g069/c2",
+        "line": 2,
+        "disposition": "excluded",
+        "group": "podman-delete-browser-fixture-declared-helm-response-boundary",
+        "bucket": "other",
+        "recording": "refuted",
+        "queue_target_candidate": null,
+        "needs_independent_drop_check": false,
+        "reason": "Parent explicitly accepted named refuted proposal from claims-043 after inspecting it. The test explicitly asserts the browser's confirmation, request and outcome handling against a supplied helm-shaped reply. Its lack of a real Podman backend does not contradict that declared boundary or establish a false assertion. Close the alleged boundary-misrepresentation concern only. Do not promote this test into evidence of real Podman backend deletion or use correct backend behavior to excuse a test-oracle defect. Checked source/results: [\"2ef10815f12ed719ab6c51c6e3ac6fcd3f8bc1fa:e2e/tests/podman-environments.spec.ts:620-629 explicitly says the ordinary remote host is presented as a container and the helm-shaped answer is supplied after actual owned-session deletion.\",\"Same file:643-665 owns two sessions, rewrites only the browser hosts response, records the selected DELETE query, deletes only gone through APIRequestContext and returns environment_remaining=1. Assertions:672-686 require the container warning, no snapshot promise, no request before confirmation, exact protected query, remaining count and survival of kept.\",\"helpers/fleet.ts cleanupSession stops/deletes only the supplied ID through request API. No real Podman deletion was executed or claimed as evidence here.\"] Current coverage/results: [\"Current SPEC.md:4838-4850 states the product Delete contract. The fixture observes its browser boundary, while SPEC_impl.md Environment Delete and the seal governs the backend. Production correctness is not used to refute a possible test defect.\",\"TODO.md Planned is empty. Searches of plans/queue, BUGS.md, INDEX and active TRIAGE_OUTCOMES.md for this test and simulated container Delete found no exact accepted defect or pending repair. Landed environment-agent-operations is context, not cover. FILTER.md is not used.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"A browser-only container Delete fixture might misleadingly imply real backend coverage. The explicit fixture comment and actual assertions bound it to the helm response interface; no product deletion or user-work-loss defect was established.\"; \"No concrete incorrect oracle or claim of real Podman execution was identified. Backend Podman execution remains outside this test's evidence.\"."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-043",
+          "key": "g069/c2",
+          "latest_line": 2,
+          "recommendation": "refuted",
+          "bucket": "other",
+          "underlying_key": "podman-delete-browser-fixture-declared-helm-response-boundary",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The test explicitly asserts the browser's confirmation, request and outcome handling against a supplied helm-shaped reply. Its lack of a real Podman backend does not contradict that declared boundary or establish a false assertion.",
+          "checks": [
+            "2ef10815f12ed719ab6c51c6e3ac6fcd3f8bc1fa:e2e/tests/podman-environments.spec.ts:620-629 explicitly says the ordinary remote host is presented as a container and the helm-shaped answer is supplied after actual owned-session deletion.",
+            "Same file:643-665 owns two sessions, rewrites only the browser hosts response, records the selected DELETE query, deletes only gone through APIRequestContext and returns environment_remaining=1. Assertions:672-686 require the container warning, no snapshot promise, no request before confirmation, exact protected query, remaining count and survival of kept.",
+            "helpers/fleet.ts cleanupSession stops/deletes only the supplied ID through request API. No real Podman deletion was executed or claimed as evidence here."
+          ],
+          "coverage_checked": [
+            "Current SPEC.md:4838-4850 states the product Delete contract. The fixture observes its browser boundary, while SPEC_impl.md Environment Delete and the seal governs the backend. Production correctness is not used to refute a possible test defect.",
+            "TODO.md Planned is empty. Searches of plans/queue, BUGS.md, INDEX and active TRIAGE_OUTCOMES.md for this test and simulated container Delete found no exact accepted defect or pending repair. Landed environment-agent-operations is context, not cover. FILTER.md is not used."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": "No concrete incorrect oracle or claim of real Podman execution was identified. Backend Podman execution remains outside this test's evidence.",
+          "original_stronger_consequence": "A browser-only container Delete fixture might misleadingly imply real backend coverage. The explicit fixture comment and actual assertions bound it to the helm response interface; no product deletion or user-work-loss defect was established.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Close the alleged boundary-misrepresentation concern only. Do not promote this test into evidence of real Podman backend deletion or use correct backend behavior to excuse a test-oracle defect."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "podman-delete-browser-fixture-declared-helm-response-boundary",
+        "destination": null
+      }
+    },
+    {
+      "key": "g069/l1",
+      "owner": "g069",
+      "id": "l1",
+      "domain": "podman-environments",
+      "purpose": "podman-environments: e2e/tests/podman-environments.spec.ts; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 3,
+          "event": {
+            "version": 1,
+            "kind": "lead",
+            "id": "l1",
+            "state": "open",
+            "summary": "Owned source sessions are created before the cleanup guard",
+            "location": "e2e/tests/podman-environments.spec.ts:124",
+            "detail": "Reviewed commit: 350a4b33b6d4476f4a78e43cea124bc2b828f462\n\n## TLDR\nInvestigating whether a setup failure can leave a fixture agent running and alter later browser tests. No product data-loss route is established.\n\n## Details\nThe active-placement test creates a real source session before listing/asserting that source and installing multiple routes; the try/finally that invokes cleanupSession starts later. Other new tests also create their source before entering try. A thrown setup assertion could bypass their local cleanup. Checked so far: createSession in e2e/tests/helpers/fleet.ts creates a real command session; cleanupOwnedSteps only runs when invoked. Missing premise: whether the browser harness cleans all owned sessions between tests or instead retains this source for the rest of the suite, and whether retention has a material test-isolation consequence. Next source checks: test evidence fixture lifecycle, owned stack teardown, fake-agent lifetime. Suggested bucket: other (test failure-path cleanup), unless catastrophic tooling impact is established; could-be-highest: false on current evidence. Confidence: unverified pending those source checks. proposed_drop: false. possible_cover: none. Source-only investigation; no execution."
+          }
+        },
+        {
+          "line": 4,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "l1",
+            "state": "open",
+            "summary": "Guard fixture sessions before setup assertions can throw",
+            "location": "e2e/tests/podman-environments.spec.ts:111",
+            "detail": "Reviewed commit: 350a4b33b6d4476f4a78e43cea124bc2b828f462\n\n## TLDR\nIf setup fails after creating the source session, this browser test leaves its fixture session in the shared test stack. Later tests can inherit the extra session and its agent instead of a restored fixture. This affects test isolation, not a user's installation.\n\n## Details\nThe active-placement test creates source at lines 111-114, then awaits a listing and asserts its success, source presence and host at lines 115-119. Its try/finally begins only at line 245; cleanupSession(source.id) is inside that finally at line 293. Therefore a refused listing, missing source row or failed route registration between creation and line 245 bypasses cleanup entirely. The same pre-try ownership gap occurs for source creation at lines 501 and 555. e2e/tests/helpers/fleet.ts:408-441 creates the real API session, and lines 576-589 show that stopping/deleting requires an explicit cleanupSession invocation. The FAKE_AGENT contract at fleet.ts:165-175 says the basic agent prints, echoes and then goes quiet; browser disposal does not own its supervisor session. e2e/tests/helpers/evidence.ts:46-112 tears down timelines, premise observation and browser contexts, without session deletion. e2e/playwright.config.ts:118-140 describes each worker's long-lived shared stack and serial tests, and its projects comment at lines 160-170 requires a spec that disturbs shared stack state to put it back. Thus a failed worker/context is not a session-cleanup boundary. Put real session creation and all later setup inside the existing try/finally, with the id recorded immediately after create succeeds, so assertion and route-setup failures run the same owned cleanup as body failures.\n\nSuggested bucket: other; the established consequence is failure-path contamination of maintainer test tooling. Confidence: confirmed by source and fixture lifecycle contracts; no runtime execution or reproduction. proposed_drop: false. Could-be-highest: false; only the harness's owned sessions are affected, and no catastrophic tooling consequence is established. possible_cover: none. Caveats: the initial setup failure is required to expose this gap; the normal success/body-failure paths clean up, and the enclosing stack eventually has its own shutdown. This record preserves the earlier lead's suspected lingering-agent consequence, now supported by the fixture lifecycle, without claiming an observed cascade or indefinite leak beyond stack shutdown."
+          }
+        },
+        {
+          "line": 7,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "l1",
+            "state": "open",
+            "summary": "Guard owned fixtures before setup assertions can throw",
+            "location": "e2e/tests/podman-environments.spec.ts:111",
+            "detail": "Reviewed commit: 350a4b33b6d4476f4a78e43cea124bc2b828f462\n\n## TLDR\nIf setup fails after creating the source session, this browser test leaves its fixture session in the shared test stack. Later tests can inherit the extra session and its agent instead of a restored fixture. A saved-template fixture has the same cleanup gap. This affects test isolation, not a user's installation.\n\n## Details\nThe active-placement test creates source at lines 111-114, then awaits a listing and asserts its success, source presence and host at lines 115-119. Its try/finally begins only at line 245; cleanupSession(source.id) is inside that finally at line 292. A refused listing, missing source row or failed route registration between creation and line 245 bypasses cleanup entirely. The same pre-try ownership gap occurs for source creation at lines 501 and 555. The quick-launch test likewise saves its real template at lines 689-702 but does not enter try until line 741, after more awaited route registration.\n\nThe source-session consequence is supported by e2e/tests/helpers/fleet.ts:408-441 (real API create) and 576-589 (explicit stop/delete cleanup). Its FAKE_AGENT definition at lines 165-175 selects the basic fixture; crates/farhelm-fixtures/src/fake_agent.rs:1675-1697 shows the fixture waiting for stdin until quit, rather than exiting at browser disposal. e2e/tests/helpers/evidence.ts:46-112 tears down timelines, premise observation and browser contexts without deleting API sessions. e2e/playwright.config.ts:119-134 describes a long-lived shared stack, and lines 160-169 require specs that disturb shared stack state to put it back. A failed browser worker/context is therefore not an owned-session cleanup boundary. Put session/template creation and every later setup operation inside the existing try/finally, recording each owned identity immediately after creation succeeds.\n\nSuggested bucket: other; the established consequence is failure-path contamination of maintainer test tooling. Confidence: confirmed from source and fixture lifecycle contracts; no runtime execution or reproduction. proposed_drop: false. Could-be-highest: false; only the harness's owned fixtures are affected, and no catastrophic tooling consequence is established. possible_cover: none. Caveats: a setup failure is required; normal success and failures inside the existing try clean up. The enclosing stack eventually shuts down. No cascade or indefinite process leak beyond stack shutdown was observed. This revision corrects the cleanup line reference, confirms the fake-agent lifetime from implementation, and includes the saved-template instance of the same ownership gap. The original suspected lingering-agent and later-test contamination consequences are retained."
+          }
+        }
+      ],
+      "latest": {
+        "line": 7,
+        "event": {
+          "version": 1,
+          "kind": "finding",
+          "id": "l1",
+          "state": "open",
+          "summary": "Guard owned fixtures before setup assertions can throw",
+          "location": "e2e/tests/podman-environments.spec.ts:111",
+          "detail": "Reviewed commit: 350a4b33b6d4476f4a78e43cea124bc2b828f462\n\n## TLDR\nIf setup fails after creating the source session, this browser test leaves its fixture session in the shared test stack. Later tests can inherit the extra session and its agent instead of a restored fixture. A saved-template fixture has the same cleanup gap. This affects test isolation, not a user's installation.\n\n## Details\nThe active-placement test creates source at lines 111-114, then awaits a listing and asserts its success, source presence and host at lines 115-119. Its try/finally begins only at line 245; cleanupSession(source.id) is inside that finally at line 292. A refused listing, missing source row or failed route registration between creation and line 245 bypasses cleanup entirely. The same pre-try ownership gap occurs for source creation at lines 501 and 555. The quick-launch test likewise saves its real template at lines 689-702 but does not enter try until line 741, after more awaited route registration.\n\nThe source-session consequence is supported by e2e/tests/helpers/fleet.ts:408-441 (real API create) and 576-589 (explicit stop/delete cleanup). Its FAKE_AGENT definition at lines 165-175 selects the basic fixture; crates/farhelm-fixtures/src/fake_agent.rs:1675-1697 shows the fixture waiting for stdin until quit, rather than exiting at browser disposal. e2e/tests/helpers/evidence.ts:46-112 tears down timelines, premise observation and browser contexts without deleting API sessions. e2e/playwright.config.ts:119-134 describes a long-lived shared stack, and lines 160-169 require specs that disturb shared stack state to put it back. A failed browser worker/context is therefore not an owned-session cleanup boundary. Put session/template creation and every later setup operation inside the existing try/finally, recording each owned identity immediately after creation succeeds.\n\nSuggested bucket: other; the established consequence is failure-path contamination of maintainer test tooling. Confidence: confirmed from source and fixture lifecycle contracts; no runtime execution or reproduction. proposed_drop: false. Could-be-highest: false; only the harness's owned fixtures are affected, and no catastrophic tooling consequence is established. possible_cover: none. Caveats: a setup failure is required; normal success and failures inside the existing try clean up. The enclosing stack eventually shuts down. No cascade or indefinite process leak beyond stack shutdown was observed. This revision corrects the cleanup line reference, confirms the fake-agent lifetime from implementation, and includes the saved-template instance of the same ownership gap. The original suspected lingering-agent and later-test contamination consequences are retained."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g069/findings.jsonl",
+        "id": "l1",
+        "line": 7,
+        "disposition": "verified",
+        "group": "browser-owned-fixtures-acquired-before-cleanup-guard",
+        "reason": "Parent read full claims043 and existing acquired-before-guard item. New Podman tests at350a4b33:111-119,501,555,689-702 acquire real session/template state before fallible assertions or route setup and before their cleanup guards. This is useful additional caller scope for the same ownership gap. Existing item covers quick-switcher/migration only, so extend it; not an accepted dismissal. Real API agents outlive browser disposal, later stack reset bounds residue, no actual incidence or user-work loss claimed. Current coverage searches found no acceptance/pending repair. Reconcile g026/f6's same pre-guard acquisition mechanism here, preserving each caller and distinct fallible setup."
+      },
+      "accepted_parent_decision": {
+        "key": "g069/l1",
+        "line": 7,
+        "disposition": "verified",
+        "group": "browser-owned-fixtures-acquired-before-cleanup-guard",
+        "bucket": "other",
+        "recording": "extend-existing",
+        "queue_target_candidate": "review_feedback_queue/switcher-second-create-failure-leaks-first-session.md",
+        "needs_independent_drop_check": false,
+        "reason": "Parent read full claims043 and existing acquired-before-guard item. New Podman tests at350a4b33:111-119,501,555,689-702 acquire real session/template state before fallible assertions or route setup and before their cleanup guards. This is useful additional caller scope for the same ownership gap. Existing item covers quick-switcher/migration only, so extend it; not an accepted dismissal. Real API agents outlive browser disposal, later stack reset bounds residue, no actual incidence or user-work loss claimed. Current coverage searches found no acceptance/pending repair. Reconcile g026/f6's same pre-guard acquisition mechanism here, preserving each caller and distinct fallible setup."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-043",
+          "key": "g069/l1",
+          "latest_line": 7,
+          "recommendation": "retain-verified",
+          "bucket": "other",
+          "underlying_key": "podman-browser-owned-fixtures-created-before-cleanup-guard",
+          "aliases": [],
+          "target_queue_file": "review_feedback_queue/switcher-second-create-failure-leaks-first-session.md",
+          "why": "Conditional setup failure can bypass all local cleanup after a real session or template has already been acquired. Shared browser/worker teardown does not delete these API-owned fixtures. This is useful additional scope for the existing acquired-before-guard item, not exact coverage of these tests.",
+          "checks": [
+            "350a4b33b6d4476f4a78e43cea124bc2b828f462:e2e/tests/podman-environments.spec.ts:111-119 creates a source before fallible listing assertions; try begins at 245 and cleanupSession is at 292. Further sources at 501 and 555 precede awaited route setup and their guards. Template save at 689-702 precedes route setup and try at 741.",
+            "Same revision:helpers/fleet.ts:408-435 creates a real API session, :165-175 chooses the basic agent, and :576-589 explicitly stops/deletes that ID. farhelm-fixtures/src/fake_agent.rs:1675-1697 waits for stdin/quit. Closing a browser is not the session's lifetime boundary.",
+            "Same revision:helpers/evidence.ts:46-110 tears down evidence/browser observation, with no session/template deletion. playwright.config.ts:119-134,160-169 keeps stacks across serial tests/projects and requires restoration. The source and raw-wait instances remain at reviewed tip 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db. No failure injection, observed cascade or indefinite process leak is claimed."
+          ],
+          "coverage_checked": [
+            "SPEC.md and SPEC_impl.md Testing contain no acceptance of per-test fixture leaks; ordinary product/container cleanup rules do not cover test fixture ownership mistakes.",
+            "TODO.md Planned is empty. Searches of plans/queue, BUGS.md and active TRIAGE_OUTCOMES.md found no exact trigger/consequence/scope acceptance or pending repair.",
+            "INDEX matches were read in full: switcher-second-create-failure-leaks-first-session.md covers the same acquisition-before-guard structure in quick-switcher and terminal-migration, but not these Podman tests or template fixture. orphan-test-setup-precedes-cleanup-guard.md covers account/recipe setup in tensorlake-tunnels; resume-launch-test-records-session-after-assertion.md loses the ID before finally; route-retirement-failure-skips-owned-session-cleanup.md fails during teardown. None removes these causes. Proposed extension is useful new scope, not duplicate coverage.",
+            "FILTER.md rare-safe-failure does not cover running fixture/resource state that persists into subsequent tests. Eventual stack reset/shutdown bounds the consequence but does not make it a transient display or a safe failed operation."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": "Actual failure incidence, survivor lifetime until a later suite reset, and downstream test failures were not measured. They are not required for the conditional ownership gap.",
+          "original_stronger_consequence": "Setup failure can leave a fixture agent running and contaminate later tests. Latest history adds the saved-template fixture. Normal success and failures after guard entry clean up; wider stack reset/shutdown eventually reclaims fixtures. No user installation, security or catastrophic tooling impact is claimed.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Retain all source/session/template instances and caveats. Extend the acquired-before-guard queue item with this separately named scope, or keep a dedicated item if its expanded title would be misleading. Do not mark the new scope covered merely because other tests have the same ownership mistake."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": true,
+        "clearly_refuted_candidate": false,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Source-confirmed by an existing parent decision; not runtime reproduced",
+        "deduplication_key": "browser-owned-fixtures-acquired-before-cleanup-guard",
+        "destination": "switcher-second-create-failure-leaks-first-session.md"
+      }
+    },
+    {
+      "key": "g069/c3",
+      "owner": "g069",
+      "id": "c3",
+      "domain": "podman-environments",
+      "purpose": "podman-environments: e2e/tests/podman-environments.spec.ts; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 6,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c3",
+            "state": "open",
+            "summary": "Held route gates are bounded by the test deadline and released before draining",
+            "location": "e2e/tests/podman-environments.spec.ts:424",
+            "detail": "Reviewed commit: 350a4b33b6d4476f4a78e43cea124bc2b828f462\n\n## TLDR\nThe deliberately held route waits do not introduce an unbounded normal test-body wait or an unreleased gate before route cleanup.\n\n## Details\nConsidered waits such as reached.wait() in the Recent publish helper and the ordinary-folder test. e2e/tests/helpers/route-gate.ts states: \"Always release in finally as well, so a failed assertion cannot strand a route handler. The surrounding Playwright test owns the overall deadline.\" The recents test releases held before cleanupOwnedSteps; the ordinary-folder test releases release before draining its routes; the quick-launch test lists place-answer gate release before its route stops. drainedRoute.ts drains in-flight callback promises before unroute, so that ordering matters. e2e/playwright.config.ts sets timeout:60000. Suggested bucket: other (test tooling only). Confidence: confirmed by source; no execution. proposed_drop: bounded by the configured test deadline and gate release precedes drain, matching the quoted helper contract. Could-be-highest: false; no user-owned resource or security impact. possible_cover: none. Caveat: this does not promise cleanup after forced worker termination, or settle the separate pre-try owned-session gap recorded under l1."
+          }
+        },
+        {
+          "line": 8,
+          "event": {
+            "version": 1,
+            "kind": "lead",
+            "id": "c3",
+            "state": "open",
+            "summary": "Verify timeout cancellation of raw route-gate waits before accepting cleanup",
+            "location": "e2e/tests/podman-environments.spec.ts:429",
+            "detail": "Reviewed commit: 350a4b33b6d4476f4a78e43cea124bc2b828f462\n\n## TLDR\nThe previous dismissal conflated a test-runner deadline with cancellation of the test body's raw promise. It is not yet established that finally runs when a held readiness wait never resolves.\n\n## Details\nThe environment Recent publish helper awaits reached.wait(), which resolves only when the environment-history route callback runs. The ordinary-folder test also awaits reached.wait() after switching hosts. routeGate returns a plain Promise with no timeout, rejection or cancellation input; finally releases the held response gate only after the body unwinds. A configured Playwright test timeout alone does not establish that unwinding. Concrete path to investigate: no history request reaches the callback after the staged trigger, leaving the body suspended before its finally. Also inspect whether sequential cleanupOwnedSteps can be blocked by a pending route drain before source-session/template deletion. Source already checked: routeGate's raw Promise and test ordering. Missing premise: the pinned Playwright runner's behavior when that test-body promise outlives its deadline, and concrete in-flight work that could block independent owned teardown. Next checks: dependency lock and runner timeout/fixture teardown source, then the exact staged routes and cleanup ordering. Suggested bucket: other (browser fixture lifetime only). Confidence: unresolved pending source checks. proposed_drop: false; previous proposed drop is not accepted. Could-be-highest: false; no user-owned-work/security route. possible_cover: none. No execution or reproduction. This revision preserves the original considered consequence: a held route/body might prevent cleanup, while avoiding an unsupported claim of an indefinite leak beyond enclosing stack shutdown."
+          }
+        },
+        {
+          "line": 9,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "c3",
+            "state": "open",
+            "summary": "Bound route-arrival waits so timeout reaches owned cleanup",
+            "location": "e2e/tests/podman-environments.spec.ts:530",
+            "detail": "Reviewed commit: 350a4b33b6d4476f4a78e43cea124bc2b828f462\n\n## TLDR\nWhen the browser never sends the history request that this test is waiting for, Playwright reports a timeout but the suspended test body never reaches its cleanup. The ordinary-folder test can leave its real source session and agent in the shared stack. The Recent-promotion case has the same stuck-body wait, but owns no real source session. These are browser-test failure-path consequences, not a leak in a user's Farhelm.\n\n## Details\nThe ordinary-folder fixture creates source at line 501 and enters try at 521. After selecting the remote host at 528-529, it awaits reached.wait() at 530. Only the matching remote launch-history callback at 510-515 resolves reached; if that read is not issued/reaches no callback, reached stays pending. routeGate.ts:10-16 returns a raw Promise with only a resolve function: no rejection deadline or cancellation input. Closing a browser context does not resolve that application-owned Promise. The finally at 539-545, including release.release() and cleanupSession(source.id), cannot run until the raw await resumes. The environment-Recent publish helper at 430-440 likewise waits on reached.wait() at 437 after feed.notify, with its release only later or in finally at 483-488.\n\nPinned dependency evidence: e2e/package-lock.json pins @playwright/test and playwright to 1.64.0. Official v1.64.0 runner source, https://raw.githubusercontent.com/microsoft/playwright/v1.64.0/packages/playwright/src/worker/timeoutManager.ts:83-114, runs Promise.race([cb(), running.timeoutPromise]); its timer rejects the timeoutPromise at 128-132, not the pending cb/test-body promise. workerMain.ts at the same tag, lines 384-389, awaits the timed wrapper around test.fn. Therefore the runner's 60-second deadline bounds its wait/reporting, not cooperative cancellation or JavaScript finally execution inside the still-suspended test body. This refutes c3's original dismissal based on the configured timeout and finally release. The concrete failure boundary is an absent history request after the staged trigger, the behavior these tests need to diagnose without bypassing fixture teardown.\n\nUse a bounded readiness assertion (for example a callback-set arrival flag polled with expect.poll) or another locally rejecting, page-lifetime-aware wait, so missing arrival throws through this try/finally. Keep the response gate separately released before drain. Suggested bucket: other, limited to maintainer browser-test cleanup/isolation. Confidence: confirmed by source; no execution or reproduction. proposed_drop: false; the original proposed drop is retracted, not accepted. Could-be-highest: false; only the owned test stack is affected and no catastrophic tooling effect is established. possible_cover: related to l1's owned-fixture cleanup consequence but a distinct gap inside an already-entered try/finally. Caveats: this requires failure to reach the expected route; the ordinary success path releases correctly. No indefinite runner hang or leak beyond enclosing stack shutdown is claimed. Sequential route-drain independence is still being checked separately; this conclusion does not depend on a hung drain or on provider subprocess settlement after stopping a helm."
+          }
+        }
+      ],
+      "latest": {
+        "line": 9,
+        "event": {
+          "version": 1,
+          "kind": "finding",
+          "id": "c3",
+          "state": "open",
+          "summary": "Bound route-arrival waits so timeout reaches owned cleanup",
+          "location": "e2e/tests/podman-environments.spec.ts:530",
+          "detail": "Reviewed commit: 350a4b33b6d4476f4a78e43cea124bc2b828f462\n\n## TLDR\nWhen the browser never sends the history request that this test is waiting for, Playwright reports a timeout but the suspended test body never reaches its cleanup. The ordinary-folder test can leave its real source session and agent in the shared stack. The Recent-promotion case has the same stuck-body wait, but owns no real source session. These are browser-test failure-path consequences, not a leak in a user's Farhelm.\n\n## Details\nThe ordinary-folder fixture creates source at line 501 and enters try at 521. After selecting the remote host at 528-529, it awaits reached.wait() at 530. Only the matching remote launch-history callback at 510-515 resolves reached; if that read is not issued/reaches no callback, reached stays pending. routeGate.ts:10-16 returns a raw Promise with only a resolve function: no rejection deadline or cancellation input. Closing a browser context does not resolve that application-owned Promise. The finally at 539-545, including release.release() and cleanupSession(source.id), cannot run until the raw await resumes. The environment-Recent publish helper at 430-440 likewise waits on reached.wait() at 437 after feed.notify, with its release only later or in finally at 483-488.\n\nPinned dependency evidence: e2e/package-lock.json pins @playwright/test and playwright to 1.64.0. Official v1.64.0 runner source, https://raw.githubusercontent.com/microsoft/playwright/v1.64.0/packages/playwright/src/worker/timeoutManager.ts:83-114, runs Promise.race([cb(), running.timeoutPromise]); its timer rejects the timeoutPromise at 128-132, not the pending cb/test-body promise. workerMain.ts at the same tag, lines 384-389, awaits the timed wrapper around test.fn. Therefore the runner's 60-second deadline bounds its wait/reporting, not cooperative cancellation or JavaScript finally execution inside the still-suspended test body. This refutes c3's original dismissal based on the configured timeout and finally release. The concrete failure boundary is an absent history request after the staged trigger, the behavior these tests need to diagnose without bypassing fixture teardown.\n\nUse a bounded readiness assertion (for example a callback-set arrival flag polled with expect.poll) or another locally rejecting, page-lifetime-aware wait, so missing arrival throws through this try/finally. Keep the response gate separately released before drain. Suggested bucket: other, limited to maintainer browser-test cleanup/isolation. Confidence: confirmed by source; no execution or reproduction. proposed_drop: false; the original proposed drop is retracted, not accepted. Could-be-highest: false; only the owned test stack is affected and no catastrophic tooling effect is established. possible_cover: related to l1's owned-fixture cleanup consequence but a distinct gap inside an already-entered try/finally. Caveats: this requires failure to reach the expected route; the ordinary success path releases correctly. No indefinite runner hang or leak beyond enclosing stack shutdown is claimed. Sequential route-drain independence is still being checked separately; this conclusion does not depend on a hung drain or on provider subprocess settlement after stopping a helm."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g069/findings.jsonl",
+        "id": "c3",
+        "line": 9,
+        "disposition": "duplicate",
+        "group": "browser-native-arrival-latch-bypasses-owned-finally",
+        "reason": "Parent read full claims043, prior g026/f5 and g027/l5 judgments and complete existing latch item. Same raw resolve-only route-gate Promise plus Playwright1.64 callback/timeout race. New Podman ordinary-folder501-545 and Recent437/483-488 callers add source/resource evidence. Extend existing item with all caller scopes; no new standalone defect, no actual timeout/leak or indefinite runner hang. Preserve earlier deadline-based dismissal and reversal; no highest consequence proposed. Current coverage searches found no acceptance of the additional caller scope."
+      },
+      "accepted_parent_decision": {
+        "key": "g069/c3",
+        "line": 9,
+        "disposition": "duplicate",
+        "group": "browser-native-arrival-latch-bypasses-owned-finally",
+        "bucket": "other",
+        "recording": "extend-existing",
+        "queue_target_candidate": "review_feedback_queue/bulk-test-preference-latch-bypasses-finally.md",
+        "needs_independent_drop_check": false,
+        "reason": "Parent read full claims043, prior g026/f5 and g027/l5 judgments and complete existing latch item. Same raw resolve-only route-gate Promise plus Playwright1.64 callback/timeout race. New Podman ordinary-folder501-545 and Recent437/483-488 callers add source/resource evidence. Extend existing item with all caller scopes; no new standalone defect, no actual timeout/leak or indefinite runner hang. Preserve earlier deadline-based dismissal and reversal; no highest consequence proposed. Current coverage searches found no acceptance of the additional caller scope."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-043",
+          "key": "g069/c3",
+          "latest_line": 9,
+          "recommendation": "retain-verified",
+          "bucket": "other",
+          "underlying_key": "podman-browser-raw-route-arrival-promise-bypasses-finally-on-timeout",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "A test-runner deadline does not cancel a pending application-owned promise. If the expected request never arrives, the guarded test body remains suspended and cannot enter its finally; fixture teardown supplies no replacement deletion of its real source session.",
+          "checks": [
+            "350a4b33b6d4476f4a78e43cea124bc2b828f462:e2e/tests/podman-environments.spec.ts:501 creates the ordinary-folder source, :510-515 releases reached only when the remote history callback runs, :521 enters try, :530 awaits reached.wait(), and :539-545 owns source cleanup. The Recent publish helper likewise awaits reached at 437, with release/route cleanup only later or in :483-488.",
+            "Same revision:helpers/route-gate.ts:10-16 returns a plain resolve-only Promise; no local rejection, deadline or cancellation input exists. Page closure does not resolve it. package-lock.json pins @playwright/test/playwright to 1.64.0; playwright.config.ts:137 supplies the 60-second runner deadline.",
+            "Checked official v1.64.0 https://raw.githubusercontent.com/microsoft/playwright/v1.64.0/packages/playwright/src/worker/timeoutManager.ts:83-114,128-132: the timed wrapper races callback and separate timeout promise; the timer rejects the latter. https://raw.githubusercontent.com/microsoft/playwright/v1.64.0/packages/playwright/src/worker/workerMain.ts:384-388 invokes test.fn inside that wrapper, then proceeds to hooks/fixtures. This establishes reporting timeout without unwinding the suspended callback's finally.",
+            "helpers/evidence.ts:46-110 and playwright.config.ts:119-134,160-169 show no API-session cleanup at browser/worker disposal and a reused stack. The ordinary-folder path remains at reviewed tip :501-544. No runtime timeout, leak, cascade or runner hang was observed."
+          ],
+          "coverage_checked": [
+            "SPEC.md/SPEC_impl.md searches found no acceptance of raw readiness waits bypassing test cleanup. Testing defines real owned stacks, but no provision that runtime deadlines cancel arbitrary promises.",
+            "TODO.md Planned is empty. plans/queue/nonblocking-session-actions.md:94-95 uses route gates for controlled replies, but it is landed per plans/REPORTS.md:16 and is not an unlanded fix for missing request arrival. No matching unlanded repair, BUGS.md entry or active TRIAGE_OUTCOMES.md decision found.",
+            "INDEX plus matching cleanup queue files were checked. g069/l1 is a distinct pre-try gap. Existing route-retirement, sequential-cleanup and premature-owned-ID-snapshot items assume cleanup has started; none fixes this raw promise before finally. No exact cover or alias established.",
+            "FILTER.md has no full match: the conditional consequence includes persistent fixture state and skipped owned cleanup, beyond transient diagnostics or safe retry."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": "The trigger is an absent expected route callback. Runtime frequency and actual subsequent contamination were not measured. The conclusion does not depend on a separately hypothesized stuck route drain.",
+          "original_stronger_consequence": "The initial event proposed dismissal based on the runner deadline and release-before-drain ordering. Event 8 reopened it; event 9 retracts that dismissal with pinned runner source. Preserve the original suspected cleanup obstruction and its reversal. Latest consequence is skipped owned test cleanup until a later reset/shutdown, not an indefinite runner hang or user-install leak.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Retain the conditional source finding. Replace raw request-arrival waits with locally rejecting readiness assertions so missing arrival throws through the entered cleanup guard; response-gate release before drain remains independently necessary and correct."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": true,
+        "clearly_refuted_candidate": false,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "browser-native-arrival-latch-bypasses-owned-finally",
+        "destination": "trailing-browser-native-arrival-latch-bypasses-owned-finally.md"
+      }
+    },
+    {
+      "key": "g069/l2",
+      "owner": "g069",
+      "id": "l2",
+      "domain": "podman-environments",
+      "purpose": "podman-environments: e2e/tests/podman-environments.spec.ts; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 10,
+          "event": {
+            "version": 1,
+            "kind": "lead",
+            "id": "l2",
+            "state": "open",
+            "summary": "Check whether route drains can consume independent owned-resource cleanup",
+            "location": "e2e/tests/podman-environments.spec.ts:689",
+            "detail": "Reviewed commit: 2ef10815f12ed719ab6c51c6e3ac6fcd3f8bc1fa\n\n## TLDR\nChecking whether waiting for browser-route work can prevent later teardown of independent test sessions. This is distinct from real provider subprocess settlement after stopping a helm.\n\n## Details\nThe container-Delete test's route callback at 661-665 awaits cleanupSession(request,gone.id). Its finally at 688-690 runs every route stop before cleanup of both owned sessions. drainedRoute stops await Promise.allSettled of in-flight callbacks before returning; cleanupOwnedSteps awaits steps sequentially and can catch only completed rejections, not pending promises. A slow callback could consume the test's remaining body deadline before the kept session's cleanup starts. Need to establish actual limits/cancellation of the callback's APIRequestContext requests and the runner fixture-teardown ordering before deciding whether this is a substantive independent-cleanup gap or adequately bounded work. Other new tests also place route drains before source/template deletion. Already checked: raw gate waits, sequential helper ordering, pinned Playwright's outer Promise.race. Missing premise: concrete behavior of request timeout and disposal while a route drain is awaiting this owned API work. Next: official pinned request/fixture implementation and exact helper await ordering. Suggested bucket: other (maintainer browser fixture isolation only). Confidence: unresolved after initial source checks. proposed_drop: false. Could-be-highest: false; no product-user or catastrophic tooling consequence established. possible_cover: l1/c3 have related cleanup consequences at different boundaries. No execution or reproduction."
+          }
+        },
+        {
+          "line": 11,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "l2",
+            "state": "open",
+            "summary": "Do not drain a Delete route before cleaning independent sessions",
+            "location": "e2e/tests/podman-environments.spec.ts:688",
+            "detail": "Reviewed commit: 2ef10815f12ed719ab6c51c6e3ac6fcd3f8bc1fa\n\n## TLDR\nIf the mocked Delete's real cleanup request is still pending when the test times out, teardown of the browser route runs ahead of cleanup of the other owned session. The runner disposes the test's API client while that drain is pending; the later session cleanup then has a disposed client and cannot restore the shared stack. A failed Delete test can consequently leave its independent kept session/agent behind. This is browser-test isolation damage only.\n\n## Details\nThis test creates kept and gone at lines 643-646. Its page-route callback at 661-665 calls cleanupSession(request,gone.id) before fulfilling the mocked browser Delete. The request fixture's API calls bypass page routing, so a still-pending stop/delete is real owned API work. In finally, lines 688-690 put both route stops before cleanup of either owned session. helpers/drained-route.ts:39-43 awaits all in-flight rewrite promises; helpers/cleanup.ts:6-13 awaits each cleanup step sequentially. Catching a rejected step cannot advance past a still-pending step. Thus the active Delete rewrite is an ordering dependency for teardown of the independent kept session.\n\nPinned Playwright 1.64.0 sources establish the timeout/disposal path. packages/playwright/src/index.ts:360-373 sets playwright._defaultContextTimeout=actionTimeout||0; this suite config sets no actionTimeout. packages/playwright-core/src/client/fetch.ts:65-82 copies that value into a new APIRequestContext and lines 251-266 use its timeout settings; timeoutSettings.ts:72-81 preserves explicit default 0. These requests therefore have no own finite deadline in this runner configuration; do not assume the standalone library's 30-second default. packages/playwright/src/worker/timeoutManager.ts:102-105 races the test body rather than cancelling it. workerMain.ts:384-418 advances to fixture teardown after that wrapper times out. index.ts:176-189 disposes the request fixture at teardown, and client/fetch.ts:178-181 refuses further fetches once it has a close reason (or the disposed channel rejects them). When disposal interrupts the rewrite's pending request, its work settles and the route drain may return, but subsequent cleanupSession calls now use that disposed request context. The independent session had no chance to begin cleanup before this lifetime ended. Official source URLs are https://raw.githubusercontent.com/microsoft/playwright/v1.64.0/packages/playwright/src/index.ts ; https://raw.githubusercontent.com/microsoft/playwright/v1.64.0/packages/playwright-core/src/client/fetch.ts ; https://raw.githubusercontent.com/microsoft/playwright/v1.64.0/packages/playwright-core/src/client/timeoutSettings.ts ; https://raw.githubusercontent.com/microsoft/playwright/v1.64.0/packages/playwright/src/worker/workerMain.ts ; https://raw.githubusercontent.com/microsoft/playwright/v1.64.0/packages/playwright/src/worker/timeoutManager.ts .\n\nSeparate stopping admission/draining of rewrites from independent owned-resource teardown, and bound/abort the in-flight API operation while the cleanup client is still alive. A fixture-owned teardown phase with its own deadline/client can also preserve this ordering. Merely catching errors or eventually closing the browser does not grant the later requests a usable client. Suggested bucket: other (maintainer browser fixture cleanup/isolation). Confidence: confirmed source-level failure path, conditional on the Delete rewrite's real API request remaining pending across the test deadline; no occurrence or cascade was observed. proposed_drop: false. Could-be-highest: false; owned test resources only, with no catastrophic tooling consequence established. possible_cover: l1/c3 share the final isolation consequence but cover pre-try and raw-arrival waits, respectively. Caveats: normal promptly settling Delete cleanup reaches all owned steps. No indefinite runner hang or leak beyond stack shutdown is claimed. This is not g070/l1's real provider subprocess-after-helm-stop boundary; it is the browser test's API client and independent sessions. The originally suspected delayed route-drain consequence is retained and now has a concrete runner/client-lifetime route."
+          }
+        },
+        {
+          "line": 12,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "l2",
+            "state": "open",
+            "summary": "Do not drain a Delete route before cleaning independent sessions",
+            "location": "e2e/tests/podman-environments.spec.ts:688",
+            "detail": "Reviewed commit: 2ef10815f12ed719ab6c51c6e3ac6fcd3f8bc1fa\n\n## TLDR\nIf the mocked Delete's real cleanup request is still pending when the test times out, teardown of the browser route runs ahead of cleanup of the other owned session. The runner disposes the test's API client while that drain is pending; the later session cleanup then has a disposed client and cannot restore the shared stack. A failed Delete test can consequently leave its independent kept session/agent behind. This is browser-test isolation damage only.\n\n## Details\nThis test creates kept and gone at lines 643-646. Its page-route callback at 661-665 calls cleanupSession(request,gone.id) before fulfilling the mocked browser Delete. The request fixture's API calls bypass page routing, so a still-pending stop/delete is real owned API work. In finally, lines 688-690 put both route stops before cleanup of either owned session. helpers/drained-route.ts:39-43 awaits all in-flight rewrite promises; helpers/cleanup.ts:6-13 awaits each cleanup step sequentially. Catching a rejected step cannot advance past a still-pending step. Thus the active Delete rewrite is an ordering dependency for teardown of the independent kept session.\n\nPinned Playwright 1.64.0 sources establish the timeout/disposal path. packages/playwright/src/index.ts:360-373 sets playwright._defaultContextTimeout=actionTimeout||0; this suite config sets no actionTimeout. packages/playwright-core/src/client/fetch.ts:65-82 copies that value into a new APIRequestContext and lines 251-266 use its timeout settings; timeoutSettings.ts:72-81 preserves explicit default 0. These requests therefore have no own finite deadline in this runner configuration; do not assume the standalone library's 30-second default. packages/playwright/src/worker/timeoutManager.ts:102-105 races the test body rather than cancelling it. workerMain.ts:384-418 advances to fixture teardown after that wrapper times out. index.ts:176-189 disposes the request fixture at teardown, and client/fetch.ts:178-181 refuses further fetches once it has a close reason (or the disposed channel rejects them). When disposal interrupts the rewrite's pending request, its work settles and the route drain may return, but subsequent cleanupSession calls now use that disposed request context. The independent session had no chance to begin cleanup before this lifetime ended. Official source URLs are https://raw.githubusercontent.com/microsoft/playwright/v1.64.0/packages/playwright/src/index.ts ; https://raw.githubusercontent.com/microsoft/playwright/v1.64.0/packages/playwright-core/src/client/fetch.ts ; https://raw.githubusercontent.com/microsoft/playwright/v1.64.0/packages/playwright-core/src/client/timeoutSettings.ts ; https://raw.githubusercontent.com/microsoft/playwright/v1.64.0/packages/playwright/src/worker/workerMain.ts ; https://raw.githubusercontent.com/microsoft/playwright/v1.64.0/packages/playwright/src/worker/timeoutManager.ts .\n\nSeparate stopping admission/draining of rewrites from independent owned-resource teardown, and bound/abort the in-flight API operation while the cleanup client is still alive. A fixture-owned teardown phase with its own deadline/client can also preserve this ordering. Merely catching errors or eventually closing the browser does not grant the later requests a usable client. Suggested bucket: other (maintainer browser fixture cleanup/isolation). Confidence: confirmed source-level failure path, conditional on the Delete rewrite's real API request remaining pending across the test deadline; no occurrence or cascade was observed. proposed_drop: false. Could-be-highest: false; owned test resources only, with no catastrophic tooling consequence established. possible_cover: l1/c3 share the final isolation consequence but cover pre-try and raw-arrival waits, respectively. Caveats: normal promptly settling Delete cleanup reaches all owned steps. No indefinite runner hang or leak beyond stack shutdown is claimed. This is not g070/l1's real provider subprocess-after-helm-stop boundary; it is the browser test's API client and independent sessions. The originally suspected delayed route-drain consequence is retained and now has a concrete runner/client-lifetime route.\n\nAdditional disposal premise checked: official v1.64.0 packages/playwright-core/src/server/fetch.ts:148-157 sets _disposed and emits Dispose; lines 548-552 reject outstanding HTTP work and destroy its request on that event; lines 323-325 reject new sends on an already-disposed context. GlobalAPIRequestContext.dispose at 724-728 invokes _disposeImpl. Source: https://raw.githubusercontent.com/microsoft/playwright/v1.64.0/packages/playwright-core/src/server/fetch.ts . This directly establishes both why the pending rewrite can settle at fixture disposal and why later independent cleanup cannot reuse its client. No additional missing cancellation premise remains for the conditional source-level route. The enclosing stack lifetime still bounds retained fixtures; no runtime observation was made."
+          }
+        },
+        {
+          "line": 13,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "l2",
+            "state": "open",
+            "summary": "Do not drain a Delete route before cleaning independent sessions",
+            "location": "e2e/tests/podman-environments.spec.ts:688",
+            "detail": "Reviewed commit: 2ef10815f12ed719ab6c51c6e3ac6fcd3f8bc1fa\n\n## TLDR\nIf the mocked Delete's real cleanup request is still pending when the test times out, teardown of the browser route runs ahead of cleanup of the other owned session. The runner disposes the test's API client while that drain is pending; the later session cleanup then has a disposed client and cannot restore the shared stack. A failed Delete test can consequently leave its independent kept session/agent behind. This is browser-test isolation damage only.\n\n## Details\nThis test creates kept and gone at lines 643-646. Its page-route callback at 661-665 calls cleanupSession(request,gone.id) before fulfilling the mocked browser Delete. The request fixture's API calls bypass page routing, so a still-pending stop/delete is real owned API work. In finally, lines 688-690 put both route stops before cleanup of either owned session. helpers/drained-route.ts:39-43 awaits all in-flight rewrite promises; helpers/cleanup.ts:6-13 awaits each cleanup step sequentially. Catching a rejected step cannot advance past a still-pending step. Thus the active Delete rewrite is an ordering dependency for teardown of the independent kept session.\n\nPinned Playwright 1.64.0 sources establish the timeout/disposal path. packages/playwright/src/index.ts:360-373 sets playwright._defaultContextTimeout=actionTimeout||0; this suite config sets no actionTimeout. packages/playwright-core/src/client/fetch.ts:65-82 copies that value into a new APIRequestContext and lines 251-266 use its timeout settings; timeoutSettings.ts:72-81 preserves explicit default 0. These requests therefore have no own finite deadline in this runner configuration; do not assume the standalone library's 30-second default. packages/playwright/src/worker/timeoutManager.ts:102-105 races the test body rather than cancelling it. workerMain.ts:384-418 advances to fixture teardown after that wrapper times out. index.ts:176-189 disposes the request fixture at teardown, and client/fetch.ts:178-181 refuses further fetches once it has a close reason (or the disposed channel rejects them). When disposal interrupts the rewrite's pending request, its work settles and the route drain may return, but subsequent cleanupSession calls now use that disposed request context. The independent session had no chance to begin cleanup before this lifetime ended. Official source URLs are https://raw.githubusercontent.com/microsoft/playwright/v1.64.0/packages/playwright/src/index.ts ; https://raw.githubusercontent.com/microsoft/playwright/v1.64.0/packages/playwright-core/src/client/fetch.ts ; https://raw.githubusercontent.com/microsoft/playwright/v1.64.0/packages/playwright-core/src/client/timeoutSettings.ts ; https://raw.githubusercontent.com/microsoft/playwright/v1.64.0/packages/playwright/src/worker/workerMain.ts ; https://raw.githubusercontent.com/microsoft/playwright/v1.64.0/packages/playwright/src/worker/timeoutManager.ts .\n\nSeparate stopping admission/draining of rewrites from independent owned-resource teardown, and bound/abort the in-flight API operation while the cleanup client is still alive. A fixture-owned teardown phase with its own deadline/client can also preserve this ordering. Merely catching errors or eventually closing the browser does not grant the later requests a usable client. Suggested bucket: other (maintainer browser fixture cleanup/isolation). Confidence: confirmed source-level failure path, conditional on the Delete rewrite's real API request remaining pending across the test deadline; no occurrence or cascade was observed. proposed_drop: false. Could-be-highest: false; owned test resources only, with no catastrophic tooling consequence established. possible_cover: l1/c3 share the final isolation consequence but cover pre-try and raw-arrival waits, respectively. Caveats: normal promptly settling Delete cleanup reaches all owned steps. No indefinite runner hang or leak beyond stack shutdown is claimed. This is not g070/l1's real provider subprocess-after-helm-stop boundary; it is the browser test's API client and independent sessions. The originally suspected delayed route-drain consequence is retained and now has a concrete runner/client-lifetime route.\n\nAdditional disposal premise checked: official v1.64.0 packages/playwright-core/src/server/fetch.ts:148-157 sets _disposed and emits Dispose; lines 548-552 reject outstanding HTTP work and destroy its request on that event; lines 323-325 reject new sends on an already-disposed context. GlobalAPIRequestContext.dispose at 724-728 invokes _disposeImpl. Source: https://raw.githubusercontent.com/microsoft/playwright/v1.64.0/packages/playwright-core/src/server/fetch.ts . This directly establishes both why the pending rewrite can settle at fixture disposal and why later independent cleanup cannot reuse its client. No additional missing cancellation premise remains for the conditional source-level route. The enclosing stack lifetime still bounds retained fixtures; no runtime observation was made.\n\nConcrete assertion-to-cleanup ordering: the callback pushes sent at line 663 before awaiting real cleanup at 664. The test can pass its sent assertion at 683 while the mocked response is still unavailable; its remaining-count notice assertion at 684 then waits/fails without the callback completing. The body enters finally with that rewrite in flight, which is exactly the work the second route stop drains before either owned-session cleanup. This path needs no forced worker kill or generic claim about arbitrary JavaScript scheduling: an unanswered real stop/delete in the explicitly invoked callback suffices. No change to l1 is implied; its exact pre-try session/template gaps remain separate."
+          }
+        }
+      ],
+      "latest": {
+        "line": 13,
+        "event": {
+          "version": 1,
+          "kind": "finding",
+          "id": "l2",
+          "state": "open",
+          "summary": "Do not drain a Delete route before cleaning independent sessions",
+          "location": "e2e/tests/podman-environments.spec.ts:688",
+          "detail": "Reviewed commit: 2ef10815f12ed719ab6c51c6e3ac6fcd3f8bc1fa\n\n## TLDR\nIf the mocked Delete's real cleanup request is still pending when the test times out, teardown of the browser route runs ahead of cleanup of the other owned session. The runner disposes the test's API client while that drain is pending; the later session cleanup then has a disposed client and cannot restore the shared stack. A failed Delete test can consequently leave its independent kept session/agent behind. This is browser-test isolation damage only.\n\n## Details\nThis test creates kept and gone at lines 643-646. Its page-route callback at 661-665 calls cleanupSession(request,gone.id) before fulfilling the mocked browser Delete. The request fixture's API calls bypass page routing, so a still-pending stop/delete is real owned API work. In finally, lines 688-690 put both route stops before cleanup of either owned session. helpers/drained-route.ts:39-43 awaits all in-flight rewrite promises; helpers/cleanup.ts:6-13 awaits each cleanup step sequentially. Catching a rejected step cannot advance past a still-pending step. Thus the active Delete rewrite is an ordering dependency for teardown of the independent kept session.\n\nPinned Playwright 1.64.0 sources establish the timeout/disposal path. packages/playwright/src/index.ts:360-373 sets playwright._defaultContextTimeout=actionTimeout||0; this suite config sets no actionTimeout. packages/playwright-core/src/client/fetch.ts:65-82 copies that value into a new APIRequestContext and lines 251-266 use its timeout settings; timeoutSettings.ts:72-81 preserves explicit default 0. These requests therefore have no own finite deadline in this runner configuration; do not assume the standalone library's 30-second default. packages/playwright/src/worker/timeoutManager.ts:102-105 races the test body rather than cancelling it. workerMain.ts:384-418 advances to fixture teardown after that wrapper times out. index.ts:176-189 disposes the request fixture at teardown, and client/fetch.ts:178-181 refuses further fetches once it has a close reason (or the disposed channel rejects them). When disposal interrupts the rewrite's pending request, its work settles and the route drain may return, but subsequent cleanupSession calls now use that disposed request context. The independent session had no chance to begin cleanup before this lifetime ended. Official source URLs are https://raw.githubusercontent.com/microsoft/playwright/v1.64.0/packages/playwright/src/index.ts ; https://raw.githubusercontent.com/microsoft/playwright/v1.64.0/packages/playwright-core/src/client/fetch.ts ; https://raw.githubusercontent.com/microsoft/playwright/v1.64.0/packages/playwright-core/src/client/timeoutSettings.ts ; https://raw.githubusercontent.com/microsoft/playwright/v1.64.0/packages/playwright/src/worker/workerMain.ts ; https://raw.githubusercontent.com/microsoft/playwright/v1.64.0/packages/playwright/src/worker/timeoutManager.ts .\n\nSeparate stopping admission/draining of rewrites from independent owned-resource teardown, and bound/abort the in-flight API operation while the cleanup client is still alive. A fixture-owned teardown phase with its own deadline/client can also preserve this ordering. Merely catching errors or eventually closing the browser does not grant the later requests a usable client. Suggested bucket: other (maintainer browser fixture cleanup/isolation). Confidence: confirmed source-level failure path, conditional on the Delete rewrite's real API request remaining pending across the test deadline; no occurrence or cascade was observed. proposed_drop: false. Could-be-highest: false; owned test resources only, with no catastrophic tooling consequence established. possible_cover: l1/c3 share the final isolation consequence but cover pre-try and raw-arrival waits, respectively. Caveats: normal promptly settling Delete cleanup reaches all owned steps. No indefinite runner hang or leak beyond stack shutdown is claimed. This is not g070/l1's real provider subprocess-after-helm-stop boundary; it is the browser test's API client and independent sessions. The originally suspected delayed route-drain consequence is retained and now has a concrete runner/client-lifetime route.\n\nAdditional disposal premise checked: official v1.64.0 packages/playwright-core/src/server/fetch.ts:148-157 sets _disposed and emits Dispose; lines 548-552 reject outstanding HTTP work and destroy its request on that event; lines 323-325 reject new sends on an already-disposed context. GlobalAPIRequestContext.dispose at 724-728 invokes _disposeImpl. Source: https://raw.githubusercontent.com/microsoft/playwright/v1.64.0/packages/playwright-core/src/server/fetch.ts . This directly establishes both why the pending rewrite can settle at fixture disposal and why later independent cleanup cannot reuse its client. No additional missing cancellation premise remains for the conditional source-level route. The enclosing stack lifetime still bounds retained fixtures; no runtime observation was made.\n\nConcrete assertion-to-cleanup ordering: the callback pushes sent at line 663 before awaiting real cleanup at 664. The test can pass its sent assertion at 683 while the mocked response is still unavailable; its remaining-count notice assertion at 684 then waits/fails without the callback completing. The body enters finally with that rewrite in flight, which is exactly the work the second route stop drains before either owned-session cleanup. This path needs no forced worker kill or generic claim about arbitrary JavaScript scheduling: an unanswered real stop/delete in the explicitly invoked callback suffices. No change to l1 is implied; its exact pre-try session/template gaps remain separate."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g069/findings.jsonl",
+        "id": "l2",
+        "line": 13,
+        "disposition": "duplicate",
+        "group": "browser-cleanup-drains-real-api-route-before-request-client-lifetime",
+        "reason": "Parent read full claims044 and prior source/runner coverage for g029/f3. Exact same introduced2ef10815 browser Delete rewrite pattern in a second spec: real cleanup awaited by callback; finally drains callback before independent owned cleanup; pending call can consume request-fixture lifetime and disposal makes later cleanup unusable. Merge new podman-environments643-690 caller into retained g029/f3's underlying client-lifetime defect, preserving both session/preference scopes and all Playwright1.64 source checks/corrected citations. Rejecting-step cleanup helper does not fix a pending predecessor, so distinct from existing route-retirement item. Conditional test contamination until broader reset, no actual occurrence or user-work loss."
+      },
+      "accepted_parent_decision": {
+        "key": "g069/l2",
+        "line": 13,
+        "disposition": "duplicate",
+        "group": "browser-cleanup-drains-real-api-route-before-request-client-lifetime",
+        "bucket": "other",
+        "recording": "retain-verified",
+        "needs_independent_drop_check": false,
+        "reason": "Parent read full claims044 and prior source/runner coverage for g029/f3. Exact same introduced2ef10815 browser Delete rewrite pattern in a second spec: real cleanup awaited by callback; finally drains callback before independent owned cleanup; pending call can consume request-fixture lifetime and disposal makes later cleanup unusable. Merge new podman-environments643-690 caller into retained g029/f3's underlying client-lifetime defect, preserving both session/preference scopes and all Playwright1.64 source checks/corrected citations. Rejecting-step cleanup helper does not fix a pending predecessor, so distinct from existing route-retirement item. Conditional test contamination until broader reset, no actual occurrence or user-work loss."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-044",
+          "key": "g069/l2",
+          "latest_line": 13,
+          "recommendation": "retain-verified",
+          "bucket": "other",
+          "underlying_key": "browser-delete-route-drain-precedes-independent-api-cleanup",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "Verified conditional source ordering: an unanswered real cleanup request in the Delete rewrite blocks route retirement, which precedes every independent session cleanup. The test deadline can expire and dispose the shared API context before those later requests start. Only private test-stack contamination is established; no occurrence, indefinite runner hang, or leak beyond wider stack shutdown is claimed.",
+          "checks": [
+            "2ef10815f12ed719ab6c51c6e3ac6fcd3f8bc1fa:e2e/tests/podman-environments.spec.ts:643-665 creates and records both sessions, records the Delete arrival before awaiting cleanupSession, then fulfills the browser response. At 683-690 the notice assertion can still be pending while finally drains both routes before cleaning either owned session.",
+            "Same revision:e2e/tests/helpers/drained-route.ts:39-43 awaits all tracked rewrite promises before unroute; helpers/cleanup.ts:6-13 awaits cleanup steps sequentially. These helpers protect completed failures, not a pending predecessor.",
+            "Same revision:e2e/playwright.config.ts:136-148 gives a 60-second test deadline without actionTimeout; e2e/package-lock.json:58-61 pins playwright-core 1.64.0.",
+            "Official Playwright v1.64.0 packages/playwright/src/index.ts:176-189 disposes the request fixture, and :360-373 supplies default context timeout 0. packages/playwright-core/src/client/fetch.ts:72-94 copies that default; timeoutSettings.ts:78-90 preserves explicit zero. Source URLs: https://raw.githubusercontent.com/microsoft/playwright/v1.64.0/packages/playwright/src/index.ts ; https://raw.githubusercontent.com/microsoft/playwright/v1.64.0/packages/playwright-core/src/client/fetch.ts ; https://raw.githubusercontent.com/microsoft/playwright/v1.64.0/packages/playwright-core/src/client/timeoutSettings.ts .",
+            "Official v1.64.0 worker/timeoutManager.ts:90-112 races the callback rather than cancelling it; worker/workerMain.ts:415-465 advances to after hooks and fixture teardown. server/fetch.ts:162-171 disposes the context, :351-352 rejects new sends, and :593-597 rejects and destroys outstanding HTTP requests. These correct the older server/fetch line numbers in the record without changing its mechanism. URLs: https://raw.githubusercontent.com/microsoft/playwright/v1.64.0/packages/playwright/src/worker/timeoutManager.ts ; https://raw.githubusercontent.com/microsoft/playwright/v1.64.0/packages/playwright/src/worker/workerMain.ts ; https://raw.githubusercontent.com/microsoft/playwright/v1.64.0/packages/playwright-core/src/server/fetch.ts ."
+          ],
+          "coverage_checked": [
+            "SPEC.md Container sessions and SPEC_impl.md Disposable environments / Environment Delete describe product cleanup, not acceptance of this test cleanup dependency. No exact acceptance found.",
+            "Current TODO.md Planned is empty (25-27). plans/queue searched for route drains, cleanup, provider, and test premises; podman-environments and environment-agent-operations are already landed per plans/REPORTS.md:21,28. No unlanded repair for this exact ordering found.",
+            "BUGS.md covers a host-install transfer with an escaped local SSH helper, not browser request-fixture disposal. Active TRIAGE_OUTCOMES.md searched for the named file, route retirement, Podman, greeting and recipe/probe terms; no matching decision found; archive not read.",
+            "INDEX.md and matching queue files checked. route-retirement-failure-skips-owned-session-cleanup.md concerns rejecting teardown prerequisites before independent cleanup, and expressly does not promise recovery with a closed request context. This claim is a pending drain inside cleanupOwnedSteps consuming that context's remaining lifetime, so the existing fix does not necessarily fix it. failed-test-response-does-not-fence-settings-write.md concerns accepted server mutations outliving cleanup, also distinct. No exact alias or full cover found.",
+            "FILTER.md read in full. Persistent test fixtures/agent work after cleanup is not a transient display, safe retry, or diagnostic-only consequence; no other complete filter matches."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": "No missing source premise for the conditional ordering. A real Delete cleanup request remaining pending through the test deadline, occurrence, and frequency remain unobserved trigger facts. Promptly settling requests reach all owned cleanup steps.",
+          "original_stronger_consequence": "Original lead: a slow route drain can consume independent cleanup. Later finding: disposal can make later owned-session requests unusable, leaving the kept session/agent until wider stack teardown. No broader user-resource or indefinite-hang claim was made or discarded.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Record the conditional browser-test cleanup failure separately from exception-only route retirement and provider subprocess settlement."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": true,
+        "clearly_refuted_candidate": false,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "browser-cleanup-drains-real-api-route-before-request-client-lifetime",
+        "destination": "trailing-browser-cleanup-drains-real-api-route-before-request-client-lifetime.md"
+      }
+    },
+    {
+      "key": "g069/l3",
+      "owner": "g069",
+      "id": "l3",
+      "domain": "podman-environments",
+      "purpose": "podman-environments: e2e/tests/podman-environments.spec.ts; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 14,
+          "event": {
+            "version": 1,
+            "kind": "lead",
+            "id": "l3",
+            "state": "open",
+            "summary": "Check whether initial feed work can satisfy the delayed-probe oracle",
+            "location": "e2e/tests/podman-environments.spec.ts:904",
+            "detail": "Reviewed commit: 350a4b33b6d4476f4a78e43cea124bc2b828f462\n\n## TLDR\nInvestigating whether the delayed-probe regression tests can pass on an initial feed-triggered recipe-status reread rather than the probe-settlement invalidation they intend to establish.\n\n## Details\nThe fixture arms feed.notifyOnConnect(1), waits only for feed connection, displays oldReason, admits opening probes, captures recipeReadsBefore and then sets settled=true. The success oracle requires a later recipe read plus fresh status, but does not explicitly identify that read as probe-settlement-triggered or establish that the initial greeting's consumers have settled. Potential concrete alternative: an opening/greeting recipe-status read starts after the baseline and receives settled=true, repairing the status even if the changed-place dependency were absent. Need to check the actual feed greeting delivery/consumption, use_feed_reader scheduling, place/probe admission and resource start/restart ordering before reporting; this is not yet a finding. Suggested bucket: other (test-oracle quality). Confidence: unresolved pending source checks. proposed_drop: false. Could-be-highest: false; no security or user-owned-work consequence. possible_cover: g026/f4 is analogous consumer attribution in a different assigned test, not coverage of this file. No runtime execution/reproduction. Missing premise: a source-permitted pending initial recipe refresh after the displayed stale response and all opening probes; check whether existing assertions already fence it."
+          }
+        },
+        {
+          "line": 15,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "l3",
+            "state": "open",
+            "summary": "Fence the initial feed greeting before measuring silent probe invalidation",
+            "location": "e2e/tests/podman-environments.spec.ts:904",
+            "detail": "Reviewed commit: 350a4b33b6d4476f4a78e43cea124bc2b828f462\n\n## TLDR\nThe delayed-probe browser tests can accept a recipe-status refresh caused by the initial feed greeting as evidence that probe completion invalidated the status without a feed notice. They do not establish the silent, healthy-feed premise before switching the fixture to ready, so the regression they intend to catch can be masked. This is a test-oracle defect, not an observed product failure.\n\n## Details\nThe new tests arm feed.notifyOnConnect(1) at line 793 and wait only for feed.waitForConnection(1) at 884. helpers/fleet.ts:663-700 counts a connection and marks its test-side socket open before sending the greeting; waitForConnection at 727-738 waits only for that count. Neither confirms browser delivery, Rust consumption, or completion of the mounted recipe-status consumer's greeting work. The test then waits for oldReason and opening probe counts at 903-906, captures recipeReadsBefore and sets settled=true at 908-912. Its later oracle accepts any recipeReads increment and the ready display, with one socket and no extra probe, at 913-926.\n\nThere is an independent recipe-status refresh route: create_form.rs:3226-3249 restarts build_status on every feed notice; tensorlake/recipes.rs:378-385 likewise restarts place_status. feed.rs:289-315 observes notices in a queued effect and spends them by calling the consumer; its docs explicitly say an effect run is queued work. FleetFeed receives the JS report asynchronously through channel.recv at feed.rs:419-424. assets/events.js:311-332 emits that report only on socket.onmessage, after the fixture's socket-arrival counter has already advanced. No tested dependency orders this report/consumer completion before the line-908 baseline. A source-permitted order is: mount the consumer and display a stale initial recipe response; admit its opening probes; capture the baseline and set settled=true; then consume the already-sent initial greeting and restart the recipe-status resource. That later request reads the fixture's now-ready values at lines 829-845, satisfying both the read-count and display oracles. It forces no additional probe because use_environment_places handles a feed notice with refresh=false (environment_ui.rs:713-714), and needs no second connection. The separate readyPlaceReads condition can be met by the intended refreshing-place poll at environment_ui.rs:715-725. Thus even if the recipe resource lost its observed_places dependency, this alternative refresh could pass the test.\n\nThe exact distinction matters: response-counting before fulfill alone is not the defect, and a genuinely late probe-triggered response would exercise the intended path correctly. The missing attribution is whether the greeting's recipe refresh is already retired before the no-notice interval starts. Socket openness/arrival does not establish FLEET_FEED.healthy either; feed.rs:121-139 expressly says health begins only on a delivered frame. Establish greeting consumption and the relevant consumer's idle/settled state before setting settled=true, or mount the tested surface only after an acknowledged greeting and fence its opening reads. The existing waitForFeedReadersSettled helper documents this separation but only measures list/session/sound readers (helpers/fleet.ts:90-153), so using it alone would still need to account for the recipe resource.\n\nContract: the changed test's own comment at lines 784-787 says 'A healthy, silent fleet feed cannot repair the stale recipe-place response; the mounted consumer must invalidate it when the probe settles.' The supplied test-authoring checklist requires establishing fixture premises and an observable that distinguishes competing mechanisms. Suggested bucket: other (maintainer test evidence). Confidence: confirmed source-level unfenced alternative, with occurrence/frequency unmeasured; no execution or reproduction. proposed_drop: false. Could-be-highest: false; no product security or loss-of-work route. possible_cover: g026/f4 concerns another test's consumer attribution, not this delayed-probe oracle; no forbidden coverage sources searched. Caveats: ordinary fast greeting consumption will usually make these tests exercise the intended mechanism; no current product invalidation bug is claimed. Attribution checked across the entire pinned range: git log for this assigned file shows only its introduction at this commit and the later connected-container Delete insertion at 2ef10815f12ed719ab6c51c6e3ac6fcd3f8bc1fa. This oracle gap is introduced with the assigned test, not merely inherited from the immediate parent. It is distinct from l1/c3/l2 cleanup lifetime findings. The lead's original suspected false-pass consequence is retained."
+          }
+        },
+        {
+          "line": 16,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "l3",
+            "state": "open",
+            "summary": "Fence the initial feed greeting before measuring silent probe invalidation",
+            "location": "e2e/tests/podman-environments.spec.ts:904",
+            "detail": "Reviewed commit: 350a4b33b6d4476f4a78e43cea124bc2b828f462\n\n## TLDR\nThe delayed-probe browser tests can accept a recipe-status refresh caused by the initial feed greeting as evidence that probe completion invalidated the status without a feed notice. They do not establish the silent, healthy-feed premise before switching the fixture to ready, so the regression they intend to catch can be masked. This is a test-oracle defect, not an observed product failure.\n\n## Details\nThe new tests arm feed.notifyOnConnect(1) at line 793 and wait only for feed.waitForConnection(1) at 884. helpers/fleet.ts:663-700 counts a connection and marks its test-side socket open before sending the greeting; waitForConnection at 723-732 waits only for that count. Neither confirms browser delivery, Rust consumption, or completion of the mounted recipe-status consumer's greeting work. The test then waits for oldReason and opening probe counts at 903-906, captures recipeReadsBefore and sets settled=true at 908-912. Its later oracle accepts any recipeReads increment and the ready display, with one socket and no extra probe, at 913-926.\n\nThere is an independent recipe-status refresh route: create_form.rs:3226-3249 restarts build_status on every feed notice; tensorlake/recipes.rs:378-385 likewise restarts place_status. feed.rs:289-315 observes notices in a queued effect and spends them by calling the consumer; its docs explicitly say an effect run is queued work. FleetFeed receives the JS report asynchronously through channel.recv at feed.rs:419-424. assets/events.js:311-332 emits that report only on socket.onmessage, after the fixture's socket-arrival counter has already advanced. No tested dependency orders this report/consumer completion before the line-908 baseline. A source-permitted order is: mount the consumer and display a stale initial recipe response; admit its opening probes; capture the baseline and set settled=true; then consume the already-sent initial greeting and restart the recipe-status resource. That later request reads the fixture's now-ready values at lines 829-845, satisfying both the read-count and display oracles. It forces no additional probe because use_environment_places handles a feed notice with refresh=false (environment_ui.rs:713-714), and needs no second connection. The separate readyPlaceReads condition can be met by the intended refreshing-place poll at environment_ui.rs:715-725. Thus even if the recipe resource lost its observed_places dependency, this alternative refresh could pass the test.\n\nThe exact distinction matters: response-counting before fulfill alone is not the defect, and a genuinely late probe-triggered response would exercise the intended path correctly. The missing attribution is whether the greeting's recipe refresh is already retired before the no-notice interval starts. Socket openness/arrival does not establish FLEET_FEED.healthy either; feed.rs:121-139 expressly says health begins only on a delivered frame. Establish greeting consumption and the relevant consumer's idle/settled state before setting settled=true, or mount the tested surface only after an acknowledged greeting and fence its opening reads. The existing waitForFeedReadersSettled helper documents this separation but only measures list/session/sound readers (helpers/fleet.ts:90-153), so using it alone would still need to account for the recipe resource.\n\nContract: the changed test's own comment at lines 784-787 says 'A healthy, silent fleet feed cannot repair the stale recipe-place response; the mounted consumer must invalidate it when the probe settles.' The supplied test-authoring checklist requires establishing fixture premises and an observable that distinguishes competing mechanisms. Suggested bucket: other (maintainer test evidence). Confidence: confirmed source-level unfenced alternative, with occurrence/frequency unmeasured; no execution or reproduction. proposed_drop: false. Could-be-highest: false; no product security or loss-of-work route. possible_cover: g026/f4 concerns another test's consumer attribution, not this delayed-probe oracle; no forbidden coverage sources searched. Caveats: ordinary fast greeting consumption will usually make these tests exercise the intended mechanism; no current product invalidation bug is claimed. Attribution checked across the entire pinned range: git log for this assigned file shows only its introduction at this commit and the later connected-container Delete insertion at 2ef10815f12ed719ab6c51c6e3ac6fcd3f8bc1fa. This oracle gap is introduced with the assigned test, not merely inherited from the immediate parent. It is distinct from l1/c3/l2 cleanup lifetime findings. The lead's original suspected false-pass consequence is retained.\n\nDiscovery-pass completion checks: the full assigned-file diff from this commit to pinned tip 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db contains only the later openRowMenu import and connected-container Delete test insertion; the delayed-probe body and its feed fence are unchanged. Exact helper line check confirms connection readiness at fleet.ts:723-732 is just a count loop. Reviewed the remaining placement, restored-select request binding, focused-history consumption, ordinary-folder boundary, refusal, leftover confirmation and quick-launch assertions without identifying another substantive issue in this pass. This does not revise, drop or lower earlier IDs."
+          }
+        }
+      ],
+      "latest": {
+        "line": 16,
+        "event": {
+          "version": 1,
+          "kind": "finding",
+          "id": "l3",
+          "state": "open",
+          "summary": "Fence the initial feed greeting before measuring silent probe invalidation",
+          "location": "e2e/tests/podman-environments.spec.ts:904",
+          "detail": "Reviewed commit: 350a4b33b6d4476f4a78e43cea124bc2b828f462\n\n## TLDR\nThe delayed-probe browser tests can accept a recipe-status refresh caused by the initial feed greeting as evidence that probe completion invalidated the status without a feed notice. They do not establish the silent, healthy-feed premise before switching the fixture to ready, so the regression they intend to catch can be masked. This is a test-oracle defect, not an observed product failure.\n\n## Details\nThe new tests arm feed.notifyOnConnect(1) at line 793 and wait only for feed.waitForConnection(1) at 884. helpers/fleet.ts:663-700 counts a connection and marks its test-side socket open before sending the greeting; waitForConnection at 723-732 waits only for that count. Neither confirms browser delivery, Rust consumption, or completion of the mounted recipe-status consumer's greeting work. The test then waits for oldReason and opening probe counts at 903-906, captures recipeReadsBefore and sets settled=true at 908-912. Its later oracle accepts any recipeReads increment and the ready display, with one socket and no extra probe, at 913-926.\n\nThere is an independent recipe-status refresh route: create_form.rs:3226-3249 restarts build_status on every feed notice; tensorlake/recipes.rs:378-385 likewise restarts place_status. feed.rs:289-315 observes notices in a queued effect and spends them by calling the consumer; its docs explicitly say an effect run is queued work. FleetFeed receives the JS report asynchronously through channel.recv at feed.rs:419-424. assets/events.js:311-332 emits that report only on socket.onmessage, after the fixture's socket-arrival counter has already advanced. No tested dependency orders this report/consumer completion before the line-908 baseline. A source-permitted order is: mount the consumer and display a stale initial recipe response; admit its opening probes; capture the baseline and set settled=true; then consume the already-sent initial greeting and restart the recipe-status resource. That later request reads the fixture's now-ready values at lines 829-845, satisfying both the read-count and display oracles. It forces no additional probe because use_environment_places handles a feed notice with refresh=false (environment_ui.rs:713-714), and needs no second connection. The separate readyPlaceReads condition can be met by the intended refreshing-place poll at environment_ui.rs:715-725. Thus even if the recipe resource lost its observed_places dependency, this alternative refresh could pass the test.\n\nThe exact distinction matters: response-counting before fulfill alone is not the defect, and a genuinely late probe-triggered response would exercise the intended path correctly. The missing attribution is whether the greeting's recipe refresh is already retired before the no-notice interval starts. Socket openness/arrival does not establish FLEET_FEED.healthy either; feed.rs:121-139 expressly says health begins only on a delivered frame. Establish greeting consumption and the relevant consumer's idle/settled state before setting settled=true, or mount the tested surface only after an acknowledged greeting and fence its opening reads. The existing waitForFeedReadersSettled helper documents this separation but only measures list/session/sound readers (helpers/fleet.ts:90-153), so using it alone would still need to account for the recipe resource.\n\nContract: the changed test's own comment at lines 784-787 says 'A healthy, silent fleet feed cannot repair the stale recipe-place response; the mounted consumer must invalidate it when the probe settles.' The supplied test-authoring checklist requires establishing fixture premises and an observable that distinguishes competing mechanisms. Suggested bucket: other (maintainer test evidence). Confidence: confirmed source-level unfenced alternative, with occurrence/frequency unmeasured; no execution or reproduction. proposed_drop: false. Could-be-highest: false; no product security or loss-of-work route. possible_cover: g026/f4 concerns another test's consumer attribution, not this delayed-probe oracle; no forbidden coverage sources searched. Caveats: ordinary fast greeting consumption will usually make these tests exercise the intended mechanism; no current product invalidation bug is claimed. Attribution checked across the entire pinned range: git log for this assigned file shows only its introduction at this commit and the later connected-container Delete insertion at 2ef10815f12ed719ab6c51c6e3ac6fcd3f8bc1fa. This oracle gap is introduced with the assigned test, not merely inherited from the immediate parent. It is distinct from l1/c3/l2 cleanup lifetime findings. The lead's original suspected false-pass consequence is retained.\n\nDiscovery-pass completion checks: the full assigned-file diff from this commit to pinned tip 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db contains only the later openRowMenu import and connected-container Delete test insertion; the delayed-probe body and its feed fence are unchanged. Exact helper line check confirms connection readiness at fleet.ts:723-732 is just a count loop. Reviewed the remaining placement, restored-select request binding, focused-history consumption, ordinary-folder boundary, refusal, leftover confirmation and quick-launch assertions without identifying another substantive issue in this pass. This does not revise, drop or lower earlier IDs."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g069/findings.jsonl",
+        "id": "l3",
+        "line": 16,
+        "disposition": "verified",
+        "group": "delayed-probe-test-unfenced-initial-feed-consumer",
+        "reason": "Parent explicitly accepted named retain-verified proposal from claims-044 after inspecting it. The delayed-probe tests count a later recipe read without retiring the initial greeting's recipe consumer. A late greeting can provide the tested refresh independently of changed-place invalidation. This is a conditional test-oracle defect; no product invalidation failure or actual false pass was observed. Retain the missing attribution witness, with its conditional scheduling and no-runtime caveats. Checked source/results: [\"350a4b33b6d4476f4a78e43cea124bc2b828f462:e2e/tests/podman-environments.spec.ts:784-926 arms the greeting, waits for socket connection, displays stale status and admits probes, then snapshots recipeReads and switches settled. The final oracle accepts any increment with ready status, unchanged probe count and one connection.\",\"Same revision:e2e/tests/helpers/fleet.ts:663-700 increments connections and open-socket state before sending the greeting; :723-732 waits only for the count. It does not acknowledge delivery or recipe-reader settlement.\",\"Same revision:crates/farhelm-ui/src/feed.rs:289-315 handles notices in an effect, and :419-424 receives asynchronous JS reports. assets/events.js:311-332 reports on message delivery. Neither route is fenced by the test's connection count.\",\"Same revision:crates/farhelm-ui/src/list/create_form.rs:3216-3249 and tensorlake/recipes.rs:364-385 restart recipe resources on feed notices independently of observed_places. environment_ui.rs:713-725 handles notices without a new probe and polls while refreshing, so the alternative need not violate either final counter assertion.\",\"The assigned test file is newly added at 350a4b33; git log over the full pinned range shows the later Delete insertion as its only other change. Pinned tip 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db retains the same delayed-probe baseline and oracle at approximately 973-1002.\"] Current coverage/results: [\"Both specifications searched for delayed probe, feed greeting, silent feed, recipe refresh and place invalidation; SPEC.md Container sessions requires background probes and SPEC_impl.md Disposable environments describes cached readiness. Neither accepts an unfenced regression oracle.\",\"TODO.md Planned empty. plans/queue searched for greeting/drain/probe/recipe-refresh premises; related Podman and agent-operation plans are landed (plans/REPORTS.md:21,28). No unlanded work removing this oracle's cause found.\",\"BUGS.md's transfer/SSH-helper issue has a different trigger and scope. Active TRIAGE_OUTCOMES.md searched for named test, initial greeting and probe/recipe terms; no exact decision found. Archive not read.\",\"INDEX.md and matching queue files checked. outage-recovery-test-can-credit-ordinary-probe.md is another attribution defect, but its independent producer is a terminal reconnect timer, not this greeting-driven recipe read. staged-start-test-lacks-reader-drain-witness.md concerns terminal ownership and process start. Neither fixes or covers this test. No exact duplicate found.\",\"FILTER.md does not filter a false regression oracle merely because its alternative ordering is rare; it is not wholly a self-correcting display or imprecise diagnostic.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"The original lead's suspected false pass on an initial greeting refresh is retained. The record claims test evidence can be masked, not that product probe invalidation is broken.\"; \"No missing source premise for the unfenced alternative. Actual greeting scheduling, occurrence and false-pass frequency were not measured. Fast greeting consumption will ordinarily exercise the intended invalidation path.\"."
+      },
+      "accepted_parent_decision": {
+        "key": "g069/l3",
+        "line": 16,
+        "disposition": "verified",
+        "group": "delayed-probe-test-unfenced-initial-feed-consumer",
+        "bucket": "other",
+        "recording": "retain-verified",
+        "queue_target_candidate": null,
+        "needs_independent_drop_check": false,
+        "reason": "Parent explicitly accepted named retain-verified proposal from claims-044 after inspecting it. The delayed-probe tests count a later recipe read without retiring the initial greeting's recipe consumer. A late greeting can provide the tested refresh independently of changed-place invalidation. This is a conditional test-oracle defect; no product invalidation failure or actual false pass was observed. Retain the missing attribution witness, with its conditional scheduling and no-runtime caveats. Checked source/results: [\"350a4b33b6d4476f4a78e43cea124bc2b828f462:e2e/tests/podman-environments.spec.ts:784-926 arms the greeting, waits for socket connection, displays stale status and admits probes, then snapshots recipeReads and switches settled. The final oracle accepts any increment with ready status, unchanged probe count and one connection.\",\"Same revision:e2e/tests/helpers/fleet.ts:663-700 increments connections and open-socket state before sending the greeting; :723-732 waits only for the count. It does not acknowledge delivery or recipe-reader settlement.\",\"Same revision:crates/farhelm-ui/src/feed.rs:289-315 handles notices in an effect, and :419-424 receives asynchronous JS reports. assets/events.js:311-332 reports on message delivery. Neither route is fenced by the test's connection count.\",\"Same revision:crates/farhelm-ui/src/list/create_form.rs:3216-3249 and tensorlake/recipes.rs:364-385 restart recipe resources on feed notices independently of observed_places. environment_ui.rs:713-725 handles notices without a new probe and polls while refreshing, so the alternative need not violate either final counter assertion.\",\"The assigned test file is newly added at 350a4b33; git log over the full pinned range shows the later Delete insertion as its only other change. Pinned tip 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db retains the same delayed-probe baseline and oracle at approximately 973-1002.\"] Current coverage/results: [\"Both specifications searched for delayed probe, feed greeting, silent feed, recipe refresh and place invalidation; SPEC.md Container sessions requires background probes and SPEC_impl.md Disposable environments describes cached readiness. Neither accepts an unfenced regression oracle.\",\"TODO.md Planned empty. plans/queue searched for greeting/drain/probe/recipe-refresh premises; related Podman and agent-operation plans are landed (plans/REPORTS.md:21,28). No unlanded work removing this oracle's cause found.\",\"BUGS.md's transfer/SSH-helper issue has a different trigger and scope. Active TRIAGE_OUTCOMES.md searched for named test, initial greeting and probe/recipe terms; no exact decision found. Archive not read.\",\"INDEX.md and matching queue files checked. outage-recovery-test-can-credit-ordinary-probe.md is another attribution defect, but its independent producer is a terminal reconnect timer, not this greeting-driven recipe read. staged-start-test-lacks-reader-drain-witness.md concerns terminal ownership and process start. Neither fixes or covers this test. No exact duplicate found.\",\"FILTER.md does not filter a false regression oracle merely because its alternative ordering is rare; it is not wholly a self-correcting display or imprecise diagnostic.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"The original lead's suspected false pass on an initial greeting refresh is retained. The record claims test evidence can be masked, not that product probe invalidation is broken.\"; \"No missing source premise for the unfenced alternative. Actual greeting scheduling, occurrence and false-pass frequency were not measured. Fast greeting consumption will ordinarily exercise the intended invalidation path.\"."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-044",
+          "key": "g069/l3",
+          "latest_line": 16,
+          "recommendation": "retain-verified",
+          "bucket": "other",
+          "underlying_key": "delayed-probe-test-unfenced-initial-feed-consumer",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The delayed-probe tests count a later recipe read without retiring the initial greeting's recipe consumer. A late greeting can provide the tested refresh independently of changed-place invalidation. This is a conditional test-oracle defect; no product invalidation failure or actual false pass was observed.",
+          "checks": [
+            "350a4b33b6d4476f4a78e43cea124bc2b828f462:e2e/tests/podman-environments.spec.ts:784-926 arms the greeting, waits for socket connection, displays stale status and admits probes, then snapshots recipeReads and switches settled. The final oracle accepts any increment with ready status, unchanged probe count and one connection.",
+            "Same revision:e2e/tests/helpers/fleet.ts:663-700 increments connections and open-socket state before sending the greeting; :723-732 waits only for the count. It does not acknowledge delivery or recipe-reader settlement.",
+            "Same revision:crates/farhelm-ui/src/feed.rs:289-315 handles notices in an effect, and :419-424 receives asynchronous JS reports. assets/events.js:311-332 reports on message delivery. Neither route is fenced by the test's connection count.",
+            "Same revision:crates/farhelm-ui/src/list/create_form.rs:3216-3249 and tensorlake/recipes.rs:364-385 restart recipe resources on feed notices independently of observed_places. environment_ui.rs:713-725 handles notices without a new probe and polls while refreshing, so the alternative need not violate either final counter assertion.",
+            "The assigned test file is newly added at 350a4b33; git log over the full pinned range shows the later Delete insertion as its only other change. Pinned tip 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db retains the same delayed-probe baseline and oracle at approximately 973-1002."
+          ],
+          "coverage_checked": [
+            "Both specifications searched for delayed probe, feed greeting, silent feed, recipe refresh and place invalidation; SPEC.md Container sessions requires background probes and SPEC_impl.md Disposable environments describes cached readiness. Neither accepts an unfenced regression oracle.",
+            "TODO.md Planned empty. plans/queue searched for greeting/drain/probe/recipe-refresh premises; related Podman and agent-operation plans are landed (plans/REPORTS.md:21,28). No unlanded work removing this oracle's cause found.",
+            "BUGS.md's transfer/SSH-helper issue has a different trigger and scope. Active TRIAGE_OUTCOMES.md searched for named test, initial greeting and probe/recipe terms; no exact decision found. Archive not read.",
+            "INDEX.md and matching queue files checked. outage-recovery-test-can-credit-ordinary-probe.md is another attribution defect, but its independent producer is a terminal reconnect timer, not this greeting-driven recipe read. staged-start-test-lacks-reader-drain-witness.md concerns terminal ownership and process start. Neither fixes or covers this test. No exact duplicate found.",
+            "FILTER.md does not filter a false regression oracle merely because its alternative ordering is rare; it is not wholly a self-correcting display or imprecise diagnostic."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": "No missing source premise for the unfenced alternative. Actual greeting scheduling, occurrence and false-pass frequency were not measured. Fast greeting consumption will ordinarily exercise the intended invalidation path.",
+          "original_stronger_consequence": "The original lead's suspected false pass on an initial greeting refresh is retained. The record claims test evidence can be masked, not that product probe invalidation is broken.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Retain the missing attribution witness, with its conditional scheduling and no-runtime caveats."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": true,
+        "clearly_refuted_candidate": false,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Source-confirmed by an existing parent decision; not runtime reproduced",
+        "deduplication_key": "delayed-probe-test-unfenced-initial-feed-consumer",
+        "destination": "trailing-delayed-probe-test-unfenced-initial-feed-consumer.md"
+      }
+    }
+  ],
+  "replies": [
+    {
+      "turn": 1,
+      "reply": "Initial pass complete; all 1,043 assigned patch lines reviewed.\n\nRecorded `l1` (`other`): setup failures can bypass cleanup of owned sessions and a saved template, contaminating the shared test stack.\n\nThree dismissed candidates are logged. No open leads or unread assigned material. Findings and progress are saved; no runtime tests, reproductions, or checkout changes were made."
+    },
+    {
+      "turn": 2,
+      "reply": "- Revised `c3` to a finding: raw arrival waits can remain suspended after the [runner timeout](https://raw.githubusercontent.com/microsoft/playwright/v1.64.0/packages/playwright/src/worker/timeoutManager.ts), bypassing `finally`.\n- Added `l2`: draining the Delete route can delay independent session cleanup until its API client is disposed.\n\nBoth are source-supported, tooling-only findings; no reproductions run. Records and progress updated. Unresolved leads: none."
+    },
+    {
+      "turn": 3,
+      "reply": "Discovery pass complete. New finding: `l3` (`other`)—an unfenced initial feed greeting can satisfy the delayed-probe refresh oracle.\n\nChecked feed delivery/consumption, both status consumers, probe polling, remaining assigned assertions, and persistence through the pinned tip. Source analysis only; no runtime execution.\n\n- New verified IDs: `l3`\n- New unverified IDs: none\n- Open leads: none\n- Anything new found: **yes**\n\nFindings log and progress updated."
+    },
+    {
+      "turn": 4,
+      "reply": "Discovery pass 2 complete. Nothing new found.\n\nChecked refreshed interface records, fixture wire shapes, endpoint matching, placement/request assertions, shortcut classification, and deletion-confirmation binding at the pinned revisions.\n\n- New verified IDs: none\n- New unverified IDs: none\n- Open leads: none\n\nProgress updated. Source review only; no runtime tests or reproductions."
+    }
+  ],
+  "progress": "g069: initialized, awaiting initial source review.\nGroup g069: podman-environments.\nInitial review, turn 1; discovery passes: 0.\nState: reading mandatory patches and pinned contracts. No source findings yet.\nInterface assumptions: inspect test helpers and helm API contracts at each assigned revision; no runtime execution.\nNext: mandatory evidence packets, contract analysis, immediate event recording.\nUnread scope: both assigned patches and governing specification sections.\n\nInitial review turn 1 complete. Discovery-pass count: 0; no later-turn synthesis/discovery protocol performed.\nCoverage: all 1,043 assigned patch lines read through evidence packets (00262: 1-180, 181-360, 361-540, 541-720, 721-900, 901-948; 00723: 1-95). Complete inventory commits field read; excluded metadata and forbidden queue/coverage files were not read.\nContracts: pinned Container sessions sections at both commits; disposable-environment contracts, creation/recents/template rules and Answers bind to what was drawn at applicable revisions. Inspected route gates/draining, fixture cleanup, shared environment Delete presentation and named companion tests, place refresh consumers, history-consumption observation, UTC formatter and owned stack lifetime. Re-read clipped specification material in smaller packets.\nNew verified finding: l1 (other): real source sessions and the quick-launch template are acquired before their cleanup guard, so setup failures bypass deletion in the long-lived shared stack. Lead l1 resolved to finding; no open leads.\nCandidates c1, c2, c3 record respectively the source-refuted timezone concern, explicit browser/provider mock boundary, and bounded/released route gates. Each includes drop basis and caveats. No unverified finding IDs remain.\nInterface assumptions: this assignment reviews browser fixture correctness; backend Podman execution is not established by mocked responses. Companion sandbox tests validate shared Delete surfaces; no coverage-queue metadata consulted. Browser context teardown does not delete API-owned sessions; enclosing stack shutdown bounds the leak.\nNo runtime tests, builds, reproductions or checkout writes performed. All conclusions are source-supported, not observed execution.\nUnread assigned scope: none. Next action: return initial-pass result and await caller's later synthesis/discovery instruction.\n\nSynthesis turn 2 started; discovery-pass count remains 0. Reopened c3 under its original ID to verify raw-promise timeout behavior and sequential cleanup independence. l1 remains open with exact pre-try source-session/template gaps and tooling-only impact preserved. Next: pinned runner source and concrete fixture paths; no runtime execution.\n\nSynthesis turn 2 complete; discovery-pass count: 0. No later discovery pass was folded into this turn.\nChanges this turn: c3 revised candidate -> lead -> source-confirmed finding (other). Concrete absent-history-request paths at original lines 437 and 530 can strand a raw gate await; the pinned Playwright runner's timeout race does not unwind that body into finally. The ordinary-folder source-session cleanup can therefore be bypassed even after entering try.\nNew l2 lead resolved to source-confirmed finding (other), with two evidence amendments. At the newer commit, the Delete rewrite records sent before awaiting real cleanup, so the sent assertion can pass and the notice assertion fail while that rewrite is pending. Finally serially drains it before independent kept-session cleanup. Pinned runner configuration gives this request context timeout 0; deadline-driven fixture disposal aborts its pending request, then refuses later sends on the same disposed client. Independent session teardown has not started before its client lifetime ends.\nRead/check results: re-read exact assigned wait/finally paths, request and cleanup helpers, suite config and both commits' lockfiles. Local node_modules were unavailable; consulted official Microsoft Playwright v1.64.0 source for TimeoutManager, workerMain, fixtureRunner, index fixtures, client fetch/timeout/network and server fetch disposal. Confirmed raw promise race, fixture teardown transition, default runner context timeout 0, sequential route drain, Dispose rejection of in-flight HTTP and refusal of sends after disposal. No reproduction/build/test execution.\nPreserved l1 unchanged: source sessions at 111, 501, 555 and saved template at 689-702 precede their try/finally guards at the original commit; limited shared-test-stack consequence remains. c1/c2 remain proposed candidates only; no drop was accepted. All IDs retained, append-only events used.\nInterface assumptions/caveats: c3 requires missing expected request arrival; l2 requires its real callback cleanup to remain pending across the deadline. These are conditional source-level failure paths, not observed occurrences. They concern browser context/request-client ownership and owned test sessions; no claim about g070/l1 provider subprocess settlement, live-install behavior, indefinite runner hangs or leaks beyond enclosing stack shutdown.\nOpen leads: none. Unverified IDs: none. Unread assigned scope: none. Next: return this turn's delta; any requested later discovery is a separate turn, warranted by the new findings.\n\nDiscovery turn 3 started; discovery-pass count: 1. Read all neighbour projection lines 1-241, re-reading the initially clipped first packet in smaller chunks. No pending cross-group questions. New search focuses only on assigned browser fixture/oracle behavior; backend findings remain interface context, not adopted local findings.\n\nDiscovery turn 3 complete; discovery-pass count: 1. Something new was found.\nNew verified ID: l3 (other), initial feed greeting not fenced before delayed-probe no-notice oracle. Recorded immediately as lead, resolved to finding after source checks, then amended with exact helper lines and endpoint persistence. New unverified-after-investigation IDs: none. Remaining open leads: none.\nUseful checks/results: read complete neighbour projection in bounded chunks; no pending synthesis questions or new aliases to adopt. Rechecked feed fixture arrival/send ordering, waitForConnection's count-only boundary, JS onmessage report, async Rust feed receipt/effect, both recipe-status consumers' independent notice restarts, opening probes and refresh=false notice reads, and the refreshing-place polling path. A late initial greeting can supply the post-baseline recipe read/ready status without probe-driven invalidation, while retaining one socket and unchanged probe count. Existing settled-reader helper does not observe this recipe resource. This is source-permitted oracle ambiguity, not a product-invalidity claim or measured schedule.\nFinished remaining assigned-test search: active placement choices and no-create counter; restored select option/value/request agreement; focused Recent consumption revision and submitted row; ordinary-folder gating and environment restoration; container refusal target, request shape and cloud consent; leftover cancel/confirmation/refusal; quick-launch first-place boundary and exact placement; newer Delete query/wording/kept-row oracle. No additional substantive new issue found. Did not stop after l3; completed the assigned discovery pass.\nWhole pinned-range attribution: assigned file has only introduction at 350a4b33 and connected Delete insertion at 2ef10815. Full file diff from 350a4b33 to endpoint 00de confirms the delayed-probe oracle is unchanged. Original l1/c3/l2 findings and c1/c2 candidate histories remain unmodified; no parent drop/lowering accepted.\nInterface assumptions/caveats: startup greeting delivery/consumption is distinct from test-side socket openness. A fast already-retired greeting yields the intended probe test; actual incidence of the alternative was not measured. Neighbour g026/f4 is an analogy only, with different test/provenance. Other neighbour backend/lifecycle findings were context, not scope expansion.\nUnread assigned scope: none. No runtime tests, reproductions, builds, checkout writes or live-install actions. Next action: return discovery delta; a subsequent discovery pass, if requested, must be a separate turn because l3 is a new substantive discovery.\n\nDiscovery turn 4 started; discovery-pass count: 2. Refreshed complete neighbour projection (352 lines) in bounded packets. No named pending questions; related external test findings do not add local scope. Searching remaining request matching, wire fixture shape, explicit-choice assertions and confirmation binding beyond known IDs.\n\nDiscovery turn 4 complete; discovery-pass count: 2. Empty discovery: nothing new found.\nNew verified IDs: none. New unverified-after-investigation IDs: none. New candidate/withdrawal revisions: none. Remaining open leads: none. Earlier finding consequences, IDs and proposed-drop bases remain unchanged; no parent drop/lowering accepted.\nChecks/results: read refreshed neighbour projection completely (352 lines, timestamp 2026-11-13T17:31:08.822Z) in bounded ranges 1-40, 41-70, 71-100, 101-130, 131-160, 161-190, 191-220, 221-250, 251-280, 281-310, 311-340, 341-352. Related new external records concern separate callers and do not create a local alias or pending synthesis question.\nSource search stayed in the assigned browser group and its immediate contracts/callers at the assigned revisions. Rechecked environmentChoices response fields and endpoint strings against UI api/environments.rs and protocol EnvironmentPlaceView/RecipePlaceView/LaunchTarget/EnvironmentHostView/ContainerLeftoverView. Fixture shapes include the required fields; catalog/history/probe/leftover paths match their consumers, and host-backed placement is kept distinct from account placement.\nRechecked explicit-placement fixture and assertions: real distinct registry IDs, two recipes/places, provider-ready snapshots, remembered default override, exact active-segment preservation and both create endpoint counters. Rechecked restored native-select non-first options/value/checked-text and submitted recipe/place; refusal request bodies omit installed-host routing fields as api/sandbox_sessions.rs:38-70 deliberately does. The partial body assertions match the tests' placement scope; no newly established contradictory fixture premise or request-target oracle was found.\nRechecked quick-launch input boundary against template-shortcuts.js's physical-code/exact-modifier classification and previously read browser shortcut specification; the held-place fixture has a separate arrival counter, loading/hidden/no-create boundary and refused target request. Rechecked leftover DELETE body against delete_container_leftover's rowless route and captured ConfirmSlot selection. Confirm/cancel controls bind the shown resource; the fixture's local place/id and expected body agree. Rechecked connected-container Delete's host projection, exact query, response remaining count, notice and kept-session assertions at the later commit. No new request-matching, wire-shape, binding or assertion defect established in this pass.\nNo runtime tests, builds, reproductions, live-install actions, prohibited coverage-source reads or checkout writes. Conclusions and empty result are source analysis only. One attempted context lookup for a nonexistent protocol session.rs path returned no source; the relevant environment protocol and actual response/body consumers were read directly instead, leaving no assigned material unread.\nUnread assigned scope: none. Next action: return the empty discovery result and checks; any later pass remains a separate turn.\n"
+}

@@ -1,0 +1,725 @@
+{
+  "group": {
+    "id": "g150",
+    "domain": "supervisor-upgrade-state",
+    "purpose": "supervisor-upgrade-state: crates/farhelm-supervisor/src/store.rs; phases complete small per-commit changes",
+    "interfaces": [
+      "g001",
+      "g007",
+      "g008",
+      "g009",
+      "g071",
+      "g072",
+      "g073",
+      "g102",
+      "g103",
+      "g104",
+      "g105",
+      "g106",
+      "g107",
+      "g108",
+      "g109",
+      "g110",
+      "g111",
+      "g112",
+      "g113",
+      "g114",
+      "g115",
+      "g116",
+      "g149",
+      "g159",
+      "g160",
+      "g161",
+      "g162",
+      "g163",
+      "g164",
+      "g165",
+      "g166",
+      "g167",
+      "g168",
+      "g169",
+      "g170",
+      "g171",
+      "g172",
+      "g173"
+    ],
+    "sources": [
+      {
+        "path": "[private-run]/prep/parts/00949-000.patch",
+        "ranges": [
+          [
+            1,
+            574
+          ]
+        ],
+        "original_path": "crates/farhelm-supervisor/src/store.rs",
+        "commit": "1ed482dde220452e424973faf38a5e1318986333",
+        "notes": "patch header; patch character offsets [0,35408)",
+        "lines": 574,
+        "bytes": 35496,
+        "start": 0,
+        "end": 35408,
+        "original": "[private-run]/prep/originals/00949.patch"
+      }
+    ],
+    "lines": 574,
+    "bytes": 35496
+  },
+  "records": [
+    {
+      "key": "g150/c1",
+      "owner": "g150",
+      "id": "c1",
+      "domain": "supervisor-upgrade-state",
+      "purpose": "supervisor-upgrade-state: crates/farhelm-supervisor/src/store.rs; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 1,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c1",
+            "state": "open",
+            "summary": "Removed per-session old-terminal resolver is superseded at startup",
+            "location": "crates/farhelm-supervisor/src/store.rs:5773",
+            "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. TLDR: Considered whether removing the per-session warning resolver leaves obsolete old-terminal warnings unresolved after Restart; source shows the global startup resolver supersedes it. Details: The assigned patch removes the previous store.rs:5784 resolve_session_notifications_of_kind. Its only parent-revision caller is service/notifications.rs:505-545, the removed tmux sampling reconciliation; there are no current callers (git grep at reviewed revision). Current store.rs:5773-5795 resolves all unresolved notifications matching exactly the supplied kind, across sessions and generations. service/core/old_terminals.rs:525-547 always calls it with OldTerminal after recording OldTerminalEnded; service/core.rs:7080-7090 calls record_ended even when the converted list is empty, before session publication. SPEC.md:2804-2814 explicitly says: 'no warning is recorded any more, and every supervisor start marks any unresolved one resolved' and 'Nothing resolves the notice: it stays unresolved'. SPEC_impl.md:5842-5848 explicitly requires the global update and distinguishes old_terminal from old_terminal_ended. The remaining resolver matches the former kind only, preserving the latter notices. Suggested bucket: other if it were a bug; no established impact. Confidence: confirmed by source and contract, no execution. proposed_drop: removal is safe because the only former use is retired and the required global replacement is invoked at startup. could_be_highest: false; notification resolution alone has no demonstrated security or loss-of-work route. possible_cover: none. Caveats: failures are logged and startup continues per contract; no runtime behavior was observed."
+          }
+        },
+        {
+          "line": 3,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c1",
+            "state": "open",
+            "summary": "Removed per-session old-terminal resolver is superseded at startup",
+            "location": "crates/farhelm-supervisor/src/store.rs:5773",
+            "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. TLDR: Considered whether removing per-session warning resolution leaves obsolete warnings unresolved or accidentally resolves newer terminal-ended notices and unrelated problems. Source shows the replacement has an exact old-warning key and separate notice lifetime. Details: The assigned patch removes former store.rs:5784 resolve_session_notifications_of_kind; its sole parent-revision caller, service/notifications.rs:505-545, was the retired tmux sampling reconciliation, and no caller remains at the reviewed revision. Current store.rs:5773-5795 uses WHERE kind = ?1 AND resolved_at IS NULL, across sessions and generations. Its sole production caller is service/core/old_terminals.rs:542-546 and supplies NotificationKind::OldTerminal.as_str(). service/notifications.rs:151-164 exhaustively gives the nine current kinds distinct strings: old_terminal is the old warning, old_terminal_ended is the new notice, and no unrelated kind shares old_terminal. service/notifications.rs:117-129 also excludes both old-terminal kinds from Resume resolution. core.rs:7080-7090 invokes record_ended even with an empty converted-session list, before session publication. SPEC.md:2804-2814 says: 'no warning is recorded any more, and every supervisor start marks any unresolved one resolved' and 'Nothing resolves the notice: it stays unresolved'. SPEC_impl.md:5842-5848 explicitly requires the global old_terminal update and distinct old_terminal_ended key. Suggested bucket: other if this concern were established; no demonstrated wrong behavior. Confidence: confirmed through source and contract, no execution. proposed_drop: the removed resolver's only use is retired, its replacement is invoked at startup, and exact key equality preserves the new notice and unrelated current kinds. could_be_highest: false; notification resolution has no established security or loss-of-work route. possible_cover: parent reports independent g129/c3 source confirmation of the distinct key and resolves_on_resume=false; no coverage sources were searched. Caveats: database write failures are logged and startup continues by contract; later-turn synthesis is checking caller/failure details further. Original considered consequence, obsolete warnings surviving or new notices being erased, is preserved here. Revision reason: independently checked all current notification keys and Resume policy to settle the cross-group interaction."
+          }
+        },
+        {
+          "line": 4,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c1",
+            "state": "open",
+            "summary": "Removed per-session old-terminal resolver is superseded at startup",
+            "location": "crates/farhelm-supervisor/src/store.rs:5773",
+            "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. TLDR: Considered whether removing per-session warning resolution leaves obsolete warnings unresolved or accidentally resolves newer terminal-ended notices and unrelated problems. Source shows the replacement has an exact old-warning key and separate notice lifetime. Details: The assigned patch removes former store.rs:5784 resolve_session_notifications_of_kind; its sole parent-revision caller, service/notifications.rs:505-545, was the retired tmux sampling reconciliation, and no caller remains at the reviewed revision. Current store.rs:5773-5795 uses WHERE kind = ?1 AND resolved_at IS NULL, across sessions and generations. Its sole production caller is service/core/old_terminals.rs:542-546 and supplies NotificationKind::OldTerminal.as_str(). service/notifications.rs:151-164 exhaustively gives the nine current kinds distinct strings: old_terminal is the old warning, old_terminal_ended is the new notice, and no unrelated kind shares old_terminal. service/notifications.rs:117-129 also excludes both old-terminal kinds from Resume resolution. core.rs:7080-7090 invokes record_ended even with an empty converted-session list, before session publication. SPEC.md:2804-2814 says: 'no warning is recorded any more, and every supervisor start marks any unresolved one resolved' and 'Nothing resolves the notice: it stays unresolved'. SPEC_impl.md:5842-5848 explicitly requires the global old_terminal update and distinct old_terminal_ended key. Suggested bucket: other if this concern were established; no demonstrated wrong behavior. Confidence: confirmed through source and contract, no execution. proposed_drop: the removed resolver's only use is retired, its replacement is invoked at startup, and exact key equality preserves the new notice and unrelated current kinds. could_be_highest: false; notification resolution has no established security or loss-of-work route. possible_cover: parent reports independent g129/c3 source confirmation of the distinct key and resolves_on_resume=false; no coverage sources were searched. Caveats: database write failures are logged and startup continues by contract; later-turn synthesis is checking caller/failure details further. Original considered consequence, obsolete warnings surviving or new notices being erased, is preserved here. Revision reason: independently checked all current notification keys and Resume policy to settle the cross-group interaction. Further synthesis checks: service/notifications.rs:395-438 constructs the Resume resolver list solely from resolves_on_resume=true kinds (HookSilent and ResumeWithdrawn); grep found the only other resolve_session_notifications_if_current caller outside tests in a capture.rs test module, so no production path passes OldTerminalEnded there. old_terminals.rs:526-546 logs an ended-notice insert error and continues the loop and old-warning resolution, and separately logs a global-resolution failure without returning an error. core.rs:7065-7090 gives a failed reconciliation an empty committed map, creates notices only for committed Interrupted outcomes, yet still invokes old-warning resolution. Thus a failed old-warning update can leave warnings unresolved until a subsequent owning startup retries it. A failed ended-notice insertion after the conversion commits need not be retried, because that row is no longer newly converted on the next start. These are source-supported failure consequences, not executed observations. SPEC_impl.md:2922-2926 explicitly accepts the post-conversion notice window and states: A failure anywhere is logged and never fatal. This caveat does not establish a new loss-of-work route: the terminal retirement itself is explicitly specified and the removed resolver never recorded ended notices. Completion of synthesis: all readily checkable caller and exact-key premises for this candidate are settled; no unresolved lead remains. The candidate remains a proposed drop for parent disposition, not a parent-accepted drop."
+          }
+        }
+      ],
+      "latest": {
+        "line": 4,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c1",
+          "state": "open",
+          "summary": "Removed per-session old-terminal resolver is superseded at startup",
+          "location": "crates/farhelm-supervisor/src/store.rs:5773",
+          "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. TLDR: Considered whether removing per-session warning resolution leaves obsolete warnings unresolved or accidentally resolves newer terminal-ended notices and unrelated problems. Source shows the replacement has an exact old-warning key and separate notice lifetime. Details: The assigned patch removes former store.rs:5784 resolve_session_notifications_of_kind; its sole parent-revision caller, service/notifications.rs:505-545, was the retired tmux sampling reconciliation, and no caller remains at the reviewed revision. Current store.rs:5773-5795 uses WHERE kind = ?1 AND resolved_at IS NULL, across sessions and generations. Its sole production caller is service/core/old_terminals.rs:542-546 and supplies NotificationKind::OldTerminal.as_str(). service/notifications.rs:151-164 exhaustively gives the nine current kinds distinct strings: old_terminal is the old warning, old_terminal_ended is the new notice, and no unrelated kind shares old_terminal. service/notifications.rs:117-129 also excludes both old-terminal kinds from Resume resolution. core.rs:7080-7090 invokes record_ended even with an empty converted-session list, before session publication. SPEC.md:2804-2814 says: 'no warning is recorded any more, and every supervisor start marks any unresolved one resolved' and 'Nothing resolves the notice: it stays unresolved'. SPEC_impl.md:5842-5848 explicitly requires the global old_terminal update and distinct old_terminal_ended key. Suggested bucket: other if this concern were established; no demonstrated wrong behavior. Confidence: confirmed through source and contract, no execution. proposed_drop: the removed resolver's only use is retired, its replacement is invoked at startup, and exact key equality preserves the new notice and unrelated current kinds. could_be_highest: false; notification resolution has no established security or loss-of-work route. possible_cover: parent reports independent g129/c3 source confirmation of the distinct key and resolves_on_resume=false; no coverage sources were searched. Caveats: database write failures are logged and startup continues by contract; later-turn synthesis is checking caller/failure details further. Original considered consequence, obsolete warnings surviving or new notices being erased, is preserved here. Revision reason: independently checked all current notification keys and Resume policy to settle the cross-group interaction. Further synthesis checks: service/notifications.rs:395-438 constructs the Resume resolver list solely from resolves_on_resume=true kinds (HookSilent and ResumeWithdrawn); grep found the only other resolve_session_notifications_if_current caller outside tests in a capture.rs test module, so no production path passes OldTerminalEnded there. old_terminals.rs:526-546 logs an ended-notice insert error and continues the loop and old-warning resolution, and separately logs a global-resolution failure without returning an error. core.rs:7065-7090 gives a failed reconciliation an empty committed map, creates notices only for committed Interrupted outcomes, yet still invokes old-warning resolution. Thus a failed old-warning update can leave warnings unresolved until a subsequent owning startup retries it. A failed ended-notice insertion after the conversion commits need not be retried, because that row is no longer newly converted on the next start. These are source-supported failure consequences, not executed observations. SPEC_impl.md:2922-2926 explicitly accepts the post-conversion notice window and states: A failure anywhere is logged and never fatal. This caveat does not establish a new loss-of-work route: the terminal retirement itself is explicitly specified and the removed resolver never recorded ended notices. Completion of synthesis: all readily checkable caller and exact-key premises for this candidate are settled; no unresolved lead remains. The candidate remains a proposed drop for parent disposition, not a parent-accepted drop."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g150/findings.jsonl",
+        "id": "c1",
+        "line": 4,
+        "disposition": "excluded",
+        "group": "old-terminal-warning-resolver-removal-superseded-by-global-startup-resolution",
+        "reason": "Parent explicitly accepted named refuted proposal from claims-096 after inspecting it. The removed resolver's retired sampling caller is superseded by an exact-kind global startup update. It does not erase the newer ended notices or unrelated notification kinds. Propose source refutation of a regression caused by removing the per-session resolver, preserving the documented failure windows. Parent-reported g129/c3 overlap was not supplied as a named record, so no exact external alias is asserted. Checked source/results: [\"1ed482dde220452e424973faf38a5e1318986333:crates/farhelm-supervisor/src/store.rs:5773-5795 updates only WHERE kind = ?1 AND resolved_at IS NULL; service/core/old_terminals.rs:525-547 calls it with OldTerminal only.\",\"Same revision service/notifications.rs:117-129 excludes both old-terminal kinds from Resume resolution; 151-164 assigns distinct old_terminal and old_terminal_ended strings.\",\"Same revision service/core.rs:7065-7090 calls record_ended even with no converted rows. old_terminals.rs logs notice-write/update failures and continues. Thus an unsuccessful global update may persist until a later startup; a committed conversion followed by a failed notice insertion is not necessarily retried.\"] Current coverage/results: [{\"source\":\"SPEC.md and SPEC_impl.md\",\"result\":\"SPEC.md:2804-2814 and SPEC_impl.md:5682-5689 require global old-warning resolution and persistent ended notices. SPEC_impl.md:2815-2820 explicitly accepts the short post-conversion notice window and nonfatal failures.\"},{\"source\":\"TODO.md:25-26\",\"result\":\"Planned bucket is empty. The phase-3 removal idea at 225-232 is in Mid term, not Planned, and does not cover these findings.\"},{\"source\":\"plans/queue\",\"result\":\"Searched named behavior and symbols. No matching unlanded corrective plan. Relevant tmux-end-old-terminals, tmux-drop-from-docs and environment-agent-operations plans are already landed per plans/REPORTS.md:28-32, despite retained queue files.\"},{\"source\":\"BUGS.md\",\"result\":\"Read fully; sole accepted ssh-output-pipe hang is unrelated.\"},{\"source\":\"review_feedback_queue/INDEX.md and matching files\",\"result\":\"Searched actual mechanisms, symbols and consequences. No exact existing item or useful same-root extension found. tab-reap-deadline-excludes-listing-request.md was read; its test polling helper is distinct from production startup cleanup.\"},{\"source\":\"TRIAGE_OUTCOMES.md\",\"result\":\"Searched actual mechanisms and consequences; no matching active decision. Archive not read.\"},{\"source\":\"review_feedback_queue/FILTER.md\",\"result\":\"Read fully. No whole-boundary filter match used.\"}] Exact cited cover: [{\"source\":\"SPEC_impl.md:5684-5688\",\"quote\":\"every supervisor start now resolves every unresolved row of it in one update fenced by neither session, generation nor conversation\"},{\"source\":\"SPEC.md:2812-2814\",\"quote\":\"Nothing resolves the notice: it stays unresolved, and unread until the user reads it, across later supervisor starts, until it is cleared.\"}] Original stronger consequence and missing premise remain preserved: \"Obsolete warnings might survive or newer ended notices/unrelated problems might be accidentally resolved. Exact-key source checks refute normal-path misresolution; accepted write-failure caveats remain.\"; null."
+      },
+      "accepted_parent_decision": {
+        "key": "g150/c1",
+        "line": 4,
+        "disposition": "excluded",
+        "group": "old-terminal-warning-resolver-removal-superseded-by-global-startup-resolution",
+        "bucket": "other",
+        "recording": "refuted",
+        "queue_target_candidate": null,
+        "needs_independent_drop_check": false,
+        "reason": "Parent explicitly accepted named refuted proposal from claims-096 after inspecting it. The removed resolver's retired sampling caller is superseded by an exact-kind global startup update. It does not erase the newer ended notices or unrelated notification kinds. Propose source refutation of a regression caused by removing the per-session resolver, preserving the documented failure windows. Parent-reported g129/c3 overlap was not supplied as a named record, so no exact external alias is asserted. Checked source/results: [\"1ed482dde220452e424973faf38a5e1318986333:crates/farhelm-supervisor/src/store.rs:5773-5795 updates only WHERE kind = ?1 AND resolved_at IS NULL; service/core/old_terminals.rs:525-547 calls it with OldTerminal only.\",\"Same revision service/notifications.rs:117-129 excludes both old-terminal kinds from Resume resolution; 151-164 assigns distinct old_terminal and old_terminal_ended strings.\",\"Same revision service/core.rs:7065-7090 calls record_ended even with no converted rows. old_terminals.rs logs notice-write/update failures and continues. Thus an unsuccessful global update may persist until a later startup; a committed conversion followed by a failed notice insertion is not necessarily retried.\"] Current coverage/results: [{\"source\":\"SPEC.md and SPEC_impl.md\",\"result\":\"SPEC.md:2804-2814 and SPEC_impl.md:5682-5689 require global old-warning resolution and persistent ended notices. SPEC_impl.md:2815-2820 explicitly accepts the short post-conversion notice window and nonfatal failures.\"},{\"source\":\"TODO.md:25-26\",\"result\":\"Planned bucket is empty. The phase-3 removal idea at 225-232 is in Mid term, not Planned, and does not cover these findings.\"},{\"source\":\"plans/queue\",\"result\":\"Searched named behavior and symbols. No matching unlanded corrective plan. Relevant tmux-end-old-terminals, tmux-drop-from-docs and environment-agent-operations plans are already landed per plans/REPORTS.md:28-32, despite retained queue files.\"},{\"source\":\"BUGS.md\",\"result\":\"Read fully; sole accepted ssh-output-pipe hang is unrelated.\"},{\"source\":\"review_feedback_queue/INDEX.md and matching files\",\"result\":\"Searched actual mechanisms, symbols and consequences. No exact existing item or useful same-root extension found. tab-reap-deadline-excludes-listing-request.md was read; its test polling helper is distinct from production startup cleanup.\"},{\"source\":\"TRIAGE_OUTCOMES.md\",\"result\":\"Searched actual mechanisms and consequences; no matching active decision. Archive not read.\"},{\"source\":\"review_feedback_queue/FILTER.md\",\"result\":\"Read fully. No whole-boundary filter match used.\"}] Exact cited cover: [{\"source\":\"SPEC_impl.md:5684-5688\",\"quote\":\"every supervisor start now resolves every unresolved row of it in one update fenced by neither session, generation nor conversation\"},{\"source\":\"SPEC.md:2812-2814\",\"quote\":\"Nothing resolves the notice: it stays unresolved, and unread until the user reads it, across later supervisor starts, until it is cleared.\"}] Original stronger consequence and missing premise remain preserved: \"Obsolete warnings might survive or newer ended notices/unrelated problems might be accidentally resolved. Exact-key source checks refute normal-path misresolution; accepted write-failure caveats remain.\"; null."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-096",
+          "key": "g150/c1",
+          "latest_line": 4,
+          "recommendation": "refuted",
+          "bucket": "other",
+          "underlying_key": "old-terminal-warning-resolver-removal-superseded-by-global-startup-resolution",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The removed resolver's retired sampling caller is superseded by an exact-kind global startup update. It does not erase the newer ended notices or unrelated notification kinds.",
+          "checks": [
+            "1ed482dde220452e424973faf38a5e1318986333:crates/farhelm-supervisor/src/store.rs:5773-5795 updates only WHERE kind = ?1 AND resolved_at IS NULL; service/core/old_terminals.rs:525-547 calls it with OldTerminal only.",
+            "Same revision service/notifications.rs:117-129 excludes both old-terminal kinds from Resume resolution; 151-164 assigns distinct old_terminal and old_terminal_ended strings.",
+            "Same revision service/core.rs:7065-7090 calls record_ended even with no converted rows. old_terminals.rs logs notice-write/update failures and continues. Thus an unsuccessful global update may persist until a later startup; a committed conversion followed by a failed notice insertion is not necessarily retried."
+          ],
+          "coverage_checked": [
+            {
+              "source": "SPEC.md and SPEC_impl.md",
+              "result": "SPEC.md:2804-2814 and SPEC_impl.md:5682-5689 require global old-warning resolution and persistent ended notices. SPEC_impl.md:2815-2820 explicitly accepts the short post-conversion notice window and nonfatal failures."
+            },
+            {
+              "source": "TODO.md:25-26",
+              "result": "Planned bucket is empty. The phase-3 removal idea at 225-232 is in Mid term, not Planned, and does not cover these findings."
+            },
+            {
+              "source": "plans/queue",
+              "result": "Searched named behavior and symbols. No matching unlanded corrective plan. Relevant tmux-end-old-terminals, tmux-drop-from-docs and environment-agent-operations plans are already landed per plans/REPORTS.md:28-32, despite retained queue files."
+            },
+            {
+              "source": "BUGS.md",
+              "result": "Read fully; sole accepted ssh-output-pipe hang is unrelated."
+            },
+            {
+              "source": "review_feedback_queue/INDEX.md and matching files",
+              "result": "Searched actual mechanisms, symbols and consequences. No exact existing item or useful same-root extension found. tab-reap-deadline-excludes-listing-request.md was read; its test polling helper is distinct from production startup cleanup."
+            },
+            {
+              "source": "TRIAGE_OUTCOMES.md",
+              "result": "Searched actual mechanisms and consequences; no matching active decision. Archive not read."
+            },
+            {
+              "source": "review_feedback_queue/FILTER.md",
+              "result": "Read fully. No whole-boundary filter match used."
+            }
+          ],
+          "exact_cover_quotes": [
+            {
+              "source": "SPEC_impl.md:5684-5688",
+              "quote": "every supervisor start now resolves every unresolved row of it in one update fenced by neither session, generation nor conversation"
+            },
+            {
+              "source": "SPEC.md:2812-2814",
+              "quote": "Nothing resolves the notice: it stays unresolved, and unread until the user reads it, across later supervisor starts, until it is cleared."
+            }
+          ],
+          "missing_premise": null,
+          "original_stronger_consequence": "Obsolete warnings might survive or newer ended notices/unrelated problems might be accidentally resolved. Exact-key source checks refute normal-path misresolution; accepted write-failure caveats remain.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Propose source refutation of a regression caused by removing the per-session resolver, preserving the documented failure windows. Parent-reported g129/c3 overlap was not supplied as a named record, so no exact external alias is asserted."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "old-terminal-warning-resolver-removal-superseded-by-global-startup-resolution",
+        "destination": null
+      }
+    },
+    {
+      "key": "g150/c2",
+      "owner": "g150",
+      "id": "c2",
+      "domain": "supervisor-upgrade-state",
+      "purpose": "supervisor-upgrade-state: crates/farhelm-supervisor/src/store.rs; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 2,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c2",
+            "state": "open",
+            "summary": "Terminal-host exit-code wording matches the host adapter",
+            "location": "crates/farhelm-supervisor/src/store.rs:190",
+            "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. TLDR: Considered whether replacing tmux exit-status documentation incorrectly describes signal deaths after the terminal-host switch. Details: The changed LastOutcome::Exited documentation at store.rs:190-193 says a missing exit code covers a signal death. Source check of hosts/terminal.rs:854-889 confirms the public exit-code contract and conversion: ChildExit::Code(code) becomes Some(code), ChildExit::Signal(_) becomes None. Therefore the changed comment matches the actual adapter and does not misdescribe a synthesized 128-plus-signal exit code. Suggested bucket: other; no user-visible incorrect behavior established. Confidence: confirmed by source; no runtime execution. proposed_drop: source refutes the suspected documentation mismatch. could_be_highest: false; this candidate concerns explanatory wording only, without a security or loss-of-work route. possible_cover: none. Caveats: this is a check of the assigned documentation change, not an independent audit of terminal-host process exit handling."
+          }
+        }
+      ],
+      "latest": {
+        "line": 2,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c2",
+          "state": "open",
+          "summary": "Terminal-host exit-code wording matches the host adapter",
+          "location": "crates/farhelm-supervisor/src/store.rs:190",
+          "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. TLDR: Considered whether replacing tmux exit-status documentation incorrectly describes signal deaths after the terminal-host switch. Details: The changed LastOutcome::Exited documentation at store.rs:190-193 says a missing exit code covers a signal death. Source check of hosts/terminal.rs:854-889 confirms the public exit-code contract and conversion: ChildExit::Code(code) becomes Some(code), ChildExit::Signal(_) becomes None. Therefore the changed comment matches the actual adapter and does not misdescribe a synthesized 128-plus-signal exit code. Suggested bucket: other; no user-visible incorrect behavior established. Confidence: confirmed by source; no runtime execution. proposed_drop: source refutes the suspected documentation mismatch. could_be_highest: false; this candidate concerns explanatory wording only, without a security or loss-of-work route. possible_cover: none. Caveats: this is a check of the assigned documentation change, not an independent audit of terminal-host process exit handling."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g150/findings.jsonl",
+        "id": "c2",
+        "line": 2,
+        "disposition": "excluded",
+        "group": "terminal-host-signal-exit-code-documentation",
+        "reason": "Parent explicitly accepted named refuted proposal from claims-096 after inspecting it. The changed documentation correctly describes the adapter: signal termination has no integer exit code. Propose source refutation of this wording defect only; no independent audit of terminal-host exit handling or runtime reproduction was performed. Checked source/results: [\"1ed482dde220452e424973faf38a5e1318986333:crates/farhelm-supervisor/src/store.rs:190-193 says None covers signal death or no surviving terminal.\",\"Same revision crates/farhelm-supervisor/src/hosts/terminal.rs:854-889 documents signal deaths and maps ChildExit::Code(code) to Some(code), ChildExit::Signal(_) to None.\",\"store.rs diff from 1ed482dde220452e424973faf38a5e1318986333 to reviewed tip touches only two unrelated comments.\"] Current coverage/results: [{\"source\":\"SPEC.md and SPEC_impl.md\",\"result\":\"SPEC.md:2664-2675 requires known exit codes or explicit unknown, never guesses. No governing specification contradicts the adapter's signal mapping, and no matching coverage item was found.\"},{\"source\":\"TODO.md:25-26\",\"result\":\"Planned bucket is empty. The phase-3 removal idea at 225-232 is in Mid term, not Planned, and does not cover these findings.\"},{\"source\":\"plans/queue\",\"result\":\"Searched named behavior and symbols. No matching unlanded corrective plan. Relevant tmux-end-old-terminals, tmux-drop-from-docs and environment-agent-operations plans are already landed per plans/REPORTS.md:28-32, despite retained queue files.\"},{\"source\":\"BUGS.md\",\"result\":\"Read fully; sole accepted ssh-output-pipe hang is unrelated.\"},{\"source\":\"review_feedback_queue/INDEX.md and matching files\",\"result\":\"Searched actual mechanisms, symbols and consequences. No exact existing item or useful same-root extension found. tab-reap-deadline-excludes-listing-request.md was read; its test polling helper is distinct from production startup cleanup.\"},{\"source\":\"TRIAGE_OUTCOMES.md\",\"result\":\"Searched actual mechanisms and consequences; no matching active decision. Archive not read.\"},{\"source\":\"review_feedback_queue/FILTER.md\",\"result\":\"Read fully. No whole-boundary filter match used.\"}] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Suspected documentation mismatch: signal deaths might be synthesized as 128+signal while the store comment says None. Source directly refutes that premise.\"; null."
+      },
+      "accepted_parent_decision": {
+        "key": "g150/c2",
+        "line": 2,
+        "disposition": "excluded",
+        "group": "terminal-host-signal-exit-code-documentation",
+        "bucket": "other",
+        "recording": "refuted",
+        "queue_target_candidate": null,
+        "needs_independent_drop_check": false,
+        "reason": "Parent explicitly accepted named refuted proposal from claims-096 after inspecting it. The changed documentation correctly describes the adapter: signal termination has no integer exit code. Propose source refutation of this wording defect only; no independent audit of terminal-host exit handling or runtime reproduction was performed. Checked source/results: [\"1ed482dde220452e424973faf38a5e1318986333:crates/farhelm-supervisor/src/store.rs:190-193 says None covers signal death or no surviving terminal.\",\"Same revision crates/farhelm-supervisor/src/hosts/terminal.rs:854-889 documents signal deaths and maps ChildExit::Code(code) to Some(code), ChildExit::Signal(_) to None.\",\"store.rs diff from 1ed482dde220452e424973faf38a5e1318986333 to reviewed tip touches only two unrelated comments.\"] Current coverage/results: [{\"source\":\"SPEC.md and SPEC_impl.md\",\"result\":\"SPEC.md:2664-2675 requires known exit codes or explicit unknown, never guesses. No governing specification contradicts the adapter's signal mapping, and no matching coverage item was found.\"},{\"source\":\"TODO.md:25-26\",\"result\":\"Planned bucket is empty. The phase-3 removal idea at 225-232 is in Mid term, not Planned, and does not cover these findings.\"},{\"source\":\"plans/queue\",\"result\":\"Searched named behavior and symbols. No matching unlanded corrective plan. Relevant tmux-end-old-terminals, tmux-drop-from-docs and environment-agent-operations plans are already landed per plans/REPORTS.md:28-32, despite retained queue files.\"},{\"source\":\"BUGS.md\",\"result\":\"Read fully; sole accepted ssh-output-pipe hang is unrelated.\"},{\"source\":\"review_feedback_queue/INDEX.md and matching files\",\"result\":\"Searched actual mechanisms, symbols and consequences. No exact existing item or useful same-root extension found. tab-reap-deadline-excludes-listing-request.md was read; its test polling helper is distinct from production startup cleanup.\"},{\"source\":\"TRIAGE_OUTCOMES.md\",\"result\":\"Searched actual mechanisms and consequences; no matching active decision. Archive not read.\"},{\"source\":\"review_feedback_queue/FILTER.md\",\"result\":\"Read fully. No whole-boundary filter match used.\"}] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Suspected documentation mismatch: signal deaths might be synthesized as 128+signal while the store comment says None. Source directly refutes that premise.\"; null."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-096",
+          "key": "g150/c2",
+          "latest_line": 2,
+          "recommendation": "refuted",
+          "bucket": "other",
+          "underlying_key": "terminal-host-signal-exit-code-documentation",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The changed documentation correctly describes the adapter: signal termination has no integer exit code.",
+          "checks": [
+            "1ed482dde220452e424973faf38a5e1318986333:crates/farhelm-supervisor/src/store.rs:190-193 says None covers signal death or no surviving terminal.",
+            "Same revision crates/farhelm-supervisor/src/hosts/terminal.rs:854-889 documents signal deaths and maps ChildExit::Code(code) to Some(code), ChildExit::Signal(_) to None.",
+            "store.rs diff from 1ed482dde220452e424973faf38a5e1318986333 to reviewed tip touches only two unrelated comments."
+          ],
+          "coverage_checked": [
+            {
+              "source": "SPEC.md and SPEC_impl.md",
+              "result": "SPEC.md:2664-2675 requires known exit codes or explicit unknown, never guesses. No governing specification contradicts the adapter's signal mapping, and no matching coverage item was found."
+            },
+            {
+              "source": "TODO.md:25-26",
+              "result": "Planned bucket is empty. The phase-3 removal idea at 225-232 is in Mid term, not Planned, and does not cover these findings."
+            },
+            {
+              "source": "plans/queue",
+              "result": "Searched named behavior and symbols. No matching unlanded corrective plan. Relevant tmux-end-old-terminals, tmux-drop-from-docs and environment-agent-operations plans are already landed per plans/REPORTS.md:28-32, despite retained queue files."
+            },
+            {
+              "source": "BUGS.md",
+              "result": "Read fully; sole accepted ssh-output-pipe hang is unrelated."
+            },
+            {
+              "source": "review_feedback_queue/INDEX.md and matching files",
+              "result": "Searched actual mechanisms, symbols and consequences. No exact existing item or useful same-root extension found. tab-reap-deadline-excludes-listing-request.md was read; its test polling helper is distinct from production startup cleanup."
+            },
+            {
+              "source": "TRIAGE_OUTCOMES.md",
+              "result": "Searched actual mechanisms and consequences; no matching active decision. Archive not read."
+            },
+            {
+              "source": "review_feedback_queue/FILTER.md",
+              "result": "Read fully. No whole-boundary filter match used."
+            }
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": null,
+          "original_stronger_consequence": "Suspected documentation mismatch: signal deaths might be synthesized as 128+signal while the store comment says None. Source directly refutes that premise.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Propose source refutation of this wording defect only; no independent audit of terminal-host exit handling or runtime reproduction was performed."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "terminal-host-signal-exit-code-documentation",
+        "destination": null
+      }
+    },
+    {
+      "key": "g150/c3",
+      "owner": "g150",
+      "id": "c3",
+      "domain": "supervisor-upgrade-state",
+      "purpose": "supervisor-upgrade-state: crates/farhelm-supervisor/src/store.rs; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 5,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c3",
+            "state": "open",
+            "summary": "Pre-host hook/provenance comments match the launch preparation boundary",
+            "location": "crates/farhelm-supervisor/src/store.rs:1443",
+            "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. TLDR: Considered whether the rewritten storage documentation promises hook/provenance recording before a terminal-host start while the new host path can actually start first, allowing an early conversation report to outrun its metadata. Source refutes that ordering mismatch. Details: Assigned store.rs:1443 and :1484 plus :5610-5623 replace pre-tmux wording with pre-host wording. service/core/host_launch.rs:451-473 awaits prepare_launch and returns on its failure before start_host at :537. prepare_launch in core.rs:14570-14585 awaits launch provenance and the hook-policy store call before returning PreparedLaunch at :14591-14600. record_launch_provenance at core.rs:7496-7503 awaits OMP recording, and core/vendor/omp.rs:44-56 awaits the provenance store call. Consequently the launch boundary described in these changed comments is real: the host start cannot precede completion of those attempted writes. Recording is best effort: a database failure logs and permits the launch without capture/diagnostics (core.rs:14554-14588 and vendor/omp.rs:46-56); the comments establish ordering, not guaranteed successful persistence despite a failed database call. Suggested bucket: other if a documentation mismatch were present; no incorrect production behavior or lost conversation established. Confidence: confirmed source/caller analysis only, no execution. proposed_drop: concrete caller ordering refutes the suspected new startup-report race or misleading ordering promise in this patch. could_be_highest: false; this considered metadata/capture timing concern has no demonstrated security or loss-of-work route. possible_cover: none; supplied neighbour records were read solely for interface context and novelty, with no matching ordering issue found there. Caveats: this check concerns the assigned comment replacements, not an independent audit of OMP admission or terminal-host spawning. No parent drop accepted."
+          }
+        }
+      ],
+      "latest": {
+        "line": 5,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c3",
+          "state": "open",
+          "summary": "Pre-host hook/provenance comments match the launch preparation boundary",
+          "location": "crates/farhelm-supervisor/src/store.rs:1443",
+          "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. TLDR: Considered whether the rewritten storage documentation promises hook/provenance recording before a terminal-host start while the new host path can actually start first, allowing an early conversation report to outrun its metadata. Source refutes that ordering mismatch. Details: Assigned store.rs:1443 and :1484 plus :5610-5623 replace pre-tmux wording with pre-host wording. service/core/host_launch.rs:451-473 awaits prepare_launch and returns on its failure before start_host at :537. prepare_launch in core.rs:14570-14585 awaits launch provenance and the hook-policy store call before returning PreparedLaunch at :14591-14600. record_launch_provenance at core.rs:7496-7503 awaits OMP recording, and core/vendor/omp.rs:44-56 awaits the provenance store call. Consequently the launch boundary described in these changed comments is real: the host start cannot precede completion of those attempted writes. Recording is best effort: a database failure logs and permits the launch without capture/diagnostics (core.rs:14554-14588 and vendor/omp.rs:46-56); the comments establish ordering, not guaranteed successful persistence despite a failed database call. Suggested bucket: other if a documentation mismatch were present; no incorrect production behavior or lost conversation established. Confidence: confirmed source/caller analysis only, no execution. proposed_drop: concrete caller ordering refutes the suspected new startup-report race or misleading ordering promise in this patch. could_be_highest: false; this considered metadata/capture timing concern has no demonstrated security or loss-of-work route. possible_cover: none; supplied neighbour records were read solely for interface context and novelty, with no matching ordering issue found there. Caveats: this check concerns the assigned comment replacements, not an independent audit of OMP admission or terminal-host spawning. No parent drop accepted."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g150/findings.jsonl",
+        "id": "c3",
+        "line": 5,
+        "disposition": "under-investigation",
+        "group": "g150-c3",
+        "reason": "Record durably acknowledged; parent source/contract validation, cross-group synthesis, coverage/filter matching and any independent drop check remain pending. This preserves the claim and uncertainty without accepting, dropping or lowering it."
+      },
+      "accepted_parent_decision": null,
+      "returned_claim_checks": [
+        {
+          "batch": "claims-096",
+          "key": "g150/c3",
+          "latest_line": 5,
+          "recommendation": "refuted",
+          "bucket": "other",
+          "underlying_key": "pre-host-launch-provenance-and-hook-write-ordering",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The actual host launch awaits preparation, including provenance and hook-policy write attempts, before starting the host. The suspected ordering race is not present.",
+          "checks": [
+            "1ed482dde220452e424973faf38a5e1318986333:crates/farhelm-supervisor/src/service/core/host_launch.rs:451-473 awaits prepare_launch and propagates failure; start_host appears later at 537.",
+            "Same revision service/core.rs:14548-14600 awaits record_launch_provenance and record_launch_hooked before returning PreparedLaunch; vendor/omp.rs:44-56 awaits the provenance store write.",
+            "Write failures remain best effort and log; the ordering does not guarantee successful durable recording under a failed database call. The changed store comments at 1443,1484,5610-5623 concern that ordering."
+          ],
+          "coverage_checked": [
+            {
+              "source": "SPEC.md and SPEC_impl.md",
+              "result": "SPEC_impl.md:4456-4465 explicitly places OMP provenance pre-spawn after spec publication and before any terminal-host child. No specification accepts a normal-path reverse ordering, and source does not have it. No matching queue item found."
+            },
+            {
+              "source": "TODO.md:25-26",
+              "result": "Planned bucket is empty. The phase-3 removal idea at 225-232 is in Mid term, not Planned, and does not cover these findings."
+            },
+            {
+              "source": "plans/queue",
+              "result": "Searched named behavior and symbols. No matching unlanded corrective plan. Relevant tmux-end-old-terminals, tmux-drop-from-docs and environment-agent-operations plans are already landed per plans/REPORTS.md:28-32, despite retained queue files."
+            },
+            {
+              "source": "BUGS.md",
+              "result": "Read fully; sole accepted ssh-output-pipe hang is unrelated."
+            },
+            {
+              "source": "review_feedback_queue/INDEX.md and matching files",
+              "result": "Searched actual mechanisms, symbols and consequences. No exact existing item or useful same-root extension found. tab-reap-deadline-excludes-listing-request.md was read; its test polling helper is distinct from production startup cleanup."
+            },
+            {
+              "source": "TRIAGE_OUTCOMES.md",
+              "result": "Searched actual mechanisms and consequences; no matching active decision. Archive not read."
+            },
+            {
+              "source": "review_feedback_queue/FILTER.md",
+              "result": "Read fully. No whole-boundary filter match used."
+            }
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": "No host-start-before-write-attempt route or lost conversation was demonstrated. Best-effort write failure is a separate, expressly documented limitation.",
+          "original_stronger_consequence": "An early conversation report might outrun its launch metadata, potentially losing capture. The alleged ordering premise is source-refuted; no runtime loss was observed.",
+          "needs_independent_drop_check": true,
+          "proposed_basis": "Propose source refutation of the assigned comment-ordering concern. Because its initial report/capture concern can touch user conversation work, include this refutation in the parent's independent drop register rather than accepting a silent consequence lowering."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": true,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "pre-host-launch-provenance-and-hook-write-ordering",
+        "destination": null
+      }
+    },
+    {
+      "key": "g150/l1",
+      "owner": "g150",
+      "id": "l1",
+      "domain": "supervisor-upgrade-state",
+      "purpose": "supervisor-upgrade-state: crates/farhelm-supervisor/src/store.rs; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 6,
+          "event": {
+            "version": 1,
+            "kind": "lead",
+            "id": "l1",
+            "state": "open",
+            "summary": "Outcome-backfill comment may promise a live probe that legacy rows no longer receive",
+            "location": "crates/farhelm-supervisor/src/store.rs:1833",
+            "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. TLDR: A rewritten migration comment may incorrectly tell future maintainers that outcome backfill is reconciled against a live terminal, although this release intentionally never looks up old tmux terminals. Source basis: assigned hunk at store.rs:1833-1834 changes the reason for the launching default to say the first reload reconciles each row against its live terminal anyway. Pinned core.rs:6675-6679 maps old Tmux-kind rows to no terminal. Missing premise to check immediately: identify the exact schema step and its rows, establish whether all rows receiving that backfill necessarily become Tmux through the later kind migration, and compare the entire pinned range for introduction/repair before attributing a documentation discrepancy. This is a concrete source-checkable documentation lead, not an established runtime defect. Suspected consequence: misleading migration invariant and rationale for maintainers. Suggested bucket: other. could_be_highest: false; no security or user-work-loss route claimed. Confidence: lead pending bounded migration/caller/history checks, no execution. proposed_drop: false pending those checks. possible_cover: no matching issue in the supplied interface records. No prohibited coverage sources searched; no runtime reproduction."
+          }
+        },
+        {
+          "line": 7,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "l1",
+            "state": "open",
+            "summary": "Outcome-backfill comment promises live reconciliation that legacy rows no longer receive",
+            "location": "crates/farhelm-supervisor/src/store.rs:1833",
+            "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. TLDR: The migration explanation tells maintainers that old sessions get checked against their live terminals, but this release deliberately skips that check and classifies the old rows through terminal retirement. This is inaccurate migration documentation, with no demonstrated runtime defect. Details: The assigned rewrite at store.rs:1832-1834 says: 'the very first reload after this migration reconciles each row against its live terminal anyway.' This is the version-1 outcome backfill (1824-1853), where every existing row gets outcome_state=launching. The same ordered migration ladder later adds terminal_kind with DEFAULT tmux at :2493-2508, so those rows are old-kind rows, not host rows eligible for live adoption. Current reload at service/core.rs:6675-6679 unconditionally maps Tmux to None and explicitly never looks up its address; :6805-6822 sends no-sentinel live-outcome old rows through Transition::TerminalEnded and continues before the ordinary terminal-evidence reconciliation. Thus the asserted live-terminal reconciliation is not the reason those legacy outcomes can be safely defaulted in this release. SPEC_impl.md:2903-2909 accurately says the reload takes every old-kind row as having no terminal, without looking its recorded pane id up, and converts still-live outcomes unless the sentinel establishes Error. Production behavior satisfies that intended retirement contract; that does not make this distinct explanatory promise accurate. Fix direction: retain the conservative historical launching default while explaining that current reload applies old-terminal retirement, rather than claiming a live probe is still performed. Range check: the base revision 6e423e30068b62c6cfa276c6d720ee35bb70387a:store.rs:1795-1797 had the historical live-tmux-probe explanation. The assigned commit expressly rewrites that line to the current live-terminal claim. The complete store.rs history within the pinned range was inspected, and the full diff from the reviewed revision to tip 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db changes only two unrelated comments, so this statement is not later repaired. The earlier in-range retirement commit dbfc69751215dbf15e1d31d5bed73c3754c4ebc4 already supplies the runtime change; direct attribution checks follow before delivery. Suggested bucket: other (internal documentation correctness). Confidence: confirmed source/contract mismatch, no execution. proposed_drop: false; retirement acceptance describes intended behavior, not acceptance of a misleading migration explanation. could_be_highest: false; no security or user-work-loss route asserted from this comment. possible_cover: no matching record in supplied neighbour findings; prohibited coverage sources not searched. Caveats: the schema/backfill code itself is unchanged by the assigned patch, and no change to the migration default or retirement policy is requested. This revision closes l1's migration-kind premise and retains the original consequence of a misleading migration invariant/rationale."
+          }
+        },
+        {
+          "line": 8,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "l1",
+            "state": "open",
+            "summary": "Outcome-backfill comment promises live reconciliation that legacy rows no longer receive",
+            "location": "crates/farhelm-supervisor/src/store.rs:1833",
+            "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. TLDR: The migration explanation tells maintainers that old sessions get checked against their live terminals, but this release deliberately skips that check and classifies the old rows through terminal retirement. This is inaccurate migration documentation, with no demonstrated runtime defect. Details: The assigned rewrite at store.rs:1832-1834 says: 'the very first reload after this migration reconciles each row against its live terminal anyway.' This is the version-1 outcome backfill (1824-1853), where every existing row gets outcome_state=launching. The same ordered migration ladder later adds terminal_kind with DEFAULT tmux at :2493-2508, so those rows are old-kind rows, not host rows eligible for live adoption. Current reload at service/core.rs:6675-6679 unconditionally maps Tmux to None and explicitly never looks up its address; :6805-6822 sends no-sentinel live-outcome old rows through Transition::TerminalEnded and continues before the ordinary terminal-evidence reconciliation. Thus the asserted live-terminal reconciliation is not the reason those legacy outcomes can be safely defaulted in this release. SPEC_impl.md:2903-2909 accurately says the reload takes every old-kind row as having no terminal, without looking its recorded pane id up, and converts still-live outcomes unless the sentinel establishes Error. Production behavior satisfies that intended retirement contract; that does not make this distinct explanatory promise accurate. Fix direction: retain the conservative historical launching default while explaining that current reload applies old-terminal retirement, rather than claiming a live probe is still performed. Range check: the base revision 6e423e30068b62c6cfa276c6d720ee35bb70387a:store.rs:1795-1797 had the historical live-tmux-probe explanation. The assigned commit expressly rewrites that line to the current live-terminal claim. The complete store.rs history within the pinned range was inspected, and the full diff from the reviewed revision to tip 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db changes only two unrelated comments, so this statement is not later repaired. The earlier in-range retirement commit dbfc69751215dbf15e1d31d5bed73c3754c4ebc4 already supplies the runtime change; direct attribution checks follow before delivery. Suggested bucket: other (internal documentation correctness). Confidence: confirmed source/contract mismatch, no execution. proposed_drop: false; retirement acceptance describes intended behavior, not acceptance of a misleading migration explanation. could_be_highest: false; no security or user-work-loss route asserted from this comment. possible_cover: no matching record in supplied neighbour findings; prohibited coverage sources not searched. Caveats: the schema/backfill code itself is unchanged by the assigned patch, and no change to the migration default or retirement policy is requested. This revision closes l1's migration-kind premise and retains the original consequence of a misleading migration invariant/rationale. Attribution checks completed: at exclusive base 6e423e30068b62c6cfa276c6d720ee35bb70387a, core.rs:7182-7225 really resolves Tmux rows through agent_pane_from_states or pane_evidence from the live pane snapshot, matching the old comment. The dbfc69751215dbf15e1d31d5bed73c3754c4ebc4 patch directly deletes those lookup branches and adds TerminalKind::Tmux => None; its source :6433-6438 ends the old server and disables the driver before reload and :6965-6969 skips old lookup. Therefore the explanatory mismatch arises inside the reviewed range with retirement, then the assigned 1ed482dd hunk rewrites the same rationale without correcting it. It is not an excluded pre-range defect and is not newly caused solely by the 1ed482dd runtime deletion. Exact specification coordinates corrected/confirmed: SPEC_impl.md:2904-2908 contains the old-kind no-lookup and conversion rule. All readily checkable premises for this documentation finding are now settled; no open lead remains. The complete post-reviewed-commit store diff confirms it survives the pinned tip."
+          }
+        }
+      ],
+      "latest": {
+        "line": 8,
+        "event": {
+          "version": 1,
+          "kind": "finding",
+          "id": "l1",
+          "state": "open",
+          "summary": "Outcome-backfill comment promises live reconciliation that legacy rows no longer receive",
+          "location": "crates/farhelm-supervisor/src/store.rs:1833",
+          "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. TLDR: The migration explanation tells maintainers that old sessions get checked against their live terminals, but this release deliberately skips that check and classifies the old rows through terminal retirement. This is inaccurate migration documentation, with no demonstrated runtime defect. Details: The assigned rewrite at store.rs:1832-1834 says: 'the very first reload after this migration reconciles each row against its live terminal anyway.' This is the version-1 outcome backfill (1824-1853), where every existing row gets outcome_state=launching. The same ordered migration ladder later adds terminal_kind with DEFAULT tmux at :2493-2508, so those rows are old-kind rows, not host rows eligible for live adoption. Current reload at service/core.rs:6675-6679 unconditionally maps Tmux to None and explicitly never looks up its address; :6805-6822 sends no-sentinel live-outcome old rows through Transition::TerminalEnded and continues before the ordinary terminal-evidence reconciliation. Thus the asserted live-terminal reconciliation is not the reason those legacy outcomes can be safely defaulted in this release. SPEC_impl.md:2903-2909 accurately says the reload takes every old-kind row as having no terminal, without looking its recorded pane id up, and converts still-live outcomes unless the sentinel establishes Error. Production behavior satisfies that intended retirement contract; that does not make this distinct explanatory promise accurate. Fix direction: retain the conservative historical launching default while explaining that current reload applies old-terminal retirement, rather than claiming a live probe is still performed. Range check: the base revision 6e423e30068b62c6cfa276c6d720ee35bb70387a:store.rs:1795-1797 had the historical live-tmux-probe explanation. The assigned commit expressly rewrites that line to the current live-terminal claim. The complete store.rs history within the pinned range was inspected, and the full diff from the reviewed revision to tip 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db changes only two unrelated comments, so this statement is not later repaired. The earlier in-range retirement commit dbfc69751215dbf15e1d31d5bed73c3754c4ebc4 already supplies the runtime change; direct attribution checks follow before delivery. Suggested bucket: other (internal documentation correctness). Confidence: confirmed source/contract mismatch, no execution. proposed_drop: false; retirement acceptance describes intended behavior, not acceptance of a misleading migration explanation. could_be_highest: false; no security or user-work-loss route asserted from this comment. possible_cover: no matching record in supplied neighbour findings; prohibited coverage sources not searched. Caveats: the schema/backfill code itself is unchanged by the assigned patch, and no change to the migration default or retirement policy is requested. This revision closes l1's migration-kind premise and retains the original consequence of a misleading migration invariant/rationale. Attribution checks completed: at exclusive base 6e423e30068b62c6cfa276c6d720ee35bb70387a, core.rs:7182-7225 really resolves Tmux rows through agent_pane_from_states or pane_evidence from the live pane snapshot, matching the old comment. The dbfc69751215dbf15e1d31d5bed73c3754c4ebc4 patch directly deletes those lookup branches and adds TerminalKind::Tmux => None; its source :6433-6438 ends the old server and disables the driver before reload and :6965-6969 skips old lookup. Therefore the explanatory mismatch arises inside the reviewed range with retirement, then the assigned 1ed482dd hunk rewrites the same rationale without correcting it. It is not an excluded pre-range defect and is not newly caused solely by the 1ed482dd runtime deletion. Exact specification coordinates corrected/confirmed: SPEC_impl.md:2904-2908 contains the old-kind no-lookup and conversion rule. All readily checkable premises for this documentation finding are now settled; no open lead remains. The complete post-reviewed-commit store diff confirms it survives the pinned tip."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g150/findings.jsonl",
+        "id": "l1",
+        "line": 8,
+        "disposition": "verified",
+        "group": "outcome-backfill-comment-falsely-promises-live-probe-after-legacy-retirement",
+        "reason": "Parent explicitly accepted named retain-verified proposal from claims-096 after inspecting it. The migration rationale promises live-terminal reconciliation for rows that the current reload deliberately never probes. Correct retirement behavior does not make that source comment accurate. Retain as other source-documentation correctness. Explain conservative historical backfill plus current terminal retirement; do not change the default or retirement behavior. Checked source/results: [\"1ed482dde220452e424973faf38a5e1318986333:crates/farhelm-supervisor/src/store.rs:1824-1853 and tip same lines backfill all v1 outcomes to launching and claim the first reload reconciles against each live terminal.\",\"00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db:store.rs:2493-2508 gives all pre-32 rows terminal_kind DEFAULT tmux, so this backfill's rows are legacy-kind rows.\",\"1ed482dde220452e424973faf38a5e1318986333:service/core.rs:6675-6679 maps Tmux to None without lookup; 6805-6822 applies TerminalEnded and continues before host reconciliation.\",\"Exclusive base 6e423e30068b62c6cfa276c6d720ee35bb70387a:store.rs:1795-1797 described live tmux probes and service/core.rs:7182-7225 actually performed them. In-range retirement dbfc69751215dbf15e1d31d5bed73c3754c4ebc4 removed those lookups; the assigned 1ed482dd rewrite preserves the misleading claim. Its later tip diff changes only two unrelated comments.\"] Current coverage/results: [{\"source\":\"SPEC.md and SPEC_impl.md\",\"result\":\"SPEC_impl.md:2798-2804 accurately specifies legacy no-lookup conversion; SPEC.md:2998-3011 specifies retirement. Neither accepts false migration rationale. tmux-drop-from-docs plan's broad comment sweep is already landed per plans/REPORTS.md:32, so it is not unlanded coverage.\"},{\"source\":\"TODO.md:25-26\",\"result\":\"Planned bucket is empty. The phase-3 removal idea at 225-232 is in Mid term, not Planned, and does not cover these findings.\"},{\"source\":\"plans/queue\",\"result\":\"Searched named behavior and symbols. No matching unlanded corrective plan. Relevant tmux-end-old-terminals, tmux-drop-from-docs and environment-agent-operations plans are already landed per plans/REPORTS.md:28-32, despite retained queue files.\"},{\"source\":\"BUGS.md\",\"result\":\"Read fully; sole accepted ssh-output-pipe hang is unrelated.\"},{\"source\":\"review_feedback_queue/INDEX.md and matching files\",\"result\":\"Searched actual mechanisms, symbols and consequences. No exact existing item or useful same-root extension found. tab-reap-deadline-excludes-listing-request.md was read; its test polling helper is distinct from production startup cleanup.\"},{\"source\":\"TRIAGE_OUTCOMES.md\",\"result\":\"Searched actual mechanisms and consequences; no matching active decision. Archive not read.\"},{\"source\":\"review_feedback_queue/FILTER.md\",\"result\":\"Read fully. No whole-boundary filter match used.\"}] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Misleading migration invariant/rationale for maintainers; no runtime defect, migration-default change, or security/data-loss route was claimed.\"; null."
+      },
+      "accepted_parent_decision": {
+        "key": "g150/l1",
+        "line": 8,
+        "disposition": "verified",
+        "group": "outcome-backfill-comment-falsely-promises-live-probe-after-legacy-retirement",
+        "bucket": "other",
+        "recording": "retain-verified",
+        "queue_target_candidate": null,
+        "needs_independent_drop_check": false,
+        "reason": "Parent explicitly accepted named retain-verified proposal from claims-096 after inspecting it. The migration rationale promises live-terminal reconciliation for rows that the current reload deliberately never probes. Correct retirement behavior does not make that source comment accurate. Retain as other source-documentation correctness. Explain conservative historical backfill plus current terminal retirement; do not change the default or retirement behavior. Checked source/results: [\"1ed482dde220452e424973faf38a5e1318986333:crates/farhelm-supervisor/src/store.rs:1824-1853 and tip same lines backfill all v1 outcomes to launching and claim the first reload reconciles against each live terminal.\",\"00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db:store.rs:2493-2508 gives all pre-32 rows terminal_kind DEFAULT tmux, so this backfill's rows are legacy-kind rows.\",\"1ed482dde220452e424973faf38a5e1318986333:service/core.rs:6675-6679 maps Tmux to None without lookup; 6805-6822 applies TerminalEnded and continues before host reconciliation.\",\"Exclusive base 6e423e30068b62c6cfa276c6d720ee35bb70387a:store.rs:1795-1797 described live tmux probes and service/core.rs:7182-7225 actually performed them. In-range retirement dbfc69751215dbf15e1d31d5bed73c3754c4ebc4 removed those lookups; the assigned 1ed482dd rewrite preserves the misleading claim. Its later tip diff changes only two unrelated comments.\"] Current coverage/results: [{\"source\":\"SPEC.md and SPEC_impl.md\",\"result\":\"SPEC_impl.md:2798-2804 accurately specifies legacy no-lookup conversion; SPEC.md:2998-3011 specifies retirement. Neither accepts false migration rationale. tmux-drop-from-docs plan's broad comment sweep is already landed per plans/REPORTS.md:32, so it is not unlanded coverage.\"},{\"source\":\"TODO.md:25-26\",\"result\":\"Planned bucket is empty. The phase-3 removal idea at 225-232 is in Mid term, not Planned, and does not cover these findings.\"},{\"source\":\"plans/queue\",\"result\":\"Searched named behavior and symbols. No matching unlanded corrective plan. Relevant tmux-end-old-terminals, tmux-drop-from-docs and environment-agent-operations plans are already landed per plans/REPORTS.md:28-32, despite retained queue files.\"},{\"source\":\"BUGS.md\",\"result\":\"Read fully; sole accepted ssh-output-pipe hang is unrelated.\"},{\"source\":\"review_feedback_queue/INDEX.md and matching files\",\"result\":\"Searched actual mechanisms, symbols and consequences. No exact existing item or useful same-root extension found. tab-reap-deadline-excludes-listing-request.md was read; its test polling helper is distinct from production startup cleanup.\"},{\"source\":\"TRIAGE_OUTCOMES.md\",\"result\":\"Searched actual mechanisms and consequences; no matching active decision. Archive not read.\"},{\"source\":\"review_feedback_queue/FILTER.md\",\"result\":\"Read fully. No whole-boundary filter match used.\"}] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Misleading migration invariant/rationale for maintainers; no runtime defect, migration-default change, or security/data-loss route was claimed.\"; null."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-096",
+          "key": "g150/l1",
+          "latest_line": 8,
+          "recommendation": "retain-verified",
+          "bucket": "other",
+          "underlying_key": "outcome-backfill-comment-falsely-promises-live-probe-after-legacy-retirement",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The migration rationale promises live-terminal reconciliation for rows that the current reload deliberately never probes. Correct retirement behavior does not make that source comment accurate.",
+          "checks": [
+            "1ed482dde220452e424973faf38a5e1318986333:crates/farhelm-supervisor/src/store.rs:1824-1853 and tip same lines backfill all v1 outcomes to launching and claim the first reload reconciles against each live terminal.",
+            "00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db:store.rs:2493-2508 gives all pre-32 rows terminal_kind DEFAULT tmux, so this backfill's rows are legacy-kind rows.",
+            "1ed482dde220452e424973faf38a5e1318986333:service/core.rs:6675-6679 maps Tmux to None without lookup; 6805-6822 applies TerminalEnded and continues before host reconciliation.",
+            "Exclusive base 6e423e30068b62c6cfa276c6d720ee35bb70387a:store.rs:1795-1797 described live tmux probes and service/core.rs:7182-7225 actually performed them. In-range retirement dbfc69751215dbf15e1d31d5bed73c3754c4ebc4 removed those lookups; the assigned 1ed482dd rewrite preserves the misleading claim. Its later tip diff changes only two unrelated comments."
+          ],
+          "coverage_checked": [
+            {
+              "source": "SPEC.md and SPEC_impl.md",
+              "result": "SPEC_impl.md:2798-2804 accurately specifies legacy no-lookup conversion; SPEC.md:2998-3011 specifies retirement. Neither accepts false migration rationale. tmux-drop-from-docs plan's broad comment sweep is already landed per plans/REPORTS.md:32, so it is not unlanded coverage."
+            },
+            {
+              "source": "TODO.md:25-26",
+              "result": "Planned bucket is empty. The phase-3 removal idea at 225-232 is in Mid term, not Planned, and does not cover these findings."
+            },
+            {
+              "source": "plans/queue",
+              "result": "Searched named behavior and symbols. No matching unlanded corrective plan. Relevant tmux-end-old-terminals, tmux-drop-from-docs and environment-agent-operations plans are already landed per plans/REPORTS.md:28-32, despite retained queue files."
+            },
+            {
+              "source": "BUGS.md",
+              "result": "Read fully; sole accepted ssh-output-pipe hang is unrelated."
+            },
+            {
+              "source": "review_feedback_queue/INDEX.md and matching files",
+              "result": "Searched actual mechanisms, symbols and consequences. No exact existing item or useful same-root extension found. tab-reap-deadline-excludes-listing-request.md was read; its test polling helper is distinct from production startup cleanup."
+            },
+            {
+              "source": "TRIAGE_OUTCOMES.md",
+              "result": "Searched actual mechanisms and consequences; no matching active decision. Archive not read."
+            },
+            {
+              "source": "review_feedback_queue/FILTER.md",
+              "result": "Read fully. No whole-boundary filter match used."
+            }
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": null,
+          "original_stronger_consequence": "Misleading migration invariant/rationale for maintainers; no runtime defect, migration-default change, or security/data-loss route was claimed.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Retain as other source-documentation correctness. Explain conservative historical backfill plus current terminal retirement; do not change the default or retirement behavior."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": true,
+        "clearly_refuted_candidate": false,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Source-confirmed by an existing parent decision; not runtime reproduced",
+        "deduplication_key": "outcome-backfill-comment-falsely-promises-live-probe-after-legacy-retirement",
+        "destination": "trailing-outcome-backfill-comment-falsely-promises-live-probe-after-legacy-retirement.md"
+      }
+    },
+    {
+      "key": "g150/l2",
+      "owner": "g150",
+      "id": "l2",
+      "domain": "supervisor-upgrade-state",
+      "purpose": "supervisor-upgrade-state: crates/farhelm-supervisor/src/store.rs; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 9,
+          "event": {
+            "version": 1,
+            "kind": "lead",
+            "id": "l2",
+            "state": "open",
+            "summary": "Check corrupt-row Delete promise after raw existence helper loses its caller",
+            "location": "crates/farhelm-supervisor/src/store.rs:4797",
+            "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. TLDR: The changed has_session_row explanation promises that Delete can end terminal hosts even when ordinary session decoding refuses the row. Need verify this remains true after the host-only refactor. Source basis: store.rs:4790-4815 deliberately projects existence without decoding; its assigned rewritten comment at :4797-4799 ties this to Delete of malformed rows. A pinned grep across supervisor service and store finds no has_session_row caller. That is not itself a defect: another raw teardown projection may supersede it. Next readily checkable premise is Delete's row discovery and host collection path for a session absent from the in-memory map because its metadata cannot decode. Suspected consequence if the promise fails: a malformed session could become undeletable and retain its terminal hosts; no such route is established yet. Suggested bucket pending checks: other for stale helper rationale, high only for a demonstrated material undeletable-session failure. could_be_highest: false; no security or user-work-loss route established by this lead. Confidence: source lead, not an execution observation. proposed_drop: false pending caller/projection checks. possible_cover: no matching supplied interface record; adjacent host cleanup findings concern different end-confirmation or runtime-record lifetimes. No prohibited coverage search, test or reproduction."
+          }
+        },
+        {
+          "line": 10,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "l2",
+            "state": "open",
+            "summary": "Host-only Delete does not need the retired raw existence probe",
+            "location": "crates/farhelm-supervisor/src/store.rs:4797",
+            "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. TLDR: Considered whether losing the raw-row existence helper caller makes a malformed session undeletable or strands its terminal hosts. Source refutes that as a new consequence of the assigned documentation/refactor. Details: store.rs:4790-4815 still supplies a raw EXISTS projection and its changed comment says teardown must not depend on decoding the session's outcome/template. The helper has no current service caller because both former uses were tmux-only: parent teardown.rs:215-228 derived a tmux session name for a terminal-less entry, and :887-905 conditionally checked/ended that tmux session. Current prepare_teardown at teardown.rs:320-369 gets the pinned child from the held entry and discovers other hosts from session id plus launch records; :402-478 takes scopes and launch information from the already-held entry, without decoding the session row. SessionHosts collection at session_hosts.rs:225-241 accepts the session id and optional runtime, not a StoredSession. Therefore deleting an already-loaded session whose outcome/template was later damaged does not newly require the rejected full-row decoder. The missing-map variation in the original lead is not an in-range regression: current handler :1241-1252 requires the in-memory entry, but the exclusive range base 6e423e30068b62c6cfa276c6d720ee35bb70387a:handlers.rs:1301-1312 already imposed the identical lookup/NotFound gate. Current load_all at store.rs:6376-6391 also refuses corrupt decoded rows rather than publishing them, so this check does not assert arbitrary damaged databases are recoverable through the normal UI. The comment establishes why a teardown should not decode unrelated metadata; it does not state that this unused helper remains Delete's current discovery mechanism or promise recovery without an entry. Suggested bucket: other for a potential stale helper rationale; no actual documentation contract contradiction or material undeletable-session regression established. Confidence: confirmed source and whole-range caller comparison, no execution. proposed_drop: the raw existence calls are retired tmux discovery, while current host teardown already avoids full-row decode; a Delete lacking a map entry predates the entire pinned range. could_be_highest: false; the original possible undeletable-session/retained-host consequence had no established security or user-work-loss route and remains source-refuted as a new regression. possible_cover: none; supplied interface records concern different cleanup lifetimes, not this projection check. Caveats: no blanket claim about all corrupt database recovery or adjacent host end-confirmation correctness. Revision reason: closes l2 after checking current host collection, both removed callers, and the range-base request gate. No parent drop accepted; no runtime tests or reproduction."
+          }
+        }
+      ],
+      "latest": {
+        "line": 10,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "l2",
+          "state": "open",
+          "summary": "Host-only Delete does not need the retired raw existence probe",
+          "location": "crates/farhelm-supervisor/src/store.rs:4797",
+          "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. TLDR: Considered whether losing the raw-row existence helper caller makes a malformed session undeletable or strands its terminal hosts. Source refutes that as a new consequence of the assigned documentation/refactor. Details: store.rs:4790-4815 still supplies a raw EXISTS projection and its changed comment says teardown must not depend on decoding the session's outcome/template. The helper has no current service caller because both former uses were tmux-only: parent teardown.rs:215-228 derived a tmux session name for a terminal-less entry, and :887-905 conditionally checked/ended that tmux session. Current prepare_teardown at teardown.rs:320-369 gets the pinned child from the held entry and discovers other hosts from session id plus launch records; :402-478 takes scopes and launch information from the already-held entry, without decoding the session row. SessionHosts collection at session_hosts.rs:225-241 accepts the session id and optional runtime, not a StoredSession. Therefore deleting an already-loaded session whose outcome/template was later damaged does not newly require the rejected full-row decoder. The missing-map variation in the original lead is not an in-range regression: current handler :1241-1252 requires the in-memory entry, but the exclusive range base 6e423e30068b62c6cfa276c6d720ee35bb70387a:handlers.rs:1301-1312 already imposed the identical lookup/NotFound gate. Current load_all at store.rs:6376-6391 also refuses corrupt decoded rows rather than publishing them, so this check does not assert arbitrary damaged databases are recoverable through the normal UI. The comment establishes why a teardown should not decode unrelated metadata; it does not state that this unused helper remains Delete's current discovery mechanism or promise recovery without an entry. Suggested bucket: other for a potential stale helper rationale; no actual documentation contract contradiction or material undeletable-session regression established. Confidence: confirmed source and whole-range caller comparison, no execution. proposed_drop: the raw existence calls are retired tmux discovery, while current host teardown already avoids full-row decode; a Delete lacking a map entry predates the entire pinned range. could_be_highest: false; the original possible undeletable-session/retained-host consequence had no established security or user-work-loss route and remains source-refuted as a new regression. possible_cover: none; supplied interface records concern different cleanup lifetimes, not this projection check. Caveats: no blanket claim about all corrupt database recovery or adjacent host end-confirmation correctness. Revision reason: closes l2 after checking current host collection, both removed callers, and the range-base request gate. No parent drop accepted; no runtime tests or reproduction."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g150/findings.jsonl",
+        "id": "l2",
+        "line": 10,
+        "disposition": "under-investigation",
+        "group": "g150-l2",
+        "reason": "Record durably acknowledged; parent source/contract validation, cross-group synthesis, coverage/filter matching and any independent drop check remain pending. This preserves the claim and uncertainty without accepting, dropping or lowering it."
+      },
+      "accepted_parent_decision": null,
+      "returned_claim_checks": [
+        {
+          "batch": "claims-096",
+          "key": "g150/l2",
+          "latest_line": 10,
+          "recommendation": "refuted",
+          "bucket": "other",
+          "underlying_key": "retired-raw-session-existence-helper-not-required-by-host-delete",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "Removing tmux discovery's raw existence calls does not establish a new malformed-row Delete failure. Host teardown uses the already-held entry and session identity without re-decoding the database row; absence from the in-memory map already blocked Delete before the range.",
+          "checks": [
+            "1ed482dde220452e424973faf38a5e1318986333:store.rs:4790-4815 retains raw EXISTS; git grep in that revision finds only its definition.",
+            "Same revision service/teardown.rs:320-369 obtains the held child's root and session_hosts(session_id, held runtime, tabs, budget); service/session_hosts.rs:225-241 accepts identity/runtime information without decoding a StoredSession.",
+            "Same revision service/handlers.rs:1241-1252 requires an in-memory entry. Exclusive base 6e423e30068b62c6cfa276c6d720ee35bb70387a:service/handlers.rs:1301-1312 has the same lookup/NotFound gate.",
+            "Same revision store.rs:6376-6391 propagates row decode failure in load_all, so this check establishes no general corrupt-database recovery guarantee. The old helper comment's broad recovery rationale predates this patch; its changed wording switches tmux discovery to terminal hosts."
+          ],
+          "coverage_checked": [
+            {
+              "source": "SPEC.md and SPEC_impl.md",
+              "result": "SPEC_impl.md:2357-2402 addresses safe host teardown and refusal for unreadable host records, rather than a new arbitrary corrupted-session recovery promise. No matching current queue item, Planned task, active outcome or unlanded corrective plan was found."
+            },
+            {
+              "source": "TODO.md:25-26",
+              "result": "Planned bucket is empty. The phase-3 removal idea at 225-232 is in Mid term, not Planned, and does not cover these findings."
+            },
+            {
+              "source": "plans/queue",
+              "result": "Searched named behavior and symbols. No matching unlanded corrective plan. Relevant tmux-end-old-terminals, tmux-drop-from-docs and environment-agent-operations plans are already landed per plans/REPORTS.md:28-32, despite retained queue files."
+            },
+            {
+              "source": "BUGS.md",
+              "result": "Read fully; sole accepted ssh-output-pipe hang is unrelated."
+            },
+            {
+              "source": "review_feedback_queue/INDEX.md and matching files",
+              "result": "Searched actual mechanisms, symbols and consequences. No exact existing item or useful same-root extension found. tab-reap-deadline-excludes-listing-request.md was read; its test polling helper is distinct from production startup cleanup."
+            },
+            {
+              "source": "TRIAGE_OUTCOMES.md",
+              "result": "Searched actual mechanisms and consequences; no matching active decision. Archive not read."
+            },
+            {
+              "source": "review_feedback_queue/FILTER.md",
+              "result": "Read fully. No whole-boundary filter match used."
+            }
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": "No in-range route was shown where deleting an already-loaded session newly decodes its damaged outcome/template. Missing-map Delete failure predates the exclusive base.",
+          "original_stronger_consequence": "A malformed session could become undeletable and retain running terminal hosts. The latest record withdraws this as a new regression, without claiming all malformed databases are recoverable.",
+          "needs_independent_drop_check": true,
+          "proposed_basis": "Propose source refutation of the new runtime regression and out-of-range attribution for the missing-map variant. Because the original concern involves retained user processes and cleanup authority, obtain the independent drop check. Do not claim the unused helper is Delete's current discovery mechanism."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": true,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "retired-raw-session-existence-helper-not-required-by-host-delete",
+        "destination": null
+      }
+    }
+  ],
+  "replies": [
+    {
+      "turn": 1,
+      "reply": "Initial review complete: all 574 assigned patch lines reviewed at the pinned revision.\n\nNo substantive findings or open leads. Two ruled-out candidates, `c1` and `c2`, are recorded in `findings.jsonl`; `progress.md` is updated. No tests, reproductions, or checkout changes."
+    },
+    {
+      "turn": 2,
+      "reply": "Revised `c1` with exact-kind isolation, Resume exclusions, and startup failure handling. No new findings. `progress.md` updated.\n\nUnresolved lead IDs: none."
+    },
+    {
+      "turn": 3,
+      "reply": "Discovery pass 1 found one new issue.\n\n- Checks: full assigned diff, launch-order callers, migration/reload contracts, range attribution, and later repairs.\n- New verified: `l1` — migration comment promises live reconciliation that legacy rows never receive. Documentation only.\n- New unverified: none.\n- New candidate: `c3`, source-refuted.\n- Open leads: none.\n\nFindings log and progress updated. No execution performed."
+    },
+    {
+      "turn": 4,
+      "reply": "Discovery pass 2 found no new reportable issue.\n\n- Checked teardown projections/callers, transition fencing, and retry-preservation test contracts.\n- `l2` resolved to a source-refuted candidate.\n- New verified IDs: none.\n- New unverified IDs: none.\n- Open leads: none.\n\nLog and progress updated. No execution performed."
+    }
+  ],
+  "progress": "g150: initialized, awaiting initial source review.\nGroup g150: supervisor-upgrade-state. Initial review, turn 1; discovery passes 0.\nState: brief and complete inventory commits field read; required recording and priority instructions read. Findings log verified present. No findings or leads yet.\nScope: assigned 574-line store.rs patch at 1ed482dde220452e424973faf38a5e1318986333 remains unread. Next: deliver evidence packets, read pinned contracts and callers, validate concrete leads through source only.\nInterface assumptions: terminal runtime representation and schema migration must preserve live sessions and refuse unsafe downgrades; verify against pinned specifications before judging.\n\nInitial review turn 1 complete; discovery-pass count 0 (initial review is separate from later discovery turns).\nAll 574 assigned patch lines delivered with evidence read packets: 1-180, 181-360, 361-520, 521-574. No unread assigned scope.\nRead pinned governing upgrade-compatibility, old-terminal notification and terminal-retirement contracts, the relevant schema and notification persistence paragraphs, runtime-state contract, and GUI answer-binding contract. Examined removal's sole former caller, replacement global resolver and startup invocation, relaunch generation/abort implementation and production caller, and changed test assertion/docstring context.\nResults: no substantive findings; two source-refuted candidates appended immediately, c1 (removed resolver superseded globally) and c2 (signal-death documentation matches host adapter). No open leads. No verified or unverified finding IDs this pass. No tests, builds, reproductions, or checkout changes.\nInterface conclusions: every owning startup invokes global old_terminal resolution even with an empty converted-session list, before session publication; old_terminal_ended has a distinct kind and remains unresolved. Production relaunch opens the generation with Host and abort restores the prior kind/address together. Host adapter maps signal deaths to no exit code. Session retirement and best-effort startup failure handling are explicitly accepted in the pinned contract, rather than promises of tmux continuity.\nTooling note: first c1 append was rejected for invalid state 'closed'; corrected to 'open' and successfully recorded. Findings counter confirms zero findings, two candidates, zero leads. No audit was attempted or certified locally; parent owns delivery audit.\nNext action: await the caller's later synthesis/discovery prompt; do not run later-turn protocol within this initial turn.\n\nSynthesis turn 2 complete; discovery-pass count remains 0. Parent reports initial delivery audited and both initial events read.\nRevised c1 twice under its original ID to retain cross-group synthesis evidence and then settle failure handling. Independently checked all nine current kind strings, the sole production global resolver caller, Resume policy/list construction, the other resolver reference (test-only), and notice/conversion/update error paths. Exact old_terminal equality cannot sweep old_terminal_ended or unrelated current kinds. Both old-terminal kinds are excluded from Resume resolution.\nFailure conclusions: old-warning resolution failure logs and can retry at the next owning startup; ended-notice insertion failure after committed conversion may leave no notice and is not automatically recreated. The pinned contract accepts the post-conversion notice window and best-effort startup failures. Reconciliation failure gives no committed conversions and therefore no ended notices, but still attempts old-warning resolution. No new source-supported defect was established in the assigned removal or comment changes.\nInterface assumptions are now source-checked, including g129/c3's reported key/lifetime conclusion. Signal-to-None conclusion c2 remains unchanged from initial source checks. No parent drop has been accepted; c1/c2 remain candidate records for parent disposition.\nNew verified finding IDs: none. New unverified finding IDs: none. Revised IDs this turn: c1. Unresolved lead IDs: none. Unread assigned scope: none. No execution or checkout changes. Next: return this turn's delta and await caller instruction.\n\nDiscovery turn 3 complete; discovery-pass count 1. Read all 592 lines of discovery-neighbours.json in bounded chunks before source search. No named pending questions were supplied. Reused c1/c2 history and did not reopen their settled notification/exit-code issues.\nNew search: reread all 574 lines of the assigned store diff in three bounded context reads; checked rewritten metadata-before-host claims against prepare_launch, launch-provenance and hook-policy callers; inspected retry takeover SQL and changed stale-generation test context. The patch changes no test oracle or test setup beyond documentation and a diagnostic string. c3 records the source-refuted metadata-ordering concern immediately; it is a candidate, not a finding.\nNew finding l1: store.rs:1833-1834 promises first-reload reconciliation against a live terminal for schema-1 outcome-backfilled rows, but those rows become Tmux in the migration ladder and current reload unconditionally skips old-terminal lookup and applies TerminalEnded. Recorded first as a lead, then a confirmed documentation finding, then revised under the same ID after range attribution checks. At the exclusive base, core.rs:7182-7225 really performs old-pane reconciliation; dbfc6975 deletes that lookup inside the range; the assigned 1ed482dd comment rewrite retains the inaccurate rationale. Full store diff from reviewed revision to pinned tip contains only two unrelated comments, so no later repair. Exact current contract checked at SPEC_impl.md:2904-2908. Suggested bucket other; no runtime defect, security or loss-of-work route claimed.\nNew verified IDs this discovery pass: l1 (source/contract verified, not execution observed). New unverified-after-investigation IDs: none. New candidate IDs: c3. Open lead IDs: none. No unread assigned scope. No tests, builds, reproductions, checkout edits or live-install actions. Parent has accepted no drops or lowerings.\nNext: return discovery delta; because this pass made a substantive new discovery, await a separate later pass from the caller rather than running it inside this turn.\n\nDiscovery turn 4 complete; discovery-pass count 2. Refreshed the entire new 730-line/237278-byte discovery-neighbours.json in bounded chunks before source search. No named pending questions were supplied. No neighbour issue was adopted or duplicated into the assigned scope, and no previous disposition was changed.\nNew checks beyond known records: inspected the rewritten raw-row existence/teardown rationale and its current callers, transition transaction/generation fence, and changed retry timestamp/activity test description and assertions. The raw helper's missing caller produced lead l2, immediately recorded, then resolved under the same ID to a source-refuted candidate. Both removed helper uses were tmux discovery/end checks. Current host teardown obtains runtime roots and launch records by the held entry/session id without decoding outcome/template; the handler's map-entry requirement already exists at the exclusive range base. This does not claim arbitrary damaged-database recovery, but refutes a new corrupt-row Delete regression caused by the assigned change.\nTransition inspection confirms current outcome plus generation are read inside the same transaction and stale observations are fenced before writing. The retry-preservation test still independently supplies differing creation/activity values and checks retained values; no test oracle/setup change is introduced by its comment rewrite. No new documentation or production discrepancy was established in these remaining assigned hunks.\nNew verified finding IDs: none. New unverified-after-investigation IDs: none. New/revised candidate ID: l2 (lead resolved). Open lead IDs: none. Anything new found: no new reportable issue; one concrete concern was investigated and source-refuted. Unread assigned scope: none. No tests, builds, reproductions, checkout edits or live-install actions. Parent has accepted no drops or lowerings. Next: return this pass's checks/result and await caller instruction.\n"
+}

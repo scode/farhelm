@@ -1,0 +1,197 @@
+{
+  "group": {
+    "id": "g187",
+    "domain": "terminal-input-copy",
+    "purpose": "terminal-input-copy: crates/farhelm-ui/js-tests/fixtures/input/keydown-actions.jsonl, crates/farhelm-ui/js-tests/grid-input-tables.js; phases complete small per-commit changes",
+    "interfaces": [
+      "g002",
+      "g079",
+      "g080",
+      "g081",
+      "g082",
+      "g083",
+      "g084",
+      "g186",
+      "g188",
+      "g189",
+      "g190",
+      "g191",
+      "g192",
+      "g193",
+      "g194",
+      "g195",
+      "g196",
+      "g197"
+    ],
+    "sources": [
+      {
+        "path": "[private-run]/prep/parts/01496-000.patch",
+        "ranges": [
+          [
+            1,
+            10
+          ]
+        ],
+        "original_path": "crates/farhelm-ui/js-tests/fixtures/input/keydown-actions.jsonl",
+        "commit": "61e632323dbc6b4a35ed27bf5b9833102ffd5a4e",
+        "notes": "patch header; patch character offsets [0,864)",
+        "lines": 10,
+        "bytes": 864,
+        "start": 0,
+        "end": 864,
+        "original": "[private-run]/prep/originals/01496.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/01498-000.patch",
+        "ranges": [
+          [
+            1,
+            51
+          ]
+        ],
+        "original_path": "crates/farhelm-ui/js-tests/grid-input-tables.js",
+        "commit": "61e632323dbc6b4a35ed27bf5b9833102ffd5a4e",
+        "notes": "patch header; patch character offsets [0,3469)",
+        "lines": 51,
+        "bytes": 3469,
+        "start": 0,
+        "end": 3469,
+        "original": "[private-run]/prep/originals/01498.patch"
+      }
+    ],
+    "lines": 61,
+    "bytes": 4333
+  },
+  "records": [
+    {
+      "key": "g187/c1",
+      "owner": "g187",
+      "id": "c1",
+      "domain": "terminal-input-copy",
+      "purpose": "terminal-input-copy: crates/farhelm-ui/js-tests/fixtures/input/keydown-actions.jsonl, crates/farhelm-ui/js-tests/grid-input-tables.js; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 1,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c1",
+            "state": "open",
+            "summary": "Generated table header changes remain synchronized",
+            "location": "crates/farhelm-ui/js-tests/grid-input-tables.js:219",
+            "detail": "Reviewed commit: 61e632323dbc6b4a35ed27bf5b9833102ffd5a4e. TLDR: Considered whether the wording changes make the checked-in keyboard contract tests fail by changing generated headers without their fixtures. Details: grid-input-tables.test.js:23-36 compares whole strings, and tests at :39-45 compare both key and keydown tables, so a stale header would break validation. Source inspection refutes this: grid-input-tables.js:219-224 matches farhelm-supervisor/tests/fixtures/grid-keys.jsonl:1-6, and grid-input-tables.js:335-341 plus its unchanged outcome legend match js-tests/fixtures/input/keydown-actions.jsonl:1-18. The assigned patch changes no generator logic or table data. Contract: SPEC_impl.md:1859-1865 identifies these tables as Farhelm's input contract. Suggested bucket: other, if established; confidence: confirmed source refutation, no execution performed. proposed_drop: source-refuted; the generator and both fixture headers agree at the reviewed revision. possible_cover: none. Could-be-highest: no; the considered consequence was a maintainer test failure, with no security or loss-of-work route. Caveat: this checks the assigned header edits and their immediate fixture interfaces, not unrelated pre-existing encoder behavior."
+          }
+        },
+        {
+          "line": 2,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c1",
+            "state": "open",
+            "summary": "Generated table header changes remain synchronized",
+            "location": "crates/farhelm-ui/js-tests/grid-input-tables.js:219",
+            "detail": "Reviewed commit: 61e632323dbc6b4a35ed27bf5b9833102ffd5a4e. TLDR: Considered whether the wording changes make the checked-in keyboard contract tests fail by changing generated headers without their fixtures. Details: grid-input-tables.test.js:23-36 compares whole strings, and tests at :39-45 compare both key and keydown tables, so a stale header would break validation. Source inspection refutes this: grid-input-tables.js:219-224 matches farhelm-supervisor/tests/fixtures/grid-keys.jsonl:1-6, and grid-input-tables.js:335-341 plus its unchanged outcome legend match js-tests/fixtures/input/keydown-actions.jsonl:1-18. Exact matching text: generator :219 and key fixture :1 both contain '# The bytes a terminal's program reads for each keydown: Farhelm's key contract, which the supervisor's'; generator :335 and keydown fixture :1 both contain '# What a terminal's page does with each keydown (grid-input.js's keydownAction): Farhelm's contract for'. The assigned patch changes no generator logic or table data. Contract: SPEC_impl.md:1859-1865 identifies these tables as Farhelm's input contract. Suggested bucket: other, if established; confidence: confirmed source refutation, no execution performed. proposed_drop: source-refuted; the exact generator and fixture header text quoted above agrees at the reviewed revision. possible_cover: none. Could-be-highest: no; the considered consequence was a maintainer test failure, with no security or loss-of-work route. Caveat: this checks the assigned header edits and their immediate fixture interfaces, not unrelated pre-existing encoder behavior. Revision reason: preserve exact cited text for the proposed drop; conclusion and original consequence unchanged."
+          }
+        },
+        {
+          "line": 3,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c1",
+            "state": "open",
+            "summary": "Generated table header changes remain synchronized",
+            "location": "crates/farhelm-ui/js-tests/grid-input-tables.js:219",
+            "detail": "Reviewed commit: 61e632323dbc6b4a35ed27bf5b9833102ffd5a4e. TLDR: Considered whether the wording changes make the checked-in keyboard contract tests fail by changing generated headers without their fixtures. Details: grid-input-tables.test.js:23-36 compares whole strings, and tests at :39-45 compare both key and keydown tables, so a stale header would break validation. Source inspection refutes this: grid-input-tables.js:219-224 matches farhelm-supervisor/tests/fixtures/grid-keys.jsonl:1-6, and grid-input-tables.js:335-341 plus its unchanged outcome legend match js-tests/fixtures/input/keydown-actions.jsonl:1-18. Exact matching text: generator :219 and key fixture :1 both contain '# The bytes a terminal's program reads for each keydown: Farhelm's key contract, which the supervisor's'; generator :335 and keydown fixture :1 both contain '# What a terminal's page does with each keydown (grid-input.js's keydownAction): Farhelm's contract for'. Synthesis additionally checked the Rust caller, crates/farhelm-supervisor/src/grid_input/tests.rs:91-144: it includes the same fixture at :104 and skips comment headers at :113 with 'for line in table.lines().filter(|line| !line.starts_with('#')) {'. Thus the changed header cannot alter Rust comparison rows or input coverage. The assigned patch changes no generator logic or table data. Contract: SPEC_impl.md:1859-1865 identifies these tables as Farhelm's input contract. Suggested bucket: other, if established; confidence: confirmed source refutation, no execution performed. proposed_drop: source-refuted; exact matching generator/fixture text above and the Rust caller's comment filter settle the considered failure route. possible_cover: none. Could-be-highest: no; the original considered consequence remains a maintainer test failure, with no security or loss-of-work route. Caveat: this checks the assigned header edits and their immediate fixture interfaces, not unrelated pre-existing encoder behavior. Revision reason: later-turn synthesis checked the second table consumer and confirmed the original disposition; no consequence was lowered."
+          }
+        }
+      ],
+      "latest": {
+        "line": 3,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c1",
+          "state": "open",
+          "summary": "Generated table header changes remain synchronized",
+          "location": "crates/farhelm-ui/js-tests/grid-input-tables.js:219",
+          "detail": "Reviewed commit: 61e632323dbc6b4a35ed27bf5b9833102ffd5a4e. TLDR: Considered whether the wording changes make the checked-in keyboard contract tests fail by changing generated headers without their fixtures. Details: grid-input-tables.test.js:23-36 compares whole strings, and tests at :39-45 compare both key and keydown tables, so a stale header would break validation. Source inspection refutes this: grid-input-tables.js:219-224 matches farhelm-supervisor/tests/fixtures/grid-keys.jsonl:1-6, and grid-input-tables.js:335-341 plus its unchanged outcome legend match js-tests/fixtures/input/keydown-actions.jsonl:1-18. Exact matching text: generator :219 and key fixture :1 both contain '# The bytes a terminal's program reads for each keydown: Farhelm's key contract, which the supervisor's'; generator :335 and keydown fixture :1 both contain '# What a terminal's page does with each keydown (grid-input.js's keydownAction): Farhelm's contract for'. Synthesis additionally checked the Rust caller, crates/farhelm-supervisor/src/grid_input/tests.rs:91-144: it includes the same fixture at :104 and skips comment headers at :113 with 'for line in table.lines().filter(|line| !line.starts_with('#')) {'. Thus the changed header cannot alter Rust comparison rows or input coverage. The assigned patch changes no generator logic or table data. Contract: SPEC_impl.md:1859-1865 identifies these tables as Farhelm's input contract. Suggested bucket: other, if established; confidence: confirmed source refutation, no execution performed. proposed_drop: source-refuted; exact matching generator/fixture text above and the Rust caller's comment filter settle the considered failure route. possible_cover: none. Could-be-highest: no; the original considered consequence remains a maintainer test failure, with no security or loss-of-work route. Caveat: this checks the assigned header edits and their immediate fixture interfaces, not unrelated pre-existing encoder behavior. Revision reason: later-turn synthesis checked the second table consumer and confirmed the original disposition; no consequence was lowered."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g187/findings.jsonl",
+        "id": "c1",
+        "line": 3,
+        "disposition": "excluded",
+        "group": "generated-key-table-header-fixture-drift",
+        "reason": "Parent explicitly accepted named refuted proposal from claims-117 after inspecting it. The header edits update generator strings and both fixed fixtures together. The Rust table consumer ignores comment headers, so the changed wording cannot alter its comparison rows. Source-refute the named header synchronization failure only. Checked source/results: [\"61e632323dbc6b4a35ed27bf5b9833102ffd5a4e diff: grid-input-tables.js:219 and farhelm-supervisor/tests/fixtures/grid-keys.jsonl:1 both change 'a new terminal' to 'a terminal'. Generator :335 and js-tests/fixtures/input/keydown-actions.jsonl:1 change the corresponding page header together; no generator logic or data row changes are present in that patch.\",\"At 61e63232, js-tests/grid-input-tables.test.js:23-36 compares whole strings; :39-45 checks key and keydown tables. crates/farhelm-supervisor/src/grid_input/tests.rs:104 includes the same key fixture and :113 filters lines beginning '#', leaving Rust comparison rows unchanged. Tests were read, not run.\"] Current coverage/results: [\"Current SPEC_impl.md:1859-1865 names checked-in input tables as the shared key contract; SPEC.md Terminal experience defines the input behavior without mandating these header words.\",\"TODO.md Planned is empty. plans/queue/tmux-drop-from-docs.md acceptance criterion 3 rewrites old comparisons while preserving behavior; it does not cover a hypothetical generator/fixture mismatch. No exact header-drift item exists in full INDEX.md, active TRIAGE_OUTCOMES.md, BUGS.md or the searched plans/queue. Archive not read.\",\"FILTER.md is not the basis; direct generator/fixture synchronization and the Rust comment filter refute the considered failure.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Other: stale generated headers might fail maintainer validation. All three historical events preserve that consequence and add source checks; none claims security or user-work loss.\"; \"No stale header was found. This verifies the assigned wording edits and immediate consumers, not unrelated encoder behavior or runtime tests.\"."
+      },
+      "accepted_parent_decision": {
+        "key": "g187/c1",
+        "line": 3,
+        "disposition": "excluded",
+        "group": "generated-key-table-header-fixture-drift",
+        "bucket": "other",
+        "recording": "refuted",
+        "queue_target_candidate": null,
+        "needs_independent_drop_check": false,
+        "reason": "Parent explicitly accepted named refuted proposal from claims-117 after inspecting it. The header edits update generator strings and both fixed fixtures together. The Rust table consumer ignores comment headers, so the changed wording cannot alter its comparison rows. Source-refute the named header synchronization failure only. Checked source/results: [\"61e632323dbc6b4a35ed27bf5b9833102ffd5a4e diff: grid-input-tables.js:219 and farhelm-supervisor/tests/fixtures/grid-keys.jsonl:1 both change 'a new terminal' to 'a terminal'. Generator :335 and js-tests/fixtures/input/keydown-actions.jsonl:1 change the corresponding page header together; no generator logic or data row changes are present in that patch.\",\"At 61e63232, js-tests/grid-input-tables.test.js:23-36 compares whole strings; :39-45 checks key and keydown tables. crates/farhelm-supervisor/src/grid_input/tests.rs:104 includes the same key fixture and :113 filters lines beginning '#', leaving Rust comparison rows unchanged. Tests were read, not run.\"] Current coverage/results: [\"Current SPEC_impl.md:1859-1865 names checked-in input tables as the shared key contract; SPEC.md Terminal experience defines the input behavior without mandating these header words.\",\"TODO.md Planned is empty. plans/queue/tmux-drop-from-docs.md acceptance criterion 3 rewrites old comparisons while preserving behavior; it does not cover a hypothetical generator/fixture mismatch. No exact header-drift item exists in full INDEX.md, active TRIAGE_OUTCOMES.md, BUGS.md or the searched plans/queue. Archive not read.\",\"FILTER.md is not the basis; direct generator/fixture synchronization and the Rust comment filter refute the considered failure.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Other: stale generated headers might fail maintainer validation. All three historical events preserve that consequence and add source checks; none claims security or user-work loss.\"; \"No stale header was found. This verifies the assigned wording edits and immediate consumers, not unrelated encoder behavior or runtime tests.\"."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-117",
+          "key": "g187/c1",
+          "latest_line": 3,
+          "recommendation": "refuted",
+          "bucket": "other",
+          "underlying_key": "generated-key-table-header-fixture-drift",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The header edits update generator strings and both fixed fixtures together. The Rust table consumer ignores comment headers, so the changed wording cannot alter its comparison rows.",
+          "checks": [
+            "61e632323dbc6b4a35ed27bf5b9833102ffd5a4e diff: grid-input-tables.js:219 and farhelm-supervisor/tests/fixtures/grid-keys.jsonl:1 both change 'a new terminal' to 'a terminal'. Generator :335 and js-tests/fixtures/input/keydown-actions.jsonl:1 change the corresponding page header together; no generator logic or data row changes are present in that patch.",
+            "At 61e63232, js-tests/grid-input-tables.test.js:23-36 compares whole strings; :39-45 checks key and keydown tables. crates/farhelm-supervisor/src/grid_input/tests.rs:104 includes the same key fixture and :113 filters lines beginning '#', leaving Rust comparison rows unchanged. Tests were read, not run."
+          ],
+          "coverage_checked": [
+            "Current SPEC_impl.md:1859-1865 names checked-in input tables as the shared key contract; SPEC.md Terminal experience defines the input behavior without mandating these header words.",
+            "TODO.md Planned is empty. plans/queue/tmux-drop-from-docs.md acceptance criterion 3 rewrites old comparisons while preserving behavior; it does not cover a hypothetical generator/fixture mismatch. No exact header-drift item exists in full INDEX.md, active TRIAGE_OUTCOMES.md, BUGS.md or the searched plans/queue. Archive not read.",
+            "FILTER.md is not the basis; direct generator/fixture synchronization and the Rust comment filter refute the considered failure."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": "No stale header was found. This verifies the assigned wording edits and immediate consumers, not unrelated encoder behavior or runtime tests.",
+          "original_stronger_consequence": "Other: stale generated headers might fail maintainer validation. All three historical events preserve that consequence and add source checks; none claims security or user-work loss.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Source-refute the named header synchronization failure only."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "generated-key-table-header-fixture-drift",
+        "destination": null
+      }
+    }
+  ],
+  "replies": [
+    {
+      "turn": 1,
+      "reply": "Initial review complete: both assigned patches fully read and checked against pinned contracts and source.\n\nNo actionable findings or open leads. Candidate `c1` records the source-refuted header synchronization concern. Findings log and progress updated. No tests or reproductions run; no assigned scope unread."
+    },
+    {
+      "turn": 2,
+      "reply": "Revised `c1`: the Rust consumer skips fixture comments, confirming the header edits cannot change its comparisons. Terminal mounting also supports removing the “new terminal” qualifier.\n\nNo new findings. Unresolved lead IDs: none. Source analysis only."
+    },
+    {
+      "turn": 3,
+      "reply": "Discovery pass complete. Checked interface context, pinned-range history, the assigned diff, and documentation against generator behavior.\n\nNothing new found. New verified IDs: none. New unverified IDs: none. Open leads: none. Progress updated; source-only checks."
+    }
+  ],
+  "progress": "# g187 progress\n\nGroup: terminal-input-copy. Turn 1, initial review complete. Discovery passes: 0. Ready for a separately requested synthesis turn.\n\nRead the complete brief and inventory commits field only. Root AGENTS.md End sentinel is present. Reviewed revision: 61e632323dbc6b4a35ed27bf5b9833102ffd5a4e. Source-only analysis; no runtime tests, reproductions, builds, checkout edits, or live-install actions.\n\nMandatory delivery complete:\n- prep/parts/01496-000.patch:1-10, keydown-actions.jsonl patch.\n- prep/parts/01498-000.patch:1-51, grid-input-tables.js patch.\n\nGoverning contracts read at the reviewed revision:\n- SPEC.md:2855-3207 (complete Terminal experience section, plus adjacent Attachments context).\n- SPEC_impl.md:1692-1887 (complete Terminal widget: the grid island section).\n- SPEC_impl.md:1069-1106 (Answers bind to what was drawn and adjacent paragraph).\n\nSource context read at the reviewed revision:\n- crates/farhelm-ui/js-tests/grid-input-tables.js:1-451, complete file.\n- crates/farhelm-ui/js-tests/grid-input-tables.test.js:1-69, complete file.\n- crates/farhelm-ui/js-tests/fixtures/input/keydown-actions.jsonl:1-25.\n- crates/farhelm-supervisor/tests/fixtures/grid-keys.jsonl:1-10.\n- crates/farhelm-ui/assets/grid-input.js:1-100.\n- Commit metadata and changed-file statistics; targeted SPEC heading searches.\n\nInterface checks: full-string table comparisons include headers. Both changed generator headers match their checked-in fixtures. The generator reads the grid input module; its input module documents the xterm.js port, consistent with the revised attribution. The governing implementation contract says every terminal uses the grid and identifies these tables as Farhelm's own contract. Both assigned patches change comments/header strings only; no input behavior, sweep bounds, table rows, or test assertions change.\n\nDurable records: c1, source-refuted header synchronization concern (two events, second adds exact cited text). New verified findings: none. New unverified findings: none. Open leads: none. Could-be-highest candidates: none. The first attempt to append c1 used unsupported state 'closed' and was rejected; it was corrected to 'open' and successfully appended through the prescribed tool. No evidence-read failure occurred.\n\nUnread assigned scope: none. Large unchanged fixture bodies were not read end-to-end; their only assigned change is the delivered header patch. No excluded coverage metadata or prohibited coverage sources were read. Next action: await caller's synthesis/discovery request; do not perform that later-turn protocol in this turn.\n\n## Turn 2: later-turn synthesis complete\n\nDiscovery-pass count remains 0. Revisited the interaction between both assigned patches and the generator's JS and Rust consumers at 61e632323dbc6b4a35ed27bf5b9833102ffd5a4e. No open leads entered this turn.\n\nAdditional context read:\n- crates/farhelm-supervisor/src/grid_input.rs:1-70, plus targeted searches.\n- crates/farhelm-supervisor/src/grid_input/tests.rs:80-170, plus targeted searches.\n- crates/farhelm-ui/assets/terminal.js:3350-3405 and 4290-4360, plus targeted searches.\n- Targeted tree/path lookup for the encoder test module and fixture callers.\n\nResolved caller premises: the Rust encoder test includes the same grid-keys fixture, filters out comment lines, and checks key-code coverage and comparison count independently of its header. The terminal attachment creates a grid surface unconditionally; that surface uses farhelmGridTerminal.create with the current platform and input sender. This supports removing the old new-terminal qualifier and preserves the split between browser keydown filtering and supervisor byte encoding stated in SPEC_impl.md.\n\nRecord delta: c1 revised under its original ID to add the Rust consumer's exact source filter and caller check. The original hypothetical consequence and source-refuted disposition are preserved. No new verified or unverified findings; no new candidates; unresolved lead IDs: none. All readily checkable premises for the assigned changes are settled by source. No runtime execution. Unread assigned scope: none.\n\nNext action: await the caller's next requested pass. This turn performed synthesis only, not a separate discovery pass.\n\n## Turn 3: separate discovery pass complete\n\nDiscovery-pass count: 1. Result: empty; nothing new found. New verified IDs: none. New unverified-after-investigation IDs: none. Open lead IDs: none. No finding, candidate or withdrawal revision was warranted in this pass.\n\nRead discovery-neighbours.json completely in bounded chunks (1-70 and 71-135) before the search. Synthesized the supplied interface context: its retained findings concern update assurances, failed-mount cleanup coverage, program-copy notifications and old-page input negotiation. None establishes a new consequence or premise in this group's two assigned comment/header patches. No parent drop or lowering was assumed.\n\nUseful new checks, all source-only:\n- Queried the complete pinned range for changes to the two assigned paths. The generator changed at f560058da19e02716e6f943883a9508b447aff4e and 61e632323dbc6b4a35ed27bf5b9833102ffd5a4e; the assigned fixture changed only at the latter.\n- Read the earlier generator patch at f560058da19e02716e6f943883a9508b447aff4e as historical context for the later wording change, without expanding the assigned review target. It replaces the deleted Shift+Enter helper with the local chord rule. The assigned later patch does not modify that rule, its inputs or the rendered data rows.\n- Re-read the complete assigned two-file diff against its recorded parent and generator source ranges 1-46, 208-240, 305-346 and 411-451 at the reviewed revision. Checked the revised provenance wording, table roles, advertised regeneration command and default output against imports, generated table construction, main-module guard and write targets. The comment edits retain the xterm.js 6.0.0 attribution and the distinction between generated key bytes and page filtering. The advertised command and non-write behavior match the source. No distinct documentation or test-oracle defect was identified.\n\nNo tests, builds, reproductions, live-install actions or prohibited coverage searches. Unread assigned scope: none. Next action: await caller; this is one actual separate discovery pass, following the prior synthesis turn.\n"
+}

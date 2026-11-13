@@ -1,0 +1,294 @@
+[
+  {
+    "key": "g079/c1",
+    "latest_line": 9,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "legacy-container-file-admission-removal-with-retired-terminal-guards",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The suspected new host-file disclosure depends on opening a retired external-supervisor container terminal. Both the view and attachment admission reject that terminal; the replacement environment uses an in-container supervisor. This is a bounded source refutation, not a runtime observation or an audit of other file routes.",
+    "checks": [
+      "04d85f0c98a9b635709d00b056719a0baa7fd3fc: session_view.rs:3723-3731 returns false for retired containers; supervisor container.rs:18-22 recognizes the stored container selection; service/core.rs:3731-3739 rejects it; handlers.rs:1495-1535 applies the rejection after agent/tab selection and before terminal resolution.",
+      "f560058da19e02716e6f943883a9508b447aff4e: session_view.rs:1709-1710 and 3714-3723 preserve the UI refusal; supervisor service/core.rs:3482-3490 and handlers.rs:1652-1674 preserve unconditional rejection before resolving the terminal.",
+      "04d85f0 SPEC_impl.md:6410-6414 requires ordinary environment supervisors; :6464-6476 runs farhelm internal stdio through Podman exec inside the environment. An already-open old-asset page is outside the changed new-bundle route."
+    ],
+    "coverage_checked": [
+      "Current SPEC.md:2173-2174 and 4892-4900 explicitly forbid retired terminal/tab access; SPEC_impl.md:3598-3613, 5931-5937 and 8313-8326 describe ordinary in-container file rules and retirement.",
+      "TODO.md Planned:25-26 is empty; plans/queue/INDEX.md contains no unlanded plan entries. Residual plan files are not indexed pending plans.",
+      "BUGS.md has only an SSH-output-pipe provisioning hang. Full queue INDEX.md and targeted queue searches found no exact disclosure item; container hover/admission-cost items describe distinct older behaviors. Active TRIAGE_OUTCOMES.md searches found no same-trigger decision. FILTER.md supplies no security exception."
+    ],
+    "exact_cover_quotes": [
+      "SPEC.md:4894-4896: The earlier experimental model, whose supervisor stayed outside the container and bind-mounted a host checkout, is retired. Existing sessions support Delete only. Opening terminals or tabs, exec, Stop, Restart, Clone, Replace and Replace with are refused.",
+      "SPEC_impl.md:8313-8314: Their supervisor runs inside the container, and every session and terminal uses its ordinary host paths."
+    ],
+    "missing_premise": "No surviving retired-terminal admission route was established. That route would be needed to restore the hypothesized disclosure consequence.",
+    "original_stronger_consequence": "A legacy container terminal backed by an outside supervisor could expose host-file targets outside its bind-mounted checkout; potentially highest security impact.",
+    "needs_independent_drop_check": true,
+    "proposed_basis": "Source-refuted changed route, supported by explicit retirement contract. Preserve the original disclosure hypothesis in the drop register; this consultation does not approve dropping it."
+  },
+  {
+    "key": "g079/c2",
+    "latest_line": 10,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "grid-only-kind-gate-removal-preserves-identity-and-held-grid",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The removed renderer-kind gate did not supply Restart identity or retained-grid ownership. Those mechanisms remain. This does not refute missing admission after Restart, constructor-failure rollback, or any general decoder/resource concern.",
+    "checks": [
+      "f560058: session_view.rs:532-564 increments mount_generation for each new restart_revision; :1702-1780 assigns it to the agent and gen=0 to tabs. terminal.js:2853-2867 removes changed path/gen identities; :2904-2911 updates surviving controller.spec before expedited recovery.",
+      "f560058: terminal.js:1556-1565 captures island.grid before unmount; :4769-4832 removes observers/socket callbacks, freezes and moves that grid when retained, and deletes its island entry. :1607-1633 restores it as a tombstone or disposes it. grid-terminal.js:2080-2085 clears send/onResize while preserving local selection/link state.",
+      "f560058: terminal.js:3203-3221 gates mounting on the sanitizer and every named grid helper. The asset diff replaces TERM_BYTES_JS with PASTE_SANITIZER_JS and injects it. Constructor cleanup remains separately defective as g079/l1 records.",
+      "The supplied g088/l1 and g089/l1 admission qualification remains: generation can advance while restart_succeeded is unavailable to the view. This consultation does not independently re-review those records or treat them as duplicates."
+    ],
+    "coverage_checked": [
+      "Current SPEC.md Terminal experience:2896-2913, 3011-3052 requires terminal hosts, non-live takeover snapshots and controlled reconnect; SPEC_impl.md:1836-1870 describes grid-only ownership and pre-socket sizing. None explicitly accepts a missing admitted terminal after successful Restart.",
+      "TODO Planned and the unlanded-plan index are empty. BUGS.md is unrelated. Full queue INDEX.md plus identity/frozen/kind searches and active-ledger searches found no exact kind-gate regression item. Existing retained-restart-hides-reboot-card and detached-grid guidance items have different causes/consequences. No filter is used."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": "No changed path/gen or held-screen ownership failure is established. Do not infer terminal admission from the numerical generation check.",
+    "original_stronger_consequence": "Removing kindPending might leave a viewer on an old run after Restart or discard its last readable recovery screen; high material UX if established. No concrete security or work-loss route was shown.",
+    "needs_independent_drop_check": true,
+    "proposed_basis": "Narrow source refutation only. A stale attachment could concern user input/work, so conservatively preserve this dismissal for independent checking. g081/c5 overlaps the identity reasoning and g081/c4 the held-grid reasoning, but neither is an exact whole-record alias."
+  },
+  {
+    "key": "g079/l1",
+    "latest_line": 13,
+    "recommendation": "out-of-range",
+    "bucket": "other",
+    "underlying_key": "grid-construction-failure-link-cleanup-dereferences-uncreated-component",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The masked constructor diagnostic and interrupted cleanup are source-established, but the same production route exists at the exclusive base. The separately rewritten test's safer object shape is an in-range test finding, not refuted by this attribution.",
+    "checks": [
+      "f560058: terminal.js:940-950 dereferences getGrid().element; :4302-4313 passes a closure over created before assignment; :4356-4358 disposes links before rethrow. terminal-files.js:641-647 reaches clearHover:460-468, which evaluates that getter and can throw before later cleanup.",
+      "Exclusive base 6e423e30068b62c6cfa276c6d720ee35bb70387a already has terminal.js:1194-1207 unguarded getter, :5981-6000 preassignment closure, :6042-6044 disposal before rethrow. Base terminal-files.js:541-550 and :722-730 have the same throwing getter access in cleanup.",
+      "f560058 terminal-files.test.js:671-678 always creates host and returns host.element; :834-844 claims before-component failed-mount disposal. That does not model getGrid() itself being undefined. Preserve supplied g136/l1, g135/l2 and g083/l1 as distinct test evidence; they were not assigned for new review here."
+    ],
+    "coverage_checked": [
+      "Current SPEC.md/SPEC_impl.md searches for constructor/failed construction/before-component cleanup found no explicit acceptance; the grid-client ownership section does not accept masking the failure.",
+      "TODO Planned and unlanded-plan index are empty; BUGS.md is unrelated. Full queue INDEX.md and constructor/construction/missing-component searches found no exact queued production item; active TRIAGE_OUTCOMES.md has no matching decision. FILTER.md rare diagnostic rule cannot be selected merely from an unspecified constructor-failure trigger."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": "No in-range introduction or changed contract for this production defect was established. Retained-resource impact beyond interrupted cleanup remains unestablished.",
+    "original_stronger_consequence": "A grid constructor failure loses its original diagnostic when file-link cleanup throws, and later disposal steps stop early; no material retained-resource, security or user-work-loss route was shown.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Entire-range attribution excludes the production defect, not production correctness. Keep the changed-test issue with its separate owner; do not discard it as a duplicate of this out-of-range production record."
+  },
+  {
+    "key": "g079/l2",
+    "latest_line": 12,
+    "recommendation": "needs-parent",
+    "bucket": "other",
+    "underlying_key": "grid-only-removal-leaves-hidden-pane-fitaddon-rationale-stale",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The stale explanation is a real in-range maintenance-documentation defect at f560058, independently of correct sizing. Commit 61e63232 corrects it before the review endpoint. It is neither out-of-range nor source-refuted at its reviewed revision; the result schema has no resolved-in-range disposition.",
+    "checks": [
+      "f560058 app.css:8567-8580 still explains hidden sizing with FitAddon.fit() and zero columns. Its lib.rs diff removes VENDOR_FIT_JS registration/injection, and mounting at terminal.js:3387-3393 constructs and fits only the grid.",
+      "f560058 grid-terminal.js:462-497 says no layout box/font metrics proposes nothing, returns for nonfinite dimensions, and retains fitted until a usable changed fit. Correct production behavior does not validate the stale comment.",
+      "61e632323dbc6b4a35ed27bf5b9833102ffd5a4e app.css:8571-8575 replaces the rationale with the grid being unable to propose a fit without a layout box. The same corrected text is present at endpoint 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db:8571-8575. git log for the range lists both introducing renderer removal and corrective comment commit."
+    ],
+    "coverage_checked": [
+      "Current SPEC_impl.md:1836-1870 specifies deterministic grid fitting and no retained sizing across visits; current SPEC.md's hidden-tab/text-size and terminal-host contract supplies context, not acceptance of the stale explanation.",
+      "TODO Planned and unlanded-plan index are empty; no plan omission is used as cover. BUGS.md unrelated. Full queue INDEX.md and FitAddon/hidden-pane rationale searches found no exact current item. Active TRIAGE_OUTCOMES.md found no same comment decision. FILTER.md does not clearly cover this persistent maintenance explanation."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": "No factual premise remains for the historical defect or its correction. Parent must choose its bookkeeping treatment for an established defect resolved within the reviewed range.",
+    "original_stronger_consequence": "Maintainers are taught a removed component and the wrong sizing behavior as the reason hidden panes need layout boxes. Other priority; no security or user-work-loss consequence was suspected.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Historical defect confirmed; corrected by 61e63232 before endpoint. Preserve both facts and do not request another code fix. The supplied g182/c1 two-column test-comment issue is distinct."
+  },
+  {
+    "key": "g080/l1",
+    "latest_line": 3,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "grid-inherited-size-removal-has-no-surviving-caller",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The sole production grid constructor supplies no inherited size. Each replacement fits its own component before constructing the socket URL and sends its latest size again on open. Retained snapshots cannot resize a replacement program.",
+    "checks": [
+      "At f560058, git grep finds exactly one production farhelmGridTerminal.create call in UI src/assets, terminal.js:4313. Its options at :4313-4355 contain no size; :3389-3393 assigns, installs, fits, then reads size before URL construction :3424-3426.",
+      "grid-terminal.js:473-497 commits fitted before calling onResize. Constructor tail :1961-1963 measures/watches pixel ratio; the first explicit fit is after component assignment. terminal.js:4560-4565 skips unavailable sockets; :4594-4605 resends on open; :4606-4636 refits for window/pane changes.",
+      "terminal.js:1556-1579 makes a fresh recovery mount; :4769-4832 removes old observers/socket callbacks and freezes retained grids. grid-terminal.js:2080-2085 clears onResize/send irreversibly. Held/tombstoned grids are separate from islands targeted by stepFontSize:2717."
+    ],
+    "coverage_checked": [
+      "Current SPEC_impl.md:1844-1857 specifies pre-socket fitting and no per-terminal sizing state across visits; :1551-1552 accepts frozen retained-screen size. SPEC.md terminal-size/reconnect contract was read; no acceptance of arbitrary wrong live sizing was inferred.",
+      "TODO Planned and unlanded-plan index are empty; BUGS.md unrelated. Queue initial-oversized-grid-cannot-attach.md was read in full: its browser/inherited handoff half is already narrowed away, and remaining supervisor oversized-admission consequence is distinct. No extension is supplied by this refutation. Active ledger has no exact inherited-size decision. No filter used."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": "No surviving production caller depends on options.size. This does not prove all browser pixel/layout timing or every fit edge case correct.",
+    "original_stronger_consequence": "Removing inherited size could attach or resize a terminal at dimensions different from its pane; high material UX if a surviving dependency existed. No security or work-loss route established.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Source-refuted surviving-caller regression, bounded to deletion of the inherited-size exception. Existing oversized supervisor admission is a different root."
+  },
+  {
+    "key": "g080/l2",
+    "latest_line": 5,
+    "recommendation": "out-of-range",
+    "bucket": "other",
+    "underlying_key": "grid-hidden-input-comment-omits-composition-retention-exception",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The comment is imprecise: composition keeps the hidden input until compositionend. The same universal wording and exception already exist at the exclusive base, and the assigned comment edit does not alter that claim or lifecycle.",
+    "checks": [
+      "f560058 grid-terminal.js:374-377 claims the field is emptied after every input; :1530-1547 only clears ordinary input when !composing and clears committed composition at compositionend.",
+      "Exclusive base 6e423e30 grid-terminal.js:383-385 has the identical emptied-after-every-input claim; :1550-1567 has the same composing exception. git log -S 'this field is emptied after every input anyway' across the exact review range returns no commits."
+    ],
+    "coverage_checked": [
+      "Current SPEC.md terminal input contract and SPEC_impl.md grid-client section do not expressly accept this comment imprecision; production input behavior is not its refutation.",
+      "TODO Planned and unlanded-plan index are empty. BUGS.md unrelated. Full queue INDEX.md plus composing/compositionend/emptied-input searches and active-ledger searches found no exact item. No FILTER.md boundary clearly applies to a persistent maintenance statement."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": "No in-range introduction or changed composition contract exists in the checked attribution.",
+    "original_stronger_consequence": "An inaccurate maintenance comment omits composition retention; no typing, security or user-work-loss failure was established.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Acknowledged documentation imprecision excluded by whole-range attribution, not by asserting production correctness."
+  },
+  {
+    "key": "g081/c1",
+    "latest_line": 1,
+    "recommendation": "covered",
+    "bucket": "other",
+    "underlying_key": "frozen-reconnect-takeover-screen-retains-old-font-size",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "Changing text size affects live islands and leaves separately held frozen screens at their prior size. The implementation specification explicitly accepts that exact trigger, consequence and scope.",
+    "checks": [
+      "f560058 terminal.js:2705-2717 changes only islands.values(); :1556-1565 retains a snapshot outside that set, :1607-1633 restores it as a tombstone, and :4819-4832 freezes/moves it and removes the island entry. grid-terminal.js:2080-2085 clears its program sinks."
+    ],
+    "coverage_checked": [
+      "Current SPEC_impl.md:1546-1554 was read and exactly accepts held reconnect/takeover screens retaining size. SPEC.md:2877-2887 live terminal text-size promise was read together with that explicit qualification.",
+      "TODO Planned and unlanded-plan index are empty; BUGS.md unrelated. Full queue INDEX.md plus frozen/font/held-size searches and active-ledger searches found no separate exact item. Detached-grid drag-guidance and guidance-gap-size records concern different live notices. No filter used."
+    ],
+    "exact_cover_quotes": [
+      "SPEC_impl.md:1551-1552: A screen held aside during a reconnect or kept after a takeover keeps its old size: it is frozen, with no program to tell."
+    ],
+    "missing_premise": null,
+    "original_stronger_consequence": "Retained reconnect/takeover screens do not follow a later text-size change; display-size convenience only.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Exact explicit specification acceptance, with no established or suspected security/work-loss route."
+  },
+  {
+    "key": "g081/l1",
+    "latest_line": 9,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "deleted-byte-replay-caps-never-guarded-grid-dispatch",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The deleted caps guarded only byte-renderer accumulation. Parent grid dispatch returned before that buffer and those checks. This refutes the changed causal route while preserving every broader grid-budget question.",
+    "checks": [
+      "f560058 parent terminal.js:5738-5741 dispatches grid then returns; :5742-5760 appends replayChunks and checks byte/frame limits only afterward. Parent receiveGrid:6188-6200 applies directly and rearms idle watchdog without those limits.",
+      "f560058 terminal.js:4466-4475 retains the same receiveGrid path. grid-terminal.js:1973-1994 decodes/applies each frame and may schedule sliced history; it does have a history backlog, so no claim of zero queue is made.",
+      "f560058 grid-model.js:876-905 validates history envelopes, skips empty append retention and trims queued real rows; :930-955 caps queued rows to historyCap and discards superseded queue storage. This is not certification of maximum legal histories, all decoder limits, WebSocket buffering or pre-existing resource costs."
+    ],
+    "coverage_checked": [
+      "Current SPEC.md Terminal experience slow-viewer/flow-control contract and SPEC_impl.md:1836-1870 grid ownership/sliced-history contract were read. They do not accept hostile-peer resource exhaustion; they explain distinct bounds.",
+      "TODO Planned and unlanded-plan index are empty; BUGS.md unrelated. Full queue INDEX.md plus replay-cap/byte-cap/backlog searches found no exact deleted-guard regression. extreme-history-numbering-hangs-selection.md describes a separate numbering/selection trigger. Active ledger has no exact cap-deletion decision. FILTER.md has no relevant security exception."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": "No removed byte cap previously constrained the grid allocation under concern. Independent grid resource weaknesses remain outside this bounded refutation.",
+    "original_stronger_consequence": "A hostile or broken remote peer might exhaust page memory or leave it unusable; the original trust-boundary denial-of-service hypothesis was potentially highest and must not be silently lowered away.",
+    "needs_independent_drop_check": true,
+    "proposed_basis": "Source-refuted changed-route security/resource regression; preserve original hostile-peer consequence and the limitations in the independent-drop register."
+  },
+  {
+    "key": "g081/c2",
+    "latest_line": 13,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "paste-sanitizer-helper-rename-preserves-framing-filter-and-wiring",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The renamed helper uses the identical sanitizer, remains a mount dependency, and remains wired to both current-page paste paths. This says nothing about old pages whose bytes are reclassified as another input kind.",
+    "checks": [
+      "f560058 paste-sanitizer.js:26-28 and parent term-bytes.js:55-57 have identical text.replace(/\\x1b\\[201~|\\x1b/g, '') semantics. terminal.js:1908-1912 calls the renamed helper; :3203-3221 gates mounting; :4354 passes it to the grid. lib.rs diff registers/injects PASTE_SANITIZER_JS instead of TERM_BYTES_JS.",
+      "f560058 supervisor grid_input.rs:223-250 captures bracketed-paste mode at the first part and closes the frame after the last; PasteText:570-655 removes embedded end markers/ESC across parts before newline conversion.",
+      "Supplied g196/l1 concerns old-page raw JSON becoming GridInput::Text, bypassing GridInput::Paste. It is distinct, not refuted or accepted by this helper-rename check; no new review of that record was performed."
+    ],
+    "coverage_checked": [
+      "Current SPEC.md input/paste and trust sections and SPEC_impl.md grid JSON-input contract were searched/read where matching. No specification acceptance of a paste framing escape was found; unchanged sanitization is source refutation, not permission for command execution.",
+      "TODO Planned and unlanded-plan index empty; BUGS.md unrelated. Full queue INDEX.md plus sanitizer/end-marker/framing searches and active-ledger searches found no exact helper-rename item. Wrong-mode-after-recovery and input handoff filters have different triggers; no filter used."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": "No weakened sanitizer or absent current-page mount dependency is established. Cross-version/raw-text input classification remains a separate claim.",
+    "original_stronger_consequence": "An embedded bracketed-paste terminator could turn the rest of pasted text into executable commands, compromising credentials or user-owned work; potentially highest.",
+    "needs_independent_drop_check": true,
+    "proposed_basis": "Bounded source refutation of helper rename and wiring. Preserve the original security/work-loss hypothesis and the g196/l1 exclusion for independent checking."
+  },
+  {
+    "key": "g081/c3",
+    "latest_line": 10,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "xterm-clipboard-provider-removal-keeps-osc52-read-refusal",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The grid's callbacks only write clipboard data, and its supervisor emulator rejects OSC 52 loads before emitting a read callback. Deleting the old renderer provider does not expose this read route.",
+    "checks": [
+      "f560058 terminal.js:4320-4334 wires onClipboard/onCopy to writes; enqueueClipboardWrite:764-773 calls native write or navigator.clipboard.writeText, never readText.",
+      "f560058 emulator.rs:99-105 sets Osc52::OnlyCopy; vendor/alacritty_terminal/src/term/mod.rs:2209-2213 returns unless OnlyPaste or CopyPaste, before constructing ClipboardLoad:2223-2229. effects.rs:183-191 also discards ClipboardLoad.",
+      "The conclusion excludes intentional user paste, clipboard writes and unrelated read channels. No execution or clipboard observation was performed."
+    ],
+    "coverage_checked": [
+      "Current SPEC.md:3053-3073 distinguishes authorized paste/write from forbidden program clipboard reads. SPEC_impl.md:1728-1745 explicitly requires unanswered OSC 52 reads and write-only native behavior.",
+      "TODO Planned and unlanded-plan index empty; BUGS.md unrelated. Full queue INDEX.md plus OSC52/read/exfiltration searches and active-ledger searches found no exact provider-removal disclosure item. Clipboard write-drain and best-effort failure cases do not cover exfiltration. No filter used."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": "No program-query path obtains browser/system clipboard contents through the replacement callback or emulator configuration.",
+    "original_stronger_consequence": "Program-initiated clipboard reads could exfiltrate credentials or other private user data; potentially highest security impact.",
+    "needs_independent_drop_check": true,
+    "proposed_basis": "Source-refuted changed deletion route. The specification forbids disclosure rather than accepting it; the implementation blocks the premise."
+  },
+  {
+    "key": "g081/c4",
+    "latest_line": 11,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "removed-xterm-snapshot-copy-listener-not-needed-by-frozen-grid",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The old auxiliary listener was only for xterm snapshots. The frozen grid keeps its local selection/link callbacks and cannot send program input through its cleared sinks.",
+    "checks": [
+      "f560058 parent terminal.js:1925-1955 installs installSnapshotCopyOnSelect only when !heldIsGrid; grids already get a no-op. Current :1556-1565 retains island.grid; :1607-1633 restores/disposes it; :4819-4832 freezes/moves it.",
+      "f560058 grid-terminal.js:2080-2085 preserves local callbacks while clearing send/onResize and stopping the gesture. :1666-1692 still copies completed local selections and admits link release; :1472-1486 rejects frozen/no-send program input; dispose:2109-2140 alone clears onCopy and link cleanup callbacks.",
+      "Retained program mouse mode can still require the forcing modifier. This does not certify all snapshot modes, history drain completion or every link policy."
+    ],
+    "coverage_checked": [
+      "Current SPEC.md:3011-3058 snapshot/recovery/local-copy contract and SPEC_impl.md:1765-1768, 3608-3610 held-grid link lifetime support retained local interaction, not its loss.",
+      "TODO Planned and unlanded-plan index empty; BUGS.md unrelated. Full queue INDEX.md plus frozen/snapshot/copy/listener searches and active-ledger searches found no exact removed-listener regression. detached-grid-retains-program-drag-guidance.md concerns stale guidance, not missing local copying or input leakage. No filter used."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": "No missing grid copy/link replacement or live-send route from the frozen component was established.",
+    "original_stronger_consequence": "Restored frozen screens might lose selection-copy/link convenience. The latest check also rules out carrying their input to a replacement through these sinks; no concrete security or work-loss route was established.",
+    "needs_independent_drop_check": true,
+    "proposed_basis": "Narrow source refutation. Conservatively include the frozen-input-to-replacement premise in independent checking because it concerns user input/work, while preserving the original convenience consequence."
+  },
+  {
+    "key": "g081/c5",
+    "latest_line": 14,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "removed-reconnect-kind-refresh-cannot-change-current-grid-attachment-identity",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "Current mounts always construct a grid, their specs carry no kind, and path/gen changes retire old recovery controllers. Removing the same-identity kind refresh does not establish wrong attachment reuse. Admission after Restart and old-bundle compatibility remain distinct unresolved-neighbor scopes.",
+    "checks": [
+      "f560058 session_view.rs:1702-1780 contains no kind, builds session/tab/lease-specific paths, gives the agent mount_generation and tabs gen=0. terminal.js:3389-3393 constructs the grid before socket creation.",
+      "f560058 terminal.js:2853-2867 compares path/gen across islands, pending mounts, reconnects and tombstones and discards changed identities unless takeover deliberately preserves the detached screen. :2907 refreshes surviving controller.spec before :2911 expedited recovery. session_view.rs:532-564 advances generation for new Restart completion revisions.",
+      "The separate retired-container admission route was checked under g079/c1 and remains blocked. Supplied g088/l1/g089/l1 explain that completion success may retire before admission; supplied g196/l1 concerns an old page. Neither consequence is refuted by this current-bundle identity check."
+    ],
+    "coverage_checked": [
+      "Current SPEC.md terminal host/reconnect/takeover rules and SPEC_impl.md grid-client contract require correct attachment behavior; they do not accept wrong-target input or prove Restart admission. Retirement contract coverage is separately recorded under g079/c1.",
+      "TODO Planned and unlanded-plan index empty; BUGS.md unrelated. Full queue INDEX.md plus reconnect-kind/path-generation searches and active-ledger searches found no exact dropped-kind-refresh item. Existing Restart recovery records have different causes/scope. No filter used."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": "No wrong-target or wrong-renderer route from removal of the same-path/gen refresh is established. Do not turn this into a blanket certification of successful Restart or old-page compatibility.",
+    "original_stronger_consequence": "Stale reconnect data might select the wrong renderer or attachment; no actual wrong-target input, security compromise or user-work loss was established from this deletion.",
+    "needs_independent_drop_check": true,
+    "proposed_basis": "Bounded source refutation of the current grid page's kind-refresh/identity route. Conservatively register the possible wrong-target premise for independent checking. Related g079/c2 covers a different deletion and additionally retained-screen ownership, so no exact alias is asserted."
+  }
+]

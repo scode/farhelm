@@ -1,0 +1,823 @@
+{
+  "group": {
+    "id": "g005",
+    "domain": "product-contracts",
+    "purpose": "product-contracts: SPEC_impl.md, SPEC.md; phases @@ -6179,36 +6160,35 @@ beside its installation snapshot from AppBody, independently of the filtered sid",
+    "interfaces": [
+      "g001",
+      "g002",
+      "g003",
+      "g004",
+      "g006",
+      "g007",
+      "g008",
+      "g009",
+      "g010",
+      "g011",
+      "g012",
+      "g013",
+      "g014",
+      "g015",
+      "g016",
+      "g030",
+      "g032",
+      "g034",
+      "g039",
+      "g044",
+      "g045",
+      "g053",
+      "g055",
+      "g061",
+      "g062",
+      "g071",
+      "g072",
+      "g073",
+      "g074",
+      "g079",
+      "g088",
+      "g090",
+      "g091",
+      "g093",
+      "g094",
+      "g097",
+      "g098",
+      "g102",
+      "g104",
+      "g105",
+      "g106",
+      "g107",
+      "g108",
+      "g109",
+      "g117",
+      "g129",
+      "g137",
+      "g138",
+      "g139",
+      "g140",
+      "g141",
+      "g142",
+      "g144",
+      "g147",
+      "g148",
+      "g149",
+      "g151",
+      "g152",
+      "g153",
+      "g154",
+      "g155",
+      "g156",
+      "g157",
+      "g159",
+      "g173",
+      "g174",
+      "g175",
+      "g176",
+      "g177",
+      "g178",
+      "g020",
+      "g018"
+    ],
+    "sources": [
+      {
+        "path": "[private-run]/prep/parts/00642-000.patch",
+        "ranges": [
+          [
+            1,
+            201
+          ]
+        ],
+        "original_path": "SPEC_impl.md",
+        "commit": "b106c0e49646ecb9a17e1a06b17a70da0ece73e0",
+        "notes": "patch header; patch character offsets [0,19391)",
+        "lines": 201,
+        "bytes": 19391,
+        "start": 0,
+        "end": 19391,
+        "original": "[private-run]/prep/originals/00642.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/00759-001.patch",
+        "ranges": [
+          [
+            1,
+            76
+          ]
+        ],
+        "original_path": "SPEC_impl.md",
+        "commit": "647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513",
+        "notes": "@@ -6179,36 +6160,35 @@ beside its installation snapshot from AppBody, independently of the filtered sid; patch character offsets [55043,63732)",
+        "lines": 76,
+        "bytes": 8693,
+        "start": 55043,
+        "end": 63732,
+        "original": "[private-run]/prep/originals/00759.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/00858-000.patch",
+        "ranges": [
+          [
+            1,
+            242
+          ]
+        ],
+        "original_path": "SPEC.md",
+        "commit": "dbfc69751215dbf15e1d31d5bed73c3754c4ebc4",
+        "notes": "patch header; patch character offsets [0,26098)",
+        "lines": 242,
+        "bytes": 26131,
+        "start": 0,
+        "end": 26098,
+        "original": "[private-run]/prep/originals/00858.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/01228-000.patch",
+        "ranges": [
+          [
+            1,
+            57
+          ]
+        ],
+        "original_path": "SPEC.md",
+        "commit": "17a3fe858c5511a24b7403af15dd41c93bf69fd7",
+        "notes": "patch header; patch character offsets [0,5222)",
+        "lines": 57,
+        "bytes": 5230,
+        "start": 0,
+        "end": 5222,
+        "original": "[private-run]/prep/originals/01228.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/01304-000.patch",
+        "ranges": [
+          [
+            1,
+            50
+          ]
+        ],
+        "original_path": "SPEC_impl.md",
+        "commit": "cb762a313abbe6da03ae0bf041f07486c4ed4df9",
+        "notes": "patch header; patch character offsets [0,5203)",
+        "lines": 50,
+        "bytes": 5207,
+        "start": 0,
+        "end": 5203,
+        "original": "[private-run]/prep/originals/01304.patch"
+      }
+    ],
+    "lines": 626,
+    "bytes": 64652
+  },
+  "records": [
+    {
+      "key": "g005/f1",
+      "owner": "g005",
+      "id": "f1",
+      "domain": "product-contracts",
+      "purpose": "product-contracts: SPEC_impl.md, SPEC.md; phases @@ -6179,36 +6160,35 @@ beside its installation snapshot from AppBody, independently of the filtered sid",
+      "history": [
+        {
+          "line": 1,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "f1",
+            "state": "open",
+            "summary": "proposed drop: old-terminal retirement accepts failed stops before restart",
+            "location": "SPEC.md:3014",
+            "detail": "Reviewed commit: dbfc69751215dbf15e1d31d5bed73c3754c4ebc4\n\nTLDR: An update retires old terminals even when stopping their processes fails; a subsequent Restart can start a second agent while the old one is still running, potentially letting both modify the user's work.\n\nDetails: The changed Terminal experience contract explicitly permits this failure path: 'A failure to end the server or to stop what ran there is logged and never stops the supervisor from starting; those sessions are treated as ended all the same, accepting that a Restart could then start a second agent beside one still running.' This is a potentially highest loss-of-work route, but this record is proposed for dropping only because that exact specification text accepts it. No shipped-source route or runtime behavior has yet been established; inspect the retirement implementation and Restart contracts before finalizing. Suggested bucket: highest if source establishes concurrent agents can modify user files; currently other for the explicitly accepted contract risk, with could-be-highest true. Confidence: confirmed specification acceptance; implementation premise pending. proposed_drop: exact cited product acceptance above, requiring independent check. possible_cover: none. Caveats: source-only review; no reproduction or tests run. The update's intentional termination and last-screen loss are also explicitly described and are not independently alleged as an unapproved defect."
+          }
+        },
+        {
+          "line": 5,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "f1",
+            "state": "open",
+            "summary": "proposed drop: old-terminal retirement accepts failed stops before restart",
+            "location": "SPEC.md:3009",
+            "detail": "Reviewed commit: dbfc69751215dbf15e1d31d5bed73c3754c4ebc4\n\nTLDR: The update treats old terminals as ended even when stopping their processes fails. Its contract explicitly accepts that a later Restart might start a second agent beside one still running, potentially allowing both to modify the user's work. Retain this potentially highest concern only for an independent check of the specification-based drop.\n\nDetails and contract: SPEC.md:3000-3018, Terminal experience, says 'A failure to end the server or to stop what ran there is logged and never stops the supervisor from starting; those sessions are treated as ended all the same, accepting that a Restart could then start a second agent beside one still running.' SPEC_impl.md:2954-3004, Terminal substrate: private tmux server, repeats the acceptance and specifies conversion regardless of exhausted sweep budget. Exact basis for proposed_drop: the quoted product acceptance. This record does not allege that intentional old-terminal termination or screen loss is contrary to the product contract.\n\nChecks/results: old_terminals.rs:286-353 performs best-effort reaping with ScopeKillFailure::Warn and returns after its deadline; core.rs:7337-7382 calls that sweep before committing TerminalEnded transitions and recording notices, regardless of sweep result. Thus source establishes the update can publish interrupted after unconfirmed retirement. Followed Restart at core.rs:12944-13011: it reaps again with ScopeKillFailure::Refuse before relaunching. That refutes a simple persistent-scope-kill-failure route to concurrent agents: the later Restart refuses such a failure. A remaining concurrent-agent route would require a survivor the Restart reaper can no longer identify (the ordinary unscoped/environment-marker limits), or another accepted boundary; no specific shipped sequence establishing that premise was found. The contract itself permits the outcome rather than requiring its prevention. Source-only conclusions; no runtime tests or reproductions.\n\nSuggested bucket: other for the established specification acceptance; could-be-highest true for concurrent agents modifying work if a complete shipped route is supplied. Preserve the suspected original loss-of-work consequence above; rarity does not lower it. Confidence: confirmed explicit specification acceptance and unconfirmed-stop-to-interrupted source path; concurrent-agent loss-of-work route not established. proposed_drop: exact specification acceptance quoted above, requiring independent check. possible_cover: none. No unresolved investigative check remains within this contract concern; source narrows the original suspicion as described."
+          }
+        },
+        {
+          "line": 8,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "f1",
+            "state": "open",
+            "summary": "proposed drop: retirement permits residual agents beside later runs",
+            "location": "SPEC.md:3014",
+            "detail": "Reviewed commit: dbfc69751215dbf15e1d31d5bed73c3754c4ebc4\n\nTLDR: The update treats old terminals as ended despite an unconfirmed stop. Its explicit contract accepts a later Restart starting a second agent beside one still running, which could let concurrent agents modify the user's work. The original possibly-highest loss-of-work concern remains intact for independent checking; neither a drop nor a parent lowering has been accepted.\n\nExact accepted residual/proposed_drop basis: SPEC.md:3014-3016 says 'A failure to end the server or to stop what ran there is logged and never stops the supervisor from starting; those sessions are treated as ended all the same, accepting that a Restart could then start a second agent beside one still running.' SPEC_impl.md:2994-3003 says the conversion commits despite an exhausted sweep budget and repeats that same duplicate-agent acceptance. Only that explicit product choice is the proposed drop basis; it is not a general license to ignore unrelated cleanup bugs. Intentional old-terminal termination and last-screen loss are also explicit, rather than silently introduced.\n\nSynthesis source checks: old_terminals.rs:290-355 still performs the conversion candidates' agent and tab sweeps with ScopeKillFailure::Warn under the shared fifteen-second retirement budget. core.rs:7337-7382 then commits interrupted outcomes and removes launch artifacts despite an unsuccessful sweep. The prior narrowing stands: Restart at core.rs:12985-13010 takes a fresh AgentOnly sweep with ScopeKillFailure::Refuse, and :7436-7439 derives its retained scope from the same stored launch generation and launch_scoped fact. Conversion did not remove that scope identity. Thus an ordinary persistent failure to kill a known scope does not alone establish duplicate agents: Restart refuses. The user-visible interrupted status after failed retirement is established from source; a full shipped duplicate-agent/work-corruption route has not been shown.\n\nOther accepted boundaries are precise: SPEC.md:2088-2099 accepts detached unscoped processes whose environment markers can no longer be read, and :2102-2110 says processes Farhelm has no way to identify do not make a cleanup operation fail. A survivor outside those identifiers or another separately accepted boundary would be needed to get past the later fresh sweep. No specific agent-survivor sequence establishing the missing premise was found in this source-only contract review, so do not upgrade speculation into an observed or established concurrent-agent route. What would establish it is a shipped source path showing an old agent can survive retirement, lose both usable process-tree and marker attribution, and pass the fresh sweep while a replacement agent runs in its working directory. No reproduction requested or performed.\n\nSuggested bucket: preserve possibly-highest (security/loss-of-work) assessment for independent adjudication; source has established failed-retirement classification, but not the complete loss-of-work route. Earlier 'other for established specification acceptance' wording was a reviewer's provisional assessment of established impact, not an accepted parent lowering and not grounds to erase the original concern. Confidence: confirmed source classification and exact specification acceptance; duplicate-agent consequence remains possible with the named missing premise. proposed_drop: exact quoted specification acceptance, pending independent check. possible_cover: caller reports the same concern at g007/f1; provenance only, that log was not read and no coverage search was performed. This record remains g005/f1 and is not withdrawn. No open uninvestigated lead remains."
+          }
+        }
+      ],
+      "latest": {
+        "line": 8,
+        "event": {
+          "version": 1,
+          "kind": "finding",
+          "id": "f1",
+          "state": "open",
+          "summary": "proposed drop: retirement permits residual agents beside later runs",
+          "location": "SPEC.md:3014",
+          "detail": "Reviewed commit: dbfc69751215dbf15e1d31d5bed73c3754c4ebc4\n\nTLDR: The update treats old terminals as ended despite an unconfirmed stop. Its explicit contract accepts a later Restart starting a second agent beside one still running, which could let concurrent agents modify the user's work. The original possibly-highest loss-of-work concern remains intact for independent checking; neither a drop nor a parent lowering has been accepted.\n\nExact accepted residual/proposed_drop basis: SPEC.md:3014-3016 says 'A failure to end the server or to stop what ran there is logged and never stops the supervisor from starting; those sessions are treated as ended all the same, accepting that a Restart could then start a second agent beside one still running.' SPEC_impl.md:2994-3003 says the conversion commits despite an exhausted sweep budget and repeats that same duplicate-agent acceptance. Only that explicit product choice is the proposed drop basis; it is not a general license to ignore unrelated cleanup bugs. Intentional old-terminal termination and last-screen loss are also explicit, rather than silently introduced.\n\nSynthesis source checks: old_terminals.rs:290-355 still performs the conversion candidates' agent and tab sweeps with ScopeKillFailure::Warn under the shared fifteen-second retirement budget. core.rs:7337-7382 then commits interrupted outcomes and removes launch artifacts despite an unsuccessful sweep. The prior narrowing stands: Restart at core.rs:12985-13010 takes a fresh AgentOnly sweep with ScopeKillFailure::Refuse, and :7436-7439 derives its retained scope from the same stored launch generation and launch_scoped fact. Conversion did not remove that scope identity. Thus an ordinary persistent failure to kill a known scope does not alone establish duplicate agents: Restart refuses. The user-visible interrupted status after failed retirement is established from source; a full shipped duplicate-agent/work-corruption route has not been shown.\n\nOther accepted boundaries are precise: SPEC.md:2088-2099 accepts detached unscoped processes whose environment markers can no longer be read, and :2102-2110 says processes Farhelm has no way to identify do not make a cleanup operation fail. A survivor outside those identifiers or another separately accepted boundary would be needed to get past the later fresh sweep. No specific agent-survivor sequence establishing the missing premise was found in this source-only contract review, so do not upgrade speculation into an observed or established concurrent-agent route. What would establish it is a shipped source path showing an old agent can survive retirement, lose both usable process-tree and marker attribution, and pass the fresh sweep while a replacement agent runs in its working directory. No reproduction requested or performed.\n\nSuggested bucket: preserve possibly-highest (security/loss-of-work) assessment for independent adjudication; source has established failed-retirement classification, but not the complete loss-of-work route. Earlier 'other for established specification acceptance' wording was a reviewer's provisional assessment of established impact, not an accepted parent lowering and not grounds to erase the original concern. Confidence: confirmed source classification and exact specification acceptance; duplicate-agent consequence remains possible with the named missing premise. proposed_drop: exact quoted specification acceptance, pending independent check. possible_cover: caller reports the same concern at g007/f1; provenance only, that log was not read and no coverage search was performed. This record remains g005/f1 and is not withdrawn. No open uninvestigated lead remains."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g005/findings.jsonl",
+        "id": "f1",
+        "line": 8,
+        "disposition": "under-investigation",
+        "group": "g005-f1",
+        "reason": "Record durably acknowledged; parent source/contract validation, cross-group synthesis, coverage/filter matching and any independent drop check remain pending. This preserves the claim and uncertainty without accepting, dropping or lowering it."
+      },
+      "accepted_parent_decision": null,
+      "returned_claim_checks": [
+        {
+          "batch": "claims-002",
+          "key": "g005/f1",
+          "latest_line": 8,
+          "recommendation": "covered",
+          "bucket": "other",
+          "underlying_key": "old-terminal-retirement-commits-ended-after-unconfirmed-stop",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "Failed-retirement classification is source-established and exactly accepted. The stronger duplicate-agent/work-corruption route remains missing a survivor that escapes Restart's fresh refusal-grade sweep. Both the proposed drop and the earlier provisional consequence lowering need independent adjudication.",
+          "checks": [
+            "At dbfc69751215dbf15e1d31d5bed73c3754c4ebc4, old_terminals.rs:290-355 sweeps with ScopeKillFailure::Warn under a shared deadline. core.rs:7337-7382 proceeds to commit interrupted transitions and cleanup despite unconfirmed sweep completion.",
+            "At the same revision, core.rs:12985-13010 repeats an AgentOnly sweep with ScopeKillFailure::Refuse before relaunch. A continuing failure to kill a known scope therefore does not itself establish simultaneous agents.",
+            "Current SPEC.md:2998-3011 and SPEC_impl.md:2780-2823 explicitly accept startup continuing and sessions treated ended even after failed termination, including the possible later duplicate agent. No concurrent-agent execution or corruption was reproduced."
+          ],
+          "coverage_checked": [
+            "The current specifications' complete old-terminal migration sections cover precisely the named failed-stop/interrupted/restart residual. Their accepted limits do not cover unrelated cleanup defects.",
+            "TODO.md Planned is empty. Failed retirement/surviving old agent/restart searches of plans/queue, BUGS.md, INDEX.md and active TRIAGE_OUTCOMES.md found no exact queued item or active triage decision. tmux-end-old-terminals and user-tmux-jobs-outlive-cleanup are landed per plans/REPORTS.md:12,29; the latter is about user-run tmux, a different root.",
+            "The older-release-plus-rare filter may additionally fit the failed-stop subset, but no filter is needed: use exact specification acceptance and preserve independent review of the possible work-loss consequence."
+          ],
+          "exact_cover_quotes": [
+            "SPEC.md:3008-3010: 'A failure to end the server or to stop what ran there is logged and never stops the supervisor from starting; those sessions are treated as ended all the same, accepting that a Restart could then start a second agent beside one still running.'",
+            "SPEC_impl.md:2815-2821: 'the conversion commits regardless' and 'accepting that a Restart could then start a second agent beside one still running'."
+          ],
+          "missing_premise": "A shipped old-agent survivor that loses usable tree and marker attribution, survives retirement, passes the fresh Restart sweep, and runs beside the replacement in the same work. Ordinary persistent known-scope failure does not supply this.",
+          "original_stronger_consequence": "Concurrent old/new agents could modify or corrupt the user's work. Earlier other wording was provisional, not an accepted parent lowering. Keep this potentially highest route and the missing premise in the independent register; established classification alone is other under the route-established priority rule.",
+          "needs_independent_drop_check": true,
+          "proposed_basis": "Exact specification acceptance of failed retirement and the possible duplicate-agent residual. Supplied g007/f1 is provenance for cross-batch reconciliation, not a separately checked alias here."
+        }
+      ],
+      "parent_proposals": [
+        {
+          "artifact": "parent-flagged-judgments-002.json",
+          "key": "g005/f1",
+          "proposal": "claim-checks/claims-002/result.json",
+          "parent_proposal": "covered-including-stated-worst-consequence",
+          "final_independent_gate": "required-before-drop-or-lowering",
+          "reason": "Full002sourceconfirmsstartupWarn-sweepfailurestillcommitsInterrupted; exactSPEC3008-3010/SPEC_impl2815-2821explicitlyacceptthis ANDpossibleRestartsecondagentbesidestillrunning. Fullcoverofstatedmigrationfailureconsequence, notgeneralcleanupwaiver. PreservefreshRefuse-gradeRestartsweepandmissingconcretesurvivorthatpassesit; do not inferduplicateagentsfromknownscopekillfailurealone or requireabsenceproof. Originalpossibleconcurrent-workcorruption/highestretainedinregister; freshcheckexactacceptedfailed-retirementroute, not raritylowering."
+        }
+      ],
+      "collection": {
+        "retain": true,
+        "clearly_refuted_candidate": false,
+        "needs_unfinished_gate": true,
+        "provisional_bucket": "highest",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "old-terminal-retirement-commits-ended-after-unconfirmed-stop",
+        "destination": "trailing-old-terminal-retirement-commits-ended-after-unconfirmed-stop.md"
+      }
+    },
+    {
+      "key": "g005/f2",
+      "owner": "g005",
+      "id": "f2",
+      "domain": "product-contracts",
+      "purpose": "product-contracts: SPEC_impl.md, SPEC.md; phases @@ -6179,36 +6160,35 @@ beside its installation snapshot from AppBody, independently of the filtered sid",
+      "history": [
+        {
+          "line": 2,
+          "event": {
+            "version": 1,
+            "kind": "lead",
+            "id": "f2",
+            "state": "open",
+            "summary": "environment launch wait contract may count approval differently",
+            "location": "SPEC_impl.md:6691",
+            "detail": "Reviewed commit: b106c0e49646ecb9a17e1a06b17a70da0ece73e0\n\nTLDR: A slow approval could leave an environment launch running after the agent has stopped waiting if the helm and relay budget approval time differently.\n\nDetails: SPEC.md Agents and environments (4289..4342), final paragraph, says the wait is nine minutes plus thirty minutes counted together from helm receipt, so slow approval leaves less launch time. SPEC_impl.md Agent requests and environments says the relay adds ENVIRONMENT_LAUNCH_WAIT to the ordinary budget plus approval wait in one span, but 'The helm bounds its own wait for the task to the same allowance after the Allow'. Need read the full implementation subsection and timeout owners to determine whether 'same allowance after the Allow' contradicts the receipt-relative product budget or merely describes an intentionally conservative second bound. Suggested bucket: other unless a shipped material UX route is established. Confidence: unverified pending source/contract investigation. proposed_drop: false. possible_cover: none. Could-be-highest: false on available evidence; task continuation and unknown outcome are accepted, no loss-of-work route identified. No execution performed."
+          }
+        },
+        {
+          "line": 3,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "f2",
+            "state": "open",
+            "summary": "environment launch specifications disagree on the timeout origin",
+            "location": "SPEC_impl.md:6694",
+            "detail": "Reviewed commit: b106c0e49646ecb9a17e1a06b17a70da0ece73e0\n\nTLDR: The implementation specification allows an agent's environment launch to time out earlier than the product specification promises. With an immediate approval, one says to wait thirty minutes and the other says thirty-nine minutes from the request. The launch continues either way, so the discrepancy concerns when the agent receives an unknown outcome, not cancellation or loss of work.\n\nDetails: SPEC.md:4337-4342 says 'Its wait covers the nine-minute approval wait and thirty minutes more, counted together from when the request reaches the helm, so a slow answer leaves less time for the launch'. SPEC_impl.md:6691-6697 instead gives the relay one additive budget and says 'The helm bounds its own wait for the task to the same allowance after the Allow'. These are different observable deadlines: approval at minute 0 gives the helm a minute-30 deadline, while SPEC.md's receipt-relative deadline is minute 39; approval at minute 8 gives minute 38 rather than 39. SPEC_impl.md:3-6 expressly says SPEC.md wins on observable behavior. Suggested fix: choose the intended deadline and align both contracts (if receipt-relative, carry the request deadline through approval and use its remaining time).\n\nChecks/results: Read complete Agents and environments and Agent requests and environments subsections at b106c0e49646ecb9a17e1a06b17a70da0ece73e0. This commit is documentation-only and git grep found no ENVIRONMENT_LAUNCH_WAIT/may_launch_environment implementation at that revision, so no claim of then-shipped runtime behavior is made. As supplementary interface context, endpoint 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db agent_requests.rs:4500-4557 waits for approval and then applies a fresh thirty-minute timeout, while agent_relay.rs:646-660 gives the relay ordinary+approval+launch time in one span; approvals.rs:23-45 defines nine and thirty minutes. Those reads confirm the distinction is actionable, but the finding is the introduced specification conflict, not an independent later-code finding. No reproduction or test execution.\n\nSuggested bucket: other (contract/documentation correctness; no established material UX or security/data-loss impact). Confidence: confirmed from source and contracts. proposed_drop: false. possible_cover: none. Could-be-highest: false; unknown outcome and background continuation are explicitly accepted, and no additional destructive route is alleged. Revision closes lead f2; the suspected missing-reply route is not established because the relay includes the full approval allowance."
+          }
+        },
+        {
+          "line": 7,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "f2",
+            "state": "open",
+            "summary": "environment launch contracts describe different effective waits",
+            "location": "SPEC_impl.md:6695",
+            "detail": "Reviewed commit: b106c0e49646ecb9a17e1a06b17a70da0ece73e0\n\nTLDR: The two specifications describe the agent's environment-launch wait differently. The product wording describes one receipt-relative span whose remaining launch time shrinks while approval waits. The implementation wording also introduces a fresh thirty-minute timeout after Allow, which normally ends the command first. Align the wording so future work has one deadline model to follow.\n\nIntroduced contract discrepancy: Read the complete SPEC.md:4289-4341 and SPEC_impl.md:6658-6702 subsections again. SPEC.md:4336-4338 says 'Its wait covers the nine-minute approval wait and thirty minutes more, counted together from when the request reaches the helm, so a slow answer leaves less time for the launch; a launch still unfinished then is reported as an unknown outcome while the task carries on'. SPEC_impl.md:6692-6697 describes an additive relay budget, then says 'The helm bounds its own wait for the task to the same allowance after the Allow'. The surrounding complete subsection does not explain a second, earlier cutoff in SPEC.md or change that post-Allow allowance into the remaining receipt-relative budget. SPEC_impl.md:3-6 says SPEC.md wins when observable behavior differs.\n\nSynthesis correction to the previous event: Do not read the thirty-nine-minute wording as a minimum guaranteed response time, nor allege that an earlier failure violates a guaranteed wait. The exact mismatch is the stated effective-timeout model, particularly 'so a slow answer leaves less time for the launch'. Let O be the ordinary relay allowance, A the approval allowance, L the launch allowance, d the work before approval, and a the actual approval delay. The implementation description makes the outcome deadline the earlier of the relay's O+A+L from queueing and the helm's d+a+L (plus registration work) after forwarding. For prompt resolution and a <= A, the fresh L normally wins: approval uses none of the launch's thirty-minute allowance. A receipt-relative A+L span would instead leave A+L-a. The initial examples (minute 30/38 vs minute 39) illustrate these models on a still-pending successful setup, not an unconditional user guarantee.\n\nDefinition checks at the reviewed revision: approvals.rs:23-33 defines A=9 minutes; SPEC_impl.md:3781-3787 and 9390-9396 identify O=30 seconds, delivery=5 seconds, and expressly accept slow pre-approval resolution making relay expiry win. The later subsection's existing warning resolves the claim that the helm always answers before its relay: no such ordering guarantee exists. It does not make a post-Allow L consume time spent awaiting approval. At b106c0e4 this is a documentation-only design change, and no ENVIRONMENT_LAUNCH_WAIT implementation exists; this finding does not assert then-shipped premature timeout.\n\nSupplementary later implementation context only: At 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db, core.rs:312,458-460 and approvals.rs:23-45 give O=30 seconds, A=9 minutes, L=30 minutes; agent_relay.rs:646-660 adds them; its upcall at :317-326 starts the answer budget after the frame enters the connection writer queue, not actual helm receipt. agent_requests.rs:4516 waits for approval and :4542-4557 registers the owned task then starts a fresh L timeout. This confirms the two distinct cutoffs, but is not an independent later-code finding. No runtime observation or reproduction.\n\nSuggested bucket: other, specification/documentation correctness only. Confidence: confirmed mismatch in the documented effective deadline model; no guaranteed-minimum-wait or lost-reply failure alleged. proposed_drop: false. possible_cover: none. Could-be-highest: false; both contracts explicitly keep the launch task running on expiry, and no security or loss-of-work route is identified. No unresolved premise remains for this bounded wording finding."
+          }
+        },
+        {
+          "line": 14,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "f2",
+            "state": "open",
+            "summary": "environment launch contracts describe different effective waits",
+            "location": "SPEC_impl.md:6695",
+            "detail": "Reviewed commit: b106c0e49646ecb9a17e1a06b17a70da0ece73e0. Late interface synthesis: exact supplied g020/l7 event 23, reviewed implementation comment commit 190d844e58c96cf197aa838d0b0eea8062f48435. Original f2 identity, consequence and prior no-minimum-wait correction are retained; the new comment is g020/l7's independently owned location, not a new g005 ID.\n\nTLDR: The product specification describes one receipt-relative approval-plus-launch span, while the implementation specification describes an additional fresh launch allowance after approval. That gives future maintainers different effective-deadline models. The supplied later source comment makes a separate, stronger claim that the local still-launching reply must beat relay expiry; actual phase ordering does not guarantee that. Both are documentation issues, not evidence that an unknown outcome is a runtime failure.\n\nOriginal specification discrepancy: At b106c0e4, complete SPEC.md:4289-4341 and SPEC_impl.md:6658-6702 were read. SPEC.md:4336-4338 says the wait covers nine minutes of approval plus thirty minutes, 'counted together from when the request reaches the helm, so a slow answer leaves less time for the launch'. SPEC_impl.md:6692-6697 gives the relay ordinary+approval+launch in one span, then bounds the helm's task wait 'to the same allowance after the Allow'. The full surrounding subsection does not describe the earlier local cutoff in SPEC.md or turn the fresh launch timeout into the remaining receipt-relative budget. SPEC_impl.md:3-6 gives SPEC.md precedence on observable behavior. Suggested remedy remains to choose one intended effective deadline model and make both documents accurately describe it.\n\nPreserved correction and uncertainty: Thirty-nine minutes is not a minimum guaranteed wait and earlier refusal does not violate such a guarantee. The documentation mismatch is the asserted time model and the sentence that approval consumes remaining launch time. Let O=30 seconds ordinary relay allowance, A=9 minutes approval allowance, L=30 minutes local launch allowance. The relay clock starts at queue acceptance, so its deadline is tQ+O+A+L. The local clock starts only after planning/source resolution, approval and awaited environment registration, so its deadline is tH+d+a+r+L. With ordinary prompt resolution/registration, the local fresh L wins and actual approval consumes none of that local L; sufficiently slow pre-timeout work can instead make the relay win. Neither clock guarantees a minimum wait, and neither expiry cancels the owned launch. No complete deployed-delay incidence or runtime occurrence was measured or alleged. At b106c0e4 this was a documentation-only design change, with no ENVIRONMENT_LAUNCH_WAIT implementation yet; later code is supplemental caller evidence rather than then-shipped behavior.\n\nLate named input source checks: Read only g020/findings.jsonl event 23 plus complete own history, not other g020 records or prohibited coverage. At 190d844e agent_requests.rs:4493-4515 awaits approved, :4541-4549 awaits run_owned(start_session_environment), and :4555-4556 then begins the fresh L timeout. start_session_environment at provisioning/tensorlake_add.rs:357-390 performs validation, recipe/provider/place reads and awaits add_confirmations.lock_owned at :388 before returning registration; that phase has no elapsed relay-budget subtraction. agent_relay.rs:317-326 starts the answer timer on connection queue acceptance; :646-660 adds O+A+L. Thus the comment at agent_requests.rs:4550-4554, 'answering by the end of the allowance after the Allow reaches the agent before its relay gives up', is an unconditional timing explanation the source does not establish. At the same revision SPEC_impl.md:9390-9396 expressly says the extra O is 'not a guaranteed ordering', and :6692-6698 says the local reply 'normally' wins. Those correct qualifications expose rather than refute the inaccurate new source comment. A path diff from 190d844e to 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db leaves the timeout/comment lines unchanged (other path changes concern unrelated deletion/test fields).\n\nRelationship judgment: g020/l7 is useful direct evidence for the two phase origins, and a distinct documentation assertion from f2. Qualifying that comment to normally would repair l7 while leaving SPEC.md's shared-span-versus-fresh-allowance wording disagreement. Conversely, aligning the two specifications does not itself remove the comment's unconditional ordering promise. Preserve both g005/f2 and g020/l7 source provenance and consequences for parent consolidation; do not treat either as an automatic duplicate/drop or as a demand to alter the accepted runtime timing policy. No new unrelated issue or source search is introduced by this synthesis.\n\nSuggested bucket: other, specification/documentation accuracy. Confidence: confirmed written-model discrepancy and distinct comment/phase-origin mismatch by source; no guaranteed-minimum-wait, production-ordering bug or lost-reply failure alleged. proposed_drop: false (unchanged). possible_cover: caller-supplied g020/l7 is related late evidence and an independently located guarantee claim, not established exact coverage of f2. Could-be-highest: false; both expiry paths retain owned work and report unknown outcome; no security or loss-of-work route established. All readily checkable named source premises resolved, no open lead. Source-only: no execution, test, build, reproduction, install, live action or accepted parent drop/lowering."
+          }
+        }
+      ],
+      "latest": {
+        "line": 14,
+        "event": {
+          "version": 1,
+          "kind": "finding",
+          "id": "f2",
+          "state": "open",
+          "summary": "environment launch contracts describe different effective waits",
+          "location": "SPEC_impl.md:6695",
+          "detail": "Reviewed commit: b106c0e49646ecb9a17e1a06b17a70da0ece73e0. Late interface synthesis: exact supplied g020/l7 event 23, reviewed implementation comment commit 190d844e58c96cf197aa838d0b0eea8062f48435. Original f2 identity, consequence and prior no-minimum-wait correction are retained; the new comment is g020/l7's independently owned location, not a new g005 ID.\n\nTLDR: The product specification describes one receipt-relative approval-plus-launch span, while the implementation specification describes an additional fresh launch allowance after approval. That gives future maintainers different effective-deadline models. The supplied later source comment makes a separate, stronger claim that the local still-launching reply must beat relay expiry; actual phase ordering does not guarantee that. Both are documentation issues, not evidence that an unknown outcome is a runtime failure.\n\nOriginal specification discrepancy: At b106c0e4, complete SPEC.md:4289-4341 and SPEC_impl.md:6658-6702 were read. SPEC.md:4336-4338 says the wait covers nine minutes of approval plus thirty minutes, 'counted together from when the request reaches the helm, so a slow answer leaves less time for the launch'. SPEC_impl.md:6692-6697 gives the relay ordinary+approval+launch in one span, then bounds the helm's task wait 'to the same allowance after the Allow'. The full surrounding subsection does not describe the earlier local cutoff in SPEC.md or turn the fresh launch timeout into the remaining receipt-relative budget. SPEC_impl.md:3-6 gives SPEC.md precedence on observable behavior. Suggested remedy remains to choose one intended effective deadline model and make both documents accurately describe it.\n\nPreserved correction and uncertainty: Thirty-nine minutes is not a minimum guaranteed wait and earlier refusal does not violate such a guarantee. The documentation mismatch is the asserted time model and the sentence that approval consumes remaining launch time. Let O=30 seconds ordinary relay allowance, A=9 minutes approval allowance, L=30 minutes local launch allowance. The relay clock starts at queue acceptance, so its deadline is tQ+O+A+L. The local clock starts only after planning/source resolution, approval and awaited environment registration, so its deadline is tH+d+a+r+L. With ordinary prompt resolution/registration, the local fresh L wins and actual approval consumes none of that local L; sufficiently slow pre-timeout work can instead make the relay win. Neither clock guarantees a minimum wait, and neither expiry cancels the owned launch. No complete deployed-delay incidence or runtime occurrence was measured or alleged. At b106c0e4 this was a documentation-only design change, with no ENVIRONMENT_LAUNCH_WAIT implementation yet; later code is supplemental caller evidence rather than then-shipped behavior.\n\nLate named input source checks: Read only g020/findings.jsonl event 23 plus complete own history, not other g020 records or prohibited coverage. At 190d844e agent_requests.rs:4493-4515 awaits approved, :4541-4549 awaits run_owned(start_session_environment), and :4555-4556 then begins the fresh L timeout. start_session_environment at provisioning/tensorlake_add.rs:357-390 performs validation, recipe/provider/place reads and awaits add_confirmations.lock_owned at :388 before returning registration; that phase has no elapsed relay-budget subtraction. agent_relay.rs:317-326 starts the answer timer on connection queue acceptance; :646-660 adds O+A+L. Thus the comment at agent_requests.rs:4550-4554, 'answering by the end of the allowance after the Allow reaches the agent before its relay gives up', is an unconditional timing explanation the source does not establish. At the same revision SPEC_impl.md:9390-9396 expressly says the extra O is 'not a guaranteed ordering', and :6692-6698 says the local reply 'normally' wins. Those correct qualifications expose rather than refute the inaccurate new source comment. A path diff from 190d844e to 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db leaves the timeout/comment lines unchanged (other path changes concern unrelated deletion/test fields).\n\nRelationship judgment: g020/l7 is useful direct evidence for the two phase origins, and a distinct documentation assertion from f2. Qualifying that comment to normally would repair l7 while leaving SPEC.md's shared-span-versus-fresh-allowance wording disagreement. Conversely, aligning the two specifications does not itself remove the comment's unconditional ordering promise. Preserve both g005/f2 and g020/l7 source provenance and consequences for parent consolidation; do not treat either as an automatic duplicate/drop or as a demand to alter the accepted runtime timing policy. No new unrelated issue or source search is introduced by this synthesis.\n\nSuggested bucket: other, specification/documentation accuracy. Confidence: confirmed written-model discrepancy and distinct comment/phase-origin mismatch by source; no guaranteed-minimum-wait, production-ordering bug or lost-reply failure alleged. proposed_drop: false (unchanged). possible_cover: caller-supplied g020/l7 is related late evidence and an independently located guarantee claim, not established exact coverage of f2. Could-be-highest: false; both expiry paths retain owned work and report unknown outcome; no security or loss-of-work route established. All readily checkable named source premises resolved, no open lead. Source-only: no execution, test, build, reproduction, install, live action or accepted parent drop/lowering."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g005/findings.jsonl",
+        "id": "f2",
+        "line": 7,
+        "disposition": "verified",
+        "group": "environment-agent-launch-specs-disagree-receipt-relative-versus-post-allow-timeout",
+        "reason": "Parent explicitly accepted named retain-verified proposal from claims-002 after inspecting it. The specifications describe different effective deadline models. This is a bounded contract wording discrepancy, not a minimum-response-time promise or an established lost reply/cancellation bug. Retain the two explicit conflicting deadline descriptions, keeping all corrections to the earlier stronger timeout interpretation. Checked source/results: [\"Read full b106c0e49646ecb9a17e1a06b17a70da0ece73e0 SPEC.md:4289-4341 and SPEC_impl.md:6658-6702. Product wording uses a receipt-relative approval-plus-launch span and says slow approval leaves less launch time. Implementation wording adds a relay span and a fresh thirty-minute post-Allow helm wait.\",\"At 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db, agent_requests.rs:4506-4557 waits for approval, registers owned work, then times out result with ENVIRONMENT_LAUNCH_WAIT. This source confirms the post-Allow model as supplementary context; the finding was introduced by the earlier documentation-only change.\",\"Current SPEC.md:4293-4305 and SPEC_impl.md:6185-6213 retain the discrepancy. Neither timeout cancels the launch. Earlier minute-30/38-versus-39 examples are model illustrations on a still-pending setup, not guaranteed minimum response times. No runtime failure was observed.\"] Current coverage/results: [\"The current authoritative specifications retain both descriptions; accepted background continuation and relay expiry do not explain away the differing timeout origins or the 'slow answer leaves less time' statement.\",\"TODO.md Planned is empty. Launch deadline/approval budget/thirty-minute/timeout-origin searches of plans/queue, BUGS.md, INDEX.md and active TRIAGE_OUTCOMES.md found no exact cover or same-root queued item. environment-agent-operations is landed, not future cover.\",\"FILTER.md does not cover persistent conflicting design contracts. The claim does not depend on a rare runtime trigger or only an imprecise error message.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Initial lead suspected agent/helm wait mismatch leaving a launch running after the caller stopped waiting; subsequent source work refuted the missing-relay-budget implication. Retain only the established effective-deadline contract discrepancy. No security, cancellation or work-loss route was alleged.\"; null."
+      },
+      "accepted_parent_decision": {
+        "key": "g005/f2",
+        "line": 7,
+        "disposition": "verified",
+        "group": "environment-agent-launch-specs-disagree-receipt-relative-versus-post-allow-timeout",
+        "bucket": "other",
+        "recording": "retain-verified",
+        "queue_target_candidate": null,
+        "needs_independent_drop_check": false,
+        "reason": "Parent explicitly accepted named retain-verified proposal from claims-002 after inspecting it. The specifications describe different effective deadline models. This is a bounded contract wording discrepancy, not a minimum-response-time promise or an established lost reply/cancellation bug. Retain the two explicit conflicting deadline descriptions, keeping all corrections to the earlier stronger timeout interpretation. Checked source/results: [\"Read full b106c0e49646ecb9a17e1a06b17a70da0ece73e0 SPEC.md:4289-4341 and SPEC_impl.md:6658-6702. Product wording uses a receipt-relative approval-plus-launch span and says slow approval leaves less launch time. Implementation wording adds a relay span and a fresh thirty-minute post-Allow helm wait.\",\"At 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db, agent_requests.rs:4506-4557 waits for approval, registers owned work, then times out result with ENVIRONMENT_LAUNCH_WAIT. This source confirms the post-Allow model as supplementary context; the finding was introduced by the earlier documentation-only change.\",\"Current SPEC.md:4293-4305 and SPEC_impl.md:6185-6213 retain the discrepancy. Neither timeout cancels the launch. Earlier minute-30/38-versus-39 examples are model illustrations on a still-pending setup, not guaranteed minimum response times. No runtime failure was observed.\"] Current coverage/results: [\"The current authoritative specifications retain both descriptions; accepted background continuation and relay expiry do not explain away the differing timeout origins or the 'slow answer leaves less time' statement.\",\"TODO.md Planned is empty. Launch deadline/approval budget/thirty-minute/timeout-origin searches of plans/queue, BUGS.md, INDEX.md and active TRIAGE_OUTCOMES.md found no exact cover or same-root queued item. environment-agent-operations is landed, not future cover.\",\"FILTER.md does not cover persistent conflicting design contracts. The claim does not depend on a rare runtime trigger or only an imprecise error message.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Initial lead suspected agent/helm wait mismatch leaving a launch running after the caller stopped waiting; subsequent source work refuted the missing-relay-budget implication. Retain only the established effective-deadline contract discrepancy. No security, cancellation or work-loss route was alleged.\"; null."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-002",
+          "key": "g005/f2",
+          "latest_line": 7,
+          "recommendation": "retain-verified",
+          "bucket": "other",
+          "underlying_key": "environment-agent-launch-specs-disagree-receipt-relative-versus-post-allow-timeout",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The specifications describe different effective deadline models. This is a bounded contract wording discrepancy, not a minimum-response-time promise or an established lost reply/cancellation bug.",
+          "checks": [
+            "Read full b106c0e49646ecb9a17e1a06b17a70da0ece73e0 SPEC.md:4289-4341 and SPEC_impl.md:6658-6702. Product wording uses a receipt-relative approval-plus-launch span and says slow approval leaves less launch time. Implementation wording adds a relay span and a fresh thirty-minute post-Allow helm wait.",
+            "At 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db, agent_requests.rs:4506-4557 waits for approval, registers owned work, then times out result with ENVIRONMENT_LAUNCH_WAIT. This source confirms the post-Allow model as supplementary context; the finding was introduced by the earlier documentation-only change.",
+            "Current SPEC.md:4293-4305 and SPEC_impl.md:6185-6213 retain the discrepancy. Neither timeout cancels the launch. Earlier minute-30/38-versus-39 examples are model illustrations on a still-pending setup, not guaranteed minimum response times. No runtime failure was observed."
+          ],
+          "coverage_checked": [
+            "The current authoritative specifications retain both descriptions; accepted background continuation and relay expiry do not explain away the differing timeout origins or the 'slow answer leaves less time' statement.",
+            "TODO.md Planned is empty. Launch deadline/approval budget/thirty-minute/timeout-origin searches of plans/queue, BUGS.md, INDEX.md and active TRIAGE_OUTCOMES.md found no exact cover or same-root queued item. environment-agent-operations is landed, not future cover.",
+            "FILTER.md does not cover persistent conflicting design contracts. The claim does not depend on a rare runtime trigger or only an imprecise error message."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": null,
+          "original_stronger_consequence": "Initial lead suspected agent/helm wait mismatch leaving a launch running after the caller stopped waiting; subsequent source work refuted the missing-relay-budget implication. Retain only the established effective-deadline contract discrepancy. No security, cancellation or work-loss route was alleged.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Retain the two explicit conflicting deadline descriptions, keeping all corrections to the earlier stronger timeout interpretation."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": true,
+        "clearly_refuted_candidate": false,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "environment-agent-launch-specs-disagree-receipt-relative-versus-post-allow-timeout",
+        "destination": "trailing-environment-agent-launch-specs-disagree-receipt-relative-versus-post-allow-timeout.md"
+      }
+    },
+    {
+      "key": "g005/f3",
+      "owner": "g005",
+      "id": "f3",
+      "domain": "product-contracts",
+      "purpose": "product-contracts: SPEC_impl.md, SPEC.md; phases @@ -6179,36 +6160,35 @@ beside its installation snapshot from AppBody, independently of the filtered sid",
+      "history": [
+        {
+          "line": 4,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "f3",
+            "state": "open",
+            "summary": "removed tmux release payloads do not strand current provisioning",
+            "location": "SPEC_impl.md:8074",
+            "detail": "Reviewed commit: cb762a313abbe6da03ae0bf041f07486c4ed4df9\n\nTLDR: Considered whether stopping publication of private tmux binaries would make remote Linux setup fail when the host has no acceptable tmux. Source refutes that route: current provisioning no longer installs or needs a tmux payload.\n\nDetails: Assigned change reduces SHA256SUMS from six payloads to four archives plus install.sh, and explicitly states clients look up entries by name. assets.rs:43-65 contains only the three farhelm targets and desktop archive; assets.rs:99-109 explains consumers look entries up by name instead of demanding an exact set. plan.rs:244-263 removes legacy bundled tmux on update and plan.rs:291-294 explicitly says 'There is no tmux step.' Thus the old provisioning dependency is gone before this commit's archive removal. A different question, old clients downloading the latest release, is also refuted by SPEC_impl.md:8050-8071: provisioning downloads its own version's release, never latest, and older published releases retain their tmux entries. Suggested bucket: other if there were a contract-only issue; no bug established. Confidence: confirmed source refutation. proposed_drop: source refutation above. possible_cover: none. Could-be-highest: false; the considered consequence was inability to provision a new host, not data loss or weakened verification. No runtime execution or reproduction."
+          }
+        },
+        {
+          "line": 6,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "f3",
+            "state": "open",
+            "summary": "removed tmux release payloads do not strand current provisioning",
+            "location": "SPEC_impl.md:8074",
+            "detail": "Reviewed commit: cb762a313abbe6da03ae0bf041f07486c4ed4df9\n\nTLDR: Considered whether stopping publication of private tmux binaries would make remote Linux setup fail when the host has no acceptable tmux. Source refutes that route: current provisioning no longer installs or needs a tmux payload.\n\nDetails: Assigned change reduces SHA256SUMS from six payloads to four archives plus install.sh, explicitly stating clients look entries up by name. assets.rs:43-65 contains only the three farhelm targets and desktop archive; assets.rs:99-109 explains downloads look entries up by name instead of demanding an exact set. plan.rs:244-263 describes removal of the previous bundled tmux after the new supervisor starts, and plan.rs:841-870 constructs the Linux setup/update actions from the supervisor unit, manager reload, enable, restart when applicable, RemoveBundledTmux and attachment; there is no tmux installation. The earlier event also cited plan.rs:291-294, but that paragraph concerns uninstall, so this revision corrects the supporting reference without changing the conclusion. Old clients do not need newly published tmux assets either: SPEC_impl.md:8050-8071 says provisioning downloads its own version's release, never latest, and older published releases retain their tmux entries.\n\nSuggested bucket: other if a contract-only issue existed; no bug established. Confidence: confirmed source refutation. proposed_drop: source refutation above. possible_cover: none. Could-be-highest: false; considered consequence was inability to provision a new host, not data loss or weakened verification. No runtime execution or reproduction."
+          }
+        },
+        {
+          "line": 9,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "f3",
+            "state": "open",
+            "summary": "removed tmux payloads do not break version-pinned provisioning",
+            "location": "SPEC_impl.md:8074",
+            "detail": "Reviewed commit: cb762a313abbe6da03ae0bf041f07486c4ed4df9\n\nTLDR: The considered setup failure from removing tmux downloads remains refuted. New provisioning no longer needs a tmux binary, and older helms ask for their own version's immutable release rather than this release's reduced asset set. This remains a proposed source-based exclusion, not an accepted parent drop.\n\nOriginal concern and source refutation: The changed contract lists four program archives plus install.sh instead of six program payloads. An older tmux-dependent setup would fail if it fetched a new manifest without its tmux asset, and new setup would fail if a current caller still requested one. Current assets.rs:43-65 lists only farhelm/farhelm-desktop; ReleasePayloadSource::path at release_payloads.rs:803-830 selects farhelm_archive_for(target), looks only that archive up by name, and never demands the complete release inventory. assets.rs:98-103 explicitly documents that sums_members is not a runtime exact-set restriction. plan.rs:244-263 and 841-870 install/start the new supervisor and remove an earlier bundled tmux afterwards, with no tmux-install action. Those source reads refute the current-client missing-payload premise.\n\nSynthesis of version/download premises: SPEC_impl.md:8050-8070 pins provisioning to its own release, with a version-and-origin cache. payloads.rs:943-945 constructs https://get.farhelm.io/v{version}/, :1082-1100 passes release_payloads::VERSION to production_payloads_with_key, and :1172-1207 chooses the default versioned URL and supplies the same expected version to ReleasePayloadSource. release_payloads.rs:457-471 verifies the fetched sums with that expected version, :899-907 requires its trusted comment to name that version, and :803-830 reads entries individually. Thus even a custom release-base URL does not silently turn a new release into an older helm's own release: signed-version mismatch refuses it. The default path does not consult /latest. Older published files retaining tmux are an explicit preservation premise in SPEC_impl.md:8074-8077, not evidence that those historical files were fetched during this review. No network or runtime validation was performed. Operator-staged payload directories remain explicitly operator-trusted under SPEC_impl.md:8058-8060; they do not create a new automatic download dependency.\n\nSuggested bucket: other if a contract-only issue existed; no bug established. Confidence: confirmed source refutation under the stated immutable-release contract. proposed_drop: exact source/contract refutation above, pending parent disposition. possible_cover: none. Could-be-highest: false for this considered missing-payload/setup-failure route; the code retains signed-version and digest verification and no security or loss-of-work consequence was established. All readily checkable caller premises settled; no open lead. This revision preserves the original considered setup consequence and adds concrete production call-chain evidence."
+          }
+        }
+      ],
+      "latest": {
+        "line": 9,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "f3",
+          "state": "open",
+          "summary": "removed tmux payloads do not break version-pinned provisioning",
+          "location": "SPEC_impl.md:8074",
+          "detail": "Reviewed commit: cb762a313abbe6da03ae0bf041f07486c4ed4df9\n\nTLDR: The considered setup failure from removing tmux downloads remains refuted. New provisioning no longer needs a tmux binary, and older helms ask for their own version's immutable release rather than this release's reduced asset set. This remains a proposed source-based exclusion, not an accepted parent drop.\n\nOriginal concern and source refutation: The changed contract lists four program archives plus install.sh instead of six program payloads. An older tmux-dependent setup would fail if it fetched a new manifest without its tmux asset, and new setup would fail if a current caller still requested one. Current assets.rs:43-65 lists only farhelm/farhelm-desktop; ReleasePayloadSource::path at release_payloads.rs:803-830 selects farhelm_archive_for(target), looks only that archive up by name, and never demands the complete release inventory. assets.rs:98-103 explicitly documents that sums_members is not a runtime exact-set restriction. plan.rs:244-263 and 841-870 install/start the new supervisor and remove an earlier bundled tmux afterwards, with no tmux-install action. Those source reads refute the current-client missing-payload premise.\n\nSynthesis of version/download premises: SPEC_impl.md:8050-8070 pins provisioning to its own release, with a version-and-origin cache. payloads.rs:943-945 constructs https://get.farhelm.io/v{version}/, :1082-1100 passes release_payloads::VERSION to production_payloads_with_key, and :1172-1207 chooses the default versioned URL and supplies the same expected version to ReleasePayloadSource. release_payloads.rs:457-471 verifies the fetched sums with that expected version, :899-907 requires its trusted comment to name that version, and :803-830 reads entries individually. Thus even a custom release-base URL does not silently turn a new release into an older helm's own release: signed-version mismatch refuses it. The default path does not consult /latest. Older published files retaining tmux are an explicit preservation premise in SPEC_impl.md:8074-8077, not evidence that those historical files were fetched during this review. No network or runtime validation was performed. Operator-staged payload directories remain explicitly operator-trusted under SPEC_impl.md:8058-8060; they do not create a new automatic download dependency.\n\nSuggested bucket: other if a contract-only issue existed; no bug established. Confidence: confirmed source refutation under the stated immutable-release contract. proposed_drop: exact source/contract refutation above, pending parent disposition. possible_cover: none. Could-be-highest: false for this considered missing-payload/setup-failure route; the code retains signed-version and digest verification and no security or loss-of-work consequence was established. All readily checkable caller premises settled; no open lead. This revision preserves the original considered setup consequence and adds concrete production call-chain evidence."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g005/findings.jsonl",
+        "id": "f3",
+        "line": 9,
+        "disposition": "excluded",
+        "group": "removed-tmux-release-assets-break-version-pinned-provisioning",
+        "reason": "Parent explicitly accepted named refuted proposal from claims-002 after inspecting it. New provisioning requests only its farhelm archive, and older helms use their own immutable versioned release. Removing tmux assets from new releases does not establish the considered missing-payload failure. Actual single-archive caller, no tmux-install action, version-pinned URL and signed expected-version check, with immutable remote-object availability left as an explicit contract premise. Checked source/results: [\"At cb762a313abbe6da03ae0bf041f07486c4ed4df9, provisioning/release_payloads.rs:803-830 selects farhelm_archive_for and looks up its single name, not a complete inventory. plan.rs:841-870 installs/enables/restarts the supervisor and removes bundled tmux, with no tmux installation action.\",\"At the same hash, payloads.rs:943-945 constructs /v{version}/; :1082-1100 supplies release_payloads::VERSION; :1172-1207 carries that expected version through default or custom release URLs. release_payloads.rs:899-907 refuses a signed checksum whose trusted comment names another version.\",\"Current SPEC_impl.md:8038-8072 states own-version downloads and the immutable release layout, retaining older releases' tmux entries. This is a preservation premise, not network evidence that every historical object was fetched. Operator-staged directories remain explicitly trusted. No runtime or network reproduction was performed.\"] Current coverage/results: [\"Both specifications were searched for release payloads/versioned provisioning. SPEC_impl.md's own-version and permanent-layout contracts support the refutation; no current specification requires new clients to fetch tmux.\",\"TODO.md Planned is empty. Payload/tmux/versioned-download searches of plans/queue, BUGS.md, INDEX.md and active TRIAGE_OUTCOMES.md found no exact same-root queued concern. tmux-drop-from-install is already landed per plans/REPORTS.md:30.\",\"No FILTER.md basis is asserted; a normally broken upgrade/provisioning route would not be dismissed merely because old versions are involved.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"New setup might fail without tmux, or an old tmux-dependent client might fetch a new manifest missing its payload. Source refutes both request routes under the immutable-release contract; no security or work-loss consequence was established.\"; \"A supported current caller still requesting tmux, an old client fetching the new reduced manifest instead of its own version, or a violation of immutable older-release preservation. None is established; local source does not prove remote historical object availability.\"."
+      },
+      "accepted_parent_decision": {
+        "key": "g005/f3",
+        "line": 9,
+        "disposition": "excluded",
+        "group": "removed-tmux-release-assets-break-version-pinned-provisioning",
+        "bucket": "other",
+        "recording": "refuted",
+        "queue_target_candidate": null,
+        "needs_independent_drop_check": false,
+        "reason": "Parent explicitly accepted named refuted proposal from claims-002 after inspecting it. New provisioning requests only its farhelm archive, and older helms use their own immutable versioned release. Removing tmux assets from new releases does not establish the considered missing-payload failure. Actual single-archive caller, no tmux-install action, version-pinned URL and signed expected-version check, with immutable remote-object availability left as an explicit contract premise. Checked source/results: [\"At cb762a313abbe6da03ae0bf041f07486c4ed4df9, provisioning/release_payloads.rs:803-830 selects farhelm_archive_for and looks up its single name, not a complete inventory. plan.rs:841-870 installs/enables/restarts the supervisor and removes bundled tmux, with no tmux installation action.\",\"At the same hash, payloads.rs:943-945 constructs /v{version}/; :1082-1100 supplies release_payloads::VERSION; :1172-1207 carries that expected version through default or custom release URLs. release_payloads.rs:899-907 refuses a signed checksum whose trusted comment names another version.\",\"Current SPEC_impl.md:8038-8072 states own-version downloads and the immutable release layout, retaining older releases' tmux entries. This is a preservation premise, not network evidence that every historical object was fetched. Operator-staged directories remain explicitly trusted. No runtime or network reproduction was performed.\"] Current coverage/results: [\"Both specifications were searched for release payloads/versioned provisioning. SPEC_impl.md's own-version and permanent-layout contracts support the refutation; no current specification requires new clients to fetch tmux.\",\"TODO.md Planned is empty. Payload/tmux/versioned-download searches of plans/queue, BUGS.md, INDEX.md and active TRIAGE_OUTCOMES.md found no exact same-root queued concern. tmux-drop-from-install is already landed per plans/REPORTS.md:30.\",\"No FILTER.md basis is asserted; a normally broken upgrade/provisioning route would not be dismissed merely because old versions are involved.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"New setup might fail without tmux, or an old tmux-dependent client might fetch a new manifest missing its payload. Source refutes both request routes under the immutable-release contract; no security or work-loss consequence was established.\"; \"A supported current caller still requesting tmux, an old client fetching the new reduced manifest instead of its own version, or a violation of immutable older-release preservation. None is established; local source does not prove remote historical object availability.\"."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-002",
+          "key": "g005/f3",
+          "latest_line": 9,
+          "recommendation": "refuted",
+          "bucket": "other",
+          "underlying_key": "removed-tmux-release-assets-break-version-pinned-provisioning",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "New provisioning requests only its farhelm archive, and older helms use their own immutable versioned release. Removing tmux assets from new releases does not establish the considered missing-payload failure.",
+          "checks": [
+            "At cb762a313abbe6da03ae0bf041f07486c4ed4df9, provisioning/release_payloads.rs:803-830 selects farhelm_archive_for and looks up its single name, not a complete inventory. plan.rs:841-870 installs/enables/restarts the supervisor and removes bundled tmux, with no tmux installation action.",
+            "At the same hash, payloads.rs:943-945 constructs /v{version}/; :1082-1100 supplies release_payloads::VERSION; :1172-1207 carries that expected version through default or custom release URLs. release_payloads.rs:899-907 refuses a signed checksum whose trusted comment names another version.",
+            "Current SPEC_impl.md:8038-8072 states own-version downloads and the immutable release layout, retaining older releases' tmux entries. This is a preservation premise, not network evidence that every historical object was fetched. Operator-staged directories remain explicitly trusted. No runtime or network reproduction was performed."
+          ],
+          "coverage_checked": [
+            "Both specifications were searched for release payloads/versioned provisioning. SPEC_impl.md's own-version and permanent-layout contracts support the refutation; no current specification requires new clients to fetch tmux.",
+            "TODO.md Planned is empty. Payload/tmux/versioned-download searches of plans/queue, BUGS.md, INDEX.md and active TRIAGE_OUTCOMES.md found no exact same-root queued concern. tmux-drop-from-install is already landed per plans/REPORTS.md:30.",
+            "No FILTER.md basis is asserted; a normally broken upgrade/provisioning route would not be dismissed merely because old versions are involved."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": "A supported current caller still requesting tmux, an old client fetching the new reduced manifest instead of its own version, or a violation of immutable older-release preservation. None is established; local source does not prove remote historical object availability.",
+          "original_stronger_consequence": "New setup might fail without tmux, or an old tmux-dependent client might fetch a new manifest missing its payload. Source refutes both request routes under the immutable-release contract; no security or work-loss consequence was established.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Actual single-archive caller, no tmux-install action, version-pinned URL and signed expected-version check, with immutable remote-object availability left as an explicit contract premise."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "removed-tmux-release-assets-break-version-pinned-provisioning",
+        "destination": null
+      }
+    },
+    {
+      "key": "g005/f4",
+      "owner": "g005",
+      "id": "f4",
+      "domain": "product-contracts",
+      "purpose": "product-contracts: SPEC_impl.md, SPEC.md; phases @@ -6179,36 +6160,35 @@ beside its installation snapshot from AppBody, independently of the filtered sid",
+      "history": [
+        {
+          "line": 10,
+          "event": {
+            "version": 1,
+            "kind": "lead",
+            "id": "f4",
+            "state": "open",
+            "summary": "reconcile supplied restart-confirmation authority concern",
+            "location": "SPEC.md:3529",
+            "detail": "Reviewed assigned commit: dbfc69751215dbf15e1d31d5bed73c3754c4ebc4. Caller-supplied interface record: g032/l5 in discovery-neighbours.json, read through line 260 so far. TLDR: A Restart confirmation can say no process remains after an update interruption, then the fresh cleanup which narrowed f1 may kill old startup-budget survivors. This is separate from duplicate agents and potentially highest because it concerns stopping work beyond the displayed confirmation. The supplied record names exact UI-to-guard-to-sweep source paths; they have not yet been independently checked in this discovery turn. Need inspect status.rs restart_consequence/restart_prompt_stops, the header question lifetime, the false-stop-consent handler and the exact accepted-leftovers versus Answers-bind-to-drawn contracts at dbfc6975. Suggested bucket: possibly highest pending source checks; could-be-highest true. Confidence: supplied-source lead, not yet independently confirmed here or observed during execution. proposed_drop: false; do not apply f1's duplicate-agent acceptance as blanket consent acceptance. possible_cover: caller-supplied g032/l5; no prohibited coverage search. This is an interface reconciliation lead, not a new claimed discovery. Preserve original separate loss-of-work consequence and g032/l5 provenance. No runtime tests or reproductions."
+          }
+        },
+        {
+          "line": 11,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "f4",
+            "state": "open",
+            "summary": "supplied duplicate: interrupted Restart confirmation understates cleanup",
+            "location": "SPEC.md:3529",
+            "detail": "Reviewed assigned commit: dbfc69751215dbf15e1d31d5bed73c3754c4ebc4. Interface provenance: caller-supplied g032/l5, independently source-checked here; this is reconciliation of an existing neighbour concern, not a new independent discovery.\n\nTLDR: A Restart question opened while an old-terminal agent was working can later say 'nothing left to stop' after the update marks it interrupted, yet the confirmed Restart can terminate surviving agent work. This is separate from f1's question of two agents running concurrently: the fresh sweep that narrowed f1 establishes this cleanup-authority concern instead. Potentially highest consequence: surviving user-owned processes/work can be stopped beyond the displayed destructive consequence. No runtime occurrence or work loss observed.\n\nSource/contract checks at the assigned revision: status.rs:608-615 explicitly reasons that Interrupted leaves nothing behind, and :634-635 changes the consequence to 'Interrupted by a host reboot or a Farhelm update — nothing left to stop; restart it:'. session_view.rs:199-200 and :2255-2264 opens a question only from Running, while :2043 reads the still-open ConfirmSlot independently of current status. :2594-2595 renders the consequence for the current shown status, :2008 derives false stop consent for Interrupted through status.rs:650-651, and :2612-2621 takes the rendered opening and sends that captured false consent. The generic button tooltip at :2600 still names stopping the agent, so it conflicts with rather than repairs the substantive 'nothing left' consequence sentence. The route requires a question left mounted through update/reconnect and a later Interrupted detail render; navigation/unmount cancels that premise.\n\nActual cleanup: core.rs:12845-12891 treats a terminal-less converted old row as no live pane; :12906 calls refuse_unconsented_stop with alive=false. That helper at :3784-3797 refuses only alive && !stop_if_running && Running, so this consent does not block leftover reaping. core.rs:12985-13010 performs the fresh recorded-scope AgentOnly sweep before relaunch. Retirement uses Warn and a shared fifteen-second budget (old_terminals.rs:290-355), then core.rs:7337-7382 converts the row regardless of failure. An ordinary budget exhaustion can therefore leave identifiable old agent work which this later sweep stops. No missing-marker or second-agent premise is required.\n\nExact acceptance boundary preserved: SPEC_impl.md:2994-2995 says 'A sweep that runs out of time leaves the rest for the session's Restart or Delete: the conversion commits regardless.' :2998-3000 accepts startup continuation and possible duplicate agents. These accept the residual and later cleanup, not an explicit 'nothing left to stop' confirmation. The separate controlling contract is SPEC_impl.md:1071 onward, Answers bind to what was drawn, and SPEC.md Lifecycle operations: a destructive confirmation authorizes only the consequence shown at the click. The assigned SPEC.md:3529-3537 intentionally extends Interrupted-card explanations to updates; it supplies no waiver of confirmation truthfulness. Suggested correction is accurate consequence wording, preserving accepted cleanup rather than removing the fresh sweep.\n\nSuggested bucket: highest for stopping undisclosed surviving user work, conditional on the stated supported timing; rarity is not a lowering basis. Could-be-highest: true. Confidence: confirmed conditional source/control route and contract mismatch; no execution. proposed_drop: false. possible_cover: exact supplied g032/l5 duplicate, retained for parent deduplication with both provenances. Previous f4 lead is closed to this source-confirmed interface finding. No parent drop/lowering accepted. No reproduction, test, build or forbidden coverage search. Read all supplied discovery-neighbours.json lines 1..1111 before the new source search; no other neighbour issue is newly claimed here."
+          }
+        }
+      ],
+      "latest": {
+        "line": 11,
+        "event": {
+          "version": 1,
+          "kind": "finding",
+          "id": "f4",
+          "state": "open",
+          "summary": "supplied duplicate: interrupted Restart confirmation understates cleanup",
+          "location": "SPEC.md:3529",
+          "detail": "Reviewed assigned commit: dbfc69751215dbf15e1d31d5bed73c3754c4ebc4. Interface provenance: caller-supplied g032/l5, independently source-checked here; this is reconciliation of an existing neighbour concern, not a new independent discovery.\n\nTLDR: A Restart question opened while an old-terminal agent was working can later say 'nothing left to stop' after the update marks it interrupted, yet the confirmed Restart can terminate surviving agent work. This is separate from f1's question of two agents running concurrently: the fresh sweep that narrowed f1 establishes this cleanup-authority concern instead. Potentially highest consequence: surviving user-owned processes/work can be stopped beyond the displayed destructive consequence. No runtime occurrence or work loss observed.\n\nSource/contract checks at the assigned revision: status.rs:608-615 explicitly reasons that Interrupted leaves nothing behind, and :634-635 changes the consequence to 'Interrupted by a host reboot or a Farhelm update — nothing left to stop; restart it:'. session_view.rs:199-200 and :2255-2264 opens a question only from Running, while :2043 reads the still-open ConfirmSlot independently of current status. :2594-2595 renders the consequence for the current shown status, :2008 derives false stop consent for Interrupted through status.rs:650-651, and :2612-2621 takes the rendered opening and sends that captured false consent. The generic button tooltip at :2600 still names stopping the agent, so it conflicts with rather than repairs the substantive 'nothing left' consequence sentence. The route requires a question left mounted through update/reconnect and a later Interrupted detail render; navigation/unmount cancels that premise.\n\nActual cleanup: core.rs:12845-12891 treats a terminal-less converted old row as no live pane; :12906 calls refuse_unconsented_stop with alive=false. That helper at :3784-3797 refuses only alive && !stop_if_running && Running, so this consent does not block leftover reaping. core.rs:12985-13010 performs the fresh recorded-scope AgentOnly sweep before relaunch. Retirement uses Warn and a shared fifteen-second budget (old_terminals.rs:290-355), then core.rs:7337-7382 converts the row regardless of failure. An ordinary budget exhaustion can therefore leave identifiable old agent work which this later sweep stops. No missing-marker or second-agent premise is required.\n\nExact acceptance boundary preserved: SPEC_impl.md:2994-2995 says 'A sweep that runs out of time leaves the rest for the session's Restart or Delete: the conversion commits regardless.' :2998-3000 accepts startup continuation and possible duplicate agents. These accept the residual and later cleanup, not an explicit 'nothing left to stop' confirmation. The separate controlling contract is SPEC_impl.md:1071 onward, Answers bind to what was drawn, and SPEC.md Lifecycle operations: a destructive confirmation authorizes only the consequence shown at the click. The assigned SPEC.md:3529-3537 intentionally extends Interrupted-card explanations to updates; it supplies no waiver of confirmation truthfulness. Suggested correction is accurate consequence wording, preserving accepted cleanup rather than removing the fresh sweep.\n\nSuggested bucket: highest for stopping undisclosed surviving user work, conditional on the stated supported timing; rarity is not a lowering basis. Could-be-highest: true. Confidence: confirmed conditional source/control route and contract mismatch; no execution. proposed_drop: false. possible_cover: exact supplied g032/l5 duplicate, retained for parent deduplication with both provenances. Previous f4 lead is closed to this source-confirmed interface finding. No parent drop/lowering accepted. No reproduction, test, build or forbidden coverage search. Read all supplied discovery-neighbours.json lines 1..1111 before the new source search; no other neighbour issue is newly claimed here."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g005/findings.jsonl",
+        "id": "f4",
+        "line": 11,
+        "disposition": "under-investigation",
+        "group": "g005-f4",
+        "reason": "Record durably acknowledged; parent source/contract validation, cross-group synthesis, coverage/filter matching and any independent drop check remain pending. This preserves the claim and uncertainty without accepting, dropping or lowering it."
+      },
+      "accepted_parent_decision": null,
+      "returned_claim_checks": [
+        {
+          "batch": "claims-003",
+          "key": "g005/f4",
+          "latest_line": 11,
+          "recommendation": "filtered",
+          "bucket": "highest",
+          "underlying_key": "old-terminal-survivor-interrupted-restart-false-stop-warning",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The conditional warning/cleanup mismatch is established by source. A retained Restart question can change to Interrupted and promise nothing remains to stop, while the fresh AgentOnly cleanup stops a startup survivor. The current older-release-plus-rare-condition filter appears to cover the entire route. This is a proposed exclusion, not an accepted drop or a claim that the warning is correct.",
+          "checks": [
+            "dbfc69751215dbf15e1d31d5bed73c3754c4ebc4:crates/farhelm-ui/src/status.rs:608-651 explicitly assumes Interrupted leaves nothing behind, renders the update/reboot nothing-left warning, and derives false stop consent.",
+            "Same revision:session_view.rs:1990-2052,2243-2272,2580-2634 retains the opening independently of current status and answers with that render's false consent. The route requires the question to remain mounted across update/reconnect; navigation/unmount removes this premise. The generic stop tooltip contradicts rather than cures the consequence text.",
+            "Same revision:service/core.rs:3775-3800,12840-12916,12979-13018 treats terminal-less old rows as no live agent for the consent guard, then runs AgentOnly cleanup with the prior scope and Refuse before relaunch. service/core/old_terminals.rs:290-355, checked at 1ed482dde220452e424973faf38a5e1318986333, has a shared 15-second budget and Warn cleanup. No execution or lost work was observed.",
+            "Current status.rs:635 still contains the same warning. This is separate from the duplicate-agent inference: a successful fresh sweep supplies this harm instead of refuting it. History supplies g032/l5 as original provenance; that outside-batch record was not independently reconciled here."
+          ],
+          "coverage_checked": [
+            "Current SPEC.md:2048 onward destructive-consent rule and :2998-3014 old-terminal paragraph; SPEC_impl.md:2780-2825 accepts survivors and deferred cleanup, without expressly accepting a false nothing-left warning.",
+            "TODO.md:25-27 Planned is empty. The phase-3 removal at :225-232 is Mid term and is not coverage. BUGS.md is solely the local-SSH-output-helper hang, not this route.",
+            "Searched plans/queue for old-terminal, tmux, Restart/consent and guard terms. The matching tmux-removal and environment plans are already landed per plans/REPORTS.md:28-32; no unlanded plan repairing this warning was found.",
+            "Read INDEX.md and searched the queue and active TRIAGE_OUTCOMES.md for the exact old-survivor/Restart-consent route. retained-restart-hides-reboot-card.md concerns hidden recovery presentation; retained-refusal-can-clear-restart-delete-protection.md concerns a different generation-race producer. Neither covers this warning. No exact queue or active outcome found; archive not read.",
+            "FILTER.md, Upgrades from older releases combined with another rare condition: old terminal state across upgrade plus startup cleanup timeout/fault is required; harm stays with those sessions. No security/trust-boundary, database corruption, bricked installation or normal-update failure is claimed."
+          ],
+          "exact_cover_quotes": [
+            "FILTER.md: The trigger needs something carried across an upgrade from an older Farhelm release: state an older release wrote, a session or agent that kept running through the upgrade, or a hook or report an older release installed.",
+            "FILTER.md: The trigger also needs another rare condition on top of that: a narrow timing window, a crash or fault at a specific point, or an unusual sequence of user or agent actions.",
+            "FILTER.md: Unlike the filters above, this one also covers losing user-owned work within the affected sessions, such as resuming the wrong conversation."
+          ],
+          "missing_premise": "No missing source premise for the conditional control route. Runtime occurrence, survivor workload and frequency were not measured. Independent check must agree the startup fault and retained-question sequence fall wholly within the upgrade filter.",
+          "original_stronger_consequence": "Stopping surviving user-owned agent work beyond the displayed nothing-left consequence; highest retained. Initial supplied lead was independently checked by the primary reviewer. No duplicate-agent or marker-invisibility premise is required; no loss was reproduced.",
+          "needs_independent_drop_check": true,
+          "proposed_basis": "Apply only the older-release-plus-another-rare-condition filter, after independent highest-drop agreement. If its boundary is disputed, retain verified at highest; best-effort startup acceptance alone does not settle false confirmation wording."
+        }
+      ],
+      "parent_proposals": [
+        {
+          "artifact": "parent-flagged-judgments-003.json",
+          "key": "g005/f4",
+          "proposal": "claim-checks/claims-003/result.json",
+          "parent_proposal": "filtered-upgrade-plus-rare",
+          "final_independent_gate": "required-before-highest-drop",
+          "reason": "Parentreadfull003. RetainedRestartquestioncanredrawInterrupted/nothingleftwhilestartupWarncleanupfailedandfreshAgentOnlysweepnowkills oldsurvivor beyonddisplayedstopconsent. Sourceconditionalharmhighest; freshsuccessfulcleanupSUPPLIESharm, notrefutation. Wholetriggerrequiresolderrunningstateacrossupgrade plusstartupcleanupfault/timeout andretainedquestion; filterexpresslycoversaffected-sessionworklosswhenadditionalrarecondition,nosecurity/database/brickingnormalupdatefailureclaimed. Freshcheckcompletefilterboundary andsame032l5alias; preservefalsewarningandno-runtimeobservation. Plainretirementacceptancedoesnotacceptwrongconfirmation."
+        }
+      ],
+      "collection": {
+        "retain": true,
+        "clearly_refuted_candidate": false,
+        "needs_unfinished_gate": true,
+        "provisional_bucket": "highest",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "old-terminal-survivor-interrupted-restart-false-stop-warning",
+        "destination": "trailing-old-terminal-survivor-interrupted-restart-false-stop-warning.md"
+      }
+    },
+    {
+      "key": "g005/f5",
+      "owner": "g005",
+      "id": "f5",
+      "domain": "product-contracts",
+      "purpose": "product-contracts: SPEC_impl.md, SPEC.md; phases @@ -6179,36 +6160,35 @@ beside its installation snapshot from AppBody, independently of the filtered sid",
+      "history": [
+        {
+          "line": 12,
+          "event": {
+            "version": 1,
+            "kind": "lead",
+            "id": "f5",
+            "state": "open",
+            "summary": "check meaning of nothing decided after an unanswered environment Delete",
+            "location": "SPEC_impl.md:6634",
+            "detail": "Reviewed commit: b106c0e49646ecb9a17e1a06b17a70da0ece73e0. TLDR: The new environment Delete wording says 'nothing was decided' when a sent request gets no answer, although the same contract allows sealing to finish after a lost reply and a later listing to destroy the environment. Need settle whether this is a misleading guarantee of no remote decision or shorthand for no helm-side decision, before reporting a wording defect. Source basis: SPEC_impl.md:6634-6637 groups 'not connected, not sent, sent without an answer, or past the deadline' under the marker that nothing was decided; :6639-6647 specifies listing-driven destruction. SPEC.md:1526-1528 says a request with no answer means nothing is decided, while :1519-1521 explicitly promises finishing deletion after a lost reply. Suggested bucket: other if this is inconsistent documentation; could-be-highest false on current evidence because the original Delete confirmation authorizes both session-only and last-session whole-environment outcomes, so no extra unapproved destruction is alleged. Confidence: unresolved wording lead. Checks needed: complete surrounding request ownership/timeout contract and precise later marker/UI semantics, to distinguish unknown result from no remote mutation. proposed_drop: false. possible_cover: none in supplied exact neighbour records; no prohibited coverage search. No runtime execution or reproduction."
+          }
+        },
+        {
+          "line": 13,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "f5",
+            "state": "open",
+            "summary": "unanswered Delete wording does not promise remote rollback in context",
+            "location": "SPEC_impl.md:6634",
+            "detail": "Reviewed commit: b106c0e49646ecb9a17e1a06b17a70da0ece73e0. TLDR: Considered whether 'nothing was decided' after an unanswered environment Delete falsely guarantees no remote mutation. Not reporting it as a separate defect: the same complete new contract explicitly describes lost-reply sealing and later finishing, so it cannot consistently be read as a remote-rollback promise. The marker records absence of a helm-known answer and gates a separately warned fallback.\n\nOriginal concern preserved: SPEC_impl.md:6634-6637 groups a sent request without an answer with 'nothing was decided'; SPEC.md:1526-1528 has similar shorthand. Taken alone it could mislead a reader into thinking the resource cannot still be deleted. Exact surrounding contract resolves the intended scope: SPEC.md:1519-1521 says the helm finishes destroying any sealed sandbox it sees 'whether or not it sent the Delete: after a lost reply, a failed destruction or its own restart'; SPEC_impl.md:6639-6647 gives the corresponding listing-driven finisher. SPEC_impl.md:24-30 and :50-54 independently says request/connection loss loses the reply, never the server-owned mutation. The original confirmation at SPEC.md:1514-1518 authorizes either session-only deletion or destruction with the last session, so no extra destructive authority follows from the missing reply.\n\nUseful source check, supplementary later implementation only: at 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db sessions/sandbox.rs:113-122 explicitly distinguishes the marker shorthand from remote effect: 'an unanswered request may still have been acted on, which the next listing shows (a seal included, which the helm then finishes)'. :221-239 sends the request, and timeout/connection-loss messages say 'Farhelm cannot tell whether the session was deleted', rather than 'nothing was deleted'. The latter phrase appears only in the no-client/not-sent branch at :204-209. UI sandbox_sessions.rs:144-155 requires the warned whole-resource confirmation and :187-194 says an uncertain read cannot widen consent. Thus the feared shipped false guarantee or silent escalation route is refuted by the precise response/caller contract, and the reviewed documentation itself contains the necessary lost-reply qualification. This does not use later correct production code as a blanket refutation of a documentation defect: the reviewed full subsection is what resolves its shorthand; later source independently confirms that reading.\n\nSuggested bucket: other if isolated wording needed clarification; no material defect established in context. Confidence: confirmed context/source refutation. proposed_drop: exact lost-reply and owned-mutation context above. possible_cover: none; this is a new considered candidate, not an independent verified finding and not a searched existing report. Could-be-highest: false on this considered route; deletion was already authorized in both forms and no new security/work-loss effect was established. Lead f5 closed; no missing readily checkable premise or runtime uncertainty retained. No reproduction, tests, builds or live-install action. No parent disposition assumed."
+          }
+        }
+      ],
+      "latest": {
+        "line": 13,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "f5",
+          "state": "open",
+          "summary": "unanswered Delete wording does not promise remote rollback in context",
+          "location": "SPEC_impl.md:6634",
+          "detail": "Reviewed commit: b106c0e49646ecb9a17e1a06b17a70da0ece73e0. TLDR: Considered whether 'nothing was decided' after an unanswered environment Delete falsely guarantees no remote mutation. Not reporting it as a separate defect: the same complete new contract explicitly describes lost-reply sealing and later finishing, so it cannot consistently be read as a remote-rollback promise. The marker records absence of a helm-known answer and gates a separately warned fallback.\n\nOriginal concern preserved: SPEC_impl.md:6634-6637 groups a sent request without an answer with 'nothing was decided'; SPEC.md:1526-1528 has similar shorthand. Taken alone it could mislead a reader into thinking the resource cannot still be deleted. Exact surrounding contract resolves the intended scope: SPEC.md:1519-1521 says the helm finishes destroying any sealed sandbox it sees 'whether or not it sent the Delete: after a lost reply, a failed destruction or its own restart'; SPEC_impl.md:6639-6647 gives the corresponding listing-driven finisher. SPEC_impl.md:24-30 and :50-54 independently says request/connection loss loses the reply, never the server-owned mutation. The original confirmation at SPEC.md:1514-1518 authorizes either session-only deletion or destruction with the last session, so no extra destructive authority follows from the missing reply.\n\nUseful source check, supplementary later implementation only: at 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db sessions/sandbox.rs:113-122 explicitly distinguishes the marker shorthand from remote effect: 'an unanswered request may still have been acted on, which the next listing shows (a seal included, which the helm then finishes)'. :221-239 sends the request, and timeout/connection-loss messages say 'Farhelm cannot tell whether the session was deleted', rather than 'nothing was deleted'. The latter phrase appears only in the no-client/not-sent branch at :204-209. UI sandbox_sessions.rs:144-155 requires the warned whole-resource confirmation and :187-194 says an uncertain read cannot widen consent. Thus the feared shipped false guarantee or silent escalation route is refuted by the precise response/caller contract, and the reviewed documentation itself contains the necessary lost-reply qualification. This does not use later correct production code as a blanket refutation of a documentation defect: the reviewed full subsection is what resolves its shorthand; later source independently confirms that reading.\n\nSuggested bucket: other if isolated wording needed clarification; no material defect established in context. Confidence: confirmed context/source refutation. proposed_drop: exact lost-reply and owned-mutation context above. possible_cover: none; this is a new considered candidate, not an independent verified finding and not a searched existing report. Could-be-highest: false on this considered route; deletion was already authorized in both forms and no new security/work-loss effect was established. Lead f5 closed; no missing readily checkable premise or runtime uncertainty retained. No reproduction, tests, builds or live-install action. No parent disposition assumed."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g005/findings.jsonl",
+        "id": "f5",
+        "line": 13,
+        "disposition": "under-investigation",
+        "group": "g005-f5",
+        "reason": "Record durably acknowledged; parent source/contract validation, cross-group synthesis, coverage/filter matching and any independent drop check remain pending. This preserves the claim and uncertainty without accepting, dropping or lowering it."
+      },
+      "accepted_parent_decision": null,
+      "returned_claim_checks": [
+        {
+          "batch": "claims-003",
+          "key": "g005/f5",
+          "latest_line": 13,
+          "recommendation": "refuted",
+          "bucket": "other",
+          "underlying_key": "environment-unanswered-delete-wording-remote-rollback-reading",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The isolated phrase is imprecise, but the reviewed contract expressly says an unanswered accepted Delete can still seal the environment and be finished later. The proposed remote-rollback guarantee is not the complete contract's meaning. This source refutation does not rely merely on later correct implementation.",
+          "checks": [
+            "b106c0e49646ecb9a17e1a06b17a70da0ece73e0:SPEC.md:1498-1536 contains both authorized Delete outcomes, explicit lost-reply finishing, and the nothing-is-decided shorthand. SPEC_impl.md:6614-6657 pairs the marker with listing-driven destruction.",
+            "Same revision:SPEC_impl.md:22-54 says an accepted server-owned mutation survives connection loss; only its reply is lost. That independently resolves what no answer can prove.",
+            "Supplementary later source at 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db:crates/farhelm-helm/src/sessions/sandbox.rs:113-122 explicitly says an unanswered request may have acted, and :198-244 says cannot tell for timeout/connection loss. Nothing was deleted is confined to the no-client branch. No runtime observation."
+          ],
+          "coverage_checked": [
+            "Current SPEC.md:1506-1536 and SPEC_impl.md:6135-6160 retain the same complete distinction. Their explicit lost-reply finishing resolves the isolated shorthand rather than accepting an implementation rollback bug.",
+            "Planned is empty; BUGS.md has only an unrelated SSH helper hang. Matching plans/queue/environment-agent-operations.md is already landed per plans/REPORTS.md:28 and is not unlanded repair coverage.",
+            "INDEX.md, matching queue search and active TRIAGE_OUTCOMES.md contain no exact unanswered-environment-Delete wording item. rename-lost-reply-restores-old-shortcut-indication.md is a different operation/consequence. No exact duplicate or extension found. Archive not read; no filter needed."
+          ],
+          "exact_cover_quotes": [
+            "b106c0e:SPEC.md:1519-1521: the helm finishes destroying any sealed sandbox it sees, whether or not it sent the Delete: after a lost reply, a failed destruction or its own restart.",
+            "b106c0e:SPEC_impl.md:24-27: A client that disconnects, reloads, has its credential rotated, or is cancelled loses the reply, never part of the work."
+          ],
+          "missing_premise": "None for the contextual reading. No misleading shipped remote-rollback message or new destructive authority was established.",
+          "original_stronger_consequence": "Taken alone, nothing was decided might make a reader think the resource cannot still be deleted. The original Delete already confirmed both session-only and last-session whole-environment deletion; the record never established additional unapproved destruction. Preserve the lead-to-refuted-candidate revision.",
+          "needs_independent_drop_check": true,
+          "proposed_basis": "The reviewed full subsection explicitly describes the very lost-reply deletion that the feared guarantee would prohibit; both destructive outcomes were already authorized. Conservative independent check because the rejected reading concerns deletion of user-owned resources."
+        }
+      ],
+      "parent_proposals": [
+        {
+          "artifact": "parent-flagged-judgments-003.json",
+          "key": "g005/f5",
+          "proposal": "claim-checks/claims-003/result.json",
+          "parent_proposal": "source-refuted-complete-contract-semantics",
+          "final_independent_gate": "required-before-drop",
+          "reason": "Full003samecompletecontractreadingas004f5: b106reviewedsubsectionexplicitlostreplysealedfinisherdestruction plusserverownedmutationdisconnectlosesreplynotwork defeatunconditionalno-remotemutationreadingofnothingdecided. Actualunknowncallerwordingconfirms, no additionalunapprovedDeleteauthority. Preserveimpreciseshorthand/originaldestructive-resourcemisreading andleadrevision; checkfullcontextratherthanfilterdiagnosticexcuse. Reconcile004f5assameinterpretationroot ifexactscopematches."
+        }
+      ],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": true,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "environment-unanswered-delete-wording-remote-rollback-reading",
+        "destination": null
+      }
+    },
+    {
+      "key": "g005/f6",
+      "owner": "g005",
+      "id": "f6",
+      "domain": "product-contracts",
+      "purpose": "product-contracts: SPEC_impl.md, SPEC.md; phases @@ -6179,36 +6160,35 @@ beside its installation snapshot from AppBody, independently of the filtered sid",
+      "history": [
+        {
+          "line": 15,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "f6",
+            "state": "open",
+            "summary": "suspended-source Clone rules distinguish agent authority from GUI prefill",
+            "location": "SPEC_impl.md:6682",
+            "detail": "Reviewed commit: b106c0e49646ecb9a17e1a06b17a70da0ece73e0. TLDR: Considered whether the new requirement to refuse an agent Clone while its environment source is suspended contradicts the product promise that Clone remains available on a suspended sandbox. The complete caller scopes distinguish those operations, so no separate contract defect is established. Details: the new Agent requests and environments subsection at SPEC_impl.md:6678-6685 requires the agent's clone plan to read launch and repository intent live from the source supervisor, explicitly refusing suspended or unreachable sources. SPEC.md:1545-1550 keeps the GUI's Clone control available during suspension; SPEC.md:1487-1494 describes that control targeting a fresh environment. This is not a promise that an agent can obtain live source authority without resuming it. The complete Agents and environments subsection at SPEC.md:4289-4341 promises the environment placement and approval rules but no suspended-source availability. In the same reviewed tree, session_view.rs:2641-2648 opens a new-session form through HeaderPrefillRequest::Clone(header_session.clone()), rather than dispatching an agent Clone. SPEC_impl.md:3928-3933 separately requires ordinary agent clone to read live source data instead of the helm cache. Thus 'as ordinary clone reads them' in the agent subsection has a caller-specific referent and need not imply that the GUI prefill must perform that agent operation. Suggested bucket: other if wording clarification were desired; could-be-highest: false, no security or loss-of-work route identified. Confidence: confirmed source/contract distinction; no runtime availability observed. proposed_drop: exact caller and live-source contract distinction above; no actionable contradiction established. possible_cover: none in supplied neighbour context; no prohibited coverage search. This is a newly considered candidate, not a verified or unverified defect, and no parent disposition is presumed. No tests, builds, reproductions or live actions."
+          }
+        }
+      ],
+      "latest": {
+        "line": 15,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "f6",
+          "state": "open",
+          "summary": "suspended-source Clone rules distinguish agent authority from GUI prefill",
+          "location": "SPEC_impl.md:6682",
+          "detail": "Reviewed commit: b106c0e49646ecb9a17e1a06b17a70da0ece73e0. TLDR: Considered whether the new requirement to refuse an agent Clone while its environment source is suspended contradicts the product promise that Clone remains available on a suspended sandbox. The complete caller scopes distinguish those operations, so no separate contract defect is established. Details: the new Agent requests and environments subsection at SPEC_impl.md:6678-6685 requires the agent's clone plan to read launch and repository intent live from the source supervisor, explicitly refusing suspended or unreachable sources. SPEC.md:1545-1550 keeps the GUI's Clone control available during suspension; SPEC.md:1487-1494 describes that control targeting a fresh environment. This is not a promise that an agent can obtain live source authority without resuming it. The complete Agents and environments subsection at SPEC.md:4289-4341 promises the environment placement and approval rules but no suspended-source availability. In the same reviewed tree, session_view.rs:2641-2648 opens a new-session form through HeaderPrefillRequest::Clone(header_session.clone()), rather than dispatching an agent Clone. SPEC_impl.md:3928-3933 separately requires ordinary agent clone to read live source data instead of the helm cache. Thus 'as ordinary clone reads them' in the agent subsection has a caller-specific referent and need not imply that the GUI prefill must perform that agent operation. Suggested bucket: other if wording clarification were desired; could-be-highest: false, no security or loss-of-work route identified. Confidence: confirmed source/contract distinction; no runtime availability observed. proposed_drop: exact caller and live-source contract distinction above; no actionable contradiction established. possible_cover: none in supplied neighbour context; no prohibited coverage search. This is a newly considered candidate, not a verified or unverified defect, and no parent disposition is presumed. No tests, builds, reproductions or live actions."
+        }
+      },
+      "recording_decision": null,
+      "accepted_parent_decision": null,
+      "returned_claim_checks": [],
+      "parent_proposals": [],
+      "collection": {
+        "retain": true,
+        "clearly_refuted_candidate": false,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "g005/f6",
+        "destination": "trailing-suspended-source-clone-rules-distinguish-agent-authority-from-gui-prefill.md"
+      }
+    }
+  ],
+  "replies": [
+    {
+      "turn": 1,
+      "reply": "Initial review is blocked before source delivery. Both mandatory evidence reads failed with `Invalid source range`; all five manifest endpoints exceed the snapshots’ line counts by one.\n\nThe brief and complete `commits` field are read. No product source was reviewed or findings recorded. Details are in [progress.md]([private-run]/g005/progress.md).\n\nPlease correct the caller-owned manifest or authorize manual inspection. The evidence tooling prohibits silently bypassing failed reads."
+    },
+    {
+      "turn": 2,
+      "reply": "Initial pass complete: all 626 mandatory lines read; no assigned scope unread.\n\n- `f2`: confirmed timeout-contract discrepancy, bucket `other`.\n- `f1`: specification-based proposed drop, retained for independent review.\n- `f3`: tmux provisioning concern refuted by source.\n\nSix events appended; no open leads. Progress updated. No tests or reproductions run."
+    },
+    {
+      "turn": 3,
+      "reply": "Appended revisions at log lines 7–9:\n\n- `f2`: narrowed to inconsistent deadline wording; removed minimum-wait and response-order claims.\n- `f1`: preserved possibly-highest concern, fresh-sweep narrowing, exact accepted residual, and caller-supplied `g007/f1` provenance. Drop remains pending.\n- `f3`: confirmed production version pinning and signed-version checks; source refutation stands.\n\nNo new IDs. Unresolved lead IDs: none."
+    },
+    {
+      "turn": 4,
+      "reply": "Discovery pass 1 complete. Read all neighbour context and rechecked assigned contracts and callers.\n\n- `f4`: source-confirmed duplicate of supplied `g032/l5`.\n- `f5`: new wording lead resolved to a candidate; surrounding contract refutes it.\n- New independent verified findings: none.\n- New unverified-after-investigation findings: none.\n- Open leads: none.\n\nNo new independent defect found. Log and progress updated; no runtime execution."
+    },
+    {
+      "turn": 5,
+      "reply": "Revised `f2` at log line 14 with the checked registration delay and timer origins.\n\n`g020/l7` is related evidence but a distinct documentation claim; fixing its unconditional reply-order promise would not resolve `f2`’s specification-model discrepancy. Both provenances and prior caveats are preserved.\n\nNo new IDs. Unresolved lead IDs: none."
+    },
+    {
+      "turn": 6,
+      "reply": "Discovery pass 2 complete. No new defect found.\n\nChecked suspended Clone caller boundaries, sealed-create retries, notification probe gating, retirement ordering, and revision-specific setup/release contracts.\n\n- New verified IDs: none.\n- New unverified IDs: none.\n- Candidate `f6`: apparent Clone contradiction resolved by the GUI-prefill versus agent-live-source distinction.\n- Open lead IDs: none.\n\nFindings log and progress updated. All assigned ranges and refreshed neighbour context read. Source-only; no runtime execution or checkout changes."
+    }
+  ],
+  "progress": "Group: g005 product-contracts\nState: initial review in progress; turn 1; discovery passes 0.\nScope: five assigned patches in SPEC.md and SPEC_impl.md, evaluated at their recorded revisions.\nRead: complete brief; complete inventory commits field; required priority/recording sections; root AGENTS.md End sentinel present.\nInterface assumptions: product contracts govern callers; implementations may be inspected only to settle assigned contract changes.\nNext: deliver all mandatory evidence packets, read governing contract sections, inspect relevant callers.\nUnread scope: all five mandatory patches and governing specification context.\nNew verified/unverified IDs: none. Findings log exists and was empty at start.\n\nTurn 1 boundary: initial review blocked before source delivery.\nEvidence reads attempted: 00642-000.patch 1..150, then 1..100; both failed with PERSISTENT_REVIEW_TOOL_FAILED: Invalid source range. No coverage certified.\nInvestigation: evidence.ts source() counts actual newline-delimited lines, and manifest() validates every source range before any read. All five manifest end lines exceed wc -l by one: 202 vs 201, 77 vs 76, 243 vs 242, 58 vs 57, 51 vs 50. No snapshot-drift error occurred. The manifest is caller-owned and tooling.md says not to change it while a reviewer is running; it remains unchanged.\nRequired next action: caller corrects manifest ranges and matching brief assignments, or explicitly authorizes manual inspection/audit. Then resume mandatory packets in ranges of at most 200 lines and 24000 bytes.\nInterface assumptions: unchanged; no product-source conclusions made.\nTurn type/count: initial/1. Discovery-pass count: 0.\nNew verified/unverified IDs: none. Open lead IDs: none; this is an evidence-tool setup block, not a product finding.\nUnread scope: all five mandatory patches and governing specification context; assigned pass not completed. Findings log remains empty.\n\nTurn 2 started: coverage repair and initial source review. Parent corrected manifest endpoints; snapshot content unchanged. Preserve findings log (empty from turn 1). Next: all mandatory evidence reads, then governing source/contract context. No synthesis/discovery pass yet.\n\nTurn 2 boundary: corrected coverage repair and initial source review complete.\nMandatory evidence delivered successfully through corrected manifest: 00642-000.patch 1..110 and 111..201; 00759-001.patch 1..76; 00858-000.patch 1..120 and 121..242; 01228-000.patch 1..57; 01304-000.patch 1..50. Total 626 assigned lines across all five pinned patches. No assigned patch material remains unread. Parent owns delivery audit.\nContracts/context read at pinned revisions: b106c0e4 complete Sandbox sessions, Agents and environments, Container sessions, Environment ownership and refusal, Environment Delete and the seal, Agent requests and environments, Tensorlake sandbox sessions, document precedence/ownership, and GUI Answers bind to what was drawn. At dbfc6975 complete Lifecycle operations, Status, Terminal experience, Durability and resume; governing old-terminal retirement block in SPEC_impl. At 647f0227 notification persistence block and complete Testing section; source notification/ticker checks. At 17a3fe85 topology's native/remote setup contract blocks, supported-tmux block, complete private-tmux substrate section, desktop/setup source checks. At cb762a31 complete release verification/download/key contract blocks and Cross-compilation and targets; archive inventory and provisioning action callers. One clipped context result was repaired with the narrower 8160..8180 read; mandatory packets were not clipped.\nSource checks: retirement sweep and conversion, later Restart cleanup, notification guard removal, local tmux prerequisite removal, release archive inventory, remote provisioning action construction. Supplementary endpoint agent launch/relay waits were checked only to settle the b106c0e4 contract ambiguity; no independent later-code finding alleged.\nRecords this turn: f1 finding proposed_drop solely under exact product acceptance (potential highest consequence retained explicitly; normal scoped Restart reaps again and refuses unconfirmed cleanup); f2 lead revised to confirmed other-bucket finding about inconsistent timeout origin; f3 candidate source-refuted and revised to correct a supporting reference. Six append-only events total. New verified finding ID: f2. New unverified finding IDs: none. Proposed-drop finding ID: f1. Candidate ID: f3. Open lead IDs: none.\nInterface assumptions: b106c0e4 is a documentation-only contract change, not evidence its new behavior had already shipped. SPEC.md controls observable behavior over SPEC_impl.md. Source comments or later code do not erase an introduced contract conflict. Old-terminal termination and residual cleanup failures are explicitly accepted; f1 retains exact language for the parent's independent drop check.\nValidation: source/contract analysis only; no runtime tests, builds, reproductions or live-install actions requested or performed. Checkout was not modified. Private findings and progress artifacts retained.\nTurn type/count: coverage repair plus initial review/2. Discovery-pass count: 0. No later synthesis or discovery pass performed in this turn.\nUnread scope: none of the assigned mandatory ranges; unrelated source/commits outside this functional group intentionally not reviewed. Next action: return delta and coverage to parent; await separately requested synthesis/discovery turn.\n\nTurn 3 started: separate later-turn synthesis. Revisit f2 whole-subsection meaning and exact duration definitions; f1 remains a possibly-highest proposed drop without parent acceptance (caller reports same concern g007/f1; do not read other logs); revisit f3 current and legacy download-version routes. Existing events preserved. Source-only, no reproduction.\n\nTurn 3 boundary: later-turn synthesis complete.\nChanges: appended revisions under f2, f1, f3 (log lines 7..9). No new IDs.\nf2: read both complete environment-agent subsections and precedence again; traced O=30 seconds, A=9 minutes, L=30 minutes, delivery=5 seconds. Compared relay queue-relative O+A+L with post-Allow fresh L. The existing permission-prompt contract accepts slow-resolution relay expiry, so revised away any guaranteed response-order or minimum-wait claim. Retained only the introduced documentation mismatch in the effective timeout model. Kept then-doc-only b106c0e4 separate from later endpoint implementation context.\nf1: rechecked exact accepted residual, Warn-bounded retirement, stored scope reconstruction and fresh Refuse Restart sweep. Preserved original possibly-highest concurrent-agent/work-corruption consequence and missing concrete shipped attribution-loss premise. Explicitly no accepted parent lowering or drop. Added caller-supplied g007/f1 provenance without reading its log or coverage sources.\nf3: followed actual production version into the default v{version} URL, expected-version signature check, per-name asset lookup and current provisioning actions. New archives are not fetched by old helms through /latest, and custom release URLs still verify the build's expected signed version. Old published content preservation remains an explicit contract premise, not an observed network check. Refutation stands, disposition still pending.\nCross-batch interface assumptions: local tmux prerequisite removal does not remove the binary-free old-terminal retirement path; release payload inventory reduction follows elimination of current provisioning's tmux payload dependency. Old-terminal retirement retains durable rows and scope identity; the fresh Restart sweep narrows the residual independently of the startup status conversion. Contract-only b106c0e4 does not prove the new protocol/launch code had already shipped at that revision.\nUnresolved lead IDs: none. No uninvestigated premise remains. f1 names the still-unestablished loss-of-work route rather than asserting it; parent owns independent adjudication and deduplication. All mandatory delivery was already audited; no unread assigned patch scope.\nTurn type/count: synthesis/3. Discovery-pass count: 0. New verified/unverified IDs: none; revised f1/f2/f3 only. No drop accepted, no record withdrawn. No tests, builds, reproductions, network checks, checkout edits, or live-install actions.\nNext: return only synthesis delta and unresolved lead IDs; await separately requested discovery or further adjudication.\n\nTurn 4 started: separate discovery pass 1. First read caller-supplied discovery-neighbours.json in bounded chunks for novelty/interface context. Named g032/l5 confirmation-authority concern is distinct from f1 duplicate agents; synthesize its drawn-consent and accepted-leftovers premises before searching beyond known issues. No parent drops or lowerings accepted. Original scope and source-only restrictions remain.\n\nTurn 4 boundary: discovery pass 1 complete. Result: no new independent verified defect and no new unverified-after-investigation defect.\nInterface context: read all 1111 lines/313156 bytes of discovery-neighbours.json in bounded contiguous chunks 1..100,101..180,181..260,261..340,341..420,421..500,501..580,581..660,661..740,741..820,821..900,901..980,981..1060,1061..1111. Used only as caller-supplied exact findings/lead context and novelty, not source credit or queue coverage. No other group's log was opened.\nNamed input synthesis before new search: f4 lead then source-confirmed finding, duplicate of supplied g032/l5. Checked changed Interrupted Restart consequence, Running-only question opening, ConfirmSlot lifetime, captured false stop consent, terminal-less supervisor probe, consent guard and fresh AgentOnly cleanup. This confirms the separate confirmation-authority issue without restoring f1's unestablished duplicate-agent premise or broadening its acceptance. Original g032/l5 provenance and exact accepted leftover/Restart text preserved; parent owns dedup/disposition.\nIndependent discovery checks across assigned group: reread new seal/supervisor-versus-helm decision and fallback contracts at b106c0e4; checked notification probe-failure and no-selector contracts/callers at 647f0227; searched removed/local-versus-remote tmux prerequisites and overrides at 17a3fe85 and inspected local setup/desktop routes; rechecked reduced release inventory and signed per-version download contract at cb762a31; checked update-interruption wording against admitted cleanup/consent contracts at dbfc6975. Scope remained the five assigned specification patches and their callers; no unrelated test-coverage review was added.\nConcrete new lead f5 concerned the no-answer/nothing-decided wording. Closed to candidate immediately after useful checks: the complete reviewed contract explicitly allows sealing to be finished after a lost reply and owns mutations across connection loss. Supplemental endpoint source distinguishes no-client/nothing-deleted from sent-without-answer/unknown-outcome and never silently escalates. No separate false no-remote-mutation guarantee or unapproved destruction established. Details and exact context are durable under f5.\nThis turn's log events: lines 10..13, f4 lead -> finding (known interface duplicate), f5 lead -> candidate (context/source refutation). No revisions to f1/f2/f3, no withdrawals, no parent drop or lowering accepted.\nNew verified IDs: f4, supplied known duplicate only; new independent verified IDs: none. New unverified-after-investigation IDs: none. New candidate ID: f5. Open lead IDs: none.\nTurn type/count: discovery/4. Discovery-pass count: 1. Anything independently new found: no defect; one new considered wording candidate ruled out in context. Required initial delivery remains audited complete; no unread assigned scope or supplied neighbour context.\nAll conclusions source/contract only. No runtime tests, reproductions, builds, live-install operations, network checks or checkout modifications. Next: return delta checks, IDs and explicit discovery result; await parent instructions.\n\nTurn 5 started: synthesis only, reopened for exact caller-named g020/l7 event 23. Read complete own history in bounded chunks before revising; read only the named external event. Compare its unconditional answer-order comment with f2's separate effective-deadline model. No discovery, unrelated searches, runtime/build/reproduction or accepted parent disposition.\n\nTurn 5 boundary: named late-interface synthesis complete. Read complete own findings history (events 1..13) in bounded chunks and only exact g020/l7 event 23. Direct source checks at 190d844e: approval then owned registration then local timeout, registration's add_confirmations await, queue-started relay timer and additive allowances, and both governing SPEC_impl qualifications. Checked relevant introducing-to-tip path diff for later timeout/comment edits; no relevant change.\nAppended f2 revision at log line 14. Preserved original deadline-model discrepancy, no-minimum-wait correction, original documentation-only attribution and other/no-runtime-failure assessment. Added explicit registration phase r and exact tQ+O+A+L versus tH+d+a+r+L comparison. New g020/l7 comment promise is related direct phase-origin evidence but a distinct documentation assertion: qualifying comment fixes unconditional reply-order claim without aligning f2's two spec models, and aligning spec models alone leaves that comment false. Preserve both provenances; no automatic duplicate/drop conclusion.\nReadily checkable named premises: resolved. No new IDs, no revised f1/f3/f4/f5, no withdrawals. Unresolved lead IDs: none. New verified/unverified-after-investigation IDs: none. Existing f2 revised only. No parent drop/lowering accepted.\nTurn type/count: late-interface synthesis/5. Discovery-pass count remains 1; this turn performed no new discovery search. No unread assigned source scope. No runtime test, build, reproduction, install, network check or live action; checkout unchanged. Next: return synthesis delta and await separate audited discovery instruction.\n\nTurn 6 started: separate discovery pass 2 after audited late-interface synthesis. No named pending question. Read caller-supplied discovery-neighbours.json in bounded chunks first, reuse all own append-only history, then search only assigned product-contract patches beyond known claims. No accepted parent drops/lowerings; source-only restrictions unchanged.\n\nTurn 6 boundary: separate discovery pass 2 complete. Result: no new verified defect and no new unverified-after-investigation defect. New considered candidate f6 only; open lead IDs none.\nContext: reused all 14 prior own events, preserving every original consequence, proposed-drop basis and later narrowing. Read the refreshed discovery-neighbours.json completely (1559 lines, 546422 bytes; SHA256 73e8b70320a2543356973aa13c410383064caf5338a3bd825afebcac650f0c7a) before the new source search. Contiguous delivery 1..1380 was followed by repaired narrower 1381..1410,1411..1450,1451..1490,1491..1520,1521..1535,1536..1559. Two clipped aggregate/context attempts were not credited; their material was reread in the narrower successful outputs. Caller-supplied interface context was used for novelty, not mandatory source credit or queue coverage. No other group's log was opened this turn; no named pending synthesis question existed.\nNew search: reread all five assigned patches, then checked original-revision caller/contract boundaries beyond prior findings. At b106c0e4 read product Sandbox sessions, full Agents and environments, ordinary agent live-source Clone and reservation/error-evidence rules; compared suspended GUI Clone's new-session prefill with the new agent Clone's live source requirement. Recorded f6 immediately as candidate when the complete caller distinction ruled out a substantive contradiction. No claim that GUI availability promises agent live authority. Checked later endpoint create_session_admitted and checkout recovery only as supplementary implementation of the assigned seal design: read-only existing-result replay precedes the seal refusal, while unkeyed launch, keyed relaunch and recovery requiring new work reach refuse_when_sealed. No stale-key bypass established, and documentation-only b106c0e4 remains separate from later shipped implementation.\nOther useful checks: at 647f0227 verified sample-pass notification reconciliation remains gated by Some(pane-state result), while stopped-agent sessions are retained for old-tab checks; the helper's unresolved-kind transition logic matches the changed specification after removal of the terminal-selection guard. At dbfc6975 inspected verified-server failure branches, record-driven sweep ordering, conversion commit and notice ordering without reviving known f1/f4 or supplied neighbour concerns. At 17a3fe85 inspected original provisioning plan: Mac returns before tmux actions, while Linux still conditionally uploads/installs tmux at that intermediate revision, consistent with this patch's narrower local prerequisite removal. At cb762a31 read the full versioned verification/download contract and checked the revised toolchain rationale against build-private-tmux.sh, build-pinned-tmux-ci.sh, devbuild-mac.sh and the release gate: pinned test tmux uses zig; Mac devbuild Linux payloads use cargo-zigbuild. No added release/prerequisite defect established. Failed path probes were corrected to the revision's actual paths; no failed read was treated as source evidence.\nRecords this turn: one append-only candidate event f6 (event 15). New verified IDs: none. New unverified-after-investigation IDs: none. New candidate IDs: f6, source/context refutation; no parent drop accepted. Remaining lead IDs: none. Existing f1..f5 unchanged; no withdrawals, accepted lowerings or drops.\nTurn type/count: discovery/6. Discovery-pass count: 2. Anything new found: no new defect; one new considered caller-scope candidate recorded. Assigned mandatory delivery remains audited complete (626 lines); no unread assigned range or refreshed neighbour context. Scope stayed the five assigned specification patches and source needed to check their contracts; no unrelated search or prohibited coverage source.\nInterface assumptions: agent live-source authority and GUI launch prefill are distinct; settled keyed replay grants no new-run authority; intermediate remote-Linux prerequisites must be judged at their own revision; test-only/documentation defects are not dismissed solely because production is correct. No changes to existing finding consequences or provenance.\nValidation: source/contract checks only. No runtime tests, builds, reproductions, installs, network checks, live actions or checkout modifications. Next: return this pass's checks, candidate ID, empty new-defect sets and open-lead status; await parent instruction.\n"
+}

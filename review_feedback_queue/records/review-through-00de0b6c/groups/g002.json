@@ -1,0 +1,342 @@
+{
+  "group": {
+    "id": "g002",
+    "domain": "product-contracts",
+    "purpose": "product-contracts: SPEC.md, crates/terminal-host/SPEC.md; phases complete small per-commit changes",
+    "interfaces": [
+      "g001",
+      "g003",
+      "g004",
+      "g005",
+      "g006",
+      "g009",
+      "g013",
+      "g037",
+      "g038",
+      "g040",
+      "g071",
+      "g079",
+      "g080",
+      "g084",
+      "g088",
+      "g092",
+      "g105",
+      "g180",
+      "g181",
+      "g182",
+      "g186",
+      "g187"
+    ],
+    "sources": [
+      {
+        "path": "[private-run]/prep/parts/00082-000.patch",
+        "ranges": [
+          [
+            1,
+            565
+          ]
+        ],
+        "original_path": "SPEC.md",
+        "commit": "c8bc155cc36723c8c53870944d07ce8ec61ef9ed",
+        "notes": "patch header; patch character offsets [0,58344)",
+        "lines": 565,
+        "bytes": 58406,
+        "start": 0,
+        "end": 58344,
+        "original": "[private-run]/prep/originals/00082.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/01217-000.patch",
+        "ranges": [
+          [
+            1,
+            34
+          ]
+        ],
+        "original_path": "SPEC.md",
+        "commit": "78e9d68a95119db8452ee139efde13d38546f648",
+        "notes": "patch header; patch character offsets [0,3072)",
+        "lines": 34,
+        "bytes": 3078,
+        "start": 0,
+        "end": 3072,
+        "original": "[private-run]/prep/originals/01217.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/01504-000.patch",
+        "ranges": [
+          [
+            1,
+            15
+          ]
+        ],
+        "original_path": "crates/terminal-host/SPEC.md",
+        "commit": "61e632323dbc6b4a35ed27bf5b9833102ffd5a4e",
+        "notes": "patch header; patch character offsets [0,928)",
+        "lines": 15,
+        "bytes": 928,
+        "start": 0,
+        "end": 928,
+        "original": "[private-run]/prep/originals/01504.patch"
+      }
+    ],
+    "lines": 614,
+    "bytes": 62412
+  },
+  "records": [
+    {
+      "key": "g002/f1",
+      "owner": "g002",
+      "id": "f1",
+      "domain": "product-contracts",
+      "purpose": "product-contracts: SPEC.md, crates/terminal-host/SPEC.md; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 1,
+          "event": {
+            "version": 1,
+            "kind": "lead",
+            "id": "f1",
+            "state": "open",
+            "summary": "Check restored update-survival assurance against old-terminal retirement",
+            "location": "SPEC.md:762",
+            "detail": "Reviewed commit: 78e9d68a95119db8452ee139efde13d38546f648. TLDR: the restored assurance that sessions keep running during an update may mislead someone whose old-terminal agents and background work this release deliberately ends. Source basis: assigned SPEC.md patch restores the unconditional assurance at 762–763 and 3459–3461; same-revision SPEC.md search locates the old-terminal ending at about 3005; commit message explicitly says the installer prints the assurance during the one migration too. Suggested bucket: highest if the reassurance induces updating with live work; could-be-highest: yes, processes/work may end, but the inducement route and specification acceptance need checking. Confidence: lead, not yet settled. proposed_drop: false pending complete governing retirement text and implementation check. possible_cover: the commit message explicitly accepts printing the general statement during the migration; no queue coverage searched. Next checks: read complete retirement bullet and corresponding implementation section at this revision; establish what warning the shipped flow provides and whether the exact reassurance is an explicitly accepted documentation omission. No execution performed."
+          }
+        },
+        {
+          "line": 3,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "f1",
+            "state": "open",
+            "summary": "Blanket update-survival assurance includes the update that ends old terminals (proposed drop)",
+            "location": "SPEC.md:762",
+            "detail": "Reviewed commit: 78e9d68a95119db8452ee139efde13d38546f648. TLDR: a reader is assured that sessions keep running when restarting to update, even during the one migration that ends old-terminal agents, tabs and their attributable background processes. Original consequence retained: a reader relying on this assurance can update while live work remains, ending processes and losing their in-memory work. Suggested bucket: highest (documentation assurance can lead to loss of running processes/work); could-be-highest: yes. Confidence: confirmed source inconsistency and destructive migration route; no runtime behavior observed, and actual reader reliance is conditional. Details: SPEC.md 762–763 removes the old-terminal exception from Restart to update; 3459–3461 restores 'only a host reboot takes sessions down'. scripts/install.sh 1287 adds 'Your sessions keep running.' The same revision's SPEC.md 3001–3016 explicitly says the first supervisor start ends the private tmux server and its running agents/tabs; old agents' attributable descendants are swept too. SPEC_impl.md 2784–2833 specifies the startup destruction; source old_terminals.rs 164–173 calls end_server, 224–232 calls terminate_process_within with TERM/KILL graces. Earlier warnings existed, but SPEC.md 2803–2812 says new warnings are no longer recorded and affected live agents receive notice after ending; lost old tabs alone receive none. proposed_drop: the exact omission is deliberate in the reviewed commit's stated decision, so independent drop check should assess it rather than treating this as an accidental regression. Exact commit-message basis: 'Every other update keeps sessions running, so the general statement comes back without the caveat, accepting that the installer prints it during that one update too.' Exact governing SPEC.md Terminal experience text at 3004–3007: 'This release ends them: the first time a host’s supervisor of this release starts, it ends that tmux server, and with it everything that still ran in an old terminal, without needing a tmux program.' (The original uses ASCII apostrophe in host's.) The specification explicitly accepts ending the old terminals, but does not independently state that the inaccurate assurance is acceptable; the commit decision supplies that narrower acceptance. possible_cover: that explicit reviewed-commit decision; no queue/filter/TODO/plan coverage searched. Caveats: this does not challenge the deliberate terminal retirement, request a new migration prompt, or claim terminal-host sessions are ended. Checks actually made: read mandatory assurance patch, full retirement bullet, notification paragraphs, complete implementation retirement section, installer/implementation change, and startup destruction implementation through the signalling call. Source-only; no reproductions or tests run."
+          }
+        },
+        {
+          "line": 4,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "f1",
+            "state": "open",
+            "summary": "Blanket update-survival assurance includes the update that ends old terminals (proposed drop)",
+            "location": "SPEC.md:762",
+            "detail": "Reviewed commit: 78e9d68a95119db8452ee139efde13d38546f648. TLDR: a reader is assured that sessions keep running when restarting to update, even during the one migration that ends old-terminal agents, tabs and their attributable background processes. Original consequence retained: a reader relying on this assurance can update while live work remains, ending processes and losing their in-memory work. Suggested bucket: highest (documentation assurance can lead to loss of running processes/work); could-be-highest: yes. Confidence: confirmed source inconsistency and destructive migration route; no runtime behavior observed, and actual reader reliance is conditional. Details: SPEC.md 762–763 removes the old-terminal exception from Restart to update; 3459–3461 restores 'only a host reboot takes sessions down'. scripts/install.sh 1287 adds 'Your sessions keep running.' Same-revision SPEC.md 3001–3016 says the first supervisor start ends the private tmux server and its running agents/tabs; old agents' attributable descendants are swept too. SPEC_impl.md 2784–2833 specifies the startup destruction. Source caller core.rs 6142–6151 invokes OldTerminals::end_private_server for the state-directory owner before session reload; old_terminals.rs 164–173 invokes end_server, and 224–232 invokes terminate_process_within with TERM/KILL graces. Earlier warnings existed, but SPEC.md 2803–2812 says new warnings are no longer recorded and affected live agents receive notice after ending; lost old tabs alone receive none. proposed_drop: the exact omission is deliberate in the reviewed commit's stated decision, so independent drop check should assess it rather than treating this as an accidental regression. Exact commit-message basis: 'Every other update keeps sessions running, so the general statement comes back without the caveat, accepting that the installer prints it during that one update too.' Exact SPEC.md Terminal experience text at 3004–3007: 'This release ends them: the first time a host's supervisor of this release starts, it ends that tmux server, and with it everything that still ran in an old terminal, without needing a tmux program.' The specification explicitly accepts ending the old terminals, but does not independently state that the inaccurate assurance is acceptable; the commit decision supplies that narrower acceptance. possible_cover: that explicit reviewed-commit decision; no queue/filter/TODO/plan coverage searched. Caveats: this does not challenge deliberate terminal retirement, request a migration prompt, or claim terminal-host sessions are ended. Checks actually made: mandatory assurance patch, complete retirement bullet, notification paragraphs, complete implementation retirement section, installer/implementation diff, full Installation and updates text governing the assurance, Durability and resume update guarantees, and startup caller/signalling implementation. Source-only; no reproductions or tests run. Revision reason: completed caller check and preserved exact ASCII quote spelling; substantive consequence and proposed drop unchanged."
+          }
+        },
+        {
+          "line": 5,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "f1",
+            "state": "open",
+            "summary": "Blanket update-survival assurance includes the update that ends old terminals (proposed drop)",
+            "location": "SPEC.md:762",
+            "detail": "Reviewed commit: 78e9d68a95119db8452ee139efde13d38546f648. TLDR: a reader is assured that sessions keep running when restarting to update, even during the migration that ends old-terminal agents, tabs and attributable background processes. Original consequence retained: relying on that reassurance can lead someone to finish an update with live work remaining, ending its processes and losing in-memory work. Suggested bucket: highest, documentation capable of inducing loss of processes/work; could-be-highest: yes. Confidence: confirmed from source for inaccurate reassurance and the normal migration's termination route; actual reader reliance is conditional, and no behavior was observed during execution. Source: assigned SPEC.md 762–763 removes the update exception; 3459–3461 restores 'only a host reboot takes sessions down'; scripts/install.sh 1287 adds 'Your sessions keep running.' SPEC.md 3001–3016 describes the deliberate migration; SPEC_impl.md 2784–2833 specifies it. core.rs 6142–6151 invokes OldTerminals::end_private_server when this supervisor owns its state directory, before reload. old_terminals.rs 164–173 invokes end_server, and 224–232 invokes terminate_process_within with TERM/KILL graces. Synthesis check: old_terminals.rs 285–356 sweeps converted old-kind agent rows through their recorded launch scope and AgentOnly target, and discoverable old tabs through their tab scopes and Tab target. This is attributable old-terminal work, not all work on the host or every terminal-host session. Failures/timeouts can leave some processes for later Delete; universal successful cleanup is not a premise of this finding. SPEC.md 2803–2812 describes prior warnings and post-ending notices; the new finding does not challenge that separate warning/residual design. proposed_drop: still only proposed, with no parent acceptance. The exact omission was deliberately accepted in the reviewed commit's own decision. Preserve the narrower exact decision for independent checking: 'Every other update keeps sessions running, so the general statement comes back without the caveat, accepting that the installer prints it during that one update too.' General retirement acceptance alone does not settle inaccurate assurance. Exact SPEC.md 3004–3007 text: 'This release ends them: the first time a host's supervisor of this release starts, it ends that tmux server, and with it everything that still ran in an old terminal, without needing a tmux program.' That text accepts retirement, not the reassurance's accuracy. possible_cover: reviewed commit's explicit decision only; no queue/ledger/plans/filter coverage searched. Cross-group synthesis input: same reassurance issue as g004/f1 and g071/f2; retain their original IDs for parent deduplication. Distinct from g033's omitted warning/cleanup-failure residual; no fresh discovery or duplicate ID created here. Caveats: new terminal-host sessions survive; terminal retirement is intended, not introduced by this assurance patch; user files are not alleged to be deleted, and losing in-memory work depends on what the old processes were doing. Revision reason: source-checked agent/tab attribution and bounded-cleanup caveat; original consequence and highest suggestion retained. Checks: source and contracts only; no runtime tests or reproductions."
+          }
+        },
+        {
+          "line": 6,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "f1",
+            "state": "open",
+            "summary": "Blanket update-survival assurance includes the update that ends old terminals (proposed drop)",
+            "location": "SPEC.md:762",
+            "detail": "Reviewed commit: 78e9d68a95119db8452ee139efde13d38546f648. TLDR: a reader is assured that sessions keep running when restarting to update, even during the migration that ends old-terminal agents, tabs and attributable background processes. Original consequence retained: relying on that reassurance can lead someone to finish an update with live work remaining, ending its processes and losing in-memory work. Suggested bucket: highest, documentation capable of inducing loss of processes/work; could-be-highest: yes. Confidence: confirmed from source for inaccurate reassurance and the normal migration's termination route; actual reader reliance is conditional, and no behavior was observed during execution. Source: assigned SPEC.md 762–763 removes the update exception; 3459–3461 restores 'only a host reboot takes sessions down'; scripts/install.sh 1287 adds 'Your sessions keep running.' SPEC.md 3001–3016 describes the deliberate migration; SPEC_impl.md 2784–2833 specifies it. core.rs 6142–6151 invokes OldTerminals::end_private_server when this supervisor owns its state directory, before reload. old_terminals.rs 164–173 invokes end_server, and 224–232 invokes terminate_process_within with TERM/KILL graces. Synthesis check: old_terminals.rs 285–356 sweeps converted old-kind agent rows through their recorded launch scope and AgentOnly target, and discoverable old tabs through their tab scopes and Tab target. This is attributable old-terminal work, not all work on the host or every terminal-host session. Failures/timeouts can leave some processes for later Delete; universal successful cleanup is not a premise of this finding. SPEC.md 2803–2812 describes prior warnings and post-ending notices; the new finding does not challenge that separate warning/residual design. proposed_drop: still only proposed, with no parent acceptance. The exact omission was deliberately accepted in the reviewed commit's own decision. Preserve the narrower exact decision for independent checking: 'Every other update keeps sessions running, so the general statement comes back without the caveat, accepting that the installer prints it during that one update too.' General retirement acceptance alone does not settle inaccurate assurance. Exact SPEC.md 3004–3007 text: 'This release ends them: the first time a host's supervisor of this release starts, it ends that tmux server, and with it everything that still ran in an old terminal, without needing a tmux program.' That text accepts retirement, not the reassurance's accuracy. possible_cover: reviewed commit's explicit decision only; no queue/ledger/plans/filter coverage searched. Cross-group synthesis input: same reassurance issue as g004/f1 and g071/f2; retain their original IDs for parent deduplication. Distinct from g033's omitted warning/cleanup-failure residual; no fresh discovery or duplicate ID created here. Caveats: new terminal-host sessions survive; terminal retirement is intended, not introduced by this assurance patch; user files are not alleged to be deleted, and losing in-memory work depends on what the old processes were doing. Revision reason: source-checked agent/tab attribution and bounded-cleanup caveat; original consequence and highest suggestion retained. Checks: source and contracts only; no runtime tests or reproductions. Synthesis timing check: scripts/install.sh 1228–1232 sets updated_installation solely from the successful install-result spelling updated; 1285–1288 then prints the restart instruction and assurance. That branch does not inspect active terminals or distinguish this migration. Thus a terminal user can see the assurance after installation but before the quit/reopen that activates the new supervisor. SPEC_impl.md 7778–7786 confirms Restart to update reopens the app and replaces the prior supervisor, at which point the already-checked core startup ends old terminals. This patch changes wording, not the termination operation. The CLI assurance and SPEC prose are one reassurance root cause shared with g004/f1 and g071/f2; no additional finding is created. The terminal-host comparison deletion at 61e632323dbc6b4a35ed27bf5b9833102ffd5a4e retains the child contract and does not extend retirement to terminal-host sessions. Proposed drop remains unaccepted; retirement specification alone is not a basis for dropping inaccurate reassurance. No readily checkable premise or lead remains unresolved within this group."
+          }
+        }
+      ],
+      "latest": {
+        "line": 6,
+        "event": {
+          "version": 1,
+          "kind": "finding",
+          "id": "f1",
+          "state": "open",
+          "summary": "Blanket update-survival assurance includes the update that ends old terminals (proposed drop)",
+          "location": "SPEC.md:762",
+          "detail": "Reviewed commit: 78e9d68a95119db8452ee139efde13d38546f648. TLDR: a reader is assured that sessions keep running when restarting to update, even during the migration that ends old-terminal agents, tabs and attributable background processes. Original consequence retained: relying on that reassurance can lead someone to finish an update with live work remaining, ending its processes and losing in-memory work. Suggested bucket: highest, documentation capable of inducing loss of processes/work; could-be-highest: yes. Confidence: confirmed from source for inaccurate reassurance and the normal migration's termination route; actual reader reliance is conditional, and no behavior was observed during execution. Source: assigned SPEC.md 762–763 removes the update exception; 3459–3461 restores 'only a host reboot takes sessions down'; scripts/install.sh 1287 adds 'Your sessions keep running.' SPEC.md 3001–3016 describes the deliberate migration; SPEC_impl.md 2784–2833 specifies it. core.rs 6142–6151 invokes OldTerminals::end_private_server when this supervisor owns its state directory, before reload. old_terminals.rs 164–173 invokes end_server, and 224–232 invokes terminate_process_within with TERM/KILL graces. Synthesis check: old_terminals.rs 285–356 sweeps converted old-kind agent rows through their recorded launch scope and AgentOnly target, and discoverable old tabs through their tab scopes and Tab target. This is attributable old-terminal work, not all work on the host or every terminal-host session. Failures/timeouts can leave some processes for later Delete; universal successful cleanup is not a premise of this finding. SPEC.md 2803–2812 describes prior warnings and post-ending notices; the new finding does not challenge that separate warning/residual design. proposed_drop: still only proposed, with no parent acceptance. The exact omission was deliberately accepted in the reviewed commit's own decision. Preserve the narrower exact decision for independent checking: 'Every other update keeps sessions running, so the general statement comes back without the caveat, accepting that the installer prints it during that one update too.' General retirement acceptance alone does not settle inaccurate assurance. Exact SPEC.md 3004–3007 text: 'This release ends them: the first time a host's supervisor of this release starts, it ends that tmux server, and with it everything that still ran in an old terminal, without needing a tmux program.' That text accepts retirement, not the reassurance's accuracy. possible_cover: reviewed commit's explicit decision only; no queue/ledger/plans/filter coverage searched. Cross-group synthesis input: same reassurance issue as g004/f1 and g071/f2; retain their original IDs for parent deduplication. Distinct from g033's omitted warning/cleanup-failure residual; no fresh discovery or duplicate ID created here. Caveats: new terminal-host sessions survive; terminal retirement is intended, not introduced by this assurance patch; user files are not alleged to be deleted, and losing in-memory work depends on what the old processes were doing. Revision reason: source-checked agent/tab attribution and bounded-cleanup caveat; original consequence and highest suggestion retained. Checks: source and contracts only; no runtime tests or reproductions. Synthesis timing check: scripts/install.sh 1228–1232 sets updated_installation solely from the successful install-result spelling updated; 1285–1288 then prints the restart instruction and assurance. That branch does not inspect active terminals or distinguish this migration. Thus a terminal user can see the assurance after installation but before the quit/reopen that activates the new supervisor. SPEC_impl.md 7778–7786 confirms Restart to update reopens the app and replaces the prior supervisor, at which point the already-checked core startup ends old terminals. This patch changes wording, not the termination operation. The CLI assurance and SPEC prose are one reassurance root cause shared with g004/f1 and g071/f2; no additional finding is created. The terminal-host comparison deletion at 61e632323dbc6b4a35ed27bf5b9833102ffd5a4e retains the child contract and does not extend retirement to terminal-host sessions. Proposed drop remains unaccepted; retirement specification alone is not a basis for dropping inaccurate reassurance. No readily checkable premise or lead remains unresolved within this group."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g002/findings.jsonl",
+        "id": "f1",
+        "line": 6,
+        "disposition": "under-investigation",
+        "group": "g002-f1",
+        "reason": "Record durably acknowledged; parent source/contract validation, cross-group synthesis, coverage/filter matching and any independent drop check remain pending. This preserves the claim and uncertainty without accepting, dropping or lowering it."
+      },
+      "accepted_parent_decision": null,
+      "returned_claim_checks": [
+        {
+          "batch": "claims-001",
+          "key": "g002/f1",
+          "latest_line": 6,
+          "recommendation": "retain-verified",
+          "bucket": "highest",
+          "underlying_key": "update-survival-reassurance-omits-old-terminal-retirement",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The installer reassures the user before the restart that activates the old-terminal shutdown. The source route to ending running old agents/tabs is established; reader reliance and any particular in-memory loss are conditional. The reviewed commit deliberately accepts the inaccurate message, but retirement acceptance alone does not settle that assurance, and a commit explanation is not one of the listed canonical coverage sources.",
+          "checks": [
+            "At 78e9d68a95119db8452ee139efde13d38546f648 SPEC.md:762-763 restores unconditional survival across Restart to update; :3459-3461 says only reboot takes sessions down. scripts/install.sh:1285-1288 prints Quit and reopen ... Your sessions keep running on the updated-installation branch.",
+            "The same revision SPEC.md:3001-3016 explicitly ends the old private tmux server, its terminals and attributable work at supervisor startup; :2803-2812 explains prior warnings and after-the-event notices, including no notice for old-tab-only losses. New terminal-host sessions are expressly preserved.",
+            "core.rs:6142-6151 invokes OldTerminals::end_private_server before reload when holding ownership. service/core/old_terminals.rs:162-168 calls end_server; :223-232 calls bounded TERM/KILL termination. :290-356 sweeps converted old-kind agents through their recorded scopes and AgentOnly target, and discoverable tabs through Tab targets. Some cleanup can fail or time out; universal termination is not required for the claim.",
+            "The full reviewed commit message explicitly says the general statement returns without the caveat, accepting that the installer prints it during the one migration too. This is strong evidence of deliberate intent and must travel into any independent drop register, not be silently ignored. No runtime reproduction or observed reader reliance."
+          ],
+          "coverage_checked": [
+            "Current SPEC.md:768 and :3454-3455 still give the assurance; :2998-3015 still states old-terminal termination. SPEC_impl.md Ending the old private tmux server (:2780-2821) expressly accepts bounded startup retirement but does not expressly accept the misleading installer reassurance as a separate rule.",
+            "TODO.md Planned is empty. Its Mid term phase-3 removal (:225-234) waits until old servers cannot remain; it is outside Planned and does not repair the assurance during this migration. BUGS.md has no matching acceptance.",
+            "Searched INDEX.md and active TRIAGE_OUTCOMES.md for update survival, reassurance and old-terminal assurance; no exact queue item or recorded decision found. No archive read.",
+            "tmux-end-old-terminals.md:155-156 required removing the installer promise in the retirement PR. plans/REPORTS.md:29 records the plan landed. Later landed wording restoration supersedes that implementation; no unlanded plan was found to repair this assurance. tmux-drop-from-docs is also recorded landed (:32).",
+            "FILTER.md older-release-plus-another-rare-condition does not match: normal completion of an update with an old terminal running is the deliberate migration trigger, not a demonstrated additional rare fault/window. The ordinary rare-glitch filter excludes process/work loss."
+          ],
+          "exact_cover_quotes": [
+            "Reviewed commit 78e9d68a95119db8452ee139efde13d38546f648, decision text: Every other update keeps sessions running, so the general statement comes back without the caveat, accepting that the installer prints it during that one update too.",
+            "SPEC.md at that revision :3004-3005: This release ends them: the first time a host's supervisor of this release starts, it ends that tmux server, and with it everything that still ran in an old terminal, without needing a tmux program."
+          ],
+          "missing_premise": "No missing source premise for inaccurate reassurance and normal termination. Actual user reliance and the contents of interrupted processes are conditional. To drop as an accepted assurance omission, the parent must determine that the explicit commit decision supplies authoritative acceptance beyond the listed specification/ledger sources and obtain the independent verdict.",
+          "original_stronger_consequence": "A reader relying on the reassurance can finish an update with live old-terminal processes remaining, ending those processes and losing their in-memory work. User files are not alleged deleted, and current terminal-host sessions are outside the route. The original highest concern and the reviewer's deliberately-accepted-omission drop proposal are both preserved.",
+          "needs_independent_drop_check": true,
+          "proposed_basis": "Retain highest on the established source route. Send the reviewer's proposed deliberate-decision drop, with the exact commit explanation and both specification passages, to the independent check before treating the omission as accepted. This consultation does not authorize that drop."
+        }
+      ],
+      "parent_proposals": [
+        {
+          "artifact": "parent-flagged-judgments-001.json",
+          "key": "g002/f1",
+          "proposal": "claim-checks/claims-001/result.json",
+          "parent_proposal": "retain-highest",
+          "final_independent_gate": "include-original-deliberate-omission-drop",
+          "reason": "Parentreadfullflagged001. New78e9 restoresunqualifiedsessionskeeprunninginstaller/SPECassurance before ordinaryupdate/firststartup deliberatelyterminatesoldtmuxagents/tabs andtheirwork. Sourceprocessendingrouteshown; readerreliance/lostinmemorycontentsconditional, nofiledeletion/currenthostsessionharmclaimed. Highestretained, no raritylowering. Explicitcommitdecision deliberately acceptsmessageeveninmigration is strongintent but not itselfcanonicalSPEC acceptanceofmisleadingreassurance; carry exactcommitexplanation plusbothcontradictorySPECclauses into finalfreshcheck oforiginalreviewerdropproposal. Do notautomaticallyinferretirementacceptanceacceptspremigrationassuranceorpriorwarning/afternoticecoversmissingwarning;tab-onlylossnoticeabsent. No dropaccepted."
+        }
+      ],
+      "collection": {
+        "retain": true,
+        "clearly_refuted_candidate": false,
+        "needs_unfinished_gate": true,
+        "provisional_bucket": "highest",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "update-survival-reassurance-omits-old-terminal-retirement",
+        "destination": "trailing-update-survival-reassurance-omits-old-terminal-retirement.md"
+      }
+    },
+    {
+      "key": "g002/f2",
+      "owner": "g002",
+      "id": "f2",
+      "domain": "product-contracts",
+      "purpose": "product-contracts: SPEC.md, crates/terminal-host/SPEC.md; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 2,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "f2",
+            "state": "open",
+            "summary": "Terminal-host comparison removal preserves the permanent child contract",
+            "location": "crates/terminal-host/SPEC.md:124",
+            "detail": "Reviewed commit: 61e632323dbc6b4a35ed27bf5b9833102ffd5a4e. TLDR: no user-visible terminal behavior changes when the obsolete comparison with tmux is removed. Considered whether deleting the compatibility rationale weakens the child's permanent terminal-settings contract. Source refutation: the assigned patch retains kernel default termios, VERASE=DEL, IUTF8, cols/rows and zero pixel sizes verbatim at SPEC.md 124–127; spawn.rs 371–404 still implements each setting. SPEC.md Change policy 497–end still states: 'The journal’s behavior and the child’s process setup are part of the contract too: a newer client relies on an older running host behaving as this document says.' The removed sentences only compare these settings with an old terminal. Suggested bucket: other; confidence: confirmed by source, no execution. Could-be-highest: no established security or loss-of-work route from this prose deletion. proposed_drop: source refutes a contract change; no reporting needed. possible_cover: none. Caveat: review is limited to this SPEC patch; the other files in this broad prose commit are assigned elsewhere."
+          }
+        }
+      ],
+      "latest": {
+        "line": 2,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "f2",
+          "state": "open",
+          "summary": "Terminal-host comparison removal preserves the permanent child contract",
+          "location": "crates/terminal-host/SPEC.md:124",
+          "detail": "Reviewed commit: 61e632323dbc6b4a35ed27bf5b9833102ffd5a4e. TLDR: no user-visible terminal behavior changes when the obsolete comparison with tmux is removed. Considered whether deleting the compatibility rationale weakens the child's permanent terminal-settings contract. Source refutation: the assigned patch retains kernel default termios, VERASE=DEL, IUTF8, cols/rows and zero pixel sizes verbatim at SPEC.md 124–127; spawn.rs 371–404 still implements each setting. SPEC.md Change policy 497–end still states: 'The journal’s behavior and the child’s process setup are part of the contract too: a newer client relies on an older running host behaving as this document says.' The removed sentences only compare these settings with an old terminal. Suggested bucket: other; confidence: confirmed by source, no execution. Could-be-highest: no established security or loss-of-work route from this prose deletion. proposed_drop: source refutes a contract change; no reporting needed. possible_cover: none. Caveat: review is limited to this SPEC patch; the other files in this broad prose commit are assigned elsewhere."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g002/findings.jsonl",
+        "id": "f2",
+        "line": 2,
+        "disposition": "excluded",
+        "group": "terminal-child-settings-contract-comparison-deletion",
+        "reason": "Parent accepts fully read focused001 source refutation for the named deletion:61e6323 removes only historical tmux comparison; terminal-host SPEC The child retains kernel defaults, VERASE DEL, IUTF8 and exact dimensions/zero pixel sizes, and Change policy retains child-setup permanence. Matching spawn370-405 still implements those settings. No executable or normative-contract change, no originally alleged security or user-work-loss route. Do not generalize to all platform behavior or the separate stty portability item."
+      },
+      "accepted_parent_decision": {
+        "key": "g002/f2",
+        "line": 2,
+        "disposition": "excluded",
+        "group": "terminal-child-settings-contract-comparison-deletion",
+        "bucket": "other",
+        "recording": "omit narrowly source-refuted contract weakening",
+        "needs_independent_drop_check": false,
+        "reason": "Parent accepts fully read focused001 source refutation for the named deletion:61e6323 removes only historical tmux comparison; terminal-host SPEC The child retains kernel defaults, VERASE DEL, IUTF8 and exact dimensions/zero pixel sizes, and Change policy retains child-setup permanence. Matching spawn370-405 still implements those settings. No executable or normative-contract change, no originally alleged security or user-work-loss route. Do not generalize to all platform behavior or the separate stty portability item."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-001",
+          "key": "g002/f2",
+          "latest_line": 2,
+          "recommendation": "refuted",
+          "bucket": "other",
+          "underlying_key": "terminal-host-child-settings-contract-comparison-deletion",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "Removing the comparison with old tmux panes changes no normative child settings or permanent host contract. The precise settings and their reasons remain in the same paragraph.",
+          "checks": [
+            "git show 61e632323dbc6b4a35ed27bf5b9833102ffd5a4e -- crates/terminal-host/SPEC.md shows only the historical comparison removed. The child section :124-127 still requires kernel defaults, VERASE=DEL, IUTF8 and cols-by-rows with zero pixel sizes.",
+            "At the same revision spawn.rs:370-405 sets the size, reads default termios and sets VERASE and IUTF8. The SPEC Change policy retains the explicit child-process-setup permanence rule. No executable change, reduced contract or runtime defect is established by this deletion."
+          ],
+          "coverage_checked": [
+            "Current root SPEC.md/SPEC_impl.md terminal-host sections supply no conflicting relaxation. Current crates/terminal-host/SPEC.md The child and Change policy retain the same settings and permanent contract.",
+            "TODO.md Planned is empty; BUGS.md and active TRIAGE_OUTCOMES.md have no matching contract-deletion claim. Searches of plans/queue and INDEX.md for termios/terminal settings found the stty test-portability item, whose full file was read; it concerns differing stty implementations, not weakened settings. No exact queue duplicate or useful extension. No archive read.",
+            "tmux-drop-from-docs was landed per plans/REPORTS.md:32; it is not pending repair coverage. FILTER.md is unnecessary because the proposed defect is source-refuted."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": null,
+          "original_stronger_consequence": "The considered concern was weakening the child's permanent terminal-settings contract. No security or loss-of-work route was established or later withdrawn; review scope remained this contract patch only.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Dismiss the alleged contract weakening on the exact unchanged normative settings and permanence clause, not on production correctness alone."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "terminal-child-settings-contract-comparison-deletion",
+        "destination": null
+      }
+    }
+  ],
+  "replies": [
+    {
+      "turn": 1,
+      "reply": "Initial review is blocked by invalid manifest ranges: required ends are 566/35/16, while the patch files contain 565/34/15 lines. The evidence reader rejects the manifest before delivering source.\n\nRead the full brief, complete `commits` field, and relevant contract context. Recorded no findings; all mandatory patches remain unread. Updated `g002/progress.md`. Awaiting manifest correction or approval for manual delivery and audit."
+    },
+    {
+      "turn": 2,
+      "reply": "Initial pass complete. All 614 mandatory lines read through the corrected evidence manifest; no assigned scope unread.\n\n- `f1`: source-confirmed update-assurance inconsistency, with proposed drop for independent review.\n- `f2`: candidate ruled out; terminal-host behavior remains unchanged.\n- No open leads.\n\nDurable records and progress updated. No execution or checkout changes."
+    },
+    {
+      "turn": 3,
+      "reply": "Revised `f1`: confirmed the installer reassures users before restart activates old-terminal termination. Clarified affected processes, cleanup limits, and overlap with `g004/f1` and `g071/f2`; kept `g033` separate.\n\nPreserved the exact stated decision. Proposed drop remains unaccepted. No new findings or unresolved leads."
+    },
+    {
+      "turn": 4,
+      "reply": "Discovery pass 1 found nothing new. Checked cleanup reference guards, environment routes and heartbeats, and recent-setup provenance against the assigned contracts.\n\nNew verified IDs: none. New unverified IDs: none. Open leads: none.\n\nProgress updated. Source-only; no execution or checkout changes."
+    }
+  ],
+  "progress": "# g002 product-contracts\n\nInitial review, turn 1; discovery-pass count 0. Findings log exists and is empty. Complete inventory commits field read; excluded metadata not read. Mandatory patch reads pending: 00082 lines 1–566, 01217 lines 1–35, 01504 lines 1–16. Contract context and caller checks follow the patch reads. No source conclusions yet. Interfaces: product behavior remains authoritative; changes must preserve surrounding implementation and terminal-host compatibility contracts. Next action: read all mandatory packets, then investigate concrete inconsistencies at their recorded revisions. No verified or unverified finding IDs yet.\n\nEvidence tooling block: reads 00082 lines 1–140 and 1–80 both returned PERSISTENT_REVIEW_TOOL_FAILED: Invalid source range. The manifest requires 1–566; wc reports 565 newline-terminated lines and evidence.ts validates every manifest range before a read. No mandatory coverage credited. Requested caller correction or manual-delivery approval; did not alter the manifest. Continuing independent pinned contract context. Findings remain empty; this is tooling, not a product finding.\n\nTurn boundary: initial turn 1, discovery-pass count 0. Evidence block remains pending caller correction or manual-delivery approval. The same off-by-one appears in all assigned sources: wc newline counts are 565, 34, 15 versus manifest ends 566, 35, 16. No mandatory patch text was delivered or reviewed; all 617 requested lines remain uncredited. No findings, candidates or product leads were established; findings.jsonl remains empty.\n\nIndependent context read at pinned revisions: c8bc155cc36723c8c53870944d07ce8ec61ef9ed SPEC_impl.md 1060–1105 (drawn-answer binding), 6408–6592 (complete disposable-environment section and subsections); SPEC.md 4737–4824 (Container sessions and Retired containerized sessions). At 61e632323dbc6b4a35ed27bf5b9833102ffd5a4e, terminal-host SPEC.md 1–180 and 486–end (Security and Change policy). Commit stats inspected for all three assigned commits. These are context only and do not replace mandatory patch coverage. Interface assumptions: new container environments use ordinary supervisors and provider-boundary transport; legacy container sessions are delete-only; terminal-host observable contracts are permanent once shipped. Next action: after the manifest is corrected, read every mandatory patch packet with the evidence launcher and complete initial source/contract analysis. No execution or checkout mutation performed.\n\nCoverage repair turn 2: corrected brief reread fully; findings.jsonl exists and remains empty. Initial review resumes, discovery-pass count remains 0. Correct mandatory ranges: 00082 1–565, 01217 1–34, 01504 1–15. Next action: deliver all 614 lines through corrected evidence manifest, then complete pinned source/contract checks.\n\nInitial source-review pass completed in coverage-repair turn 2; this was not synthesis or a discovery pass. Discovery-pass count remains 0. All corrected mandatory ranges delivered through evidence read in separate calls: 00082 1–150, 151–280, 281–420, 421–565; 01217 1–34; 01504 1–15. Total 614 lines; no unread assigned scope. Parent audit remains authoritative for delivery certification. Existing failed reads remain recorded; no source snapshot or manifest edits made here.\n\nRecords appended this turn: f1 lead, then finding and final finding revision (source-confirmed documentation inconsistency; highest consequence preserved; proposed drop explicitly names the reviewed commit's deliberate acceptance and exact governing retirement text); f2 candidate (source refutes a permanent terminal-host behavior change). No unverified findings or open leads remain. No other substantive finding established in the assigned container-contract changes. Do not drop f1 without the parent's independent highest-drop decision.\n\nInterface conclusions: the changed container contract consistently places the supervisor and filesystem inside its environment; transport remains direct helm-to-supervisor through IPC/SSH/exec, with provider responsibilities in the specified boundary. Ordinary deletion versus whole-environment deletion and source-only Replace are distinguished; retired legacy containers are Delete-only. Recipe/place identity and recent setups survive disposable host removal. Terminal-host pty settings and permanent observables remain intact. At c8bc155c the named environment implementation module is not yet present; this docs commit establishes the contract, so absence of later implementation at this revision was not independently raised as a product defect.\n\nAdditional context read this turn at c8bc155cc36723c8c53870944d07ce8ec61ef9ed: SPEC.md 13–73, 73–249, 250–437, 438–578, 578–661 (Topology complete across chunks), 946–1010, 1431–1524; SPEC_impl.md 1–75, 8642–8764. Earlier pinned container/environment and drawn-answer sections remain in context. At 61e632323dbc6b4a35ed27bf5b9833102ffd5a4e: spawn.rs 365–408. At 78e9d68a95119db8452ee139efde13d38546f648: SPEC.md 676–707, 708–819, 2798–2815, 2815–2920, 2920–2985, 2995–3022, 3424–3475; SPEC_impl.md 2784–2845; old_terminals.rs 1–200, 200–260; core.rs 6125–6165; related installer/implementation/changelog patch. One broad core.rs rg context query was oversized and clipped; it was not treated as full-file coverage and its relevant caller was reread narrowly. A guessed pty.rs path and environment/mod.rs path at c8 did not exist; resolved the actual terminal-host spawn.rs path through git ls-tree. No runtime tests, builds or reproductions; conclusions are from source. No checkout changes.\n\nNext action: return delta/coverage status, then await the parent's synthesis prompt. Keep findings.jsonl append-only. No separate report file created.\n\nSynthesis turn 3 started; delivery audit accepted by parent. Discovery-pass count remains 0. No open leads entering this turn. Cross-group input associates g002/f1 with g004/f1 and g071/f2; g033's warning/cleanup-failure residual is separate. Own durable findings and progress reread; source old_terminals.rs 260–390 checked to refine the consequence's attribution. Next action: record that refinement under f1 immediately, then check installer timing and the cross-batch terminal-host contract. No new discovery claimed.\n\nSynthesis turn 3 complete. Discovery-pass count remains 0; no new discovery claimed. Revised f1 twice under its original ID: (1) checked agent/tab attribution and bounded-cleanup caveats from old_terminals.rs 260–390; (2) checked successful-installer outcome and assurance timing through install.sh 1208–1255 and 1260–1310, and the app's supervisor handover contract through SPEC_impl.md 7768–7795. The installer decides the assurance from an updated result, not terminal kind or migration state. It can therefore reassure a terminal user before quit/reopen activates the startup that ends old terminals. Read full recorded commit message to preserve its exact narrower acceptance. The intentional terminal retirement is the consequence route, not a new defect caused by the wording change.\n\nCross-batch checks: terminal-host SPEC.md 117–130 at 61e632323dbc6b4a35ed27bf5b9833102ffd5a4e retains its child setup contract; old_terminals.rs 390–445 excludes tabs with terminal-host launch records from the old-tab sweep. Container SPEC.md 2130–2145 at c8bc155cc36723c8c53870944d07ce8ec61ef9ed distinguishes ordinary supervisor behavior inside new containers from no terminal access for retired containerized sessions. These do not broaden f1 to every running terminal or make the comparison-only deletion a lifecycle change. f2 unchanged.\n\nNo open leads or unresolved readily checkable source premises. No new verified/unverified IDs; f1 remains source-confirmed with actual reader reliance conditional, highest consequence preserved, and its proposed drop unaccepted. The exact commit-message decision remains in f1; retirement spec alone does not settle inaccurate reassurance. g004/f1 and g071/f2 are the caller-supplied same-root issue, retaining original owner IDs; g033's warning/cleanup-failure residual is separate. No queue/ledger/plans searched. Assigned delivery was audited by parent; no unread assigned scope. Source-only; no tests, reproductions or checkout changes. Next action: return only this turn's delta and await further parent instructions.\n\nDiscovery turn 4, discovery-pass count 1 started. Read discovery-neighbours.json completely in bounded ranges 1–45, 46–85, 86–125, 126–160, 161–205, 206–245, 246–285, 286–329 after an initial oversized 1–160 read was clipped and not relied on as complete. No pending named questions. Existing f1/f2 history retained; interface issues supplied are novelty context only. No new findings or leads yet. Search focus beyond known issues: changed recipe/place identity and reference guards, direct environment transport/heartbeat contracts, and launch ownership/recent-history intent. Source context at pinned revisions only; no forbidden coverage sources or runtime actions.\n\nDiscovery turn 4 complete; discovery-pass count 1. Result: credible empty discovery. New verified IDs: none. New unverified-after-investigation IDs: none. Open leads: none. No new finding/candidate events were warranted by this pass; existing IDs and proposed-drop bases unchanged. No parent disposition inferred.\n\nChecks beyond known issues used the assigned c8bc155c contract changes and implementation at pinned tip 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db. Recipe/place cleanup reachability: store/podman.rs 210–255 includes every referencing environment row regardless of state and all recorded recipe resources; store.rs 7535–7588 invokes the refusal within the destination-change transaction, and 8022–8065 invokes it before host-row removal. Transport/idle contract: access.rs 1–155 and 155–285 retains one route representation and explicit container login/home/runtime environment; its stdio argv emits 120 seconds for environment routes, not ordinary SSH. manager.rs 4460–4505 enables heartbeat for every environment provider; client.rs 1690–1728 and 1812–1885 runs the thirty-second timer in the transport writer independently of cache refresh. Original governing transport subsection reread at c8 SPEC_impl.md 6462–6500.\n\nRecent-setup contract: store/environment_history.rs 1–175 retains captured recipe/place/repository intent without an environment FK, uses an independent bounded admission order, and does not overwrite replayed source keys. sessions.rs 1980–2255 passes request-captured environment intent and explicit GUI selection through successful create into claim-guarded recording; store.rs 8960–9040 puts the environment projection in the same admitted-create transaction. These checks did not establish a distinct document contradiction or shipped correctness route. Ran path history over the complete pinned range for access.rs, store/podman.rs and store/environment_history.rs to identify introduction/evolution context (1038bb1f, 04ffdbb3, 52cc5d72, 56659839, 08399d09); no finding was excluded merely for predating one commit.\n\nAll discovery-neighbour latest records were read before the search; known same-root issues were not restated or assigned new IDs. A source comment still naming only Tensorlake in the generic heartbeat constructor was incidental context outside this assigned SPEC group, not expanded into another review target. No prohibited coverage sources, runtime tests, reproductions, builds or live-install actions. No checkout changes. Required delivery and synthesis were already accepted by parent; no unread assigned mandatory scope remains. Next action: return this pass's checks and empty result, then await caller instruction.\n"
+}

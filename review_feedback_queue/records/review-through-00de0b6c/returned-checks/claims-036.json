@@ -1,0 +1,223 @@
+[
+  {
+    "key": "g056/c3",
+    "latest_line": 5,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "backend-session-limit-redaction-peer-diagnostic-exposure",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The typed exception preserves locally constructed context, not remote diagnostic text. This refutes the named credential-disclosure route, subject to the independent drop check.",
+    "checks": [
+      "At 56659839785691f76da3af5d8f51b511cff4ba8b, provisioning/backend.rs:287-324: new clears safe_refusal; session_limit builds context from the typed reason; redacted clears stderr; redacted_reason selects context only for that type.",
+      "At the same revision, transport.rs:423-460: SessionLimitRefusal has a private string; at constructs it from a 128-character configured-destination excerpt. Peer stderr only selects the refusal branch, with nested SSH route and exit 255 required.",
+      "Pinned git grep found no external BackendFailure struct literal or context assignment. backend.rs:1484-1489 reconstructs combined failures through new, removing the exception rather than granting it to combined stderr.",
+      "credential_delivery.rs:600-608,642-652 uses redacted_reason at warning boundaries. These are source conclusions; no runtime disclosure test was run."
+    ],
+    "coverage_checked": [
+      "Current SPEC.md:4901-4930 keeps remote-host text untrusted and explicitly preserves existing redaction requirements. SPEC_impl.md, Named credential catalog, requires fixed per-host failure reasons; One route for transport and provisioning requires a useful SSH-capacity diagnosis. Neither accepts disclosure.",
+      "TODO.md Planned is empty; plans/queue/INDEX.md contains no unlanded plans. The matching podman-environments plan is already landed (plans/REPORTS.md:21), not future coverage.",
+      "BUGS.md's escaped local SSH-helper transfer hang is a different trigger and consequence. Searches of INDEX.md, matching queue text and active TRIAGE_OUTCOMES.md found no exact typed-redaction exposure item. No archive read.",
+      "FILTER.md does not permit security consequences; the proposed disposition rests on source refutation, not a filter."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": "No source path has been established that changes a typed failure's context to arbitrary peer text while keeping its trusted marker. Configured destination display is intentional and is not itself a credential-disclosure premise.",
+    "original_stronger_consequence": "A failed credential read/write could expose arbitrary token-bearing remote diagnostics; original possible bucket highest and proposed_drop=true are preserved for independent judgment.",
+    "needs_independent_drop_check": true,
+    "proposed_basis": "Source refutation limited to the named typed-redaction route; it is not a global assertion that every diagnostic in Farhelm is credential-safe."
+  },
+  {
+    "key": "g056/f2",
+    "latest_line": 15,
+    "recommendation": "retain-verified",
+    "bucket": "other",
+    "underlying_key": "atomic-install-failed-cleanup-clears-safe-session-limit-refusal",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "A failed cleanup deterministically discards the trusted session-limit identity, so credential/proxy warning redaction loses the required useful diagnosis. The accepted failure sequence is conditional source analysis, not an observed failure or measured frequency.",
+    "checks": [
+      "At 56659839785691f76da3af5d8f51b511cff4ba8b, provisioning/backend.rs:464-473 and 2889-2918 dispatch install_bytes through install_source. The remote guarded block uploads at 1264-1267 and finishes at 1302-1328.",
+      "backend.rs:1166-1187 performs temporary sweep, metadata/possible identical-content skip, and initial temporary removal before that block. A refusal there returns directly; the finding requires reaching upload or finishing after successful earlier commands.",
+      "backend.rs:940-947 and 1571-1575 classify nested SSH refusal into a typed failure. At 1331-1338 another remove_owned_file request follows failure; its failure rebuilds through new, which sets safe_refusal=None at 287-292. redacted_reason:319-324 therefore returns the generic fallback.",
+      "Real warning boundaries: credential_delivery.rs:580-608,630-652 for Codex login/GitHub token, and environment/podman.rs:612-617 for proxy settings. podman.rs:1185-1233 confines the proxy install to pre-admission setup; admitted-container recovery does not reinstall it.",
+      "access.rs:302-324 sends independent nested commands over the place's Supervisor master. Successful earlier commands do not reserve later command capacity. Capacity becoming exhausted before upload/finishing and remaining exhausted for cleanup is compatible with the source; scheduling/frequency were not measured.",
+      "At inclusive review tip 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db, backend.rs:275-313 and 1327-1334 retain the same marker loss and generic fallback. No raw-peer-diagnostic exception is needed to repair this."
+    ],
+    "coverage_checked": [
+      "Current SPEC_impl.md:5983-6008, One route for transport and provisioning, requires the SSH-session-limit diagnosis. Named credential catalog:5915-5919 requires fixed per-host reasons, which does not accept losing a safe local diagnosis. SPEC.md's redaction/security rules remain compatible with retaining that local diagnosis.",
+      "TODO.md Planned is empty. plans/queue/INDEX.md has no unlanded plans; podman-environments is already landed per REPORTS.md:21. Its session-limit requirement is the implemented contract, not an outstanding repair plan.",
+      "BUGS.md concerns an unbounded transfer read with escaped local helpers, not completed failed commands followed by warning over-redaction. INDEX.md and matching queue searches found no same-root item; active TRIAGE_OUTCOMES.md has no session-limit cleanup-redaction decision. No archive read.",
+      "FILTER.md, Rare, self-correcting glitches and imprecise diagnostics, covers the diagnostic consequence only if the trigger is rare. Capacity changing between separate SSH commands is established, but this source-only record does not establish a rare sub-second or otherwise narrow window. Retain rather than infer the entire filter boundary from lack of reproduction."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": "No missing premise for the conditional marker-loss result. Real-world frequency and the actual OpenSSH scheduling sequence remain unmeasured; that limits a rarity-based filter proposal, not the source conclusion.",
+    "original_stronger_consequence": "All history events keep diagnostic correctness in other. No disclosure or loss of work was alleged; the code over-redacts. Earlier broad wording was narrowed to failures arising after successful preflight, preserving the successful-cleanup and earlier-refusal caveats.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Retain the narrowly established warning defect. Preserve the original requirement to keep remote stderr redacted and rebuild only from a trusted local refusal identity."
+  },
+  {
+    "key": "g056/c4",
+    "latest_line": 10,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "remote-route-argv-shell-injection",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "Configured executable/state paths and container login coordinates remain argv words across each parsing shell. The named constructor migration does not establish command injection.",
+    "checks": [
+      "At 1038bb1f4549f6896fa6e064fecf540f4548b4da, transport.rs:191-203 sends stdio_argv as RemoteCommand::Argv. access.rs:113-125 preserves argv versus script; 257-287 quotes each argv word before SSH's parsing shell.",
+      "At that revision, access.rs:200-220 supplies container/user/home as separate argv entries and payload.script() quotes the innermost argv. access.rs:230-239 quotes the entire outer Podman invocation separately for SSH.",
+      "At 56659839785691f76da3af5d8f51b511cff4ba8b, access.rs:203-231 uses an absolute Podman path and literal argv; 307-324 wraps the constant CLEAN_PLACE_EXEC script and its arguments through the same outer quoting boundary. farhelm-proto/src/text.rs:82-99 always single-quotes words and escapes embedded quotes.",
+      "No runtime shell experiment was run. Explicit selection of an operator-controlled remote program remains ordinary execution authority, not an injection claim."
+    ],
+    "coverage_checked": [
+      "Current SPEC_impl.md:5983-6008 requires one quote per parsing shell and forbids embedding Podman argv in the Farhelm program spelling; checked source follows it. SPEC.md:4901-4930 retains the remote-host execution/secret boundary.",
+      "TODO.md Planned and plans/queue/INDEX.md are empty; podman-environments is landed, not an unlanded fix. BUGS.md has no argv-injection acceptance.",
+      "INDEX.md and matching queue searches found quoting defects in unrelated maintainer tooling, not this route constructor. Active TRIAGE_OUTCOMES.md has no matching remote-route injection decision. No archive read.",
+      "No FILTER.md rule can omit an established security boundary failure; disposition is source refutation only."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": "No dynamic word entering unquoted shell syntax in the named route was shown.",
+    "original_stronger_consequence": "Configured paths or container login coordinates could become shell commands; possible highest for command injection, with original proposed_drop=true. Preserve the operator-selected-program caveat.",
+    "needs_independent_drop_check": true,
+    "proposed_basis": "Refute the specific argv-to-shell injection hypothesis at the reviewed revisions; do not generalize to every shell script or future route implementation."
+  },
+  {
+    "key": "g056/c5",
+    "latest_line": 16,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "transport-process-observation-lifetime-cycle",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The stderr drainer owns observation state only. It has no reverse lifetime/child edge that can keep the transport child or drainer alive after the final connection owner drops.",
+    "checks": [
+      "At 1038bb1f4549f6896fa6e064fecf540f4548b4da, transport.rs:221-227 gives the child kill_on_drop; ProcessLifetime:323-336 owns that child and the drainer abort handle. Its Drop aborts the drainer.",
+      "transport.rs:441-455 makes SshObservation only bounded state, watch sender and Notify. process_connection:655-692 passes that observation to the drainer and gives lifetime anchors to the reader and diagnostics; the stdin writer supplies no reverse edge.",
+      "The base-to-reviewed-revision transport diff's lifetime/destructor and process_connection hunks retain this ownership shape under renamed types. This is not a claim that killing a Podman client synchronously ends all remote descendants.",
+      "No runtime cancellation or descendant-lifetime observation was made."
+    ],
+    "coverage_checked": [
+      "Current SPEC_impl.md:5983-6008 assigns child/stderr ownership to the connection and expressly uses a 120-second stdin watchdog for the in-container helper because client termination is insufficient. SPEC.md's host/session lifecycle text supplies no broader immediate descendant-kill promise for this transport helper.",
+      "TODO.md Planned and plans/queue/INDEX.md are empty. BUGS.md's transfer capture hang is a separate primitive. The landed podman-environments plan is not future coverage.",
+      "Read existing queue item cancelled-ssh-capture-can-retain-local-readers.md in full: it concerns provisioning capture_child dropping detached JoinHandles and ProxyJump helpers, not process_connection's owned abort handle. It is neither an alias nor exact coverage. INDEX.md and active TRIAGE_OUTCOMES.md searches found no same-root lifetime-cycle item. No archive read.",
+      "No filter is needed to refute a nonexistent reverse ownership edge."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": "The named hidden ownership cycle is absent. Broader remote descendant lifetime is separately bounded by the specified helper watchdog, not proved by kill_on_drop.",
+    "original_stronger_consequence": "Orphan transport child/stderr-drainer resources after cancellation, originally other with no established security or user-work-loss route; proposed_drop=true. The remote-descendant caveat remains.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Narrow source refutation of transport lifetime-cycle/cancellation leak, preserving the distinction from provisioning capture cancellation and remote helper lifetime."
+  },
+  {
+    "key": "g057/l1",
+    "latest_line": 10,
+    "recommendation": "covered",
+    "bucket": "other",
+    "underlying_key": "uninstall-retains-already-orphaned-legacy-private-tmux-server",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The exact already-stopped-supervisor residual is explicitly accepted by both specifications, including a prior startup-shutdown failure. The proposal does not waive active-unit or terminal-host termination.",
+    "checks": [
+      "At 500548b9253b07a26fd03119679184b69544e31d, provisioning/backend.rs:3303-3345 stops units except inactive/failed and runs terminal-host cleanup, without private-tmux socket lookup or kill-server. Terminal-host stop/confirmation failures return nonzero before later lib removal.",
+      "At the same revision, SPEC.md:211-218 and SPEC_impl.md:7853-7863 expressly accept a private server that already outlived its stopped supervisor. Current SPEC.md:210-217 and SPEC_impl.md:7814-7830 retain that acceptance.",
+      "No runtime evidence establishes cgroup termination here; active control-group termination remains the separate specified contract. Add adoption is checked separately in g057/c4 and is not covered by this residual."
+    ],
+    "coverage_checked": [
+      "SPEC.md and SPEC_impl.md contain exact trigger/consequence/scope acceptance, quoted below. It includes survival after host and installed-binary removal, rather than promising explicit tmux termination at uninstall.",
+      "TODO.md Planned is empty. Its Mid term phase-3 item removes future startup legacy cleanup and is not this uninstall acceptance. plans/queue/INDEX.md has no unlanded plans; tmux-drop-from-install is landed per plans/REPORTS.md:30. Its criterion 3/Decisions agrees with the specs but is not used as outstanding plan coverage.",
+      "BUGS.md contains a distinct SSH-transfer hang. INDEX.md, matching queue searches and active TRIAGE_OUTCOMES.md found no remaining exact orphan-private-tmux item or decision. No archive read.",
+      "No rarity filter is required. Do not extend the older-release filter or exact acceptance to answering-supervisor mutation or failed terminal-host termination."
+    ],
+    "exact_cover_quotes": [
+      "SPEC.md at 500548b9253b07a26fd03119679184b69544e31d:214-217 (also current Topology): Uninstall has no tmux step of its own: stopping the supervisor's service ends whatever still runs under it, an earlier release's private tmux server included, but one that outlived a supervisor stopped before uninstall (on a host never updated to a release that ends it at startup, say) keeps running, which the maintainer accepted on 2026-11-11.",
+      "SPEC_impl.md at that revision:7860-7863 (also current Provisioning): Uninstall has no tmux step: a private tmux server that outlived a supervisor stopped before uninstall (a host never updated to a release that ends it at startup, or one whose startup ending failed and whose supervisor was later stopped) keeps running. The maintainer accepted that residual on 2026-11-11 when the step was removed."
+    ],
+    "missing_premise": "No missing premise for the exact accepted survival case. A distinct loss-of-work/security consequence, failure to stop an active unit, or failed terminal-host termination would require its own established route and would fall outside this proposal.",
+    "original_stronger_consequence": "Initial lead considered owned processes left unmanaged and possible highest if uninstall destroyed work beyond confirmation. Later events establish only legacy-server survival and propose exact-spec coverage; potential highest and all prior proposed drops remain for independent review.",
+    "needs_independent_drop_check": true,
+    "proposed_basis": "Exact specification acceptance, limited to a legacy private server already orphaned before uninstall. No parent disposition inferred."
+  },
+  {
+    "key": "g057/c2",
+    "latest_line": 3,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "tmux-removal-reach-record-producer-parser-offsets",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The inspection producer and parser agree on their reduced eight-field record, including the setup-owned unit guard. This record comes from the helm's own script, not an older remote binary.",
+    "checks": [
+      "At 500548b9253b07a26fd03119679184b69544e31d, provisioning/backend.rs:2744-2759 emits marker, distro, HOME, architecture, manager, unit directory, unit owner and final empty split field. inspect immediately parses this command's stdout at 2765-2774.",
+      "parse_reach_output:3836-3842 requires exactly eight fields and empty field 7. Architecture is field 3, manager 4, HOME 2, unit directory 5 and owner 6 at 3860-3923. Absolute HOME/unit validation and SetupManaged are retained.",
+      "Pinned SPEC_impl.md:7771-7788 describes helm-owned inspection and the OS split. No remote-version reach-output wire compatibility premise exists for this script/parser pair. No execution was performed."
+    ],
+    "coverage_checked": [
+      "Current SPEC.md:100-111 and 5221-5227 preserve discovery and setup-owned unit obligations. Current SPEC_impl.md, Provisioning, preserves inspection and setup-unit ownership. Neither accepts losing the guard; source refutes its loss.",
+      "TODO.md Planned and plans/queue/INDEX.md are empty. The matching tmux-drop-from-install plan is landed, not unlanded coverage. BUGS.md contains no reach-field/parser acceptance.",
+      "INDEX.md and active TRIAGE_OUTCOMES.md searches found unrelated inspection/path issues, not this local producer/parser offset pair. No exact matching queue item or alias; no archive read.",
+      "No FILTER.md rule is needed or used."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": "A mismatched producer/parser or omitted owner validation was not found. An older remote binary is not the producer of this reach record.",
+    "original_stronger_consequence": "Malformed host classification or loss of setup-owned service protection was considered; original suggested other, could-be-highest=false and proposed_drop=true. Because the latter hypothesis concerns mutation of an owned service, send the proposed refutation to the independent check conservatively.",
+    "needs_independent_drop_check": true,
+    "proposed_basis": "Refute this exact reach-format and owner-guard hypothesis by the pinned producer, immediate parser call and checked offsets."
+  },
+  {
+    "key": "g057/c3",
+    "latest_line": 11,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "bundled-tmux-removal-mac-reachability-error-and-final-symlink",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The three named concerns are refuted within their stated limits: Mac plans never reach this Linux step, lookup/removal failures propagate, and unlink does not follow the final symlink to its target.",
+    "checks": [
+      "At 500548b9253b07a26fd03119679184b69544e31d, provisioning/plan.rs:811-839 returns the Mac plan before RemoveBundledTmux at 867-869. service.rs:2778-2785 dispatches the removal and converts errors to a degraded warning.",
+      "backend.rs:34-36 matches only C-locale missing-path diagnostics. remove_file:3373-3379 skips only local NotFound; 3392-3408 uses stat without -L, rm -f on the quoted named entry, and explicit nonzero propagation for other lookup errors. Refused rm remains the successful-lookup branch's exit status.",
+      "Pinned SPEC.md:182-194 requires absent-file skip, warning on failure and no Mac tmux actions. Current SPEC_impl.md:8003-8019 states the same private-path/lookup/removal contract.",
+      "No runtime filesystem/platform test was performed. These checks do not establish safety against intermediate-parent symlinks or concurrent path replacement."
+    ],
+    "coverage_checked": [
+      "Both current specifications preserve the Linux cleanup contract and Mac exclusion; this is correctness of implementation against those contracts, not accepted failure coverage.",
+      "TODO.md Planned and plans/queue/INDEX.md are empty; tmux-drop-from-install is landed. BUGS.md has no matching cleanup/symlink acceptance.",
+      "INDEX.md, matching queue text and active TRIAGE_OUTCOMES.md contain other uninstall path/topology uncertainties, not this final-entry unlink or unreachable Mac action. No same-root alias; no archive read.",
+      "No rarity or older-release filter used. The proposed refutation of a possible symlink-target deletion still goes to the independent check because that original concern can involve user-owned files."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": "No final-symlink target-following deletion exists in the checked commands. Intermediate-parent replacement is explicitly outside this named conclusion and remains unproved by it.",
+    "original_stronger_consequence": "Mac incompatibility, inaccessible files silently skipped, or deleting a symlink's target. Original events assign other/could-be-highest=false after refuting final-link following; preserve the user-file deletion hypothesis and narrowed guarantees for independent review.",
+    "needs_independent_drop_check": true,
+    "proposed_basis": "Source refutation limited to Mac action reachability, observable lookup/removal failures and unlink of the final entry. Do not treat it as global filesystem-race safety or permission to delete shared-bin tmux."
+  },
+  {
+    "key": "g057/c4",
+    "latest_line": 9,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "bundled-tmux-cleanup-beneath-answering-old-supervisor",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "Ordinary Add adopts an answering compatible or skewed supervisor without installation or cleanup, including at confirmation. Update restarts before cleanup and stops on failure. Removal targets the private lib path, not a shared binary directory.",
+    "checks": [
+      "At 500548b9253b07a26fd03119679184b69544e31d, provisioning/service.rs:835-932 registers both answering outcomes; only Absent constructs Add planning. revalidate:2238-2249 probes original and, when distinct, planned coordinates. Answering outcomes return UseAsIs:2251-2309; only Absent returns Execute:2311.",
+      "revalidate_and_execute:2215-2220 dispatches UseAsIs separately. finish_use_as_is:2546-2559 only completes/skips run steps, clears busy and publishes events; it does not execute installation or removal.",
+      "backend.rs:2648-2652 requires positive-absence exit, empty stdout and remote command-start evidence. Timeout/malformed hello returns failure:2670-2681. probe_script:1602-1617 searches PATH plus both ordinary installation locations and uses the frozen state argument.",
+      "plan.rs:722-740 freezes lib_dir independently of remote Farhelm executable placement; 867-869 removes only lib_dir/tmux. Mac returns earlier:811-839. Update adds RestartSupervisor:862-865 before removal. backend.rs:2983-2995 requires successful restart; sequential service.rs:2660-2685 stops on an action error.",
+      "Pinned SPEC.md:3010-3025 requires no tmux program for new-supervisor legacy termination. Source checks do not establish that systemctl enable --now alone replaces a previously running process; the earlier phase-order-only proposed drop was insufficient and is superseded by checked adoption gates.",
+      "No runtime process/service behavior observed. A concurrent external start after confirmation or intermediate-parent replacement is a different, unestablished route, not refuted globally here."
+    ],
+    "coverage_checked": [
+      "Current SPEC.md:100-106 requires discovery and use-as-is without replacing an answering supervisor. SPEC.md:182-189 preserves the shared-bin copy and orders private removal after start/restart. SPEC_impl.md, Provisioning and tmux removal, retains those contracts.",
+      "TODO.md Planned and plans/queue/INDEX.md are empty. tmux-drop-from-install is landed; its Decisions approves removal of the private bundled binary, not mutation of an answering supervisor. The exact orphan-uninstall acceptance in g057/l1 does not cover Add.",
+      "BUGS.md is a different transfer hang. INDEX.md and active TRIAGE_OUTCOMES.md have no exact Add-cleanup-under-answering-supervisor item. Other Add/automatic-update registry issues are different triggers, so no same-root alias is asserted. No archive read.",
+      "No FILTER.md rule used. Security/work-loss potential requires independent checking of this proposed source refutation despite the absence of an established harmful route."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": "No ordinary answering-supervisor path reaches Add cleanup through the checked discovery/confirmation gates. A later external start race or a complete loss-of-work sequence was not established. Enable-now success alone would not supply the missing replacement premise.",
+    "original_stronger_consequence": "Deleting bundled tmux while an old supervisor still needs it could break terminal operations (high), possibly affect active work (highest); deleting the user's shared-bin copy was also considered. Preserve the initial phase-order-only drop, its withdrawal to an unresolved Add lead, and later narrowed source refutation. None is a parent-accepted drop.",
+    "needs_independent_drop_check": true,
+    "proposed_basis": "Refute ordinary Add at the probed installation through actual adoption/no-execute gates, separately refute shared-bin targeting, and retain narrow Update ordering evidence. Do not use already-orphaned uninstall acceptance to waive Add or terminal-host cleanup obligations."
+  }
+]

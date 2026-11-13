@@ -1,0 +1,218 @@
+[
+  {
+    "key": "g060/l1",
+    "latest_line": 11,
+    "recommendation": "retain-verified",
+    "bucket": "high",
+    "underlying_key": "recipe-place-status-error-discards-success-and-has-no-retry",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "A failed per-place read replaces every displayed container build status and Rebuild control with an error, with no retry for that request. The healthy idle feed owes no further read. This is a source-confirmed persistent loss of useful controls, with recovery workarounds; frequency and material real-world duration were not measured. High is a recommendation, not a parent decision.",
+    "checks": [
+      "350a4b33b6d4476f4a78e43cea124bc2b828f462:crates/farhelm-ui/src/tensorlake/recipes.rs:366-385,401-417,448-462,480-485,540-545: place_status depends on successful place observations/feed notices; catalog Retry calls only fetch_recipes; editor returns occur after the resource hooks.",
+      "Same revision:crates/farhelm-ui/src/containers_settings.rs:192-218,257-285: Err displays only an alert; successful rows and their Rebuild/on_refresh controls are absent. No separate successful-status cache exists here.",
+      "Same revision:crates/farhelm-ui/src/feed.rs:88-98,280-315 and environment_ui.rs:689-729: feed notices are spent on invocation; settled place hooks do not poll with a healthy feed. Each hook owns its own answer signal. settings.rs:312-314,629-647 keeps section panels mounted.",
+      "Pinned dioxus-hooks 0.7.10 cached src/use_resource.rs:22-92,191-195: completion stores Some(res), including Result::Err; dependency changes and explicit restart start new tasks. Completion or ordinary rendering does not schedule error retry. Same reviewed revision api/environments.rs:29-38 and api.rs:2416-2443,2482-2548 return the bounded request's error without a retry ladder.",
+      "56659839785691f76da3af5d8f51b511cff4ba8b:crates/farhelm-helm/src/tensorlake/recipes.rs:531-545,558-573,593-616: successful create/update and deletion emit feed bumps. These permit same-opening recovery after a subsequent successful status read; an accepted unchanged Save also emits a bump.",
+      "350a4b33b6d4476f4a78e43cea124bc2b828f462:crates/farhelm-ui/src/containers_settings.rs:17,53-63 and environment_ui.rs:689-729: Containers Refresh operates its own hook, not the recipe hook. Helm hosts.rs:1663-1672 and environment/podman_probe.rs:435-475,485-494 update cached probe state and Notify without a fleet bump. A separately observed changed recipe-hook answer can still recover indirectly.",
+      "git diff 350a4b33b6d4476f4a78e43cea124bc2b828f462..00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db is empty for recipes.rs, recipe_editor.rs, add_host.rs and containers_settings.rs. No runtime reproduction was performed."
+    ],
+    "coverage_checked": [
+      "Current SPEC.md:451-488 shared recipe catalog and SPEC_impl.md:6010-6057 Shared recipes and prepared artifacts were read. They require per-place status/Rebuild and failed-refresh retention/retry; neither accepts this error behavior. Reviewed SPEC.md:441-479 has the same rule.",
+      "TODO.md:25-26 Planned is empty. Search of plans/queue for recipe/status/retry/refresh found podman-environments.md Settings requirements at 373-383, but no outstanding work that fixes this error path. Its implementing product commits #3328/#3329 are already in the review range; the retained plan text is not evidence of an unlanded fix.",
+      "BUGS.md contains only the escaped SSH-output-holder provisioning hang, not recipe status reads. INDEX.md was read in full and matching queue sources searched. failed-recipe-refresh-test-lacks-baseline-row.md concerns a browser oracle for the separate recipe-list read, not this production status resource; no exact duplicate or useful extension identified.",
+      "Active TRIAGE_OUTCOMES.md was searched for recipe/status/refresh/retry/Podman. Its recipe credential-delivery decision is unrelated. No exact decision found; archive not read.",
+      "FILTER.md read in full: ordinary status request failure does not establish its rare-trigger boundary, and retrying the displayed operation is unavailable. Other filters concern unrelated triggers. No full filter match."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": "No missing source premise for the narrow error/retry defect. Actual frequency, elapsed persistence and measured material UX impact remain unknown. No backend build failure, resource loss, security impact or permanent lockout is established.",
+    "original_stronger_consequence": "Earlier records called this 'without recovery' and said all container rebuild controls could disappear indefinitely in the open panel. Preserve the healthy-idle persistence claim, qualified by successful recipe mutation, any new fleet notice, an actually changed recipe-hook place observation, or reopening Settings followed by a successful read. Section navigation and editor cancellation alone do not restart it. Containers Refresh has no direct restart guarantee but can indirectly help if the recipe hook separately observes a changed answer. This was never a highest-bucket loss-of-work claim.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Retain the source-confirmed failed-read retention/retry defect with its concrete recovery qualifications; high for loss of all container build visibility and per-place controls in this view."
+  },
+  {
+    "key": "g060/c3",
+    "latest_line": 5,
+    "recommendation": "refuted",
+    "bucket": "highest",
+    "underlying_key": "recipe-delete-aggregate-podman-ownership-guard",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The changed Tensorlake-only precheck does not weaken the final aggregate deletion guard. The suspected route of forgetting recorded Podman ownership through that narrowing is source-refuted. This proposes a narrowly scoped dismissal and still requires an independent drop check.",
+    "checks": [
+      "56659839785691f76da3af5d8f51b511cff4ba8b:crates/farhelm-helm/src/environment/recipes.rs:40-73,272-281,314-316: Podman images, prepared images, builder/preparer handles, starts and retired images all contribute to aggregate needs_cleanup; Tensorlake fields are checked separately and ORed with every Podman place.",
+      "Same revision:crates/farhelm-helm/src/tensorlake/recipes.rs:393-418,593-616: route obtains shared deletion admission, awaits provider cleanup, then the store's immediate transaction refuses deletion if decoded aggregate state needs cleanup.",
+      "Same revision:crates/farhelm-helm/src/environment/mod.rs:424-445 attempts every installed provider, retaining the first failure; tensorlake/build.rs:1813-1828 uses tensorlake_needs_cleanup only to avoid demanding a Tensorlake key when no Tensorlake cleanup is needed.",
+      "Reviewed SPEC_impl.md:6518-6523 expressly requires the shared admission and final aggregate guard, and this route satisfies it. No execution or audit of individual provider destruction algorithms was performed."
+    ],
+    "coverage_checked": [
+      "Current SPEC.md recipe ownership/deletion paragraphs and SPEC_impl.md:6010-6057 checked; they require ownership retention and aggregate cleanup, rather than accepting ownership loss.",
+      "TODO Planned is empty. plans/queue recipe/cleanup/aggregate searches found the Podman implementation plan's ownership requirements, not an unlanded repair of this suspected weakening.",
+      "BUGS.md, full INDEX.md and matching recipe-cleanup queue searches checked. Snapshot visibility, changed-project-key cleanup absence and detached recipe-write entries are different roots; none covers deleting through this aggregate guard.",
+      "Active TRIAGE_OUTCOMES.md searched for recipe/Podman/cleanup/aggregate; no exact decision. FILTER.md has no full match for this guard question. Archive not read."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": "The original consequence requires store deletion while a Podman ownership field still needs cleanup. The final aggregate guard forbids that path. No claim about an independent flaw inside a provider's cleanup algorithm is refuted.",
+    "original_stronger_consequence": "Deleting a recipe could abandon its container images or interrupted builders, losing the recorded ownership and cleanup authority for user-owned artifacts (hypothetical highest consequence). The checked narrowing does not produce it.",
+    "needs_independent_drop_check": true,
+    "proposed_basis": "Source refutation limited to narrowing the Tensorlake precheck: aggregate needs_cleanup and transactional deletion admission remain intact. Independent agreement required before dropping."
+  },
+  {
+    "key": "g060/c4",
+    "latest_line": 8,
+    "recommendation": "refuted",
+    "bucket": "highest",
+    "underlying_key": "recipe-container-field-getent-pull-inspect-argument-boundaries",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The three named argument positions preserve field values as data. This refutes injection through those positions only. It cannot support a general security dismissal for arbitrary later consumers or the common executor.",
+    "checks": [
+      "350a4b33b6d4476f4a78e43cea124bc2b828f462:crates/farhelm-ui/src/tensorlake/recipe_editor.rs:224-227 preserves literal reference/user values; farhelm-proto/src/recipes.rs:726-729,788-798 requires nonempty NUL-free values and delegates syntax/account resolution to runtime consumers.",
+      "56659839785691f76da3af5d8f51b511cff4ba8b:crates/farhelm-helm/src/environment/podman/build.rs:59-73 places shell_quote(requested) after getent passwd --; :808-832 places the reference as one vector argument after -- in pull and image inspect. These positions do not splice shell code or extra options.",
+      "The same pull_base starts with exists at :809, which this record explicitly excludes. Helper/run construction, exec, ownership handling, the common executor and other later uses are outside this refutation. No runtime execution was performed."
+    ],
+    "coverage_checked": [
+      "Current SPEC.md shared recipe paragraph and SPEC_impl.md:6010-6057,6079 checked for literal container base/login contract; neither accepts command injection. The reviewed validator explicitly delegates reference syntax and account resolution.",
+      "TODO Planned is empty; plans/queue recipe/reference/login/injection searches found shared base/login requirements, not an unlanded fix for these three positions.",
+      "BUGS.md and full INDEX.md checked; targeted queue searches for container reference/login/shell or option injection found no exact cover. image-inspection-inherits-keep-id-account.md was read and concerns ambient account synthesis in the older inspector, not these positions.",
+      "Active TRIAGE_OUTCOMES.md searched for Podman/recipe/login/injection; credential-delivery settings decisions do not cover command boundaries. FILTER.md has no full match; security is outside the general rare-glitch filter. Archive not read."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": "No shell/option injection is shown through getent's requested-user position or pull/inspect's reference position. Any broader host-command-execution claim needs its own concrete consumer/executor path. Parent-supplied g058/l1 is related earlier model-stage context, not an inspected alias or a claim refuted here.",
+    "original_stronger_consequence": "Newly editable literal image references and login users might permit host command execution. The initial 'immediate consumers refute the route' wording was narrowed: only getent/pull/inspect positional boundaries were checked. Keep host command execution as the original suspected highest consequence and preserve every excluded consumer; this is not blanket command or transport certification.",
+    "needs_independent_drop_check": true,
+    "proposed_basis": "Source refutation of exactly three named positional injection routes. Independent drop check must agree to that narrow scope; do not use it to dismiss g058/l1 or a broader executor concern.",
+    "new_interface_evidence": "At 56659839785691f76da3af5d8f51b511cff4ba8b environment/podman/build.rs:70 and :812-830, getent uses shell_quote plus -- and pull/inspect use separate reference arguments after --. This is later consumer evidence for related g058/l1, not evidence about exists or the common executor."
+  },
+  {
+    "key": "g060/c5",
+    "latest_line": 12,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "shared-recipe-catalog-size-label-qualification",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The shared catalog explicitly qualifies size as Tensorlake-only. Retaining stored size in a row summary therefore does not establish the claimed unqualified promise of Podman limits.",
+    "checks": [
+      "350a4b33b6d4476f4a78e43cea124bc2b828f462:crates/farhelm-ui/src/tensorlake/recipes.rs:58-75 retains CPU/memory/disk and labels custom container bases Podman only; :467-469 explicitly says Size applies to Tensorlake sandboxes.",
+      "Same revision:crates/farhelm-ui/src/tensorlake/recipe_editor.rs:616,638 says Size (Tensorlake sandboxes only), with Tensorlake-specific help. environment/recipes.rs:77-79 says Podman applies no resource limits.",
+      "Reviewed SPEC.md:443-447,469-470 likewise confines size to Tensorlake. No usability/comprehension measurement and no blanket check of other provider labels was performed."
+    ],
+    "coverage_checked": [
+      "Current SPEC.md:451-488 and SPEC_impl.md:6010-6057 retain Tensorlake-only size; the source wording follows that contract, rather than invoking an exception for misleading limits.",
+      "TODO Planned empty. plans/queue/podman-environments.md:269-274,373-383 repeats the same size requirement; no unlanded size-summary repair found.",
+      "BUGS.md, full INDEX.md, queue recipe/size searches and active TRIAGE_OUTCOMES.md searches found no exact item or decision. FILTER.md has no applicable boundary. Archive not read."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": "The suspected display defect requires the shared catalog to promise unqualified container limits. Its introduction and editor explicitly qualify those values. Other launcher/provider labels remain outside this candidate.",
+    "original_stronger_consequence": "Retained CPU/memory/disk row values might falsely promise Podman resource limits. That narrow display premise is contradicted by nearby source wording; no security or user-work-loss consequence was claimed.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Source wording refutes the narrow unqualified-size-promise claim."
+  },
+  {
+    "key": "g060/c6",
+    "latest_line": 13,
+    "recommendation": "refuted",
+    "bucket": "high",
+    "underlying_key": "prepared-podman-login-field-prior-production-writer",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The required login field accompanies the first production PreparedImage constructor in this sequence. The shown predecessor has only the type and its optional state member, so it does not establish a shipped record invalidated by the new field.",
+    "checks": [
+      "git grep PreparedImage across crates at 56659839785691f76da3af5d8f51b511cff4ba8b^ returns only environment/recipes.rs:42 (member) and :86 (declaration), with no constructor. git log -SPreparedImage over the pinned range finds the initial shared-recipes declaration at 56040bb964270bb40d191902173dbb84b3ba78fc and the production integration at 56659839785691f76da3af5d8f51b511cff4ba8b.",
+      "56659839785691f76da3af5d8f51b511cff4ba8b:crates/farhelm-helm/src/environment/recipes.rs:38-45,94-100 adds login to the optional prepared record; environment/podman/build.rs:338-375 resolves the selected account and constructs PreparedImage with login:user.",
+      "The optional/defaulted Podman state retains absence for older Tensorlake-only rows. No manually fabricated state or external fork is an established shipped premise. No runtime decoding experiment was performed."
+    ],
+    "coverage_checked": [
+      "Current SPEC.md shared recipes/upgrade contracts and SPEC_impl.md:6010-6057 preserve old stored base spellings and add per-place Podman state. They do not accept invalidating previously produced records; the suspected earlier writer is instead absent.",
+      "TODO Planned empty. plans/queue shared-recipe/prepared/login/schema searches found Podman introduction requirements, not an outstanding repair for an older missing-login record.",
+      "BUGS.md, full INDEX.md and targeted queue searches for PreparedImage/prepared login/decode found no exact coverage. Active TRIAGE_OUTCOMES.md has no matching schema decision. FILTER.md's older-release-plus-rare-condition rule was not applied: no older production record has been established. Archive not read."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": "A shipped earlier writer of PreparedImage without login. Unshown external forks and fabricated state remain outside the established route. Record decode failure alone would not prove deletion of stored artifacts.",
+    "original_stronger_consequence": "Adding a required login field might make existing prepared-image state unreadable and deny access to the recipe catalog (hypothetical high). No original security or proven user-owned-work-loss route was established. Retain the distinction between inaccessibility and artifact deletion, and the limit to the inspected production sequence.",
+    "needs_independent_drop_check": true,
+    "proposed_basis": "Source refutation of the prior-production-record premise. Marked for independent checking conservatively because the suspected affected state records owned artifacts, despite no established artifact-loss consequence."
+  },
+  {
+    "key": "g060/l2",
+    "latest_line": 17,
+    "recommendation": "retain-verified",
+    "bucket": "other",
+    "underlying_key": "tensorlake-add-host-inline-container-recipe-compatibility",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "Saving a newly enabled container recipe in Add host selects a Podman-only recipe while Tensorlake Continue remains enabled. Continue deterministically reaches the backend compatibility refusal. The recipe itself is valid shared-catalog data; the defect is the unusable enabled continuation.",
+    "checks": [
+      "350a4b33b6d4476f4a78e43cea124bc2b828f462 diff and crates/farhelm-ui/src/tensorlake/recipe_editor.rs:660-692 remove the staged card/readonly restrictions. The inline Add host use is at tensorlake/add_host.rs:291-295 and selects saved.name without compatibility admission.",
+      "Same revision:add_host.rs:132-138 loads every recipe; :326-338 renders ordinary enabled options; :355 tests only lock/nonempty recipe/name; :172-208 sends the selected name without provider admission.",
+      "Same revision:crates/farhelm-helm/src/provisioning/tensorlake_add.rs:649-668 sets new_install=true and saved_prepared=false for a fresh host; :714-728 refuses a base that does not support Tensorlake before returning a setup confirmation. environment_ui.rs:283-296 already contains the shared exhaustive base compatibility decision.",
+      "Reviewed SPEC.md:358-363 requires the full inline editor, while :441-447 requires unsupported recipes visible but disabled with a reason. git diff to 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db is empty for recipe_editor.rs and add_host.rs. No runtime observation."
+    ],
+    "coverage_checked": [
+      "Current SPEC.md:366-383 Add host and :451-488 shared catalog, plus SPEC_impl.md Adding Tensorlake hosts and Shared recipes and prepared artifacts, checked. Full editing and backend refusal do not accept an enabled incompatible Continue.",
+      "TODO Planned empty. plans/queue/podman-environments.md:269-274,330-339,373-383 requires provider-disabled choices but its implementing product commits are already in range. No unlanded plan specifically fixing Add host's inline-selection/Continue path found.",
+      "BUGS.md, full INDEX.md and matching Add-host/recipe/provider queue searches found no exact cover. add-host-refusal-bypasses-dialog-admission.md concerns delayed dialog admission, not incompatible recipe selection. Shared-launcher scope does not automatically cover this separate Add host caller.",
+      "Active TRIAGE_OUTCOMES.md recipe/Tensorlake/provider searches found no exact decision. FILTER.md read: this uses normal shipped controls, and retrying the same choice fails again; it does not fit rare safe failure followed by successful retry. Archive not read."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": "None for the enabled-choice and failed-Continue route. A saved Tensorlake API key and valid nonempty host name are prerequisites. No billed creation, credential leak, wrong-provider execution, resource loss or permanent lockout follows from the checked backend refusal.",
+    "original_stronger_consequence": "Earlier wording also mentioned pre-existing externally authored container recipes appearing enabled. Preserve that context, but introduction in this range is the newly editable inline container card interacting with automatic selection on Save. Pre-existing options alone receive no separate new-issue credit. Saving remains valid for Podman; choosing a compatible recipe or editing the saved recipe through Recipes recovers. The failed-Continue consequence has not been withdrawn or lowered from highest.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Retain as other: a source-confirmed unusable enabled choice and avoidable failed primary step, with a straightforward compatible-choice workaround and effective pre-setup backend refusal."
+  },
+  {
+    "key": "g060/c7",
+    "latest_line": 18,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "hidden-recipe-editor-oracle-retained-draft-witness",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The complete assertion sequence checks the specific unsaved draft after revealing the editor. Hiddenness alone could pass for a missing editor, but that is not the complete oracle used here.",
+    "checks": [
+      "350a4b33b6d4476f4a78e43cea124bc2b828f462:e2e/tests/tensorlake-recipes.spec.ts:997-1010 fills e2e-close-header, switches sections, checks hiddenness, closes Settings, checks the Recipes section and guarded question, answers Keep editing, and requires that exact Name value. Losing the draft does not satisfy this sequence.",
+      "Same revision:e2e/tests/tensorlake-recipes.spec.ts:430-438 independently requires the hidden sticky owner and Save element still exist; :444-465 verifies revealed draft and API persistence after Save. No test was run.",
+      "This refutes only the proposed missing/unmounted-and-lost-draft false-pass route. It does not certify every close path, browser timing boundary or all state-preservation mechanisms."
+    ],
+    "coverage_checked": [
+      "Current SPEC.md recipe editor leave/save/discard/keep-editing paragraph and SPEC_impl.md Adding Tensorlake hosts' mounted editor/close-guard discussion were checked. They require retained draft behavior; the test has a corresponding positive witness.",
+      "TODO Planned empty. plans/queue hidden/editor/draft/retention searches found no unlanded work matching this oracle concern.",
+      "BUGS.md, full INDEX.md and matching queue searches checked. recipe-leave-save-live-draft-mismatch-unresolved.md concerns production live-draft dispatch, and failed-recipe-refresh-test-lacks-baseline-row.md concerns a separate list-refresh oracle; both were read and neither is exact coverage.",
+      "Active TRIAGE_OUTCOMES.md hidden/editor/draft searches found no matching decision. FILTER.md has no applicable boundary; source refutation, not low-value filtering, is proposed. Archive not read."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": "The suspected false pass needs an editor that lost the specific unsaved Name value yet can satisfy the later exact retained-value assertion. The named sequence supplies the missing observable.",
+    "original_stronger_consequence": "A toBeHidden assertion might pass when the editor unmounted and silently discarded its unsaved form state, falsely assuring maintainers that drafts survive. The later retained-value assertions refute that narrow oracle concern. This is a maintainer test-coverage hypothesis, with no catastrophic tooling, security or established user-work-loss route.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Source refutation of the narrow hiddenness-only oracle claim, using the complete assertion sequence."
+  },
+  {
+    "key": "g060/l3",
+    "latest_line": 20,
+    "recommendation": "retain-verified",
+    "bucket": "other",
+    "underlying_key": "recipe-row-deep-clones-global-place-status-matrix",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "Each recipe row deep-clones the all-recipes/all-places response before its child filters to that recipe. For N recipes with P returned places each, this copies O(N^2*P) status entries per parent render. Source establishes avoidable growth, not a measured freeze, OOM or crash.",
+    "checks": [
+      "350a4b33b6d4476f4a78e43cea124bc2b828f462:crates/farhelm-ui/src/tensorlake/recipes.rs:478-485 evaluates place_status.read().as_ref().cloned() for each recipe row. containers_settings.rs:192-218 accepts owned Option<Result<Vec<RecipePlaceView>,String>> then filters by recipe/container place.",
+      "Same revision:crates/farhelm-proto/src/environment.rs:118-130 derives ordinary Clone for RecipePlaceView containing owned recipe/reason/step strings. This is Vec/String copying, not Arc/Rc sharing, performed before child equality can avoid rendering.",
+      "Same revision:crates/farhelm-helm/src/hosts.rs:4347-4371 builds a single vector over all recipes and recorded/supported places. tensorlake/build.rs:235-264 selects all rows without LIMIT; tensorlake/recipes.rs:251-285 imposes validity/uniqueness/credential checks, not catalog count. UI api/tensorlake_recipes.rs:47-57 returns all entries and the row loop has no pagination. Per-request recipe body size is not a catalog-count cap.",
+      "Same revision:recipes.rs:364 reads ACTIVITY_NOW; activity.rs:75,86-109 republishes every 30 seconds. Therefore the allocation path can repeat in an idle mounted panel as well as after read/feed-driven renders. No cost is asserted before a status response is loaded.",
+      "git diff to 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db is empty for recipes.rs and containers_settings.rs. No benchmark or runtime reproduction performed."
+    ],
+    "coverage_checked": [
+      "Current SPEC.md shared recipe catalog and SPEC_impl.md:6010-6057 require per-place status and synchronous readiness projection, not per-row ownership of every recipe's response. No acceptance of the avoidable cloning found.",
+      "TODO Planned empty. plans/queue recipe/catalog/status/clone/matrix/performance searches found the existing Podman catalog requirement, not an unlanded indexing/sharing/paging fix.",
+      "BUGS.md and full INDEX.md checked. Targeted recipe/status/matrix/quadratic searches in queue sources found no exact root. Existing typed-template, popover and terminal-row repeated-work entries concern different data and consumers; they are not aliases.",
+      "Active TRIAGE_OUTCOMES.md recipe/catalog/matrix/clone/performance searches found no exact decision. FILTER.md has no full match for ordinary catalog growth and repeated allocation. Archive not read."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": "No missing source premise for deep copies and asymptotic growth. Material latency, realistic catalog scale, freeze threshold, memory exhaustion, crash and user-work loss remain unmeasured/unestablished. Small catalogs may have negligible practical cost; P means actual returned places.",
+    "original_stronger_consequence": "Initial lead suspected large-catalog responsiveness and memory overhead. Latest finding establishes quadratic allocation/copying and child filtering, with no measured latency, particular freeze threshold, OOM, crash, security or user-work-loss route. Failed-status recovery and successful-status invalidation remain distinct roots.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Retain source-verified avoidable resource growth as other; stronger user-visible severity requires evidence beyond complexity alone."
+  }
+]

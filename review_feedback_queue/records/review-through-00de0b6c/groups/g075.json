@@ -1,0 +1,493 @@
+{
+  "group": {
+    "id": "g075",
+    "domain": "helm-terminal-routing",
+    "purpose": "helm-terminal-routing: crates/farhelm-helm/src/client.rs; phases complete small per-commit changes",
+    "interfaces": [
+      "g009",
+      "g010",
+      "g011",
+      "g052",
+      "g053",
+      "g054",
+      "g074",
+      "g076",
+      "g117",
+      "g118",
+      "g119",
+      "g120",
+      "g121"
+    ],
+    "sources": [
+      {
+        "path": "[private-run]/prep/parts/01028-000.patch",
+        "ranges": [
+          [
+            1,
+            1227
+          ]
+        ],
+        "original_path": "crates/farhelm-helm/src/client.rs",
+        "commit": "f560058da19e02716e6f943883a9508b447aff4e",
+        "notes": "patch header; patch character offsets [0,59779)",
+        "lines": 1227,
+        "bytes": 59825,
+        "start": 0,
+        "end": 59779,
+        "original": "[private-run]/prep/originals/01028.patch"
+      }
+    ],
+    "lines": 1227,
+    "bytes": 59825
+  },
+  "records": [
+    {
+      "key": "g075/c1",
+      "owner": "g075",
+      "id": "c1",
+      "domain": "helm-terminal-routing",
+      "purpose": "helm-terminal-routing: crates/farhelm-helm/src/client.rs; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 1,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c1",
+            "state": "open",
+            "summary": "Removal of byte-stream fallback is deliberate and protocol-fenced",
+            "location": "crates/farhelm-helm/src/client.rs:4013",
+            "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e. TLDR: An older page left open across an update can misdraw a terminal and have its input refused until reload; the specification explicitly accepts this transition. Details: the assigned patch removes ViewerStreams, stream_kind, settle_bytes, and send_input and always starts grid flow after Attached (client.rs:4013-4070). Governing SPEC_impl.md, Grid streams (3009-3027), says: 'Protocol 77 removed the byte streams with the old terminals and xterm.js: every attachment’s data channel carries a grid stream' (apostrophe normalized here), and exactly: 'A page loaded from the previous helm and left open across the update must be reloaded; nothing keeps it working.' It also says exactly: 'Keeping the stream notice for such pages was considered and not done: a reload is the whole remedy.' Proposed_drop: explicit specification acceptance of stale-page misdrawing/input refusal, pending independent check; byte-only peer removal also requires source verification of hello mismatch rejection. Suggested bucket: high/material UX for the stale-page effect if it were not accepted. Confidence: confirmed specification acceptance, not runtime-observed. Could-be-highest: no established security or loss-of-work route; the described malformed-input path ends an attachment, not its agent. possible_cover: none; coverage sources were not consulted. Caveat: this record does not establish the handshake implementation, which remains to be checked in the initial pass."
+          }
+        },
+        {
+          "line": 2,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c1",
+            "state": "open",
+            "summary": "Removal of byte-stream fallback is deliberate and protocol-fenced",
+            "location": "crates/farhelm-helm/src/client.rs:4013",
+            "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e. TLDR: An older page left open across an update can misdraw a terminal and have its input refused until reload; the specification explicitly accepts this transition. Details: the assigned patch removes ViewerStreams, stream_kind, settle_bytes, and send_input and always starts grid flow after Attached (client.rs:4013-4070). SPEC_impl.md, Grid streams (3009-3027), says exactly: 'Protocol 77 removed the byte streams with the old terminals and xterm.js: every attachment’s data channel carries a grid stream' [this sentence is paraphrased only in its apostrophe typography; the exact acceptance quotes below are verbatim]. Exact acceptance: 'A page loaded from the previous helm and left open across the update must be reloaded; nothing keeps it working.' Exact acceptance: 'Keeping the stream notice for such pages was considered and not done: a reload is the whole remedy.' Proposed_drop: explicit specification acceptance of stale-page misdrawing/input refusal, for independent check; byte-only peer removal is also source-refuted as a compatibility bug. Source checks: farhelm-proto/src/lib.rs:255 sets PROTOCOL_VERSION to 77; client.rs:1756-1759 calls handshake_as_owning_helm or handshake before installing writer or terminal maps; both call io.rs:585-658 handshake_with_hello, which returns success only at exact protocol equality and otherwise returns VersionSkew. terminal.rs:762-774 forwards binary messages through send_grid_input and ends reading on refusal; client.rs:4111-4133 removes the attachment and signals Detach for oversized input, without killing the agent. Suggested bucket: high/material UX for the stale-page effect if it were not accepted. Confidence: confirmed by source and specification, not runtime-observed. Could-be-highest: no established security or loss-of-work route; malformed input ends an attachment, not its agent. possible_cover: none; coverage sources were not consulted. Revision reason: completed the handshake and input-lifetime source checks; no missing premise remains for this candidate."
+          }
+        },
+        {
+          "line": 4,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c1",
+            "state": "open",
+            "summary": "Removal of byte-stream fallback is deliberate and protocol-fenced",
+            "location": "crates/farhelm-helm/src/client.rs:4013",
+            "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e. TLDR: An older page left open across an update can misdraw a terminal and have its input refused until reload; the specification explicitly accepts this transition. Details: the assigned patch removes ViewerStreams, stream_kind, settle_bytes, and send_input and always starts grid flow after Attached (client.rs:4013-4070). SPEC_impl.md, Grid streams (3009-3027), says exactly: 'Protocol 77 removed the byte streams with the old terminals and xterm.js: every attachment's data channel carries a grid stream'. Exact acceptance: 'A page loaded from the previous helm and left open across the update must be reloaded; nothing keeps it working.' Exact acceptance: 'Keeping the stream notice for such pages was considered and not done: a reload is the whole remedy.' Proposed_drop: explicit specification acceptance of stale-page misdrawing/input refusal, for independent check; byte-only peer removal is also source-refuted as a compatibility bug. Source checks: farhelm-proto/src/lib.rs:255 sets PROTOCOL_VERSION to 77; client.rs, start_with_seams, calls handshake_as_owning_helm or handshake before installing writer or terminal maps; both call io.rs:585-658 handshake_with_hello, which returns success only at exact protocol equality and otherwise returns VersionSkew. terminal.rs:762-774 forwards binary messages through send_grid_input and ends reading on refusal; client.rs:4111-4133 removes the attachment and signals Detach for oversized input, without killing the agent. The supervisor's service/handlers.rs:1903-1943 sends Attached before spawning its GridSender and installs a HostAttach input route, so a compatible production attachment has no byte-stream fallback left to negotiate. Suggested bucket: high/material UX for the stale-page effect if it were not accepted. Confidence: confirmed by source and specification, not runtime-observed. Could-be-highest: no established security or loss-of-work route; malformed input ends an attachment, not its agent. possible_cover: none; coverage sources were not consulted. Revision reason: corrected the first quote to literal source typography and included the completed producer-side contract check; the original stale-page consequence is unchanged. No missing premise remains for this candidate."
+          }
+        },
+        {
+          "line": 6,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c1",
+            "state": "open",
+            "summary": "Removal of byte-stream fallback is deliberate and protocol-fenced",
+            "location": "crates/farhelm-helm/src/client.rs:4013",
+            "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e. TLDR: An older page left open across an update can misdraw a terminal and have its input refused until reload; the specification explicitly accepts this transition. Original consequence preserved: SPEC_impl.md:3023-3027 says that reconnect from the old page, automatic in the build-latch window or manual, draws grid messages as terminal output, and typing ends the attachment as malformed input. Exact acceptance: 'A page loaded from the previous helm and left open across the update must be reloaded; nothing keeps it working.' Exact acceptance: 'Keeping the stream notice for such pages was considered and not done: a reload is the whole remedy.' proposed_drop: explicit specification acceptance of that stale-browser consequence, still proposed; no independent drop accepted. Distinct source-refuted route: a mismatched helm and supervisor cannot negotiate an attachment. farhelm-proto/src/lib.rs:255 sets protocol 77; start_with_seams completes handshake before installing client routing, and proto/io.rs:585-658 accepts only exact equality. This agrees with g053/c1 (browser acceptance) and g053/c2 (peer protocol fence); browser acceptance is not evidence of peer compatibility. Source checks preserved: client.rs:4016-4037 unconditionally installs a grid-sized queue and shared QueueGauge before Attach; 4062-4069 starts helm flow on every accepted reply, unless already released. terminal.rs:762-774 calls send_grid_input and stops reading on refusal; client.rs:4111-4133 removes only the attachment and signals Detach on oversized input. service/handlers.rs:1903-1943 sends Attached before starting GridSender and installs HostAttach input. Synthesis teardown check: handlers.rs:1952-1977 matches channel and owning connection, removes only that attachment and joins its output task; ActiveAttach at service/terminals.rs:417-468 holds the viewer's flow/input pump, not an agent process. HostAttach::drop (service/grid_stream.rs:1169-1175) sends pump cancellation only; GridSender's shutdown returns Requested (937-962). Supervisor stall/natural-detach arbiters also verify channel, connection and forwarder identity before removing only that attachment (service/connection.rs:1427-1517). These paths do not terminate the running terminal host or its agent. Independent upgrade lifetime: terminal-host/SPEC.md:3-6 states that a running terminal host outlives every update of its client, and Change policy:501-523 requires permanent shipped wire behavior and compatibility with every shipped host version. The helm-supervisor protocol 77 is separate from terminal_host::protocol::PROTOCOL_VERSION, which remains 1 (terminal-host/src/protocol.rs:29). hosts/client.rs:128-132 imports that independent constant and 1277-1319 uses it for Host Hello/Welcome. The reviewed commit has no diff under crates/terminal-host. Thus removing viewer negotiation does not authorize changing the running host's protocol or lifetime. The separate deliberate old-tmux retirement consequence remains g053/f1; this candidate does not retract or lower it. Suggested bucket: high/material UX for the accepted stale-browser effect if it were not accepted. Confidence: confirmed source and contract analysis, not observed execution. Could-be-highest: no established security or loss-of-work route from this stale-browser/attachment behavior; malformed input ends the viewer attachment, not its agent. possible_cover: none; related group records were supplied for interface synthesis, and excluded queue coverage sources were not consulted. Caveats: no tests or reproductions run; helm-supervisor incompatibility blocks host access until matching versions run, while an old browser needs reload. Revision reason: synthesis separated the two version boundaries and validated teardown through the supervisor, preserving the exact old-page consequence and its pending proposed drop."
+          }
+        },
+        {
+          "line": 7,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c1",
+            "state": "open",
+            "summary": "Removal of byte-stream fallback is deliberate and protocol-fenced",
+            "location": "crates/farhelm-helm/src/client.rs:4013",
+            "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e. TLDR: An older page left open across an update can misdraw a terminal and have its input refused until reload. Original accepted consequence preserved exactly in substance: reconnect from that page, automatic before the build-mismatch latch or manual, draws grid messages as terminal output, and typing ends its attachment as malformed input (SPEC_impl.md:3023-3027). Exact acceptance: 'A page loaded from the previous helm and left open across the update must be reloaded; nothing keeps it working.' Exact acceptance: 'Keeping the stream notice for such pages was considered and not done: a reload is the whole remedy.' proposed_drop: explicit specification acceptance of the stale-browser consequence, still proposed; no independent drop accepted. Distinct source-refuted route: a mismatched helm and supervisor cannot negotiate an attachment. farhelm-proto/src/lib.rs:255 sets protocol 77; client start_with_seams completes handshake before installing client routing; proto/io.rs:585-658 accepts only exact equality. This matches supplied g053/c1 (old-browser acceptance) and g053/c2 (peer version fence), which are distinct premises. Production route checks: client.rs:4016-4037 unconditionally installs a grid-sized queue and shared QueueGauge before Attach; 4062-4069 starts helm flow on every accepted reply unless already released. terminal.rs:762-774 calls send_grid_input and stops reading on refusal. client.rs:4111-4133 revokes only the oversized-input attachment and signals Detach. Supervisor handlers.rs:1903-1943 sends Attached before starting GridSender and installs HostAttach input. Teardown checks: handlers.rs:1952-1977 matches channel and owning connection, removes only that attachment and joins its output task. ActiveAttach (service/terminals.rs:417-468) owns viewer flow and input pump; HostAttach::drop (service/grid_stream.rs:1169-1175) cancels its pump only. GridSender shutdown returns Requested (937-962); stall and natural-end arbiters identity-check before removing only the attachment (service/connection.rs:1427-1517). Final ownership premise checked: SessionEntry retains terminal: Option<HostTerminal> independently of viewers (service/core.rs:4144-4146). HostTerminal clones share Arc<Inner> (hosts/terminal.rs:1205-1228); even the last clone closes the supervisor runtime connection and leaves the host running, as its lifetime contract states at 1205-1208. Viewer teardown neither removes SessionEntry nor sends terminal-host Shutdown. Independent upgrade lifetime: terminal-host/SPEC.md:3-6 states that a running host outlives updates of its client; Change policy:501-523 requires permanent shipped wire behavior and compatibility with every shipped host version. Helm-supervisor 77 is separate from terminal_host::protocol::PROTOCOL_VERSION, which remains 1 (terminal-host/src/protocol.rs:29). hosts/client.rs:128-132 imports that independent constant and 1277-1319 uses it for Host Hello/Welcome. The reviewed commit has no diff under crates/terminal-host. The separate deliberate old-tmux retirement remains g053/f1; this candidate neither retracts nor lowers that process/history loss consequence. Suggested bucket: high/material UX for the accepted stale-page effect if it were not accepted. Confidence: confirmed source and contract analysis, not observed execution. Could-be-highest: no established security or loss-of-work route from this stale-browser/attachment behavior; malformed input ends the viewer attachment, not its agent. possible_cover: none; supplied related-group records were used for interface synthesis, with no excluded coverage sources consulted. Caveats: no tests or reproductions run; a protocol-mismatched host needs a matching peer, while an old browser needs reload. Revision reason: completed the remaining runtime ownership check after tracing viewer teardown; all earlier consequences and the pending proposed drop are preserved."
+          }
+        }
+      ],
+      "latest": {
+        "line": 7,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c1",
+          "state": "open",
+          "summary": "Removal of byte-stream fallback is deliberate and protocol-fenced",
+          "location": "crates/farhelm-helm/src/client.rs:4013",
+          "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e. TLDR: An older page left open across an update can misdraw a terminal and have its input refused until reload. Original accepted consequence preserved exactly in substance: reconnect from that page, automatic before the build-mismatch latch or manual, draws grid messages as terminal output, and typing ends its attachment as malformed input (SPEC_impl.md:3023-3027). Exact acceptance: 'A page loaded from the previous helm and left open across the update must be reloaded; nothing keeps it working.' Exact acceptance: 'Keeping the stream notice for such pages was considered and not done: a reload is the whole remedy.' proposed_drop: explicit specification acceptance of the stale-browser consequence, still proposed; no independent drop accepted. Distinct source-refuted route: a mismatched helm and supervisor cannot negotiate an attachment. farhelm-proto/src/lib.rs:255 sets protocol 77; client start_with_seams completes handshake before installing client routing; proto/io.rs:585-658 accepts only exact equality. This matches supplied g053/c1 (old-browser acceptance) and g053/c2 (peer version fence), which are distinct premises. Production route checks: client.rs:4016-4037 unconditionally installs a grid-sized queue and shared QueueGauge before Attach; 4062-4069 starts helm flow on every accepted reply unless already released. terminal.rs:762-774 calls send_grid_input and stops reading on refusal. client.rs:4111-4133 revokes only the oversized-input attachment and signals Detach. Supervisor handlers.rs:1903-1943 sends Attached before starting GridSender and installs HostAttach input. Teardown checks: handlers.rs:1952-1977 matches channel and owning connection, removes only that attachment and joins its output task. ActiveAttach (service/terminals.rs:417-468) owns viewer flow and input pump; HostAttach::drop (service/grid_stream.rs:1169-1175) cancels its pump only. GridSender shutdown returns Requested (937-962); stall and natural-end arbiters identity-check before removing only the attachment (service/connection.rs:1427-1517). Final ownership premise checked: SessionEntry retains terminal: Option<HostTerminal> independently of viewers (service/core.rs:4144-4146). HostTerminal clones share Arc<Inner> (hosts/terminal.rs:1205-1228); even the last clone closes the supervisor runtime connection and leaves the host running, as its lifetime contract states at 1205-1208. Viewer teardown neither removes SessionEntry nor sends terminal-host Shutdown. Independent upgrade lifetime: terminal-host/SPEC.md:3-6 states that a running host outlives updates of its client; Change policy:501-523 requires permanent shipped wire behavior and compatibility with every shipped host version. Helm-supervisor 77 is separate from terminal_host::protocol::PROTOCOL_VERSION, which remains 1 (terminal-host/src/protocol.rs:29). hosts/client.rs:128-132 imports that independent constant and 1277-1319 uses it for Host Hello/Welcome. The reviewed commit has no diff under crates/terminal-host. The separate deliberate old-tmux retirement remains g053/f1; this candidate neither retracts nor lowers that process/history loss consequence. Suggested bucket: high/material UX for the accepted stale-page effect if it were not accepted. Confidence: confirmed source and contract analysis, not observed execution. Could-be-highest: no established security or loss-of-work route from this stale-browser/attachment behavior; malformed input ends the viewer attachment, not its agent. possible_cover: none; supplied related-group records were used for interface synthesis, with no excluded coverage sources consulted. Caveats: no tests or reproductions run; a protocol-mismatched host needs a matching peer, while an old browser needs reload. Revision reason: completed the remaining runtime ownership check after tracing viewer teardown; all earlier consequences and the pending proposed drop are preserved."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g075/findings.jsonl",
+        "id": "c1",
+        "line": 7,
+        "disposition": "excluded",
+        "group": "grid-only-upgrade-stale-browser-needs-reload",
+        "reason": "Parent explicitly accepted named covered proposal from claims-048 after inspecting it. The old-browser consequence exactly matches an explicit accepted compatibility boundary. It must remain separate from peer protocol rejection and deliberate retirement of old tmux work. Exact specification acceptance of the stale-browser effect only. This proposes no disposition of any old-tmux process/history-loss claim. Checked source/results: [\"f560058da19e02716e6f943883a9508b447aff4e SPEC_impl.md:3009-3027 expressly accepts old pages misdrawing and input ending the viewer attachment.\",\"At that hash proto/io.rs:585-658 returns success only for exact protocol equality; client.rs:4016-4069 installs grid accounting and starts flow for accepted attachment replies. This is distinct from the old-browser HTTP/WebSocket boundary.\",\"client.rs:4111-4133 removes only the attachment on oversized input; terminal.rs:762-774 ends browser reading on refusal. No checked path sends terminal-host Shutdown. The latest record's independently retained terminal-host lifetime and separate old-tmux retirement caveats are preserved; this disposition does not lower those other claims.\",\"No historical browser reproduction or runtime test was performed.\"] Current coverage/results: [\"Current SPEC_impl.md:2943-2955 retains exactly the same old-page acceptance. SPEC.md terminal/upgrade rules do not turn it into an accepted current-page failure or authorize terminating terminal hosts.\",\"TODO.md Planned is empty; plans/queue/tmux-end-old-terminals.md:119-129 requires removing stream negotiation and building grids unconditionally, not retaining compatibility. No matching BUGS.md or active TRIAGE_OUTCOMES.md item.\",\"INDEX.md and matching queue searches found no exact queued finding. Aliases are limited to the supplied g074/c1 and g076/c1. The mentioned g053 records were not independently inspected or added as aliases. No FILTER.md basis is needed.\"] Exact cited cover: [\"SPEC_impl.md:2949-2950: A page loaded from the previous helm and left open across the update must be reloaded; nothing keeps it working.\",\"SPEC_impl.md:2955: malformed input. Keeping the stream notice for such pages was considered and not done: a reload is the whole remedy.\"] Original stronger consequence and missing premise remain preserved: \"An older page reconnecting automatically before the build-mismatch latch, or manually, draws grid messages as terminal text and typing ends its attachment until reload. The record explicitly excludes lowering the separate deliberate old-tmux process/history loss claim. Helm-supervisor incompatibility and the permanent terminal-host protocol are distinct boundaries.\"; null."
+      },
+      "accepted_parent_decision": {
+        "key": "g075/c1",
+        "line": 7,
+        "disposition": "excluded",
+        "group": "grid-only-upgrade-stale-browser-needs-reload",
+        "bucket": "high",
+        "recording": "covered",
+        "queue_target_candidate": null,
+        "needs_independent_drop_check": false,
+        "reason": "Parent explicitly accepted named covered proposal from claims-048 after inspecting it. The old-browser consequence exactly matches an explicit accepted compatibility boundary. It must remain separate from peer protocol rejection and deliberate retirement of old tmux work. Exact specification acceptance of the stale-browser effect only. This proposes no disposition of any old-tmux process/history-loss claim. Checked source/results: [\"f560058da19e02716e6f943883a9508b447aff4e SPEC_impl.md:3009-3027 expressly accepts old pages misdrawing and input ending the viewer attachment.\",\"At that hash proto/io.rs:585-658 returns success only for exact protocol equality; client.rs:4016-4069 installs grid accounting and starts flow for accepted attachment replies. This is distinct from the old-browser HTTP/WebSocket boundary.\",\"client.rs:4111-4133 removes only the attachment on oversized input; terminal.rs:762-774 ends browser reading on refusal. No checked path sends terminal-host Shutdown. The latest record's independently retained terminal-host lifetime and separate old-tmux retirement caveats are preserved; this disposition does not lower those other claims.\",\"No historical browser reproduction or runtime test was performed.\"] Current coverage/results: [\"Current SPEC_impl.md:2943-2955 retains exactly the same old-page acceptance. SPEC.md terminal/upgrade rules do not turn it into an accepted current-page failure or authorize terminating terminal hosts.\",\"TODO.md Planned is empty; plans/queue/tmux-end-old-terminals.md:119-129 requires removing stream negotiation and building grids unconditionally, not retaining compatibility. No matching BUGS.md or active TRIAGE_OUTCOMES.md item.\",\"INDEX.md and matching queue searches found no exact queued finding. Aliases are limited to the supplied g074/c1 and g076/c1. The mentioned g053 records were not independently inspected or added as aliases. No FILTER.md basis is needed.\"] Exact cited cover: [\"SPEC_impl.md:2949-2950: A page loaded from the previous helm and left open across the update must be reloaded; nothing keeps it working.\",\"SPEC_impl.md:2955: malformed input. Keeping the stream notice for such pages was considered and not done: a reload is the whole remedy.\"] Original stronger consequence and missing premise remain preserved: \"An older page reconnecting automatically before the build-mismatch latch, or manually, draws grid messages as terminal text and typing ends its attachment until reload. The record explicitly excludes lowering the separate deliberate old-tmux process/history loss claim. Helm-supervisor incompatibility and the permanent terminal-host protocol are distinct boundaries.\"; null."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-048",
+          "key": "g075/c1",
+          "latest_line": 7,
+          "recommendation": "covered",
+          "bucket": "high",
+          "underlying_key": "grid-only-upgrade-stale-browser-needs-reload",
+          "aliases": [
+            "g074/c1",
+            "g076/c1"
+          ],
+          "target_queue_file": null,
+          "why": "The old-browser consequence exactly matches an explicit accepted compatibility boundary. It must remain separate from peer protocol rejection and deliberate retirement of old tmux work.",
+          "checks": [
+            "f560058da19e02716e6f943883a9508b447aff4e SPEC_impl.md:3009-3027 expressly accepts old pages misdrawing and input ending the viewer attachment.",
+            "At that hash proto/io.rs:585-658 returns success only for exact protocol equality; client.rs:4016-4069 installs grid accounting and starts flow for accepted attachment replies. This is distinct from the old-browser HTTP/WebSocket boundary.",
+            "client.rs:4111-4133 removes only the attachment on oversized input; terminal.rs:762-774 ends browser reading on refusal. No checked path sends terminal-host Shutdown. The latest record's independently retained terminal-host lifetime and separate old-tmux retirement caveats are preserved; this disposition does not lower those other claims.",
+            "No historical browser reproduction or runtime test was performed."
+          ],
+          "coverage_checked": [
+            "Current SPEC_impl.md:2943-2955 retains exactly the same old-page acceptance. SPEC.md terminal/upgrade rules do not turn it into an accepted current-page failure or authorize terminating terminal hosts.",
+            "TODO.md Planned is empty; plans/queue/tmux-end-old-terminals.md:119-129 requires removing stream negotiation and building grids unconditionally, not retaining compatibility. No matching BUGS.md or active TRIAGE_OUTCOMES.md item.",
+            "INDEX.md and matching queue searches found no exact queued finding. Aliases are limited to the supplied g074/c1 and g076/c1. The mentioned g053 records were not independently inspected or added as aliases. No FILTER.md basis is needed."
+          ],
+          "exact_cover_quotes": [
+            "SPEC_impl.md:2949-2950: A page loaded from the previous helm and left open across the update must be reloaded; nothing keeps it working.",
+            "SPEC_impl.md:2955: malformed input. Keeping the stream notice for such pages was considered and not done: a reload is the whole remedy."
+          ],
+          "missing_premise": null,
+          "original_stronger_consequence": "An older page reconnecting automatically before the build-mismatch latch, or manually, draws grid messages as terminal text and typing ends its attachment until reload. The record explicitly excludes lowering the separate deliberate old-tmux process/history loss claim. Helm-supervisor incompatibility and the permanent terminal-host protocol are distinct boundaries.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Exact specification acceptance of the stale-browser effect only. This proposes no disposition of any old-tmux process/history-loss claim."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": false,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "high",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "grid-only-upgrade-stale-browser-needs-reload",
+        "destination": null
+      }
+    },
+    {
+      "key": "g075/c2",
+      "owner": "g075",
+      "id": "c2",
+      "domain": "helm-terminal-routing",
+      "purpose": "helm-terminal-routing: crates/farhelm-helm/src/client.rs; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 3,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c2",
+            "state": "open",
+            "summary": "Smaller overflow-test queues retain the intended coverage",
+            "location": "crates/farhelm-helm/src/client.rs:4766",
+            "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e. TLDR: No user-visible defect established. Considered whether retaining 256-slot synthetic test queues after production moves uniformly to 4096 events masks a missing production admission bound. Details: TEST_EVENT_QUEUE at client.rs:4759-4766 explicitly targets mpsc Full, and register_terminal at 4773-4796 still uses the real QueueGauge. route_terminal_event at 2471-2495 applies gauge admission before try_send, and both refusal paths remove the route and call detach_stalled_terminal. The gauge test at 6409-6523 separately fills GRID_EVENT_QUEUE, refuses its next event, pins the 1 MiB frame and 16 MiB byte bounds, checks pause/resume at both marks, and checks release before delayed flow startup. The accepted-attachment integration test at 6597-6654 exercises flow startup and byte overflow through the real demultiplexer. This split preserves the tested mechanisms: the synthetic capacity tests head-of-line isolation and marker overflow, while the gauge and attach tests pin production accounting. Contract: SPEC_impl.md, Grid streams, 3029-3038, requires at most 4096 frames and 16 MiB, helm-owned pause/resume and no blocking of the shared reader. Suggested bucket: other/test coverage if established. Confidence: confirmed source refutation; no execution performed. proposed_drop: source refutation, no production-bound coverage regression established. Could-be-highest: no; this consideration concerns test mechanism coverage, with no demonstrated shipped security or work-loss route. possible_cover: none. Caveat: source review does not claim these tests were executed or passed."
+          }
+        },
+        {
+          "line": 5,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c2",
+            "state": "open",
+            "summary": "Smaller overflow-test queues retain the intended coverage",
+            "location": "crates/farhelm-helm/src/client.rs:4766",
+            "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e. TLDR: No user-visible defect established. Original consideration preserved: retaining 256-slot synthetic test queues after production moves uniformly to 4096 events might mask a missing production admission bound. Initial source checks preserved: TEST_EVENT_QUEUE at client.rs:4759-4766 explicitly targets mpsc Full; register_terminal at 4773-4796 still uses the real QueueGauge. route_terminal_event at 2471-2495 applies gauge admission before try_send; both refusal paths remove only that route and call detach_stalled_terminal. The gauge test at 6409-6523 separately fills GRID_EVENT_QUEUE, refuses the next event, pins the 1 MiB frame and 16 MiB byte bounds, checks pause/resume at both marks and release before delayed startup. The accepted-attachment test at 6597-6654 exercises flow startup and byte overflow through the real demultiplexer. Synthesis checks: both public attachment entry points converge on attach_with_policy (3993-4017), which unconditionally creates mpsc::channel(GRID_EVENT_QUEUE), QueueGauge::new and a shared gauge in both the handle and stream (4016-4037); no negotiation-dependent accounting path remains. Every accepted Attached starts grid flow unless the handle was already released (4062-4069 and 866-877), while the gauge admits data from registration onward (837-849). Both recv and try_recv release counted events through taken (931-992). Overflow never awaits queue capacity: try_send removes only the occupied entry, signals its out-of-band detach and spawns release_upstream (2436-2519). This independently owned send may wait for the shared writer without parking the shared reader. Dropping TerminalHandle clears its flow and prevents a late Attached from restarting it (747-752). The supervisor's pause lookup matches channel and owning connection (service/connection.rs:1546-1558), and its Detach checks the same ownership and removes only the matching attachment/forwarder (service/handlers.rs:1952-1977). Contract: SPEC_impl.md, Grid streams, 3029-3038, requires at most 4096 frames and 16 MiB, helm-owned flow control and no blocking of the shared reader. Suggested bucket if established: other/test coverage. Confidence: confirmed source refutation; no execution performed. proposed_drop: source refutation, no production-bound coverage regression established; still proposed, no independent drop accepted. Could-be-highest: no demonstrated shipped security or work-loss route in this test-coverage consideration. possible_cover: none. Caveat: source review does not claim the tests were executed or passed; an upstream Detach uses the shared writer and is not a promise of zero scheduling delay. Revision reason: synthesis verified unconditional production accounting and per-attachment isolation across the client/supervisor boundary, preserving the original consideration and source checks."
+          }
+        }
+      ],
+      "latest": {
+        "line": 5,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c2",
+          "state": "open",
+          "summary": "Smaller overflow-test queues retain the intended coverage",
+          "location": "crates/farhelm-helm/src/client.rs:4766",
+          "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e. TLDR: No user-visible defect established. Original consideration preserved: retaining 256-slot synthetic test queues after production moves uniformly to 4096 events might mask a missing production admission bound. Initial source checks preserved: TEST_EVENT_QUEUE at client.rs:4759-4766 explicitly targets mpsc Full; register_terminal at 4773-4796 still uses the real QueueGauge. route_terminal_event at 2471-2495 applies gauge admission before try_send; both refusal paths remove only that route and call detach_stalled_terminal. The gauge test at 6409-6523 separately fills GRID_EVENT_QUEUE, refuses the next event, pins the 1 MiB frame and 16 MiB byte bounds, checks pause/resume at both marks and release before delayed startup. The accepted-attachment test at 6597-6654 exercises flow startup and byte overflow through the real demultiplexer. Synthesis checks: both public attachment entry points converge on attach_with_policy (3993-4017), which unconditionally creates mpsc::channel(GRID_EVENT_QUEUE), QueueGauge::new and a shared gauge in both the handle and stream (4016-4037); no negotiation-dependent accounting path remains. Every accepted Attached starts grid flow unless the handle was already released (4062-4069 and 866-877), while the gauge admits data from registration onward (837-849). Both recv and try_recv release counted events through taken (931-992). Overflow never awaits queue capacity: try_send removes only the occupied entry, signals its out-of-band detach and spawns release_upstream (2436-2519). This independently owned send may wait for the shared writer without parking the shared reader. Dropping TerminalHandle clears its flow and prevents a late Attached from restarting it (747-752). The supervisor's pause lookup matches channel and owning connection (service/connection.rs:1546-1558), and its Detach checks the same ownership and removes only the matching attachment/forwarder (service/handlers.rs:1952-1977). Contract: SPEC_impl.md, Grid streams, 3029-3038, requires at most 4096 frames and 16 MiB, helm-owned flow control and no blocking of the shared reader. Suggested bucket if established: other/test coverage. Confidence: confirmed source refutation; no execution performed. proposed_drop: source refutation, no production-bound coverage regression established; still proposed, no independent drop accepted. Could-be-highest: no demonstrated shipped security or work-loss route in this test-coverage consideration. possible_cover: none. Caveat: source review does not claim the tests were executed or passed; an upstream Detach uses the shared writer and is not a promise of zero scheduling delay. Revision reason: synthesis verified unconditional production accounting and per-attachment isolation across the client/supervisor boundary, preserving the original consideration and source checks."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g075/findings.jsonl",
+        "id": "c2",
+        "line": 5,
+        "disposition": "excluded",
+        "group": "synthetic-terminal-queue-capacity-loses-production-bound-coverage-suspicion",
+        "reason": "Parent explicitly accepted named refuted proposal from claims-048 after inspecting it. The smaller fixture deliberately exercises mpsc Full, while separate tests pin the production gauge limits. Unconditional production accounting remains present. These observations do not address the distinct stalled-input-writer timeout test. Source-refuted concern about this coverage split. It provides no writer-capacity or elapsed-grace evidence for g076/l1. Checked source/results: [\"f560058da19e02716e6f943883a9508b447aff4e client.rs:4759-4796 documents TEST_EVENT_QUEUE=256 and uses a real QueueGauge with the synthetic queue.\",\"At that hash :6409-6523 explicitly tests 4096 events, one-MiB frames, sixteen-MiB bytes, both pause/resume marks and flow release. :4016-4069 unconditionally installs production queue/gauge accounting before Attach and starts flow after Attached.\",\":2471-2519 applies gauge admission before nonblocking try_send and removes only the failed route, handing upstream release to its own task. Source inspection establishes coverage mechanisms, not executed test success or zero enqueue delay.\"] Current coverage/results: [\"SPEC.md:3011-3029 requires isolated slow-viewer handling; SPEC_impl.md:2957-2982 specifies queue bounds and helm-owned flow. None accepts omitting production-bound coverage.\",\"TODO.md Planned is empty. Searched plans/queue for overflow, gauge and writer coverage; removal criteria in tmux-end-old-terminals.md:119-129 do not settle a hypothetical test defect. No exact BUGS.md, INDEX.md/queue or active TRIAGE_OUTCOMES.md item.\",\"FILTER.md does not supply a matching test-coverage boundary.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Keeping 256-slot synthetic queues while production moves to 4096 might mask missing production admission-bound coverage. No shipped failure or security/user-work route was shown. An independently owned Detach can still wait on the shared writer.\"; null."
+      },
+      "accepted_parent_decision": {
+        "key": "g075/c2",
+        "line": 5,
+        "disposition": "excluded",
+        "group": "synthetic-terminal-queue-capacity-loses-production-bound-coverage-suspicion",
+        "bucket": "other",
+        "recording": "refuted",
+        "queue_target_candidate": null,
+        "needs_independent_drop_check": false,
+        "reason": "Parent explicitly accepted named refuted proposal from claims-048 after inspecting it. The smaller fixture deliberately exercises mpsc Full, while separate tests pin the production gauge limits. Unconditional production accounting remains present. These observations do not address the distinct stalled-input-writer timeout test. Source-refuted concern about this coverage split. It provides no writer-capacity or elapsed-grace evidence for g076/l1. Checked source/results: [\"f560058da19e02716e6f943883a9508b447aff4e client.rs:4759-4796 documents TEST_EVENT_QUEUE=256 and uses a real QueueGauge with the synthetic queue.\",\"At that hash :6409-6523 explicitly tests 4096 events, one-MiB frames, sixteen-MiB bytes, both pause/resume marks and flow release. :4016-4069 unconditionally installs production queue/gauge accounting before Attach and starts flow after Attached.\",\":2471-2519 applies gauge admission before nonblocking try_send and removes only the failed route, handing upstream release to its own task. Source inspection establishes coverage mechanisms, not executed test success or zero enqueue delay.\"] Current coverage/results: [\"SPEC.md:3011-3029 requires isolated slow-viewer handling; SPEC_impl.md:2957-2982 specifies queue bounds and helm-owned flow. None accepts omitting production-bound coverage.\",\"TODO.md Planned is empty. Searched plans/queue for overflow, gauge and writer coverage; removal criteria in tmux-end-old-terminals.md:119-129 do not settle a hypothetical test defect. No exact BUGS.md, INDEX.md/queue or active TRIAGE_OUTCOMES.md item.\",\"FILTER.md does not supply a matching test-coverage boundary.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Keeping 256-slot synthetic queues while production moves to 4096 might mask missing production admission-bound coverage. No shipped failure or security/user-work route was shown. An independently owned Detach can still wait on the shared writer.\"; null."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-048",
+          "key": "g075/c2",
+          "latest_line": 5,
+          "recommendation": "refuted",
+          "bucket": "other",
+          "underlying_key": "synthetic-terminal-queue-capacity-loses-production-bound-coverage-suspicion",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The smaller fixture deliberately exercises mpsc Full, while separate tests pin the production gauge limits. Unconditional production accounting remains present. These observations do not address the distinct stalled-input-writer timeout test.",
+          "checks": [
+            "f560058da19e02716e6f943883a9508b447aff4e client.rs:4759-4796 documents TEST_EVENT_QUEUE=256 and uses a real QueueGauge with the synthetic queue.",
+            "At that hash :6409-6523 explicitly tests 4096 events, one-MiB frames, sixteen-MiB bytes, both pause/resume marks and flow release. :4016-4069 unconditionally installs production queue/gauge accounting before Attach and starts flow after Attached.",
+            ":2471-2519 applies gauge admission before nonblocking try_send and removes only the failed route, handing upstream release to its own task. Source inspection establishes coverage mechanisms, not executed test success or zero enqueue delay."
+          ],
+          "coverage_checked": [
+            "SPEC.md:3011-3029 requires isolated slow-viewer handling; SPEC_impl.md:2957-2982 specifies queue bounds and helm-owned flow. None accepts omitting production-bound coverage.",
+            "TODO.md Planned is empty. Searched plans/queue for overflow, gauge and writer coverage; removal criteria in tmux-end-old-terminals.md:119-129 do not settle a hypothetical test defect. No exact BUGS.md, INDEX.md/queue or active TRIAGE_OUTCOMES.md item.",
+            "FILTER.md does not supply a matching test-coverage boundary."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": null,
+          "original_stronger_consequence": "Keeping 256-slot synthetic queues while production moves to 4096 might mask missing production admission-bound coverage. No shipped failure or security/user-work route was shown. An independently owned Detach can still wait on the shared writer.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Source-refuted concern about this coverage split. It provides no writer-capacity or elapsed-grace evidence for g076/l1."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "synthetic-terminal-queue-capacity-loses-production-bound-coverage-suspicion",
+        "destination": null
+      }
+    },
+    {
+      "key": "g075/c3",
+      "owner": "g075",
+      "id": "c3",
+      "domain": "helm-terminal-routing",
+      "purpose": "helm-terminal-routing: crates/farhelm-helm/src/client.rs; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 8,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c3",
+            "state": "open",
+            "summary": "Resize sentinels preserve the client writer tests' boundaries",
+            "location": "crates/farhelm-helm/src/client.rs:5039",
+            "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e. TLDR: No defect established in replacing removed raw-input sends with resize messages in this client's writer tests. Considered whether those replacements let the tests pass without reaching their declared ordering or in-progress-write boundary. Source checks: awaited_detach_preserves_writer_ordering at client.rs:4940-4978 awaits detach, queues resize on the same FIFO writer and requires the first peer frame to be Detach, so a resize that overtakes it is distinguishable. dropping_the_last_client_interrupts_an_in_progress_write at 5009-5052 first sets ParkableWriter's park flag, queues resize, and awaits entered.notified before dropping the client. ParkableWriter::poll_write at 4735-4744 notifies only after the writer actually invokes poll_write with park true and then returns Pending without forwarding bytes. Thus its boundary is a signaled blocked transport write, not an arbitrary Pending from the input-send future. The writer's in-progress cancellation select at 1874-1879 and shutdown at 1894-1901 explain why EOF after client drop distinguishes the promised behavior. This does not refute g076/l1: that separate test uses manual polling of send_grid_input as a writer-capacity oracle and lacks a timeout-boundary assertion; neither mechanism occurs in these two client tests. Contract: the test-authoring checklist requires establishing the fixture premise and an observable that distinguishes competing mechanisms; SPEC_impl.md Multiplexing, chunks and writer priority specifies one FIFO writer and complete-frame writes. Suggested bucket if established: other/test-evidence quality. Confidence: confirmed source refutation, not runtime observation. proposed_drop: source-refuted concern about these resize replacements, pending independent judgment; no drops have been accepted. Could-be-highest: no established shipped security or loss-of-work route; the consideration concerns test-oracle coverage. possible_cover: none; supplied neighbour records were used for novelty only, with no prohibited coverage sources searched. Caveats: these tests do not prove every cancellation schedule, and no execution or reproduction was performed. This candidate makes no claim that production correctness refutes a distinct test-oracle defect."
+          }
+        }
+      ],
+      "latest": {
+        "line": 8,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c3",
+          "state": "open",
+          "summary": "Resize sentinels preserve the client writer tests' boundaries",
+          "location": "crates/farhelm-helm/src/client.rs:5039",
+          "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e. TLDR: No defect established in replacing removed raw-input sends with resize messages in this client's writer tests. Considered whether those replacements let the tests pass without reaching their declared ordering or in-progress-write boundary. Source checks: awaited_detach_preserves_writer_ordering at client.rs:4940-4978 awaits detach, queues resize on the same FIFO writer and requires the first peer frame to be Detach, so a resize that overtakes it is distinguishable. dropping_the_last_client_interrupts_an_in_progress_write at 5009-5052 first sets ParkableWriter's park flag, queues resize, and awaits entered.notified before dropping the client. ParkableWriter::poll_write at 4735-4744 notifies only after the writer actually invokes poll_write with park true and then returns Pending without forwarding bytes. Thus its boundary is a signaled blocked transport write, not an arbitrary Pending from the input-send future. The writer's in-progress cancellation select at 1874-1879 and shutdown at 1894-1901 explain why EOF after client drop distinguishes the promised behavior. This does not refute g076/l1: that separate test uses manual polling of send_grid_input as a writer-capacity oracle and lacks a timeout-boundary assertion; neither mechanism occurs in these two client tests. Contract: the test-authoring checklist requires establishing the fixture premise and an observable that distinguishes competing mechanisms; SPEC_impl.md Multiplexing, chunks and writer priority specifies one FIFO writer and complete-frame writes. Suggested bucket if established: other/test-evidence quality. Confidence: confirmed source refutation, not runtime observation. proposed_drop: source-refuted concern about these resize replacements, pending independent judgment; no drops have been accepted. Could-be-highest: no established shipped security or loss-of-work route; the consideration concerns test-oracle coverage. possible_cover: none; supplied neighbour records were used for novelty only, with no prohibited coverage sources searched. Caveats: these tests do not prove every cancellation schedule, and no execution or reproduction was performed. This candidate makes no claim that production correctness refutes a distinct test-oracle defect."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g075/findings.jsonl",
+        "id": "c3",
+        "line": 8,
+        "disposition": "excluded",
+        "group": "resize-writer-fixtures-lose-ordering-or-blocked-write-oracle-suspicion",
+        "reason": "Parent explicitly accepted named refuted proposal from claims-048 after inspecting it. Both named client tests distinguish the mechanisms they claim: FIFO order is checked at the peer, and the cancellation test receives a witness from inside the parked transport write. Source-refuted test-oracle suspicion, limited to these two Resize replacements. Checked source/results: [\"f560058da19e02716e6f943883a9508b447aff4e client.rs:4940-4978 awaits Detach, then enqueues Resize on the same writer and requires the first peer frame to be Detach.\",\"At that hash :5009-5052 parks the writer, sends Resize, waits for entered.notified, then drops the client and requires peer EOF. ParkableWriter::poll_write at :4735-4744 emits that notification only in its parked branch before returning Pending.\",\"This is a transport-entry witness, unlike g076/l1's manually polled input future. No runtime execution or claim of exhaustive cancellation schedules.\"] Current coverage/results: [\"SPEC_impl.md:3101-3146 specifies complete-frame writes and the shared helm FIFO; SPEC.md terminal/responsiveness searches contain no acceptance of this hypothetical oracle gap.\",\"TODO.md Planned is empty. No same ordering/parked-write test repair in searched unlanded plans, BUGS.md, INDEX.md/queue or active TRIAGE_OUTCOMES.md. FILTER.md is not a basis.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Replacing removed raw-input traffic with Resize might let writer-ordering or in-progress cancellation tests pass without their declared boundary. No shipped security or work-loss consequence was claimed.\"; null."
+      },
+      "accepted_parent_decision": {
+        "key": "g075/c3",
+        "line": 8,
+        "disposition": "excluded",
+        "group": "resize-writer-fixtures-lose-ordering-or-blocked-write-oracle-suspicion",
+        "bucket": "other",
+        "recording": "refuted",
+        "queue_target_candidate": null,
+        "needs_independent_drop_check": false,
+        "reason": "Parent explicitly accepted named refuted proposal from claims-048 after inspecting it. Both named client tests distinguish the mechanisms they claim: FIFO order is checked at the peer, and the cancellation test receives a witness from inside the parked transport write. Source-refuted test-oracle suspicion, limited to these two Resize replacements. Checked source/results: [\"f560058da19e02716e6f943883a9508b447aff4e client.rs:4940-4978 awaits Detach, then enqueues Resize on the same writer and requires the first peer frame to be Detach.\",\"At that hash :5009-5052 parks the writer, sends Resize, waits for entered.notified, then drops the client and requires peer EOF. ParkableWriter::poll_write at :4735-4744 emits that notification only in its parked branch before returning Pending.\",\"This is a transport-entry witness, unlike g076/l1's manually polled input future. No runtime execution or claim of exhaustive cancellation schedules.\"] Current coverage/results: [\"SPEC_impl.md:3101-3146 specifies complete-frame writes and the shared helm FIFO; SPEC.md terminal/responsiveness searches contain no acceptance of this hypothetical oracle gap.\",\"TODO.md Planned is empty. No same ordering/parked-write test repair in searched unlanded plans, BUGS.md, INDEX.md/queue or active TRIAGE_OUTCOMES.md. FILTER.md is not a basis.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Replacing removed raw-input traffic with Resize might let writer-ordering or in-progress cancellation tests pass without their declared boundary. No shipped security or work-loss consequence was claimed.\"; null."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-048",
+          "key": "g075/c3",
+          "latest_line": 8,
+          "recommendation": "refuted",
+          "bucket": "other",
+          "underlying_key": "resize-writer-fixtures-lose-ordering-or-blocked-write-oracle-suspicion",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "Both named client tests distinguish the mechanisms they claim: FIFO order is checked at the peer, and the cancellation test receives a witness from inside the parked transport write.",
+          "checks": [
+            "f560058da19e02716e6f943883a9508b447aff4e client.rs:4940-4978 awaits Detach, then enqueues Resize on the same writer and requires the first peer frame to be Detach.",
+            "At that hash :5009-5052 parks the writer, sends Resize, waits for entered.notified, then drops the client and requires peer EOF. ParkableWriter::poll_write at :4735-4744 emits that notification only in its parked branch before returning Pending.",
+            "This is a transport-entry witness, unlike g076/l1's manually polled input future. No runtime execution or claim of exhaustive cancellation schedules."
+          ],
+          "coverage_checked": [
+            "SPEC_impl.md:3101-3146 specifies complete-frame writes and the shared helm FIFO; SPEC.md terminal/responsiveness searches contain no acceptance of this hypothetical oracle gap.",
+            "TODO.md Planned is empty. No same ordering/parked-write test repair in searched unlanded plans, BUGS.md, INDEX.md/queue or active TRIAGE_OUTCOMES.md. FILTER.md is not a basis."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": null,
+          "original_stronger_consequence": "Replacing removed raw-input traffic with Resize might let writer-ordering or in-progress cancellation tests pass without their declared boundary. No shipped security or work-loss consequence was claimed.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Source-refuted test-oracle suspicion, limited to these two Resize replacements."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "resize-writer-fixtures-lose-ordering-or-blocked-write-oracle-suspicion",
+        "destination": null
+      }
+    },
+    {
+      "key": "g075/c4",
+      "owner": "g075",
+      "id": "c4",
+      "domain": "helm-terminal-routing",
+      "purpose": "helm-terminal-routing: crates/farhelm-helm/src/client.rs; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 9,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c4",
+            "state": "open",
+            "summary": "Grid-sized pre-reply fixture reaches the intended admission check",
+            "location": "crates/farhelm-helm/src/client.rs:6319",
+            "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e. TLDR: No test-oracle defect established from increasing the pre-Attached oversized-data fixture from 64 KiB to 1 MiB. Considered whether the larger frame or peer shutdown causes an earlier framing/connection failure that can masquerade as the intended per-attachment cap enforcement. Source checks: terminal_data_limit_applies_before_attach_and_accepts_the_limit at client.rs:6281-6406 writes GRID_MAX_MESSAGE + 1 before Attached, explicitly requires the upstream Detach for that exact channel, waits for that observation before the second Attach, and then requires an exactly GRID_MAX_MESSAGE all-y data event from the same client connection. proto/lib.rs:484 and Frame::encode/decode at 626-678 permit frames up to 8 MiB including their five-byte kind/channel overhead, so both fixture data lengths are frame-valid. FrameWriter at proto/io.rs:224-230 writes and flushes each frame in order, and the running client reader routes before reading the later reply. A generic connection failure cannot satisfy the stalled detach plus successful second attach and exact payload assertions. The peer closes after sending the second reply, but TermStream::recv prefers buffered data before its detached reason (client.rs:931-976), preserving the exact-limit observable. Parent-commit comparison confirms this patch changes the cap/stream negotiation rather than inventing the test's sequencing; the test also exists at the range's exclusive base. Governing contract: SPEC_impl.md Grid streams requires a 1 MiB data cap and independent attachment failure, and the test-authoring checklist requires an observable that distinguishes the claimed mechanism. Suggested bucket if established: other/test-evidence quality. Confidence: confirmed source refutation; no execution. proposed_drop: source refutation of this distinct larger-fixture concern, pending independent judgment; no drops accepted. Could-be-highest: no demonstrated security or user-owned-work-loss route in the contemplated test-oracle defect. possible_cover: none; no prohibited coverage sources read. Caveat: this establishes the source oracle and frame-size compatibility, not a runtime pass or a scheduling/performance guarantee."
+          }
+        }
+      ],
+      "latest": {
+        "line": 9,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c4",
+          "state": "open",
+          "summary": "Grid-sized pre-reply fixture reaches the intended admission check",
+          "location": "crates/farhelm-helm/src/client.rs:6319",
+          "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e. TLDR: No test-oracle defect established from increasing the pre-Attached oversized-data fixture from 64 KiB to 1 MiB. Considered whether the larger frame or peer shutdown causes an earlier framing/connection failure that can masquerade as the intended per-attachment cap enforcement. Source checks: terminal_data_limit_applies_before_attach_and_accepts_the_limit at client.rs:6281-6406 writes GRID_MAX_MESSAGE + 1 before Attached, explicitly requires the upstream Detach for that exact channel, waits for that observation before the second Attach, and then requires an exactly GRID_MAX_MESSAGE all-y data event from the same client connection. proto/lib.rs:484 and Frame::encode/decode at 626-678 permit frames up to 8 MiB including their five-byte kind/channel overhead, so both fixture data lengths are frame-valid. FrameWriter at proto/io.rs:224-230 writes and flushes each frame in order, and the running client reader routes before reading the later reply. A generic connection failure cannot satisfy the stalled detach plus successful second attach and exact payload assertions. The peer closes after sending the second reply, but TermStream::recv prefers buffered data before its detached reason (client.rs:931-976), preserving the exact-limit observable. Parent-commit comparison confirms this patch changes the cap/stream negotiation rather than inventing the test's sequencing; the test also exists at the range's exclusive base. Governing contract: SPEC_impl.md Grid streams requires a 1 MiB data cap and independent attachment failure, and the test-authoring checklist requires an observable that distinguishes the claimed mechanism. Suggested bucket if established: other/test-evidence quality. Confidence: confirmed source refutation; no execution. proposed_drop: source refutation of this distinct larger-fixture concern, pending independent judgment; no drops accepted. Could-be-highest: no demonstrated security or user-owned-work-loss route in the contemplated test-oracle defect. possible_cover: none; no prohibited coverage sources read. Caveat: this establishes the source oracle and frame-size compatibility, not a runtime pass or a scheduling/performance guarantee."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g075/findings.jsonl",
+        "id": "c4",
+        "line": 9,
+        "disposition": "excluded",
+        "group": "pre-attached-grid-limit-test-generic-connection-failure-suspicion",
+        "reason": "Parent explicitly accepted named refuted proposal from claims-048 after inspecting it. The oversized fixture remains below the outer framing cap, and the same connection must subsequently deliver an exact-limit frame. Generic connection failure cannot satisfy those assertions. Source-refuted competing mechanism; exact-channel Detach and same-connection exact-limit delivery distinguish cap enforcement. Checked source/results: [\"f560058da19e02716e6f943883a9508b447aff4e client.rs:6281-6406 sends GRID_MAX_MESSAGE+1 before Attached, requires the exact channel's upstream Detach, gates a second Attach on that witness, and requires an exact GRID_MAX_MESSAGE all-y event from the same client.\",\"At that hash proto/lib.rs:484 sets the outer cap to eight MiB; :626-678 encodes/decodes kind+channel+body under it. Both one-MiB fixture lengths plus overhead are valid frames.\",\"The later peer closure does not remove the explicit upstream Detach and second successful Attach requirements. This checks the source oracle, not a runtime pass or scheduling/performance guarantee.\"] Current coverage/results: [\"SPEC.md:3011-3029 requires attachment isolation. SPEC_impl.md:2957-2982 specifies the grid cap, and :3101-3109 separates the outer eight-MiB framing cap. None accepts a false oracle.\",\"TODO.md Planned is empty; searched plans, BUGS.md, INDEX.md/queue and active TRIAGE_OUTCOMES.md have no exact larger-fixture/outer-frame-failure item. The existing initial-oversized-grid-cannot-attach queue topic concerns attach dimensions and producer validity, not this test's generic failure alternative. No FILTER.md basis.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Increasing the pre-Attached fixture from sixty-four KiB to one MiB could have caused framing or connection failure to masquerade as per-attachment cap enforcement. The test sequence predates this patch; this disposition addresses its changed larger fixture only.\"; null."
+      },
+      "accepted_parent_decision": {
+        "key": "g075/c4",
+        "line": 9,
+        "disposition": "excluded",
+        "group": "pre-attached-grid-limit-test-generic-connection-failure-suspicion",
+        "bucket": "other",
+        "recording": "refuted",
+        "queue_target_candidate": null,
+        "needs_independent_drop_check": false,
+        "reason": "Parent explicitly accepted named refuted proposal from claims-048 after inspecting it. The oversized fixture remains below the outer framing cap, and the same connection must subsequently deliver an exact-limit frame. Generic connection failure cannot satisfy those assertions. Source-refuted competing mechanism; exact-channel Detach and same-connection exact-limit delivery distinguish cap enforcement. Checked source/results: [\"f560058da19e02716e6f943883a9508b447aff4e client.rs:6281-6406 sends GRID_MAX_MESSAGE+1 before Attached, requires the exact channel's upstream Detach, gates a second Attach on that witness, and requires an exact GRID_MAX_MESSAGE all-y event from the same client.\",\"At that hash proto/lib.rs:484 sets the outer cap to eight MiB; :626-678 encodes/decodes kind+channel+body under it. Both one-MiB fixture lengths plus overhead are valid frames.\",\"The later peer closure does not remove the explicit upstream Detach and second successful Attach requirements. This checks the source oracle, not a runtime pass or scheduling/performance guarantee.\"] Current coverage/results: [\"SPEC.md:3011-3029 requires attachment isolation. SPEC_impl.md:2957-2982 specifies the grid cap, and :3101-3109 separates the outer eight-MiB framing cap. None accepts a false oracle.\",\"TODO.md Planned is empty; searched plans, BUGS.md, INDEX.md/queue and active TRIAGE_OUTCOMES.md have no exact larger-fixture/outer-frame-failure item. The existing initial-oversized-grid-cannot-attach queue topic concerns attach dimensions and producer validity, not this test's generic failure alternative. No FILTER.md basis.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Increasing the pre-Attached fixture from sixty-four KiB to one MiB could have caused framing or connection failure to masquerade as per-attachment cap enforcement. The test sequence predates this patch; this disposition addresses its changed larger fixture only.\"; null."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-048",
+          "key": "g075/c4",
+          "latest_line": 9,
+          "recommendation": "refuted",
+          "bucket": "other",
+          "underlying_key": "pre-attached-grid-limit-test-generic-connection-failure-suspicion",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The oversized fixture remains below the outer framing cap, and the same connection must subsequently deliver an exact-limit frame. Generic connection failure cannot satisfy those assertions.",
+          "checks": [
+            "f560058da19e02716e6f943883a9508b447aff4e client.rs:6281-6406 sends GRID_MAX_MESSAGE+1 before Attached, requires the exact channel's upstream Detach, gates a second Attach on that witness, and requires an exact GRID_MAX_MESSAGE all-y event from the same client.",
+            "At that hash proto/lib.rs:484 sets the outer cap to eight MiB; :626-678 encodes/decodes kind+channel+body under it. Both one-MiB fixture lengths plus overhead are valid frames.",
+            "The later peer closure does not remove the explicit upstream Detach and second successful Attach requirements. This checks the source oracle, not a runtime pass or scheduling/performance guarantee."
+          ],
+          "coverage_checked": [
+            "SPEC.md:3011-3029 requires attachment isolation. SPEC_impl.md:2957-2982 specifies the grid cap, and :3101-3109 separates the outer eight-MiB framing cap. None accepts a false oracle.",
+            "TODO.md Planned is empty; searched plans, BUGS.md, INDEX.md/queue and active TRIAGE_OUTCOMES.md have no exact larger-fixture/outer-frame-failure item. The existing initial-oversized-grid-cannot-attach queue topic concerns attach dimensions and producer validity, not this test's generic failure alternative. No FILTER.md basis."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": null,
+          "original_stronger_consequence": "Increasing the pre-Attached fixture from sixty-four KiB to one MiB could have caused framing or connection failure to masquerade as per-attachment cap enforcement. The test sequence predates this patch; this disposition addresses its changed larger fixture only.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Source-refuted competing mechanism; exact-channel Detach and same-connection exact-limit delivery distinguish cap enforcement."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "pre-attached-grid-limit-test-generic-connection-failure-suspicion",
+        "destination": null
+      }
+    }
+  ],
+  "replies": [
+    {
+      "turn": 1,
+      "reply": "Initial review complete: all 1,227 assigned patch lines reviewed against pinned contracts and callers.\n\nNo reportable findings. Recorded candidates c1 and c2; no open leads. c1’s specification-based proposed drop awaits independent judgment.\n\nFindings log and progress updated. No tests, reproductions, or checkout changes."
+    },
+    {
+      "turn": 2,
+      "reply": "Revised c1 and c2 with source checks confirming uniform grid accounting, isolated attachment teardown, and the terminal-host protocol’s independent upgrade lifetime.\n\nPreserved c1’s exact accepted old-page consequence and c2’s prior checks. No drops accepted, new findings, or unresolved leads. No execution performed."
+    },
+    {
+      "turn": 3,
+      "reply": "Discovery pass 1 complete. No new reportable defect found.\n\nChecked writer-test assertions, the enlarged pre-reply frame fixture, removed API references, and changed documentation contracts. Recorded source-refuted candidates c3 and c4.\n\nNew verified IDs: none. New unverified IDs: none. Open leads: none. No execution performed."
+    }
+  ],
+  "progress": "# g075 helm-terminal-routing\n\nTurn type: initial review. Turn count: 1. Discovery-pass count: 0.\nState: initial pass complete; awaiting the caller's later synthesis or discovery turn.\n\nReviewed f560058da19e02716e6f943883a9508b447aff4e, all assigned client.rs patch lines 1–1227, delivered in seven evidence packets. Read the full brief and the inventory's complete commits field only. Unread assigned scope: none.\n\nContracts read at the reviewed revision: SPEC.md Terminal experience (2855–3177) and Upgrade compatibility and client scale (5375–5457); SPEC_impl.md transport preamble (2896–3008), Grid streams (3009–3110), Multiplexing, chunks and writer priority (3173–3216), Version and skew primary section (8268–8348), and GUI Answers bind to what was drawn (1069–1098). Pinned full specifications and a separate contracts-manifest.json remain here for the delivered contract packets. Queue priority and finding-format sections and the test-authoring checklist were read.\n\nInterface assumptions checked: production client construction completes exact-version hello before any attachment; protocol is 77. The supervisor sends Attached before starting GridSender and uses HostAttach for input. The browser relay pins one supervisor connection and preserves the if_unowned choice, forwards one binary input message per data frame, and ignores browser pause/resume. The helm gauge enforces 4096 events, 16 MiB, 1 MiB data frames and its own hysteretic flow control; dropping TerminalHandle prevents late flow startup. Oversized input revokes only its attachment.\n\nRecords: c1 is the explicitly accepted stale-page transition after byte-stream removal, with exact specification text and completed handshake/producer checks. c2 is the source-refuted concern about smaller synthetic overflow-test queues; real gauge bounds and accepted-attach flow remain separately covered. New verified findings: none. New unverified findings: none. New candidates: c1, c2. Open leads: none. All are source conclusions; no tests, builds or reproductions were run.\n\nNext action: caller synthesis, including independent judgment of c1's specification-based proposed drop. No queue coverage files or excluded inventory metadata were read. No checkout files were changed.\n\nSynthesis turn 2 started. Delivery audit accepted all 1227 assigned patch lines. The caller has accepted no drops. Related g053/c1 and c2 distinguish old-browser reload acceptance from exact helm-supervisor protocol fencing; its other records were read as supplied context, without consulting queue coverage. Rechecking production queue accounting, overflow/teardown isolation and the independent terminal-host upgrade lifetime. Discovery-pass count remains 0.\n\nSynthesis turn 2 complete. Discovery-pass count: 0. Assigned unread scope: none. New verified/unverified findings: none. New candidates: none. Revised IDs: c2 once and c1 twice; their proposed drops remain unaccepted. Open leads: none.\n\nResolved interaction premises: every production attach uses the same grid queue/gauge before reply and starts helm-owned flow on acceptance unless already released; recv/try_recv debit the same gauge. Overflow uses try_send, removes only the affected map entry and signals its detached watch without waiting for writer capacity. Its independent upstream sender does not park the shared demultiplexer. Supervisor Detach and delayed pause/stream-end handling check connection/channel ownership, with forwarder identity for delayed verdicts. Output shutdown and input-pump cancellation do not end the agent; SessionEntry retains HostTerminal independently, and even the last HostTerminal handle leaves the host process running.\n\nVersion assumptions are now explicitly separated in c1: old-page misdrawing and attachment refusal until reload are specification-accepted; exact helm-supervisor protocol equality independently rejects older peers. The terminal-host version is a separate constant (1), with permanent shipped behavior and independent upgrade lifetime. No crates/terminal-host files changed in the reviewed commit. Its governing intro, connection negotiation and complete Change policy were also delivered as evidence packets using host-contract-manifest.json. The separate deliberate old-tmux retirement stays with supplied g053/f1 and has not been reclassified here.\n\nNext action: caller independent drop judgment or later discovery prompt. No readily checkable premise remains open in this group. Source conclusions only; no runtime tests, builds or reproductions performed, and no checkout files changed.\n\nDiscovery turn 3 started. Discovery-pass count: 1. Read all 130 lines of discovery-neighbours.json (23054 bytes), including g076's distinct test-oracle finding; production correctness is not used to refute it. No pending cross-group questions were supplied. Search remains limited to the assigned client.rs change and its necessary callers/contracts, beyond c1/c2. No drop accepted.\n\nDiscovery turn 3 complete. Discovery-pass count: 1. Result: no new reportable defect found. New verified finding IDs: none. New unverified-after-investigation IDs: none. Open lead IDs: none. New candidate IDs: c3 and c4, each source-refuted and retained for independent drop judgment. No existing consequence, bucket or proposed-drop basis was withdrawn or lowered.\n\nChecks beyond prior c1/c2: revisited all client patch hunks for changed contracts and assertions; traced resize replacements through FIFO ordering, ParkableWriter's actual transport-write notification, in-progress writer cancellation and peer EOF (c3). Checked the enlarged pre-Attached fixture against the generic 8 MiB frame encoder/decoder, ordered writes, per-channel stalled Detach, same-connection second attach, exact payload assertion and buffered-event-before-detach semantics (c4). Compared relevant test structure with the parent and exclusive base rather than inferring range attribution from one parent. Searched helm/CLI source for removed ViewerStreams, StreamKind, BYTE_STREAM_EVENT_QUEUE, MAX_TERMINAL_DATA_LEN and send_input call sites; no residual references found. Checked the modified queue/input comments against the retained numerical bounds and helper signatures. The supplied g076 test-oracle finding remains distinct and is not refuted by this pass.\n\nUnread assigned scope: none. No runtime tests, reproductions, builds, live-install actions, checkout changes or prohibited coverage searches. Next action: caller consolidation or another requested discovery pass; there is no unresolved source premise in this group.\n"
+}

@@ -1,0 +1,297 @@
+[
+  {
+    "key": "g086/l1",
+    "latest_line": 16,
+    "recommendation": "covered",
+    "bucket": "highest",
+    "underlying_key": "fresh-environment-ambiguous-create-cleanup",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "Both conditional consequences are source-supported and explicitly accepted: another explicit launch after outer response loss can allocate another environment; an internal supervisor-create error can destroy this launch's fresh environment even if its agent started. This is proposed specification coverage, not an authorized drop.",
+    "checks": [
+      "350a4b33b6d4476f4a78e43cea124bc2b828f462:crates/farhelm-ui/src/list/create_form.rs:5989-6170 mints a fresh key, dispatches the environment request and preserves Unknown separately from Refused.",
+      "350a4b33:crates/farhelm-ui/src/api/sandbox_sessions.rs:1-128 sends one 30-minute request through result decoding; uncertainty tells the user to check Hosts. It contains no automatic launch retry.",
+      "350a4b33:crates/farhelm-helm/src/sessions/sandbox.rs:55-106 admits helm-owned provisioning and streams its result. Outer response loss is not the internal cleanup trigger.",
+      "00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db:crates/farhelm-helm/src/provisioning/tensorlake_add.rs:986-1058 invokes create_in_session_sandbox and sends its error to forget_host_locked using this fresh host and held provisioning guard; cleanup failure retains a named recovery remedy. hosts.rs:1530-1567 invokes provider.destroy before delete_registered_host and returns on destruction failure. No execution or observed work loss."
+    ],
+    "coverage_checked": [
+      "Current SPEC.md:1450-1582,4831-4838 and SPEC_impl.md:6584-6632 explicitly accept initial-launch cleanup and absent transparent reconciliation, including containers.",
+      "TODO.md Planned is empty (25-26); BUGS.md concerns SSH installation helpers, not this trigger. Searched plans/queue and active TRIAGE_OUTCOMES.md; no additional exact repair/decision. The ledger's uncertain-launch-marker-overwrites-older-attempt entry concerns ordinary-create marker state, not fresh-environment cleanup.",
+      "INDEX.md searched/read and matching launch entries checked: no exact existing item. FILTER.md does not independently cover destruction of started work."
+    ],
+    "exact_cover_quotes": [
+      {"source":"SPEC.md:1480-1485, Sandbox sessions", "quote":"If an ordinary new launch fails before the helm has confirmed session creation, including a lost create reply, it attempts to delete that newly created sandbox and snapshots and shows **Not launched.** with the reason. This may end an agent that started before its reply was lost."},
+      {"source":"SPEC.md:1485", "quote":"Transparent recovery of an ambiguous launch is not promised."},
+      {"source":"SPEC_impl.md:6602-6606, Tensorlake sandbox sessions", "quote":"Lost create replies need no special reconciliation: the newly created resource may be destroyed. Interrupted owned resources remain visible in Hosts, and resources without a row are discoverable by the reserved prefix. There is no new launch journal, retained request fingerprint, exactly-once launch guarantee or startup continuation worker."},
+      {"source":"SPEC.md:4834-4836, Container sessions", "quote":"An ordinary failed initial launch may discard its newly created container, including after a lost session-create reply."}
+    ],
+    "missing_premise": null,
+    "original_stronger_consequence": "Preserve both duplicate environments/sessions and extra Tensorlake billing after another explicit launch, and ending an agent or discarding files it created after an internally lost session-create acknowledgement. Cleanup is confined to this fresh resource, not an existing Replace source. Outer client response loss alone does not initiate cleanup. Failed cleanup remains recoverable; no runtime incident was demonstrated.",
+    "needs_independent_drop_check": true,
+    "proposed_basis": "Exact environment-specific specification acceptance, subject to the independent highest-priority drop consultation."
+  },
+  {
+    "key": "g086/l2",
+    "latest_line": 13,
+    "recommendation": "retain-verified",
+    "bucket": "high",
+    "underlying_key": "replace-with-environment-recent-bypasses-held-placement-admission",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "An offered environment Recent mutates Replace into a fresh-environment draft that submission refuses while the placement picker is disabled. This breaks the active offered workflow. The refusal precedes create and source deletion, so no wrong-target execution or loss of user work is established.",
+    "checks": [
+      "350a4b33:create_form.rs:4347-4356 merges environment history; :8185-8225 offers Recent outside Restart, explicitly including Replace. draft.rs:1984-2043 excludes only Restart and assigns entry.target before restoring destination.",
+      "350a4b33:create_form.rs:5991-5998 refuses target with host_fixed before dispatch; :7450-7457 disables PlacementPicker with busy || host_fixed.",
+      "00de0b6c:crates/farhelm-ui/src/list/create_form/draft.rs:1958-2005 still admits modern entry.target; its new legacy-container refusal is a separate field. create_form.rs:5963-5969 still refuses the resulting Replace.",
+      "350a4b33:draft.rs:2711-2722 host search clears recipe/target and can repair an ordinary source host. A compatible ordinary Recent can clear target; session-owned source hosts are not ordinary search destinations. Earlier generic template-recovery wording was withdrawn: a host template can itself hit held-placement refusal, while an absent placement leaves target. Reset choices preserves placement; reopening reseeds source. No reproduction."
+    ],
+    "coverage_checked": [
+      "SPEC.md:1138-1143 requires all-or-none refusal of held template fields; :2012-2024 says Replace with keeps the source's host. SPEC_impl.md launch-template placement rules and environment ownership provide no exception for Recent mutation.",
+      "TODO.md Planned empty; BUGS.md unrelated; searched plans/queue and active TRIAGE_OUTCOMES.md for environment Recent/Replace/held-placement triggers, without exact repair coverage.",
+      "INDEX.md contains no exact environment-Recent Replace item. Existing launcher-source, browse fallback and shortcut-batch items describe different owners/triggers. FILTER.md does not cover this ordinarily offered workflow becoming unlaunchable."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": null,
+    "original_stronger_consequence": "The user may have to recover through another compatible ordinary Recent, original ordinary-host search, or closing/reopening and redoing edits. A same-host template is not a reliable repair. No create or source deletion is sent. The parent's reported g085/l2 similarity was not treated as a verified alias because that record is outside this batch.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Retain the source-established Replace admission defect; use underlying_key to reconcile the parent's separately supplied counterpart."
+  },
+  {
+    "key": "g086/c4",
+    "latest_line": 10,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "launch-target-guard-host-scope-and-owned-lifetime",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The assigned target marker compares an exact host and clears with the owned launch guard. The suggested unrelated-host blockage or leaked marker does not follow from this change.",
+    "checks": [
+      "1d24c6af0b6fdbbec854623ff53f90281b8271ab:crates/farhelm-ui/src/ops.rs:36-110 stores Some(host), clears marker and held state in Drop, and compares exact equality in launch_targets_now.",
+      "1d24c6af:create_form.rs:6124-6150 validates the existing target and availability before marking it synchronously, prior to wake awaits; the fresh-environment branch returns earlier. Cancellation drops the same owned guard. No runtime check."
+    ],
+    "coverage_checked": [
+      "SPEC.md Creation and SPEC_impl.md GUI operation-token rules require the same-host exclusion; plans/queue/sandbox-suspend-overlap.md:71-94 states that scope and describes the already delivered change rather than an additional repair.",
+      "Planned empty; BUGS.md unrelated; active ledger, INDEX.md and plans searched for this host-target guard/lifetime consequence, with no exact distinct defect. FILTER.md unnecessary because the alleged source defect is refuted."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": "No path was shown that makes the marker select another host or survive its guard.",
+    "original_stronger_consequence": "A launch marker might block unrelated hosts or outlive refusal/cancellation. No security or user-owned-work consequence was claimed or established.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Narrow source refutation of marker scope and guard lifetime, not certification of every lifecycle overlap."
+  },
+  {
+    "key": "g086/l3",
+    "latest_line": 18,
+    "recommendation": "refuted",
+    "bucket": "highest",
+    "underlying_key": "retired-container-template-undo-structural-save-admission",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The alleged irreversible Undo failure conflates the editor's applicability refusal with the restore endpoint's structural validation. Delete and restore both use the structural contract, which still accepts valid legacy container objects. Keep the original potential loss of a user-authored template in the independent-drop register.",
+    "checks": [
+      "04d85f0c98a9b635709d00b056719a0baa7fd3fc:crates/farhelm-ui/src/list/templates.rs:1696-1714 classifies the stored snapshot with check_template_shape. :2313-2343 restores its stored fields through put_template after a fresh name-collision read; only retired workspace_trust is deliberately cleared.",
+      "04d85f0c:crates/farhelm-proto/src/launcher.rs:493-494 calls container.validate for a present legacy config. crates/farhelm-helm/src/templates.rs:98-113 uses check_template_shape, not the editor Field::refusal. The claimed universal retired-config rejection is absent. No execution."
+    ],
+    "coverage_checked": [
+      "SPEC.md:1176-1193 distinguishes incompatible editor fields from Delete/Undo promises. SPEC_impl.md:8750-8773 says Delete classifies the stored snapshot using shape rules and fresh name checks govern Undo.",
+      "Planned empty; BUGS.md unrelated; plans and active ledger searched for retired-container Undo. TODO's broader lost-delete-reply work is outside Planned and concerns no usable DELETE reply, a different trigger.",
+      "INDEX.md contains no exact structural-legacy-Undo defect; related template state items do not supply coverage. FILTER.md does not justify dropping irreversible template loss."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": "The proposed premise that Undo's backend rejects every retired container config is source-refuted. An independently invalid shape or a newly occupied name can still refuse restoration under existing contracts.",
+    "original_stronger_consequence": "Plain Delete could promise Undo but become unintentionally irreversible for a reusable user-authored legacy-container template. This check does not claim every historical byte survives separate image_file decoding, nor deny existing invalid-shape/name-collision refusals.",
+    "needs_independent_drop_check": true,
+    "proposed_basis": "Source refutation limited to editor retirement causing structural Undo rejection. Highest here preserves the alleged user-data-loss route pending independent agreement; it is not a demonstrated defect severity."
+  },
+  {
+    "key": "g086/l4",
+    "latest_line": 20,
+    "recommendation": "retain-verified",
+    "bucket": "other",
+    "underlying_key": "container-place-footer-omits-peer-format-escaping",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The container placement label admits an alias containing format characters, composes it as raw text and reaches the ordinary New/Clone footer without display_peer. This violates the visible-formatting rule. Correct captured host identity and text interpolation do not establish wrong-host execution or HTML injection.",
+    "checks": [
+      "350a4b33:crates/farhelm-helm/src/store.rs:2014-2032 rejects char::is_control but not Unicode format characters; hosts.rs:4317-4330 projects the raw alias through host_display_name into EnvironmentPlaceView.name.",
+      "350a4b33:crates/farhelm-ui/src/environment_ui.rs:300-317 returns raw place.name in target_label and assigns escaping to rendering. create_form.rs:4395-4423 escapes only Restart's label, leaving New/Clone raw.",
+      "350a4b33:create_form.rs:9188 interpolates selected_host_label directly into the footer's peer-value span; dir=ltr does not call format-character escaping. 00de0b6c:create_form.rs:4395-4423 retains the raw environment-label branch. This is the newly integrated container-host-name path; raw sandbox recipe text predates it. No runtime rendering or harmful reliance demonstrated."
+    ],
+    "coverage_checked": [
+      "SPEC.md:4944-4948 expressly requires visible escaping of invisible and direction-changing host text. SPEC_impl.md peer-text/host-identity rules provide no footer exception.",
+      "Planned empty; BUGS.md unrelated; searched plans/queue and active ledger for footer/container-placement formatting, no exact accepted omission or planned repair.",
+      "Read review_feedback_queue/launcher-target-hover-merges-direction-runs.md: it concerns grouping ordinary RTL text after escaping, whereas this claim omits escaping of unsafe format characters. remote-version-display-retains-format-characters names a different display owner. Neither is exact coverage. FILTER.md's rare diagnostics rule does not cover an admitted placement display used in ordinary launch."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": "A stronger security/work-loss consequence would need an actual harmful target-confusion route; none was established and requests retain the correct host id.",
+    "original_stronger_consequence": "The same selected host can have a misleading or different visible spelling in the footer beside Launch versus its escaped picker label. No wrong-target action, unauthorized execution or HTML interpretation is claimed.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Retain the conditional source-confirmed escaping omission as presentation correctness; do not promote it to a security incident without the missing route."
+  },
+  {
+    "key": "g086/c5",
+    "latest_line": 21,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "environment-history-search-folder-projection-authority",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The promoter does not add ordinary folders to environment history, and immediate search indexing and rendered offers use the same projection. The specific hypothesized folder-row divergence is refuted.",
+    "checks": [
+      "350a4b33:create_form.rs:1478-1490 copies ordinary history only when its target equals both current and destination targets, then merges environment launches; it does not merge environment folders.",
+      "350a4b33:create_form.rs:4347-4356 rendered history and :7913-7918 immediate search calculation both call offered_recent_history with the same authority inputs. Normal fresh placement has no ordinary destination authority. No tests or reproduction run."
+    ],
+    "coverage_checked": [
+      "SPEC.md Sandbox/Container sessions fixes fresh-environment folders to home; Working directory and SPEC_impl.md history/discovery rules distinguish ordinary folder evidence from environment launch intent.",
+      "Planned empty; BUGS.md unrelated; plans, active ledger and INDEX.md searched for environment-history folder authority/active-index mismatch, with no exact independent item. Existing browse-result-survives-automatic-host-fallback is an ordinary-host fallback mechanism. FILTER.md unnecessary for source refutation."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": "No ordinary folder authority was shown to enter the fresh-environment promoter. This does not certify manually generated browse/search rows or every active-index owner.",
+    "original_stronger_consequence": "Enter might choose a different row from the environment search's rendered row because synchronous indexing included ordinary folder suggestions. The related held-Replace environment Recent defect remains g086/l2 and is not refuted here. No separate test-oracle defect was claimed.",
+    "needs_independent_drop_check": true,
+    "proposed_basis": "Narrow source refutation of wrong-row authority from this promoter; conservative independent check because the dismissed hypothesis concerns the target/destination selected by Enter."
+  },
+  {
+    "key": "g086/l5",
+    "latest_line": 24,
+    "recommendation": "retain-verified",
+    "bucket": "high",
+    "underlying_key": "launcher-feed-restarts-cancel-first-environment-catalog",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "Every observed fleet notice restarts the resource required for environment preparation. If notice gaps remain shorter than its first sequential recipe/settings read, it cannot publish an initial answer. This condition can block environment/template preparation for the duration of the activity; cadence and duration were not measured.",
+    "checks": [
+      "350a4b33:create_form.rs:3237-3248 combines recipe then settings reads in a Resource and unconditionally restarts it from use_feed_reader; :3257-3266 derives recipe_names only from a completed result; :5999-6024 gates environment submission on that result.",
+      "Pinned installed primary source [home]/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/dioxus-hooks-0.7.10/src/use_resource.rs:29,46-66,191-194 initializes None, publishes only after completion and cancels the old task before restart. Earlier completed values survive; first-load cancellation has no value to retain.",
+      "350a4b33:crates/farhelm-ui/src/feed.rs:250-315 invokes reread for each newly observed notice and explicitly delegates coalescing/retry to readers; it does not wait for this resource. helm templates.rs:119-150 is a shipped producer, bumping the fleet after each accepted write independently of catalog completion. Cargo.lock:1528-1531 confirms dioxus-hooks 0.7.10. 00de0b6c:create_form.rs:3232-3243 retains the restarts. No runtime test, synthetic event, production frequency, server-request cancellation or unbounded backend-work claim."
+    ],
+    "coverage_checked": [
+      "SPEC_impl.md:5023 onward preserves composer's SurfaceReader refresh-demand policy; neither specification expressly accepts repeated cancellation preventing first readiness. A quiet interval and retained earlier success limit the consequence but do not refute the conditional route.",
+      "Planned empty; BUGS.md unrelated; searched plans/queue and active ledger for initial recipe/catalog cancellation/starvation, no exact repair or acceptance.",
+      "Read review_feedback_queue/credential-catalog-success-starvation.md: separate credentials owner invalidates generations rather than cancelling this launcher Resource. It is related scheduling policy, not exact same-root coverage or a fix for this owner. No exact INDEX item. FILTER.md does not establish a brief self-correcting glitch: repeated refresh is itself what prevents initial readiness while the condition persists."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": "No empirical incidence or duration. Conditional scheduling route is established; a claim of permanent lockout, guaranteed normal-load failure, or ordinary non-environment launch blockage would need further evidence.",
+    "original_stronger_consequence": "Initial environment catalogs, template replay and saved environment quick-launch preparation can remain loading while delivered fleet-notice cadence outruns completion. Existing successful snapshots remain usable; a long enough quiet interval repairs initial readiness. No create is dispatched from the blocked path and no work-loss/security route is established.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Retain conditional initial environment-launch availability defect at high; keep actual cadence and severity frequency explicitly unmeasured."
+  },
+  {
+    "key": "g086/l6",
+    "latest_line": 26,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "fresh-environment-live-home-invariant-rejects-old-browse-path",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "Even if browse generations lag, the live draft refuses any non-home folder while a fresh-environment target is present. The hypothesized old-host path cannot become that environment's operational destination through the examined path.",
+    "checks": [
+      "350a4b33:draft.rs:1468-1483 synchronously selects and publishes target. :399-416 rejects nonempty/non-home edits and choose_existing_folder calls whenever target.is_some().",
+      "350a4b33:draft.rs:2732-2747 separately refuses non-home folder and Browse search actions for a new environment. create_form.rs:6090 builds actual environment requests at home. No runtime check."
+    ],
+    "coverage_checked": [
+      "SPEC.md Sandbox sessions:1461-1464 and Container sessions require home-only fresh placement; SPEC_impl.md environment creation follows that constraint.",
+      "Planned empty; BUGS.md unrelated; plans/queue and active ledger searched for queued browse/fresh-environment authority; no additional exact item. Read existing browse-result-survives-automatic-host-fallback.md: it concerns ordinary targets without this invariant and is not refuted or covered here. FILTER.md unnecessary for this narrow source refutation."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": "No path bypassing the live home-only invariant was shown. A queued reply may transiently populate an internal signal; no distinct user-visible harm from that storage was established.",
+    "original_stronger_consequence": "A queued old-host browse choice could change a newly selected environment's folder before render-derived authority catches up, including the hypothesized equal-home window. Empty/home remains admissible; non-home destination corruption is blocked. This does not certify all queued replies are discarded immediately.",
+    "needs_independent_drop_check": true,
+    "proposed_basis": "Narrow source refutation of operational destination corruption; conservative independent check for dismissal of an old-host destination-adoption hypothesis."
+  },
+  {
+    "key": "g087/c1",
+    "latest_line": 10,
+    "recommendation": "covered",
+    "bucket": "other",
+    "underlying_key": "woken-launch-one-shot-expiry-state-boundary",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The one-shot timer's scope exactly matches explicit current specification acceptance. A connection that becomes pending only after expiry gets no renewed bound; no concrete indefinite later-connection route was established.",
+    "checks": [
+      "533169cf19571d34af3a8497eaceb8d2d7b7c852:create_form.rs:7490-7522 schedules one timer per woken_connection_wait and inspects the matching parked press only at expiry. :7530-7592 waits on its current connection/preview and spends pending state before submitting.",
+      "SPEC_impl.md:210-215 states this exact after-expiry exception, distinguishing connection wait from checkout-preview time. No runtime observation or indefinitely blocked production route."
+    ],
+    "coverage_checked": [
+      "Current SPEC_impl.md:210-215 exactly accepts the boundary; SPEC.md Creation requires bounded initial connection wait. plans/queue/wake-launch-stuck.md:51-69,95-120 describes the implemented single-timer boundary, not a separate repair.",
+      "Planned empty; BUGS.md unrelated; active ledger and INDEX searched for one-shot wake/post-expiry pending consequence, no distinct exact item. FILTER.md not needed."
+    ],
+    "exact_cover_quotes": [
+      {"source":"SPEC_impl.md:210-215, GUI: Dioxus", "quote":"The limit is checked when its 60 seconds run out: a press still waiting for a connection then is discarded, even one that saw the host connect and lost it again before that point, while a host that shows a connection pending again only after that point is not bounded by it."}
+    ],
+    "missing_premise": "An actual indefinitely pending later connection and resulting persistent token blockage were not established. That stronger availability consequence could merit high; it is not disproved by the timer's narrow accepted scope.",
+    "original_stronger_consequence": "A connection returning to pending after the one-shot expiry can keep the launch waiting with no renewed 60-second bound. A still-waiting press discarded at expiry cannot later create from that spent slot. This check does not bound later preview preparation or certify host-reader progress.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Exact specification acceptance of the one-shot boundary, not a claim that indefinite waiting has been observed or that every continuation progresses."
+  },
+  {
+    "key": "g087/c2",
+    "latest_line": 9,
+    "recommendation": "refuted",
+    "bucket": "highest",
+    "underlying_key": "retired-container-object-cannot-become-unisolated-agent-launch",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "Stored retired container objects are refused rather than silently converted into ordinary host Agent launches. This narrow refutation says nothing about modern environment target placement, whose field differs from the retired container object.",
+    "checks": [
+      "04d85f0c98a9b635709d00b056719a0baa7fd3fc:draft.rs:230-232 refuses the active Agent container config; :747-750 makes structured_selection unavailable; raw config remains retained for editing/fingerprints.",
+      "04d85f0c:create_form.rs:5864-5868 checks container_refusal before launch. proto launcher.rs:667-669 refuses a template containing the retired container object before fold mutation. The supplied direct/search Recent refusal references are consistent with this same field check.",
+      "At 00de0b6c:draft.rs:1966-1977 the legacy Recent object is refused before writes, but modern entry.target still applies, explaining why g086/l2 survives. No launch or isolation experiment."
+    ],
+    "coverage_checked": [
+      "04d85f0c:SPEC.md:4816-4823 and current SPEC.md:4893-4899 retire the supervisor-outside model and require explained drop/refusal. SPEC_impl.md:8312-8326 preserves decoding but forbids new old-style creation.",
+      "Planned empty; BUGS.md unrelated; plans/queue/podman-environments.md:15-19,60-70 records the hard cut, not a missing repair. Active ledger/INDEX searches supplied no exact independent silent-isolation-loss item. FILTER.md cannot dismiss security loss."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": "No active Agent path dropping a retired ContainerConfig while proceeding directly on its host was shown. Explicit Command selection is a separate retained field group, not evidence of silent Agent fallback.",
+    "original_stronger_consequence": "A stored container-isolated setup might silently launch directly on the host after removal of its editor, losing intended isolation. Preserve this highest/security allegation for independent drop review. Modern environment targets normally have selection.container == None and are outside this refutation.",
+    "needs_independent_drop_check": true,
+    "proposed_basis": "Source refutation limited to retired container-object isolation fallback; highest preserves the original alleged consequence pending independent agreement."
+  },
+  {
+    "key": "g087/c3",
+    "latest_line": 6,
+    "recommendation": "refuted",
+    "bucket": "high",
+    "underlying_key": "restart-form-bool-bridge-preserves-needed-completion-information",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "Changing this form call to a success boolean does not discard a remaining result field required by the receiver. It preserves error reporting, delivery and settlement. Retained-success retirement correctness is a separate question and is not refuted.",
+    "checks": [
+      "f560058da19e02716e6f943883a9508b447aff4e:create_form.rs:6554-6620 sends non-YOLO errors to bridge.error, calls bridge.finish(result.is_ok()) before modal return, and still handles the original result for success/YOLO/refusal.",
+      "f560058d^:list/view.rs:275-296 shows RestartOutcome held only succeeded and agent_terminal. f560058d:list/view.rs:257-282 changes both receiver/finish to bool; :3636-3648 clears pending/progress, records outcome and releases restart_claim. session_ops.rs:190-196 increments lifecycle revision and stores success. No execution."
+    ],
+    "coverage_checked": [
+      "SPEC.md lifecycle and SPEC_impl.md GUI closing-boundary/retained-outcome rules require settlement independent of the form. These source checks establish that delivery, not correctness of later retirement.",
+      "Planned empty; BUGS.md unrelated; plans and active ledger searched for boolean bridge field loss; no exact item. Read retained-restart-hides-reboot-card.md: different retained-outcome lifecycle concern, not this adaptation. Other parent-mentioned g037/g038/g089 records were not supplied or judged. FILTER.md unnecessary."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": "No needed non-retired result field lost by the bool adaptation was identified. Early retirement of successful outcomes or subsequent mount seeding requires its own assessment.",
+    "original_stronger_consequence": "Restart completion could lose information needed to restore the session, materially degrading recovery. Earlier wording that completion 'still settles' is limited to reaching its receiver and releasing the shared claim; it does not certify retained-success retirement or the entire renderer migration.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Narrow source refutation of result-information loss caused by this one form-call type adaptation; preserve independent retained-success concerns."
+  },
+  {
+    "key": "g087/c4",
+    "latest_line": 11,
+    "recommendation": "refuted",
+    "bucket": "highest",
+    "underlying_key": "sandbox-launch-warning-last-session-revision-alignment",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The changed warning describes last-session destruction under the same revision's changed deletion contract. Non-final session deletion and separately confirmed whole-environment fallback do not contradict its wording. Narrow consent equality prevents a different-valued draft from inheriting the captured draft's consent, without proving opening-generation safety.",
+    "checks": [
+      "2ef10815f12ed719ab6c51c6e3ac6fcd3f8bc1fa:create_form.rs:9244-9269 states that deleting the last session removes the sandbox, processes, files and snapshots; Confirm captures snapshot. Submission at :5998-5999 requires complete LaunchDraft equality for consent.",
+      "2ef10815:SPEC.md Sandbox sessions:1499-1548 requires supervisor-counted last-session sealing and separately warned whole-sandbox Delete when the supervisor cannot answer. Current SPEC_impl.md:6609-6622 retains that split. The earlier 04d85f0c contract and warning were whole-sandbox wording; the later wording is not evidence about that older behavior. No end-to-end provider deletion check."
+    ],
+    "coverage_checked": [
+      "Read same-revision Sandbox sessions deletion section plus current SPEC.md:1509-1548 and SPEC_impl.md:6584-6632: no warning/last-session contract mismatch.",
+      "Planned empty; BUGS.md unrelated; plans and active ledger searched for this last-session warning consequence. INDEX's sandbox-launch-question-lacks-opening-token.md was read: it records a distinct confirmation-opening defect and must remain independent. It is neither refuted by draft equality nor exact coverage for a wording mismatch. FILTER.md cannot dismiss destructive under-warning."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": "No destruction beyond the changed warning's stated same-revision semantics was shown. Draft equality does not establish generation-safe cancellation, same-valued reopening safety, or a frozen recipe catalog.",
+    "original_stronger_consequence": "An understated launch warning might cause loss of files, processes or unpushed work. Preserve that highest allegation for independent drop review. The text does not say last-session deletion is the only destruction route; whole-environment Delete remains separately warned. This assessment does not refute independent confirmation-lifecycle defects.",
+    "needs_independent_drop_check": true,
+    "proposed_basis": "Narrow source/contract refutation of changed last-session wording understating that revision's deletion behavior; independent review still required for the original work-loss allegation."
+  }
+]

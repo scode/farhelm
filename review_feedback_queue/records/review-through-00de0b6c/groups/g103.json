@@ -1,0 +1,879 @@
+{
+  "group": {
+    "id": "g103",
+    "domain": "supervisor-core-integration",
+    "purpose": "supervisor-core-integration: crates/farhelm-supervisor/src/service/core.rs, crates/farhelm-supervisor/src/agent_kind/screen_reader.rs, crates/farhelm-supervisor/src/agent_screen.rs, crates/farhelm-supervisor/src/github_token.rs, crates/farhelm-supervisor/src/managed_supervisor.rs; phases complete small per-commit changes",
+    "interfaces": [
+      "g001",
+      "g003",
+      "g007",
+      "g008",
+      "g009",
+      "g097",
+      "g098",
+      "g099",
+      "g100",
+      "g101",
+      "g102",
+      "g104",
+      "g105",
+      "g106",
+      "g107",
+      "g108",
+      "g109",
+      "g110",
+      "g111",
+      "g112",
+      "g113",
+      "g114",
+      "g115",
+      "g116",
+      "g117",
+      "g118",
+      "g119",
+      "g120",
+      "g121",
+      "g122",
+      "g123",
+      "g124",
+      "g125",
+      "g126",
+      "g127",
+      "g128",
+      "g129",
+      "g130",
+      "g131",
+      "g132",
+      "g133",
+      "g134",
+      "g149",
+      "g150",
+      "g159",
+      "g160",
+      "g161",
+      "g162",
+      "g163",
+      "g164",
+      "g165",
+      "g166",
+      "g167",
+      "g168",
+      "g169",
+      "g170",
+      "g171",
+      "g172",
+      "g173"
+    ],
+    "sources": [
+      {
+        "path": "[private-run]/prep/parts/00742-000.patch",
+        "ranges": [
+          [
+            1,
+            1245
+          ]
+        ],
+        "original_path": "crates/farhelm-supervisor/src/service/core.rs",
+        "commit": "70bc66a9f285cc2a9984924f389834d118b7cfdc",
+        "notes": "patch header; patch character offsets [0,59538)",
+        "lines": 1245,
+        "bytes": 59544,
+        "start": 0,
+        "end": 59538,
+        "original": "[private-run]/prep/originals/00742.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/00903-000.patch",
+        "ranges": [
+          [
+            1,
+            39
+          ]
+        ],
+        "original_path": "crates/farhelm-supervisor/src/agent_kind/screen_reader.rs",
+        "commit": "1ed482dde220452e424973faf38a5e1318986333",
+        "notes": "patch header; patch character offsets [0,2274)",
+        "lines": 39,
+        "bytes": 2274,
+        "start": 0,
+        "end": 2274,
+        "original": "[private-run]/prep/originals/00903.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/00904-000.patch",
+        "ranges": [
+          [
+            1,
+            25
+          ]
+        ],
+        "original_path": "crates/farhelm-supervisor/src/agent_screen.rs",
+        "commit": "1ed482dde220452e424973faf38a5e1318986333",
+        "notes": "patch header; patch character offsets [0,1395)",
+        "lines": 25,
+        "bytes": 1395,
+        "start": 0,
+        "end": 1395,
+        "original": "[private-run]/prep/originals/00904.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/00907-000.patch",
+        "ranges": [
+          [
+            1,
+            12
+          ]
+        ],
+        "original_path": "crates/farhelm-supervisor/src/github_token.rs",
+        "commit": "1ed482dde220452e424973faf38a5e1318986333",
+        "notes": "patch header; patch character offsets [0,637)",
+        "lines": 12,
+        "bytes": 637,
+        "start": 0,
+        "end": 637,
+        "original": "[private-run]/prep/originals/00907.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/00917-000.patch",
+        "ranges": [
+          [
+            1,
+            26
+          ]
+        ],
+        "original_path": "crates/farhelm-supervisor/src/managed_supervisor.rs",
+        "commit": "1ed482dde220452e424973faf38a5e1318986333",
+        "notes": "patch header; patch character offsets [0,1613)",
+        "lines": 26,
+        "bytes": 1613,
+        "start": 0,
+        "end": 1613,
+        "original": "[private-run]/prep/originals/00917.patch"
+      }
+    ],
+    "lines": 1347,
+    "bytes": 65463
+  },
+  "records": [
+    {
+      "key": "g103/c1",
+      "owner": "g103",
+      "id": "c1",
+      "domain": "supervisor-core-integration",
+      "purpose": "supervisor-core-integration: crates/farhelm-supervisor/src/service/core.rs, crates/farhelm-supervisor/src/agent_kind/screen_reader.rs, crates/farhelm-supervisor/src/agent_screen.rs, crates/farhelm-supervisor/src/github_token.rs, crates/farhelm-supervisor/src/managed_supervisor.rs; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 1,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c1",
+            "state": "open",
+            "summary": "Refused host start still proves failed-create artifact cleanup",
+            "location": "crates/farhelm-supervisor/src/service/core.rs:34096",
+            "detail": "Reviewed commit: 70bc66a9f285cc2a9984924f389834d118b7cfdc. TLDR: considered whether moving the failed-create test from tmux removed the proof that nothing started, allowing artifact cleanup to pass on ambiguous acceptance. Source checks: core.rs:34096-34264 reads the entire stdin spec before checking the durable .host record, creates status/waypoint evidence, and requires the fake's own refusal text; service/core/host_launch.rs:573-590 maps SpawnError::Refused to HostLeft::Nothing. SPEC_impl.md, Creating agents in hosts: 'a refusal, or an unfinished start the spawn confirmed ended, leaves nothing, and the create rolls back as for an absent tmux session'. The explicit fake-refusal assertion prevents a setup failure from satisfying the intended path. Suggested bucket: other (test coverage concern, refuted). Confidence: confirmed by source, no execution. Could-be-highest: no; this concern is about a test's premise, with no established shipped loss-of-work route. proposed_drop: source refutation and exact contract quoted above. possible_cover: none; coverage sources not searched. Caveat: does not validate the host spawn implementation independently; that is outside the assigned patch."
+          }
+        },
+        {
+          "line": 8,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c1",
+            "state": "open",
+            "summary": "Refused host start still proves failed-create artifact cleanup",
+            "location": "crates/farhelm-supervisor/src/service/core.rs:34096",
+            "detail": "Reviewed commit: 70bc66a9f285cc2a9984924f389834d118b7cfdc. TLDR: considered whether moving the failed-create test from tmux removed the proof that nothing started, allowing artifact cleanup to pass on ambiguous acceptance. Source checks: core.rs:34096-34264 reads the entire stdin spec before checking the durable .host record, creates status/waypoint evidence, and requires the fake's own refusal text; service/core/host_launch.rs:573-590 maps SpawnError::Refused to HostLeft::Nothing. SPEC_impl.md, Creating agents in hosts: 'a refusal, or an unfinished start the spawn confirmed ended, leaves nothing, and the create rolls back as for an absent tmux session'. The explicit fake-refusal assertion prevents a setup failure from satisfying the intended path. Suggested bucket: other (test coverage concern, refuted). Confidence: confirmed by source, no execution. Could-be-highest: no; this concern is about a test's premise, with no established shipped loss-of-work route. proposed_drop: source refutation and exact contract quoted above. possible_cover: none; coverage sources not searched. Caveat: does not validate the host spawn implementation independently; that is outside the assigned patch. Synthesis follow-up: at pinned tip 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db host_launch.rs:577-597 still separates MayRemain from Refused/Abandoned and maps definitive refusal to Nothing. The subsequent tmux removal did not invalidate the original fake-refusal fixture premise. No new issue; proposed drop unchanged."
+          }
+        }
+      ],
+      "latest": {
+        "line": 8,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c1",
+          "state": "open",
+          "summary": "Refused host start still proves failed-create artifact cleanup",
+          "location": "crates/farhelm-supervisor/src/service/core.rs:34096",
+          "detail": "Reviewed commit: 70bc66a9f285cc2a9984924f389834d118b7cfdc. TLDR: considered whether moving the failed-create test from tmux removed the proof that nothing started, allowing artifact cleanup to pass on ambiguous acceptance. Source checks: core.rs:34096-34264 reads the entire stdin spec before checking the durable .host record, creates status/waypoint evidence, and requires the fake's own refusal text; service/core/host_launch.rs:573-590 maps SpawnError::Refused to HostLeft::Nothing. SPEC_impl.md, Creating agents in hosts: 'a refusal, or an unfinished start the spawn confirmed ended, leaves nothing, and the create rolls back as for an absent tmux session'. The explicit fake-refusal assertion prevents a setup failure from satisfying the intended path. Suggested bucket: other (test coverage concern, refuted). Confidence: confirmed by source, no execution. Could-be-highest: no; this concern is about a test's premise, with no established shipped loss-of-work route. proposed_drop: source refutation and exact contract quoted above. possible_cover: none; coverage sources not searched. Caveat: does not validate the host spawn implementation independently; that is outside the assigned patch. Synthesis follow-up: at pinned tip 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db host_launch.rs:577-597 still separates MayRemain from Refused/Abandoned and maps definitive refusal to Nothing. The subsequent tmux removal did not invalidate the original fake-refusal fixture premise. No new issue; proposed drop unchanged."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g103/findings.jsonl",
+        "id": "c1",
+        "line": 8,
+        "disposition": "excluded",
+        "group": "failed-create-refusal-artifact-test-premise",
+        "reason": "Parent explicitly accepted named refuted proposal from claims-067 after inspecting it. The migrated test requires the fake host's own refusal after the fake has witnessed all launch artifacts, so a generic setup failure or ambiguous start cannot satisfy its oracle. Refute the named migrated-test concern from its positive refusal witness and the definitive-refusal classification. This is not an independent audit of spawning. Checked source/results: [\"70bc66a9f285cc2a9984924f389834d118b7cfdc:service/core.rs:34090-34270: fake drains stdin, verifies the durable .host record and spec, plants status/waypoint evidence, emits its unique refusal; assertion requires 'refused by the test'. It checks every artifact and durable failed replay, including a deliberately obstructed status unlink.\",\"Same revision:service/core/host_launch.rs:573-590: SpawnError::MayRemain is distinct; definitive Refused and Abandoned map to HostLeft::Nothing.\",\"Current SPEC_impl.md:2178-2233, especially 2205-2213: refusal or confirmed-ended unfinished start leaves nothing; possible remaining host retains cleanup responsibility. Source review, no test execution.\"] Current coverage/results: {\"TODO.md:25-27\":\"Planned is empty; no cover.\",\"BUGS.md\":\"Only the local SSH output-holder provisioning hang is recorded; no matching trigger/consequence/scope.\",\"TRIAGE_OUTCOMES.md\":\"Searched active ledger for the actual lifecycle, marker, replay, shim, metadata and terminal-field claims; no exact matching disposition. Archive not read.\",\"plans/queue\":\"Searched named behavior and symbols. Podman and tmux plans provide retirement context; none explicitly accepts the claimed test-oracle gap or fixes the named timer/serialization hypothesis. No plan used as cover merely because its subsystem matches.\",\"FILTER.md\":\"Read in full. No entire filter boundary matches the retained integrated test gap; rarity alone was not used. Refuted hypotheses are resolved from source rather than filtered.\",\"SPEC.md / SPEC_impl.md\":\"Host-create classification contract supports the fake refusal premise, not arbitrary ambiguous acceptance.\",\"INDEX.md / matching files\":\"No exact failed-create-artifact false-pass item found.\"} Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Migrating the failed-create test could remove proof that nothing started, allowing cleanup assertions to pass on ambiguous acceptance. This was always a test-coverage concern; no shipped loss route established.\"; \"No source premise shows the unique fake-refusal assertion can pass before the fake witnesses the intended files.\"."
+      },
+      "accepted_parent_decision": {
+        "key": "g103/c1",
+        "line": 8,
+        "disposition": "excluded",
+        "group": "failed-create-refusal-artifact-test-premise",
+        "bucket": "other",
+        "recording": "refuted",
+        "queue_target_candidate": null,
+        "needs_independent_drop_check": false,
+        "reason": "Parent explicitly accepted named refuted proposal from claims-067 after inspecting it. The migrated test requires the fake host's own refusal after the fake has witnessed all launch artifacts, so a generic setup failure or ambiguous start cannot satisfy its oracle. Refute the named migrated-test concern from its positive refusal witness and the definitive-refusal classification. This is not an independent audit of spawning. Checked source/results: [\"70bc66a9f285cc2a9984924f389834d118b7cfdc:service/core.rs:34090-34270: fake drains stdin, verifies the durable .host record and spec, plants status/waypoint evidence, emits its unique refusal; assertion requires 'refused by the test'. It checks every artifact and durable failed replay, including a deliberately obstructed status unlink.\",\"Same revision:service/core/host_launch.rs:573-590: SpawnError::MayRemain is distinct; definitive Refused and Abandoned map to HostLeft::Nothing.\",\"Current SPEC_impl.md:2178-2233, especially 2205-2213: refusal or confirmed-ended unfinished start leaves nothing; possible remaining host retains cleanup responsibility. Source review, no test execution.\"] Current coverage/results: {\"TODO.md:25-27\":\"Planned is empty; no cover.\",\"BUGS.md\":\"Only the local SSH output-holder provisioning hang is recorded; no matching trigger/consequence/scope.\",\"TRIAGE_OUTCOMES.md\":\"Searched active ledger for the actual lifecycle, marker, replay, shim, metadata and terminal-field claims; no exact matching disposition. Archive not read.\",\"plans/queue\":\"Searched named behavior and symbols. Podman and tmux plans provide retirement context; none explicitly accepts the claimed test-oracle gap or fixes the named timer/serialization hypothesis. No plan used as cover merely because its subsystem matches.\",\"FILTER.md\":\"Read in full. No entire filter boundary matches the retained integrated test gap; rarity alone was not used. Refuted hypotheses are resolved from source rather than filtered.\",\"SPEC.md / SPEC_impl.md\":\"Host-create classification contract supports the fake refusal premise, not arbitrary ambiguous acceptance.\",\"INDEX.md / matching files\":\"No exact failed-create-artifact false-pass item found.\"} Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Migrating the failed-create test could remove proof that nothing started, allowing cleanup assertions to pass on ambiguous acceptance. This was always a test-coverage concern; no shipped loss route established.\"; \"No source premise shows the unique fake-refusal assertion can pass before the fake witnesses the intended files.\"."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-067",
+          "key": "g103/c1",
+          "latest_line": 8,
+          "recommendation": "refuted",
+          "bucket": "other",
+          "underlying_key": "failed-create-refusal-artifact-test-premise",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The migrated test requires the fake host's own refusal after the fake has witnessed all launch artifacts, so a generic setup failure or ambiguous start cannot satisfy its oracle.",
+          "checks": [
+            "70bc66a9f285cc2a9984924f389834d118b7cfdc:service/core.rs:34090-34270: fake drains stdin, verifies the durable .host record and spec, plants status/waypoint evidence, emits its unique refusal; assertion requires 'refused by the test'. It checks every artifact and durable failed replay, including a deliberately obstructed status unlink.",
+            "Same revision:service/core/host_launch.rs:573-590: SpawnError::MayRemain is distinct; definitive Refused and Abandoned map to HostLeft::Nothing.",
+            "Current SPEC_impl.md:2178-2233, especially 2205-2213: refusal or confirmed-ended unfinished start leaves nothing; possible remaining host retains cleanup responsibility. Source review, no test execution."
+          ],
+          "coverage_checked": {
+            "TODO.md:25-27": "Planned is empty; no cover.",
+            "BUGS.md": "Only the local SSH output-holder provisioning hang is recorded; no matching trigger/consequence/scope.",
+            "TRIAGE_OUTCOMES.md": "Searched active ledger for the actual lifecycle, marker, replay, shim, metadata and terminal-field claims; no exact matching disposition. Archive not read.",
+            "plans/queue": "Searched named behavior and symbols. Podman and tmux plans provide retirement context; none explicitly accepts the claimed test-oracle gap or fixes the named timer/serialization hypothesis. No plan used as cover merely because its subsystem matches.",
+            "FILTER.md": "Read in full. No entire filter boundary matches the retained integrated test gap; rarity alone was not used. Refuted hypotheses are resolved from source rather than filtered.",
+            "SPEC.md / SPEC_impl.md": "Host-create classification contract supports the fake refusal premise, not arbitrary ambiguous acceptance.",
+            "INDEX.md / matching files": "No exact failed-create-artifact false-pass item found."
+          },
+          "exact_cover_quotes": [],
+          "missing_premise": "No source premise shows the unique fake-refusal assertion can pass before the fake witnesses the intended files.",
+          "original_stronger_consequence": "Migrating the failed-create test could remove proof that nothing started, allowing cleanup assertions to pass on ambiguous acceptance. This was always a test-coverage concern; no shipped loss route established.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Refute the named migrated-test concern from its positive refusal witness and the definitive-refusal classification. This is not an independent audit of spawning."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "failed-create-refusal-artifact-test-premise",
+        "destination": null
+      }
+    },
+    {
+      "key": "g103/f1",
+      "owner": "g103",
+      "id": "f1",
+      "domain": "supervisor-core-integration",
+      "purpose": "supervisor-core-integration: crates/farhelm-supervisor/src/service/core.rs, crates/farhelm-supervisor/src/agent_kind/screen_reader.rs, crates/farhelm-supervisor/src/agent_screen.rs, crates/farhelm-supervisor/src/github_token.rs, crates/farhelm-supervisor/src/managed_supervisor.rs; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 2,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "f1",
+            "state": "open",
+            "summary": "Deleted cleanup regression test has no equivalent unmarked-shell premise",
+            "location": "crates/farhelm-supervisor/src/service/core.rs:21621",
+            "detail": "Reviewed commit: 70bc66a9f285cc2a9984924f389834d118b7cfdc. TLDR: removing this test loses the check that Delete reaches background work when the terminal shell's own environment cannot be read, the macOS failure the deleted test was written to prevent. Suggested bucket: other (test coverage regression; no shipped malfunction established). Confidence: confirmed by source, not execution. Details: the removed delete_reaps_an_unmarked_process_under_a_tab_shell test (parent core.rs:21490-21690; deletion at reviewed core.rs:21621) execs env -i in the tab's own pane process, verifies that both shell and job have no session marker, disables scopes and asserts both are gone after Delete. The commit message says the host e2e test covers the same behavior, but host_tabs.rs:1374-1452, close_stop_and_delete_kill_a_hangup_immune_unmarked_job_of_a_tab, clears only the background job's environment at :1393; its tab shell keeps FARHELM_TAB_ID and the session marker (it reads FARHELM_TAB_ID at :1392 and then execs /bin/sh -i). service/sweep.rs:550-561 explicitly says marker processes are roots expanded through their descendants, and :597-618 admits marked processes before expanding the PPID closure. Thus the purported replacement can pass without the explicit tab-child root: its marked shell already makes the unmarked job reachable. The deleted test excludes that competing mechanism. service/teardown.rs:181-206 describes why every tab pane must itself be a root when macOS hides a platform shell's environment. Preserve an equivalent shell-unmarked fixture on terminal hosts, or keep the old regression until that replacement exists. Could-be-highest: no; established impact is a test gap, confined to maintainer tooling; the possible future process leak is not an established shipped regression. proposed_drop: false. possible_cover: none known; forbidden coverage sources not searched. Caveats: this does not allege current Delete leaks jobs; the explicit roots remain in production. The review judges this intermediate revision, even if later commits remove the tmux path."
+          }
+        },
+        {
+          "line": 3,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "f1",
+            "state": "open",
+            "summary": "Deleted cleanup regression test has no equivalent unmarked-shell premise",
+            "location": "crates/farhelm-supervisor/src/service/core.rs:21621",
+            "detail": "Reviewed commit: 70bc66a9f285cc2a9984924f389834d118b7cfdc. TLDR: removing this test loses the check that Delete reaches background work when the terminal shell's own environment cannot be read, the macOS failure the deleted test was written to prevent. Suggested bucket: other (test coverage regression; no shipped malfunction established). Confidence: confirmed by source, not execution. Details: the removed delete_reaps_an_unmarked_process_under_a_tab_shell test (parent core.rs:21490-21690; deletion at reviewed core.rs:21621) execs env -i in the tab's own pane process, verifies that both shell and job have no session marker, disables scopes and asserts both are gone after Delete. The commit message says the host e2e test covers the same behavior, but host_tabs.rs:1374-1452, close_stop_and_delete_kill_a_hangup_immune_unmarked_job_of_a_tab, clears only the background job's environment at :1393; its tab shell keeps FARHELM_TAB_ID and the session marker (it reads FARHELM_TAB_ID at :1392 and then execs /bin/sh -i). service/sweep.rs:550-561 explicitly says marker processes are roots expanded through their descendants, and :597-618 admits marked processes before expanding the PPID closure. Thus the purported replacement can pass without the explicit tab-child root: its marked shell already makes the unmarked job reachable. The deleted test excludes that competing mechanism. service/teardown.rs:181-206 describes why every tab pane must itself be a root when macOS hides a platform shell's environment. Preserve an equivalent shell-unmarked fixture on terminal hosts, or keep the old regression until that replacement exists. Could-be-highest: no; established impact is a test gap, confined to maintainer tooling; the possible future process leak is not an established shipped regression. proposed_drop: false. possible_cover: none known; forbidden coverage sources not searched. Caveats: this does not allege current Delete leaks jobs; the explicit roots remain in production. The review judges this intermediate revision, even if later commits remove the tmux path. Follow-up validation: read service/sweep.rs:550-625 and teardown.rs:181-210 in full; both confirm marker roots expand descendants and the unmarked-shell rationale. A pinned git grep for env -i throughout supervisor service and Rust e2e sources found only the host_tabs job fixture and the separate daemonizer in terminal_tabs.rs, not another shell-scrubbing fixture. These checks strengthen the missing-equivalent-premise conclusion without executing tests."
+          }
+        },
+        {
+          "line": 6,
+          "event": {
+            "version": 1,
+            "kind": "lead",
+            "id": "f1",
+            "state": "open",
+            "summary": "Check whether existing failed-reconnect Delete test covers explicit unmarked tab roots",
+            "location": "crates/farhelm-supervisor/src/service/core.rs:21621",
+            "detail": "Reviewed commit: 70bc66a9f285cc2a9984924f389834d118b7cfdc; synthesis also reads pinned tip 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db. Original consequence retained: deleting the unmarked-shell regression may lose assurance that Delete reaches shell/background work when the shell's environment is unreadable. Suggested bucket: other, test gap only; no shipped cleanup break claimed. The cited real-host e2e replacement still leaves its shell marked at tip host_tabs.rs:972-1043, so that fixture alone does not exclude marker-root expansion. However synthesis found pre-existing delete_roots_children_after_failed_agent_and_tab_reconnects (original host_terminals.rs:2264, tip :2240). It explicitly asserts Delete kills a stand-in's unmarked pinned child, including a tab, even though host shutdown later refuses. This could refute the broad claim that explicit unmarked tab roots have no regression coverage. Checks made: read complete test at tip :2236-2289 and actual pinned-root collection at session_hosts.rs:496-548 and teardown.rs:297-378; the explicit roots do remain in production. Missing premise: how the stand-in child is spawned and whether this test plus PPID-closure tests cover the removed test's shell-and-descendant route. Need trace TestHost fixture and relevant sweep tests before concluding. Confidence: unverified after partial synthesis investigation, readily checkable source premise remains. Could-be-highest: no, established issue under investigation is test coverage. proposed_drop: not decided; no parent drop accepted. possible_cover: this is existing source-test evidence, not queue coverage. Scope: distinct from g107/c4's removed lone-tmux-tab Delete guard test, whose trigger concerns tab enumeration and guarded refusal rather than unmarked PPID roots."
+          }
+        },
+        {
+          "line": 7,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "f1",
+            "state": "open",
+            "summary": "Existing Delete-root regression narrows the claimed lost cleanup coverage",
+            "location": "crates/farhelm-supervisor/src/service/core.rs:21621",
+            "detail": "Reviewed commit: 70bc66a9f285cc2a9984924f389834d118b7cfdc; synthesis checked through pinned tip 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db. Original consequence preserved: the removed test uniquely combined an unmarked tab shell, its unmarked HUP-immune background job, disabled scopes and successful Delete; the named real-host e2e replacement leaves the shell marked and can reach the job through marker-root PPID expansion. That specific end-to-end premise is still lost. However the earlier finding overstated the missing assurance: a pre-existing independent regression does exercise explicit unmarked tab-child roots through Delete. Source evidence: original host_terminals.rs:2264-2313 and tip :2240-2289, delete_roots_children_after_failed_agent_and_tab_reconnects, run both agent and tab cases; the test pins a real child, makes recovery fail, verifies the child is still running, calls Delete, and asserts !runs(child) before fixture cleanup. Host shutdown deliberately fails because the peer is the test runner, so successful host teardown cannot account for that observation. Tip hosts/terminal/test_host.rs:424-450 starts the real sleep child directly with no s1 session/tab markers added, rather than under a marked shell; core/tests/host_terminals.rs:2629-2691 ties it only through the adopted tab runtime and removes the tab launch record before Delete. session_hosts.rs:510-528 roots both ordinary and recovered-placeholder tabs through the same pinned_child_root loop. Separately sweep.rs:2159-2190 tests root-child-grandchild PPID expansion without any marker inputs. This provides layered regression coverage for the host path, although not the removed exact shell-plus-job fixture. Production explicit roots remain in teardown.rs:318-370 and session_hosts.rs:510-548; that alone would NOT refute a missing-test defect, and is not the basis for this proposed drop. Suggested bucket: other, test coverage only; no shipped process leak established. Confidence: confirmed source analysis, no execution; ambient environment is inherited by TestHost's child and no assertion checks marker absence, but the fixture injects no target s1 marker. Could-be-highest: no; a missing specific test composition is maintainer-tooling impact, not an established shipped security or loss-of-work route. proposed_drop: source refutation of the broad missing-explicit-root-regression premise by the existing Delete-root test plus transitive-closure test; retain the exact missing combined fixture as a caveat, not a production bug. Parent has not accepted a drop; request independent judgment on whether preserving that exact composition merits a separate test-gap finding. possible_cover: existing tests cited above, not queue coverage; forbidden coverage sources not searched. Scope reconciliation: g107/c4 concerns the removed lone-tmux-tab guarded-Delete test and tab enumeration/guard refusal. It has a different trigger and oracle; the host pinned-root evidence here does not refute that separate test gap. Intermediate-revision caveat: the removed test directly exercised tmux's other_pane_roots, so its exact legacy branch loses this regression at 70bc66a9 even though hosts have the independent root regression; tmux removal in 1ed482dde220452e424973faf38a5e1318986333 later retires that branch."
+          }
+        },
+        {
+          "line": 10,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "f1",
+            "state": "open",
+            "summary": "Unmarked tab-shell cleanup loses its integrated regression oracle",
+            "location": "crates/farhelm-supervisor/src/service/core.rs:21621",
+            "detail": "Reviewed commit: 70bc66a9f285cc2a9984924f389834d118b7cfdc; checked through pinned tip 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db. TLDR: deleting the regression removes the integrated check that Delete kills a tab shell and its background job when neither carries a readable session marker and no system scope can clean them up. This narrows the original missing-assurance claim; no shipped cleanup malfunction is established. Details: deleted parent core.rs:21490-21690 execs env -i in the tab's own pane, asserts shell and job both lack session markers, confirms both are live and HUP-resistant with no usable scope, then requires both gone after successful Delete. At this intermediate revision old tmux tabs are still supported; SPEC_impl.md:2970-3005 describes retained old-terminal operation and service/teardown.rs:181-210 requires other_pane_roots precisely because macOS can hide the tab shell's environment. Its marker-root alternative remains concrete in sweep.rs:550-625: marked processes become PPID-closure roots before expansion. The commit-cited replacement host_tabs.rs:1374-1452 (tip :972-1043) scrubs only a background job and leaves the shell marked, so it cannot distinguish explicit tab-child rooting from marker-root expansion. Existing host_terminals.rs:2264-2313 (tip :2240-2289), delete_roots_children_after_failed_agent_and_tab_reconnects, does meaningfully assert Delete kills an unmarked real stand-in child through a recovered placeholder runtime, before cleanup and despite later host-end refusal. Its child is a directly spawned sleep, not the removed shell/job composition, and its root collection is the host path in session_hosts.rs:510-548. sweep.rs:2159-2190 separately checks transitive closure over synthetic process identities. These layered tests narrow the gap but neither exercises the old tmux other_pane_roots caller nor establishes the combined unmarked-shell/HUP-immune-job/scopes-off/successful-Delete oracle. They therefore do not refute that specific lost regression coverage. Suggested fix: retain the old fixture while the legacy branch is supported, or migrate its complete premise and both-process death assertions into an appropriate retained fixture. Suggested bucket: other, test coverage. Confidence: confirmed source/test-contract comparison, no execution. Could-be-highest: no established security or loss-of-work route; future undetected cleanup failures are hypothetical and do not elevate this test defect. proposed_drop: false for the remaining narrow integrated-oracle gap. Earlier proposed-drop basis is preserved: the independent host pinned-root test plus pure transitive-closure test refute a broad claim that explicit roots or PPID traversal have no tests; they do not replace this specific oracle. Later retirement of the tmux branch in 1ed482dde220452e424973faf38a5e1318986333 makes that legacy branch obsolete at tip but does not erase its supported intermediate gap. No parent drop/lowering was accepted. possible_cover: g107/g107-c4 and g108/c2 concern lone legacy-tab discovery/listing, Delete guard and Stop after agent loss, a different trigger and oracle; do not merge this marker-invisibility gap into those. All neighbour records read from discovery-neighbours.json only, not prohibited coverage sources. Material caveats: production roots remain correct in inspected code; this is not an actual process leak, not a demand to restore retired tmux machinery at tip, and not a newly discovered issue in this discovery turn. This revision resolves the caller's pending reconciliation before the separate new search."
+          }
+        }
+      ],
+      "latest": {
+        "line": 10,
+        "event": {
+          "version": 1,
+          "kind": "finding",
+          "id": "f1",
+          "state": "open",
+          "summary": "Unmarked tab-shell cleanup loses its integrated regression oracle",
+          "location": "crates/farhelm-supervisor/src/service/core.rs:21621",
+          "detail": "Reviewed commit: 70bc66a9f285cc2a9984924f389834d118b7cfdc; checked through pinned tip 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db. TLDR: deleting the regression removes the integrated check that Delete kills a tab shell and its background job when neither carries a readable session marker and no system scope can clean them up. This narrows the original missing-assurance claim; no shipped cleanup malfunction is established. Details: deleted parent core.rs:21490-21690 execs env -i in the tab's own pane, asserts shell and job both lack session markers, confirms both are live and HUP-resistant with no usable scope, then requires both gone after successful Delete. At this intermediate revision old tmux tabs are still supported; SPEC_impl.md:2970-3005 describes retained old-terminal operation and service/teardown.rs:181-210 requires other_pane_roots precisely because macOS can hide the tab shell's environment. Its marker-root alternative remains concrete in sweep.rs:550-625: marked processes become PPID-closure roots before expansion. The commit-cited replacement host_tabs.rs:1374-1452 (tip :972-1043) scrubs only a background job and leaves the shell marked, so it cannot distinguish explicit tab-child rooting from marker-root expansion. Existing host_terminals.rs:2264-2313 (tip :2240-2289), delete_roots_children_after_failed_agent_and_tab_reconnects, does meaningfully assert Delete kills an unmarked real stand-in child through a recovered placeholder runtime, before cleanup and despite later host-end refusal. Its child is a directly spawned sleep, not the removed shell/job composition, and its root collection is the host path in session_hosts.rs:510-548. sweep.rs:2159-2190 separately checks transitive closure over synthetic process identities. These layered tests narrow the gap but neither exercises the old tmux other_pane_roots caller nor establishes the combined unmarked-shell/HUP-immune-job/scopes-off/successful-Delete oracle. They therefore do not refute that specific lost regression coverage. Suggested fix: retain the old fixture while the legacy branch is supported, or migrate its complete premise and both-process death assertions into an appropriate retained fixture. Suggested bucket: other, test coverage. Confidence: confirmed source/test-contract comparison, no execution. Could-be-highest: no established security or loss-of-work route; future undetected cleanup failures are hypothetical and do not elevate this test defect. proposed_drop: false for the remaining narrow integrated-oracle gap. Earlier proposed-drop basis is preserved: the independent host pinned-root test plus pure transitive-closure test refute a broad claim that explicit roots or PPID traversal have no tests; they do not replace this specific oracle. Later retirement of the tmux branch in 1ed482dde220452e424973faf38a5e1318986333 makes that legacy branch obsolete at tip but does not erase its supported intermediate gap. No parent drop/lowering was accepted. possible_cover: g107/g107-c4 and g108/c2 concern lone legacy-tab discovery/listing, Delete guard and Stop after agent loss, a different trigger and oracle; do not merge this marker-invisibility gap into those. All neighbour records read from discovery-neighbours.json only, not prohibited coverage sources. Material caveats: production roots remain correct in inspected code; this is not an actual process leak, not a demand to restore retired tmux machinery at tip, and not a newly discovered issue in this discovery turn. This revision resolves the caller's pending reconciliation before the separate new search."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g103/findings.jsonl",
+        "id": "f1",
+        "line": 10,
+        "disposition": "under-investigation",
+        "group": "g103-f1",
+        "reason": "Record durably acknowledged; parent source/contract validation, cross-group synthesis, coverage/filter matching and any independent drop check remain pending. This preserves the claim and uncertainty without accepting, dropping or lowering it."
+      },
+      "accepted_parent_decision": null,
+      "returned_claim_checks": [
+        {
+          "batch": "claims-067",
+          "key": "g103/f1",
+          "latest_line": 10,
+          "recommendation": "retain-verified",
+          "bucket": "other",
+          "underlying_key": "deleted-integrated-unmarked-tab-shell-delete-oracle",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The deleted test excluded both competing cleanup mechanisms: readable shell markers and system scopes. The cited replacement leaves its shell marked, while the independent root test uses a direct sleep and refuses final host shutdown. Neither preserves the integrated shell-plus-background-job/successful-Delete oracle.",
+          "checks": [
+            "70bc66a9f285cc2a9984924f389834d118b7cfdc^:service/core.rs:21490-21690: removed test execs env -i in the tab pane shell, checks shell/job marker absence and parentage, disables scope availability, makes both HUP-resistant, and asserts both gone after successful Delete.",
+            "70bc66a9f285cc2a9984924f389834d118b7cfdc:crates/farhelm/tests/e2e/host_tabs.rs:1374-1452: replacement scrubs only the background job. Its shell reads FARHELM_TAB_ID then execs /bin/sh -i without clearing its inherited marker.",
+            "Same revision:service/sweep.rs:550-625: marker processes are closure roots before descendant expansion, so the replacement can reach its job through the marked shell without explicit tab-child rooting.",
+            "Same revision:service/core/tests/host_terminals.rs:2264-2313: existing agent/tab failed-reconnect test meaningfully proves Delete kills its pinned child before cleanup despite host-end refusal. hosts/terminal/test_host.rs:405-424 spawns sleep directly, with no target markers injected; inherited ambient environment is not explicitly asserted marker-free.",
+            "Same revision:service/sweep.rs:2177 onward separately tests synthetic transitive PPID expansion. These tests refute the earlier broad 'no explicit-root coverage' claim, but not the narrow integrated-oracle loss.",
+            "Later 1ed482dde220452e424973faf38a5e1318986333 retires the tmux driver. That makes the old caller obsolete at tip, but does not erase the supported intermediate test gap. No production cleanup malfunction or runtime observation established."
+          ],
+          "coverage_checked": {
+            "TODO.md:25-27": "Planned is empty; no cover.",
+            "BUGS.md": "Only the local SSH output-holder provisioning hang is recorded; no matching trigger/consequence/scope.",
+            "TRIAGE_OUTCOMES.md": "Searched active ledger for the actual lifecycle, marker, replay, shim, metadata and terminal-field claims; no exact matching disposition. Archive not read.",
+            "plans/queue": "Read relevant tmux-end-old-terminals acceptance/test-footing and tmux-drop-from-docs audit sections, plus user-tmux-jobs-outlive-cleanup acceptance. They concern retirement or user-owned tmux/scoped policy, not restoring this integrated oracle. No exact unlanded-plan cover.",
+            "FILTER.md": "Read in full. No entire filter boundary matches the retained integrated test gap; rarity alone was not used. Refuted hypotheses are resolved from source rather than filtered.",
+            "SPEC.md / SPEC_impl.md": "Lifecycle cleanup and SPEC_impl.md process-tree/host-root rules require cleanup; no specification accepts this integrated test gap. Current retirement does not establish intermediate test equivalence.",
+            "INDEX.md / matching files": "Read child-hangup-masks-missing-stop-tree-sweep.md: a different Stop test can pass through HUP, not removal of this Delete/unreadable-shell oracle. Read gone-retry-forgets-pinned-foreground-child.md: shipped recovery identity concern, not this test. Neither is an exact alias or useful same-root extension."
+          },
+          "exact_cover_quotes": [],
+          "missing_premise": "None for the narrow source-level coverage loss. Actual cleanup leakage, runtime false pass/failure and frequency are not established.",
+          "original_stronger_consequence": "Initially claimed explicit unmarked tab roots had no equivalent regression coverage. History later proposed dropping that broad claim because the existing failed-reconnect child test plus PPID test supply layered coverage. Latest claim retains only the lost combined unmarked-shell/HUP-immune-job/scopes-off/successful-Delete oracle, including the old tmux other_pane_roots caller while supported. Production roots remain correct in inspected source; no current process leak is alleged.",
+          "needs_independent_drop_check": true,
+          "proposed_basis": "Retain the narrow test-gap finding, other priority. Preserve the earlier proposed withdrawal and its narrower valid evidence for parent reconciliation; do not silently turn retirement or production correctness into a test-equivalence proof."
+        }
+      ],
+      "parent_proposals": [
+        {
+          "artifact": "parent-flagged-judgments-067.json",
+          "key": "g103/f1",
+          "proposal": "claim-checks/claims-067/result.json",
+          "parent_proposal": "preserve-narrow-intermediate-integrated-unmarked-tab-delete-test-gap",
+          "final_independent_gate": "register-earlier-withdrawal-and-narrowing-regardless-other-bucket",
+          "reason": "Full067 separates actual removed unmarked-shell plus HUP-resistant child plus scopes-off successful Delete oracle from narrower replacement marked-shell and failed-host-end pinned-child tests. Those and synthetic PPID tests refute broad no-root-coverage claim, not integrated equivalence. Intermediate supported tmux gap is real; later1ed retires exact subject. Preserve both historical gap and earlier proposed withdrawal, then reconcile with established historical-retirement disposition rather than demand obsolete tip test or allege current production leak. No highest consequence established for this maintainer test; narrower other claim retained in provenance."
+        }
+      ],
+      "collection": {
+        "retain": true,
+        "clearly_refuted_candidate": false,
+        "needs_unfinished_gate": true,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "deleted-integrated-unmarked-tab-shell-delete-oracle",
+        "destination": "trailing-deleted-integrated-unmarked-tab-shell-delete-oracle.md"
+      }
+    },
+    {
+      "key": "g103/c2",
+      "owner": "g103",
+      "id": "c2",
+      "domain": "supervisor-core-integration",
+      "purpose": "supervisor-core-integration: crates/farhelm-supervisor/src/service/core.rs, crates/farhelm-supervisor/src/agent_kind/screen_reader.rs, crates/farhelm-supervisor/src/agent_screen.rs, crates/farhelm-supervisor/src/github_token.rs, crates/farhelm-supervisor/src/managed_supervisor.rs; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 4,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c2",
+            "state": "open",
+            "summary": "Reload fixture's replay wait preserves the intended Stop classification boundary",
+            "location": "crates/farhelm-supervisor/src/service/core.rs:40046",
+            "detail": "Reviewed commit: 70bc66a9f285cc2a9984924f389834d118b7cfdc. TLDR: considered whether waiting for host exit and invoking the ticker manually masks an incorrect reload result, or whether passing reloaded entries outside the supervisor map makes the check vacuous. core.rs:39912-40020 adopts the fixture's actual host, waits for its processed exit record, verifies the competing wrapper/preparation failure premises, then persists StopRequested. The reload caller at :40115-40150 aborts the old runtime before re-adoption and checks found-vs-absent terminals. ticker.rs:1362-1483 observes the explicitly supplied entries and writes transitions directly through sup.store.transition_many; it does not require entries to be in sup.sessions. SPEC_impl.md, Across supervisor restarts, says: 'A host whose child exited while no supervisor was attached reads as running until its runtime has replayed the exit record, after which the ticker records the exit, with any never-started classification; reload confirms such a session’s launch, but leaves a durable stop request as it is'. The helper waits on the shared bounded status-change oracle (host_terminals.rs:71-98) and runs exactly the production completion step that the contract requires. Suggested bucket: other (test validity concern, refuted). Confidence: confirmed by source, no execution. Could-be-highest: no; no established shipped security or loss-of-work route. proposed_drop: source refutation; the exact specification acceptance above supports the intentionally combined reload/ticker boundary. possible_cover: none; coverage sources not searched. Caveat: this reviews the migrated test's boundary, not every host reload implementation branch."
+          }
+        },
+        {
+          "line": 9,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c2",
+            "state": "open",
+            "summary": "Reload fixture's replay wait preserves the intended Stop classification boundary",
+            "location": "crates/farhelm-supervisor/src/service/core.rs:40046",
+            "detail": "Reviewed commit: 70bc66a9f285cc2a9984924f389834d118b7cfdc. TLDR: considered whether waiting for host exit and invoking the ticker manually masks an incorrect reload result, or whether passing reloaded entries outside the supervisor map makes the check vacuous. core.rs:39912-40020 adopts the fixture's actual host, waits for its processed exit record, verifies the competing wrapper/preparation failure premises, then persists StopRequested. The reload caller at :40115-40150 aborts the old runtime before re-adoption and checks found-vs-absent terminals. ticker.rs:1362-1483 observes the explicitly supplied entries and writes transitions directly through sup.store.transition_many; it does not require entries to be in sup.sessions. SPEC_impl.md, Across supervisor restarts, says: 'A host whose child exited while no supervisor was attached reads as running until its runtime has replayed the exit record, after which the ticker records the exit, with any never-started classification; reload confirms such a session’s launch, but leaves a durable stop request as it is'. The helper waits on the shared bounded status-change oracle (host_terminals.rs:71-98) and runs exactly the production completion step that the contract requires. Suggested bucket: other (test validity concern, refuted). Confidence: confirmed by source, no execution. Could-be-highest: no; no established shipped security or loss-of-work route. proposed_drop: source refutation; the exact specification acceptance above supports the intentionally combined reload/ticker boundary. possible_cover: none; coverage sources not searched. Caveat: this reviews the migrated test's boundary, not every host reload implementation branch. Synthesis follow-up: pinned-tip core.rs:34869-34979 still aborts the old runtime, checks actual host presence after reload, waits for each processed exit and calls production ticker::observe_entries. Removing terminal-kind dispatch simplified the helper without changing its boundary. Caller reports g104/c3 independently agrees this is intentional production ticker completion after exit replay. No unresolved caller premise; proposed drop unchanged."
+          }
+        }
+      ],
+      "latest": {
+        "line": 9,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c2",
+          "state": "open",
+          "summary": "Reload fixture's replay wait preserves the intended Stop classification boundary",
+          "location": "crates/farhelm-supervisor/src/service/core.rs:40046",
+          "detail": "Reviewed commit: 70bc66a9f285cc2a9984924f389834d118b7cfdc. TLDR: considered whether waiting for host exit and invoking the ticker manually masks an incorrect reload result, or whether passing reloaded entries outside the supervisor map makes the check vacuous. core.rs:39912-40020 adopts the fixture's actual host, waits for its processed exit record, verifies the competing wrapper/preparation failure premises, then persists StopRequested. The reload caller at :40115-40150 aborts the old runtime before re-adoption and checks found-vs-absent terminals. ticker.rs:1362-1483 observes the explicitly supplied entries and writes transitions directly through sup.store.transition_many; it does not require entries to be in sup.sessions. SPEC_impl.md, Across supervisor restarts, says: 'A host whose child exited while no supervisor was attached reads as running until its runtime has replayed the exit record, after which the ticker records the exit, with any never-started classification; reload confirms such a session’s launch, but leaves a durable stop request as it is'. The helper waits on the shared bounded status-change oracle (host_terminals.rs:71-98) and runs exactly the production completion step that the contract requires. Suggested bucket: other (test validity concern, refuted). Confidence: confirmed by source, no execution. Could-be-highest: no; no established shipped security or loss-of-work route. proposed_drop: source refutation; the exact specification acceptance above supports the intentionally combined reload/ticker boundary. possible_cover: none; coverage sources not searched. Caveat: this reviews the migrated test's boundary, not every host reload implementation branch. Synthesis follow-up: pinned-tip core.rs:34869-34979 still aborts the old runtime, checks actual host presence after reload, waits for each processed exit and calls production ticker::observe_entries. Removing terminal-kind dispatch simplified the helper without changing its boundary. Caller reports g104/c3 independently agrees this is intentional production ticker completion after exit replay. No unresolved caller premise; proposed drop unchanged."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g103/findings.jsonl",
+        "id": "c2",
+        "line": 9,
+        "disposition": "excluded",
+        "group": "pending-stop-reload-test-real-exit-observer-boundary",
+        "reason": "Parent explicitly accepted named refuted proposal from claims-067 after inspecting it. The helper waits for replay of the actual exited host and then invokes the shipped observer over the returned entries. That observer operates on the supplied entries and durable store, so the map need not already be installed. Source and contract refutation of synthetic/vacuous classification. Alias g104/c3; source analysis only, no runtime pass or scheduling coverage. Checked source/results: [\"70bc66a9f285cc2a9984924f389834d118b7cfdc:service/core.rs:39905-40023: fixture verifies owned dead host evidence and competing startup/preparation inference, then persists StopRequested.\",\"Same revision:service/core.rs:40046-40152: present case aborts the old runtime without ending the host; absent case confirms shutdown and empty sockets; test asserts found/absent host correspondence. Helper waits for actual host exit and calls ticker::observe_entries.\",\"Same revision:service/ticker.rs:1362-1483: observation iterates supplied entries and persists transitions via the supervisor store, not by looking those entries up in sup.sessions.\",\"Current SPEC_impl.md:2440-2455 explicitly leaves pending Stop intact until host exit replay and ticker observation. No ticker-scheduling or full service-startup coverage claimed.\"] Current coverage/results: {\"TODO.md:25-27\":\"Planned is empty; no cover.\",\"BUGS.md\":\"Only the local SSH output-holder provisioning hang is recorded; no matching trigger/consequence/scope.\",\"TRIAGE_OUTCOMES.md\":\"Searched active ledger for the actual lifecycle, marker, replay, shim, metadata and terminal-field claims; no exact matching disposition. Archive not read.\",\"plans/queue\":\"Searched named behavior and symbols. Podman and tmux plans provide retirement context; none explicitly accepts the claimed test-oracle gap or fixes the named timer/serialization hypothesis. No plan used as cover merely because its subsystem matches.\",\"FILTER.md\":\"Read in full. No entire filter boundary matches the retained integrated test gap; rarity alone was not used. Refuted hypotheses are resolved from source rather than filtered.\",\"SPEC.md / SPEC_impl.md\":\"SPEC.md:2663-2683 pending-Stop annotation plus SPEC_impl.md:2440-2455 replay/observer split directly govern the classification tested.\",\"INDEX.md / matching files\":\"stop-annotation-exit-witness.md describes a separate immediate-listing race; its title/summary do not cover this helper's explicit wait. No exact queue cover.\",\"Named aliases\":\"g104/c3 is the same removed-oracle hypothesis at the same test/helper and revision; reconcile together.\"} Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Manual exit observation might conceal lost pending-Stop annotation or startup misclassification, or be vacuous outside the supervisor map. Always a test-strength concern; no shipped security/work-loss route established.\"; \"No manufactured exit evidence was found. The helper's omission of ticker scheduling is a declared test boundary, not proof of a false oracle.\"."
+      },
+      "accepted_parent_decision": {
+        "key": "g103/c2",
+        "line": 9,
+        "disposition": "excluded",
+        "group": "pending-stop-reload-test-real-exit-observer-boundary",
+        "bucket": "other",
+        "recording": "refuted",
+        "queue_target_candidate": null,
+        "needs_independent_drop_check": false,
+        "reason": "Parent explicitly accepted named refuted proposal from claims-067 after inspecting it. The helper waits for replay of the actual exited host and then invokes the shipped observer over the returned entries. That observer operates on the supplied entries and durable store, so the map need not already be installed. Source and contract refutation of synthetic/vacuous classification. Alias g104/c3; source analysis only, no runtime pass or scheduling coverage. Checked source/results: [\"70bc66a9f285cc2a9984924f389834d118b7cfdc:service/core.rs:39905-40023: fixture verifies owned dead host evidence and competing startup/preparation inference, then persists StopRequested.\",\"Same revision:service/core.rs:40046-40152: present case aborts the old runtime without ending the host; absent case confirms shutdown and empty sockets; test asserts found/absent host correspondence. Helper waits for actual host exit and calls ticker::observe_entries.\",\"Same revision:service/ticker.rs:1362-1483: observation iterates supplied entries and persists transitions via the supervisor store, not by looking those entries up in sup.sessions.\",\"Current SPEC_impl.md:2440-2455 explicitly leaves pending Stop intact until host exit replay and ticker observation. No ticker-scheduling or full service-startup coverage claimed.\"] Current coverage/results: {\"TODO.md:25-27\":\"Planned is empty; no cover.\",\"BUGS.md\":\"Only the local SSH output-holder provisioning hang is recorded; no matching trigger/consequence/scope.\",\"TRIAGE_OUTCOMES.md\":\"Searched active ledger for the actual lifecycle, marker, replay, shim, metadata and terminal-field claims; no exact matching disposition. Archive not read.\",\"plans/queue\":\"Searched named behavior and symbols. Podman and tmux plans provide retirement context; none explicitly accepts the claimed test-oracle gap or fixes the named timer/serialization hypothesis. No plan used as cover merely because its subsystem matches.\",\"FILTER.md\":\"Read in full. No entire filter boundary matches the retained integrated test gap; rarity alone was not used. Refuted hypotheses are resolved from source rather than filtered.\",\"SPEC.md / SPEC_impl.md\":\"SPEC.md:2663-2683 pending-Stop annotation plus SPEC_impl.md:2440-2455 replay/observer split directly govern the classification tested.\",\"INDEX.md / matching files\":\"stop-annotation-exit-witness.md describes a separate immediate-listing race; its title/summary do not cover this helper's explicit wait. No exact queue cover.\",\"Named aliases\":\"g104/c3 is the same removed-oracle hypothesis at the same test/helper and revision; reconcile together.\"} Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Manual exit observation might conceal lost pending-Stop annotation or startup misclassification, or be vacuous outside the supervisor map. Always a test-strength concern; no shipped security/work-loss route established.\"; \"No manufactured exit evidence was found. The helper's omission of ticker scheduling is a declared test boundary, not proof of a false oracle.\"."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-067",
+          "key": "g103/c2",
+          "latest_line": 9,
+          "recommendation": "refuted",
+          "bucket": "other",
+          "underlying_key": "pending-stop-reload-test-real-exit-observer-boundary",
+          "aliases": [
+            "g104/c3"
+          ],
+          "target_queue_file": null,
+          "why": "The helper waits for replay of the actual exited host and then invokes the shipped observer over the returned entries. That observer operates on the supplied entries and durable store, so the map need not already be installed.",
+          "checks": [
+            "70bc66a9f285cc2a9984924f389834d118b7cfdc:service/core.rs:39905-40023: fixture verifies owned dead host evidence and competing startup/preparation inference, then persists StopRequested.",
+            "Same revision:service/core.rs:40046-40152: present case aborts the old runtime without ending the host; absent case confirms shutdown and empty sockets; test asserts found/absent host correspondence. Helper waits for actual host exit and calls ticker::observe_entries.",
+            "Same revision:service/ticker.rs:1362-1483: observation iterates supplied entries and persists transitions via the supervisor store, not by looking those entries up in sup.sessions.",
+            "Current SPEC_impl.md:2440-2455 explicitly leaves pending Stop intact until host exit replay and ticker observation. No ticker-scheduling or full service-startup coverage claimed."
+          ],
+          "coverage_checked": {
+            "TODO.md:25-27": "Planned is empty; no cover.",
+            "BUGS.md": "Only the local SSH output-holder provisioning hang is recorded; no matching trigger/consequence/scope.",
+            "TRIAGE_OUTCOMES.md": "Searched active ledger for the actual lifecycle, marker, replay, shim, metadata and terminal-field claims; no exact matching disposition. Archive not read.",
+            "plans/queue": "Searched named behavior and symbols. Podman and tmux plans provide retirement context; none explicitly accepts the claimed test-oracle gap or fixes the named timer/serialization hypothesis. No plan used as cover merely because its subsystem matches.",
+            "FILTER.md": "Read in full. No entire filter boundary matches the retained integrated test gap; rarity alone was not used. Refuted hypotheses are resolved from source rather than filtered.",
+            "SPEC.md / SPEC_impl.md": "SPEC.md:2663-2683 pending-Stop annotation plus SPEC_impl.md:2440-2455 replay/observer split directly govern the classification tested.",
+            "INDEX.md / matching files": "stop-annotation-exit-witness.md describes a separate immediate-listing race; its title/summary do not cover this helper's explicit wait. No exact queue cover.",
+            "Named aliases": "g104/c3 is the same removed-oracle hypothesis at the same test/helper and revision; reconcile together."
+          },
+          "exact_cover_quotes": [],
+          "missing_premise": "No manufactured exit evidence was found. The helper's omission of ticker scheduling is a declared test boundary, not proof of a false oracle.",
+          "original_stronger_consequence": "Manual exit observation might conceal lost pending-Stop annotation or startup misclassification, or be vacuous outside the supervisor map. Always a test-strength concern; no shipped security/work-loss route established.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Source and contract refutation of synthetic/vacuous classification. Alias g104/c3; source analysis only, no runtime pass or scheduling coverage."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "pending-stop-reload-test-real-exit-observer-boundary",
+        "destination": null
+      }
+    },
+    {
+      "key": "g103/c3",
+      "owner": "g103",
+      "id": "c3",
+      "domain": "supervisor-core-integration",
+      "purpose": "supervisor-core-integration: crates/farhelm-supervisor/src/service/core.rs, crates/farhelm-supervisor/src/agent_kind/screen_reader.rs, crates/farhelm-supervisor/src/agent_screen.rs, crates/farhelm-supervisor/src/github_token.rs, crates/farhelm-supervisor/src/managed_supervisor.rs; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 5,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c3",
+            "state": "open",
+            "summary": "Terminal-host wording changes do not change token transport or session shutdown policy",
+            "location": "crates/farhelm-supervisor/src/managed_supervisor.rs:29",
+            "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. TLDR: considered whether removing the tmux-specific warnings falsely implies that force-killing a supervisor ends its terminal-host sessions, or weakens the documented credential boundary. All four assigned patches at this revision are comment-only. managed_supervisor.rs:29-34 now says a kill skips orderly stop, not that it kills sessions; its test at :565-608 still distinguishes SIGTERM from an authorized SIGKILL. SPEC_impl.md, Native app packaging, states that the app waits ORDERLY_STOP_GRACE and kills only its own wedged supervisor, and Across supervisor restarts states that hosts keep their latest checkpoint and tail after a crash or kill. github_token.rs:1-3 says no token is cached in launch records or put on a command line; SPEC_impl.md:6043-6050, Named credential catalog, explicitly requires injection into ChildSpec.env and excludes LaunchSpec, launch records and host argv/environment. The changed wording is consistent with those contracts. Screen reader and agent-screen edits likewise describe host liveness and retained final screens without executable changes; agent_screen.rs:155-198 starts and adopts the real host runtime. Suggested bucket: other (documentation correctness concern, refuted). Confidence: confirmed by source, no execution. Could-be-highest: no established route; credential exposure was a possible security topic, but no behavior is changed and the documented boundary remains the same. proposed_drop: no erroneous promise or changed credential transport in the assigned edits. possible_cover: none; forbidden coverage sources not searched. Caveat: does not independently audit the unchanged credential transport or key encoder for unrelated defects."
+          }
+        },
+        {
+          "line": 13,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c3",
+            "state": "open",
+            "summary": "Terminal-host wording changes do not change token transport or session shutdown policy",
+            "location": "crates/farhelm-supervisor/src/managed_supervisor.rs:29",
+            "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. TLDR: considered whether removing the tmux-specific warnings falsely implies that force-killing a supervisor ends its terminal-host sessions, or weakens the documented credential boundary. All four assigned patches at this revision are comment-only. managed_supervisor.rs:29-34 now says a kill skips orderly stop, not that it kills sessions; its test at :565-608 still distinguishes SIGTERM from an authorized SIGKILL. SPEC_impl.md, Native app packaging, states that the app waits ORDERLY_STOP_GRACE and kills only its own wedged supervisor, and Across supervisor restarts states that hosts keep their latest checkpoint and tail after a crash or kill. github_token.rs:1-3 says no token is cached in launch records or put on a command line; SPEC_impl.md:6043-6050, Named credential catalog, explicitly requires injection into ChildSpec.env and excludes LaunchSpec, launch records and host argv/environment. The changed wording is consistent with those contracts. Screen reader and agent-screen edits likewise describe host liveness and retained final screens without executable changes; agent_screen.rs:155-198 starts and adopts the real host runtime. Suggested bucket: other (documentation correctness concern, refuted). Confidence: confirmed by source, no execution. Could-be-highest: no established route; credential exposure was a possible security topic, but no behavior is changed and the documented boundary remains the same. proposed_drop: no erroneous promise or changed credential transport in the assigned edits. possible_cover: none; forbidden coverage sources not searched. Caveat: does not independently audit the unchanged credential transport or key encoder for unrelated defects. Discovery follow-up: separately checked whether changing wants_title documentation from a separate tmux call to a separate terminal read misdescribes the host sampler. At reviewed 1ed482dd ticker.rs:1372-1378 reads screen_tail first, then calls terminal.title only when reader.wants_title. The changed separate-read and opt-in-cost explanation is accurate. This considered documentation issue is source-refuted; no new finding or open premise."
+          }
+        }
+      ],
+      "latest": {
+        "line": 13,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c3",
+          "state": "open",
+          "summary": "Terminal-host wording changes do not change token transport or session shutdown policy",
+          "location": "crates/farhelm-supervisor/src/managed_supervisor.rs:29",
+          "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. TLDR: considered whether removing the tmux-specific warnings falsely implies that force-killing a supervisor ends its terminal-host sessions, or weakens the documented credential boundary. All four assigned patches at this revision are comment-only. managed_supervisor.rs:29-34 now says a kill skips orderly stop, not that it kills sessions; its test at :565-608 still distinguishes SIGTERM from an authorized SIGKILL. SPEC_impl.md, Native app packaging, states that the app waits ORDERLY_STOP_GRACE and kills only its own wedged supervisor, and Across supervisor restarts states that hosts keep their latest checkpoint and tail after a crash or kill. github_token.rs:1-3 says no token is cached in launch records or put on a command line; SPEC_impl.md:6043-6050, Named credential catalog, explicitly requires injection into ChildSpec.env and excludes LaunchSpec, launch records and host argv/environment. The changed wording is consistent with those contracts. Screen reader and agent-screen edits likewise describe host liveness and retained final screens without executable changes; agent_screen.rs:155-198 starts and adopts the real host runtime. Suggested bucket: other (documentation correctness concern, refuted). Confidence: confirmed by source, no execution. Could-be-highest: no established route; credential exposure was a possible security topic, but no behavior is changed and the documented boundary remains the same. proposed_drop: no erroneous promise or changed credential transport in the assigned edits. possible_cover: none; forbidden coverage sources not searched. Caveat: does not independently audit the unchanged credential transport or key encoder for unrelated defects. Discovery follow-up: separately checked whether changing wants_title documentation from a separate tmux call to a separate terminal read misdescribes the host sampler. At reviewed 1ed482dd ticker.rs:1372-1378 reads screen_tail first, then calls terminal.title only when reader.wants_title. The changed separate-read and opt-in-cost explanation is accurate. This considered documentation issue is source-refuted; no new finding or open premise."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g103/findings.jsonl",
+        "id": "c3",
+        "line": 13,
+        "disposition": "under-investigation",
+        "group": "g103-c3",
+        "reason": "Record durably acknowledged; parent source/contract validation, cross-group synthesis, coverage/filter matching and any independent drop check remain pending. This preserves the claim and uncertainty without accepting, dropping or lowering it."
+      },
+      "accepted_parent_decision": null,
+      "returned_claim_checks": [
+        {
+          "batch": "claims-067",
+          "key": "g103/c3",
+          "latest_line": 13,
+          "recommendation": "refuted",
+          "bucket": "other",
+          "underlying_key": "host-wording-supervisor-kill-token-transport-contract",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The assigned wording says a kill skips orderly stop; it does not promise that a kill ends terminal-host sessions. Token wording still excludes launch records and command lines and agrees with the child-stdin transport contract.",
+          "checks": [
+            "1ed482dde220452e424973faf38a5e1318986333 diff:managed_supervisor.rs:29-34,567-575, github_token.rs:1-3, agent_screen.rs:34-39,289-296: inspected changes are comments, preserving the stated stop/token boundaries.",
+            "Current SPEC_impl.md:2403-2455 says hosts retain checkpoint and journal after supervisor crash/kill; 7488-7513 permits the app to kill only its own wedged supervisor after ORDERLY_STOP_GRACE.",
+            "Current SPEC_impl.md:5885-5893: token is injected into ChildSpec.env after host_child_env; LaunchSpec, launch records and host argv/environment never carry it. The changed github_token comment is consistent with that.",
+            "Comments alone would not refute a false documentation promise; here the actual new statements do not make the hypothesized promise. No transport audit or runtime verification claimed."
+          ],
+          "coverage_checked": {
+            "TODO.md:25-27": "Planned is empty; no cover.",
+            "BUGS.md": "Only the local SSH output-holder provisioning hang is recorded; no matching trigger/consequence/scope.",
+            "TRIAGE_OUTCOMES.md": "Searched active ledger for the actual lifecycle, marker, replay, shim, metadata and terminal-field claims; no exact matching disposition. Archive not read.",
+            "plans/queue": "Searched named behavior and symbols. Podman and tmux plans provide retirement context; none explicitly accepts the claimed test-oracle gap or fixes the named timer/serialization hypothesis. No plan used as cover merely because its subsystem matches.",
+            "FILTER.md": "Read in full. No entire filter boundary matches the retained integrated test gap; rarity alone was not used. Refuted hypotheses are resolved from source rather than filtered.",
+            "SPEC.md / SPEC_impl.md": "Host-survival, native managed-supervisor and named-credential contracts agree with the specific changed wording.",
+            "INDEX.md / matching files": "No exact wording/credential-transport item found."
+          },
+          "exact_cover_quotes": [],
+          "missing_premise": "No erroneous promise of ending hosts or changed token transport appears in the assigned edits.",
+          "original_stronger_consequence": "Removing tmux-specific warnings might imply force-killing a supervisor ends its sessions, or weaken the documented credential boundary. Credential exposure was a potential security topic; no exposure or work-loss route was established.",
+          "needs_independent_drop_check": true,
+          "proposed_basis": "Narrow source/contract refutation of the edited prose. Independent drop check should retain the original credential-boundary concern; unchanged transport is not independently cleared."
+        }
+      ],
+      "parent_proposals": [
+        {
+          "artifact": "parent-flagged-judgments-067.json",
+          "key": "g103/c3",
+          "proposal": "claim-checks/claims-067/result.json",
+          "parent_proposal": "source-refuted-specific-edited-supervisor-stop-and-token-prose-promises",
+          "final_independent_gate": "required-before-original-security-or-work-loss-drop",
+          "reason": "Full067 actual comments say kill skips orderly stop, not that it ends host sessions; retained-host crash/kill contract remains. Token still excluded from LaunchSpec/records/host argv/environment and injected into child stdin transport contract. Read exact statements rather than assume comment-only harmlessness. Refutation is of hypothesized false promise, not a fresh global credential transport audit; original security/work concern stays in gate."
+        }
+      ],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": true,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "host-wording-supervisor-kill-token-transport-contract",
+        "destination": null
+      }
+    },
+    {
+      "key": "g103/c4",
+      "owner": "g103",
+      "id": "c4",
+      "domain": "supervisor-core-integration",
+      "purpose": "supervisor-core-integration: crates/farhelm-supervisor/src/service/core.rs, crates/farhelm-supervisor/src/agent_kind/screen_reader.rs, crates/farhelm-supervisor/src/agent_screen.rs, crates/farhelm-supervisor/src/github_token.rs, crates/farhelm-supervisor/src/managed_supervisor.rs; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 11,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c4",
+            "state": "open",
+            "summary": "Host migration keeps the spare-worker executable an intentional stand-in",
+            "location": "crates/farhelm-supervisor/src/service/core.rs:39219",
+            "detail": "Reviewed commit: 70bc66a9f285cc2a9984924f389834d118b7cfdc. TLDR: considered whether replacing tmux_supervisor with host_supervisor while using the current test binary as launch shim accidentally runs tests recursively, runs a real preparation/agent, or changes the spare-worker assertion's subject. Source check: core.rs:39165-39355 explicitly re-execs one exact test in a separate child only when SPARE_WORKER_CHILD is absent, seeds hostile credentials on that child alone, starts the supervisor through host_supervisor(current_exe), and supplies the worker itself with a separate private held-guard script that checks the credential scrub and records starts. The host-program initializer in hosts/test_program.rs:55-94 recognizes only the exact internal terminal-host --socket command line, so host starts run real host code while launch-shim invocations are not redirected into a host or a test-recursion path. The test comments at core.rs:39340-39355 explicitly establish that its fake executable never runs real preparation; preparation state is intentionally supplied through the durable fixture seam. Worker cancellation and serialization are observed through its own held script, not terminal success. Suggested bucket: other, refuted test-fixture concern. Confidence: confirmed source and caller analysis, no execution. Could-be-highest: no established security or user-work-loss route. proposed_drop: source refutation; the two executable roles and separate child test invocation remain distinct. possible_cover: none known; neighbour records do not report this concern and prohibited coverage sources were not read. Caveat: this does not independently audit the unchanged spare-builder worker for unrelated defects."
+          }
+        },
+        {
+          "line": 14,
+          "event": {
+            "version": 1,
+            "kind": "lead",
+            "id": "c4",
+            "state": "open",
+            "summary": "Check libtest interpretation of the fixture's current-executable launch shim",
+            "location": "crates/farhelm-supervisor/src/service/core.rs:39219",
+            "detail": "Reviewed commit: 70bc66a9f285cc2a9984924f389834d118b7cfdc. Original considered consequence preserved: the migrated spare-worker/current-test-executable fixture might start unintended tests or recurse rather than merely act as an absent preparation shim. Earlier proposed_drop established separate host-program and worker-program roles, but overstated the claim that a non-host command line cannot enter libtest. Useful new source check: launch.rs:696-702 constructs unscoped argv as test-binary internal launch <spec> with positional words and no unknown flag, and core.rs:17239-17240 uses it unchanged. hosts/test_program.rs recognizes only the terminal-host command and returns for this launch invocation. Therefore actual libtest positional-filter semantics, not the host initializer alone, determine whether unrelated tests run. Need source for this Rust toolchain's libtest parser/filter matching and whole-range attribution before concluding. Earlier evidence still supports the separate held worker script and lack of real preparation shim, but does not refute unintended libtest work. Suggested bucket: other pending a concrete test-only consequence; Could-be-highest: no established security or loss-of-work route. Confidence: unresolved readily checkable source premise, no execution. proposed_drop: previous broad source refutation is provisional; no parent drop accepted. possible_cover: none known. This is analysis of the assigned current_exe constructor migration, not an independent audit of all launch code. No tests or reproductions performed."
+          }
+        },
+        {
+          "line": 15,
+          "event": {
+            "version": 1,
+            "kind": "lead",
+            "id": "c4",
+            "state": "open",
+            "summary": "Check libtest interpretation of the fixture's current-executable launch shim",
+            "location": "crates/farhelm-supervisor/src/service/core.rs:39219",
+            "detail": "Reviewed commit: 70bc66a9f285cc2a9984924f389834d118b7cfdc. Original considered consequence preserved: the migrated spare-worker/current-test-executable fixture might start unintended tests or recurse rather than merely act as an absent preparation shim. Earlier proposed_drop established separate host-program and worker-program roles, but overstated the claim that a non-host command line cannot enter libtest. Useful new source check: launch.rs:696-702 constructs unscoped argv as test-binary internal launch <spec> with positional words and no unknown flag, and core.rs:17239-17240 uses it unchanged. hosts/test_program.rs recognizes only the terminal-host command and returns for this launch invocation. Therefore actual libtest positional-filter semantics, not the host initializer alone, determine whether unrelated tests run. Need source for this Rust toolchain's libtest parser/filter matching and whole-range attribution before concluding. Earlier evidence still supports the separate held worker script and lack of real preparation shim, but does not refute unintended libtest work. Suggested bucket: other pending a concrete test-only consequence; Could-be-highest: no established security or loss-of-work route. Confidence: unresolved readily checkable source premise, no execution. proposed_drop: previous broad source refutation is provisional; no parent drop accepted. possible_cover: none known. This is analysis of the assigned current_exe constructor migration, not an independent audit of all launch code. No tests or reproductions performed. Further checks: local Rust sources are not installed; rustc --print sysroot and rust-toolchain.toml identify 1.99.1 without executing tests. Official Rust tests documentation https://doc.rust-lang.org/rustc/tests/ (Filters) states that positional arguments select tests matching any of their substrings. Therefore unscoped current-executable internal launch <spec> can select tests containing launch rather than simply fail. Scoped launch-wrapped includes --farhelm-exe and may instead reject that option; do not conflate the cases. Git history attributes SPARE_WORKER_CHILD introduction to 8f5d016f04ab13c284530e759e828826790f2843, and merge-base --is-ancestor proves it predates the exclusive range base. The base source already contains the worker and current-executable fresh-create tests. Remaining readily checkable attribution premise: confirm the base uses the same current-executable shim and unscoped window_command before excluding this unchanged concern from the assigned migration review. No occurrence, recursion or resource impact was observed."
+          }
+        },
+        {
+          "line": 16,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c4",
+            "state": "open",
+            "summary": "Current-executable shim concern predates the entire reviewed range",
+            "location": "crates/farhelm-supervisor/src/service/core.rs:39219",
+            "detail": "Reviewed assigned commit: 70bc66a9f285cc2a9984924f389834d118b7cfdc. Original considered consequence retained: using the test binary as an unscoped launch shim can run unintended libtest tests matching internal or launch instead of simply standing in for an absent preparation shim. No actual occurrence, recursion, resource exhaustion or security effect was observed. Corrected earlier claim: the exact host-program initializer does NOT by itself prevent a non-host launch command from entering libtest. Official Rust documentation at https://doc.rust-lang.org/rustc/tests/ (Filters) confirms positional arguments are substring filters selecting any matching test. At reviewed launch.rs:696-702 the unscoped command is current-test-binary internal launch <spec>, while the scoped launch-wrapped adds --farhelm-exe and is a different parser case. The initializer at hosts/test_program.rs:55-94 returns on non-host commands, so it neither introduces nor prevents this unscoped behavior. Whole-range attribution checks settle the assigned-review disposition: exclusive base 6e423e30068b62c6cfa276c6d720ee35bb70387a already uses tmux_supervisor(current_exe) in this same worker at core.rs:39155 and in a_fresh_checkout_creates_exactly_one_directory_and_replays at :39307. Its launch.rs:677-725 builds exactly the same unscoped positional command. The complete base-to-assigned launch.rs diff does not change window_command; SPARE_WORKER_CHILD introduction 8f5d016f04ab13c284530e759e828826790f2843 is confirmed an ancestor of the exclusive base. Thus the suspected invocation defect is demonstrably pre-range, not merely older than the assigned commit, and the assigned host conversion retains the same child command instead of adding a new invocation path. The worker's separate held-script executable, scrub checks and serialization assertions remain as recorded earlier. Suggested bucket: other for a possible test-fixture defect outside this range; no new assigned finding. Confidence: confirmed source/contract and whole-range attribution; no execution. Could-be-highest: no established security or user-work-loss route. proposed_drop: exclude this unchanged pre-range concern from the assigned migration review; this is attribution/scope, not a claim that unintended libtest work is impossible or correct. The earlier broad source-refutation wording is superseded by this precise basis. possible_cover: none known; prohibited coverage sources not searched. Missing premise/open lead: none for attribution. Local toolchain source was absent; only official read-only Rust documentation was consulted, and no libtest process or reproduction was run. Material caveat: absence of runtime observation does not refute the pre-existing possibility; do not reopen a broader review of that unchanged behavior under this group."
+          }
+        }
+      ],
+      "latest": {
+        "line": 16,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c4",
+          "state": "open",
+          "summary": "Current-executable shim concern predates the entire reviewed range",
+          "location": "crates/farhelm-supervisor/src/service/core.rs:39219",
+          "detail": "Reviewed assigned commit: 70bc66a9f285cc2a9984924f389834d118b7cfdc. Original considered consequence retained: using the test binary as an unscoped launch shim can run unintended libtest tests matching internal or launch instead of simply standing in for an absent preparation shim. No actual occurrence, recursion, resource exhaustion or security effect was observed. Corrected earlier claim: the exact host-program initializer does NOT by itself prevent a non-host launch command from entering libtest. Official Rust documentation at https://doc.rust-lang.org/rustc/tests/ (Filters) confirms positional arguments are substring filters selecting any matching test. At reviewed launch.rs:696-702 the unscoped command is current-test-binary internal launch <spec>, while the scoped launch-wrapped adds --farhelm-exe and is a different parser case. The initializer at hosts/test_program.rs:55-94 returns on non-host commands, so it neither introduces nor prevents this unscoped behavior. Whole-range attribution checks settle the assigned-review disposition: exclusive base 6e423e30068b62c6cfa276c6d720ee35bb70387a already uses tmux_supervisor(current_exe) in this same worker at core.rs:39155 and in a_fresh_checkout_creates_exactly_one_directory_and_replays at :39307. Its launch.rs:677-725 builds exactly the same unscoped positional command. The complete base-to-assigned launch.rs diff does not change window_command; SPARE_WORKER_CHILD introduction 8f5d016f04ab13c284530e759e828826790f2843 is confirmed an ancestor of the exclusive base. Thus the suspected invocation defect is demonstrably pre-range, not merely older than the assigned commit, and the assigned host conversion retains the same child command instead of adding a new invocation path. The worker's separate held-script executable, scrub checks and serialization assertions remain as recorded earlier. Suggested bucket: other for a possible test-fixture defect outside this range; no new assigned finding. Confidence: confirmed source/contract and whole-range attribution; no execution. Could-be-highest: no established security or user-work-loss route. proposed_drop: exclude this unchanged pre-range concern from the assigned migration review; this is attribution/scope, not a claim that unintended libtest work is impossible or correct. The earlier broad source-refutation wording is superseded by this precise basis. possible_cover: none known; prohibited coverage sources not searched. Missing premise/open lead: none for attribution. Local toolchain source was absent; only official read-only Rust documentation was consulted, and no libtest process or reproduction was run. Material caveat: absence of runtime observation does not refute the pre-existing possibility; do not reopen a broader review of that unchanged behavior under this group."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g103/findings.jsonl",
+        "id": "c4",
+        "line": 16,
+        "disposition": "excluded",
+        "group": "test-current-exe-unscoped-launch-enters-libtest",
+        "reason": "Parent explicitly accepted named out-of-range proposal from claims-067 after inspecting it. The same worker already passes current_exe as its shim at the exclusive base, whose unscoped command is the same positional internal launch invocation. The assigned host migration retains that invocation. Exclude the unchanged pre-range invocation concern from this range. Do not describe it as impossible or correct, and do not reopen a review of the unchanged fixture. Checked source/results: [\"Exclusive base 6e423e30068b62c6cfa276c6d720ee35bb70387a:service/core.rs:39143-39165 and 39295-39313: worker and fresh-checkout fixture already construct tmux_supervisor with std::env::current_exe().\",\"Same base:launch.rs:677-725: unscoped words are executable, internal, launch, spec path; scoped launch-wrapped separately appends --farhelm-exe.\",\"Base-to-70bc66a9f285cc2a9984924f389834d118b7cfdc launch.rs diff hunk inventory contains no window_command change; the same positional construction remains.\",\"git merge-base --is-ancestor 8f5d016f04ab13c284530e759e828826790f2843 6e423e30068b62c6cfa276c6d720ee35bb70387a returned 0, confirming the worker introduction predates the range.\",\"No libtest reproduction or process experiment run. Disposition depends on attribution, not independently proving its parser consequence.\"] Current coverage/results: {\"TODO.md:25-27\":\"Planned is empty; no cover.\",\"BUGS.md\":\"Only the local SSH output-holder provisioning hang is recorded; no matching trigger/consequence/scope.\",\"TRIAGE_OUTCOMES.md\":\"Searched active ledger for the actual lifecycle, marker, replay, shim, metadata and terminal-field claims; no exact matching disposition. Archive not read.\",\"plans/queue\":\"Searched named behavior and symbols. Podman and tmux plans provide retirement context; none explicitly accepts the claimed test-oracle gap or fixes the named timer/serialization hypothesis. No plan used as cover merely because its subsystem matches.\",\"FILTER.md\":\"Read in full. No entire filter boundary matches the retained integrated test gap; rarity alone was not used. Refuted hypotheses are resolved from source rather than filtered.\",\"SPEC.md / SPEC_impl.md\":\"No specification acceptance of unintended libtest execution found; source attribution, not coverage, is the basis.\",\"INDEX.md / matching files\":\"No exact current-executable shim item found.\"} Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"The test executable invoked as an unscoped shim may run tests matching internal/launch rather than merely stand in for absent preparation. Earlier broad refutation incorrectly inferred the exact host initializer prevents libtest entry; the final history corrects that and excludes only the pre-range concern.\"; \"None for pre-range attribution. Runtime occurrence, recursion or resource cost remains unobserved; this consultation does not independently settle libtest parsing.\"."
+      },
+      "accepted_parent_decision": {
+        "key": "g103/c4",
+        "line": 16,
+        "disposition": "excluded",
+        "group": "test-current-exe-unscoped-launch-enters-libtest",
+        "bucket": "other",
+        "recording": "out-of-range",
+        "queue_target_candidate": null,
+        "needs_independent_drop_check": false,
+        "reason": "Parent explicitly accepted named out-of-range proposal from claims-067 after inspecting it. The same worker already passes current_exe as its shim at the exclusive base, whose unscoped command is the same positional internal launch invocation. The assigned host migration retains that invocation. Exclude the unchanged pre-range invocation concern from this range. Do not describe it as impossible or correct, and do not reopen a review of the unchanged fixture. Checked source/results: [\"Exclusive base 6e423e30068b62c6cfa276c6d720ee35bb70387a:service/core.rs:39143-39165 and 39295-39313: worker and fresh-checkout fixture already construct tmux_supervisor with std::env::current_exe().\",\"Same base:launch.rs:677-725: unscoped words are executable, internal, launch, spec path; scoped launch-wrapped separately appends --farhelm-exe.\",\"Base-to-70bc66a9f285cc2a9984924f389834d118b7cfdc launch.rs diff hunk inventory contains no window_command change; the same positional construction remains.\",\"git merge-base --is-ancestor 8f5d016f04ab13c284530e759e828826790f2843 6e423e30068b62c6cfa276c6d720ee35bb70387a returned 0, confirming the worker introduction predates the range.\",\"No libtest reproduction or process experiment run. Disposition depends on attribution, not independently proving its parser consequence.\"] Current coverage/results: {\"TODO.md:25-27\":\"Planned is empty; no cover.\",\"BUGS.md\":\"Only the local SSH output-holder provisioning hang is recorded; no matching trigger/consequence/scope.\",\"TRIAGE_OUTCOMES.md\":\"Searched active ledger for the actual lifecycle, marker, replay, shim, metadata and terminal-field claims; no exact matching disposition. Archive not read.\",\"plans/queue\":\"Searched named behavior and symbols. Podman and tmux plans provide retirement context; none explicitly accepts the claimed test-oracle gap or fixes the named timer/serialization hypothesis. No plan used as cover merely because its subsystem matches.\",\"FILTER.md\":\"Read in full. No entire filter boundary matches the retained integrated test gap; rarity alone was not used. Refuted hypotheses are resolved from source rather than filtered.\",\"SPEC.md / SPEC_impl.md\":\"No specification acceptance of unintended libtest execution found; source attribution, not coverage, is the basis.\",\"INDEX.md / matching files\":\"No exact current-executable shim item found.\"} Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"The test executable invoked as an unscoped shim may run tests matching internal/launch rather than merely stand in for absent preparation. Earlier broad refutation incorrectly inferred the exact host initializer prevents libtest entry; the final history corrects that and excludes only the pre-range concern.\"; \"None for pre-range attribution. Runtime occurrence, recursion or resource cost remains unobserved; this consultation does not independently settle libtest parsing.\"."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-067",
+          "key": "g103/c4",
+          "latest_line": 16,
+          "recommendation": "out-of-range",
+          "bucket": "other",
+          "underlying_key": "test-current-exe-unscoped-launch-enters-libtest",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The same worker already passes current_exe as its shim at the exclusive base, whose unscoped command is the same positional internal launch invocation. The assigned host migration retains that invocation.",
+          "checks": [
+            "Exclusive base 6e423e30068b62c6cfa276c6d720ee35bb70387a:service/core.rs:39143-39165 and 39295-39313: worker and fresh-checkout fixture already construct tmux_supervisor with std::env::current_exe().",
+            "Same base:launch.rs:677-725: unscoped words are executable, internal, launch, spec path; scoped launch-wrapped separately appends --farhelm-exe.",
+            "Base-to-70bc66a9f285cc2a9984924f389834d118b7cfdc launch.rs diff hunk inventory contains no window_command change; the same positional construction remains.",
+            "git merge-base --is-ancestor 8f5d016f04ab13c284530e759e828826790f2843 6e423e30068b62c6cfa276c6d720ee35bb70387a returned 0, confirming the worker introduction predates the range.",
+            "No libtest reproduction or process experiment run. Disposition depends on attribution, not independently proving its parser consequence."
+          ],
+          "coverage_checked": {
+            "TODO.md:25-27": "Planned is empty; no cover.",
+            "BUGS.md": "Only the local SSH output-holder provisioning hang is recorded; no matching trigger/consequence/scope.",
+            "TRIAGE_OUTCOMES.md": "Searched active ledger for the actual lifecycle, marker, replay, shim, metadata and terminal-field claims; no exact matching disposition. Archive not read.",
+            "plans/queue": "Searched named behavior and symbols. Podman and tmux plans provide retirement context; none explicitly accepts the claimed test-oracle gap or fixes the named timer/serialization hypothesis. No plan used as cover merely because its subsystem matches.",
+            "FILTER.md": "Read in full. No entire filter boundary matches the retained integrated test gap; rarity alone was not used. Refuted hypotheses are resolved from source rather than filtered.",
+            "SPEC.md / SPEC_impl.md": "No specification acceptance of unintended libtest execution found; source attribution, not coverage, is the basis.",
+            "INDEX.md / matching files": "No exact current-executable shim item found."
+          },
+          "exact_cover_quotes": [],
+          "missing_premise": "None for pre-range attribution. Runtime occurrence, recursion or resource cost remains unobserved; this consultation does not independently settle libtest parsing.",
+          "original_stronger_consequence": "The test executable invoked as an unscoped shim may run tests matching internal/launch rather than merely stand in for absent preparation. Earlier broad refutation incorrectly inferred the exact host initializer prevents libtest entry; the final history corrects that and excludes only the pre-range concern.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Exclude the unchanged pre-range invocation concern from this range. Do not describe it as impossible or correct, and do not reopen a review of the unchanged fixture."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": false,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "test-current-exe-unscoped-launch-enters-libtest",
+        "destination": null
+      }
+    },
+    {
+      "key": "g103/c5",
+      "owner": "g103",
+      "id": "c5",
+      "domain": "supervisor-core-integration",
+      "purpose": "supervisor-core-integration: crates/farhelm-supervisor/src/service/core.rs, crates/farhelm-supervisor/src/agent_kind/screen_reader.rs, crates/farhelm-supervisor/src/agent_screen.rs, crates/farhelm-supervisor/src/github_token.rs, crates/farhelm-supervisor/src/managed_supervisor.rs; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 12,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c5",
+            "state": "open",
+            "summary": "Checkout metadata reload test still observes durable projection after host migration",
+            "location": "crates/farhelm-supervisor/src/service/core.rs:39442",
+            "detail": "Reviewed commit: 70bc66a9f285cc2a9984924f389834d118b7cfdc. TLDR: considered whether retaining the first supervisor while constructing another on the same fixture state invalidates the migrated checkout-metadata reload test. core.rs:39442-39511 checks origin/borrower/unmanaged checkout fields through create, keyed replay and listing on both supervisors. Constructor :6704-6720 reloads sessions through reload_sessions_with_hosts from the reopened store; listing.rs:195-203 always projects checkout metadata through that supervisor's store, and core.rs:12635-12644 uses the same durable projection for single-session replies. Those fields are independent of host replay or child-exit readiness. A second host adoption may disturb a first runtime, and construction's ownership path permits a reused in-process state claim, but this fixture makes no terminal continuity, activity or child-liveness assertion. It measures durable metadata reconstruction, which the actual store/listing path still supplies; it is not the replay/exit test covered by c2. Suggested bucket: other, refuted test-oracle concern. Confidence: confirmed source and data-flow analysis, no execution. Could-be-highest: no established security or user-work-loss route in this private fixture. proposed_drop: source refutation of vacuous metadata-reload claim; no additional runtime-health promise is asserted by the test. possible_cover: none known; prohibited coverage sources not searched. Caveat: this does not claim simultaneous runtimes are a supported production operating mode, nor independently validate their reconnect behavior."
+          }
+        }
+      ],
+      "latest": {
+        "line": 12,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c5",
+          "state": "open",
+          "summary": "Checkout metadata reload test still observes durable projection after host migration",
+          "location": "crates/farhelm-supervisor/src/service/core.rs:39442",
+          "detail": "Reviewed commit: 70bc66a9f285cc2a9984924f389834d118b7cfdc. TLDR: considered whether retaining the first supervisor while constructing another on the same fixture state invalidates the migrated checkout-metadata reload test. core.rs:39442-39511 checks origin/borrower/unmanaged checkout fields through create, keyed replay and listing on both supervisors. Constructor :6704-6720 reloads sessions through reload_sessions_with_hosts from the reopened store; listing.rs:195-203 always projects checkout metadata through that supervisor's store, and core.rs:12635-12644 uses the same durable projection for single-session replies. Those fields are independent of host replay or child-exit readiness. A second host adoption may disturb a first runtime, and construction's ownership path permits a reused in-process state claim, but this fixture makes no terminal continuity, activity or child-liveness assertion. It measures durable metadata reconstruction, which the actual store/listing path still supplies; it is not the replay/exit test covered by c2. Suggested bucket: other, refuted test-oracle concern. Confidence: confirmed source and data-flow analysis, no execution. Could-be-highest: no established security or user-work-loss route in this private fixture. proposed_drop: source refutation of vacuous metadata-reload claim; no additional runtime-health promise is asserted by the test. possible_cover: none known; prohibited coverage sources not searched. Caveat: this does not claim simultaneous runtimes are a supported production operating mode, nor independently validate their reconnect behavior."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g103/findings.jsonl",
+        "id": "c5",
+        "line": 12,
+        "disposition": "excluded",
+        "group": "checkout-metadata-reload-test-independent-durable-projection",
+        "reason": "Parent explicitly accepted named refuted proposal from claims-067 after inspecting it. The assertion concerns durable checkout metadata, not terminal continuity. Listing explicitly reprojects those fields from each supervisor's store, including the newly opened supervisor. Narrow data-flow refutation of the vacuous-metadata claim; does not clear reconnect behavior or simultaneous production runtimes. Checked source/results: [\"70bc66a9f285cc2a9984924f389834d118b7cfdc:service/core.rs:39435-39518: test checks origin, borrower and unmanaged fields at create, keyed replay and listing with both supervisors; no child-liveness or terminal continuity assertion.\",\"Same revision:service/listing.rs:195-203: list_all calls sup.store.project_checkout_metadata on its resulting SessionInfo list.\",\"Current SPEC_impl.md:3645-3665: registry, memberships and provenance are durable; borrowers do not inherit preparation duty. A disturbed first host runtime does not erase the actual store projection under test.\",\"Source only; simultaneous in-process supervisors are not asserted to be a supported production operating mode.\"] Current coverage/results: {\"TODO.md:25-27\":\"Planned is empty; no cover.\",\"BUGS.md\":\"Only the local SSH output-holder provisioning hang is recorded; no matching trigger/consequence/scope.\",\"TRIAGE_OUTCOMES.md\":\"Searched active ledger for the actual lifecycle, marker, replay, shim, metadata and terminal-field claims; no exact matching disposition. Archive not read.\",\"plans/queue\":\"Searched named behavior and symbols. Podman and tmux plans provide retirement context; none explicitly accepts the claimed test-oracle gap or fixes the named timer/serialization hypothesis. No plan used as cover merely because its subsystem matches.\",\"FILTER.md\":\"Read in full. No entire filter boundary matches the retained integrated test gap; rarity alone was not used. Refuted hypotheses are resolved from source rather than filtered.\",\"SPEC.md / SPEC_impl.md\":\"Managed-checkout association/provenance contracts support the durable metadata subject. No acceptance of a vacuous test found or needed.\",\"INDEX.md / matching files\":\"No exact metadata-reload fixture item found.\"} Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Keeping the first supervisor alive while constructing another might invalidate the migrated metadata reload test. No security/user-work-loss route was established in this private fixture.\"; \"No dependence of these metadata assertions on host replay/child-exit readiness was found.\"."
+      },
+      "accepted_parent_decision": {
+        "key": "g103/c5",
+        "line": 12,
+        "disposition": "excluded",
+        "group": "checkout-metadata-reload-test-independent-durable-projection",
+        "bucket": "other",
+        "recording": "refuted",
+        "queue_target_candidate": null,
+        "needs_independent_drop_check": false,
+        "reason": "Parent explicitly accepted named refuted proposal from claims-067 after inspecting it. The assertion concerns durable checkout metadata, not terminal continuity. Listing explicitly reprojects those fields from each supervisor's store, including the newly opened supervisor. Narrow data-flow refutation of the vacuous-metadata claim; does not clear reconnect behavior or simultaneous production runtimes. Checked source/results: [\"70bc66a9f285cc2a9984924f389834d118b7cfdc:service/core.rs:39435-39518: test checks origin, borrower and unmanaged fields at create, keyed replay and listing with both supervisors; no child-liveness or terminal continuity assertion.\",\"Same revision:service/listing.rs:195-203: list_all calls sup.store.project_checkout_metadata on its resulting SessionInfo list.\",\"Current SPEC_impl.md:3645-3665: registry, memberships and provenance are durable; borrowers do not inherit preparation duty. A disturbed first host runtime does not erase the actual store projection under test.\",\"Source only; simultaneous in-process supervisors are not asserted to be a supported production operating mode.\"] Current coverage/results: {\"TODO.md:25-27\":\"Planned is empty; no cover.\",\"BUGS.md\":\"Only the local SSH output-holder provisioning hang is recorded; no matching trigger/consequence/scope.\",\"TRIAGE_OUTCOMES.md\":\"Searched active ledger for the actual lifecycle, marker, replay, shim, metadata and terminal-field claims; no exact matching disposition. Archive not read.\",\"plans/queue\":\"Searched named behavior and symbols. Podman and tmux plans provide retirement context; none explicitly accepts the claimed test-oracle gap or fixes the named timer/serialization hypothesis. No plan used as cover merely because its subsystem matches.\",\"FILTER.md\":\"Read in full. No entire filter boundary matches the retained integrated test gap; rarity alone was not used. Refuted hypotheses are resolved from source rather than filtered.\",\"SPEC.md / SPEC_impl.md\":\"Managed-checkout association/provenance contracts support the durable metadata subject. No acceptance of a vacuous test found or needed.\",\"INDEX.md / matching files\":\"No exact metadata-reload fixture item found.\"} Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Keeping the first supervisor alive while constructing another might invalidate the migrated metadata reload test. No security/user-work-loss route was established in this private fixture.\"; \"No dependence of these metadata assertions on host replay/child-exit readiness was found.\"."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-067",
+          "key": "g103/c5",
+          "latest_line": 12,
+          "recommendation": "refuted",
+          "bucket": "other",
+          "underlying_key": "checkout-metadata-reload-test-independent-durable-projection",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The assertion concerns durable checkout metadata, not terminal continuity. Listing explicitly reprojects those fields from each supervisor's store, including the newly opened supervisor.",
+          "checks": [
+            "70bc66a9f285cc2a9984924f389834d118b7cfdc:service/core.rs:39435-39518: test checks origin, borrower and unmanaged fields at create, keyed replay and listing with both supervisors; no child-liveness or terminal continuity assertion.",
+            "Same revision:service/listing.rs:195-203: list_all calls sup.store.project_checkout_metadata on its resulting SessionInfo list.",
+            "Current SPEC_impl.md:3645-3665: registry, memberships and provenance are durable; borrowers do not inherit preparation duty. A disturbed first host runtime does not erase the actual store projection under test.",
+            "Source only; simultaneous in-process supervisors are not asserted to be a supported production operating mode."
+          ],
+          "coverage_checked": {
+            "TODO.md:25-27": "Planned is empty; no cover.",
+            "BUGS.md": "Only the local SSH output-holder provisioning hang is recorded; no matching trigger/consequence/scope.",
+            "TRIAGE_OUTCOMES.md": "Searched active ledger for the actual lifecycle, marker, replay, shim, metadata and terminal-field claims; no exact matching disposition. Archive not read.",
+            "plans/queue": "Searched named behavior and symbols. Podman and tmux plans provide retirement context; none explicitly accepts the claimed test-oracle gap or fixes the named timer/serialization hypothesis. No plan used as cover merely because its subsystem matches.",
+            "FILTER.md": "Read in full. No entire filter boundary matches the retained integrated test gap; rarity alone was not used. Refuted hypotheses are resolved from source rather than filtered.",
+            "SPEC.md / SPEC_impl.md": "Managed-checkout association/provenance contracts support the durable metadata subject. No acceptance of a vacuous test found or needed.",
+            "INDEX.md / matching files": "No exact metadata-reload fixture item found."
+          },
+          "exact_cover_quotes": [],
+          "missing_premise": "No dependence of these metadata assertions on host replay/child-exit readiness was found.",
+          "original_stronger_consequence": "Keeping the first supervisor alive while constructing another might invalidate the migrated metadata reload test. No security/user-work-loss route was established in this private fixture.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Narrow data-flow refutation of the vacuous-metadata claim; does not clear reconnect behavior or simultaneous production runtimes."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "checkout-metadata-reload-test-independent-durable-projection",
+        "destination": null
+      }
+    }
+  ],
+  "replies": [
+    {
+      "turn": 1,
+      "reply": "Initial pass complete: all 1,347 assigned patch lines reviewed.\n\nRecorded `f1` (`other`): the deleted cleanup test covered an unmarked tab shell; its cited replacement leaves the shell marked and can pass through a different cleanup mechanism.\n\nThree refuted candidates logged. No open leads or unread assigned scope. Source analysis only; no tests or reproductions run.\n\nRecords: [findings.jsonl]([private-run]/g103/findings.jsonl), [progress.md]([private-run]/g103/progress.md)."
+    },
+    {
+      "turn": 2,
+      "reply": "- Revised `f1` to a proposed-drop candidate: an existing Delete regression tests explicit tab-child roots. The missing combined shell/job fixture remains a caveat; no shipped cleanup failure is claimed.\n- Reinforced `c1` and `c2` with pinned-tip source checks; dispositions unchanged.\n- Kept `g107/c4` distinct.\n\nNo new findings. Unresolved lead IDs: none."
+    },
+    {
+      "turn": 3,
+      "reply": "Discovery pass complete; nothing new found in scope.\n\n- Checked migrated fixtures, process-start commands, reload projections, activity barriers, intent locking, and title reads.\n- Revised known `f1`; logged considered candidates `c4`/`c5` and updated `c3`.\n- New verified IDs: none.\n- New unverified IDs: none.\n- Open leads: none.\n\nSource-only review; no runtime tests or reproductions."
+    }
+  ],
+  "progress": "Group: g103 (supervisor-core-integration)\nTurn type/count: discovery / 3. Discovery-pass count: 1.\nState: separate discovery pass complete. Result: no new in-scope verified or unverified-after-investigation findings.\n\nPre-search reconciliation: read discovery-neighbours.json completely, lines 1-835, in bounded chunks. Reconciled parent/test-coverage-reconciliation before beginning new source search. f1 restored to a narrow other finding: layered host pinned-child and pure PPID tests do not replace the removed integrated shell-unmarked + job + scopes-off + successful-Delete oracle or its still-supported legacy caller. Earlier proposed-drop basis retained and narrowed; no parent drop/lowering accepted. This is a revision of a known issue, not discovery. g107/g107-c4 and g108/c2 have distinct lone-tab discovery/guard/Stop triggers; g104's replay-helper conclusion agrees with c2.\n\nDiscovery checks: revisited migrated spare-worker and fresh-checkout creation/replay/borrower/reload fixtures; followed constructor reload and durable checkout projection; examined late activity-write barrier and creation timestamp assertions; reviewed legacy fingerprint retry fixture, absent-launch-shim resume fixture and competing create/refusal lock ordering and explicit owned-host cleanup; checked conditional title read at the documentation-change revision. Reviewed process-start command construction, host initializer discrimination and source at the exclusive range base to settle the current-test-executable concern. No new issue found in those assigned changes.\n\nDurable changes in this turn:\n- f1: known narrow integrated-oracle finding retained, proposed_drop false; original consequence and alternative layered-coverage basis preserved.\n- c3: added source refutation of suspected inaccurate separate-title-read documentation.\n- c4: new considered candidate, temporarily a lead while checking libtest semantics; resolved after complete range-base attribution. The unscoped current-test-executable shim can be interpreted as libtest filters, but the same worker/fresh-create fixture and same launch command already exist at exclusive base 6e423e3. The host conversion does not introduce it. Earlier claim that the host initializer alone refutes test execution was corrected. This is an excluded unchanged pre-range concern, not a new in-scope finding. Official Rust tests/Filters documentation was consulted read-only after local compiler sources were found absent; no binary was run as a test.\n- c5: new considered candidate; metadata reload assertion remains meaningful because both listing and single-session paths project from the reopened store, independently of terminal replay. Source refuted a vacuous metadata-test concern.\n\nNew verified finding IDs: none.\nNew unverified-after-investigation finding IDs: none.\nRemaining lead IDs: none. c4's lead events are superseded by its candidate resolution.\nExplicit new-discovery result: nothing new in the assigned group.\n\nCoverage: original 1,347 assigned patch lines remain fully read/audited. No unread assigned material. All 835 neighbour-context lines read; these are novelty/interface context, not source-delivery credit. Own earlier candidate and revision history retained append-only. No queue/index/filter/TODO/plans/triage/coverage metadata searched.\n\nExecution: source/contract/history analysis only. rustc --print sysroot was read-only toolchain identification. No runtime tests, builds, reproductions, live-install/process mutations or checkout edits. Only this group's private event/log/progress artifacts were written. No missing readily checkable source premise remains.\n\nNext action: report discovery delta and await caller's next turn.\n"
+}

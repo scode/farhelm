@@ -1,0 +1,920 @@
+{
+  "group": {
+    "id": "g186",
+    "domain": "terminal-input-copy",
+    "purpose": "terminal-input-copy: crates/farhelm-ui/assets/composition-guard.js, crates/farhelm-ui/assets/copy-on-select.js, crates/farhelm-ui/assets/grid-input.js, crates/farhelm-ui/assets/paste-sanitizer.js, crates/farhelm-ui/assets/shift-enter-key.js, crates/farhelm-ui/assets/term-bytes.js, crates/farhelm-ui/js-tests/composition-guard.test.js, crates/farhelm-ui/js-tests/copy-on-select.test.js, crates/farhelm-ui/js-tests/grid-input-tables.js, crates/farhelm-ui/js-tests/grid-input.test.js, crates/farhelm-ui/js-tests/paste-sanitizer.test.js, crates/farhelm-ui/js-tests/shift-enter-key.test.js, crates/farhelm-ui/js-tests/term-bytes.test.js; phases complete small per-commit changes",
+    "interfaces": [
+      "g002",
+      "g009",
+      "g010",
+      "g011",
+      "g079",
+      "g080",
+      "g081",
+      "g082",
+      "g083",
+      "g084",
+      "g187",
+      "g188",
+      "g189",
+      "g190",
+      "g191",
+      "g192",
+      "g193",
+      "g194",
+      "g195",
+      "g196",
+      "g197"
+    ],
+    "sources": [
+      {
+        "path": "[private-run]/prep/parts/01057-000.patch",
+        "ranges": [
+          [
+            1,
+            25
+          ]
+        ],
+        "original_path": "crates/farhelm-ui/assets/composition-guard.js",
+        "commit": "f560058da19e02716e6f943883a9508b447aff4e",
+        "notes": "patch header; patch character offsets [0,1376)",
+        "lines": 25,
+        "bytes": 1376,
+        "start": 0,
+        "end": 1376,
+        "original": "[private-run]/prep/originals/01057.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/01058-000.patch",
+        "ranges": [
+          [
+            1,
+            143
+          ]
+        ],
+        "original_path": "crates/farhelm-ui/assets/copy-on-select.js",
+        "commit": "f560058da19e02716e6f943883a9508b447aff4e",
+        "notes": "patch header; patch character offsets [0,7794)",
+        "lines": 143,
+        "bytes": 7804,
+        "start": 0,
+        "end": 7794,
+        "original": "[private-run]/prep/originals/01058.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/01061-000.patch",
+        "ranges": [
+          [
+            1,
+            112
+          ]
+        ],
+        "original_path": "crates/farhelm-ui/assets/grid-input.js",
+        "commit": "f560058da19e02716e6f943883a9508b447aff4e",
+        "notes": "patch header; patch character offsets [0,5907)",
+        "lines": 112,
+        "bytes": 5907,
+        "start": 0,
+        "end": 5907,
+        "original": "[private-run]/prep/originals/01061.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/01066-000.patch",
+        "ranges": [
+          [
+            1,
+            48
+          ]
+        ],
+        "original_path": "crates/farhelm-ui/assets/paste-sanitizer.js",
+        "commit": "f560058da19e02716e6f943883a9508b447aff4e",
+        "notes": "patch header; patch character offsets [0,2451)",
+        "lines": 48,
+        "bytes": 2459,
+        "start": 0,
+        "end": 2451,
+        "original": "[private-run]/prep/originals/01066.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/01068-000.patch",
+        "ranges": [
+          [
+            1,
+            175
+          ]
+        ],
+        "original_path": "crates/farhelm-ui/assets/shift-enter-key.js",
+        "commit": "f560058da19e02716e6f943883a9508b447aff4e",
+        "notes": "patch header; patch character offsets [0,9959)",
+        "lines": 175,
+        "bytes": 10003,
+        "start": 0,
+        "end": 9959,
+        "original": "[private-run]/prep/originals/01068.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/01070-000.patch",
+        "ranges": [
+          [
+            1,
+            77
+          ]
+        ],
+        "original_path": "crates/farhelm-ui/assets/term-bytes.js",
+        "commit": "f560058da19e02716e6f943883a9508b447aff4e",
+        "notes": "patch header; patch character offsets [0,3969)",
+        "lines": 77,
+        "bytes": 3983,
+        "start": 0,
+        "end": 3969,
+        "original": "[private-run]/prep/originals/01070.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/01088-000.patch",
+        "ranges": [
+          [
+            1,
+            13
+          ]
+        ],
+        "original_path": "crates/farhelm-ui/js-tests/composition-guard.test.js",
+        "commit": "f560058da19e02716e6f943883a9508b447aff4e",
+        "notes": "patch header; patch character offsets [0,794)",
+        "lines": 13,
+        "bytes": 794,
+        "start": 0,
+        "end": 794,
+        "original": "[private-run]/prep/originals/01088.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/01089-000.patch",
+        "ranges": [
+          [
+            1,
+            103
+          ]
+        ],
+        "original_path": "crates/farhelm-ui/js-tests/copy-on-select.test.js",
+        "commit": "f560058da19e02716e6f943883a9508b447aff4e",
+        "notes": "patch header; patch character offsets [0,6029)",
+        "lines": 103,
+        "bytes": 6033,
+        "start": 0,
+        "end": 6029,
+        "original": "[private-run]/prep/originals/01089.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/01092-000.patch",
+        "ranges": [
+          [
+            1,
+            51
+          ]
+        ],
+        "original_path": "crates/farhelm-ui/js-tests/grid-input-tables.js",
+        "commit": "f560058da19e02716e6f943883a9508b447aff4e",
+        "notes": "patch header; patch character offsets [0,2691)",
+        "lines": 51,
+        "bytes": 2691,
+        "start": 0,
+        "end": 2691,
+        "original": "[private-run]/prep/originals/01092.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/01093-000.patch",
+        "ranges": [
+          [
+            1,
+            15
+          ]
+        ],
+        "original_path": "crates/farhelm-ui/js-tests/grid-input.test.js",
+        "commit": "f560058da19e02716e6f943883a9508b447aff4e",
+        "notes": "patch header; patch character offsets [0,1052)",
+        "lines": 15,
+        "bytes": 1052,
+        "start": 0,
+        "end": 1052,
+        "original": "[private-run]/prep/originals/01093.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/01094-000.patch",
+        "ranges": [
+          [
+            1,
+            66
+          ]
+        ],
+        "original_path": "crates/farhelm-ui/js-tests/paste-sanitizer.test.js",
+        "commit": "f560058da19e02716e6f943883a9508b447aff4e",
+        "notes": "patch header; patch character offsets [0,3592)",
+        "lines": 66,
+        "bytes": 3608,
+        "start": 0,
+        "end": 3592,
+        "original": "[private-run]/prep/originals/01094.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/01096-000.patch",
+        "ranges": [
+          [
+            1,
+            185
+          ]
+        ],
+        "original_path": "crates/farhelm-ui/js-tests/shift-enter-key.test.js",
+        "commit": "f560058da19e02716e6f943883a9508b447aff4e",
+        "notes": "patch header; patch character offsets [0,8100)",
+        "lines": 185,
+        "bytes": 8132,
+        "start": 0,
+        "end": 8100,
+        "original": "[private-run]/prep/originals/01096.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/01098-000.patch",
+        "ranges": [
+          [
+            1,
+            124
+          ]
+        ],
+        "original_path": "crates/farhelm-ui/js-tests/term-bytes.test.js",
+        "commit": "f560058da19e02716e6f943883a9508b447aff4e",
+        "notes": "patch header; patch character offsets [0,6647)",
+        "lines": 124,
+        "bytes": 6675,
+        "start": 0,
+        "end": 6647,
+        "original": "[private-run]/prep/originals/01098.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/01493-000.patch",
+        "ranges": [
+          [
+            1,
+            79
+          ]
+        ],
+        "original_path": "crates/farhelm-ui/assets/grid-input.js",
+        "commit": "61e632323dbc6b4a35ed27bf5b9833102ffd5a4e",
+        "notes": "patch header; patch character offsets [0,4226)",
+        "lines": 79,
+        "bytes": 4226,
+        "start": 0,
+        "end": 4226,
+        "original": "[private-run]/prep/originals/01493.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/01499-000.patch",
+        "ranges": [
+          [
+            1,
+            12
+          ]
+        ],
+        "original_path": "crates/farhelm-ui/js-tests/grid-input.test.js",
+        "commit": "61e632323dbc6b4a35ed27bf5b9833102ffd5a4e",
+        "notes": "patch header; patch character offsets [0,699)",
+        "lines": 12,
+        "bytes": 699,
+        "start": 0,
+        "end": 699,
+        "original": "[private-run]/prep/originals/01499.patch"
+      }
+    ],
+    "lines": 1228,
+    "bytes": 65442
+  },
+  "records": [
+    {
+      "key": "g186/c1",
+      "owner": "g186",
+      "id": "c1",
+      "domain": "terminal-input-copy",
+      "purpose": "terminal-input-copy: crates/farhelm-ui/assets/composition-guard.js, crates/farhelm-ui/assets/copy-on-select.js, crates/farhelm-ui/assets/grid-input.js, crates/farhelm-ui/assets/paste-sanitizer.js, crates/farhelm-ui/assets/shift-enter-key.js, crates/farhelm-ui/assets/term-bytes.js, crates/farhelm-ui/js-tests/composition-guard.test.js, crates/farhelm-ui/js-tests/copy-on-select.test.js, crates/farhelm-ui/js-tests/grid-input-tables.js, crates/farhelm-ui/js-tests/grid-input.test.js, crates/farhelm-ui/js-tests/paste-sanitizer.test.js, crates/farhelm-ui/js-tests/shift-enter-key.test.js, crates/farhelm-ui/js-tests/term-bytes.test.js; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 1,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c1",
+            "state": "open",
+            "summary": "Paste sanitizing survives the helper replacement",
+            "location": "crates/farhelm-ui/assets/paste-sanitizer.js:26",
+            "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e. TLDR: considered whether removing term-bytes.js lets pasted text escape its bracketed-paste frame; source refutes this regression. Details: the new paste-sanitizer.js:26-28 preserves the removed term-bytes.js:55-57 regular expression exactly. src/lib.rs:1445 registers the new asset; terminal.js:3204 gates mounting on farhelmPasteSanitizer, :1910 sanitizes intercepted text, and :4354 supplies the same sanitizer to grid-terminal.js, whose paste listener at :1559 sanitizes plain text before paste(). grid_input.rs:576-583 independently states server-side sanitizing at the framing boundary. Contract: SPEC_impl.md, The grid client, says 'Input goes up as small JSON messages (keys, text, pastes, mouse and focus events), never as encoded bytes'. Suggested bucket: highest if a paste-frame escape route existed; could-be-highest: yes, because unintended typed shell input can execute pasted commands. Confidence: confirmed source refutation of the deletion/move regression; no execution. proposed_drop: source refutation, behavior and callers preserved; possible_cover: none. Caveat: this does not claim that every pre-existing sanitizer behavior was newly audited; the assigned change moves the same implementation."
+          }
+        },
+        {
+          "line": 9,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c1",
+            "state": "open",
+            "summary": "Paste sanitizing survives the helper replacement",
+            "location": "crates/farhelm-ui/assets/paste-sanitizer.js:26",
+            "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e. TLDR: considered whether removing term-bytes.js permits pasted commands to escape their bracketed-paste frame; the implementation move and its callers preserve sanitizing. Details: paste-sanitizer.js:26-28 copies the deleted term-bytes.js regular expression. src/lib.rs:1445 registers its asset and :1914 mounts the script; terminal.js:3204 gates mounting on the global. Intercepted text is sanitized at terminal.js:1910 and the pasteText callback at :4369 invokes created.paste; the component receives the same sanitizer at :4354 and its own plain-text paste listener at grid-terminal.js:1559 calls it before paste(). Synthesis checked multipart behavior rather than relying on comments: grid-input.js:447-477 splits already-sanitized text on characters and keeps CRLF together. grid_input.rs:223-249 actually passes each paste part through PasteText before adding framing. PasteText::byte at :623-646 strips ESC and complete end markers, retains partial markers between chunks, and reprocesses mismatches; end at :617-622 omits any held ESC at the last part. This closes the earlier premise that server sanitizing was only documented rather than implemented. Contract: SPEC_impl.md The grid client says 'Input goes up as small JSON messages (keys, text, pastes, mouse and focus events), never as encoded bytes'; server framing owns its own content sanitizing. Suggested bucket: highest if an escape route ran pasted text as typed shell commands; could-be-highest: yes for that considered route, which is refuted for this move. Confidence: confirmed source refutation; no execution. proposed_drop: source refutation, implementation and callers preserved; possible_cover: none. Caveat: this does not independently certify every pre-existing terminal program's paste handling or native browser behavior."
+          }
+        }
+      ],
+      "latest": {
+        "line": 9,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c1",
+          "state": "open",
+          "summary": "Paste sanitizing survives the helper replacement",
+          "location": "crates/farhelm-ui/assets/paste-sanitizer.js:26",
+          "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e. TLDR: considered whether removing term-bytes.js permits pasted commands to escape their bracketed-paste frame; the implementation move and its callers preserve sanitizing. Details: paste-sanitizer.js:26-28 copies the deleted term-bytes.js regular expression. src/lib.rs:1445 registers its asset and :1914 mounts the script; terminal.js:3204 gates mounting on the global. Intercepted text is sanitized at terminal.js:1910 and the pasteText callback at :4369 invokes created.paste; the component receives the same sanitizer at :4354 and its own plain-text paste listener at grid-terminal.js:1559 calls it before paste(). Synthesis checked multipart behavior rather than relying on comments: grid-input.js:447-477 splits already-sanitized text on characters and keeps CRLF together. grid_input.rs:223-249 actually passes each paste part through PasteText before adding framing. PasteText::byte at :623-646 strips ESC and complete end markers, retains partial markers between chunks, and reprocesses mismatches; end at :617-622 omits any held ESC at the last part. This closes the earlier premise that server sanitizing was only documented rather than implemented. Contract: SPEC_impl.md The grid client says 'Input goes up as small JSON messages (keys, text, pastes, mouse and focus events), never as encoded bytes'; server framing owns its own content sanitizing. Suggested bucket: highest if an escape route ran pasted text as typed shell commands; could-be-highest: yes for that considered route, which is refuted for this move. Confidence: confirmed source refutation; no execution. proposed_drop: source refutation, implementation and callers preserved; possible_cover: none. Caveat: this does not independently certify every pre-existing terminal program's paste handling or native browser behavior."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g186/findings.jsonl",
+        "id": "c1",
+        "line": 9,
+        "disposition": "under-investigation",
+        "group": "g186-c1",
+        "reason": "Record durably acknowledged; parent source/contract validation, cross-group synthesis, coverage/filter matching and any independent drop check remain pending. This preserves the claim and uncertainty without accepting, dropping or lowering it."
+      },
+      "accepted_parent_decision": null,
+      "returned_claim_checks": [
+        {
+          "batch": "claims-117",
+          "key": "g186/c1",
+          "latest_line": 9,
+          "recommendation": "refuted",
+          "bucket": "other",
+          "underlying_key": "paste-sanitizer-move-bracket-frame-escape",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The helper move preserves the sanitizer and its callers. No removal-induced paste-frame escape is established. This is source refutation of that move, not certification of every terminal program's paste behavior.",
+          "checks": [
+            "f560058da19e02716e6f943883a9508b447aff4e diff: deleted assets/term-bytes.js:55-57 and added assets/paste-sanitizer.js:26-28 have the identical ESC/end-marker replacement.",
+            "At f560058d, crates/farhelm-ui/src/lib.rs:1445,1914 registers and mounts the asset; assets/terminal.js:3204 waits for its global, :1910 sanitizes intercepted text, :4354 supplies the component sanitizer and :4369 routes attachment text through created.paste. assets/grid-terminal.js:1549-1559 sanitizes ordinary text paste before paste().",
+            "At f560058d, assets/grid-input.js:447-477 splits text at characters and keeps CRLF together. crates/farhelm-supervisor/src/grid_input.rs:223-249 actually runs PasteText before framing. :617-646 removes ESC and whole closing markers, carries partial markers across parts and reprocesses mismatches. These are source checks, not executed reproductions."
+          ],
+          "coverage_checked": [
+            "Current SPEC.md Terminal experience and SPEC_impl.md The grid client/Terminal widget require structured paste handling; neither accepts an escape regression.",
+            "TODO.md Planned is empty. Searches of plans/queue found no plan fixing this trigger; tmux-end-old-terminals acceptance criteria 3-5 remove legacy helpers but do not authorize weakened paste filtering.",
+            "BUGS.md has only the unrelated SSH-helper provisioning hang. INDEX.md read in full; no exact sanitizer-move item. Paste receipt/backpressure entries have different triggers and consequences. Active TRIAGE_OUTCOMES.md searches found no matching decision; archive not read.",
+            "FILTER.md read in full. No filter is the proposed basis; a paste escape capable of executing commands lies outside the rare-diagnostic filter."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": "No source route from this move to escaping the paste frame was found. Native browser behavior and arbitrary terminal programs were not executed or independently audited.",
+          "original_stronger_consequence": "Highest if deleting term-bytes.js allowed pasted text to close bracketed paste and run remaining text as typed shell commands. Both historical events propose source refutation of this regression; neither is an accepted parent drop.",
+          "needs_independent_drop_check": true,
+          "proposed_basis": "Drop only the removal/move regression after the required independent check. The other bucket denotes no established surviving harm and must not erase the original highest consequence from the drop register."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": true,
+        "provisional_bucket": "highest",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "paste-sanitizer-move-bracket-frame-escape",
+        "destination": null
+      }
+    },
+    {
+      "key": "g186/c2",
+      "owner": "g186",
+      "id": "c2",
+      "domain": "terminal-input-copy",
+      "purpose": "terminal-input-copy: crates/farhelm-ui/assets/composition-guard.js, crates/farhelm-ui/assets/copy-on-select.js, crates/farhelm-ui/assets/grid-input.js, crates/farhelm-ui/assets/paste-sanitizer.js, crates/farhelm-ui/assets/shift-enter-key.js, crates/farhelm-ui/assets/term-bytes.js, crates/farhelm-ui/js-tests/composition-guard.test.js, crates/farhelm-ui/js-tests/copy-on-select.test.js, crates/farhelm-ui/js-tests/grid-input-tables.js, crates/farhelm-ui/js-tests/grid-input.test.js, crates/farhelm-ui/js-tests/paste-sanitizer.test.js, crates/farhelm-ui/js-tests/shift-enter-key.test.js, crates/farhelm-ui/js-tests/term-bytes.test.js; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 2,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c2",
+            "state": "open",
+            "summary": "Removing the raw OSC 52 classifier does not turn clipboard reads into writes",
+            "location": "crates/farhelm-ui/assets/copy-on-select.js:173",
+            "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e. TLDR: considered whether removing isOsc52Write lets a program read the clipboard or falsely suppresses the drag-copy notice. Details: the removed helper classified raw xterm payloads. The replacement page receives completed writes: farhelm-terminal-emulator/src/effects.rs:177-188 maps ClipboardStore to Clipboard effects and discards ClipboardLoad; :207-208 delivers live Clipboard effects as notices. grid-terminal.js:1983 calls onClipboard for the model's completed clipboard messages, and terminal.js:4326-4330 increments the program-write counter for those callbacks, forwarding only the clipboard target to the write sink. Thus a read query cannot reach that counter through this event path and no raw classifier remains necessary. Contract: SPEC.md, Terminal experience, says 'an OSC 52 READ is never answered with clipboard contents' and 'Any completed program clipboard write, including a primary-selection write, suppresses it during the grace window.' Suggested bucket: highest for a clipboard-read exposure if established; other for false notice suppression alone. could-be-highest: yes for the considered confidentiality route, which the source refutes here. Confidence: confirmed source refutation; no execution. proposed_drop: source refutation, only completed write events reach the remaining callback; possible_cover: none. Caveat: this is an analysis of the helper removal and callback interface, not an independent audit of all escape-sequence parsing."
+          }
+        },
+        {
+          "line": 5,
+          "event": {
+            "version": 1,
+            "kind": "lead",
+            "id": "c2",
+            "state": "open",
+            "summary": "Check whether primary clipboard writes reach the drag-copy counter",
+            "location": "crates/farhelm-supervisor/src/service/grid_stream.rs:845",
+            "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e. TLDR: the initial clipboard-read exposure concern remains source-refuted, but synthesis found a concrete delivery premise to check: primary writes may be filtered before the drag-copy counter can suppress guidance. Source basis: targeted git show search of service/grid_stream.rs returned :845-846 matching Notice::Clipboard only when clipboard_target(target) equals ClipboardTarget::Clipboard. terminal.js:4326-4330 counts both callback targets, but that alone does not prove primary notices reach it. Suspected consequence: a program that writes only primary selection could still show the copied-nothing guidance, contrary to SPEC.md Terminal experience: 'Any completed program clipboard write, including a primary-selection write, suppresses it during the grace window.' Checks made: initial emulator Event::ClipboardLoad is ignored and ClipboardStore produces effects; grid-model.js search shows takeClipboard yields completed writes. Exact remaining premise: whether the target filter is viewer delivery, another sink, or accompanied by a separate primary-notice path; also whether any violation is introduced by assigned removal versus pre-existing. Read surrounding server transport and parent revision next. Suggested bucket: other for false guidance; original potential clipboard-read exposure would be highest but remains refuted. could-be-highest: yes only for that original confidentiality concern, not this new guidance lead. Confidence: unverified pending readily available source checks, not execution. proposed_drop: pending for primary-delivery lead; original read-exposure route is source-refuted. possible_cover: none. No runtime tests or reproduction."
+          }
+        },
+        {
+          "line": 6,
+          "event": {
+            "version": 1,
+            "kind": "lead",
+            "id": "c2",
+            "state": "open",
+            "summary": "Primary clipboard writes are filtered before the drag-copy counter",
+            "location": "crates/farhelm-supervisor/src/service/grid_stream.rs:845",
+            "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e. TLDR: source confirms primary-only copying cannot suppress the page's copied-nothing guidance on this server path; attribution to the assigned change remains to check. Details: grid_stream.rs:844-849 stashes only ClipboardTarget::Clipboard; :786-788 sends only that stored target. grid-model.js:1043-1064 can assemble both targets, but support in the consumer cannot recover a primary notice the server discarded. terminal.js:4326-4330 counts callbacks, so a primary-only program has no increment; :4426-4431 can consequently show the guidance. Contract: SPEC.md Terminal experience says 'Any completed program clipboard write, including a primary-selection write, suppresses it during the grace window.' Checks made this turn: read full stash/sending context and model assembly; confirmed filter is viewer delivery, not an unrelated sink. Exact missing premise: whether assigned removal introduced or expanded this behavior versus a pre-existing grid-only issue; compare the parent source next. Source also closes an input-routing gap: grid_stream.rs:1077-1089 encodes each key to one QueuedInput::OneOff; :1247-1257 sends that complete chunk via input_frames. Original confidentiality consequence is unchanged: an actual clipboard-read exposure would be highest, but emulator read effects remain discarded and no such route is present. Suggested bucket: other for false guidance. could-be-highest: only the source-refuted original confidentiality route. Confidence: source-confirmed primary-delivery filter; change attribution unverified pending available parent comparison. proposed_drop: pending for primary-guidance lead; read exposure source-refuted. possible_cover: none. No execution."
+          }
+        },
+        {
+          "line": 7,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "c2",
+            "state": "open",
+            "summary": "Primary-selection writes cannot suppress the drag-copy guidance",
+            "location": "crates/farhelm-supervisor/src/service/grid_stream.rs:845",
+            "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e. TLDR: after a program handles a drag by writing to the primary selection, Farhelm can still tell the user that the program copied nothing. Details: the replacement described by copy-on-select.js after deletion of its raw isOsc52Write helper depends on completed onClipboard events. The emulator preserves primary writes (farhelm-terminal-emulator/src/effects.rs:180-181), but service/grid_stream.rs:844-849 retains only ClipboardTarget::Clipboard, and :786-788 emits only that target. Primary notices therefore never reach grid-model.js:1043-1064 or grid-terminal.js:1983. terminal.js:4326-4330 increments gridOsc52Writes only on callbacks; :4426-4431 consequently admits and later displays the notice even though a primary write completed. Contract: SPEC.md Terminal experience explicitly says 'Any completed program clipboard write, including a primary-selection write, suppresses it during the grace window.' SPEC_impl.md Terminal widget similarly names callbacks for both targets. Fix direction: carry enough primary-write notification through the viewer stream to count it, while retaining the rule that primary text does not write the viewer's system clipboard. Suggested bucket: other, because the established consequence is misleading selection guidance; no security or loss-of-work route established. Confidence: confirmed by source and contract analysis; no execution. proposed_drop: false for this replacement-contract defect. possible_cover: none known; server notice forwarding may fall within an interface group's scope, but no coverage sources were consulted. Material attribution caveat: comparison with f560058da19e02716e6f943883a9508b447aff4e^ shows identical grid-stream filtering and identical grid onClipboard counting. This is a pre-existing grid-path defect exposed while validating the deletion's replacement contract, not a newly introduced filter in the assigned commit; the removed xterm route counted raw OSC 52 writes, including primary writes, directly at parent terminal.js:4442-4444. Parent should retain that distinction when deciding scope or attribution. Original considered consequence preserved: removing the classifier might have exposed clipboard reads (highest), but Event::ClipboardLoad is ignored and no read exposure was found; that original route remains source-refuted. could-be-highest: only that refuted original confidentiality concern, not the established guidance defect."
+          }
+        },
+        {
+          "line": 10,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c2",
+            "state": "open",
+            "summary": "Removing the raw OSC 52 classifier does not expose clipboard reads",
+            "location": "crates/farhelm-ui/assets/copy-on-select.js:173",
+            "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e. Identity correction requested by caller: restore c2 to the original clipboard-confidentiality candidate and preserve every prior event. The distinct primary-guidance defect previously placed under c2 is tracked separately as linked f1; it is not dropped by this revision. TLDR: removing the browser raw OSC 52 classifier does not permit terminal programs to read the viewer clipboard. Details: farhelm-terminal-emulator/src/effects.rs:177-188 turns ClipboardStore into effects but discards ClipboardLoad; grid-terminal.js:1983 forwards completed model writes only and terminal.js:4326-4330 only calls a write sink. Original contract: SPEC.md Terminal experience says 'an OSC 52 READ is never answered with clipboard contents'. Suggested bucket for the considered disclosure: highest/security. could-be-highest: yes, clipboard secrets would be exposed if a read route existed; source refutes that route. Confidence: confirmed source refutation, no execution. proposed_drop: source refutation of the original confidentiality concern only, subject to independent checking; not an accepted parent drop. possible_cover: supplied g188/c3 corroborates the original boundary, without replacing this record or a coverage search. Prior consequence preserved separately: primary-selection writes fail to suppress drag-copy guidance, an other-bucket correctness issue linked as f1; earlier c2 lead/finding events remain valid evidence of that distinct cause. Base-range attribution is being checked under f1, not generalized from the immediate-parent check."
+          }
+        }
+      ],
+      "latest": {
+        "line": 10,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c2",
+          "state": "open",
+          "summary": "Removing the raw OSC 52 classifier does not expose clipboard reads",
+          "location": "crates/farhelm-ui/assets/copy-on-select.js:173",
+          "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e. Identity correction requested by caller: restore c2 to the original clipboard-confidentiality candidate and preserve every prior event. The distinct primary-guidance defect previously placed under c2 is tracked separately as linked f1; it is not dropped by this revision. TLDR: removing the browser raw OSC 52 classifier does not permit terminal programs to read the viewer clipboard. Details: farhelm-terminal-emulator/src/effects.rs:177-188 turns ClipboardStore into effects but discards ClipboardLoad; grid-terminal.js:1983 forwards completed model writes only and terminal.js:4326-4330 only calls a write sink. Original contract: SPEC.md Terminal experience says 'an OSC 52 READ is never answered with clipboard contents'. Suggested bucket for the considered disclosure: highest/security. could-be-highest: yes, clipboard secrets would be exposed if a read route existed; source refutes that route. Confidence: confirmed source refutation, no execution. proposed_drop: source refutation of the original confidentiality concern only, subject to independent checking; not an accepted parent drop. possible_cover: supplied g188/c3 corroborates the original boundary, without replacing this record or a coverage search. Prior consequence preserved separately: primary-selection writes fail to suppress drag-copy guidance, an other-bucket correctness issue linked as f1; earlier c2 lead/finding events remain valid evidence of that distinct cause. Base-range attribution is being checked under f1, not generalized from the immediate-parent check."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g186/findings.jsonl",
+        "id": "c2",
+        "line": 10,
+        "disposition": "under-investigation",
+        "group": "g186-c2",
+        "reason": "Record durably acknowledged; parent source/contract validation, cross-group synthesis, coverage/filter matching and any independent drop check remain pending. This preserves the claim and uncertainty without accepting, dropping or lowering it."
+      },
+      "accepted_parent_decision": null,
+      "returned_claim_checks": [
+        {
+          "batch": "claims-117",
+          "key": "g186/c2",
+          "latest_line": 10,
+          "recommendation": "refuted",
+          "bucket": "other",
+          "underlying_key": "osc52-classifier-removal-clipboard-read-disclosure",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The remaining callback receives completed clipboard writes. Removing a classifier for the deleted raw terminal path does not create a viewer-clipboard read route. The primary-selection guidance defect in earlier c2 events remains separate under g186/f1.",
+          "checks": [
+            "f560058da19e02716e6f943883a9508b447aff4e:crates/farhelm-terminal-emulator/src/effects.rs:173-190 produces effects for ClipboardStore and returns without an effect for ClipboardLoad; :207-208 forwards live clipboard effects as notices.",
+            "At f560058d, assets/grid-model.js:1043-1064 validates/assembles clipboard parts and only publishes a write on last. assets/grid-terminal.js:1983 calls onClipboard for model.takeClipboard(); assets/terminal.js:4326-4330 increments the counter and invokes only the clipboard write sink.",
+            "Read all c2 history: lines 5-7 found a distinct missing primary-write notification; line 10 restores confidentiality as c2's identity and explicitly preserves that guidance issue under f1. No runtime reproduction was performed."
+          ],
+          "coverage_checked": [
+            "Current SPEC.md:3053-3073 explicitly forbids answering OSC 52 reads; SPEC_impl.md:1728-1753 describes write-only delivery and both-target guidance counting. These do not accept disclosure. SPEC_impl.md:2067-2069 separately says primary notices are not sent, relevant to f1 only.",
+            "TODO.md Planned is empty. plans/queue searches found clipboard-cap alignment and removal of legacy plumbing, not permission for reads or an exact read-disclosure fix.",
+            "BUGS.md, full INDEX.md and active TRIAGE_OUTCOMES.md have no exact read-disclosure item/decision. The clipboard-drain work-bound item concerns scheduling, not clipboard confidentiality. No archive was read.",
+            "No FILTER.md boundary accepts clipboard disclosure. Refutation, not coverage/filtering, is proposed."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": "A read request reaching a viewer-clipboard read sink is absent on the checked event/callback path. This does not constitute a new audit of all escape parsing.",
+          "original_stronger_consequence": "Highest/security: a terminal program might obtain clipboard secrets after isOsc52Write removal. Initial c2 also considered false guidance suppression. Later primary-write findings under c2 were split into f1, not withdrawn as incorrect. The confidentiality refutation remains subject to independent checking.",
+          "needs_independent_drop_check": true,
+          "proposed_basis": "Drop only the classifier-removal confidentiality candidate after independent agreement. Preserve c2 lines 5-7 as provenance of g186/f1; do not use this refutation to dismiss primary guidance. The other bucket records that no surviving confidentiality route is established, not authorization to lower or drop it."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": true,
+        "clearly_refuted_candidate": false,
+        "needs_unfinished_gate": true,
+        "provisional_bucket": "highest",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "osc52-classifier-removal-clipboard-read-disclosure",
+        "destination": "trailing-osc52-classifier-removal-clipboard-read-disclosure.md"
+      }
+    },
+    {
+      "key": "g186/c3",
+      "owner": "g186",
+      "id": "c3",
+      "domain": "terminal-input-copy",
+      "purpose": "terminal-input-copy: crates/farhelm-ui/assets/composition-guard.js, crates/farhelm-ui/assets/copy-on-select.js, crates/farhelm-ui/assets/grid-input.js, crates/farhelm-ui/assets/paste-sanitizer.js, crates/farhelm-ui/assets/shift-enter-key.js, crates/farhelm-ui/assets/term-bytes.js, crates/farhelm-ui/js-tests/composition-guard.test.js, crates/farhelm-ui/js-tests/copy-on-select.test.js, crates/farhelm-ui/js-tests/grid-input-tables.js, crates/farhelm-ui/js-tests/grid-input.test.js, crates/farhelm-ui/js-tests/paste-sanitizer.test.js, crates/farhelm-ui/js-tests/shift-enter-key.test.js, crates/farhelm-ui/js-tests/term-bytes.test.js; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 3,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c3",
+            "state": "open",
+            "summary": "Legacy Shift+Enter and binary-byte helpers are replaced by server encoding",
+            "location": "crates/farhelm-ui/assets/shift-enter-key.js:1",
+            "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e. TLDR: considered whether removing the legacy helpers splits Shift+Enter into submit input or corrupts high-byte mouse reports. Source refutes the removal regression. Details: grid-terminal.js:1515-1521 sends one structured key message after keydownAction filters input. grid-input.js:326 ignores composing/229 keys and :337 leaves third-level-shift keys to browser input; :363-369 serializes the key and modifiers. grid_input.rs:299-312 adds ESC to Enter with exactly SHIFT; :269-270 chunks only above MAX_INPUT. terminal-host/src/host.rs:800-802 retains each Input as a separate segment and :581-600 offers that segment whole to libc::write. This path does not use or need the deleted xterm arm/merge lifecycle. Its existing host test :4536-4572 asserts write boundaries through datagrams; this test was read, not run. Binary mouse encoding now stays on the server: grid_input.rs:747-763 pushes each legacy report component directly into Vec<u8>, preserving high bytes without a browser binary-string conversion. Contract: SPEC.md, Terminal experience, says Shift+Enter 'is sent as ESC CR in a SINGLE write' and SPEC_impl.md says 'Input goes up as small JSON messages (keys, text, pastes, mouse and focus events), never as encoded bytes'. The changed table renderer's isShiftEnterChord at grid-input-tables.js:187-191 preserves the deleted match, while sentBytes :203-209 prefixes the same CR sequence. Suggested bucket: high for a newline-to-submit regression; could-be-highest: only if an established destructive shell command were thereby submitted, but no regression route is present. Confidence: confirmed source refutation; no execution. proposed_drop: source refutation, replacement encodes the whole key and raw mouse bytes without the removed browser helpers; possible_cover: none. Caveat: host.rs explicitly permits kernel partial pty writes; that pre-existing boundary is not introduced by these deletions and is not claimed to be empirically tested here."
+          }
+        },
+        {
+          "line": 8,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c3",
+            "state": "open",
+            "summary": "Legacy Shift+Enter and binary-byte helpers are replaced by server encoding",
+            "location": "crates/farhelm-ui/assets/shift-enter-key.js:1",
+            "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e. TLDR: removal of the legacy arm/merge and binary-string helpers does not itself split Shift+Enter or corrupt high-byte mouse reports. Initial consequence preserved: a split newline chord could become submit input (high, potentially highest with an established destructive command), but that removal regression is source-refuted. Details: grid-terminal.js:1515-1521 sends a structured key after keydownAction; grid-input.js:326 guards isComposing/229 and :363-369 serializes key/modifiers. grid_input.rs:299-312 prefixes CR with ESC for exactly SHIFT. Synthesis closed the pump linkage: terminal.js:4501-4505 encodes and sends one WebSocket frame; service/grid_stream.rs:1077-1089 encodes the key and queues a single QueuedInput::OneOff, and :1247-1257 hands its input_frames chunks to the runtime. grid_input.rs:269-270 splits only above MAX_INPUT; terminal-host/src/host.rs:800-802 retains each input segment and :581-600 offers it whole in the initial pty write. Mouse bytes are built directly in Vec<u8> at grid_input.rs:747-763. Contract: SPEC.md Terminal experience says Shift+Enter 'is sent as ESC CR in a SINGLE write'; SPEC_impl.md says 'Input goes up as small JSON messages (keys, text, pastes, mouse and focus events), never as encoded bytes'. Table/test interaction: grid-input-tables.js:187-209 preserves the removed helper's exact classifier and CR prefix in the renderer, while grid-input-tables.test.js:32-46 compares generated tables to checked-in fixtures, so removing the production helper does not silently replace fixed expectations with unconstrained generated output. The existing host datagram test at host.rs:4536-4572 directly specifies initial write boundaries. All tests were read, not run. Suggested bucket: high for hypothetical newline-to-submit regression; could-be-highest: only if a destructive-command route were established, which was not. Confidence: confirmed source refutation of this removal regression. proposed_drop: source refutation; possible_cover: none. Caveats: the host permits kernel partial pty writes; no execution establishes native behavior here. The page's third-level-shift filter is platform/key-code bounded (grid-input.js:289-293), not a universal AltGraph guard; the previous record's broad guard wording must not be read as proof of every AltGraph combination. That policy and the server key path pre-exist this removal; the deleted classifier only served the removed xterm path."
+          }
+        },
+        {
+          "line": 14,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c3",
+            "state": "open",
+            "summary": "Legacy helper removal preserves structured input; documentation caveat remains separate",
+            "location": "crates/farhelm-ui/assets/shift-enter-key.js:1",
+            "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e. Discovery interface synthesis: c3's proposed runtime-removal refutation must not refute the distinct documentation defect supplied as g010/f1. Original TLDR/consequence: deleting the legacy Shift+Enter arm/merge and binary-string conversion could split the chord into submit input or corrupt mouse high bytes; a destructive-command route could be highest, but no such new removal route was established. Source still establishes one structured key from grid-terminal.js:1515-1521, one encoded ESC CR at grid_input.rs:299-312, and one queued input through service/grid_stream.rs:1077-1089/1247-1257; host.rs:581-600 offers that input whole on its first pty write. grid_input.rs:747-763 constructs raw mouse Vec<u8> directly. The table-only predicate preserves expected key bytes; c5 separately analyzes its omitted event-type guard using its actual callers. Contract: SPEC.md Terminal experience says Shift+Enter 'is sent as ESC CR in a SINGLE write'. Material distinct caveat from exact supplied g010/f1: SPEC_impl.md:1722-1727 newly says the host writes in one write, whereas host.rs:573-580 and terminal-host/SPEC.md:399-403 explicitly permit kernel short writes and later suffix writes; read boundaries are not guaranteed. The new grid-input-tables.js:182-184 comment also states the single-write intent, and c3 does not establish physical-write atomicity or certify that documentation claim. Treat that as linked known documentation evidence, not a new independent discovery or a defect refuted by production encoding. Suggested bucket: high for hypothetical newline-to-submit runtime regression, other for the known documentation contradiction; could-be-highest: only an established destructive submit route, which remains absent here. Confidence: confirmed source refutation of the deleted-helper dependency; no execution. proposed_drop: limited to the original removal-induced runtime regression, with independent checking still required; no drop proposed here for g010/f1 and no parent drop or lowering accepted. possible_cover: caller-supplied exact g010/f1 is the distinct documentation finding for consolidation. Caveat preserved: third-level-shift policy is platform/key-code bounded, not a universal AltGraph guard, and predates the assigned removal."
+          }
+        }
+      ],
+      "latest": {
+        "line": 14,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c3",
+          "state": "open",
+          "summary": "Legacy helper removal preserves structured input; documentation caveat remains separate",
+          "location": "crates/farhelm-ui/assets/shift-enter-key.js:1",
+          "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e. Discovery interface synthesis: c3's proposed runtime-removal refutation must not refute the distinct documentation defect supplied as g010/f1. Original TLDR/consequence: deleting the legacy Shift+Enter arm/merge and binary-string conversion could split the chord into submit input or corrupt mouse high bytes; a destructive-command route could be highest, but no such new removal route was established. Source still establishes one structured key from grid-terminal.js:1515-1521, one encoded ESC CR at grid_input.rs:299-312, and one queued input through service/grid_stream.rs:1077-1089/1247-1257; host.rs:581-600 offers that input whole on its first pty write. grid_input.rs:747-763 constructs raw mouse Vec<u8> directly. The table-only predicate preserves expected key bytes; c5 separately analyzes its omitted event-type guard using its actual callers. Contract: SPEC.md Terminal experience says Shift+Enter 'is sent as ESC CR in a SINGLE write'. Material distinct caveat from exact supplied g010/f1: SPEC_impl.md:1722-1727 newly says the host writes in one write, whereas host.rs:573-580 and terminal-host/SPEC.md:399-403 explicitly permit kernel short writes and later suffix writes; read boundaries are not guaranteed. The new grid-input-tables.js:182-184 comment also states the single-write intent, and c3 does not establish physical-write atomicity or certify that documentation claim. Treat that as linked known documentation evidence, not a new independent discovery or a defect refuted by production encoding. Suggested bucket: high for hypothetical newline-to-submit runtime regression, other for the known documentation contradiction; could-be-highest: only an established destructive submit route, which remains absent here. Confidence: confirmed source refutation of the deleted-helper dependency; no execution. proposed_drop: limited to the original removal-induced runtime regression, with independent checking still required; no drop proposed here for g010/f1 and no parent drop or lowering accepted. possible_cover: caller-supplied exact g010/f1 is the distinct documentation finding for consolidation. Caveat preserved: third-level-shift policy is platform/key-code bounded, not a universal AltGraph guard, and predates the assigned removal."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g186/findings.jsonl",
+        "id": "c3",
+        "line": 14,
+        "disposition": "under-investigation",
+        "group": "g186-c3",
+        "reason": "Record durably acknowledged; parent source/contract validation, cross-group synthesis, coverage/filter matching and any independent drop check remain pending. This preserves the claim and uncertainty without accepting, dropping or lowering it."
+      },
+      "accepted_parent_decision": null,
+      "returned_claim_checks": [
+        {
+          "batch": "claims-117",
+          "key": "g186/c3",
+          "latest_line": 14,
+          "recommendation": "refuted",
+          "bucket": "other",
+          "underlying_key": "legacy-input-helper-removal-structured-key-split",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The deleted browser merge and binary conversion serve the removed raw path. The surviving structured path encodes the exact ordinary Shift+Enter as one ESC CR input and constructs mouse bytes on the server. This does not establish physical pty-write atomicity or refute the separately supplied documentation defect.",
+          "checks": [
+            "At f560058da19e02716e6f943883a9508b447aff4e, assets/grid-terminal.js:1515-1521 sends one keyMessage after keydownAction. assets/terminal.js:4501-4505 sends its encoded message once. crates/farhelm-supervisor/src/grid_input.rs:299-312 prepends ESC for Enter with exactly SHIFT; :269-270 only chunks above MAX_INPUT.",
+            "At f560058d, service/grid_stream.rs:1077-1089 queues one QueuedInput::OneOff and :1247-1257 sends its input_frames pieces. terminal-host/src/host.rs:800-802 keeps each Input as its own segment; :581-600 initially offers its full remaining bytes to libc::write. grid_input.rs:747-763 constructs default mouse report bytes directly in Vec<u8>, including high bytes.",
+            "At f560058d, terminal-host/src/host.rs:573-580 and terminal-host/SPEC.md:399-403 explicitly allow short kernel writes and later suffix writes. The datagram test at host.rs:4536-4572 checks the initial whole offer, not native read boundaries. SPEC_impl.md:1722-1727 and the new grid-input-tables.js:182-184 comment state a stronger single-write promise; production encoding does not refute that known documentation concern.",
+            "assets/grid-input.js:289-293 limits third-level-shift filtering by platform and key code; :326 ignores composition/229. This is not a universal AltGraph exclusion. No execution was performed."
+          ],
+          "coverage_checked": [
+            "Current SPEC.md:2869-2877 promises exact-chord single-write delivery. SPEC_impl.md:1721-1726 repeats it; The grid client at :1859-1865 describes structured input and fixed tables. These are contracts, not accepted exceptions.",
+            "TODO.md Planned is empty. plans/queue/tmux-end-old-terminals.md acceptance criterion 4 removes the legacy merge; tmux-drop-from-docs.md preserves behavior and only rewrites rationale. Neither settles the stronger single-write documentation conflict.",
+            "Read queue/grid-shift-enter-loses-independent-altgraph.md: it covers the distinct pre-existing AltGraph modifier-loss route, not this helper-deletion regression. Read input-test-comments-overstate-termination-coverage.md: its atomic-co-arrival statements concern different WebSocket test helpers, not the pty guarantee. INDEX.md and active TRIAGE_OUTCOMES.md searches yielded no exact helper-removal or pty-documentation disposition. BUGS.md is unrelated; no archive read.",
+            "No FILTER.md rule is proposed. A proven destructive unintended submission would lie outside rare self-correcting diagnostics."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": "No removal-induced split or high-byte corruption was found. A kernel short write and harmful destructive-submit execution are not established here. The separate documentation contradiction is not resolved by these checks.",
+          "original_stronger_consequence": "High for newline becoming submit; potentially highest if an established destructive shell command were submitted. Historical c3 explicitly retains kernel partial-write and bounded AltGraph caveats. Latest c3 links g010/f1 as a separate documentation finding and proposes no drop of it.",
+          "needs_independent_drop_check": true,
+          "proposed_basis": "Refute only the deleted-helper dependency. Keep the possible highest route in the independent register and retain the separate single-write documentation evidence for its owner. Do not interpret the other bookkeeping bucket as an approved consequence lowering."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": true,
+        "provisional_bucket": "high",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "legacy-input-helper-removal-structured-key-split",
+        "destination": null
+      }
+    },
+    {
+      "key": "g186/c4",
+      "owner": "g186",
+      "id": "c4",
+      "domain": "terminal-input-copy",
+      "purpose": "terminal-input-copy: crates/farhelm-ui/assets/composition-guard.js, crates/farhelm-ui/assets/copy-on-select.js, crates/farhelm-ui/assets/grid-input.js, crates/farhelm-ui/assets/paste-sanitizer.js, crates/farhelm-ui/assets/shift-enter-key.js, crates/farhelm-ui/assets/term-bytes.js, crates/farhelm-ui/js-tests/composition-guard.test.js, crates/farhelm-ui/js-tests/copy-on-select.test.js, crates/farhelm-ui/js-tests/grid-input-tables.js, crates/farhelm-ui/js-tests/grid-input.test.js, crates/farhelm-ui/js-tests/paste-sanitizer.test.js, crates/farhelm-ui/js-tests/shift-enter-key.test.js, crates/farhelm-ui/js-tests/term-bytes.test.js; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 4,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c4",
+            "state": "open",
+            "summary": "The narrowed composition exclusion still matches the surviving terminal input",
+            "location": "crates/farhelm-ui/assets/composition-guard.js:56",
+            "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e. TLDR: considered whether narrowing the terminal-input selector lets the app's composition guard intercept terminal editing. Details: composition-guard.js:56-63 still excludes .grid-terminal-input from both compositionend tracking and event normalization; grid-terminal.js:368 assigns exactly that class to its input and :1536-1549 retains the terminal's own composition lifecycle. The removed selector named the deleted xterm input, not an additional grid input. composition-guard.test.js:97-139 keeps an isolated injected window and verifies the terminal event remains unmodified; only its selector expectation changed. The test does not mutate process environment. Contract: SPEC_impl.md, GUI: Dioxus, Input-method keys, says 'the grid terminal's input field retains its own input-method handling.' Suggested bucket: high for widespread terminal IME breakage if present. could-be-highest: no established security or loss-of-work consequence. Confidence: confirmed source refutation; no execution or claim about native Mac IME behavior. proposed_drop: source refutation, the surviving input class still takes the same exclusion; possible_cover: none."
+          }
+        }
+      ],
+      "latest": {
+        "line": 4,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c4",
+          "state": "open",
+          "summary": "The narrowed composition exclusion still matches the surviving terminal input",
+          "location": "crates/farhelm-ui/assets/composition-guard.js:56",
+          "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e. TLDR: considered whether narrowing the terminal-input selector lets the app's composition guard intercept terminal editing. Details: composition-guard.js:56-63 still excludes .grid-terminal-input from both compositionend tracking and event normalization; grid-terminal.js:368 assigns exactly that class to its input and :1536-1549 retains the terminal's own composition lifecycle. The removed selector named the deleted xterm input, not an additional grid input. composition-guard.test.js:97-139 keeps an isolated injected window and verifies the terminal event remains unmodified; only its selector expectation changed. The test does not mutate process environment. Contract: SPEC_impl.md, GUI: Dioxus, Input-method keys, says 'the grid terminal's input field retains its own input-method handling.' Suggested bucket: high for widespread terminal IME breakage if present. could-be-highest: no established security or loss-of-work consequence. Confidence: confirmed source refutation; no execution or claim about native Mac IME behavior. proposed_drop: source refutation, the surviving input class still takes the same exclusion; possible_cover: none."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g186/findings.jsonl",
+        "id": "c4",
+        "line": 4,
+        "disposition": "excluded",
+        "group": "composition-exclusion-selector-removal",
+        "reason": "Parent explicitly accepted named refuted proposal from claims-117 after inspecting it. The narrowed selector still identifies the surviving terminal input. Removing the deleted xterm input selector does not cause this composition guard to normalize grid-terminal events. Source-refute the selector-removal regression within the stated scope; do not generalize to native IME correctness. Checked source/results: [\"f560058da19e02716e6f943883a9508b447aff4e:assets/composition-guard.js:56-63 excludes .grid-terminal-input from compositionend tracking and event normalization. assets/grid-terminal.js:368 assigns that class; :1536-1549 retains its own composition lifecycle.\",\"At f560058d, js-tests/composition-guard.test.js:97-139 injects an isolated window, checks the exact selector and asserts that the terminal event remains unmodified. It does not mutate process environment. Read the test; did not run it. The patch removes only .xterm-helper-textarea from the selector.\"] Current coverage/results: [\"Current SPEC_impl.md:1487-1503 explicitly leaves grid-terminal input-method handling with the terminal and limits synthetic-test/native timing claims. SPEC.md Terminal experience requires normal terminal input fidelity; no accepted selector regression found.\",\"TODO.md Planned is empty. The Maybe later input-method composition-preview item at :547-552 is about displaying composition/candidate placement, not this selector. plans/queue/tmux-drop-from-docs.md:84 leaves that item alone; tmux-end-old-terminals criterion 4 removes dual selectors, without authorizing interception of surviving input.\",\"BUGS.md, full INDEX.md, plans/queue and active TRIAGE_OUTCOMES.md searches show no exact selector-regression coverage. No archive read. No FILTER.md rule is used.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"High if this narrowing caused widespread terminal IME breakage. The sole historical record source-refutes that regression and states no established security or work-loss consequence.\"; \"No mismatch between the surviving input class and exclusion exists. Native Mac IME behavior was not executed.\"."
+      },
+      "accepted_parent_decision": {
+        "key": "g186/c4",
+        "line": 4,
+        "disposition": "excluded",
+        "group": "composition-exclusion-selector-removal",
+        "bucket": "other",
+        "recording": "refuted",
+        "queue_target_candidate": null,
+        "needs_independent_drop_check": false,
+        "reason": "Parent explicitly accepted named refuted proposal from claims-117 after inspecting it. The narrowed selector still identifies the surviving terminal input. Removing the deleted xterm input selector does not cause this composition guard to normalize grid-terminal events. Source-refute the selector-removal regression within the stated scope; do not generalize to native IME correctness. Checked source/results: [\"f560058da19e02716e6f943883a9508b447aff4e:assets/composition-guard.js:56-63 excludes .grid-terminal-input from compositionend tracking and event normalization. assets/grid-terminal.js:368 assigns that class; :1536-1549 retains its own composition lifecycle.\",\"At f560058d, js-tests/composition-guard.test.js:97-139 injects an isolated window, checks the exact selector and asserts that the terminal event remains unmodified. It does not mutate process environment. Read the test; did not run it. The patch removes only .xterm-helper-textarea from the selector.\"] Current coverage/results: [\"Current SPEC_impl.md:1487-1503 explicitly leaves grid-terminal input-method handling with the terminal and limits synthetic-test/native timing claims. SPEC.md Terminal experience requires normal terminal input fidelity; no accepted selector regression found.\",\"TODO.md Planned is empty. The Maybe later input-method composition-preview item at :547-552 is about displaying composition/candidate placement, not this selector. plans/queue/tmux-drop-from-docs.md:84 leaves that item alone; tmux-end-old-terminals criterion 4 removes dual selectors, without authorizing interception of surviving input.\",\"BUGS.md, full INDEX.md, plans/queue and active TRIAGE_OUTCOMES.md searches show no exact selector-regression coverage. No archive read. No FILTER.md rule is used.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"High if this narrowing caused widespread terminal IME breakage. The sole historical record source-refutes that regression and states no established security or work-loss consequence.\"; \"No mismatch between the surviving input class and exclusion exists. Native Mac IME behavior was not executed.\"."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-117",
+          "key": "g186/c4",
+          "latest_line": 4,
+          "recommendation": "refuted",
+          "bucket": "other",
+          "underlying_key": "composition-exclusion-selector-removal",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The narrowed selector still identifies the surviving terminal input. Removing the deleted xterm input selector does not cause this composition guard to normalize grid-terminal events.",
+          "checks": [
+            "f560058da19e02716e6f943883a9508b447aff4e:assets/composition-guard.js:56-63 excludes .grid-terminal-input from compositionend tracking and event normalization. assets/grid-terminal.js:368 assigns that class; :1536-1549 retains its own composition lifecycle.",
+            "At f560058d, js-tests/composition-guard.test.js:97-139 injects an isolated window, checks the exact selector and asserts that the terminal event remains unmodified. It does not mutate process environment. Read the test; did not run it. The patch removes only .xterm-helper-textarea from the selector."
+          ],
+          "coverage_checked": [
+            "Current SPEC_impl.md:1487-1503 explicitly leaves grid-terminal input-method handling with the terminal and limits synthetic-test/native timing claims. SPEC.md Terminal experience requires normal terminal input fidelity; no accepted selector regression found.",
+            "TODO.md Planned is empty. The Maybe later input-method composition-preview item at :547-552 is about displaying composition/candidate placement, not this selector. plans/queue/tmux-drop-from-docs.md:84 leaves that item alone; tmux-end-old-terminals criterion 4 removes dual selectors, without authorizing interception of surviving input.",
+            "BUGS.md, full INDEX.md, plans/queue and active TRIAGE_OUTCOMES.md searches show no exact selector-regression coverage. No archive read. No FILTER.md rule is used."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": "No mismatch between the surviving input class and exclusion exists. Native Mac IME behavior was not executed.",
+          "original_stronger_consequence": "High if this narrowing caused widespread terminal IME breakage. The sole historical record source-refutes that regression and states no established security or work-loss consequence.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Source-refute the selector-removal regression within the stated scope; do not generalize to native IME correctness."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "high",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "composition-exclusion-selector-removal",
+        "destination": null
+      }
+    },
+    {
+      "key": "g186/f1",
+      "owner": "g186",
+      "id": "f1",
+      "domain": "terminal-input-copy",
+      "purpose": "terminal-input-copy: crates/farhelm-ui/assets/composition-guard.js, crates/farhelm-ui/assets/copy-on-select.js, crates/farhelm-ui/assets/grid-input.js, crates/farhelm-ui/assets/paste-sanitizer.js, crates/farhelm-ui/assets/shift-enter-key.js, crates/farhelm-ui/assets/term-bytes.js, crates/farhelm-ui/js-tests/composition-guard.test.js, crates/farhelm-ui/js-tests/copy-on-select.test.js, crates/farhelm-ui/js-tests/grid-input-tables.js, crates/farhelm-ui/js-tests/grid-input.test.js, crates/farhelm-ui/js-tests/paste-sanitizer.test.js, crates/farhelm-ui/js-tests/shift-enter-key.test.js, crates/farhelm-ui/js-tests/term-bytes.test.js; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 11,
+          "event": {
+            "version": 1,
+            "kind": "lead",
+            "id": "f1",
+            "state": "open",
+            "summary": "Primary-selection writes cannot suppress drag-copy guidance",
+            "location": "crates/farhelm-supervisor/src/service/grid_stream.rs:845",
+            "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e. Linked identity: this is the distinct primary-guidance cause previously recorded in c2; c2 retains the original clipboard-confidentiality candidate and its highest/security refutation. TLDR: primary-only program copying can still show the program-handles-selection guidance. Source-confirmed reviewed behavior: grid_stream.rs:844-849 filters to ClipboardTarget::Clipboard and :786-788 emits only that target; terminal.js:4326-4330 and :4426-4431 count delivered writes to suppress guidance. Material new attribution check: exclusive-base SPEC.md:3055-3057 already promises 'any completed program clipboard write, including a primary-selection write, suppresses it during the grace window'; base SPEC_impl.md:1833-1835 already claims both targets are counted by the grid. Thus the promise is not newly introduced in the range. Supplied exact g188/c3 event 6 says the base hosts/terminal.rs:3210-3221 filters primary and base terminal.js:6012-6016/6113-6124 counts only delivered writes. Exact remaining readily checkable premise: directly inspect those base behavior paths and the reviewed subscription to settle full-range attribution. Suggested bucket: other for misleading guidance; could-be-highest: no established security or loss-of-work route for this distinct defect. Confidence: reviewed mismatch confirmed by source; base behavior attribution pending direct check, not execution. proposed_drop: false pending completion; no parent drop or lowering accepted. possible_cover: caller-supplied g188/c3 is the same mismatch for consolidation; no prohibited coverage sources consulted. Original c2 confidentiality consequence is preserved under c2, and this record makes no clipboard-read claim."
+          }
+        },
+        {
+          "line": 12,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "f1",
+            "state": "open",
+            "summary": "Primary-selection writes cannot suppress drag-copy guidance (predates range)",
+            "location": "crates/farhelm-supervisor/src/service/grid_stream.rs:845",
+            "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e. Linked identity: distinct primary-guidance cause split from prior c2 events at caller request; c2 retains the independent highest/security clipboard-confidentiality candidate and source refutation. TLDR: a program that writes only its primary selection can still receive guidance that it copied nothing. Source confirms the mismatch, but both behavior and the primary-write promise already exist at the review's exclusive base. Details at reviewed revision: effects.rs:180-181 preserves primary effects; hosts/terminal.rs:3310-3321 broadcasts only ClipboardTarget::Clipboard; service/handlers.rs:1907-1915 supplies that subscription to the viewer; grid_stream.rs:844-849 independently retains only clipboard writes and :786-788 emits that target. Thus terminal.js:4326-4330 cannot increment gridOsc52Writes for primary writes and :4426-4431 permits the false notice. Current contract SPEC.md:3074-3075: 'Any completed program clipboard write, including a primary-selection write, suppresses it during the grace window.' Actual full-range checks: at exclusive base 6e423e30068b62c6cfa276c6d720ee35bb70387a, SPEC.md:3055-3057 already says 'any completed program clipboard write, including a primary-selection write, suppresses it during the grace window'; SPEC_impl.md:1833-1835 already describes the grid counting callbacks for either target. Base hosts/terminal.rs:3210-3221 has the same clipboard-only broadcast, base grid_stream.rs:845-850 the same target filter, and base terminal.js:6012-6016/6113-6124 the same delivered-write count and grace decision. Therefore neither the promise nor this grid-path omission is newly introduced anywhere in the pinned range. This is stronger attribution evidence than the earlier immediate-parent comparison. Suggested bucket: other for misleading guidance; could-be-highest: no established security or loss-of-work route for this distinct defect. Confidence: confirmed source analysis for the contract mismatch and base-range provenance; no execution. proposed_drop: proposed scope exclusion only, because the independently found grid-path behavior and its contradictory promise both predate the exclusive base; not a claim that behavior meets the contract, and not an accepted parent drop or lowering. possible_cover: caller-supplied exact g188/c3 event 6 describes the same mismatch for consolidation; no prohibited coverage sources searched. Caveats: removal's old xterm path counted primary OSC 52 writes directly, but terminal-host/grid sessions already had this omission before the range; do not label this a newly added filter or a newly introduced documentation promise. Fix direction if taken separately: deliver a primary-write notice for the count without writing its text to the viewer system clipboard. All prior c2 primary-guidance consequences/evidence are preserved by this linked record."
+          }
+        }
+      ],
+      "latest": {
+        "line": 12,
+        "event": {
+          "version": 1,
+          "kind": "finding",
+          "id": "f1",
+          "state": "open",
+          "summary": "Primary-selection writes cannot suppress drag-copy guidance (predates range)",
+          "location": "crates/farhelm-supervisor/src/service/grid_stream.rs:845",
+          "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e. Linked identity: distinct primary-guidance cause split from prior c2 events at caller request; c2 retains the independent highest/security clipboard-confidentiality candidate and source refutation. TLDR: a program that writes only its primary selection can still receive guidance that it copied nothing. Source confirms the mismatch, but both behavior and the primary-write promise already exist at the review's exclusive base. Details at reviewed revision: effects.rs:180-181 preserves primary effects; hosts/terminal.rs:3310-3321 broadcasts only ClipboardTarget::Clipboard; service/handlers.rs:1907-1915 supplies that subscription to the viewer; grid_stream.rs:844-849 independently retains only clipboard writes and :786-788 emits that target. Thus terminal.js:4326-4330 cannot increment gridOsc52Writes for primary writes and :4426-4431 permits the false notice. Current contract SPEC.md:3074-3075: 'Any completed program clipboard write, including a primary-selection write, suppresses it during the grace window.' Actual full-range checks: at exclusive base 6e423e30068b62c6cfa276c6d720ee35bb70387a, SPEC.md:3055-3057 already says 'any completed program clipboard write, including a primary-selection write, suppresses it during the grace window'; SPEC_impl.md:1833-1835 already describes the grid counting callbacks for either target. Base hosts/terminal.rs:3210-3221 has the same clipboard-only broadcast, base grid_stream.rs:845-850 the same target filter, and base terminal.js:6012-6016/6113-6124 the same delivered-write count and grace decision. Therefore neither the promise nor this grid-path omission is newly introduced anywhere in the pinned range. This is stronger attribution evidence than the earlier immediate-parent comparison. Suggested bucket: other for misleading guidance; could-be-highest: no established security or loss-of-work route for this distinct defect. Confidence: confirmed source analysis for the contract mismatch and base-range provenance; no execution. proposed_drop: proposed scope exclusion only, because the independently found grid-path behavior and its contradictory promise both predate the exclusive base; not a claim that behavior meets the contract, and not an accepted parent drop or lowering. possible_cover: caller-supplied exact g188/c3 event 6 describes the same mismatch for consolidation; no prohibited coverage sources searched. Caveats: removal's old xterm path counted primary OSC 52 writes directly, but terminal-host/grid sessions already had this omission before the range; do not label this a newly added filter or a newly introduced documentation promise. Fix direction if taken separately: deliver a primary-write notice for the count without writing its text to the viewer system clipboard. All prior c2 primary-guidance consequences/evidence are preserved by this linked record."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g186/findings.jsonl",
+        "id": "f1",
+        "line": 12,
+        "disposition": "under-investigation",
+        "group": "g186-f1",
+        "reason": "Record durably acknowledged; parent source/contract validation, cross-group synthesis, coverage/filter matching and any independent drop check remain pending. This preserves the claim and uncertainty without accepting, dropping or lowering it."
+      },
+      "accepted_parent_decision": null,
+      "returned_claim_checks": [
+        {
+          "batch": "claims-117",
+          "key": "g186/f1",
+          "latest_line": 12,
+          "recommendation": "out-of-range",
+          "bucket": "other",
+          "underlying_key": "primary-write-notice-filter-drag-guidance",
+          "aliases": [
+            "g186/c2 primary-guidance events at lines 5-7"
+          ],
+          "target_queue_file": null,
+          "why": "The misleading guidance mechanism is real by source, but both the omission and its contradictory promise already exist at the exclusive base. This is a proposed range exclusion, not a claim that the behavior meets its contract.",
+          "checks": [
+            "At f560058da19e02716e6f943883a9508b447aff4e, effects.rs:180-181 preserves selection writes. hosts/terminal.rs:3310-3321 broadcasts only ClipboardTarget::Clipboard; service/handlers.rs:1907-1915 passes that subscription to the grid; service/grid_stream.rs:844-849 independently filters to clipboard and :786-788 emits only that target. assets/terminal.js:4326-4330 counts delivered callbacks; :4426-4431 can therefore show guidance after a primary-only write.",
+            "Direct exclusive-base check at 6e423e30068b62c6cfa276c6d720ee35bb70387a: hosts/terminal.rs:3210-3221 already has the clipboard-only broadcast; service/grid_stream.rs:845-850 has the same stash filter; terminal.js:6012-6016 and :6113-6124 have the same delivered-write count and grace decision.",
+            "At the exclusive base, SPEC.md:3055-3057 already promises primary-write suppression and SPEC_impl.md:1833-1835 already claims either-target callback counting. Thus this is not a newly added documentation promise or filter within the review range. No runtime reproduction or frequency measurement occurred."
+          ],
+          "coverage_checked": [
+            "Current SPEC.md:3067-3068 and SPEC_impl.md:1747-1753 require counting primary writes. SPEC_impl.md:2067-2069 also explicitly says primary notices are not sent. This is a contract conflict worth preserving if the parent records this pre-existing issue separately; it is not unambiguous spec acceptance of misleading guidance.",
+            "TODO.md Planned is empty. plans/queue searches found clipboard-cap alignment and removal of old plumbing, not an exact primary-notice/count repair.",
+            "BUGS.md and active TRIAGE_OUTCOMES.md have no matching guidance disposition. Full INDEX.md has different guidance placement/detachment items and a clipboard-drain bound item, not this primary target omission. No archive read.",
+            "No FILTER.md omission is proposed. The supplied history names g188/c3 as the same issue, but that record was not assigned or independently read; parent should reconcile it using this underlying key."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": "No missing premise for base provenance or the conditional source mechanism. Actual occurrence/frequency was not measured. Whether to record a pre-existing issue beyond this trailing-review range is the parent's scope decision.",
+          "original_stronger_consequence": "The distinct f1 consequence remains other: false program-handles-selection guidance after a completed primary write. Earlier c2 histories found this while investigating a highest clipboard-confidentiality candidate, but the latter remains separately preserved under c2 and must not disappear through this split or scope exclusion.",
+          "needs_independent_drop_check": true,
+          "proposed_basis": "Exclude this exact pre-existing grid-path mismatch from findings introduced in the pinned range, preserving its contract conflict and c2 history. Conservative independent-check flag retains the earlier security-related identity split; no independent drop approval is supplied here."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": true,
+        "clearly_refuted_candidate": false,
+        "needs_unfinished_gate": true,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "primary-write-notice-filter-drag-guidance",
+        "destination": "trailing-primary-write-notice-filter-drag-guidance.md"
+      }
+    },
+    {
+      "key": "g186/c5",
+      "owner": "g186",
+      "id": "c5",
+      "domain": "terminal-input-copy",
+      "purpose": "terminal-input-copy: crates/farhelm-ui/assets/composition-guard.js, crates/farhelm-ui/assets/copy-on-select.js, crates/farhelm-ui/assets/grid-input.js, crates/farhelm-ui/assets/paste-sanitizer.js, crates/farhelm-ui/assets/shift-enter-key.js, crates/farhelm-ui/assets/term-bytes.js, crates/farhelm-ui/js-tests/composition-guard.test.js, crates/farhelm-ui/js-tests/copy-on-select.test.js, crates/farhelm-ui/js-tests/grid-input-tables.js, crates/farhelm-ui/js-tests/grid-input.test.js, crates/farhelm-ui/js-tests/paste-sanitizer.test.js, crates/farhelm-ui/js-tests/shift-enter-key.test.js, crates/farhelm-ui/js-tests/term-bytes.test.js; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 13,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c5",
+            "state": "open",
+            "summary": "The table-only Shift+Enter predicate does not need the deleted event-type guard",
+            "location": "crates/farhelm-ui/js-tests/grid-input-tables.js:186",
+            "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e. TLDR: discovery considered whether replacing shiftEnterKeyAction with isShiftEnterChord loses its keydown-only condition and makes the key oracle accept keyup/keypress events. Source refutes that input route. Details: the deleted production helper refused ev.type other than keydown. Its new table-only replacement at grid-input-tables.js:186-190 omits that guard, but its sole caller sentBytes at :200-205 is reached from keyTable at :226-232 with events built by keydown at :160-172, which fixes type to keydown. The helper and sentBytes are not exported (:442-451). It therefore cannot classify a keyup or keypress through the shipped table renderer, while the live grid listener remains specifically a keydown listener. The new predicate retains key, modifier, composition/229 and AltGraph checks; no fixture changes appear in the reviewed commit for grid-keys.jsonl, keydown-actions.jsonl or move-to-cell.txt (git diff of all three returned empty). The existing comparison tests use checked-in fixture content, rather than overwriting it during tests. Contract: SPEC_impl.md The grid client identifies checked-in tables as Farhelm's key/click contract; this change only decouples their renderer from a deleted legacy production module. Suggested bucket: other for a hypothetical weakened test oracle; could-be-highest: no, no production security or loss-of-work route follows from this table-helper event-type concern. Confidence: confirmed source refutation; no tests or reproduction executed. proposed_drop: no non-keydown caller exists and the renderer's input constructor establishes the omitted premise; not an accepted parent drop. possible_cover: none. Caveat: production correctness alone is not used to certify this test oracle; caller shape, export surface and fixed fixture comparison are the refuting evidence."
+          }
+        }
+      ],
+      "latest": {
+        "line": 13,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c5",
+          "state": "open",
+          "summary": "The table-only Shift+Enter predicate does not need the deleted event-type guard",
+          "location": "crates/farhelm-ui/js-tests/grid-input-tables.js:186",
+          "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e. TLDR: discovery considered whether replacing shiftEnterKeyAction with isShiftEnterChord loses its keydown-only condition and makes the key oracle accept keyup/keypress events. Source refutes that input route. Details: the deleted production helper refused ev.type other than keydown. Its new table-only replacement at grid-input-tables.js:186-190 omits that guard, but its sole caller sentBytes at :200-205 is reached from keyTable at :226-232 with events built by keydown at :160-172, which fixes type to keydown. The helper and sentBytes are not exported (:442-451). It therefore cannot classify a keyup or keypress through the shipped table renderer, while the live grid listener remains specifically a keydown listener. The new predicate retains key, modifier, composition/229 and AltGraph checks; no fixture changes appear in the reviewed commit for grid-keys.jsonl, keydown-actions.jsonl or move-to-cell.txt (git diff of all three returned empty). The existing comparison tests use checked-in fixture content, rather than overwriting it during tests. Contract: SPEC_impl.md The grid client identifies checked-in tables as Farhelm's key/click contract; this change only decouples their renderer from a deleted legacy production module. Suggested bucket: other for a hypothetical weakened test oracle; could-be-highest: no, no production security or loss-of-work route follows from this table-helper event-type concern. Confidence: confirmed source refutation; no tests or reproduction executed. proposed_drop: no non-keydown caller exists and the renderer's input constructor establishes the omitted premise; not an accepted parent drop. possible_cover: none. Caveat: production correctness alone is not used to certify this test oracle; caller shape, export surface and fixed fixture comparison are the refuting evidence."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g186/findings.jsonl",
+        "id": "c5",
+        "line": 13,
+        "disposition": "excluded",
+        "group": "input-table-shift-enter-nonkeydown-caller",
+        "reason": "Parent explicitly accepted named refuted proposal from claims-117 after inspecting it. The omitted event-type guard has no non-keydown caller in the table renderer. The caller constructor establishes that premise; production correctness is not the refutation of this test-oracle candidate. Source-refute the named non-keydown oracle route. Keep the separately supplied single-write comment concern outside this refutation. Checked source/results: [\"At f560058da19e02716e6f943883a9508b447aff4e, js-tests/grid-input-tables.js:160-172 constructs type=keydown. :186-190 retains exact key/modifier/composition/AltGraph checks; :200-205 calls it only from sentBytes; :226-232 feeds sentBytes those constructed events. :442-451 exports neither helper.\",\"The f560058d diff replaces shiftEnterKeyAction/mergeArmedPrefix only in the table renderer; a direct diff of grid-keys.jsonl, keydown-actions.jsonl and move-to-cell.txt is empty. js-tests/grid-input-tables.test.js:23-46 compares generated output to existing fixture strings rather than rewriting expectations. No tests were executed.\",\"assets/grid-terminal.js:1515 is specifically a keydown listener, but the table caller and export surface, not that production fact, settle the named oracle concern.\"] Current coverage/results: [\"Current SPEC_impl.md:1859-1865 declares fixed tables as the input contract. SPEC.md:2869-2877 defines the exact Shift+Enter chord; neither accepts weakening the oracle.\",\"TODO.md Planned is empty. plans/queue, BUGS.md, full INDEX.md and active TRIAGE_OUTCOMES.md searches found no exact omitted-event-guard/table-caller item. The existing AltGraph encoding issue concerns production modifier loss, not non-keydown input to this private table helper. No archive read.\",\"FILTER.md is not the basis; this is source refutation.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Other: the key oracle might accept non-keydown events after losing the old guard. The only event source is keydown by construction; no security or user-work-loss route was claimed.\"; \"No shipped table-renderer route supplies keyup or keypress to the helper. The claim is limited to actual callers and exports at the reviewed revision.\"."
+      },
+      "accepted_parent_decision": {
+        "key": "g186/c5",
+        "line": 13,
+        "disposition": "excluded",
+        "group": "input-table-shift-enter-nonkeydown-caller",
+        "bucket": "other",
+        "recording": "refuted",
+        "queue_target_candidate": null,
+        "needs_independent_drop_check": false,
+        "reason": "Parent explicitly accepted named refuted proposal from claims-117 after inspecting it. The omitted event-type guard has no non-keydown caller in the table renderer. The caller constructor establishes that premise; production correctness is not the refutation of this test-oracle candidate. Source-refute the named non-keydown oracle route. Keep the separately supplied single-write comment concern outside this refutation. Checked source/results: [\"At f560058da19e02716e6f943883a9508b447aff4e, js-tests/grid-input-tables.js:160-172 constructs type=keydown. :186-190 retains exact key/modifier/composition/AltGraph checks; :200-205 calls it only from sentBytes; :226-232 feeds sentBytes those constructed events. :442-451 exports neither helper.\",\"The f560058d diff replaces shiftEnterKeyAction/mergeArmedPrefix only in the table renderer; a direct diff of grid-keys.jsonl, keydown-actions.jsonl and move-to-cell.txt is empty. js-tests/grid-input-tables.test.js:23-46 compares generated output to existing fixture strings rather than rewriting expectations. No tests were executed.\",\"assets/grid-terminal.js:1515 is specifically a keydown listener, but the table caller and export surface, not that production fact, settle the named oracle concern.\"] Current coverage/results: [\"Current SPEC_impl.md:1859-1865 declares fixed tables as the input contract. SPEC.md:2869-2877 defines the exact Shift+Enter chord; neither accepts weakening the oracle.\",\"TODO.md Planned is empty. plans/queue, BUGS.md, full INDEX.md and active TRIAGE_OUTCOMES.md searches found no exact omitted-event-guard/table-caller item. The existing AltGraph encoding issue concerns production modifier loss, not non-keydown input to this private table helper. No archive read.\",\"FILTER.md is not the basis; this is source refutation.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Other: the key oracle might accept non-keydown events after losing the old guard. The only event source is keydown by construction; no security or user-work-loss route was claimed.\"; \"No shipped table-renderer route supplies keyup or keypress to the helper. The claim is limited to actual callers and exports at the reviewed revision.\"."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-117",
+          "key": "g186/c5",
+          "latest_line": 13,
+          "recommendation": "refuted",
+          "bucket": "other",
+          "underlying_key": "input-table-shift-enter-nonkeydown-caller",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The omitted event-type guard has no non-keydown caller in the table renderer. The caller constructor establishes that premise; production correctness is not the refutation of this test-oracle candidate.",
+          "checks": [
+            "At f560058da19e02716e6f943883a9508b447aff4e, js-tests/grid-input-tables.js:160-172 constructs type=keydown. :186-190 retains exact key/modifier/composition/AltGraph checks; :200-205 calls it only from sentBytes; :226-232 feeds sentBytes those constructed events. :442-451 exports neither helper.",
+            "The f560058d diff replaces shiftEnterKeyAction/mergeArmedPrefix only in the table renderer; a direct diff of grid-keys.jsonl, keydown-actions.jsonl and move-to-cell.txt is empty. js-tests/grid-input-tables.test.js:23-46 compares generated output to existing fixture strings rather than rewriting expectations. No tests were executed.",
+            "assets/grid-terminal.js:1515 is specifically a keydown listener, but the table caller and export surface, not that production fact, settle the named oracle concern."
+          ],
+          "coverage_checked": [
+            "Current SPEC_impl.md:1859-1865 declares fixed tables as the input contract. SPEC.md:2869-2877 defines the exact Shift+Enter chord; neither accepts weakening the oracle.",
+            "TODO.md Planned is empty. plans/queue, BUGS.md, full INDEX.md and active TRIAGE_OUTCOMES.md searches found no exact omitted-event-guard/table-caller item. The existing AltGraph encoding issue concerns production modifier loss, not non-keydown input to this private table helper. No archive read.",
+            "FILTER.md is not the basis; this is source refutation."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": "No shipped table-renderer route supplies keyup or keypress to the helper. The claim is limited to actual callers and exports at the reviewed revision.",
+          "original_stronger_consequence": "Other: the key oracle might accept non-keydown events after losing the old guard. The only event source is keydown by construction; no security or user-work-loss route was claimed.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Source-refute the named non-keydown oracle route. Keep the separately supplied single-write comment concern outside this refutation."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "input-table-shift-enter-nonkeydown-caller",
+        "destination": null
+      }
+    }
+  ],
+  "replies": [
+    {
+      "turn": 1,
+      "reply": "Initial review complete: all 15 assigned patches reviewed at their recorded revisions.\n\nNo reportable findings established. Logged four source-refuted candidates (`c1`–`c4`); no unresolved leads. [Findings log]([private-run]/g186/findings.jsonl) and progress updated.\n\nSource-only review; no tests or reproductions run."
+    },
+    {
+      "turn": 2,
+      "reply": "- `c2` promoted to a finding: server filtering prevents primary-selection writes from suppressing drag-copy guidance. Confirmed by source; pre-existing in the parent revision, with attribution caveat recorded.\n- `c1` and `c3` revised with additional caller, framing, and test-contract evidence; remain source-refuted candidates.\n- Unresolved lead IDs: none."
+    },
+    {
+      "turn": 3,
+      "reply": "Discovery pass complete; no new reportable issue found.\n\n- Checked predicate callers, fixed fixtures, paste tests, selection callbacks, and comment contracts.\n- New verified candidate: `c5`, source-refuted.\n- Split the known guidance issue into `f1`; exclusive-base checks resolved its range attribution.\n- New unverified IDs: none. Open leads: none.\n- Log and progress updated. No execution performed."
+    }
+  ],
+  "progress": "Group: g186 terminal-input-copy.\nState: separate discovery pass complete.\nTurn type/count: discovery/3. Discovery-pass count: 1.\nCoverage retained: all 15 assigned patch packets, 1,228 lines, initially delivered and caller-audited. No unread assigned material. Read discovery-neighbours.json in bounded chunks in this turn, plus exact g188 history events 1-7 requested by caller. Prohibited coverage sources not searched; inventory excluded metadata remains unread.\nRequired interface synthesis completed before new search: split distinct primary-guidance cause from original c2 confidentiality candidate into linked f1; restored c2 original highest/security hypothetical consequence and source refutation without deleting its history. Direct exclusive-base checks establish both primary-write suppression promise (SPEC.md:3055-3057; SPEC_impl.md:1833-1835) and defective behavior (hosts/terminal.rs:3210-3221, grid_stream.rs:845-850, terminal.js:6012-6016/6113-6124) already present before the range. f1 retains the confirmed mismatch and proposes scope exclusion only, not accepted by parent. There is no newly introduced primary-write documentation promise in this range. Reviewed actual subscription in handlers.rs:1907-1915; no alternative primary delivery path there. c3 now explicitly separates deletion-induced runtime concerns from caller-supplied g010/f1's distinct documentation contradiction; no documentation concern dropped because of successful production encoding.\nDiscovery checks beyond known findings: examined table input construction, predicate call sites and exports, fixed key/keydown/Alt-click fixture diff (empty at f560), and fixed-fixture comparison tests; compared new table predicate's omitted event-type guard with its actual exclusively-keydown caller. Rechecked changed paste tests against production-loaded source and browser-global branch, composition-selector test diff, changed copy-on-select contract against grid release-time callback arguments and press-time forcing, and second commit's mouse/wheel/key comment claims against actual caller behavior. No runtime tests, builds or reproductions.\nNew independent reportable discoveries: none. New verified IDs: c5 (source-refuted candidate); f1 is a split identity for the previously known primary-guidance finding, not a new discovery. New unverified-after-investigation IDs: none. Revised IDs: c2 (restored original concern), c3 (documentation/runtime distinction). c1 and c4 unchanged this turn.\nOpen unresolved lead IDs: none. f1's transient lead event is resolved by its current source-confirmed finding event, with full-range provenance and proposed scope exclusion preserved. All records append-only; no parent drop or lowering assumed.\nInterface caveats: this source review does not establish physical PTY atomicity, native IME behavior or a successful exploit in execution. Source-refuting the sanitizer move does not certify old-page protocol compatibility discussed by neighbours; that known distinct issue was not recast as a fresh discovery here.\nExecution/isolation: no checkout changes, live-install actions or helper agents. Private artifacts only.\nNext action: caller-directed consolidation or further discovery; the requested separate discovery pass returned no new reportable defect.\n"
+}

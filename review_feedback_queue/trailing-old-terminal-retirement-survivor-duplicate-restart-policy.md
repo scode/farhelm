@@ -1,0 +1,38 @@
+# Old-terminal fallback is explicitly accepted; a startup failure alone does not establish duplicate Restart
+
+Reviewed commit: 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db
+
+## TLDR
+
+Unverified collection: the specification accepts that an old agent left alive by retirement could run beside a later Restart, potentially allowing concurrent agents to overwrite user work. Preserve that original strongest consequence, but the earlier description of an established overlapping-agent route was too strong: startup failure alone does not establish successful Restart beside a survivor. Checks: core.rs:12377–12384 probes the held terminal; :12414–12417 settles outstanding host starts; :12472–12484 performs a fresh reap with the recorded scope, AgentOnly and ScopeKillFailure::Refuse before relaunching. Direct discovery-pass checks of sweep.rs:247–260 confirm AgentOnly selects current-agent and legacy session-only markers. :1448–1562 checks recorded scopes, keeps the portable sweep on uncertain containment and returns Err on unconfirmed recorded scopes or failed sweep. The source does not simply skip ordinary marker-readable or recorded-scoped old agents because no terminal runtime is held. old_terminals.rs:296–356 can leave old processes after its bounded startup attempt; that does not exempt them from the later fresh reap. A duplicate after a successful reap needs a survivor outside every successful selector: no usable recorded scope, no retained explicit root, and no readable matching marker (the environment-scrubbed/non-dumpable/platform-binary residual described in sweep.rs:263–307). This pass has not established a concrete ordinary resumable agent that has that shape; repository source does not establish the external installed agent's surviving process/environment shape. Platform/ag
+
+## Details
+
+Collected immediately at the maintainer's request from the pinned review. No further source investigation, coverage search, claim check, independent dismissal check or exhaustive reconciliation was performed. This entry preserves proposals rather than approving a dismissal or severity reduction. It has not been reassessed against product changes after the pinned tip.
+
+Provisional priority: **highest**. Original and later consequence statements are preserved separately below; this bucket does not approve any proposed lowering.
+
+Contributing records: `g112/c1`.
+
+### g112/c1
+
+Confidence: Unverified collection; recording proposals and any disagreement remain unresolved.
+
+Latest reviewer record, event 7 (finding, open):
+
+Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333; fallback introduced within the pinned range in dbfc69751215dbf15e1d31d5bed73c3754c4ebc4. TLDR: the specification accepts that an old agent left alive by retirement could run beside a later Restart, potentially allowing concurrent agents to overwrite user work. Preserve that original strongest consequence, but the earlier description of an established overlapping-agent route was too strong: startup failure alone does not establish successful Restart beside a survivor. Checks: core.rs:12377–12384 probes the held terminal; :12414–12417 settles outstanding host starts; :12472–12484 performs a fresh reap with the recorded scope, AgentOnly and ScopeKillFailure::Refuse before relaunching. Direct discovery-pass checks of sweep.rs:247–260 confirm AgentOnly selects current-agent and legacy session-only markers. :1448–1562 checks recorded scopes, keeps the portable sweep on uncertain containment and returns Err on unconfirmed recorded scopes or failed sweep. The source does not simply skip ordinary marker-readable or recorded-scoped old agents because no terminal runtime is held. old_terminals.rs:296–356 can leave old processes after its bounded startup attempt; that does not exempt them from the later fresh reap. A duplicate after a successful reap needs a survivor outside every successful selector: no usable recorded scope, no retained explicit root, and no readable matching marker (the environment-scrubbed/non-dumpable/platform-binary residual described in sweep.rs:263–307). This pass has not established a concrete ordinary resumable agent that has that shape; repository source does not establish the external installed agent's surviving process/environment shape. Platform/agent source or a retained trace of that shape would settle that remaining runtime premise; no reproduction was requested or run. Confidence: confirmed fallback policy and fresh-cleanup control flow; duplicate/work-loss runtime route not established. Suggested bucket: preserve prior high proposal and could-be-highest work-loss consequence for independent judgment; this revision corrects route certainty, not an accepted lowering or drop. proposed_drop: exact SPEC_impl.md:2924–2927 acceptance, ‘A failure anywhere is logged and never fatal (the maintainer chose to start anyway and treat old sessions as ended, accepting that a Restart could then start a second agent beside one still running)’. No parent drop or lowering accepted. possible_cover: supplied neighbour g109/c1 and g007/f1 cover this same fallback and fresh-reap limitation. Material caveats: g007/c4 and g128/l1 concern later Delete consent over hidden live tabs/agents, which this Restart acceptance does not settle; g111/l1 concerns removal following moved subdirectories into a retained borrower's checkout, a separate work-loss route not covered by permission to leave an old agent alive. g033 warning and g004/g071 survival-guidance concerns remain distinct. Source/contract analysis only; no execution observation. The explicit policy is retained as a finding with proposed_drop for independent checking, with its original strongest consequences and exact basis preserved.
+
+Returned proposal (claims-072, event 7): **covered**, suggested bucket **high**.
+
+The exact retirement policy accepts a later Restart beside an old survivor. The earlier claim that startup failure alone establishes successful duplication was too strong: Restart still performs fresh cleanup. Preserve the possible work-loss consequence and route-certainty correction for independent adjudication.
+
+Original stronger consequence: A second agent starts beside a retirement survivor in the same working directory and may overwrite user work. Earlier histories treated overlap as established and briefly suggested highest, then high; latest explicitly withdraws that route certainty while preserving original possible highest harm and prior high proposal.
+
+Unresolved premise or limitation: A concrete old agent surviving a later successful fresh reap outside every applicable selector is missing for the stronger runtime overlap claim. Work-overwrite occurrence is also unobserved. These gaps qualify certainty; they do not authorize dropping a potentially highest consequence without independent review.
+
+Proposed basis: Independent drop check of exact retirement/duplicate-Restart acceptance, including the original work-loss consequence and the latest fresh-reap qualification. Keep high as the prior proposed bucket for consultation rather than claiming a proven material overlap; do not extend this cover to hidden-live Delete consent or spare cleanup.
+
+Existing parent disposition (event 7): under-investigation. Record durably acknowledged; parent source/contract validation, cross-group synthesis, coverage/filter matching and any independent drop check remain pending. This preserves the claim and uncertainty without accepting, dropping or lowering it.
+
+Complete original wording, every revision/withdrawal, cited checks and exact cover quotations: [g112 record](records/review-through-00de0b6c/groups/g112.json). Record ID: `c1`.
+

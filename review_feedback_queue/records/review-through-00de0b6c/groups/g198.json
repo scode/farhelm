@@ -1,0 +1,710 @@
+{
+  "group": {
+    "id": "g198",
+    "domain": "mac-release-gate",
+    "purpose": "mac-release-gate: releasing/mac-vm-test/checkpoint_contract.py, releasing/mac-vm-test/guest_workflow.py, releasing/mac-vm-test/test_guest_operations.py, releasing/mac-vm-test/test_guest_workflow.py, releasing/rehearse-release-gate.py, releasing/mac-vm-test/brick_test.py, releasing/mac-vm-test/guest_operations.py, releasing/mac-vm-test/guest_tester.py, releasing/mac-vm-test/test_brick_test.py, releasing/mac-vm-test/test_native_coordinator.py; phases complete small per-commit changes",
+    "interfaces": [
+      "g007",
+      "g009",
+      "g010",
+      "g011",
+      "g071",
+      "g072",
+      "g073",
+      "g199"
+    ],
+    "sources": [
+      {
+        "path": "[private-run]/prep/parts/01187-000.patch",
+        "ranges": [
+          [
+            1,
+            17
+          ]
+        ],
+        "original_path": "releasing/mac-vm-test/checkpoint_contract.py",
+        "commit": "f560058da19e02716e6f943883a9508b447aff4e",
+        "notes": "patch header; patch character offsets [0,980)",
+        "lines": 17,
+        "bytes": 980,
+        "start": 0,
+        "end": 980,
+        "original": "[private-run]/prep/originals/01187.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/01188-000.patch",
+        "ranges": [
+          [
+            1,
+            115
+          ]
+        ],
+        "original_path": "releasing/mac-vm-test/guest_workflow.py",
+        "commit": "f560058da19e02716e6f943883a9508b447aff4e",
+        "notes": "patch header; patch character offsets [0,7925)",
+        "lines": 115,
+        "bytes": 7925,
+        "start": 0,
+        "end": 7925,
+        "original": "[private-run]/prep/originals/01188.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/01189-000.patch",
+        "ranges": [
+          [
+            1,
+            13
+          ]
+        ],
+        "original_path": "releasing/mac-vm-test/test_guest_operations.py",
+        "commit": "f560058da19e02716e6f943883a9508b447aff4e",
+        "notes": "patch header; patch character offsets [0,811)",
+        "lines": 13,
+        "bytes": 811,
+        "start": 0,
+        "end": 811,
+        "original": "[private-run]/prep/originals/01189.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/01190-000.patch",
+        "ranges": [
+          [
+            1,
+            84
+          ]
+        ],
+        "original_path": "releasing/mac-vm-test/test_guest_workflow.py",
+        "commit": "f560058da19e02716e6f943883a9508b447aff4e",
+        "notes": "patch header; patch character offsets [0,5979)",
+        "lines": 84,
+        "bytes": 5979,
+        "start": 0,
+        "end": 5979,
+        "original": "[private-run]/prep/originals/01190.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/01412-000.patch",
+        "ranges": [
+          [
+            1,
+            13
+          ]
+        ],
+        "original_path": "releasing/rehearse-release-gate.py",
+        "commit": "d751ff1633bb479c7bf53920f2e4ea4ba932a1c2",
+        "notes": "patch header; patch character offsets [0,692)",
+        "lines": 13,
+        "bytes": 692,
+        "start": 0,
+        "end": 692,
+        "original": "[private-run]/prep/originals/01412.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/01443-000.patch",
+        "ranges": [
+          [
+            1,
+            62
+          ]
+        ],
+        "original_path": "releasing/mac-vm-test/brick_test.py",
+        "commit": "6f1a36144ede6f87c33c0bfedd871c208cc930d4",
+        "notes": "patch header; patch character offsets [0,3647)",
+        "lines": 62,
+        "bytes": 3647,
+        "start": 0,
+        "end": 3647,
+        "original": "[private-run]/prep/originals/01443.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/01444-000.patch",
+        "ranges": [
+          [
+            1,
+            115
+          ]
+        ],
+        "original_path": "releasing/mac-vm-test/checkpoint_contract.py",
+        "commit": "6f1a36144ede6f87c33c0bfedd871c208cc930d4",
+        "notes": "patch header; patch character offsets [0,7310)",
+        "lines": 115,
+        "bytes": 7310,
+        "start": 0,
+        "end": 7310,
+        "original": "[private-run]/prep/originals/01444.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/01445-000.patch",
+        "ranges": [
+          [
+            1,
+            206
+          ]
+        ],
+        "original_path": "releasing/mac-vm-test/guest_operations.py",
+        "commit": "6f1a36144ede6f87c33c0bfedd871c208cc930d4",
+        "notes": "patch header; patch character offsets [0,14049)",
+        "lines": 206,
+        "bytes": 14049,
+        "start": 0,
+        "end": 14049,
+        "original": "[private-run]/prep/originals/01445.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/01446-000.patch",
+        "ranges": [
+          [
+            1,
+            44
+          ]
+        ],
+        "original_path": "releasing/mac-vm-test/guest_tester.py",
+        "commit": "6f1a36144ede6f87c33c0bfedd871c208cc930d4",
+        "notes": "patch header; patch character offsets [0,2703)",
+        "lines": 44,
+        "bytes": 2703,
+        "start": 0,
+        "end": 2703,
+        "original": "[private-run]/prep/originals/01446.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/01447-000.patch",
+        "ranges": [
+          [
+            1,
+            187
+          ]
+        ],
+        "original_path": "releasing/mac-vm-test/guest_workflow.py",
+        "commit": "6f1a36144ede6f87c33c0bfedd871c208cc930d4",
+        "notes": "patch header; patch character offsets [0,12690)",
+        "lines": 187,
+        "bytes": 12690,
+        "start": 0,
+        "end": 12690,
+        "original": "[private-run]/prep/originals/01447.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/01448-000.patch",
+        "ranges": [
+          [
+            1,
+            29
+          ]
+        ],
+        "original_path": "releasing/mac-vm-test/test_brick_test.py",
+        "commit": "6f1a36144ede6f87c33c0bfedd871c208cc930d4",
+        "notes": "patch header; patch character offsets [0,1596)",
+        "lines": 29,
+        "bytes": 1596,
+        "start": 0,
+        "end": 1596,
+        "original": "[private-run]/prep/originals/01448.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/01451-000.patch",
+        "ranges": [
+          [
+            1,
+            29
+          ]
+        ],
+        "original_path": "releasing/mac-vm-test/test_native_coordinator.py",
+        "commit": "6f1a36144ede6f87c33c0bfedd871c208cc930d4",
+        "notes": "patch header; patch character offsets [0,2039)",
+        "lines": 29,
+        "bytes": 2039,
+        "start": 0,
+        "end": 2039,
+        "original": "[private-run]/prep/originals/01451.patch"
+      }
+    ],
+    "lines": 914,
+    "bytes": 60421
+  },
+  "records": [
+    {
+      "key": "g198/c1",
+      "owner": "g198",
+      "id": "c1",
+      "domain": "mac-release-gate",
+      "purpose": "mac-release-gate: releasing/mac-vm-test/checkpoint_contract.py, releasing/mac-vm-test/guest_workflow.py, releasing/mac-vm-test/test_guest_operations.py, releasing/mac-vm-test/test_guest_workflow.py, releasing/rehearse-release-gate.py, releasing/mac-vm-test/brick_test.py, releasing/mac-vm-test/guest_operations.py, releasing/mac-vm-test/guest_tester.py, releasing/mac-vm-test/test_brick_test.py, releasing/mac-vm-test/test_native_coordinator.py; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 1,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c1",
+            "state": "open",
+            "summary": "Old-session fixtures intentionally require terminal hosts",
+            "location": "releasing/mac-vm-test/guest_operations.py:696",
+            "detail": "Reviewed commit: 6f1a36144ede6f87c33c0bfedd871c208cc930d4. TLDR: Baselines whose old sessions run in tmux can no longer complete the macOS brick test. Details: terminal_hosts now refuses any updater old fixture without exactly one terminal host and child, and host_survival refuses legacy empty-host receipts. This matches the explicit changed contract in releasing/mac-vm-test/BRICK-TEST.md:421-422: 'requires exactly one terminal host with one live child: a previous stable that runs the session anywhere else cannot be tested this way.' The same document at 440-441 says 'This test does not check that the upgrade ends the old terminals releases before terminal hosts left running; the supervisor’s Rust tests cover that startup step.' Suggested bucket: other, maintainer test coverage limitation. Confidence: confirmed by source and explicit recipe contract, not execution. proposed_drop: explicit acceptance quoted above; no unintended baseline fallback is claimed. Could-be-highest: no; this removes maintainer-tooling coverage and fails closed rather than affecting user processes. possible_cover: none. Caveat: this is a deliberate narrowing of supported test fixtures, not evidence that older product upgrades work."
+          }
+        },
+        {
+          "line": 7,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c1",
+            "state": "open",
+            "summary": "Terminal-host-only fixtures are explicitly unsupported otherwise and fail closed",
+            "location": "releasing/mac-vm-test/guest_operations.py:694",
+            "detail": "Reviewed commit: 6f1a36144ede6f87c33c0bfedd871c208cc930d4. TLDR (original consequence preserved): baselines whose old sessions run in tmux can no longer complete the macOS brick test. Contract: BRICK-TEST.md:421-422 says 'requires exactly one terminal host with one live child: a previous stable that runs the session anywhere else cannot be tested this way'; :440-441 says 'This test does not check that the upgrade ends the old terminals releases before terminal hosts left running; the supervisor’s Rust tests cover that startup step.' Synthesis interface checks: checkpoint_contract.py:132-135 requires both terminal-host operations for updater old-fixture, and guest_operations.py:689-696 refuses absent capture, zero or multiple hosts, or a non-single live child. dispatch at :293-319 latches a failure before rethrowing, writing managed-failure.json at :287-291; managed_result at guest_tester.py:277-290 refuses that latch regardless of model verdict and refuses missing required operations on pass. Legacy empty-host receipts also refuse at guest_operations.py:712-716. Later comparisons require the same host and child at :719-728 and a later captured generation with exactly one new host and old host gone at checkpoint_contract.py:75-87, through guest_tester.py:325-330. Coordinator brick_test.py:894-901 rejects automation-failure; :939-942 records could-not-run, and :1151-1157 cannot turn that unavailable fixture into a pass. All conclusions are from source, not execution. Suggested bucket: other, maintainer test coverage limitation. Confidence: confirmed. proposed_drop: preserve the explicit contract-acceptance proposal; unsupported fixtures are refused, not silently counted as passing. Parent has not accepted this drop. Could-be-highest: no; this narrows maintainer-tooling coverage without changing product processes. possible_cover: none. Caveats: the classification can be harness failure/could-not-run rather than a product fail; no claim is made that this test validates older product upgrade survival or old-terminal cleanup. Enforcement described here is the managed executor's; plain instructions rely on the tester's independent observations."
+          }
+        }
+      ],
+      "latest": {
+        "line": 7,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c1",
+          "state": "open",
+          "summary": "Terminal-host-only fixtures are explicitly unsupported otherwise and fail closed",
+          "location": "releasing/mac-vm-test/guest_operations.py:694",
+          "detail": "Reviewed commit: 6f1a36144ede6f87c33c0bfedd871c208cc930d4. TLDR (original consequence preserved): baselines whose old sessions run in tmux can no longer complete the macOS brick test. Contract: BRICK-TEST.md:421-422 says 'requires exactly one terminal host with one live child: a previous stable that runs the session anywhere else cannot be tested this way'; :440-441 says 'This test does not check that the upgrade ends the old terminals releases before terminal hosts left running; the supervisor’s Rust tests cover that startup step.' Synthesis interface checks: checkpoint_contract.py:132-135 requires both terminal-host operations for updater old-fixture, and guest_operations.py:689-696 refuses absent capture, zero or multiple hosts, or a non-single live child. dispatch at :293-319 latches a failure before rethrowing, writing managed-failure.json at :287-291; managed_result at guest_tester.py:277-290 refuses that latch regardless of model verdict and refuses missing required operations on pass. Legacy empty-host receipts also refuse at guest_operations.py:712-716. Later comparisons require the same host and child at :719-728 and a later captured generation with exactly one new host and old host gone at checkpoint_contract.py:75-87, through guest_tester.py:325-330. Coordinator brick_test.py:894-901 rejects automation-failure; :939-942 records could-not-run, and :1151-1157 cannot turn that unavailable fixture into a pass. All conclusions are from source, not execution. Suggested bucket: other, maintainer test coverage limitation. Confidence: confirmed. proposed_drop: preserve the explicit contract-acceptance proposal; unsupported fixtures are refused, not silently counted as passing. Parent has not accepted this drop. Could-be-highest: no; this narrows maintainer-tooling coverage without changing product processes. possible_cover: none. Caveats: the classification can be harness failure/could-not-run rather than a product fail; no claim is made that this test validates older product upgrade survival or old-terminal cleanup. Enforcement described here is the managed executor's; plain instructions rely on the tester's independent observations."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g198/findings.jsonl",
+        "id": "c1",
+        "line": 7,
+        "disposition": "excluded",
+        "group": "mac-brick-terminal-host-only-baseline",
+        "reason": "Parent read full123/direct6f1BRICK-TEST402-445 and current plan Decisionsalready made85-105. Maintainer explicitly settled retirement of tmux branch/kind checks and reliance on Rust shutdown tests; tool's actual declared support requires exactlyonehost/livechild and unavailablefixtures failclosed, not falsepass. This is intended narrowed test responsibility under an explicit tooling contract, not a productbug or a missing promised fixture. Landedplan is authorization/intent evidence, not unlandedfuturefixcover, and rootSPEC doesnotitselfdefinebrickfixtureeligibility. Preserve real loss of historicalbaseline coverage/no certification of separateRustshutdownoracles. No catastrophic/security/userwork consequence."
+      },
+      "accepted_parent_decision": {
+        "key": "g198/c1",
+        "line": 7,
+        "disposition": "excluded",
+        "group": "mac-brick-terminal-host-only-baseline",
+        "bucket": "other",
+        "recording": "explicit-tooling-contract",
+        "needs_independent_drop_check": false,
+        "reason": "Parent read full123/direct6f1BRICK-TEST402-445 and current plan Decisionsalready made85-105. Maintainer explicitly settled retirement of tmux branch/kind checks and reliance on Rust shutdown tests; tool's actual declared support requires exactlyonehost/livechild and unavailablefixtures failclosed, not falsepass. This is intended narrowed test responsibility under an explicit tooling contract, not a productbug or a missing promised fixture. Landedplan is authorization/intent evidence, not unlandedfuturefixcover, and rootSPEC doesnotitselfdefinebrickfixtureeligibility. Preserve real loss of historicalbaseline coverage/no certification of separateRustshutdownoracles. No catastrophic/security/userwork consequence."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-123",
+          "key": "g198/c1",
+          "latest_line": 7,
+          "recommendation": "needs-parent",
+          "bucket": "other",
+          "underlying_key": "mac-brick-terminal-host-only-baseline",
+          "aliases": [
+            "g199/c2"
+          ],
+          "target_queue_file": null,
+          "why": "The support limitation is real and deliberate, and unsupported fixtures fail closed. The proposed dismissal rests on the brick-test contract and a recorded maintainer decision in a now-landed plan. Those establish intent, but neither is an unlanded-plan cover under the recording rules. Parent should explicitly decide whether to close this considered limitation as intended behavior, rather than claim current queue/spec coverage that was not found.",
+          "checks": [
+            "6f1a36144ede6f87c33c0bfedd871c208cc930d4:guest_operations.py:689-696 refuses a baseline without its captured session and exactly one host with one child; :712-716 also refuses legacy empty-host receipts.",
+            "Same revision checkpoint_contract.py:130-135 requires both baseline terminal samples; guest_operations.py:287-319 latches failures; guest_tester.py:277-290 rejects the latch or missing pass operations.",
+            "Same revision brick_test.py:894-901,935-942,1151-1157 preserves automation failure/could-not-run rather than treating this unavailable fixture as a passing release check.",
+            "Same revision BRICK-TEST.md:416-441 explicitly narrows the baseline and delegates old-terminal retirement coverage to supervisor Rust tests. That separate Rust coverage was not checked.",
+            "All source references above are under releasing/mac-vm-test/. No execution or reproduction was performed. Managed enforcement does not establish that a plain tester follows its instructions."
+          ],
+          "coverage_checked": {
+            "SPEC.md": "Current :2998-3010 explicitly ends legacy terminals and preserves host terminals; it does not explicitly define which historical fixtures the brick test must accept.",
+            "SPEC_impl.md": "Current Ending the old private tmux server (:2780-2823) accepts retirement; no exact brick-baseline coverage rule found.",
+            "TODO.md Planned": "Empty (:25-26). The separate before-signing brick-test entry is unrelated.",
+            "plans/queue": "tmux-drop-from-tooling criterion 5 and Decisions explicitly authorize retiring this branch and relying on Rust shutdown tests. plans/REPORTS.md:31 says it already landed, so it is intent evidence, not unlanded-plan cover.",
+            "BUGS.md": "Read in full; its SSH-pipe hang is unrelated.",
+            "INDEX.md and queue": "Index read in full. Nearby brick-recovery, native-app-binding and Mac-uninstall records concern different triggers and oracles; no exact alias found.",
+            "TRIAGE_OUTCOMES.md": "Searched for brick, old-session, terminal-kind and operation terms. Matching release-tool decisions concern other boundaries, not baseline support. Archive not read.",
+            "FILTER.md": "No entire filter boundary matches this deliberate persistent tooling support limitation."
+          },
+          "exact_cover_quotes": [
+            "BRICK-TEST.md:421-422 at 6f1: requires exactly one terminal host with one live child: a previous stable that runs the session anywhere else cannot be tested this way.",
+            "plans/queue/tmux-drop-from-tooling.md:97: Brick test: retire the tmux branch and the terminal-kind checks; rely on the Rust tests for the shutdown. This is a landed decision, not an eligible unlanded cover."
+          ],
+          "missing_premise": "No runtime premise is needed for the limitation. The remaining issue is the recording disposition of an explicitly accepted tooling limitation when its acceptance is in BRICK-TEST.md and a landed plan rather than an enumerated coverage source.",
+          "original_stronger_consequence": "Baselines whose old sessions run in tmux can no longer complete the macOS brick test. This does not prove old product upgrades or cleanup work, and unavailable fixtures can be classified as harness failure/could-not-run rather than product failure.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Preserve the original contract-acceptance proposal and the actual loss of historical-fixture coverage. Other priority: maintainer tooling only, without an established catastrophic, security or user-owned-work consequence. No drop decision is made here."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": false,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "mac-brick-terminal-host-only-baseline",
+        "destination": null
+      }
+    },
+    {
+      "key": "g198/c2",
+      "owner": "g198",
+      "id": "c2",
+      "domain": "mac-release-gate",
+      "purpose": "mac-release-gate: releasing/mac-vm-test/checkpoint_contract.py, releasing/mac-vm-test/guest_workflow.py, releasing/mac-vm-test/test_guest_operations.py, releasing/mac-vm-test/test_guest_workflow.py, releasing/rehearse-release-gate.py, releasing/mac-vm-test/brick_test.py, releasing/mac-vm-test/guest_operations.py, releasing/mac-vm-test/guest_tester.py, releasing/mac-vm-test/test_brick_test.py, releasing/mac-vm-test/test_native_coordinator.py; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 2,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c2",
+            "state": "open",
+            "summary": "Release rehearsal recognizes the renamed test step",
+            "location": "releasing/rehearse-release-gate.py:131",
+            "detail": "Reviewed commit: d751ff1633bb479c7bf53920f2e4ea4ba932a1c2. TLDR: The rehearsal's test-gate presence check still recognizes the generated release workflow after its step was renamed. Details: considered whether the new literal '- name: \"Run the test suite\"\\n' would refuse the generated workflow. Source at the same commit, .github/workflows/release.yml:225-236, contains exactly that quoted step name and invokes the recorded nextest workspace tests and doctests. The rewrite at releasing/rehearse-release-gate.py:98-107 changes the two earlier tag-dependent steps and removes jobs beginning at build-global-artifacts, leaving this step intact. Suggested bucket: other. Confidence: confirmed by source, not executed. proposed_drop: source refutes the suspected literal mismatch; the exact name exists in the retained build-local-artifacts job. Could-be-highest: no; this is a maintainer workflow shape guard and its changed literal introduces no publication route. possible_cover: none. Caveat: the text guard does not prove arbitrary future workflow semantics, as was already true before this patch."
+          }
+        },
+        {
+          "line": 8,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c2",
+            "state": "open",
+            "summary": "Renamed rehearsal guard still matches and blocks output on validation errors",
+            "location": "releasing/rehearse-release-gate.py:131",
+            "detail": "Reviewed commit: d751ff1633bb479c7bf53920f2e4ea4ba932a1c2. TLDR (original considered consequence preserved): a mismatch in the renamed test-step guard would make release rehearsal unavailable; the actual pinned workflow still matches. Synthesis checks: .github/workflows/release.yml:225 has exactly '- name: \"Run the test suite\"' followed by a newline, and :226-236 runs the nextest workspace suite and doctests on Linux X64. rehearse-release-gate.py:98-105 only removes the tag-version step and rewrites the following changelog step up to the next step name; :107 removes jobs beginning at build-global-artifacts, so neither transformation removes this later test step in build-local-artifacts. Every rewrite must match once (:71-75). main at :143-152 calls rewrite then check_properties and returns 1 on rewrite or property errors, before either self-test success or output writing. Thus the changed literal itself is supported by the retained workflow and an absent marker would fail closed. Suggested bucket: other. Confidence: confirmed by source, not execution. proposed_drop: preserve the original source-refutation proposal; the suspected literal mismatch is absent in the reviewed workflow. Parent has not accepted this drop. Could-be-highest: no; this changed marker neither creates a publication route nor affects user work. possible_cover: none. Caveat: as before, text presence alone does not verify arbitrary future step semantics, complete target coverage or actual test execution; no such stronger conclusion is claimed."
+          }
+        }
+      ],
+      "latest": {
+        "line": 8,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c2",
+          "state": "open",
+          "summary": "Renamed rehearsal guard still matches and blocks output on validation errors",
+          "location": "releasing/rehearse-release-gate.py:131",
+          "detail": "Reviewed commit: d751ff1633bb479c7bf53920f2e4ea4ba932a1c2. TLDR (original considered consequence preserved): a mismatch in the renamed test-step guard would make release rehearsal unavailable; the actual pinned workflow still matches. Synthesis checks: .github/workflows/release.yml:225 has exactly '- name: \"Run the test suite\"' followed by a newline, and :226-236 runs the nextest workspace suite and doctests on Linux X64. rehearse-release-gate.py:98-105 only removes the tag-version step and rewrites the following changelog step up to the next step name; :107 removes jobs beginning at build-global-artifacts, so neither transformation removes this later test step in build-local-artifacts. Every rewrite must match once (:71-75). main at :143-152 calls rewrite then check_properties and returns 1 on rewrite or property errors, before either self-test success or output writing. Thus the changed literal itself is supported by the retained workflow and an absent marker would fail closed. Suggested bucket: other. Confidence: confirmed by source, not execution. proposed_drop: preserve the original source-refutation proposal; the suspected literal mismatch is absent in the reviewed workflow. Parent has not accepted this drop. Could-be-highest: no; this changed marker neither creates a publication route nor affects user work. possible_cover: none. Caveat: as before, text presence alone does not verify arbitrary future step semantics, complete target coverage or actual test execution; no such stronger conclusion is claimed."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g198/findings.jsonl",
+        "id": "c2",
+        "line": 8,
+        "disposition": "excluded",
+        "group": "release-rehearsal-renamed-step-marker",
+        "reason": "Parent explicitly accepted named refuted proposal from claims-123 after inspecting it. The changed literal exactly matches the pinned retained workflow step. The named suspected mismatch is absent. Source-refute this literal-mismatch candidate only. No publication route or end-user harm is established. Checked source/results: [\"d751ff1633bb479c7bf53920f2e4ea4ba932a1c2:.github/workflows/release.yml:225 contains the quoted Run the test suite marker; :226-236 invokes recorded nextest and doctests on Linux X64.\",\"Same revision releasing/rehearse-release-gate.py:98-107 removes two earlier tag-dependent sections and later jobs, preserving this build-local-artifacts step; :71-75 requires exactly one match per rewrite.\",\"Same file :131 checks the matching marker and :143-152 returns failure before output writing when rewrites or properties fail. Source inspection only; no self-test was run.\"] Current coverage/results: {\"SPEC.md and SPEC_impl.md\":\"Searched rehearsal/release-test/step terms; no acceptance of a mismatched marker found or needed for source refutation.\",\"TODO.md Planned\":\"Empty.\",\"plans/queue\":\"tmux-drop-from-tooling:57-60 calls for updating this marker with the rename, but REPORTS.md:31 marks the plan landed; not future-fix cover.\",\"BUGS.md\":\"No matching known bug.\",\"INDEX.md and queue\":\"No exact rehearsal-marker item in the full index; nearby brick-tool records differ.\",\"TRIAGE_OUTCOMES.md\":\"No matching renamed-step decision in the claim-specific searches.\",\"FILTER.md\":\"Not used; direct source refutation.\"} Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"A mismatch in the renamed guard would make rehearsal unavailable. Literal presence does not prove future workflow semantics, complete target coverage or actual test execution.\"; null."
+      },
+      "accepted_parent_decision": {
+        "key": "g198/c2",
+        "line": 8,
+        "disposition": "excluded",
+        "group": "release-rehearsal-renamed-step-marker",
+        "bucket": "other",
+        "recording": "refuted",
+        "queue_target_candidate": null,
+        "needs_independent_drop_check": false,
+        "reason": "Parent explicitly accepted named refuted proposal from claims-123 after inspecting it. The changed literal exactly matches the pinned retained workflow step. The named suspected mismatch is absent. Source-refute this literal-mismatch candidate only. No publication route or end-user harm is established. Checked source/results: [\"d751ff1633bb479c7bf53920f2e4ea4ba932a1c2:.github/workflows/release.yml:225 contains the quoted Run the test suite marker; :226-236 invokes recorded nextest and doctests on Linux X64.\",\"Same revision releasing/rehearse-release-gate.py:98-107 removes two earlier tag-dependent sections and later jobs, preserving this build-local-artifacts step; :71-75 requires exactly one match per rewrite.\",\"Same file :131 checks the matching marker and :143-152 returns failure before output writing when rewrites or properties fail. Source inspection only; no self-test was run.\"] Current coverage/results: {\"SPEC.md and SPEC_impl.md\":\"Searched rehearsal/release-test/step terms; no acceptance of a mismatched marker found or needed for source refutation.\",\"TODO.md Planned\":\"Empty.\",\"plans/queue\":\"tmux-drop-from-tooling:57-60 calls for updating this marker with the rename, but REPORTS.md:31 marks the plan landed; not future-fix cover.\",\"BUGS.md\":\"No matching known bug.\",\"INDEX.md and queue\":\"No exact rehearsal-marker item in the full index; nearby brick-tool records differ.\",\"TRIAGE_OUTCOMES.md\":\"No matching renamed-step decision in the claim-specific searches.\",\"FILTER.md\":\"Not used; direct source refutation.\"} Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"A mismatch in the renamed guard would make rehearsal unavailable. Literal presence does not prove future workflow semantics, complete target coverage or actual test execution.\"; null."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-123",
+          "key": "g198/c2",
+          "latest_line": 8,
+          "recommendation": "refuted",
+          "bucket": "other",
+          "underlying_key": "release-rehearsal-renamed-step-marker",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The changed literal exactly matches the pinned retained workflow step. The named suspected mismatch is absent.",
+          "checks": [
+            "d751ff1633bb479c7bf53920f2e4ea4ba932a1c2:.github/workflows/release.yml:225 contains the quoted Run the test suite marker; :226-236 invokes recorded nextest and doctests on Linux X64.",
+            "Same revision releasing/rehearse-release-gate.py:98-107 removes two earlier tag-dependent sections and later jobs, preserving this build-local-artifacts step; :71-75 requires exactly one match per rewrite.",
+            "Same file :131 checks the matching marker and :143-152 returns failure before output writing when rewrites or properties fail. Source inspection only; no self-test was run."
+          ],
+          "coverage_checked": {
+            "SPEC.md and SPEC_impl.md": "Searched rehearsal/release-test/step terms; no acceptance of a mismatched marker found or needed for source refutation.",
+            "TODO.md Planned": "Empty.",
+            "plans/queue": "tmux-drop-from-tooling:57-60 calls for updating this marker with the rename, but REPORTS.md:31 marks the plan landed; not future-fix cover.",
+            "BUGS.md": "No matching known bug.",
+            "INDEX.md and queue": "No exact rehearsal-marker item in the full index; nearby brick-tool records differ.",
+            "TRIAGE_OUTCOMES.md": "No matching renamed-step decision in the claim-specific searches.",
+            "FILTER.md": "Not used; direct source refutation."
+          },
+          "exact_cover_quotes": [],
+          "missing_premise": null,
+          "original_stronger_consequence": "A mismatch in the renamed guard would make rehearsal unavailable. Literal presence does not prove future workflow semantics, complete target coverage or actual test execution.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Source-refute this literal-mismatch candidate only. No publication route or end-user harm is established."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "release-rehearsal-renamed-step-marker",
+        "destination": null
+      }
+    },
+    {
+      "key": "g198/l1",
+      "owner": "g198",
+      "id": "l1",
+      "domain": "mac-release-gate",
+      "purpose": "mac-release-gate: releasing/mac-vm-test/checkpoint_contract.py, releasing/mac-vm-test/guest_workflow.py, releasing/mac-vm-test/test_guest_operations.py, releasing/mac-vm-test/test_guest_workflow.py, releasing/rehearse-release-gate.py, releasing/mac-vm-test/brick_test.py, releasing/mac-vm-test/guest_operations.py, releasing/mac-vm-test/guest_tester.py, releasing/mac-vm-test/test_brick_test.py, releasing/mac-vm-test/test_native_coordinator.py; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 3,
+          "event": {
+            "version": 1,
+            "kind": "lead",
+            "id": "l1",
+            "state": "open",
+            "summary": "Old-session instructions may require a confirmation the idle agent does not show",
+            "location": "releasing/mac-vm-test/guest_workflow.py:185",
+            "detail": "Reviewed commit: 6f1a36144ede6f87c33c0bfedd871c208cc930d4 (similar wording retained at f560058da19e02716e6f943883a9508b447aff4e). TLDR: A correctly functioning idle session may be reported as a failed release check if the tester treats ordinary confirmation as a mandatory dialog. Details: the rewritten old-session instructions demand an actual completed answer 48 and then use the session's ordinary Restart and its ordinary confirmation; pinned UI source search shows restart_needs_confirmation is limited to working status, and nearby tests describe idle restarts without a question. Suggested bucket: other (maintainer test tooling). Confidence: unverified; need inspect the exact lifecycle contract and full instruction/recipe wording to determine whether confirmation is required or merely handled when offered. proposed_drop: false pending investigation. Could-be-highest: no established product data-loss or security route. possible_cover: none. No runtime execution. Next checks: pinned SPEC lifecycle confirmation rules, session_view restart handler, and recipe old-session steps; missing premise is whether these words require a dialog rather than following the normal conditional confirmation flow."
+          }
+        },
+        {
+          "line": 5,
+          "event": {
+            "version": 1,
+            "kind": "lead",
+            "id": "l1",
+            "state": "open",
+            "summary": "Old-session instructions ambiguously request a confirmation absent for idle agents",
+            "location": "releasing/mac-vm-test/guest_workflow.py:187",
+            "detail": "Reviewed commit: 6f1a36144ede6f87c33c0bfedd871c208cc930d4; similar wording at f560058da19e02716e6f943883a9508b447aff4e:195-198. TLDR: A correct idle-session restart could be reported as a failed macOS release check if the tester reads ordinary confirmation as a required dialog. Details: guest_workflow.py:183-190 says any following step not working is a fail, requires the old agent's new answer 48, then says 'use the session’s ordinary Restart and its ordinary confirmation.' SPEC.md:1938-1944 explicitly says a live idle, waiting or unknown agent is stopped and relaunched without asking, whereas working status confirms. Checks actually made: pinned session_view.rs:190-200 implements restart_needs_confirmation only for Running; :2178-2187 dispatches directly otherwise. Pinned RECIPE.md:114-121 requires the new answer then Restart, but does not require a dialog. guest_tester.py:287-330 and checkpoint_contract.py:60-87 validate observations, generation and host replacement, with no confirmation-image prerequisite; therefore there is no programmatic false refusal established. Suggested bucket: other (maintainer test tooling). Confidence: unverified after investigation. Exact missing premise: whether the native tester treats the natural-language phrase as mandating a dialog instead of handling the product's conditional confirmation. Available source cannot settle this model interpretation; the authoritative recipe does not mandate a dialog and the validator permits a normal direct restart. A retained actual tester turn that refuses a successful idle restart solely for missing confirmation would establish the suspected consequence; alternatively caller interpretation can settle whether the wording itself merits a clarification. No reproduction requested or performed. proposed_drop: false; retain this ambiguity for synthesis rather than asserting a confirmed bug. Could-be-highest: no established security or user-work loss route. possible_cover: none. Caveat: the phrase predates the assigned rewrites, and the rewrites preserve its semantics; this is not an established regression caused by the removal of tmux support."
+          }
+        },
+        {
+          "line": 6,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "l1",
+            "state": "open",
+            "summary": "Confirmation wording predates the assigned edits; propose excluding it from this change review",
+            "location": "releasing/mac-vm-test/guest_workflow.py:187",
+            "detail": "Reviewed commits: f560058da19e02716e6f943883a9508b447aff4e and 6f1a36144ede6f87c33c0bfedd871c208cc930d4. TLDR (original concern preserved): a correct idle-session restart could be reported as a failed macOS release check if the native tester reads ordinary confirmation as a mandatory dialog. Details and exact attribution: f560058da19e02716e6f943883a9508b447aff4e has parent 1ed482dde220452e424973faf38a5e1318986333. That parent's guest_workflow.py:190 already makes any following step not working a fail, :192-193 already requires the separate new answer 48, :197 says 'use the band’s Restart and its ordinary confirmation', and :198 says 'Branch host: use the session’s ordinary Restart and its ordinary confirmation.' The f560 rewrite at :195-198 consolidates those two routes while retaining this wording and the fail/answer premises. 6f1a36144ede6f87c33c0bfedd871c208cc930d4 has parent d751ff1633bb479c7bf53920f2e4ea4ba932a1c2, whose guest_workflow.py:190-198 already has the same fail/answer/ordinary-confirmation sequence. The 6f1 rewrite at :183-190 retains the already unconditional host-branch restart; removing the obsolete tmux/no-restart branch does not impose a materially new confirmation contract on the surviving host fixture. Governing conditional behavior also predates the edits: 1ed482dde220452e424973faf38a5e1318986333 SPEC.md:1931-1937 says working confirms but idle, waiting and unknown restart without asking. At 6f1, SPEC.md:1938-1944 and session_view.rs:190-200,2178-2187 preserve that behavior. The pinned RECIPE.md:114-121 requires answer then Restart and does not demand a dialog; guest_tester.py:287-330 and checkpoint_contract.py:60-87 add no confirmation-image prerequisite. Suggested bucket: other, maintainer test tooling. Confidence: source confirms unchanged attribution and normal conditional confirmation; actual false failure remains unverified after investigation. proposed_drop: scope proposal only, pending parent decision: wording, relevant host-route semantics, new-answer premise and fail language all predate both assigned edits; no materially new confirmation obligation is established. This does not refute the original wording concern. Could-be-highest: no established security or user-work loss route. possible_cover: none. Remaining factual uncertainty: native model interpretation of the phrase; source cannot determine whether it demands a nonexistent dialog. A retained actual turn refusing an otherwise successful idle restart solely for missing confirmation would settle that behavioral claim. No execution or reproduction was requested or performed. This candidate revision closes the lead classification under the original ID; parent has not accepted the proposed drop."
+          }
+        },
+        {
+          "line": 10,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "l1",
+            "state": "open",
+            "summary": "Exact exclusive-base evidence places the confirmation ambiguity before the whole review range",
+            "location": "releasing/mac-vm-test/guest_workflow.py:187",
+            "detail": "Reviewed commits: f560058da19e02716e6f943883a9508b447aff4e and 6f1a36144ede6f87c33c0bfedd871c208cc930d4; full-range attribution checked against exclusive base 6e423e30068b62c6cfa276c6d720ee35bb70387a and inclusive end 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db. TLDR (original concern preserved): a correct idle-session restart could be reported as a failed macOS release check if the native tester treats ordinary confirmation as a mandatory dialog. New exact prebase proof: at 6e423e30068b62c6cfa276c6d720ee35bb70387a, guest_workflow.py:190 already says any following step not working is a fail; :192-193 already requires the separate new answer 48; :197 says 'use the band’s Restart and its ordinary confirmation'; :198 says 'Branch host: use the session’s ordinary Restart and its ordinary confirmation.' The same exclusive-base SPEC.md:1880-1886 already makes confirmation conditional on working status and specifies idle, waiting and unknown Restart without asking. A bounded git log for guest_workflow.py, checkpoint_contract.py and guest_tester.py over the whole pinned range lists only f560 and 6f1. Exact parent comparisons previously recorded remain: f560 parent 1ed482dde220452e424973faf38a5e1318986333:guest_workflow.py:190-198 contains the same sequence; 6f1 parent d751ff1633bb479c7bf53920f2e4ea4ba932a1c2:guest_workflow.py:190-198 retains it. The surviving host path gains no materially new confirmation obligation in either assigned rewrite. Pinned 6f1 RECIPE.md:114-121 requires answer then Restart without a dialog mandate, and guest_tester.py:287-330/checkpoint_contract.py:60-87 impose no confirmation-image prerequisite. Suggested bucket: other, maintainer test wording. Confidence: exact before-range attribution confirmed by source; actual false failure remains unverified after investigation. proposed_drop: scope proposal, now supported against the entire pinned range rather than only assigned parents: relevant wording, answer/fail premises and conditional Restart policy all exist at the exclusive base. Parent has not accepted the drop. This does not refute the distinct wording/test-oracle concern or use correct product behavior to dismiss it. Could-be-highest: no established security or user-work-loss route. possible_cover: none. Remaining uncertainty is native model interpretation, which source cannot determine; a retained turn refusing an otherwise successful idle restart solely for missing confirmation would settle that consequence. No runtime test or reproduction performed. This is a revision of the existing candidate, not a new discovery or an open lead."
+          }
+        }
+      ],
+      "latest": {
+        "line": 10,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "l1",
+          "state": "open",
+          "summary": "Exact exclusive-base evidence places the confirmation ambiguity before the whole review range",
+          "location": "releasing/mac-vm-test/guest_workflow.py:187",
+          "detail": "Reviewed commits: f560058da19e02716e6f943883a9508b447aff4e and 6f1a36144ede6f87c33c0bfedd871c208cc930d4; full-range attribution checked against exclusive base 6e423e30068b62c6cfa276c6d720ee35bb70387a and inclusive end 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db. TLDR (original concern preserved): a correct idle-session restart could be reported as a failed macOS release check if the native tester treats ordinary confirmation as a mandatory dialog. New exact prebase proof: at 6e423e30068b62c6cfa276c6d720ee35bb70387a, guest_workflow.py:190 already says any following step not working is a fail; :192-193 already requires the separate new answer 48; :197 says 'use the band’s Restart and its ordinary confirmation'; :198 says 'Branch host: use the session’s ordinary Restart and its ordinary confirmation.' The same exclusive-base SPEC.md:1880-1886 already makes confirmation conditional on working status and specifies idle, waiting and unknown Restart without asking. A bounded git log for guest_workflow.py, checkpoint_contract.py and guest_tester.py over the whole pinned range lists only f560 and 6f1. Exact parent comparisons previously recorded remain: f560 parent 1ed482dde220452e424973faf38a5e1318986333:guest_workflow.py:190-198 contains the same sequence; 6f1 parent d751ff1633bb479c7bf53920f2e4ea4ba932a1c2:guest_workflow.py:190-198 retains it. The surviving host path gains no materially new confirmation obligation in either assigned rewrite. Pinned 6f1 RECIPE.md:114-121 requires answer then Restart without a dialog mandate, and guest_tester.py:287-330/checkpoint_contract.py:60-87 impose no confirmation-image prerequisite. Suggested bucket: other, maintainer test wording. Confidence: exact before-range attribution confirmed by source; actual false failure remains unverified after investigation. proposed_drop: scope proposal, now supported against the entire pinned range rather than only assigned parents: relevant wording, answer/fail premises and conditional Restart policy all exist at the exclusive base. Parent has not accepted the drop. This does not refute the distinct wording/test-oracle concern or use correct product behavior to dismiss it. Could-be-highest: no established security or user-work-loss route. possible_cover: none. Remaining uncertainty is native model interpretation, which source cannot determine; a retained turn refusing an otherwise successful idle restart solely for missing confirmation would settle that consequence. No runtime test or reproduction performed. This is a revision of the existing candidate, not a new discovery or an open lead."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g198/findings.jsonl",
+        "id": "l1",
+        "line": 10,
+        "disposition": "excluded",
+        "group": "mac-brick-idle-restart-confirmation-wording",
+        "reason": "Parent explicitly accepted named out-of-range proposal from claims-123 after inspecting it. The wording ambiguity and relevant idle-restart policy both exist at the exclusive review base. Neither in-range rewrite adds the alleged confirmation requirement to the surviving host path. This attribution result does not refute the possible wording/test-oracle defect. Exclude only from this pinned change-review range because the entire relevant ambiguity predates its exclusive base. Keep the unresolved interpretation and original consequence in the parent record. Checked source/results: [\"6e423e30068b62c6cfa276c6d720ee35bb70387a:releasing/mac-vm-test/guest_workflow.py:190-198 already contains fail-on-step-failure, the new answer 48 and the host path's ordinary Restart and its ordinary confirmation.\",\"Exclusive-base SPEC.md:1880-1886 already says working confirms and idle/waiting/unknown restart without asking.\",\"git log over the full exclusive-base..00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db range for guest_workflow.py, checkpoint_contract.py and guest_tester.py lists only f560058d and 6f1a3614. The full base-to-tip guest_workflow.py diff preserves the host path's relevant semantics.\",\"f560058da19e02716e6f943883a9508b447aff4e:guest_workflow.py:189-205 and 6f1a36144ede6f87c33c0bfedd871c208cc930d4:guest_workflow.py:183-196 retain the phrase. Paths in these two references are releasing/mac-vm-test/.\",\"6f1:crates/farhelm-ui/src/session_view.rs:190-200,2178-2187 implements conditional confirmation. 6f1:releasing/mac-vm-test/RECIPE.md:114-121 requires Restart without a dialog mandate; guest_tester.py:287-330 and checkpoint_contract.py:60-87 add no confirmation-image gate. No native tester behavior was observed.\"] Current coverage/results: {\"SPEC.md\":\"Current Lifecycle operations :1927-1955 preserves conditional confirmation. Correct product behavior does not cover a misleading test instruction.\",\"SPEC_impl.md\":\"Searched relevant Restart/confirmation and brick terms; no acceptance of mandatory nonexistent tester dialogs found.\",\"TODO.md Planned\":\"Empty.\",\"plans/queue\":\"Relevant tmux plans are landed and do not settle native-model interpretation of this phrase.\",\"BUGS.md\":\"No exact match.\",\"INDEX.md and queue\":\"No exact idle-Restart instruction item found in the full index. Other confirmation and release-tool items have different triggers.\",\"TRIAGE_OUTCOMES.md\":\"Claim-specific searches found no exact wording decision; separate window-check and oracle decisions do not cover this.\",\"FILTER.md\":\"Not used; full-range attribution is the proposed exclusion.\"} Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"A correct idle-session restart could be reported as a failed macOS release check if the tester treats ordinary confirmation as a mandatory dialog. The lead was investigated, then revised into a scope-drop proposal; that proposal does not mean the wording concern was disproved.\"; \"Actual false failure still needs a retained native tester turn that refuses an otherwise successful idle restart solely because no dialog appeared. Source cannot settle model interpretation.\"."
+      },
+      "accepted_parent_decision": {
+        "key": "g198/l1",
+        "line": 10,
+        "disposition": "excluded",
+        "group": "mac-brick-idle-restart-confirmation-wording",
+        "bucket": "other",
+        "recording": "out-of-range",
+        "queue_target_candidate": null,
+        "needs_independent_drop_check": false,
+        "reason": "Parent explicitly accepted named out-of-range proposal from claims-123 after inspecting it. The wording ambiguity and relevant idle-restart policy both exist at the exclusive review base. Neither in-range rewrite adds the alleged confirmation requirement to the surviving host path. This attribution result does not refute the possible wording/test-oracle defect. Exclude only from this pinned change-review range because the entire relevant ambiguity predates its exclusive base. Keep the unresolved interpretation and original consequence in the parent record. Checked source/results: [\"6e423e30068b62c6cfa276c6d720ee35bb70387a:releasing/mac-vm-test/guest_workflow.py:190-198 already contains fail-on-step-failure, the new answer 48 and the host path's ordinary Restart and its ordinary confirmation.\",\"Exclusive-base SPEC.md:1880-1886 already says working confirms and idle/waiting/unknown restart without asking.\",\"git log over the full exclusive-base..00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db range for guest_workflow.py, checkpoint_contract.py and guest_tester.py lists only f560058d and 6f1a3614. The full base-to-tip guest_workflow.py diff preserves the host path's relevant semantics.\",\"f560058da19e02716e6f943883a9508b447aff4e:guest_workflow.py:189-205 and 6f1a36144ede6f87c33c0bfedd871c208cc930d4:guest_workflow.py:183-196 retain the phrase. Paths in these two references are releasing/mac-vm-test/.\",\"6f1:crates/farhelm-ui/src/session_view.rs:190-200,2178-2187 implements conditional confirmation. 6f1:releasing/mac-vm-test/RECIPE.md:114-121 requires Restart without a dialog mandate; guest_tester.py:287-330 and checkpoint_contract.py:60-87 add no confirmation-image gate. No native tester behavior was observed.\"] Current coverage/results: {\"SPEC.md\":\"Current Lifecycle operations :1927-1955 preserves conditional confirmation. Correct product behavior does not cover a misleading test instruction.\",\"SPEC_impl.md\":\"Searched relevant Restart/confirmation and brick terms; no acceptance of mandatory nonexistent tester dialogs found.\",\"TODO.md Planned\":\"Empty.\",\"plans/queue\":\"Relevant tmux plans are landed and do not settle native-model interpretation of this phrase.\",\"BUGS.md\":\"No exact match.\",\"INDEX.md and queue\":\"No exact idle-Restart instruction item found in the full index. Other confirmation and release-tool items have different triggers.\",\"TRIAGE_OUTCOMES.md\":\"Claim-specific searches found no exact wording decision; separate window-check and oracle decisions do not cover this.\",\"FILTER.md\":\"Not used; full-range attribution is the proposed exclusion.\"} Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"A correct idle-session restart could be reported as a failed macOS release check if the tester treats ordinary confirmation as a mandatory dialog. The lead was investigated, then revised into a scope-drop proposal; that proposal does not mean the wording concern was disproved.\"; \"Actual false failure still needs a retained native tester turn that refuses an otherwise successful idle restart solely because no dialog appeared. Source cannot settle model interpretation.\"."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-123",
+          "key": "g198/l1",
+          "latest_line": 10,
+          "recommendation": "out-of-range",
+          "bucket": "other",
+          "underlying_key": "mac-brick-idle-restart-confirmation-wording",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The wording ambiguity and relevant idle-restart policy both exist at the exclusive review base. Neither in-range rewrite adds the alleged confirmation requirement to the surviving host path. This attribution result does not refute the possible wording/test-oracle defect.",
+          "checks": [
+            "6e423e30068b62c6cfa276c6d720ee35bb70387a:releasing/mac-vm-test/guest_workflow.py:190-198 already contains fail-on-step-failure, the new answer 48 and the host path's ordinary Restart and its ordinary confirmation.",
+            "Exclusive-base SPEC.md:1880-1886 already says working confirms and idle/waiting/unknown restart without asking.",
+            "git log over the full exclusive-base..00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db range for guest_workflow.py, checkpoint_contract.py and guest_tester.py lists only f560058d and 6f1a3614. The full base-to-tip guest_workflow.py diff preserves the host path's relevant semantics.",
+            "f560058da19e02716e6f943883a9508b447aff4e:guest_workflow.py:189-205 and 6f1a36144ede6f87c33c0bfedd871c208cc930d4:guest_workflow.py:183-196 retain the phrase. Paths in these two references are releasing/mac-vm-test/.",
+            "6f1:crates/farhelm-ui/src/session_view.rs:190-200,2178-2187 implements conditional confirmation. 6f1:releasing/mac-vm-test/RECIPE.md:114-121 requires Restart without a dialog mandate; guest_tester.py:287-330 and checkpoint_contract.py:60-87 add no confirmation-image gate. No native tester behavior was observed."
+          ],
+          "coverage_checked": {
+            "SPEC.md": "Current Lifecycle operations :1927-1955 preserves conditional confirmation. Correct product behavior does not cover a misleading test instruction.",
+            "SPEC_impl.md": "Searched relevant Restart/confirmation and brick terms; no acceptance of mandatory nonexistent tester dialogs found.",
+            "TODO.md Planned": "Empty.",
+            "plans/queue": "Relevant tmux plans are landed and do not settle native-model interpretation of this phrase.",
+            "BUGS.md": "No exact match.",
+            "INDEX.md and queue": "No exact idle-Restart instruction item found in the full index. Other confirmation and release-tool items have different triggers.",
+            "TRIAGE_OUTCOMES.md": "Claim-specific searches found no exact wording decision; separate window-check and oracle decisions do not cover this.",
+            "FILTER.md": "Not used; full-range attribution is the proposed exclusion."
+          },
+          "exact_cover_quotes": [],
+          "missing_premise": "Actual false failure still needs a retained native tester turn that refuses an otherwise successful idle restart solely because no dialog appeared. Source cannot settle model interpretation.",
+          "original_stronger_consequence": "A correct idle-session restart could be reported as a failed macOS release check if the tester treats ordinary confirmation as a mandatory dialog. The lead was investigated, then revised into a scope-drop proposal; that proposal does not mean the wording concern was disproved.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Exclude only from this pinned change-review range because the entire relevant ambiguity predates its exclusive base. Keep the unresolved interpretation and original consequence in the parent record."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": false,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "mac-brick-idle-restart-confirmation-wording",
+        "destination": null
+      }
+    },
+    {
+      "key": "g198/c3",
+      "owner": "g198",
+      "id": "c3",
+      "domain": "mac-release-gate",
+      "purpose": "mac-release-gate: releasing/mac-vm-test/checkpoint_contract.py, releasing/mac-vm-test/guest_workflow.py, releasing/mac-vm-test/test_guest_operations.py, releasing/mac-vm-test/test_guest_workflow.py, releasing/rehearse-release-gate.py, releasing/mac-vm-test/brick_test.py, releasing/mac-vm-test/guest_operations.py, releasing/mac-vm-test/guest_tester.py, releasing/mac-vm-test/test_brick_test.py, releasing/mac-vm-test/test_native_coordinator.py; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 4,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c3",
+            "state": "open",
+            "summary": "Removing UI terminal-kind checks retains the independent receipt gates",
+            "location": "releasing/mac-vm-test/guest_workflow.py:189",
+            "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e. TLDR: The tester no longer needs hidden terminal-kind details or a retired migration band to check old-session restart. Details: considered whether deleting the GUI kind and band assertions weakened terminal-transition acceptance. Pinned checkpoint_contract.py:62-109 still rejects new-session stored kinds contradicting sampled hosts, survival kind_disagreements, non-survival, absent generation progress, no captured conversation, a final tmux kind, a missing new host and a leaked old host. guest_operations.py:674-792 samples and compares the stored kinds and processes independently. A targeted search of pinned session_view.rs finds no terminal_kind, TerminalKind or migration reference, and SPEC.md:3002-3015 explicitly says the previous loud band asked users to move old terminals and 'This release ends them'; terminal-host sessions keep running. The changed instructions still require the Restart offer and recalled word. Suggested bucket: other. Confidence: confirmed by source, not execution. proposed_drop: removal follows the available UI and leaves terminal-kind acceptance to the machine-owned samples; the previous GUI checks do not represent an additional available product surface. Could-be-highest: no; no established new user-data or process-loss route results from removing these unavailable UI observations. possible_cover: none. Caveat: old tmux fixtures still cannot survive this candidate's intentional retirement behavior at this intermediate revision; the later 6f1a36144ede6f87c33c0bfedd871c208cc930d4 explicitly narrows the test baseline as recorded under c1."
+          }
+        },
+        {
+          "line": 9,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c3",
+            "state": "open",
+            "summary": "The intermediate GUI-check removal retains enforced managed terminal checks",
+            "location": "releasing/mac-vm-test/guest_workflow.py:195",
+            "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e. TLDR (original considered consequence preserved): removing GUI terminal-kind and migration-band observations could have allowed a broken terminal transition to pass; at this revision the managed executor still enforces the independent terminal premises. Synthesis checks: guest_tester.py:287-291 requires completed operations before accepting pass, :326-334 calls require_agent_terminal for either updater-pair supervisor-agent checkpoint and require_old_session for either old-session checkpoint, and wraps ValueError/KeyError/TypeError as TesterError. checkpoint_contract.py:69-71 refuses stored new-session kind contradicting new_hosts; :91-109 refuses kind_disagreements, lost survival, absent session, invalid/non-progressed generation, missing captured conversation, final tmux kind, missing/excess new hosts or surviving old host. Thus these are actual validator calls, not unused helper contracts. The existing managed-failure latch independently rejects operation errors. Pinned guest_operations.py:674-792 produces those samples and comparisons from receipts and its own observations, rather than the tester's reading of details. Product contract SPEC.md:3002-3015 says earlier releases had a loud band asking users to move old terminals and 'This release ends them'; sessions already in terminal hosts keep them. session_view.rs contains no terminal_kind, TerminalKind or migration references, so the removed UI checks are not available in the pinned candidate. Suggested bucket: other. Confidence: confirmed by source, not execution. proposed_drop: preserve the original source/contract proposal: removal of unavailable GUI observations does not remove these managed acceptance premises. Parent has not accepted this drop. Could-be-highest: no established new data-loss or process-loss route from these review-scope deletions. possible_cover: none. Caveats: this statement is revision-specific and managed-executor-specific. The later 6f1a36144ede6f87c33c0bfedd871c208cc930d4 deliberately removes stored-kind checks and switches to terminal-host-only fixtures; c1 records that separate narrowing. Plain instructions rely on independent observations by the tester. At the intermediate f560 revision, an old tmux fixture still cannot satisfy the intentional retirement behavior; that older compatibility path is not proven to work by this candidate proposal."
+          }
+        }
+      ],
+      "latest": {
+        "line": 9,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c3",
+          "state": "open",
+          "summary": "The intermediate GUI-check removal retains enforced managed terminal checks",
+          "location": "releasing/mac-vm-test/guest_workflow.py:195",
+          "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e. TLDR (original considered consequence preserved): removing GUI terminal-kind and migration-band observations could have allowed a broken terminal transition to pass; at this revision the managed executor still enforces the independent terminal premises. Synthesis checks: guest_tester.py:287-291 requires completed operations before accepting pass, :326-334 calls require_agent_terminal for either updater-pair supervisor-agent checkpoint and require_old_session for either old-session checkpoint, and wraps ValueError/KeyError/TypeError as TesterError. checkpoint_contract.py:69-71 refuses stored new-session kind contradicting new_hosts; :91-109 refuses kind_disagreements, lost survival, absent session, invalid/non-progressed generation, missing captured conversation, final tmux kind, missing/excess new hosts or surviving old host. Thus these are actual validator calls, not unused helper contracts. The existing managed-failure latch independently rejects operation errors. Pinned guest_operations.py:674-792 produces those samples and comparisons from receipts and its own observations, rather than the tester's reading of details. Product contract SPEC.md:3002-3015 says earlier releases had a loud band asking users to move old terminals and 'This release ends them'; sessions already in terminal hosts keep them. session_view.rs contains no terminal_kind, TerminalKind or migration references, so the removed UI checks are not available in the pinned candidate. Suggested bucket: other. Confidence: confirmed by source, not execution. proposed_drop: preserve the original source/contract proposal: removal of unavailable GUI observations does not remove these managed acceptance premises. Parent has not accepted this drop. Could-be-highest: no established new data-loss or process-loss route from these review-scope deletions. possible_cover: none. Caveats: this statement is revision-specific and managed-executor-specific. The later 6f1a36144ede6f87c33c0bfedd871c208cc930d4 deliberately removes stored-kind checks and switches to terminal-host-only fixtures; c1 records that separate narrowing. Plain instructions rely on independent observations by the tester. At the intermediate f560 revision, an old tmux fixture still cannot satisfy the intentional retirement behavior; that older compatibility path is not proven to work by this candidate proposal."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g198/findings.jsonl",
+        "id": "c3",
+        "line": 9,
+        "disposition": "excluded",
+        "group": "mac-brick-intermediate-gui-kind-check-removal",
+        "reason": "Parent explicitly accepted named refuted proposal from claims-123 after inspecting it. At the named intermediate revision, deleting unavailable GUI kind/band observations does not delete the examined managed terminal acceptance premises. Propose closing this narrow source-refuted candidate. Do not reuse the conclusion for the later terminal-host-only support limitation or as proof of historical upgrade compatibility. Checked source/results: [\"f560058da19e02716e6f943883a9508b447aff4e:releasing/mac-vm-test/checkpoint_contract.py:62-109 retains new-session kind/host agreement, survival, generation, capture, new-host and old-host checks.\",\"Same revision guest_tester.py:287-291,326-334 actually invokes require_old_session and require_agent_terminal on pass; these are enforced validators rather than unused helpers.\",\"Same revision guest_operations.py:674-793 takes the process/session samples and comparisons independently. These references are under releasing/mac-vm-test/.\",\"Pinned git grep finds no terminal_kind, TerminalKind or migration reference in crates/farhelm-ui/src/session_view.rs. Pinned SPEC.md:3002-3015 explicitly retires old terminals and their migration surface.\",\"Later 6f1 deliberately removes the stored-kind branches and changes fixture support, so this conclusion is specific to f560 and the managed executor. No run was performed.\"] Current coverage/results: {\"SPEC.md and SPEC_impl.md\":\"Current terminal experience and Ending the old private tmux server accept legacy-terminal retirement; they do not themselves prove tester coverage.\",\"TODO.md Planned\":\"Empty.\",\"plans/queue\":\"tmux-end-old-terminals criterion 9 authorizes removing hidden UI reads with the product display. REPORTS.md:29 marks it landed; intent context, not pending-work cover.\",\"BUGS.md\":\"No exact match.\",\"INDEX.md and queue\":\"Full index contains no remaining hidden-terminal-kind-details item. Nearby release-oracle records are different; no extension identified.\",\"TRIAGE_OUTCOMES.md\":\"No exact decision covering removal of these managed acceptance premises.\",\"FILTER.md\":\"Not used; pinned enforcement refutes the named weakening.\"} Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Removing GUI kind and migration-band observations could have allowed a broken terminal transition to pass. The check refutes that specific managed-oracle weakening, not all possible release false passes. An old tmux fixture still cannot survive intentional retirement at f560. Plain instructions rely on the tester's independent observations.\"; null."
+      },
+      "accepted_parent_decision": {
+        "key": "g198/c3",
+        "line": 9,
+        "disposition": "excluded",
+        "group": "mac-brick-intermediate-gui-kind-check-removal",
+        "bucket": "other",
+        "recording": "refuted",
+        "queue_target_candidate": null,
+        "needs_independent_drop_check": false,
+        "reason": "Parent explicitly accepted named refuted proposal from claims-123 after inspecting it. At the named intermediate revision, deleting unavailable GUI kind/band observations does not delete the examined managed terminal acceptance premises. Propose closing this narrow source-refuted candidate. Do not reuse the conclusion for the later terminal-host-only support limitation or as proof of historical upgrade compatibility. Checked source/results: [\"f560058da19e02716e6f943883a9508b447aff4e:releasing/mac-vm-test/checkpoint_contract.py:62-109 retains new-session kind/host agreement, survival, generation, capture, new-host and old-host checks.\",\"Same revision guest_tester.py:287-291,326-334 actually invokes require_old_session and require_agent_terminal on pass; these are enforced validators rather than unused helpers.\",\"Same revision guest_operations.py:674-793 takes the process/session samples and comparisons independently. These references are under releasing/mac-vm-test/.\",\"Pinned git grep finds no terminal_kind, TerminalKind or migration reference in crates/farhelm-ui/src/session_view.rs. Pinned SPEC.md:3002-3015 explicitly retires old terminals and their migration surface.\",\"Later 6f1 deliberately removes the stored-kind branches and changes fixture support, so this conclusion is specific to f560 and the managed executor. No run was performed.\"] Current coverage/results: {\"SPEC.md and SPEC_impl.md\":\"Current terminal experience and Ending the old private tmux server accept legacy-terminal retirement; they do not themselves prove tester coverage.\",\"TODO.md Planned\":\"Empty.\",\"plans/queue\":\"tmux-end-old-terminals criterion 9 authorizes removing hidden UI reads with the product display. REPORTS.md:29 marks it landed; intent context, not pending-work cover.\",\"BUGS.md\":\"No exact match.\",\"INDEX.md and queue\":\"Full index contains no remaining hidden-terminal-kind-details item. Nearby release-oracle records are different; no extension identified.\",\"TRIAGE_OUTCOMES.md\":\"No exact decision covering removal of these managed acceptance premises.\",\"FILTER.md\":\"Not used; pinned enforcement refutes the named weakening.\"} Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Removing GUI kind and migration-band observations could have allowed a broken terminal transition to pass. The check refutes that specific managed-oracle weakening, not all possible release false passes. An old tmux fixture still cannot survive intentional retirement at f560. Plain instructions rely on the tester's independent observations.\"; null."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-123",
+          "key": "g198/c3",
+          "latest_line": 9,
+          "recommendation": "refuted",
+          "bucket": "other",
+          "underlying_key": "mac-brick-intermediate-gui-kind-check-removal",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "At the named intermediate revision, deleting unavailable GUI kind/band observations does not delete the examined managed terminal acceptance premises.",
+          "checks": [
+            "f560058da19e02716e6f943883a9508b447aff4e:releasing/mac-vm-test/checkpoint_contract.py:62-109 retains new-session kind/host agreement, survival, generation, capture, new-host and old-host checks.",
+            "Same revision guest_tester.py:287-291,326-334 actually invokes require_old_session and require_agent_terminal on pass; these are enforced validators rather than unused helpers.",
+            "Same revision guest_operations.py:674-793 takes the process/session samples and comparisons independently. These references are under releasing/mac-vm-test/.",
+            "Pinned git grep finds no terminal_kind, TerminalKind or migration reference in crates/farhelm-ui/src/session_view.rs. Pinned SPEC.md:3002-3015 explicitly retires old terminals and their migration surface.",
+            "Later 6f1 deliberately removes the stored-kind branches and changes fixture support, so this conclusion is specific to f560 and the managed executor. No run was performed."
+          ],
+          "coverage_checked": {
+            "SPEC.md and SPEC_impl.md": "Current terminal experience and Ending the old private tmux server accept legacy-terminal retirement; they do not themselves prove tester coverage.",
+            "TODO.md Planned": "Empty.",
+            "plans/queue": "tmux-end-old-terminals criterion 9 authorizes removing hidden UI reads with the product display. REPORTS.md:29 marks it landed; intent context, not pending-work cover.",
+            "BUGS.md": "No exact match.",
+            "INDEX.md and queue": "Full index contains no remaining hidden-terminal-kind-details item. Nearby release-oracle records are different; no extension identified.",
+            "TRIAGE_OUTCOMES.md": "No exact decision covering removal of these managed acceptance premises.",
+            "FILTER.md": "Not used; pinned enforcement refutes the named weakening."
+          },
+          "exact_cover_quotes": [],
+          "missing_premise": null,
+          "original_stronger_consequence": "Removing GUI kind and migration-band observations could have allowed a broken terminal transition to pass. The check refutes that specific managed-oracle weakening, not all possible release false passes. An old tmux fixture still cannot survive intentional retirement at f560. Plain instructions rely on the tester's independent observations.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Propose closing this narrow source-refuted candidate. Do not reuse the conclusion for the later terminal-host-only support limitation or as proof of historical upgrade compatibility."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "mac-brick-intermediate-gui-kind-check-removal",
+        "destination": null
+      }
+    }
+  ],
+  "replies": [
+    {
+      "turn": 1,
+      "reply": "Initial review complete. All 12 assigned patches and the complete commit list were read; no assigned material remains unread.\n\nRecorded three excluded candidates (`c1–c3`) and one investigated, unresolved lead (`l1`) about restart-confirmation wording. No confirmed findings. Findings and progress logs are updated. No tests or reproductions were run."
+    },
+    {
+      "turn": 2,
+      "reply": "- Revised `l1` to a candidate scope proposal: exact parent comparisons confirm the wording and relevant behavior predate both assigned edits. Original concern preserved.\n- Revised `c1–c3` with validator calls, failure propagation, and rewrite/refusal checks. All drops remain proposals.\n- No new findings. No runtime execution.\n\nUnresolved lead IDs: none."
+    },
+    {
+      "turn": 3,
+      "reply": "Discovery pass complete; nothing new found.\n\nChecked receipt lifecycle, local/remote sampling, removed-field references, instruction assembly, checkpoint ordering and result folding. Revised `l1` with exact exclusive-base proof; its scope-drop proposal remains pending.\n\nNew verified IDs: none. New unverified IDs: none. Open leads: none. No runtime execution."
+    }
+  ],
+  "progress": "g198: initialized, awaiting initial source review.\nGroup g198 (mac-release-gate). Initial review complete, turn 1. Discovery passes: 0.\nBrief and complete inventory commits field read; excluded coverage metadata was not read.\nAll 12 assigned patch files (914 lines) delivered through evidence read; 01445 delivered as 1–160 and 161–206. No assigned patch material is unread.\nReviewed at the recorded revisions: f560058da19e02716e6f943883a9508b447aff4e, d751ff1633bb479c7bf53920f2e4ea4ba932a1c2, and 6f1a36144ede6f87c33c0bfedd871c208cc930d4. Governing contracts inspected: product Restart lifecycle, terminal retirement, upgrade compatibility; implementation terminal-host introduction, running-session compatibility, drawn-answer binding and Testing; pinned brick-test and recipe obligations.\nInterface assumptions: old-fixture receipts are digest-bound; survival takes its own process/session samples once; final samples compare generation and hosts against that survival snapshot. Native observations establish actual answers and remembered conversation. Remote new sessions must remain running for Remove/Uninstall. The release rehearsal preserves the renamed test step in its retained build job.\nChecks/results: traced required operations into managed_result and guest operation dispatch; checked removal of prior_value's optional argument leaves no stale callers; inspected pinned generated release workflow and rewrite boundaries; inspected changed tests and surrounding fixture assertions. No execution, runtime tests, reproduction, checkout writes, or live-install actions.\nNew verified findings: none. New verified candidates: c1 (intentional terminal-host-only fixture), c2 (release-step literal matches), c3 (GUI kind/band removal retains independent checks). New unverified IDs: l1, revised after investigation.\nOpen leads: l1. Source establishes that idle Restart asks no confirmation and the instruction mentions ordinary confirmation. It does not establish that the tester treats this as mandatory; validator has no confirmation prerequisite. Exact remaining premise and evidence needed are in the durable event.\nNext action: return to caller for a later synthesis turn. Do not start a second pass inside this initial turn.\nUnread scope: none of the assigned material. No omitted assigned material. Review remains source-only; language-model interpretation in l1 remains unresolved.\n\nSynthesis turn 2 complete. Discovery passes: 0. No new discoveries or verified findings in this turn.\nRevised l1 under its original ID from lead to candidate: exact parents are 1ed482dde220452e424973faf38a5e1318986333 for f560 and d751ff1633bb479c7bf53920f2e4ea4ba932a1c2 for 6f1. Both parent instructions already have the answer-48, fail-on-step and ordinary-confirmation sequence for the surviving host path. The product's conditional confirmation rule also predates both edits. The scope proposal preserves the original possible false-failure concern and unresolved model interpretation; parent has not accepted the drop.\nRevised c1 with concrete managed failure-latch, required-operation, legacy-receipt, final-state and coordinator refusal paths. The executor turns validation errors into automation-failure, never a passing result (guest_tester.py:814-831,846-858); the host retains could-not-run for the required checkpoint.\nRevised c2 with rewrite boundaries and main's refusal-before-output path. The exact renamed test marker survives in the retained Linux X64 build job; future semantics are not established by marker presence alone.\nRevised c3 with actual managed_result call sites at the f560 intermediate revision. Those stored-kind checks remain enforced there and are deliberately removed by 6f1 together with the terminal-host-only contract. Plain instructions rely on tester observations; the managed guarantee is not generalized to them.\nInterface assumptions after synthesis: explicit unsupported-fixture refusal can be a harness failure/could-not-run, not a product fail; native confirmation is conditional on working status; managed validation is separate from the model's original final claim; release property errors prevent output. All candidate drops remain proposals for the parent.\nOpen lead IDs: none. l1 now has candidate classification; its behavioral concern remains unverified after source investigation, with settling evidence specified in findings.jsonl.\nNext action: return this turn's delta to caller. Unread assigned scope: none. No coverage-source searches, runtime tests, reproductions, checkout changes or live-install actions.\n\nDiscovery turn 3 complete. Discovery passes: 1. Result: no new issue found.\nRead the complete discovery-neighbours.json (84 lines, 18,802 bytes) before the new search. Neighbour findings establish distinct product retirement, destructive authority, guidance and terminal-input concerns; none adds a new source premise for an issue in this group's changed release-gate paths.\nResolved parent/l1-full-range-wording before discovery: the exact exclusive base 6e423e30068b62c6cfa276c6d720ee35bb70387a already contains the fail-on-step, answer-48 and ordinary-confirmation wording in guest_workflow.py:190-198, and the conditional working-only Restart policy in SPEC.md:1880-1886. Bounded range history for the instruction/contract/executor files contains only the two already-compared edits. Appended this stronger full-range scope proposal under l1; parent acceptance is still pending, and the original possible false-failure concern remains preserved.\nSeparate discovery checks: traced SESSION_COLUMNS through local database and generated remote inspection, host-process selection and child identities, per-attempt operation state versus persistent receipt state, receipt replacement/digest reads, the managed/plain old-fixture instruction assembly, staging of the current operation/contract modules, actual checkpoint sequencing and result folding, and the changed coordinator/test assertions. Searched only assigned paths for stale removed contract fields and helper names; no stale production reference was found. These checks found no new concrete lead or unintended changed contract.\nNew verified IDs: none. New unverified-after-investigation IDs: none. Existing ID revised: l1 (candidate, exact prebase proof). Open lead IDs: none. No new finding or candidate beyond existing history.\nInterface assumptions remain those recorded in synthesis turn 2. Next action: return discovery result to caller. Unread assigned scope: none. No prohibited coverage searches, runtime tests, reproductions, checkout writes or live-install actions.\n"
+}

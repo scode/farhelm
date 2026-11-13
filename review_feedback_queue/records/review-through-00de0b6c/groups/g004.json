@@ -1,0 +1,680 @@
+{
+  "group": {
+    "id": "g004",
+    "domain": "product-contracts",
+    "purpose": "product-contracts: SPEC_impl.md, SPEC.md; phases @@ -6943,13 +7124,12 @@ The Suspend question uses the shared framed-dialog header, scroll body and foote",
+    "interfaces": [
+      "g001",
+      "g002",
+      "g003",
+      "g005",
+      "g006",
+      "g007",
+      "g008",
+      "g009",
+      "g010",
+      "g011",
+      "g012",
+      "g013",
+      "g014",
+      "g015",
+      "g016",
+      "g027",
+      "g052",
+      "g071",
+      "g074",
+      "g077",
+      "g087"
+    ],
+    "sources": [
+      {
+        "path": "[private-run]/prep/parts/00083-001.patch",
+        "ranges": [
+          [
+            1,
+            151
+          ]
+        ],
+        "original_path": "SPEC_impl.md",
+        "commit": "c8bc155cc36723c8c53870944d07ce8ec61ef9ed",
+        "notes": "@@ -6943,13 +7124,12 @@ The Suspend question uses the shared framed-dialog header, scroll body and foote; patch character offsets [59652,73508)",
+        "lines": 151,
+        "bytes": 13856,
+        "start": 59652,
+        "end": 73508,
+        "original": "[private-run]/prep/originals/00083.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/00585-000.patch",
+        "ranges": [
+          [
+            1,
+            96
+          ]
+        ],
+        "original_path": "SPEC.md",
+        "commit": "6d610d435dd12bbe8458b1a31b0988d95ff7338c",
+        "notes": "patch header; patch character offsets [0,10238)",
+        "lines": 96,
+        "bytes": 10246,
+        "start": 0,
+        "end": 10238,
+        "original": "[private-run]/prep/originals/00585.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/00617-000.patch",
+        "ranges": [
+          [
+            1,
+            62
+          ]
+        ],
+        "original_path": "SPEC_impl.md",
+        "commit": "533169cf19571d34af3a8497eaceb8d2d7b7c852",
+        "notes": "patch header; patch character offsets [0,6469)",
+        "lines": 62,
+        "bytes": 6471,
+        "start": 0,
+        "end": 6469,
+        "original": "[private-run]/prep/originals/00617.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/00641-000.patch",
+        "ranges": [
+          [
+            1,
+            339
+          ]
+        ],
+        "original_path": "SPEC.md",
+        "commit": "b106c0e49646ecb9a17e1a06b17a70da0ece73e0",
+        "notes": "patch header; patch character offsets [0,32414)",
+        "lines": 339,
+        "bytes": 32420,
+        "start": 0,
+        "end": 32414,
+        "original": "[private-run]/prep/originals/00641.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/01218-000.patch",
+        "ranges": [
+          [
+            1,
+            20
+          ]
+        ],
+        "original_path": "SPEC_impl.md",
+        "commit": "78e9d68a95119db8452ee139efde13d38546f648",
+        "notes": "patch header; patch character offsets [0,1855)",
+        "lines": 20,
+        "bytes": 1855,
+        "start": 0,
+        "end": 1855,
+        "original": "[private-run]/prep/originals/01218.patch"
+      }
+    ],
+    "lines": 668,
+    "bytes": 64848
+  },
+  "records": [
+    {
+      "key": "g004/f1",
+      "owner": "g004",
+      "id": "f1",
+      "domain": "product-contracts",
+      "purpose": "product-contracts: SPEC_impl.md, SPEC.md; phases @@ -6943,13 +7124,12 @@ The Suspend question uses the shared framed-dialog header, scroll body and foote",
+      "history": [
+        {
+          "line": 1,
+          "event": {
+            "version": 1,
+            "kind": "lead",
+            "id": "f1",
+            "state": "open",
+            "summary": "Check update-survival promise against the old-terminal migration",
+            "location": "SPEC_impl.md:7781",
+            "detail": "Reviewed commit: 78e9d68a95119db8452ee139efde13d38546f648. TLDR: A general promise that updates keep sessions running could mislead someone whose update ends an old terminal and its work. Source basis: the commit message explicitly restores that promise while accepting that the installer prints it during the one migration that ends old tmux terminals; pinned SPEC_impl.md search locates the unconditional promise at line 7781 and the old-terminal startup cleanup at lines 2784 onward. Suggested bucket: highest if this documentation induces a data-loss mistake; could-be-highest: yes. Confidence: unresolved lead, not a confirmed defect. Next checks: read the full migration and upgrade compatibility contracts and the assigned patch once its invalid evidence manifest is corrected; determine whether the specification explicitly accepts the exception. proposed_drop: false pending contract verification. possible_cover: none; no coverage sources consulted. No execution or reproduction performed. Mandatory patch delivery is currently blocked by out-of-bounds source ranges in the supplied manifest."
+          }
+        },
+        {
+          "line": 2,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "f1",
+            "state": "open",
+            "summary": "Update-survival promise omits the explicitly accepted old-terminal migration",
+            "location": "SPEC_impl.md:7781",
+            "detail": "Reviewed commit: 78e9d68a95119db8452ee139efde13d38546f648. TLDR: Someone trusting the general statement that sessions keep running across an update could leave work in an old terminal that this one migration ends. Precise references: SPEC_impl.md:7777-7784 restores the general update-survival statement; SPEC_impl.md:2784-2834 describes ending the old tmux server, interrupting live old sessions and sweeping their processes; SPEC.md:3001-3016 explicitly specifies that migration. Contract analysis: this is a deliberate specification exception rather than an unintended migration. Exact acceptance text, SPEC.md:3004-3006: 'This release ends them: the first time a host’s supervisor of this release starts, it ends that tmux server, and with it everything that still ran in an old terminal, without needing a tmux program.' (The source uses an ASCII apostrophe in host's.) It also states at SPEC.md:3012: 'A session whose agent or tabs already run in terminal hosts keeps them.' The reviewed commit message expressly says it is 'accepting that the installer prints it during that one update too.' Suggested bucket: potentially highest because an inaccurate update assurance could contribute to losing running work; could-be-highest: yes. Established consequence is the documented one-time termination; a user actually relying on the restored assurance has not been observed. Confidence: confirmed documentation/contract mismatch with explicitly intended behavior; implementation execution was not observed. proposed_drop: specification explicitly accepts the destructive one-time migration and the reviewed change deliberately restores the general assurance; retain for the caller's independent highest-impact drop check. possible_cover: none; no coverage sources consulted. Revision of f1 closes its unresolved contract question. Assigned patch still awaits mandatory evidence delivery after correction of the supplied out-of-bounds manifest; no runtime tests or reproductions were run."
+          }
+        },
+        {
+          "line": 3,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "f1",
+            "state": "open",
+            "summary": "Update-survival promise omits the explicitly accepted old-terminal migration",
+            "location": "SPEC_impl.md:7781",
+            "detail": "Reviewed commit: 78e9d68a95119db8452ee139efde13d38546f648. TLDR: Someone trusting the general statement that sessions keep running across an update could leave work in an old terminal that this one migration ends. Precise references: assigned SPEC_impl.md patch, now delivered in full through the corrected evidence manifest, removes the explicit migration caveat at old lines 7781-7784 and restores '; sessions keep running.' at new line 7781. SPEC_impl.md:2784-2834 describes ending the old tmux server, interrupting live old sessions and sweeping their processes; SPEC.md:3001-3016 explicitly specifies that migration. Exact termination acceptance, SPEC.md:3004-3006: 'This release ends them: the first time a host's supervisor of this release starts, it ends that tmux server, and with it everything that still ran in an old terminal, without needing a tmux program.' It also states at SPEC.md:3012: 'A session whose agent or tabs already run in terminal hosts keeps them.' Intended termination alone does not establish acceptance of misleading wording. The separate evidence for intended wording is the reviewed patch restoring that sentence and its commit rationale: 'Every other update keeps sessions running, so the general statement comes back without the caveat, accepting that the installer prints it during that one update too.' Thus both termination and general wording were deliberate, on separate evidence. Suggested bucket remains potentially highest because inaccurate update guidance could contribute to losing running work; could-be-highest: yes. Established source consequences are misleading general guidance and the independently specified one-time termination; a user's reliance on the assurance has not been observed. Confidence: confirmed source-level exception to the general wording; no execution observed. proposed_drop: the specification expressly accepts the migration, and the commit rationale separately explicitly accepts printing the survival assurance during that migration; retain for the caller's independent check, with no drop or lowering accepted by the parent. possible_cover: parent-supplied g071/f2 latest event at physical line 6 reports the same underlying wording-versus-migration concern, with the concrete installer sentence at scripts/install.sh:1287, 'Quit and reopen Farhelm to finish updating. Your sessions keep running.' Its installer surface and this specification surface are two manifestations of the same claim, not new progress. Revision follows mandatory patch delivery and that interface comparison; original potential loss-of-work consequence preserved. No runtime tests or reproductions were run."
+          }
+        },
+        {
+          "line": 7,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "f1",
+            "state": "open",
+            "summary": "Update-survival promise omits the explicitly accepted old-terminal migration",
+            "location": "SPEC_impl.md:7781",
+            "detail": "Reviewed commit: 78e9d68a95119db8452ee139efde13d38546f648. TLDR: Someone trusting the restored statement that sessions keep running across an update could leave running work in an old terminal that this migration ends. Source consequence and attribution: assigned SPEC_impl.md patch removes the explicit migration caveat and restores '; sessions keep running.' at line 7781; scripts/install.sh:1285-1287 prints 'Quit and reopen Farhelm to finish updating. Your sessions keep running.' whenever updated_installation is 1. Direct synthesis checks at the same revision establish the separate termination route: service/core.rs:6142-6151 calls OldTerminals::end_private_server only for the state-directory owner and before session reload; service/core/old_terminals.rs:164-232 reaches a verified same-user private server and calls terminate_process_within, within the migration deadline. The reassurance-restoration commit does not introduce that termination: it restores general wording after the earlier retirement change. Exact general retirement acceptance, SPEC.md:3004-3006: 'This release ends them: the first time a host's supervisor of this release starts, it ends that tmux server, and with it everything that still ran in an old terminal, without needing a tmux program.' That retirement rule alone does NOT accept inaccurate assurance. Separate exact stated wording decision in this reviewed commit's rationale: 'Every other update keeps sessions running, so the general statement comes back without the caveat, accepting that the installer prints it during that one update too.' Preserve this narrower decision for independent checking. SPEC.md:3012 separately says 'A session whose agent or tabs already run in terminal hosts keeps them.' Suggested bucket remains potentially highest because misleading update guidance could induce a loss-of-work mistake; could-be-highest: yes. Confirmed source consequences are the misleading general reassurance and the independently implemented one-time termination route. No reliance event or process termination was observed during execution; no runtime tests or reproductions were run. Confidence: confirmed source-level mismatch with an explicit deliberate wording decision. proposed_drop: the exact commit-rationale decision separately accepts printing the assurance during the migration; this remains only a proposal, with NO parent drop or lowering accepted. possible_cover: parent-supplied g002/f1, this g004/f1 and g071/f2 concern this same reassurance restoration at the same revision; g071/f2 supplies the installer surface, now checked directly. These are manifestations of one underlying claim, not new discoveries. g033's omitted-warning/cleanup-failure residual is distinct: neither a post-termination notice nor assumptions that cleanup always succeeds are used to refute this reassurance concern, and this record makes no claim about g033's residual. Revision adds directly checked shipped premises and attribution, preserves the original potentially highest consequence, and leaves the record open for independent judgment. No queue, ledger or plan coverage searches."
+          }
+        }
+      ],
+      "latest": {
+        "line": 7,
+        "event": {
+          "version": 1,
+          "kind": "finding",
+          "id": "f1",
+          "state": "open",
+          "summary": "Update-survival promise omits the explicitly accepted old-terminal migration",
+          "location": "SPEC_impl.md:7781",
+          "detail": "Reviewed commit: 78e9d68a95119db8452ee139efde13d38546f648. TLDR: Someone trusting the restored statement that sessions keep running across an update could leave running work in an old terminal that this migration ends. Source consequence and attribution: assigned SPEC_impl.md patch removes the explicit migration caveat and restores '; sessions keep running.' at line 7781; scripts/install.sh:1285-1287 prints 'Quit and reopen Farhelm to finish updating. Your sessions keep running.' whenever updated_installation is 1. Direct synthesis checks at the same revision establish the separate termination route: service/core.rs:6142-6151 calls OldTerminals::end_private_server only for the state-directory owner and before session reload; service/core/old_terminals.rs:164-232 reaches a verified same-user private server and calls terminate_process_within, within the migration deadline. The reassurance-restoration commit does not introduce that termination: it restores general wording after the earlier retirement change. Exact general retirement acceptance, SPEC.md:3004-3006: 'This release ends them: the first time a host's supervisor of this release starts, it ends that tmux server, and with it everything that still ran in an old terminal, without needing a tmux program.' That retirement rule alone does NOT accept inaccurate assurance. Separate exact stated wording decision in this reviewed commit's rationale: 'Every other update keeps sessions running, so the general statement comes back without the caveat, accepting that the installer prints it during that one update too.' Preserve this narrower decision for independent checking. SPEC.md:3012 separately says 'A session whose agent or tabs already run in terminal hosts keeps them.' Suggested bucket remains potentially highest because misleading update guidance could induce a loss-of-work mistake; could-be-highest: yes. Confirmed source consequences are the misleading general reassurance and the independently implemented one-time termination route. No reliance event or process termination was observed during execution; no runtime tests or reproductions were run. Confidence: confirmed source-level mismatch with an explicit deliberate wording decision. proposed_drop: the exact commit-rationale decision separately accepts printing the assurance during the migration; this remains only a proposal, with NO parent drop or lowering accepted. possible_cover: parent-supplied g002/f1, this g004/f1 and g071/f2 concern this same reassurance restoration at the same revision; g071/f2 supplies the installer surface, now checked directly. These are manifestations of one underlying claim, not new discoveries. g033's omitted-warning/cleanup-failure residual is distinct: neither a post-termination notice nor assumptions that cleanup always succeeds are used to refute this reassurance concern, and this record makes no claim about g033's residual. Revision adds directly checked shipped premises and attribution, preserves the original potentially highest consequence, and leaves the record open for independent judgment. No queue, ledger or plan coverage searches."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g004/findings.jsonl",
+        "id": "f1",
+        "line": 7,
+        "disposition": "under-investigation",
+        "group": "g004-f1",
+        "reason": "Record durably acknowledged; parent source/contract validation, cross-group synthesis, coverage/filter matching and any independent drop check remain pending. This preserves the claim and uncertainty without accepting, dropping or lowering it."
+      },
+      "accepted_parent_decision": null,
+      "returned_claim_checks": [
+        {
+          "batch": "claims-002",
+          "key": "g004/f1",
+          "latest_line": 7,
+          "recommendation": "needs-parent",
+          "bucket": "highest",
+          "underlying_key": "update-survival-reassurance-restored-during-old-terminal-retirement",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The misleading general assurance and the intended one-time termination are established. The commit rationale explicitly accepts printing the assurance during that migration, but that is a separate decision source from specification acceptance of termination. Parent must adjudicate that proposed exclusion through the independent check; do not silently treat migration acceptance as wording acceptance.",
+          "checks": [
+            "The 78e9d68a95119db8452ee139efde13d38546f648 diff removes the migration caveat from SPEC_impl.md:7781 and restores the installer's 'Your sessions keep running.' at scripts/install.sh:1287.",
+            "The full commit rationale separately says the general statement returns 'without the caveat, accepting that the installer prints it during that one update too.' This is direct evidence of deliberate wording, independent of intended termination.",
+            "At reviewed tip, SPEC.md:2998-3011 and SPEC_impl.md:2780-2823 specify the old-server termination, conversion and accepted cleanup failures; SPEC_impl.md:7724 still gives the general assurance. The assurance can be misleading for the explicit exception. No user reliance or actual process termination was observed."
+          ],
+          "coverage_checked": [
+            "Current SPEC.md and SPEC_impl.md explicitly accept the migration, but do not separately say that a false update-survival assurance is acceptable. The reviewed commit's rationale supplies the separate wording decision; flag the distinction for the parent.",
+            "TODO.md Planned is empty. Old-terminal/update assurance searches of BUGS.md, INDEX.md and active TRIAGE_OUTCOMES.md found no exact cover. The old-terminal and install/docs cleanup plans are all landed per plans/REPORTS.md:29-32; they are not prospective cover. Their older instruction to remove the reassurance does not negate the later explicit restoration.",
+            "FILTER.md upgrade-plus-rare requires an additional rare condition. Updating a surviving old terminal is the migration's ordinary trigger, so it does not cover this assurance claim."
+          ],
+          "exact_cover_quotes": [
+            "Current SPEC.md:3000-3002: 'A supervisor that finds that tmux server when it starts ends it, and with it everything that still ran in an old terminal' — accepts termination, not the reassurance.",
+            "78e9d68a commit rationale: 'Every other update keeps sessions running, so the general statement comes back without the caveat, accepting that the installer prints it during that one update too.' — separate proposed decision basis requiring parent judgment."
+          ],
+          "missing_premise": "No actual reliance event was observed. Parent must decide whether the explicit commit-rationale wording decision is sufficient accepted cover under this recording flow; absent that decision, retain the contract mismatch.",
+          "original_stronger_consequence": "A user relying on the assurance could leave running work in an old terminal that this migration ends. Keep potentially highest until independently adjudicated; do not conflate this with omitted post-termination warnings or residual failed-cleanup behavior.",
+          "needs_independent_drop_check": true,
+          "proposed_basis": "Potential explicit wording acceptance in the reviewed commit rationale. Supplied g002/f1 and g071/f2 are same-root provenance, not independently read named records in this batch; reconcile them by underlying_key."
+        }
+      ],
+      "parent_proposals": [
+        {
+          "artifact": "parent-flagged-judgments-002.json",
+          "key": "g004/f1",
+          "proposal": "claim-checks/claims-002/result.json",
+          "parent_proposal": "duplicate-retained-highest-g002/f1",
+          "final_independent_gate": "include-both-provenance-and-original-intent-drop",
+          "reason": "Full002same78e9 installer/SPECunconditionalsurvivalassuranceduringordinarymigrationthatterminatesoldagents/tabs. Preserveexplicitcommitdeliberate-wordingdecision andbothcontradictorycontractclauses; bareterminationacceptancedoesnotacceptassurance. Canonical002f1 retains highestconditionalworkloss, nofiles/currenthostharm. Dedup exactsameassurance/rootwith004SPEC_implwordingprovenance andlater071f2, do not silentlydiscardtheoriginalreviewerintent-baseddropproposal."
+        }
+      ],
+      "collection": {
+        "retain": true,
+        "clearly_refuted_candidate": false,
+        "needs_unfinished_gate": true,
+        "provisional_bucket": "highest",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "update-survival-reassurance-restored-during-old-terminal-retirement",
+        "destination": "trailing-update-survival-reassurance-restored-during-old-terminal-retirement.md"
+      }
+    },
+    {
+      "key": "g004/f2",
+      "owner": "g004",
+      "id": "f2",
+      "domain": "product-contracts",
+      "purpose": "product-contracts: SPEC_impl.md, SPEC.md; phases @@ -6943,13 +7124,12 @@ The Suspend question uses the shared framed-dialog header, scroll body and foote",
+      "history": [
+        {
+          "line": 4,
+          "event": {
+            "version": 1,
+            "kind": "lead",
+            "id": "f2",
+            "state": "open",
+            "summary": "Check resumed connection wait that reappears after the one-shot deadline",
+            "location": "SPEC_impl.md:211",
+            "detail": "Reviewed commit: 533169cf19571d34af3a8497eaceb8d2d7b7c852. TLDR: A resumed launch may still keep New and host changes unavailable indefinitely if it loses the connection after its single 60-second timer has already passed. Source basis: assigned SPEC_impl.md patch at new lines 211-214 explicitly leaves a later reappearing connection wait unbounded, while SPEC.md:1346-1350 promises this window sees the woken host connect within at most 60 seconds and says timeout creates nothing. Suggested bucket: high if a shipped connection-loss path reenters the blocked state without another timeout. Could-be-highest: no identified security or loss-of-work route. Confidence: source contract tension; unresolved lead pending create-form state and timer analysis. Next checks: inspect pinned create_form.rs pending-submission state, timeout callback and connection-loss handling; distinguish a genuinely unbounded connection wait from preview's independent request deadline. proposed_drop: false pending investigation. possible_cover: none; no coverage sources consulted. No execution or reproduction performed."
+          }
+        },
+        {
+          "line": 5,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "f2",
+            "state": "open",
+            "summary": "One-shot wake deadline deliberately excludes a later connection wait",
+            "location": "SPEC_impl.md:211",
+            "detail": "Reviewed commit: 533169cf19571d34af3a8497eaceb8d2d7b7c852. TLDR: A resumed launch could still hold New and host changes unavailable if it first sees the woken connection, remains waiting for checkout preview past the timer, then sees a connection-pending phase. Source checks: create_form.rs:6284-6297 arms one counter only after successful Resume; 7499-7522 sleeps once and checks the current parked state only at expiry; 1143-1165 treats the old token or a live connection-pending observation as a connection wait; 7534-7556 first validates the parked draft, then returns before inspecting preview failure while that wait is active. 4314-4331 and 4552-4579 show the preview request has its own result, but 7556 precedes the handling of that result. Source basis establishes the single-check limitation, not an observed indefinite execution. The exact source route through a late connecting phase with unchanged incarnation was not established or exercised; a third incarnation instead cancels the parked press through guard_if_current at 1170-1205. Contract disposition: do not report as a bug because the assigned implementation contract explicitly selects this boundary, despite the broader shorthand in SPEC.md:1346-1350. Exact acceptance, SPEC_impl.md:211-214: 'The limit is checked when its 60 seconds run out: a press still waiting for a connection then is discarded, even one that saw the host connect and lost it again before that point, while a host that shows a connection pending again only after that point is not bounded by it.' Suggested bucket if unintended: high/material UX; could-be-highest: no security or loss-of-work route identified. Confidence: confirmed one-shot source behavior and exact specification acceptance; the hypothetical late-wait route is not claimed as executed. proposed_drop: the exact quoted specification deliberately excludes a wait that reappears after that checkpoint. possible_cover: none; no coverage sources consulted. This revision resolves lead f2 as a considered candidate, preserving its original suspected consequence. No runtime tests or reproductions run."
+          }
+        },
+        {
+          "line": 8,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "f2",
+            "state": "open",
+            "summary": "Ordinary late disconnect cancels the parked launch; one-shot timer boundary is explicit",
+            "location": "SPEC_impl.md:211",
+            "detail": "Reviewed commit: 533169cf19571d34af3a8497eaceb8d2d7b7c852. TLDR of original concern, preserved: a resumed launch might keep New and host changes unavailable if it sees its woken host, waits past the single timeout, then reenters a connection-pending phase. Synthesis resolves the previously missing readily checkable premise against that ordinary disconnect route. Source: manager.rs:5123-5228 publishes client and status coherently; specifically 5190-5203 gives a fresh incarnation whenever the client changes, including when it goes away. connect_phase at 3948-3971 publishes Connecting with no client. Thus a connection lost after the form actually observed the returned connection has a third token, not that observed connection's token. shared.rs:706 projects host.incarnation into HostOption.connection; create_form.rs:989-1005 copies it into PreviewAuthority.incarnation; guard_if_current at 1170-1205 tolerates only the old pre-resume token or the captured returned token. The pending-submit effect at 7534-7547 calls that guard before the awaiting-woken-connection return at 7551-7556, so this ordinary third-token route discards the parked press rather than stranding it. The one-shot implementation remains real: 6284-6297 arms one counter after Resume; 7499-7522 checks the parked state only once at expiry. Exact specification boundary, SPEC_impl.md:211-214: 'The limit is checked when its 60 seconds run out: a press still waiting for a connection then is discarded, even one that saw the host connect and lost it again before that point, while a host that shows a connection pending again only after that point is not bounded by it.' This boundary is explicit despite the broader shorthand at SPEC.md:1346-1350; it does not establish that shipped ordinary disconnects can retain an unchanged token. Suggested bucket if the original route existed unintentionally: high/material UX; could-be-highest: no security or loss-of-work route identified. Confidence: confirmed source refutation of the normal lost-connection premise and exact contractual timer boundary; no indefinite execution observed. proposed_drop: ordinary late disconnect mints a third incarnation and cancels through guard_if_current; independently, the exact quoted specification excludes a later reappearing wait from the timer's guarantee. No other unchanged-token late-wait producer has been established, and no uninvestigated producer is claimed. possible_cover: none; no queue/ledger/plan coverage sources consulted. Revision preserves original impact while resolving the missing incarnation premise. No runtime tests or reproductions run."
+          }
+        }
+      ],
+      "latest": {
+        "line": 8,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "f2",
+          "state": "open",
+          "summary": "Ordinary late disconnect cancels the parked launch; one-shot timer boundary is explicit",
+          "location": "SPEC_impl.md:211",
+          "detail": "Reviewed commit: 533169cf19571d34af3a8497eaceb8d2d7b7c852. TLDR of original concern, preserved: a resumed launch might keep New and host changes unavailable if it sees its woken host, waits past the single timeout, then reenters a connection-pending phase. Synthesis resolves the previously missing readily checkable premise against that ordinary disconnect route. Source: manager.rs:5123-5228 publishes client and status coherently; specifically 5190-5203 gives a fresh incarnation whenever the client changes, including when it goes away. connect_phase at 3948-3971 publishes Connecting with no client. Thus a connection lost after the form actually observed the returned connection has a third token, not that observed connection's token. shared.rs:706 projects host.incarnation into HostOption.connection; create_form.rs:989-1005 copies it into PreviewAuthority.incarnation; guard_if_current at 1170-1205 tolerates only the old pre-resume token or the captured returned token. The pending-submit effect at 7534-7547 calls that guard before the awaiting-woken-connection return at 7551-7556, so this ordinary third-token route discards the parked press rather than stranding it. The one-shot implementation remains real: 6284-6297 arms one counter after Resume; 7499-7522 checks the parked state only once at expiry. Exact specification boundary, SPEC_impl.md:211-214: 'The limit is checked when its 60 seconds run out: a press still waiting for a connection then is discarded, even one that saw the host connect and lost it again before that point, while a host that shows a connection pending again only after that point is not bounded by it.' This boundary is explicit despite the broader shorthand at SPEC.md:1346-1350; it does not establish that shipped ordinary disconnects can retain an unchanged token. Suggested bucket if the original route existed unintentionally: high/material UX; could-be-highest: no security or loss-of-work route identified. Confidence: confirmed source refutation of the normal lost-connection premise and exact contractual timer boundary; no indefinite execution observed. proposed_drop: ordinary late disconnect mints a third incarnation and cancels through guard_if_current; independently, the exact quoted specification excludes a later reappearing wait from the timer's guarantee. No other unchanged-token late-wait producer has been established, and no uninvestigated producer is claimed. possible_cover: none; no queue/ledger/plan coverage sources consulted. Revision preserves original impact while resolving the missing incarnation premise. No runtime tests or reproductions run."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g004/findings.jsonl",
+        "id": "f2",
+        "line": 8,
+        "disposition": "excluded",
+        "group": "ordinary-late-wake-disconnect-retains-parked-launch-after-one-shot-timeout",
+        "reason": "Parent explicitly accepted named refuted proposal from claims-002 after inspecting it. The one-shot timer is real and explicit, but ordinary loss of the observed woken connection changes its incarnation and invalidates the parked press before the waiting return. The claimed indefinite ordinary-disconnect route lacks its required unchanged-token producer. Concrete incarnation invalidation refutes the ordinary disconnect route; retain the record's explicit limitation that no other unchanged-token producer was established. Checked source/results: [\"At 533169cf19571d34af3a8497eaceb8d2d7b7c852, manager.rs:5190-5203 mints a new incarnation whenever the client changes, including disappearance.\",\"At the same hash, list/create_form.rs:1143-1205 tolerates the pre-resume token or captured resumed authority; :7534-7556 validates that authority and discards a mismatch before awaiting_woken_connection can return. :7499-7522 checks its sleep once, not repeatedly.\",\"SPEC_impl.md:207-214 explicitly scopes that single checkpoint. The broader product shorthand does not establish a supported unchanged-token late-connecting producer. No unbounded runtime wait was observed.\"] Current coverage/results: [\"Current SPEC.md:1346-1356 and SPEC_impl.md:207-214 retain the broad wake wait and precise one-shot boundary. This source refutation does not rely on interpreting the narrower implementation contract as overriding product behavior.\",\"TODO.md Planned is empty. Wake/late connection/60-second searches of plans/queue, BUGS.md, INDEX.md and active TRIAGE_OUTCOMES.md found no exact queued claim or unlanded fix. wake-launch-stuck and sandbox-suspend-overlap are landed per plans/REPORTS.md:23,27.\",\"No filter is asserted; rarity alone would not settle an indefinitely blocked page.\"] Exact cited cover: [\"SPEC_impl.md:212-214: 'a press still waiting for a connection then is discarded' and 'a host that shows a connection pending again only after that point is not bounded by it.'\"] Original stronger consequence and missing premise remain preserved: \"New and host changes might remain unavailable indefinitely after a resumed launch reenters connection wait past the one-shot check. Original suggested high if established; no security or work-loss route alleged.\"; \"A shipped producer of a later connection-pending phase that preserves the captured resumed incarnation. Ordinary disconnection does not supply it.\"."
+      },
+      "accepted_parent_decision": {
+        "key": "g004/f2",
+        "line": 8,
+        "disposition": "excluded",
+        "group": "ordinary-late-wake-disconnect-retains-parked-launch-after-one-shot-timeout",
+        "bucket": "other",
+        "recording": "refuted",
+        "queue_target_candidate": null,
+        "needs_independent_drop_check": false,
+        "reason": "Parent explicitly accepted named refuted proposal from claims-002 after inspecting it. The one-shot timer is real and explicit, but ordinary loss of the observed woken connection changes its incarnation and invalidates the parked press before the waiting return. The claimed indefinite ordinary-disconnect route lacks its required unchanged-token producer. Concrete incarnation invalidation refutes the ordinary disconnect route; retain the record's explicit limitation that no other unchanged-token producer was established. Checked source/results: [\"At 533169cf19571d34af3a8497eaceb8d2d7b7c852, manager.rs:5190-5203 mints a new incarnation whenever the client changes, including disappearance.\",\"At the same hash, list/create_form.rs:1143-1205 tolerates the pre-resume token or captured resumed authority; :7534-7556 validates that authority and discards a mismatch before awaiting_woken_connection can return. :7499-7522 checks its sleep once, not repeatedly.\",\"SPEC_impl.md:207-214 explicitly scopes that single checkpoint. The broader product shorthand does not establish a supported unchanged-token late-connecting producer. No unbounded runtime wait was observed.\"] Current coverage/results: [\"Current SPEC.md:1346-1356 and SPEC_impl.md:207-214 retain the broad wake wait and precise one-shot boundary. This source refutation does not rely on interpreting the narrower implementation contract as overriding product behavior.\",\"TODO.md Planned is empty. Wake/late connection/60-second searches of plans/queue, BUGS.md, INDEX.md and active TRIAGE_OUTCOMES.md found no exact queued claim or unlanded fix. wake-launch-stuck and sandbox-suspend-overlap are landed per plans/REPORTS.md:23,27.\",\"No filter is asserted; rarity alone would not settle an indefinitely blocked page.\"] Exact cited cover: [\"SPEC_impl.md:212-214: 'a press still waiting for a connection then is discarded' and 'a host that shows a connection pending again only after that point is not bounded by it.'\"] Original stronger consequence and missing premise remain preserved: \"New and host changes might remain unavailable indefinitely after a resumed launch reenters connection wait past the one-shot check. Original suggested high if established; no security or work-loss route alleged.\"; \"A shipped producer of a later connection-pending phase that preserves the captured resumed incarnation. Ordinary disconnection does not supply it.\"."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-002",
+          "key": "g004/f2",
+          "latest_line": 8,
+          "recommendation": "refuted",
+          "bucket": "other",
+          "underlying_key": "ordinary-late-wake-disconnect-retains-parked-launch-after-one-shot-timeout",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The one-shot timer is real and explicit, but ordinary loss of the observed woken connection changes its incarnation and invalidates the parked press before the waiting return. The claimed indefinite ordinary-disconnect route lacks its required unchanged-token producer.",
+          "checks": [
+            "At 533169cf19571d34af3a8497eaceb8d2d7b7c852, manager.rs:5190-5203 mints a new incarnation whenever the client changes, including disappearance.",
+            "At the same hash, list/create_form.rs:1143-1205 tolerates the pre-resume token or captured resumed authority; :7534-7556 validates that authority and discards a mismatch before awaiting_woken_connection can return. :7499-7522 checks its sleep once, not repeatedly.",
+            "SPEC_impl.md:207-214 explicitly scopes that single checkpoint. The broader product shorthand does not establish a supported unchanged-token late-connecting producer. No unbounded runtime wait was observed."
+          ],
+          "coverage_checked": [
+            "Current SPEC.md:1346-1356 and SPEC_impl.md:207-214 retain the broad wake wait and precise one-shot boundary. This source refutation does not rely on interpreting the narrower implementation contract as overriding product behavior.",
+            "TODO.md Planned is empty. Wake/late connection/60-second searches of plans/queue, BUGS.md, INDEX.md and active TRIAGE_OUTCOMES.md found no exact queued claim or unlanded fix. wake-launch-stuck and sandbox-suspend-overlap are landed per plans/REPORTS.md:23,27.",
+            "No filter is asserted; rarity alone would not settle an indefinitely blocked page."
+          ],
+          "exact_cover_quotes": [
+            "SPEC_impl.md:212-214: 'a press still waiting for a connection then is discarded' and 'a host that shows a connection pending again only after that point is not bounded by it.'"
+          ],
+          "missing_premise": "A shipped producer of a later connection-pending phase that preserves the captured resumed incarnation. Ordinary disconnection does not supply it.",
+          "original_stronger_consequence": "New and host changes might remain unavailable indefinitely after a resumed launch reenters connection wait past the one-shot check. Original suggested high if established; no security or work-loss route alleged.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Concrete incarnation invalidation refutes the ordinary disconnect route; retain the record's explicit limitation that no other unchanged-token producer was established."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "high",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "ordinary-late-wake-disconnect-retains-parked-launch-after-one-shot-timeout",
+        "destination": null
+      }
+    },
+    {
+      "key": "g004/f3",
+      "owner": "g004",
+      "id": "f3",
+      "domain": "product-contracts",
+      "purpose": "product-contracts: SPEC_impl.md, SPEC.md; phases @@ -6943,13 +7124,12 @@ The Suspend question uses the shared framed-dialog header, scroll body and foote",
+      "history": [
+        {
+          "line": 6,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "f3",
+            "state": "open",
+            "summary": "Retired container sessions deliberately lose Stop and terminal access",
+            "location": "SPEC_impl.md:8647",
+            "detail": "Reviewed commit: c8bc155cc36723c8c53870944d07ce8ec61ef9ed. TLDR: Existing experimental container sessions become unavailable for terminal interaction, Stop, Restart and Replace; Delete remains their only supported action. This can strand an existing running session from the product's ordinary controls, but the restriction is intentional. Source basis: assigned SPEC_impl.md patch removes the supervisor-outside launch, account, hooks and terminal mechanisms and replaces them with a decode-and-delete compatibility path. At the pinned revision, SPEC_impl.md:8646-8656 retains decoding, legacy removal, confirmed absence and creation/deletion lock handling, and permits removal of confinement/attach helpers only 'once nothing can create or open these sessions.' Exact product acceptance, SPEC.md, Retired containerized sessions: 'Existing sessions support Delete only. Opening terminals or tabs, exec, Stop, Restart, Clone, Replace and Replace with are refused.' Exact cleanup requirement: 'Delete retains the legacy container-removal path and confirms absence.' The replacement ordinary container model is specified separately, with an in-container supervisor; it does not silently reinterpret the old configuration as a new launch. Suggested bucket if unintended: high/material loss of access to running sessions. Could-be-highest: no established unconfirmed destructive route; an explicit Delete is still warned and requires confirmed removal, and this documentation-only patch does not itself stop a running process. Confidence: confirmed explicit compatibility restriction in both specifications; implementation effects not executed. proposed_drop: the exact quoted specification deliberately makes these old experimental sessions delete-only. possible_cover: none; no coverage sources consulted. No runtime tests or reproductions run."
+          }
+        }
+      ],
+      "latest": {
+        "line": 6,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "f3",
+          "state": "open",
+          "summary": "Retired container sessions deliberately lose Stop and terminal access",
+          "location": "SPEC_impl.md:8647",
+          "detail": "Reviewed commit: c8bc155cc36723c8c53870944d07ce8ec61ef9ed. TLDR: Existing experimental container sessions become unavailable for terminal interaction, Stop, Restart and Replace; Delete remains their only supported action. This can strand an existing running session from the product's ordinary controls, but the restriction is intentional. Source basis: assigned SPEC_impl.md patch removes the supervisor-outside launch, account, hooks and terminal mechanisms and replaces them with a decode-and-delete compatibility path. At the pinned revision, SPEC_impl.md:8646-8656 retains decoding, legacy removal, confirmed absence and creation/deletion lock handling, and permits removal of confinement/attach helpers only 'once nothing can create or open these sessions.' Exact product acceptance, SPEC.md, Retired containerized sessions: 'Existing sessions support Delete only. Opening terminals or tabs, exec, Stop, Restart, Clone, Replace and Replace with are refused.' Exact cleanup requirement: 'Delete retains the legacy container-removal path and confirms absence.' The replacement ordinary container model is specified separately, with an in-container supervisor; it does not silently reinterpret the old configuration as a new launch. Suggested bucket if unintended: high/material loss of access to running sessions. Could-be-highest: no established unconfirmed destructive route; an explicit Delete is still warned and requires confirmed removal, and this documentation-only patch does not itself stop a running process. Confidence: confirmed explicit compatibility restriction in both specifications; implementation effects not executed. proposed_drop: the exact quoted specification deliberately makes these old experimental sessions delete-only. possible_cover: none; no coverage sources consulted. No runtime tests or reproductions run."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g004/findings.jsonl",
+        "id": "f3",
+        "line": 6,
+        "disposition": "under-investigation",
+        "group": "g004-f3",
+        "reason": "Record durably acknowledged; parent source/contract validation, cross-group synthesis, coverage/filter matching and any independent drop check remain pending. This preserves the claim and uncertainty without accepting, dropping or lowering it."
+      },
+      "accepted_parent_decision": null,
+      "returned_claim_checks": [
+        {
+          "batch": "claims-002",
+          "key": "g004/f3",
+          "latest_line": 6,
+          "recommendation": "covered",
+          "bucket": "high",
+          "underlying_key": "experimental-supervisor-outside-container-sessions-retired-delete-only",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The exact loss of normal terminal/lifecycle access to old experimental container sessions is expressly required by both specifications. It is not authority to destroy without the retained Delete confirmation or to reinterpret them as new environments.",
+          "checks": [
+            "At c8bc155cc36723c8c53870944d07ce8ec61ef9ed, SPEC_impl.md:8646-8656 requires decode-and-delete compatibility and refusal of all other lifecycle/terminal/exec paths.",
+            "At current recording main, SPEC.md:4892-4901 still names Delete as the sole action, explicitly lists the refused controls and retains confirmed legacy container removal. This establishes intended access restriction, not an observed execution or unconfirmed kill."
+          ],
+          "coverage_checked": [
+            "SPEC.md Retired containerized sessions and SPEC_impl.md retired-container compatibility text exactly cover trigger, consequence and scope.",
+            "TODO.md Planned is empty. Retired/delete-only/container searches of plans/queue, BUGS.md, INDEX.md and active TRIAGE_OUTCOMES.md found no separate same-root item. podman-environments is landed per plans/REPORTS.md:21.",
+            "No FILTER.md exclusion is needed."
+          ],
+          "exact_cover_quotes": [
+            "SPEC.md:4895-4897: 'Existing sessions support Delete only. Opening terminals or tabs, exec, Stop, Restart, Clone, Replace and Replace with are refused. Delete retains the legacy container-removal path and confirms absence.'"
+          ],
+          "missing_premise": null,
+          "original_stronger_consequence": "An existing running experimental container session can be inaccessible through ordinary terminal and Stop/Restart/Replace controls. Original high; no unauthorized destructive route established. Preserve the running-work context for the independent check.",
+          "needs_independent_drop_check": true,
+          "proposed_basis": "Exact intentional delete-only compatibility rule; its existing running-work context warrants conservative independent adjudication."
+        }
+      ],
+      "parent_proposals": [
+        {
+          "artifact": "parent-flagged-judgments-002.json",
+          "key": "g004/f3",
+          "proposal": "claim-checks/claims-002/result.json",
+          "parent_proposal": "covered",
+          "final_independent_gate": "required-before-drop",
+          "reason": "Full002exactretiredexperimentalcontainerDelete-onlycompatibilitypolicyexpresslyrefusesallterminal/exec/Stop/Restart/Clone/Replaceaccess, includingexistingrunningrows. Intentionallossnormalaccesscovered; noauthorizationforunconfirmedDelete,wrongresource,ornewenvironmentreinterpretation. Preserveliveworkcontext/potentialhighestquestionforfreshconsult; no runtimeclaim or broadcompatibilityexception."
+        }
+      ],
+      "collection": {
+        "retain": true,
+        "clearly_refuted_candidate": false,
+        "needs_unfinished_gate": true,
+        "provisional_bucket": "high",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "experimental-supervisor-outside-container-sessions-retired-delete-only",
+        "destination": "trailing-experimental-supervisor-outside-container-sessions-retired-delete-only.md"
+      }
+    },
+    {
+      "key": "g004/f4",
+      "owner": "g004",
+      "id": "f4",
+      "domain": "product-contracts",
+      "purpose": "product-contracts: SPEC_impl.md, SPEC.md; phases @@ -6943,13 +7124,12 @@ The Suspend question uses the shared framed-dialog header, scroll body and foote",
+      "history": [
+        {
+          "line": 9,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "f4",
+            "state": "open",
+            "summary": "No released-helper incompatibility established by removing the stdin-option probe",
+            "location": "SPEC_impl.md:7127",
+            "detail": "Reviewed commit: c8bc155cc36723c8c53870944d07ce8ec61ef9ed. TLDR of considered concern: passing --stdin-idle-limit-secs 120 unconditionally might make an older environment helper reject its command before ordinary version-skew recovery, leaving a sandbox unreachable. Discovery source/history checks: git log -S stdin_idle_limit_secs attributes the CLI option to 8a7f66ede90651d47d1facc1e877ce81f842af1a, the Tensorlake suspend/resume change. git log -S Tensorlake on hosts.rs finds initial host support at 88bf83e267b5066815448885c61ed4148b851930. git tag --contains that host-support commit --no-contains the option commit returns no tags in the local repository; the ancestry-path history between them contains no Cargo.toml version change. At c8bc155, main.rs:1349 and 1885-1900 accepts and forwards the option; the existing ssh.rs:477 still probes as expected before this design-only change is implemented. Exact contract basis SPEC_impl.md:7127-7130: 'Every environment route passes --stdin-idle-limit-secs 120 unconditionally' and 'The option shipped in the same release as Tensorlake host support, and new Podman environments carry a prepared helper.' This design does not direct ordinary SSH hosts to receive the option. Suggested bucket if a supported older-helper route existed: high/connectivity; could-be-highest: no security or loss-of-work route identified. Confidence: no locally tagged supported Tensorlake release lacking the option was found, consistent with the exact compatibility premise; no runtime behavior observed. proposed_drop: source/history checks do not establish the required released-helper gap, and the specification explicitly supplies the supported-release/prepared-helper premise. Caveat: local tag absence alone is not proof about unpublished development binaries or every external installation; no incompatibility is claimed for those unestablished configurations. possible_cover: none in the supplied interface records; no prohibited coverage sources searched. No runtime tests or reproductions run."
+          }
+        }
+      ],
+      "latest": {
+        "line": 9,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "f4",
+          "state": "open",
+          "summary": "No released-helper incompatibility established by removing the stdin-option probe",
+          "location": "SPEC_impl.md:7127",
+          "detail": "Reviewed commit: c8bc155cc36723c8c53870944d07ce8ec61ef9ed. TLDR of considered concern: passing --stdin-idle-limit-secs 120 unconditionally might make an older environment helper reject its command before ordinary version-skew recovery, leaving a sandbox unreachable. Discovery source/history checks: git log -S stdin_idle_limit_secs attributes the CLI option to 8a7f66ede90651d47d1facc1e877ce81f842af1a, the Tensorlake suspend/resume change. git log -S Tensorlake on hosts.rs finds initial host support at 88bf83e267b5066815448885c61ed4148b851930. git tag --contains that host-support commit --no-contains the option commit returns no tags in the local repository; the ancestry-path history between them contains no Cargo.toml version change. At c8bc155, main.rs:1349 and 1885-1900 accepts and forwards the option; the existing ssh.rs:477 still probes as expected before this design-only change is implemented. Exact contract basis SPEC_impl.md:7127-7130: 'Every environment route passes --stdin-idle-limit-secs 120 unconditionally' and 'The option shipped in the same release as Tensorlake host support, and new Podman environments carry a prepared helper.' This design does not direct ordinary SSH hosts to receive the option. Suggested bucket if a supported older-helper route existed: high/connectivity; could-be-highest: no security or loss-of-work route identified. Confidence: no locally tagged supported Tensorlake release lacking the option was found, consistent with the exact compatibility premise; no runtime behavior observed. proposed_drop: source/history checks do not establish the required released-helper gap, and the specification explicitly supplies the supported-release/prepared-helper premise. Caveat: local tag absence alone is not proof about unpublished development binaries or every external installation; no incompatibility is claimed for those unestablished configurations. possible_cover: none in the supplied interface records; no prohibited coverage sources searched. No runtime tests or reproductions run."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g004/findings.jsonl",
+        "id": "f4",
+        "line": 9,
+        "disposition": "excluded",
+        "group": "unconditional-environment-stdin-option-versus-unsupported-older-helper",
+        "reason": "Parent explicitly accepted named covered proposal from claims-002 after inspecting it. The required supported older helper lacking the option is not established, and the implementation specification explicitly states the supported-release/prepared-helper premise. Local tag absence is supporting evidence only, not proof about every external or development binary. Explicit supported-helper contract and absence of the named supported incompatible release in local history, with the external/development caveat preserved. Checked source/results: [\"At c8bc155cc36723c8c53870944d07ce8ec61ef9ed, SPEC_impl.md:7127-7130 expressly requires unconditional environment argv and says the option shipped with Tensorlake host support; Podman gets a prepared helper. Ordinary SSH remains outside that requirement.\",\"The exact local command git tag --contains 88bf83e267b5066815448885c61ed4148b851930 --no-contains 8a7f66ede90651d47d1facc1e877ce81f842af1a returns no tags. This agrees with, but does not independently prove, the supported-release premise.\",\"Current SPEC_impl.md:6763-6768 retains the same compatibility premise. No helper incompatibility was executed or observed.\"] Current coverage/results: [\"Both specifications were searched for environment helper compatibility and idle limits; SPEC_impl.md explicitly settles the supported helper contract, and SPEC.md contains no broader promise that unpublished unsupported helper versions accept the new argv.\",\"TODO.md Planned is empty. Helper-option/compatibility searches of plans/queue, BUGS.md, INDEX.md and active TRIAGE_OUTCOMES.md found no exact same-root item. podman-environments is landed, not pending cover.\",\"No FILTER.md basis is asserted.\"] Exact cited cover: [\"SPEC_impl.md:6764-6767: '--stdin-idle-limit-secs 120' is passed 'unconditionally' and 'The option shipped in the same release as Tensorlake host support, and new Podman environments carry a prepared helper.'\"] Original stronger consequence and missing premise remain preserved: \"A helper might reject the command before ordinary version-skew recovery, leaving an environment unreachable. Original conditional high connectivity consequence; no security or work-loss route alleged.\"; \"A supported released Tensorlake helper without the option, or a prepared Podman helper lacking it. Unpublished development installations remain unverified and are not silently declared compatible.\"."
+      },
+      "accepted_parent_decision": {
+        "key": "g004/f4",
+        "line": 9,
+        "disposition": "excluded",
+        "group": "unconditional-environment-stdin-option-versus-unsupported-older-helper",
+        "bucket": "other",
+        "recording": "covered",
+        "queue_target_candidate": null,
+        "needs_independent_drop_check": false,
+        "reason": "Parent explicitly accepted named covered proposal from claims-002 after inspecting it. The required supported older helper lacking the option is not established, and the implementation specification explicitly states the supported-release/prepared-helper premise. Local tag absence is supporting evidence only, not proof about every external or development binary. Explicit supported-helper contract and absence of the named supported incompatible release in local history, with the external/development caveat preserved. Checked source/results: [\"At c8bc155cc36723c8c53870944d07ce8ec61ef9ed, SPEC_impl.md:7127-7130 expressly requires unconditional environment argv and says the option shipped with Tensorlake host support; Podman gets a prepared helper. Ordinary SSH remains outside that requirement.\",\"The exact local command git tag --contains 88bf83e267b5066815448885c61ed4148b851930 --no-contains 8a7f66ede90651d47d1facc1e877ce81f842af1a returns no tags. This agrees with, but does not independently prove, the supported-release premise.\",\"Current SPEC_impl.md:6763-6768 retains the same compatibility premise. No helper incompatibility was executed or observed.\"] Current coverage/results: [\"Both specifications were searched for environment helper compatibility and idle limits; SPEC_impl.md explicitly settles the supported helper contract, and SPEC.md contains no broader promise that unpublished unsupported helper versions accept the new argv.\",\"TODO.md Planned is empty. Helper-option/compatibility searches of plans/queue, BUGS.md, INDEX.md and active TRIAGE_OUTCOMES.md found no exact same-root item. podman-environments is landed, not pending cover.\",\"No FILTER.md basis is asserted.\"] Exact cited cover: [\"SPEC_impl.md:6764-6767: '--stdin-idle-limit-secs 120' is passed 'unconditionally' and 'The option shipped in the same release as Tensorlake host support, and new Podman environments carry a prepared helper.'\"] Original stronger consequence and missing premise remain preserved: \"A helper might reject the command before ordinary version-skew recovery, leaving an environment unreachable. Original conditional high connectivity consequence; no security or work-loss route alleged.\"; \"A supported released Tensorlake helper without the option, or a prepared Podman helper lacking it. Unpublished development installations remain unverified and are not silently declared compatible.\"."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-002",
+          "key": "g004/f4",
+          "latest_line": 9,
+          "recommendation": "covered",
+          "bucket": "other",
+          "underlying_key": "unconditional-environment-stdin-option-versus-unsupported-older-helper",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The required supported older helper lacking the option is not established, and the implementation specification explicitly states the supported-release/prepared-helper premise. Local tag absence is supporting evidence only, not proof about every external or development binary.",
+          "checks": [
+            "At c8bc155cc36723c8c53870944d07ce8ec61ef9ed, SPEC_impl.md:7127-7130 expressly requires unconditional environment argv and says the option shipped with Tensorlake host support; Podman gets a prepared helper. Ordinary SSH remains outside that requirement.",
+            "The exact local command git tag --contains 88bf83e267b5066815448885c61ed4148b851930 --no-contains 8a7f66ede90651d47d1facc1e877ce81f842af1a returns no tags. This agrees with, but does not independently prove, the supported-release premise.",
+            "Current SPEC_impl.md:6763-6768 retains the same compatibility premise. No helper incompatibility was executed or observed."
+          ],
+          "coverage_checked": [
+            "Both specifications were searched for environment helper compatibility and idle limits; SPEC_impl.md explicitly settles the supported helper contract, and SPEC.md contains no broader promise that unpublished unsupported helper versions accept the new argv.",
+            "TODO.md Planned is empty. Helper-option/compatibility searches of plans/queue, BUGS.md, INDEX.md and active TRIAGE_OUTCOMES.md found no exact same-root item. podman-environments is landed, not pending cover.",
+            "No FILTER.md basis is asserted."
+          ],
+          "exact_cover_quotes": [
+            "SPEC_impl.md:6764-6767: '--stdin-idle-limit-secs 120' is passed 'unconditionally' and 'The option shipped in the same release as Tensorlake host support, and new Podman environments carry a prepared helper.'"
+          ],
+          "missing_premise": "A supported released Tensorlake helper without the option, or a prepared Podman helper lacking it. Unpublished development installations remain unverified and are not silently declared compatible.",
+          "original_stronger_consequence": "A helper might reject the command before ordinary version-skew recovery, leaving an environment unreachable. Original conditional high connectivity consequence; no security or work-loss route alleged.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Explicit supported-helper contract and absence of the named supported incompatible release in local history, with the external/development caveat preserved."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": false,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "unconditional-environment-stdin-option-versus-unsupported-older-helper",
+        "destination": null
+      }
+    },
+    {
+      "key": "g004/f5",
+      "owner": "g004",
+      "id": "f5",
+      "domain": "product-contracts",
+      "purpose": "product-contracts: SPEC_impl.md, SPEC.md; phases @@ -6943,13 +7124,12 @@ The Suspend question uses the shared framed-dialog header, scroll body and foote",
+      "history": [
+        {
+          "line": 10,
+          "event": {
+            "version": 1,
+            "kind": "lead",
+            "id": "f5",
+            "state": "open",
+            "summary": "Check what the Delete contract means by nothing decided after a lost reply",
+            "location": "SPEC.md:1526",
+            "detail": "Reviewed commit: b106c0e49646ecb9a17e1a06b17a70da0ece73e0. TLDR: The new Delete description says nothing is decided when its request gets no answer, although the adjacent contract allows a sealed environment to be destroyed automatically after a lost reply. If read as a no-mutation guarantee, this would misstate an ambiguous deletion outcome. Source basis: SPEC.md:1526-1529 applies 'nothing is decided' to both unreachable/not-sent and no-answer cases; :1518-1521 explicitly describes destruction after a lost reply. SPEC_impl.md:6633-6638 similarly calls the response a marker that nothing was decided even for a request sent without an answer. Suggested bucket: other/documentation clarity on established evidence; could-be-highest: no additional loss beyond the already drawn destructive consent is established. Confidence: unresolved semantic/contract lead, not a verified new bug. Next check: compare the exact new marker and caller wording in the in-range implementation to determine whether it promises no mutation or only refuses to infer final membership; inspect how an eventual sealed listing interacts with the fallback question. proposed_drop: false pending that check. possible_cover: none in the supplied interface records; no queue/ledger/plans searched. No runtime tests or reproductions run."
+          }
+        },
+        {
+          "line": 11,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "f5",
+            "state": "open",
+            "summary": "Nothing-decided marker does not promise no mutation after a lost Delete reply",
+            "location": "SPEC.md:1526",
+            "detail": "Reviewed commit: b106c0e49646ecb9a17e1a06b17a70da0ece73e0. Original suspected consequence preserved: interpreting the new phrase 'nothing is decided' as a no-mutation guarantee could misstate the outcome of an unanswered Delete that actually deleted a session or sealed its environment. Discovery checks settle the marker/caller meaning, and the full surrounding documentation does not establish that stronger guarantee. SPEC.md:1518-1521 expressly says a sealed listing makes the helm finish destruction 'after a lost reply, a failed destruction or its own restart'; :1526-1535 says Delete does not guess and offers a separately warned whole-environment Delete. Read together, 'nothing is decided' describes the helm's inability to decide membership/outcome, not an assertion that the supervisor performed no mutation. SPEC_impl.md:6599-6603 reserves the stronger definite 'nothing was deleted' Conflict for bounded pre-decision admission failure; :6633-6638 separately describes the unanswered marker. Supplementary in-range implementation check at 222bf6253bcd168db04bcbb1df20180c88306998: sessions/sandbox.rs:113-124 expressly says an unanswered request may still have been acted on and the next listing may report a seal; :224-240 returns 'Farhelm cannot tell whether the session was deleted' for deadline/connection-loss ambiguity. Its no-client branch :204-209 alone says 'nothing was deleted', because it has sent nothing. The finisher :334-360 acts on a later seal independently of the lost answer. The header's public comment and spelling at proto/http.rs:86-95 reuse 'nothing decided'; that spelling is not itself a new no-mutation guarantee. Documentation is judged separately from production correctness: the basis for not reporting a documentation contradiction is the explicit adjacent lost-reply destruction contract and distinct definite-Conflict wording, not merely that the later error text is correct. The phrase could be clearer as 'the helm cannot determine the outcome', but no distinct false guarantee or caller action relying on one is established. Attribution check across the whole pinned range: git log -S 'nothing is decided' places the new phrase at the assigned b106c0e commit; the same wording persists at tip SPEC.md:1532 and SPEC_impl.md:6144. Suggested bucket if the stronger misleading assertion were actually made: other/documentation clarity. Could-be-highest: no additional security or loss beyond already drawn destructive consent established. Confidence: source/contract semantics resolved; no runtime behavior observed. proposed_drop: the complete section explicitly permits sealed destruction after lost replies and uses the marker for lack of a known decision, without promising no supervisor mutation. possible_cover: none in supplied interface records; no prohibited coverage sources searched. This revision closes lead f5 as a considered candidate. No runtime tests or reproductions run."
+          }
+        }
+      ],
+      "latest": {
+        "line": 11,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "f5",
+          "state": "open",
+          "summary": "Nothing-decided marker does not promise no mutation after a lost Delete reply",
+          "location": "SPEC.md:1526",
+          "detail": "Reviewed commit: b106c0e49646ecb9a17e1a06b17a70da0ece73e0. Original suspected consequence preserved: interpreting the new phrase 'nothing is decided' as a no-mutation guarantee could misstate the outcome of an unanswered Delete that actually deleted a session or sealed its environment. Discovery checks settle the marker/caller meaning, and the full surrounding documentation does not establish that stronger guarantee. SPEC.md:1518-1521 expressly says a sealed listing makes the helm finish destruction 'after a lost reply, a failed destruction or its own restart'; :1526-1535 says Delete does not guess and offers a separately warned whole-environment Delete. Read together, 'nothing is decided' describes the helm's inability to decide membership/outcome, not an assertion that the supervisor performed no mutation. SPEC_impl.md:6599-6603 reserves the stronger definite 'nothing was deleted' Conflict for bounded pre-decision admission failure; :6633-6638 separately describes the unanswered marker. Supplementary in-range implementation check at 222bf6253bcd168db04bcbb1df20180c88306998: sessions/sandbox.rs:113-124 expressly says an unanswered request may still have been acted on and the next listing may report a seal; :224-240 returns 'Farhelm cannot tell whether the session was deleted' for deadline/connection-loss ambiguity. Its no-client branch :204-209 alone says 'nothing was deleted', because it has sent nothing. The finisher :334-360 acts on a later seal independently of the lost answer. The header's public comment and spelling at proto/http.rs:86-95 reuse 'nothing decided'; that spelling is not itself a new no-mutation guarantee. Documentation is judged separately from production correctness: the basis for not reporting a documentation contradiction is the explicit adjacent lost-reply destruction contract and distinct definite-Conflict wording, not merely that the later error text is correct. The phrase could be clearer as 'the helm cannot determine the outcome', but no distinct false guarantee or caller action relying on one is established. Attribution check across the whole pinned range: git log -S 'nothing is decided' places the new phrase at the assigned b106c0e commit; the same wording persists at tip SPEC.md:1532 and SPEC_impl.md:6144. Suggested bucket if the stronger misleading assertion were actually made: other/documentation clarity. Could-be-highest: no additional security or loss beyond already drawn destructive consent established. Confidence: source/contract semantics resolved; no runtime behavior observed. proposed_drop: the complete section explicitly permits sealed destruction after lost replies and uses the marker for lack of a known decision, without promising no supervisor mutation. possible_cover: none in supplied interface records; no prohibited coverage sources searched. This revision closes lead f5 as a considered candidate. No runtime tests or reproductions run."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g004/findings.jsonl",
+        "id": "f5",
+        "line": 11,
+        "disposition": "under-investigation",
+        "group": "g004-f5",
+        "reason": "Record durably acknowledged; parent source/contract validation, cross-group synthesis, coverage/filter matching and any independent drop check remain pending. This preserves the claim and uncertainty without accepting, dropping or lowering it."
+      },
+      "accepted_parent_decision": null,
+      "returned_claim_checks": [
+        {
+          "batch": "claims-002",
+          "key": "g004/f5",
+          "latest_line": 11,
+          "recommendation": "refuted",
+          "bucket": "other",
+          "underlying_key": "nothing-decided-delete-marker-misread-as-no-remote-mutation-guarantee",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The complete contract explicitly permits destruction after a lost reply and uses the marker for an unknown outcome. It does not establish the proposed no-mutation guarantee. The phrase can be clearer without constituting the stronger claimed contradiction.",
+          "checks": [
+            "Current SPEC.md:1518-1539 permits the finisher to destroy after a lost reply, describes the warned whole-resource fallback, and says Delete does not guess. SPEC_impl.md:6109-6113 reserves definite nothing-deleted Conflict for pre-decision refusal; :6137-6158 separately describes the unanswered marker and later seal handling.",
+            "At 222bf6253bcd168db04bcbb1df20180c88306998, sessions/sandbox.rs:113-124 explicitly states an unanswered request may have been acted on. :204-209 says nothing deleted only when there is no client; :224-240 says the outcome cannot be known after timeout or connection loss.",
+            "This resolves documentation semantics from surrounding contract text as well as caller wording. It does not rely merely on production code being correct. No runtime event was observed."
+          ],
+          "coverage_checked": [
+            "Both current specifications' complete Delete/seal subsections distinguish unknown outcome from definite pre-decision refusal; no additional automatic destructive consent is asserted.",
+            "TODO.md Planned is empty. Nothing-decided/lost-Delete-reply/seal searches of plans/queue, BUGS.md, INDEX.md and active TRIAGE_OUTCOMES.md found no exact same-root item. environment-agent-operations is landed per plans/REPORTS.md:28.",
+            "No diagnostic filter is asserted because the alleged guarantee concerns destructive outcomes."
+          ],
+          "exact_cover_quotes": [
+            "SPEC.md:1525-1527: 'the helm finishes destroying any sealed sandbox it sees, whether or not it sent the Delete: after a lost reply, a failed destruction or its own restart.'",
+            "SPEC.md:1532-1533: 'nothing is decided. Delete does not guess' — read as the helm's lack of a known outcome in the complete subsection."
+          ],
+          "missing_premise": "Text or a caller that promises no supervisor mutation for an answered-unknown request. The checked complete section and caller say the opposite.",
+          "original_stronger_consequence": "If interpreted as no mutation, the marker would misstate an unanswered deletion that had already deleted or sealed the environment. No loss beyond the user's already drawn destructive consent was established.",
+          "needs_independent_drop_check": true,
+          "proposed_basis": "Complete lost-reply/seal contract and the distinct definite-refusal wording; conservative independent check because the candidate concerns user-owned files/processes."
+        }
+      ],
+      "parent_proposals": [
+        {
+          "artifact": "parent-flagged-judgments-002.json",
+          "key": "g004/f5",
+          "proposal": "claim-checks/claims-002/result.json",
+          "parent_proposal": "source-refuted-complete-contract-semantics",
+          "final_independent_gate": "required-before-drop",
+          "reason": "Full002completeDelete/sealcontract distinguishesdefinitenothingdeletedConflictbeforedecision fromunansweredunknown. 'nothingdecided/doesnotguess' doesnotpromisenoalreadycommittedmutation: samefullsubsectionexpresslyfinishesdestructionafterlostreplyandrestart,actualrequestwordssayoutcomecannotbeknown. Preserveoriginalpotentialmisreadingaboutuserfiles/processesandfreshcheckwholecontract/callerwording; nofilterdiagnosticexcuse orclaimofnewdestructiveconsent."
+        }
+      ],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": true,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "nothing-decided-delete-marker-misread-as-no-remote-mutation-guarantee",
+        "destination": null
+      }
+    }
+  ],
+  "replies": [
+    {
+      "turn": 1,
+      "reply": "Initial review is incomplete: the supplied manifest has out-of-bounds ranges for all five patches, so mandatory evidence delivery failed.\n\nLogged `f1` for independent drop review; it concerns an update assurance whose exception is explicitly accepted by the specification. Progress and unread scope are recorded in `g004/progress.md`. Manifest correction is pending."
+    },
+    {
+      "turn": 2,
+      "reply": "Initial pass complete: all 668 mandatory lines delivered; no unread scope.\n\n- Revised `f1` to distinguish intended termination from intended wording and identify overlap with g071/f2. No drop or lowering applied.\n- Recorded candidates `f2` and `f3` with exact specification acceptance.\n- No open leads or new verified defects.\n\nLogs and progress updated. No runtime execution performed."
+    },
+    {
+      "turn": 3,
+      "reply": "Revised `f1` with direct installer/startup evidence, precise attribution, and the separate wording decision. Distinguished g033’s residual; no drop or lowering assumed.\n\nRevised `f2`: ordinary disconnect changes the token and cancels the parked launch, refuting that route.\n\nNo new IDs. Unresolved leads: none."
+    },
+    {
+      "turn": 4,
+      "reply": "Discovery pass 1 complete. Checked helper compatibility/history, file-opening policy, and Delete lost-reply semantics against pinned contracts and callers.\n\n- New verified findings: none.\n- New unverified findings: none.\n- Recorded candidates: `f4`, `f5`; both resolved.\n- Open leads: none.\n\nNo new reportable issue found. Progress updated; no runtime execution."
+    }
+  ],
+  "progress": "Group g004: product-contracts. Separate discovery pass, turn 4 complete; initial delivery and later-turn synthesis verified by parent. Discovery-pass count: 1.\n\nTurn 4 start: no pending named interface questions. Reading exact latest interface records for novelty, then searching only assigned specification patches at their pinned revisions beyond existing IDs. Existing full findings history remains authoritative. No runtime tests, reproductions or live-install actions.\n\nTurn 3 start: reviewing existing IDs and cross-batch contract/caller assumptions. Parent supplied g002/f1 and g071/f2 attribution/decision evidence; g033 is a separate omitted-warning/cleanup-failure residual. No proposed drop is accepted. Next checks: exact reviewed startup termination and installer wording, manager connection-incarnation publication for f2, and any effect on f3's compatibility conclusion. No runtime reproduction.\n\nState: corrected brief reread in full. The complete inventory commits field was read on turn 1; excluded coverage metadata was not read. Root instructions, priority buckets, recording format, machine rules and answer-binding rule were read. Findings log was verified present before source review and preserved append-only.\n\nMandatory delivery complete through the corrected manifest, with unchanged snapshot hashes: 00083-001.patch 1-151; 00585-000.patch 1-96; 00617-000.patch 1-62; 00641-000.patch 1-170 and 171-339; 01218-000.patch 1-20. Total: 668 lines in six successful evidence packets, each within both delivery limits. Turn 1's failed read earned no coverage. The parent owns transcript audit; this log records delivered ranges, not an independent audit result. Unread assigned scope: none.\n\nPinned contract/source checks completed: c8bc155cc36723c8c53870944d07ce8ec61ef9ed disposable-environment sections 6408-6592, full Tensorlake-host section 7023-7140, recipe-tunnel/unowned-sandbox section 7141-7203, full Provisioning section 8084-8470, retired-container replacement patch, product container/retirement/security context, and the answer-binding rule. 6d610d435dd12bbe8458b1a31b0988d95ff7338c file-opening defaults/settings/security paragraphs, complete shared extension parser, and adjacent downloads/settings implementation diff. 533169cf19571d34af3a8497eaceb8d2d7b7c852 launcher product contract and implementation wake contract, parked-stamp identity and wait predicates, wake completion, timeout callback, preview request/result handling, host-option connection projection and pending-submit dispatch. b106c0e49646ecb9a17e1a06b17a70da0ece73e0 sandbox sessions, agent/environment confinement, container sessions, full environment Delete/seal and agent-request implementation subsections, sandbox-session implementation subsection, and schema seal compatibility paragraph. 78e9d68a95119db8452ee139efde13d38546f648 migration, update handover and upgrade/compatibility context.\n\nDelta: f1 revised after mandatory delivery and comparison with parent-supplied g071/f2 physical line 6. It separates intended termination from intended wording: the migration is accepted in the specification, while acceptance of printing the general assurance during it is stated most directly in the reviewed commit rationale. The same underlying claim is already represented by g071/f2's concrete installer surface; that duplication is not new progress. f1 retains its original potentially highest loss-of-work implication, proposed_drop and open state for independent judgment; no parent drop or lowering is assumed.\n\nNew considered records: f2 lead immediately recorded and then resolved as candidate after pinned source and exact-spec analysis of the one-shot timeout's late-reentry exclusion; f3 candidate records the explicitly intended delete-only compatibility restriction for retired experimental container sessions. New verified defect IDs: none. New unverified retained finding IDs: none. Open leads: none. Current log: f1 finding with proposed_drop; f2 and f3 candidates with exact acceptance and material caveats.\n\nInterface assumptions: implementation owners review their assigned implementation patches; this group reviews the five assigned specification patches at their recorded revisions, following concrete contract leads into source. The two design-only environment specification commits are judged as design contracts rather than promises that their entire future implementation already shipped. Environment last-session deletion is protected by supervisor-side counting/sealing and drawn confirmation; confinement is keyed by origin host, and the direct-Allow environment card is separately specified. No runtime behavior was observed. No tests, builds or reproductions were run; no checkout files or live-install state were changed.\n\nNext action: return initial-pass delta and coverage status to the parent, then await its separate synthesis/discovery instructions. No additional initial-pass work remains and no separate final report was written.\n\nTurn 3 synthesis complete. Audited mandatory delivery remains complete; no unread assigned scope. Existing IDs preserved. New finding/candidate/lead IDs this turn: none. Revisions: f1 at log line 7 and f2 at line 8. Open leads: none. Discovery-pass count remains 0; duplicate reconciliation is not new discovery.\n\nUseful new checks: directly read reviewed-revision service/core.rs:6127-6168, service/core/old_terminals.rs:155-240, scripts/install.sh:1260-1295 and the full 78e9d68 commit rationale. They establish the existing owner-only startup termination call, its verified-server termination path, and the unconditional survival reassurance for an updated installation. f1 now attributes the reviewed commit to restored reassurance rather than the earlier termination behavior. The exact separate decision to print that assurance during the migration is preserved. Parent supplied g002/f1 and g071/f2 are the same underlying claim; g033's omitted-warning/cleanup-failure residual is expressly separate. No parent's drop or lowering is assumed.\n\nFor f2, read manager.rs:5050-5228 and its connection-loop/Connecting publication context. Disconnect itself mints a fresh incarnation, including before reconnect, not merely at a later successful reconnect. With the already checked HostOption/PreviewAuthority projection and guard_if_current ordering, the ordinary late-disconnect route cancels the parked launch. This resolves the previously missing readily checkable premise and strengthens f2's source refutation without relying only on specification acceptance. Original suspected material UX consequence remains recorded as conditional and unobserved.\n\nCross-batch compatibility check: reread c8bc155's product retirement paragraph and complete rootless-Podman replacement subsection. Legacy configuration still decodes for deletion and cannot become a new ordinary environment launch. The later b106c0e confinement/seal design operates on the new session-owned host abstraction and its commit explicitly says it specifies contracts before implementation. No new contradiction or new readily checkable open premise was identified for f3, whose recorded acceptance remains unchanged.\n\nNo execution observed; no tests, builds or reproductions run. No coverage-source searches and no checkout/live-install changes. Next action: return only synthesis delta and unresolved lead IDs, then await parent instructions.\n\nTurn 4 discovery complete. Read all 331 lines of discovery-neighbours.json in bounded chunks before the new search. Named pending questions were empty. New verified finding IDs: none. New unverified-after-investigation finding IDs: none. Open leads: none. New reportable issues found: no. Existing findings/candidate IDs and consequences remain preserved; no parent drop or lowering is inferred.\n\nNew durable considered records: f4 at line 9, compatibility candidate for the removal of the environment stdin-option probe; f5 lead at line 10 resolved to candidate at line 11, semantic check of the environment Delete unknown-outcome marker. These are considered candidates, not new verified/unverified findings or new defects. No unresolved readily checkable premise remains for either considered route.\n\nUseful discovery checks/results: source/history locates initial Tensorlake-host support at 88bf83e and the stdin option at 8a7f66e, finds no locally available tag containing support without the option and no intervening Cargo.toml version change, consistent with the specification's same-release premise. The current design's prepared Podman helper and ordinary-SSH exception remain explicit. File-opening checks followed the shared default/parser and actual downloads.rs:146-162 hover policy, :205-237 post-publication policy read, final-extension allowlist and same-type gate: the raster defaults do not add SVG, do not replace saved empty lists, and do not remove the click-time checks. No new defect found on those routes.\n\nEnvironment-contract checks reread the full ownership/seal/agent-request implementation subsections at b106c0e, product Delete/Replace interaction and both-outcomes confirmation. The considered no-answer wording was compared with the explicitly allowed post-lost-reply sealed finisher and the separate definite pre-decision Conflict. The later in-range implementation at 222bf6253bcd168db04bcbb1df20180c88306998 distinguishes no-client/no-send from deadline/connection ambiguity in its user-facing errors and documents that an unanswered request can have acted. Whole-range history attributes the new phrase to b106c0e and shows it remains at the pinned tip. This semantic check does not use correct production behavior to dismiss a distinct false documentation promise: the surrounding specification itself discloses the lost-reply effect. The originally suspected consequence and exact not-reporting basis are in f5.\n\nThe search remained within assigned specification changes and concrete supporting callers/history. Known neighbour records were used for novelty only, not repeated as discoveries. No prohibited coverage sources, runtime tests, reproductions, live-install actions or checkout edits. Mandatory assigned scope remains fully read with no omissions. Next action: return this discovery pass's checks, record deltas, no new findings and no open leads to the parent; a later discovery/synthesis turn requires its separate prompt.\n"
+}

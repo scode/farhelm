@@ -1,0 +1,386 @@
+{
+  "group": {
+    "id": "g197",
+    "domain": "retired-xterm-vendor",
+    "purpose": "retired-xterm-vendor: crates/farhelm-ui/assets/vendor/xterm.js; phases bundle wrapper method setScrollPositionSmooth: MethodDefinition setScrollPositionSmooth",
+    "interfaces": [
+      "g009",
+      "g010",
+      "g011",
+      "g061",
+      "g062",
+      "g063",
+      "g079",
+      "g080",
+      "g081",
+      "g082",
+      "g083",
+      "g084",
+      "g135",
+      "g136",
+      "g186",
+      "g187",
+      "g188",
+      "g189",
+      "g190",
+      "g191",
+      "g192",
+      "g193",
+      "g194",
+      "g195",
+      "g196"
+    ],
+    "sources": [
+      {
+        "path": "[private-run]/prep/parts/01085-030.patch",
+        "ranges": [
+          [
+            1,
+            3
+          ]
+        ],
+        "original_path": "crates/farhelm-ui/assets/vendor/xterm.js",
+        "commit": "f560058da19e02716e6f943883a9508b447aff4e",
+        "notes": "bundle wrapper method setScrollPositionSmooth: MethodDefinition setScrollPositionSmooth; patch character offsets [473659,488727)",
+        "lines": 3,
+        "bytes": 15073,
+        "start": 473659,
+        "end": 488727,
+        "original": "[private-run]/prep/originals/01085.patch"
+      }
+    ],
+    "lines": 3,
+    "bytes": 15073
+  },
+  "records": [
+    {
+      "key": "g197/c1",
+      "owner": "g197",
+      "id": "c1",
+      "domain": "retired-xterm-vendor",
+      "purpose": "retired-xterm-vendor: crates/farhelm-ui/assets/vendor/xterm.js; phases bundle wrapper method setScrollPositionSmooth: MethodDefinition setScrollPositionSmooth",
+      "history": [
+        {
+          "line": 1,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c1",
+            "state": "open",
+            "summary": "Retiring xterm smooth-scrolling helpers does not remove terminal scrolling",
+            "location": "crates/farhelm-ui/assets/vendor/xterm.js:1",
+            "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e\n\nTLDR: Considered whether deleting the vendored smooth-scrolling implementation leaves terminal history inaccessible. The replacement grid owns its viewport and retains local keyboard scrolling. No defect established.\n\nDetails: Assigned patch 01085-030.patch lines 1-3 deletes setScrollPositionSmooth, hasPendingScrollAnimation, SmoothScrollingOperation, related internal utilities, and the bundle public Terminal wrapper. At the reviewed revision, crates/farhelm-ui/assets/grid-terminal.js:530-595 computes the available history and screen, clamps the viewport, and implements scrollLines/scrollToBottom; :1514-1528 handles page-up/page-down locally. SPEC_impl.md:1837-1845 says the browser draws the supervisor's grid and terminal.js mounts the grid for every terminal. The replacement has its own viewport rather than invoking the removed implementation. A targeted git grep at the reviewed revision found no setScrollPositionSmooth, hasPendingScrollAnimation, SmoothScrolling, new Terminal(, or window.Terminal references in the UI outside the deleted bundle; remaining xterm.js mentions describe origins/licenses.\n\nSuggested bucket: other if a visual scrolling difference were demonstrated. Confidence: confirmed source refutation of a stranded smooth-scroll caller; no execution performed. proposed_drop: source refutation above, not specification acceptance of an established bug. possible_cover: none; coverage sources not searched. Could-be-highest: no; the considered consequence is viewport behavior, and no security or loss-of-work route was identified. Caveat: this establishes the removal's relevant viewport contracts, not parity of every legacy xterm API or an audit of unrelated pre-existing grid behavior."
+          }
+        },
+        {
+          "line": 3,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c1",
+            "state": "open",
+            "summary": "Retiring xterm smooth-scrolling helpers does not remove terminal scrolling",
+            "location": "crates/farhelm-ui/assets/vendor/xterm.js:1",
+            "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e\n\nTLDR: Considered whether deleting the vendored smooth-scrolling implementation leaves terminal history inaccessible. The replacement grid owns its viewport and retains local keyboard scrolling. No defect established.\n\nDetails: Assigned patch 01085-030.patch lines 1-3 deletes setScrollPositionSmooth, hasPendingScrollAnimation, SmoothScrollingOperation, related internal utilities, and the bundle public Terminal wrapper. At the reviewed revision, crates/farhelm-ui/assets/grid-terminal.js:530-595 computes the available history and screen, clamps the viewport, and implements scrollLines/scrollToBottom; :1514-1528 handles page-up/page-down locally. The follow-up caller check in grid-input.js:295-350 confirms Shift+PageUp/Down are local viewport actions, canceled rather than sent to the program. This meets SPEC.md:3320-3324, including the exact requirement that 'the terminal scrolls with Shift+PageUp/PageDown.' SPEC_impl.md:1837-1845 says the browser draws the supervisor's grid and terminal.js mounts the grid for every terminal. The replacement has its own viewport rather than invoking the removed implementation. An exact git grep across crates/farhelm-ui at the reviewed revision returned no setScrollPositionSmooth, hasPendingScrollAnimation, SmoothScrolling, new Terminal(, window.Terminal, or assets/vendor/xterm matches (status 1). The removed smooth animation is not an independent requirement in the read Terminal experience, keyboard scrolling or grid client contracts.\n\nSuggested bucket: other if a visual scrolling difference were demonstrated. Confidence: confirmed source refutation of a stranded smooth-scroll caller; no execution performed. proposed_drop: source refutation above, not specification acceptance of an established bug. possible_cover: none; coverage sources not searched. Could-be-highest: no; the considered consequence is inaccessible viewport history or changed animation, and no security or loss-of-work route was identified. Caveat: this establishes the removal's relevant viewport contracts, not parity of every legacy xterm API or an audit of unrelated pre-existing grid behavior."
+          }
+        },
+        {
+          "line": 4,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c1",
+            "state": "open",
+            "summary": "Retiring xterm smooth-scrolling helpers does not remove terminal scrolling",
+            "location": "crates/farhelm-ui/assets/vendor/xterm.js:1",
+            "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e\n\nTLDR: The considered consequence remains inaccessible terminal history or changed scroll animation after deleting xterm's smooth-scroll helpers. Source checks still do not establish either as a defect. This remains a proposed drop for independent judgment; no drop has been accepted.\n\nDetails: Turn 2 repaired mandatory delivery using separate evidence-read stdout packets for 01085-030.patch:1, :2 and :3, each with its END sentinel and unchanged hash bc4efda65bae9abd277a6febdb3b32457e56e72b6a507067feece677c613bdbe. The packet removes smooth-scroll animation/state helpers, string/stopwatch/integer utility modules, the Terminal wrapper/export, and the source-map trailer. Original c1 wording: 'Considered whether deleting the vendored smooth-scrolling implementation leaves terminal history inaccessible.' The prior latest wording preserves 'inaccessible viewport history or changed animation'. Neither consequence is being replaced by a weaker hypothetical. Original proposed_drop wording: 'source refutation above, not specification acceptance of an established bug.' Latest proposed_drop basis remains that source refutation, now extended by the grid's own scrollbar drag path.\n\nSource/contract checks: grid-terminal.js:530-595 has its own history/screen viewport and clamps scroll positions; :1514-1528 dispatches local page-up/down actions; grid-input.js:295-350 declares and selects the local actions. SPEC.md:3320-3324 says exactly 'the terminal scrolls with Shift+PageUp/PageDown.' SPEC_impl.md:1840-1845 says 'terminal.js owns the connection and mounts the grid component for every terminal before the socket exists'. New synthesis check grid-terminal.js:950-1028 shows its scrollbar slider computes a target from current viewShape, calls scrollToIndex, and removes document mousemove/mouseup handlers on release. This path does not call or depend on the deleted SmoothScrollingOperation. Earlier exact git grep at the reviewed revision found no remaining smooth-scroll helper, Terminal constructor/global or deleted xterm asset path in crates/farhelm-ui.\n\nSuggested bucket: high if the original inaccessible-history consequence were established; other for an animation-only difference. No impact has been established, and no finding was lowered. Confidence: confirmed source-based absence of a stranded smooth-scroll caller; no runtime behavior observed. proposed_drop: the removed code is an internal renderer implementation replaced by the grid's own viewport, keyboard and scrollbar paths, with the exact source and contract citations above; pending independent decision. possible_cover: none, forbidden coverage sources not searched. Could-be-highest: no established security or loss-of-work route; viewport access and animation were the considered consequences. Caveats: no claim of full legacy API parity, browser execution or unrelated pre-existing grid correctness. No unresolved source premise remains for the specific removed-helper dependency."
+          }
+        }
+      ],
+      "latest": {
+        "line": 4,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c1",
+          "state": "open",
+          "summary": "Retiring xterm smooth-scrolling helpers does not remove terminal scrolling",
+          "location": "crates/farhelm-ui/assets/vendor/xterm.js:1",
+          "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e\n\nTLDR: The considered consequence remains inaccessible terminal history or changed scroll animation after deleting xterm's smooth-scroll helpers. Source checks still do not establish either as a defect. This remains a proposed drop for independent judgment; no drop has been accepted.\n\nDetails: Turn 2 repaired mandatory delivery using separate evidence-read stdout packets for 01085-030.patch:1, :2 and :3, each with its END sentinel and unchanged hash bc4efda65bae9abd277a6febdb3b32457e56e72b6a507067feece677c613bdbe. The packet removes smooth-scroll animation/state helpers, string/stopwatch/integer utility modules, the Terminal wrapper/export, and the source-map trailer. Original c1 wording: 'Considered whether deleting the vendored smooth-scrolling implementation leaves terminal history inaccessible.' The prior latest wording preserves 'inaccessible viewport history or changed animation'. Neither consequence is being replaced by a weaker hypothetical. Original proposed_drop wording: 'source refutation above, not specification acceptance of an established bug.' Latest proposed_drop basis remains that source refutation, now extended by the grid's own scrollbar drag path.\n\nSource/contract checks: grid-terminal.js:530-595 has its own history/screen viewport and clamps scroll positions; :1514-1528 dispatches local page-up/down actions; grid-input.js:295-350 declares and selects the local actions. SPEC.md:3320-3324 says exactly 'the terminal scrolls with Shift+PageUp/PageDown.' SPEC_impl.md:1840-1845 says 'terminal.js owns the connection and mounts the grid component for every terminal before the socket exists'. New synthesis check grid-terminal.js:950-1028 shows its scrollbar slider computes a target from current viewShape, calls scrollToIndex, and removes document mousemove/mouseup handlers on release. This path does not call or depend on the deleted SmoothScrollingOperation. Earlier exact git grep at the reviewed revision found no remaining smooth-scroll helper, Terminal constructor/global or deleted xterm asset path in crates/farhelm-ui.\n\nSuggested bucket: high if the original inaccessible-history consequence were established; other for an animation-only difference. No impact has been established, and no finding was lowered. Confidence: confirmed source-based absence of a stranded smooth-scroll caller; no runtime behavior observed. proposed_drop: the removed code is an internal renderer implementation replaced by the grid's own viewport, keyboard and scrollbar paths, with the exact source and contract citations above; pending independent decision. possible_cover: none, forbidden coverage sources not searched. Could-be-highest: no established security or loss-of-work route; viewport access and animation were the considered consequences. Caveats: no claim of full legacy API parity, browser execution or unrelated pre-existing grid correctness. No unresolved source premise remains for the specific removed-helper dependency."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g197/findings.jsonl",
+        "id": "c1",
+        "line": 4,
+        "disposition": "excluded",
+        "group": "removed-xterm-smooth-scroll-caller-dependency",
+        "reason": "Parent explicitly accepted named refuted proposal from claims-122 after inspecting it. The replacement owns its viewport, keyboard scrolling and scrollbar without the deleted helpers. Source refutes the specific stranded-dependency hypothesis; it does not establish universal scrolling correctness or complete animation parity. Narrow source refutation of dependency on deleted smooth-scroll implementation. This is not acceptance of unrelated grid history defects. Checked source/results: [\"At f560058da19e02716e6f943883a9508b447aff4e, grid-terminal.js:530-595 computes/clamps history and screen positions and implements scrollLines/scrollToBottom; :950-1028 handles slider drag through scrollToIndex; :1514-1528 handles local page scrolling. grid-input.js:295-350 classifies Shift+PageUp/Down locally and cancels them.\",\"An exact git grep across crates/farhelm-ui at that hash found no setScrollPositionSmooth, hasPendingScrollAnimation, SmoothScrolling, new Terminal(, window.Terminal or removed assets/vendor/xterm path (status 1).\",\"All three histories were read. Original inaccessible-history and later animation consequences are preserved; no runtime observation, full API-parity claim or audit of unrelated pre-existing grid behavior was made.\"] Current coverage/results: [\"SPEC.md Reaching everything by keyboard :3311-3320 explicitly requires Shift+PageUp/PageDown. SPEC_impl.md Grid client :1836-1868 assigns local viewport ownership to the grid. These requirements support the caller check rather than accept inaccessible history.\",\"TODO Planned empty; BUGS unrelated; no exact removal-dependency or smooth-scroll coverage in active TRIAGE_OUTCOMES or queue/index. Existing oldest-row clipping and selection/history items concern different causes, not a stranded deleted helper. The tmux removal plans are landed per REPORTS.md:29-32; no unlanded remedy found.\",\"No FILTER.md boundary applied: inaccessible history is not established as a rare transient display glitch, and no filtering is needed for the source refutation.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Deleting smooth-scrolling helpers might make retained terminal history inaccessible; changed animation was also considered. Preserve high for the former hypothetical, other for animation only. Latest explicitly raises the hypothetical inaccessible-history bucket to high and accepts no drop or lowering.\"; \"None for deleted-helper dependency. Runtime viewport correctness and full old-animation parity were not measured.\"."
+      },
+      "accepted_parent_decision": {
+        "key": "g197/c1",
+        "line": 4,
+        "disposition": "excluded",
+        "group": "removed-xterm-smooth-scroll-caller-dependency",
+        "bucket": "high",
+        "recording": "refuted",
+        "queue_target_candidate": null,
+        "needs_independent_drop_check": false,
+        "reason": "Parent explicitly accepted named refuted proposal from claims-122 after inspecting it. The replacement owns its viewport, keyboard scrolling and scrollbar without the deleted helpers. Source refutes the specific stranded-dependency hypothesis; it does not establish universal scrolling correctness or complete animation parity. Narrow source refutation of dependency on deleted smooth-scroll implementation. This is not acceptance of unrelated grid history defects. Checked source/results: [\"At f560058da19e02716e6f943883a9508b447aff4e, grid-terminal.js:530-595 computes/clamps history and screen positions and implements scrollLines/scrollToBottom; :950-1028 handles slider drag through scrollToIndex; :1514-1528 handles local page scrolling. grid-input.js:295-350 classifies Shift+PageUp/Down locally and cancels them.\",\"An exact git grep across crates/farhelm-ui at that hash found no setScrollPositionSmooth, hasPendingScrollAnimation, SmoothScrolling, new Terminal(, window.Terminal or removed assets/vendor/xterm path (status 1).\",\"All three histories were read. Original inaccessible-history and later animation consequences are preserved; no runtime observation, full API-parity claim or audit of unrelated pre-existing grid behavior was made.\"] Current coverage/results: [\"SPEC.md Reaching everything by keyboard :3311-3320 explicitly requires Shift+PageUp/PageDown. SPEC_impl.md Grid client :1836-1868 assigns local viewport ownership to the grid. These requirements support the caller check rather than accept inaccessible history.\",\"TODO Planned empty; BUGS unrelated; no exact removal-dependency or smooth-scroll coverage in active TRIAGE_OUTCOMES or queue/index. Existing oldest-row clipping and selection/history items concern different causes, not a stranded deleted helper. The tmux removal plans are landed per REPORTS.md:29-32; no unlanded remedy found.\",\"No FILTER.md boundary applied: inaccessible history is not established as a rare transient display glitch, and no filtering is needed for the source refutation.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Deleting smooth-scrolling helpers might make retained terminal history inaccessible; changed animation was also considered. Preserve high for the former hypothetical, other for animation only. Latest explicitly raises the hypothetical inaccessible-history bucket to high and accepts no drop or lowering.\"; \"None for deleted-helper dependency. Runtime viewport correctness and full old-animation parity were not measured.\"."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-122",
+          "key": "g197/c1",
+          "latest_line": 4,
+          "recommendation": "refuted",
+          "bucket": "high",
+          "underlying_key": "removed-xterm-smooth-scroll-caller-dependency",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The replacement owns its viewport, keyboard scrolling and scrollbar without the deleted helpers. Source refutes the specific stranded-dependency hypothesis; it does not establish universal scrolling correctness or complete animation parity.",
+          "checks": [
+            "At f560058da19e02716e6f943883a9508b447aff4e, grid-terminal.js:530-595 computes/clamps history and screen positions and implements scrollLines/scrollToBottom; :950-1028 handles slider drag through scrollToIndex; :1514-1528 handles local page scrolling. grid-input.js:295-350 classifies Shift+PageUp/Down locally and cancels them.",
+            "An exact git grep across crates/farhelm-ui at that hash found no setScrollPositionSmooth, hasPendingScrollAnimation, SmoothScrolling, new Terminal(, window.Terminal or removed assets/vendor/xterm path (status 1).",
+            "All three histories were read. Original inaccessible-history and later animation consequences are preserved; no runtime observation, full API-parity claim or audit of unrelated pre-existing grid behavior was made."
+          ],
+          "coverage_checked": [
+            "SPEC.md Reaching everything by keyboard :3311-3320 explicitly requires Shift+PageUp/PageDown. SPEC_impl.md Grid client :1836-1868 assigns local viewport ownership to the grid. These requirements support the caller check rather than accept inaccessible history.",
+            "TODO Planned empty; BUGS unrelated; no exact removal-dependency or smooth-scroll coverage in active TRIAGE_OUTCOMES or queue/index. Existing oldest-row clipping and selection/history items concern different causes, not a stranded deleted helper. The tmux removal plans are landed per REPORTS.md:29-32; no unlanded remedy found.",
+            "No FILTER.md boundary applied: inaccessible history is not established as a rare transient display glitch, and no filtering is needed for the source refutation."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": "None for deleted-helper dependency. Runtime viewport correctness and full old-animation parity were not measured.",
+          "original_stronger_consequence": "Deleting smooth-scrolling helpers might make retained terminal history inaccessible; changed animation was also considered. Preserve high for the former hypothetical, other for animation only. Latest explicitly raises the hypothetical inaccessible-history bucket to high and accepts no drop or lowering.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Narrow source refutation of dependency on deleted smooth-scroll implementation. This is not acceptance of unrelated grid history defects."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "high",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "removed-xterm-smooth-scroll-caller-dependency",
+        "destination": null
+      }
+    },
+    {
+      "key": "g197/c2",
+      "owner": "g197",
+      "id": "c2",
+      "domain": "retired-xterm-vendor",
+      "purpose": "retired-xterm-vendor: crates/farhelm-ui/assets/vendor/xterm.js; phases bundle wrapper method setScrollPositionSmooth: MethodDefinition setScrollPositionSmooth",
+      "history": [
+        {
+          "line": 2,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c2",
+            "state": "open",
+            "summary": "Deleting the bundle Terminal export does not strand page startup",
+            "location": "crates/farhelm-ui/assets/vendor/xterm.js:1",
+            "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e\n\nTLDR: Considered whether removing the exported terminal class and its utility modules prevents terminals from mounting. The page loads and mounts the grid component directly, with no remaining dependency on the deleted export. No defect established.\n\nDetails: The assigned deletion packet 01085-030.patch ends with the Terminal export, delegating focus, input, resize, selection, scrolling, write, paste, addons and disposal to the retired core. At the reviewed revision, crates/farhelm-ui/src/lib.rs:1913-1926 loads the grid model/style/input/buffer/terminal scripts before terminal.js. crates/farhelm-ui/assets/terminal.js:3190-3230 waits for the grid globals without requiring Terminal or its addons; :3387-3393 unconditionally constructs the grid surface, fits it and reads its size before opening the socket; :4294-4384 constructs farhelmGridTerminal and wires input, resizing, clipboard, links, paste and protocol errors. The grid exports the page-facing methods at grid-terminal.js:2015-2149 and cancels its animation frame, history drain and scrollbar fade in dispose. A separate exact git grep for setScrollPositionSmooth|hasPendingScrollAnimation|SmoothScrolling|new Terminal\\(|window\\.Terminal|assets/vendor/xterm across crates/farhelm-ui at this revision returned no matches (status 1). SPEC_impl.md:1837-1845 declares the browser a grid drawer and terminal.js the owner of mounting the grid for every terminal.\n\nSuggested bucket: high if terminal startup had been broken; no impact established. Confidence: confirmed source refutation of the deleted-export dependency; no execution performed. proposed_drop: source refutation of a missing runtime dependency, not specification acceptance of a known failure. possible_cover: none; prohibited coverage sources not searched. Could-be-highest: no established security or loss-of-work route; the considered consequence was failed viewing/mounting. Caveats: compilation and browser execution were not requested or performed; unrelated behavior of retired string/stopwatch/integer helpers was not independently audited because it is deletion-only scope."
+          }
+        },
+        {
+          "line": 5,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c2",
+            "state": "open",
+            "summary": "Deleting the bundle Terminal export does not strand page startup",
+            "location": "crates/farhelm-ui/assets/vendor/xterm.js:1",
+            "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e\n\nTLDR: The original considered consequence remains terminals failing to mount after deleting the Terminal export and utilities. Rechecked startup, teardown and reconnect ownership do not establish that failure or a lifecycle defect caused by this deletion. This remains a proposed drop for independent judgment, not an accepted drop.\n\nDetails: Original/latest prior c2 TLDR wording: 'Considered whether removing the exported terminal class and its utility modules prevents terminals from mounting. The page loads and mounts the grid component directly, with no remaining dependency on the deleted export. No defect established.' Original/latest prior proposed_drop wording: 'source refutation of a missing runtime dependency, not specification acceptance of a known failure.' These consequences and citations remain preserved; no severity lowering is proposed. The mandatory patch now has three separate supported evidence-read deliveries, :1, :2, :3, with hash bc4efda65bae9abd277a6febdb3b32457e56e72b6a507067feece677c613bdbe.\n\nSynthesis checks/results: Parent-revision terminal.js:4650-4663 already mounted a grid directly for host terminals, whereas its :3900 Terminal constructor was the old renderer path. At the reviewed revision lib.rs:1913-1926 still loads all grid assets before terminal.js, and terminal.js:3198-3230 gates mounting on grid globals without the deleted export. The earlier traced constructor at terminal.js:3387-3393 and :4294-4384 fits the grid and wires the page-facing callbacks. SPEC_impl.md:1840-1845 explicitly assigns 'rendering, the virtualized scrollback, selection, the pointer and keyboard' to grid-terminal.js and says 'terminal.js owns the connection and mounts the grid component for every terminal before the socket exists'. A rerun of the exact git grep across crates/farhelm-ui found no setScrollPositionSmooth, hasPendingScrollAnimation, SmoothScrolling, new Terminal(, window.Terminal or assets/vendor/xterm dependency (status 1).\n\nLifecycle checks/results: terminal.js:4687-4747 disposes observers, attachments, deferred timers and the grid when a mount fails. Its :4761-4849 unmount cancels pending attempts, removes window/pane/attachment/drag-notice observers or listeners, retires deferred work, nulls socket callbacks, closes the socket and disposes the grid, except for an explicitly retained recovery snapshot. That exception is owned: runReconnect at :1556-1582 stores the old grid as controller.snapshot and marks keepScreen; cancelReconnect at :1607-1641 restores it as a frozen tombstone on refusal or calls held.dispose for confirmed/discarded recovery. grid-terminal.js:2076-2085 freeze disables sending and resizing; :2109-2144 dispose cancels animation/drain frames, closes its message ports, ends document gestures, clears the fade timer, invalidates hover and callbacks, and removes its element. Removing the old wrapper's dispose delegation therefore does not remove the replacement's teardown.\n\nSuggested bucket: high for the original hypothetical failed startup; no impact established. Confidence: confirmed source refutation of the deleted-export dependency and teardown-ownership concern, with no runtime observation. proposed_drop: source refutation above, pending independent acceptance; exact contract/source quotations and original wording retained. possible_cover: none, no forbidden coverage sources searched. Could-be-highest: no established security or loss-of-work route; startup/viewing failure remains the considered impact. Caveats: no compilation, browser execution, reproduction or exhaustive legacy API-parity claim. Unrelated defects in retired helpers were not independently sought. No unresolved source premise remains for this candidate's dependency or disposal concern."
+          }
+        },
+        {
+          "line": 6,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c2",
+            "state": "open",
+            "summary": "Deleting the bundle Terminal export does not strand page startup",
+            "location": "crates/farhelm-ui/assets/vendor/xterm.js:1",
+            "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e. Turn 3 interface synthesis before discovery.\n\nTLDR: The original consideration remains terminals failing to mount because their deleted Terminal class or utility modules are still required. Prior startup dependency refutation is preserved. It does not certify every replacement constructor-failure path, changed test oracle or compatibility path.\n\nDetails: Read all 246 lines of caller-supplied discovery-neighbours.json in three bounded packets. Supplied g083/l1 and g135/l2/g136/l1 show a distinct test-oracle mismatch and pre-existing unsafe construction-time element getter. This limits my prior lifecycle wording: source at terminal.js:4687-4747 shows an outer rollback attempt, not proof that nested link cleanup preserves the original exception or that a constructor which never returned released every allocation. No production-correctness claim refutes that separate changed-test claim. The original/latest prior startup TLDR is preserved verbatim in earlier c2 events, beginning 'Considered whether removing the exported terminal class and its utility modules prevents terminals from mounting.' Prior exact proposed_drop wording remains 'source refutation of a missing runtime dependency, not specification acceptance of a known failure.' Source citations remain lib.rs:1913-1926, terminal.js:3198-3230, :3387-3393, :4294-4384, and SPEC_impl.md:1840-1845 ('terminal.js owns the connection and mounts the grid component for every terminal before the socket exists').\n\nThe supplied g196/l1 also concerns a separate old-page input-compatibility route, not a retained dependency on the deleted export in the new page. Absence of new-page Terminal callers cannot refute it. I do not claim either supplied record as a new discovery; parent owns consolidation and independent disposition. No distinct reproduction or forbidden coverage-source search was made.\n\nSuggested bucket: high for the original hypothetical failed-startup consequence; no original impact was weakened. Confidence: confirmed source refutation only of the deleted-export dependency. proposed_drop: unchanged missing-runtime-dependency source basis, pending independent judgment; no accepted drop or lowering. possible_cover: supplied g083/l1, g135/l2 and g136/l1 are distinct test-oracle context; g196/l1 is distinct compatibility context. Could-be-highest: no established route for c2's missing-export startup hypothesis; this does not apply a no-highest judgment to the supplied old-page input finding. Caveats: prior normal disposal/ownership checks do not establish safe nested constructor-failure cleanup. Source-only; no new unresolved lead in c2's own dependency question."
+          }
+        }
+      ],
+      "latest": {
+        "line": 6,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c2",
+          "state": "open",
+          "summary": "Deleting the bundle Terminal export does not strand page startup",
+          "location": "crates/farhelm-ui/assets/vendor/xterm.js:1",
+          "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e. Turn 3 interface synthesis before discovery.\n\nTLDR: The original consideration remains terminals failing to mount because their deleted Terminal class or utility modules are still required. Prior startup dependency refutation is preserved. It does not certify every replacement constructor-failure path, changed test oracle or compatibility path.\n\nDetails: Read all 246 lines of caller-supplied discovery-neighbours.json in three bounded packets. Supplied g083/l1 and g135/l2/g136/l1 show a distinct test-oracle mismatch and pre-existing unsafe construction-time element getter. This limits my prior lifecycle wording: source at terminal.js:4687-4747 shows an outer rollback attempt, not proof that nested link cleanup preserves the original exception or that a constructor which never returned released every allocation. No production-correctness claim refutes that separate changed-test claim. The original/latest prior startup TLDR is preserved verbatim in earlier c2 events, beginning 'Considered whether removing the exported terminal class and its utility modules prevents terminals from mounting.' Prior exact proposed_drop wording remains 'source refutation of a missing runtime dependency, not specification acceptance of a known failure.' Source citations remain lib.rs:1913-1926, terminal.js:3198-3230, :3387-3393, :4294-4384, and SPEC_impl.md:1840-1845 ('terminal.js owns the connection and mounts the grid component for every terminal before the socket exists').\n\nThe supplied g196/l1 also concerns a separate old-page input-compatibility route, not a retained dependency on the deleted export in the new page. Absence of new-page Terminal callers cannot refute it. I do not claim either supplied record as a new discovery; parent owns consolidation and independent disposition. No distinct reproduction or forbidden coverage-source search was made.\n\nSuggested bucket: high for the original hypothetical failed-startup consequence; no original impact was weakened. Confidence: confirmed source refutation only of the deleted-export dependency. proposed_drop: unchanged missing-runtime-dependency source basis, pending independent judgment; no accepted drop or lowering. possible_cover: supplied g083/l1, g135/l2 and g136/l1 are distinct test-oracle context; g196/l1 is distinct compatibility context. Could-be-highest: no established route for c2's missing-export startup hypothesis; this does not apply a no-highest judgment to the supplied old-page input finding. Caveats: prior normal disposal/ownership checks do not establish safe nested constructor-failure cleanup. Source-only; no new unresolved lead in c2's own dependency question."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g197/findings.jsonl",
+        "id": "c2",
+        "line": 6,
+        "disposition": "excluded",
+        "group": "removed-xterm-export-new-page-startup-dependency",
+        "reason": "Parent explicitly accepted named refuted proposal from claims-122 after inspecting it. New-page startup directly constructs the grid and waits for its assets. It has no remaining Terminal-export dependency. The latest record correctly retracts an overly broad cleanup assurance; this narrow disposition does not refute constructor-failure cleanup or changed-test-oracle concerns. Source refutation only of the deleted-export dependency in the new page. Preserve the latest limits on broad lifecycle language and keep separate old-page and test-oracle records independent. Checked source/results: [\"At f560058da19e02716e6f943883a9508b447aff4e, UI lib.rs:1913-1926 emits all grid scripts before terminal.js; terminal.js:3190-3230 waits for grid globals; :3387-3393 creates/fits the grid before opening its socket; :4294-4342 constructs it through farhelmGridTerminal.create.\",\"Exact git grep of that revision's UI found no new Terminal(, window.Terminal, deleted asset-path or smooth-helper dependency (status 1). This refutes the specific missing-export dependency, not arbitrary startup failures.\",\"All three histories were read. The latest explicitly limits prior normal disposal/outer rollback claims: cleanup attempts do not prove nested failures preserve the original exception or release allocations from a constructor that never returned. g083/l1,g135/l2,g136/l1 were named only as distinct supplied context, not checked here.\"] Current coverage/results: [\"SPEC_impl.md Grid client :1836-1847 assigns terminal.js the unconditional grid mount before the socket. No specification accepts terminals failing to mount because a deleted export is required.\",\"TODO Planned empty; BUGS unrelated; no exact missing-export startup item or active outcome found in targeted queue/index/ledger searches. All tmux removal plans are landed per REPORTS.md:29-32; none is unlanded coverage. FILTER.md not applied.\",\"g196/l1 is a distinct old loaded-page compatibility route. Absence of new-page Terminal callers cannot refute it. Likewise production dependency correctness cannot dispose of an independent changed-test or documentation defect.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Removing the exported Terminal class and utilities could prevent terminals mounting. Intermediate normal teardown checks were subsequently narrowed because they do not certify constructor-failure safety. Original failed-startup consequence remains high if demonstrated; no accepted drop or severity lowering.\"; \"None for the missing-runtime-export dependency. Compilation, browser startup and nested construction-failure cleanup were not exercised or certified.\"."
+      },
+      "accepted_parent_decision": {
+        "key": "g197/c2",
+        "line": 6,
+        "disposition": "excluded",
+        "group": "removed-xterm-export-new-page-startup-dependency",
+        "bucket": "high",
+        "recording": "refuted",
+        "queue_target_candidate": null,
+        "needs_independent_drop_check": false,
+        "reason": "Parent explicitly accepted named refuted proposal from claims-122 after inspecting it. New-page startup directly constructs the grid and waits for its assets. It has no remaining Terminal-export dependency. The latest record correctly retracts an overly broad cleanup assurance; this narrow disposition does not refute constructor-failure cleanup or changed-test-oracle concerns. Source refutation only of the deleted-export dependency in the new page. Preserve the latest limits on broad lifecycle language and keep separate old-page and test-oracle records independent. Checked source/results: [\"At f560058da19e02716e6f943883a9508b447aff4e, UI lib.rs:1913-1926 emits all grid scripts before terminal.js; terminal.js:3190-3230 waits for grid globals; :3387-3393 creates/fits the grid before opening its socket; :4294-4342 constructs it through farhelmGridTerminal.create.\",\"Exact git grep of that revision's UI found no new Terminal(, window.Terminal, deleted asset-path or smooth-helper dependency (status 1). This refutes the specific missing-export dependency, not arbitrary startup failures.\",\"All three histories were read. The latest explicitly limits prior normal disposal/outer rollback claims: cleanup attempts do not prove nested failures preserve the original exception or release allocations from a constructor that never returned. g083/l1,g135/l2,g136/l1 were named only as distinct supplied context, not checked here.\"] Current coverage/results: [\"SPEC_impl.md Grid client :1836-1847 assigns terminal.js the unconditional grid mount before the socket. No specification accepts terminals failing to mount because a deleted export is required.\",\"TODO Planned empty; BUGS unrelated; no exact missing-export startup item or active outcome found in targeted queue/index/ledger searches. All tmux removal plans are landed per REPORTS.md:29-32; none is unlanded coverage. FILTER.md not applied.\",\"g196/l1 is a distinct old loaded-page compatibility route. Absence of new-page Terminal callers cannot refute it. Likewise production dependency correctness cannot dispose of an independent changed-test or documentation defect.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Removing the exported Terminal class and utilities could prevent terminals mounting. Intermediate normal teardown checks were subsequently narrowed because they do not certify constructor-failure safety. Original failed-startup consequence remains high if demonstrated; no accepted drop or severity lowering.\"; \"None for the missing-runtime-export dependency. Compilation, browser startup and nested construction-failure cleanup were not exercised or certified.\"."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-122",
+          "key": "g197/c2",
+          "latest_line": 6,
+          "recommendation": "refuted",
+          "bucket": "high",
+          "underlying_key": "removed-xterm-export-new-page-startup-dependency",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "New-page startup directly constructs the grid and waits for its assets. It has no remaining Terminal-export dependency. The latest record correctly retracts an overly broad cleanup assurance; this narrow disposition does not refute constructor-failure cleanup or changed-test-oracle concerns.",
+          "checks": [
+            "At f560058da19e02716e6f943883a9508b447aff4e, UI lib.rs:1913-1926 emits all grid scripts before terminal.js; terminal.js:3190-3230 waits for grid globals; :3387-3393 creates/fits the grid before opening its socket; :4294-4342 constructs it through farhelmGridTerminal.create.",
+            "Exact git grep of that revision's UI found no new Terminal(, window.Terminal, deleted asset-path or smooth-helper dependency (status 1). This refutes the specific missing-export dependency, not arbitrary startup failures.",
+            "All three histories were read. The latest explicitly limits prior normal disposal/outer rollback claims: cleanup attempts do not prove nested failures preserve the original exception or release allocations from a constructor that never returned. g083/l1,g135/l2,g136/l1 were named only as distinct supplied context, not checked here."
+          ],
+          "coverage_checked": [
+            "SPEC_impl.md Grid client :1836-1847 assigns terminal.js the unconditional grid mount before the socket. No specification accepts terminals failing to mount because a deleted export is required.",
+            "TODO Planned empty; BUGS unrelated; no exact missing-export startup item or active outcome found in targeted queue/index/ledger searches. All tmux removal plans are landed per REPORTS.md:29-32; none is unlanded coverage. FILTER.md not applied.",
+            "g196/l1 is a distinct old loaded-page compatibility route. Absence of new-page Terminal callers cannot refute it. Likewise production dependency correctness cannot dispose of an independent changed-test or documentation defect."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": "None for the missing-runtime-export dependency. Compilation, browser startup and nested construction-failure cleanup were not exercised or certified.",
+          "original_stronger_consequence": "Removing the exported Terminal class and utilities could prevent terminals mounting. Intermediate normal teardown checks were subsequently narrowed because they do not certify constructor-failure safety. Original failed-startup consequence remains high if demonstrated; no accepted drop or severity lowering.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Source refutation only of the deleted-export dependency in the new page. Preserve the latest limits on broad lifecycle language and keep separate old-page and test-oracle records independent."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "high",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "removed-xterm-export-new-page-startup-dependency",
+        "destination": null
+      }
+    },
+    {
+      "key": "g197/c3",
+      "owner": "g197",
+      "id": "c3",
+      "domain": "retired-xterm-vendor",
+      "purpose": "retired-xterm-vendor: crates/farhelm-ui/assets/vendor/xterm.js; phases bundle wrapper method setScrollPositionSmooth: MethodDefinition setScrollPositionSmooth",
+      "history": [
+        {
+          "line": 7,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c3",
+            "state": "open",
+            "summary": "Removing the parser accessor does not restore duplicate query replies",
+            "location": "crates/farhelm-ui/assets/vendor/xterm.js:1",
+            "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e. Discovery pass 1.\n\nTLDR: Considered whether removal of the exported parser accessor also removes the protection against late terminal-query replies appearing as unintended keystrokes. The replacement page receives structured grid frames rather than interpreting terminal escape sequences, so the removed response suppressors have no browser responder left to suppress. No defect established.\n\nDetails: The assigned deletion includes the public Terminal.parser getter that exposes ParserApi. Parent terminal.js:4100-4147 uses it to swallow DECRQM and DECRQSS before xterm can generate late duplicate replies. Its exact rationale is that a late DECRPM reply 'parses as KEYSTROKES' and the query hooks stop xterm's built-in responder. At the reviewed revision terminal.js:4152-4165 sends each binary frame only to receiveGrid; grid-terminal.js:1972-1993 decodes a grid frame and applies the model, with explicit focus-report, clipboard-write and fitted-size effects, rather than parsing ANSI output. SPEC_impl.md:1837-1839 states exactly 'the browser gets the screen and scrollback as rows of styled runs' and 'it is not a terminal emulator.' Thus lack of a replacement registerCsiHandler/registerDcsHandler is not itself a lost protection. Current-UI source search finds neither registration nor a retained Terminal parser caller. This conclusion concerns duplicate browser-generated query replies only, not every supervisor query behavior or the separately supplied old-page JSON-input compatibility finding.\n\nSuggested bucket: high if unintended keystrokes from removed suppression were established; no impact established. Confidence: confirmed source refutation for the new page's duplicate-responder hypothesis; no execution. proposed_drop: the triggering browser escape-sequence responder was removed with the wrapper, while incoming data is decoded as structured grid frames under the quoted contract; pending independent judgment, no drop accepted. possible_cover: none for this specific parser-accessor check; supplied interface records were read only for context and novelty. Could-be-highest: no established security or loss-of-work route; an extension from stray input to destructive input would require an actual outgoing reply path, which these source checks did not find. Caveats: this is not a claim that source-correct production behavior refutes any changed test-oracle or documentation defect. No tests, reproduction or live-install action performed."
+          }
+        }
+      ],
+      "latest": {
+        "line": 7,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c3",
+          "state": "open",
+          "summary": "Removing the parser accessor does not restore duplicate query replies",
+          "location": "crates/farhelm-ui/assets/vendor/xterm.js:1",
+          "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e. Discovery pass 1.\n\nTLDR: Considered whether removal of the exported parser accessor also removes the protection against late terminal-query replies appearing as unintended keystrokes. The replacement page receives structured grid frames rather than interpreting terminal escape sequences, so the removed response suppressors have no browser responder left to suppress. No defect established.\n\nDetails: The assigned deletion includes the public Terminal.parser getter that exposes ParserApi. Parent terminal.js:4100-4147 uses it to swallow DECRQM and DECRQSS before xterm can generate late duplicate replies. Its exact rationale is that a late DECRPM reply 'parses as KEYSTROKES' and the query hooks stop xterm's built-in responder. At the reviewed revision terminal.js:4152-4165 sends each binary frame only to receiveGrid; grid-terminal.js:1972-1993 decodes a grid frame and applies the model, with explicit focus-report, clipboard-write and fitted-size effects, rather than parsing ANSI output. SPEC_impl.md:1837-1839 states exactly 'the browser gets the screen and scrollback as rows of styled runs' and 'it is not a terminal emulator.' Thus lack of a replacement registerCsiHandler/registerDcsHandler is not itself a lost protection. Current-UI source search finds neither registration nor a retained Terminal parser caller. This conclusion concerns duplicate browser-generated query replies only, not every supervisor query behavior or the separately supplied old-page JSON-input compatibility finding.\n\nSuggested bucket: high if unintended keystrokes from removed suppression were established; no impact established. Confidence: confirmed source refutation for the new page's duplicate-responder hypothesis; no execution. proposed_drop: the triggering browser escape-sequence responder was removed with the wrapper, while incoming data is decoded as structured grid frames under the quoted contract; pending independent judgment, no drop accepted. possible_cover: none for this specific parser-accessor check; supplied interface records were read only for context and novelty. Could-be-highest: no established security or loss-of-work route; an extension from stray input to destructive input would require an actual outgoing reply path, which these source checks did not find. Caveats: this is not a claim that source-correct production behavior refutes any changed test-oracle or documentation defect. No tests, reproduction or live-install action performed."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g197/findings.jsonl",
+        "id": "c3",
+        "line": 7,
+        "disposition": "under-investigation",
+        "group": "g197-c3",
+        "reason": "Record durably acknowledged; parent source/contract validation, cross-group synthesis, coverage/filter matching and any independent drop check remain pending. This preserves the claim and uncertainty without accepting, dropping or lowering it."
+      },
+      "accepted_parent_decision": null,
+      "returned_claim_checks": [
+        {
+          "batch": "claims-122",
+          "key": "g197/c3",
+          "latest_line": 7,
+          "recommendation": "refuted",
+          "bucket": "high",
+          "underlying_key": "removed-xterm-parser-duplicate-browser-query-responder",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The new page consumes structured grid frames rather than terminal escape sequences, so removing the old parser suppressors does not leave that browser query responder active. This only refutes duplicate browser-generated query replies from the removed responder.",
+          "checks": [
+            "At f560058da19e02716e6f943883a9508b447aff4e^, terminal.js:4100-4147 registers DECRQM/DECRQSS suppressors and explains that late replies can parse as keystrokes. At f560058da19e02716e6f943883a9508b447aff4e, terminal.js:4152-4165 passes binary data to receiveGrid.",
+            "At the reviewed revision, grid-terminal.js:1972-1993 decodes a grid frame and applies the model, with explicit focus-report/clipboard/fit effects. It does not parse ANSI queries. Exact reviewed-UI grep found no registerCsiHandler/registerDcsHandler or Terminal constructor/global dependency (status 1).",
+            "The sole history was read in full. It preserves potential stray input and notes that extending it to destructive input requires an actual reply path. No runtime query behavior was observed."
+          ],
+          "coverage_checked": [
+            "Current SPEC_impl.md Grid client :1836-1868 says the browser is not a terminal emulator and receives styled grid rows. This is architecture supporting source refutation, not blanket permission for unintended input. SPEC.md output-recovery-gap input-mode acceptance :2920-2942 has a different trigger.",
+            "TODO Planned empty; BUGS unrelated; no exact duplicate browser query-responder finding or active triage outcome found. Existing grid-input X10/selection items have different triggers and consequences. All tmux removal plans are recorded landed per REPORTS.md:29-32; no unlanded fix covers this exact hypothesis. FILTER.md not applied.",
+            "The g196/l1 old-page valid-JSON paste route is distinct and remains retained. Correct new-page source behavior does not refute any independent changed-test or documentation claim."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": "No remaining premise for the deleted responder dependency. An actual new-page outgoing query reply route would be needed to establish unintended keystrokes; none was found in these targeted checks. No claim about every supervisor query path is made.",
+          "original_stronger_consequence": "Deleting parser accessors/suppression might let late terminal-query replies become unintended keystrokes. Hypothetical destructive input could affect user-owned work but requires an outgoing responder path; retain that original concern in the independent-drop register even though latest reports high/no established impact.",
+          "needs_independent_drop_check": true,
+          "proposed_basis": "Narrow source refutation: the removed browser ANSI responder has no counterpart in the replacement structured-grid receive path. Separate independent acceptance is required before dropping the possible harmful-input consequence."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": true,
+        "provisional_bucket": "high",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "removed-xterm-parser-duplicate-browser-query-responder",
+        "destination": null
+      }
+    }
+  ],
+  "replies": [
+    {
+      "turn": 1,
+      "reply": "Initial review complete. All assigned material reviewed.\n\nNo reportable findings or unresolved leads. Recorded source-refuted candidates `c1` and `c2` in `findings.jsonl` and updated `progress.md`.\n\nSource-only review; no tests, reproductions, or checkout changes."
+    },
+    {
+      "turn": 2,
+      "reply": "Coverage repaired: lines 1–3 were delivered separately through evidence read, without clipping. No assigned material remains unread.\n\nCompleted synthesis and revised c1/c2 with caller, contract, and lifecycle checks. Original impacts and proposed-drop wording are preserved; neither drop is accepted.\n\nNo new reportable findings or open leads. Source-only; no reproductions or checkout changes."
+    },
+    {
+      "turn": 3,
+      "reply": "Discovery pass 1 complete. No new defect found.\n\nChecked additional wrapper APIs, utility exports, parser hooks, replacement input routing, and full-range file history. Added source-refuted candidate c3 and narrowed c2’s lifecycle claim.\n\nNew verified IDs: none. New unverified IDs: none. Open leads: none. Assigned coverage remains complete; progress updated."
+    }
+  ],
+  "progress": "# g197 progress\n\nInitial review complete, turn 1. Discovery passes: 0. Await caller's later synthesis/discovery prompt; no later-turn protocol performed in this turn.\n\nScope: retired-xterm-vendor, bundle slice beginning at setScrollPositionSmooth and ending with the public Terminal wrapper. Reviewed commit f560058da19e02716e6f943883a9508b447aff4e. Complete inventory commits field read, without excluded coverage metadata. Assigned mandatory packet 01085-030.patch lines 1-3 delivered by evidence read in full (15,073 bytes), with its END sentinel. Unread assigned material: none.\n\nfindings.jsonl has two candidates, c1 and c2, with a follow-up revision to c1. No reportable findings, no unresolved leads. New verified finding IDs: none. New unverified finding IDs: none. Candidate IDs added: c1, c2. Candidate c1 records the viewport/keyboard-scroll check; c2 records the runtime export/startup/lifecycle dependency check. Both have source refutations, proposed-drop bases, bucket reasoning, caveats and explicit could-be-highest judgments. The first c1 record attempt rejected the unsupported state 'closed'; it was immediately retried as 'open' successfully. Candidates use kind=candidate and proposed_drop for their disposition; 'open' is the supported event state, not an outstanding investigative lead.\n\nContracts read at the assigned revision: complete SPEC.md Terminal experience section, Reaching everything by keyboard subsection; SPEC_impl.md The grid client subsection and Answers bind to what was drawn paragraph, plus relevant Terminal widget motivation/flow-control context. Queue Priority buckets and What goes in a feedback file read. The initial overlarge terminal.js context preview was clipped; all relied-upon mount/wait/surface/dispose code was subsequently delivered in bounded ranges. The assigned evidence packet was never clipped.\n\nInterface assumptions checked: all page terminals mount farhelmGridTerminal; no Terminal global, xterm asset URL, smooth-scroll operation or addon dependency is needed for startup. The grid owns viewport line anchoring and Shift+PageUp/Down; disposal cancels grid paint/drain/fade work. Retired string/stopwatch/helper code was read in its deletion packet and assessed for removal dependencies, not searched for unrelated historical defects. Related implementation groups retain responsibility for their own changes.\n\nSource-only conclusions. No runtime tests, builds, reproductions, live-install access, checkout edits, queued-finding reads or helper agents. Only private group artifacts changed. Validation of repository changes does not apply.\n\nNext action: return this initial pass for later synthesis. If asked to continue, reread brief after compaction and revisit durable candidate records before further investigation. No scope omitted.\n\nTurn 2: missing-packet coverage repair followed by caller-requested synthesis. Earlier delivery earned zero supported coverage; prior coverage claim superseded. Canonical manifest/source unchanged. c1/c2 preserved, neither proposed drop accepted. Next: deliver lines 1, 2 and 3 separately via evidence read, then revisit replacement contracts/callers/lifecycle. Discovery-pass count remains 0; no new finding IDs or leads yet.\n\n## Turn 2 completion: delivery repair and synthesis\n\nCaller clarified that this was missing-packet repair, not a manifest correction. Canonical source and manifest stayed unchanged. Superseding the turn 1 coverage claim, all mandatory material was delivered this turn as three separate evidence-read direct-stdout tool results: 01085-030.patch:1-1, :2-2 and :3-3. Each packet showed PERSISTENT_REVIEW_END_V1 and unchanged sha256 bc4efda65bae9abd277a6febdb3b32457e56e72b6a507067feece677c613bdbe; no clipped output or unread assigned lines remain.\n\nCaller explicitly requested later-turn synthesis in this same turn. Synthesis count: 1. Discovery-pass count: 0. Appended revisions to c1 and c2; original records remain intact. Each revision preserves the original considered consequence, previous exact proposed-drop wording, current proposed-drop basis, exact contract quotations and source citations. Neither drop is accepted; both remain candidate/open pending independent judgment. No finding was lowered. c1 now explicitly distinguishes hypothetical inaccessible history (high) from an animation-only difference (other).\n\nNew source checks: grid scrollbar drag/release and document-handler removal; prior-revision host terminals already bypassed the deleted wrapper; current asset order and readiness gate; failed-mount rollback; ordinary unmount; reconnect snapshot retention/restoration/disposal; grid freeze/dispose. Repeated exact deleted-helper/export/asset dependency grep returned no matches (exit 1). Results support the existing source refutations. No new reportable finding or substantive unresolved lead was discovered.\n\nInterface assumptions: every served terminal uses the grid; the old Terminal wrapper does not remain a runtime dependency. Grid viewport actions replace the removed scroll implementation. Page-owned lifecycle cleans up socket/deferred/observer work; grid-owned lifecycle cleans up renderer/drain/gesture work; reconnect owns retained frozen grids. No claim of exhaustive legacy API parity or runtime behavior.\n\nNew verified finding IDs this turn: none. New unverified finding IDs: none. Revised candidate IDs: c1, c2. Open lead IDs: none. Unread assigned scope: none. Source-only; no reproduction, test, build, checkout mutation, live-install access, helper agent or forbidden coverage-source search.\n\nNext action: return delta and repaired coverage status. Parent owns independent proposed-drop acceptance and final rendering.\n\nTurn 3: discovery pass 1 starting after interface synthesis. Read discovery-neighbours.json completely (1-80, 81-160, 161-246). No pending cross-group questions supplied. Revised c2 to limit prior rollback wording in light of distinct supplied test-oracle input; retained original impact/proposed-drop basis and all prior events. New search stays within the deleted wrapper/utilities and their replacement interfaces. Next: inspect removed public option/event/parser surfaces and retired utility dependencies at pinned revisions, without re-claiming supplied findings. New verified/unverified finding IDs: none; open leads: none. Mandatory coverage remains complete from turn 2.\n\n## Turn 3 completion: discovery pass 1\n\nRead the supplied discovery-neighbours.json completely in bounded chunks before the new source search. No pending questions were supplied. Interface synthesis revised c2 to distinguish its original missing-export dependency hypothesis from the separately supplied changed-test oracle/constructor diagnostic problem and old-page input compatibility route. No supplied issue was claimed as a new discovery, accepted drop or severity lowering.\n\nDiscovery pass count: 1, complete. Searched the assigned deleted wrapper's additional public events, parser/proposed APIs, static accessibility labels and private utility exports; inspected the original UMD/module boundary, parent parser suppression callers, replacement binary-frame receive/input paths and font-size API. Current UI searches found no retained StopWatch, CodePointIterator, MicrotaskDelay, Terminal.strings, promptLabel, tooMuchOutput, decoration/joiner/marker or legacy parser/event dependency. The surviving font-size caller uses island.grid.setFontSize. The wrapper's parser accessor had supported old DECRQM/DECRQSS suppressors; replacement receiveGrid calls grid.receive, which decodes/applies structured frames rather than generating xterm query responses. sendGridInput encodes structured input messages. Recorded the considered duplicate-response consequence and source refutation immediately as c3, pending independent drop judgment.\n\nAttribution checks across the entire pinned range: git log for the assigned vendor file contains only f560058da19e02716e6f943883a9508b447aff4e, its deletion. Diff from exclusive range base to that commit's parent has no vendor-file changes; diff from the assigned commit to pinned tip also has none. No separate historical retired-code defect was pursued. The assigned source's private helper modules were bundle-internal; the wrapper exported Terminal. This checks removal dependencies, not a new audit of the removed library.\n\nResult: no new reportable defect or unresolved lead. New verified finding IDs: none. New unverified-after-investigation finding IDs: none. New candidate ID: c3. Revised candidate ID: c2. Remaining lead IDs: none. All prior IDs, consequences and proposed-drop bases preserved. No parent drop/lowering accepted. Mandatory delivery remains complete; unread assigned scope: none.\n\nSource-only checks; no tests, runtime reproductions, live-install actions, helpers, checkout edits or prohibited coverage searches. Next: return discovery delta. Parent owns independent proposed-drop judgments and final rendering.\n"
+}

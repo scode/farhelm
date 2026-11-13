@@ -1,0 +1,595 @@
+{
+  "group": {
+    "id": "g132",
+    "domain": "supervisor-status-reporting",
+    "purpose": "supervisor-status-reporting: crates/farhelm-supervisor/src/service/ticker.rs; phases complete small per-commit changes",
+    "interfaces": [
+      "g001",
+      "g007",
+      "g008",
+      "g009",
+      "g102",
+      "g103",
+      "g104",
+      "g105",
+      "g106",
+      "g107",
+      "g108",
+      "g109",
+      "g110",
+      "g111",
+      "g112",
+      "g113",
+      "g114",
+      "g115",
+      "g116",
+      "g129",
+      "g131",
+      "g133",
+      "g134",
+      "g159",
+      "g160",
+      "g161",
+      "g162",
+      "g163",
+      "g164",
+      "g165",
+      "g166",
+      "g167",
+      "g168",
+      "g169",
+      "g170",
+      "g171",
+      "g172",
+      "g173"
+    ],
+    "sources": [
+      {
+        "path": "[private-run]/prep/parts/00945-000.patch",
+        "ranges": [
+          [
+            1,
+            1131
+          ]
+        ],
+        "original_path": "crates/farhelm-supervisor/src/service/ticker.rs",
+        "commit": "1ed482dde220452e424973faf38a5e1318986333",
+        "notes": "patch header; patch character offsets [0,59798)",
+        "lines": 1131,
+        "bytes": 59872,
+        "start": 0,
+        "end": 59798,
+        "original": "[private-run]/prep/originals/00945.patch"
+      }
+    ],
+    "lines": 1131,
+    "bytes": 59872
+  },
+  "records": [
+    {
+      "key": "g132/c1",
+      "owner": "g132",
+      "id": "c1",
+      "domain": "supervisor-status-reporting",
+      "purpose": "supervisor-status-reporting: crates/farhelm-supervisor/src/service/ticker.rs; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 1,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c1",
+            "state": "open",
+            "summary": "Removing failed-capture invalidation does not leave a fallible host screen read untreated",
+            "location": "crates/farhelm-supervisor/src/service/ticker.rs:1372",
+            "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. TLDR: Considered whether removing forget_tail_hinted and fallible capture handling could leave a session stuck waiting after its screen becomes unreadable. Source refutation: ticker.rs:1330-1337 excludes hosts not caught up or without owned-live evidence; hosts/terminal.rs:2229-2247 implements screen_tail and title as infallible reads of the current emulator or its retained view, rather than a subprocess capture that can fail. The new calls therefore have no failed-capture result for the removed handler to handle. SPEC_impl.md, Recovery and checkpoints, states that screen text and title come from a view left in place while encoding, without waiting. This rejects the proposed regression from deletion of tmux capture-failure handling; races after the live-set snapshot and unrelated runtime defects are not established by this check. Suggested bucket: other if it existed. Confidence: confirmed source refutation; no execution. proposed_drop: source refutation as above. possible_cover: none. Could-be-highest: no; the considered consequence is stale cosmetic status, without an established security or loss-of-work route."
+          }
+        },
+        {
+          "line": 6,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c1",
+            "state": "open",
+            "summary": "Host-only sampling preserves the prior successful-sample baseline and encoding view",
+            "location": "crates/farhelm-supervisor/src/service/ticker.rs:1372",
+            "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. TLDR: Synthesis confirms that removing tmux capture-failure invalidation did not introduce a host baseline or encoding-view regression. Original considered consequence retained: a session might keep stale waiting evidence, or date/reorder activity after a failed read without the reset that formerly discarded the baseline. Checks/results: parent-revision ticker.rs:1712-1719 already applies exactly the caught_up plus owned-live filter now at :1330-1337; parent terminals.rs:319-339 already returns Ok(host.screen_tail(max_bytes)) and Ok(host.title()), so production host reads never reached the failed-capture reset. The fault injection removed by this patch was a test seam, not a production host read failure. At the reviewed revision hosts/terminal.rs:1429-1454 captures the emulator's real screen/title in View, :1707-1723 and :3589-3605 replace the live slot with that view during encoding, and :2275-2284 reads the live emulator or retained view under the same short mutex without waiting for an encode. The view is the processed emulator state, not evidence of new terminal output or proof of current wall-time liveness; this check does not claim otherwise. ticker.rs:586-629 still supplies no prior reading to a run's first successful sample, keeps Unknown from replacing the stored reading, and establishes transition readiness only on a definite sample; :288-319 requires both prior and fresh readings before activity dating or burst starts. Thus the same baseline/activity rules apply before and after the dispatch simplification. SPEC_impl.md, Status heuristics / Last-activity timestamp / Work-start ordering (:4321-4429), defines successful-sample evidence, first-sample baseline suppression and owned sample counts; Recovery and checkpoints (:2179 onward) explicitly describes the encoding view. These source checks independently support the caller-provided g134/l2 interface result. Suggested bucket: other for the considered cosmetic status claim; no established security or loss-of-work route. Confidence: confirmed source refutation; no execution. proposed_drop: source refutation of a regression introduced by this patch, with identical prior production host reads and filter. possible_cover: none. Could-be-highest: no for this considered claim. Caveats: does not adjudicate separate pre-existing host gap/re-adoption behavior or every status heuristic; residual documentation of the removed reset is recorded independently under c3."
+          }
+        }
+      ],
+      "latest": {
+        "line": 6,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c1",
+          "state": "open",
+          "summary": "Host-only sampling preserves the prior successful-sample baseline and encoding view",
+          "location": "crates/farhelm-supervisor/src/service/ticker.rs:1372",
+          "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. TLDR: Synthesis confirms that removing tmux capture-failure invalidation did not introduce a host baseline or encoding-view regression. Original considered consequence retained: a session might keep stale waiting evidence, or date/reorder activity after a failed read without the reset that formerly discarded the baseline. Checks/results: parent-revision ticker.rs:1712-1719 already applies exactly the caught_up plus owned-live filter now at :1330-1337; parent terminals.rs:319-339 already returns Ok(host.screen_tail(max_bytes)) and Ok(host.title()), so production host reads never reached the failed-capture reset. The fault injection removed by this patch was a test seam, not a production host read failure. At the reviewed revision hosts/terminal.rs:1429-1454 captures the emulator's real screen/title in View, :1707-1723 and :3589-3605 replace the live slot with that view during encoding, and :2275-2284 reads the live emulator or retained view under the same short mutex without waiting for an encode. The view is the processed emulator state, not evidence of new terminal output or proof of current wall-time liveness; this check does not claim otherwise. ticker.rs:586-629 still supplies no prior reading to a run's first successful sample, keeps Unknown from replacing the stored reading, and establishes transition readiness only on a definite sample; :288-319 requires both prior and fresh readings before activity dating or burst starts. Thus the same baseline/activity rules apply before and after the dispatch simplification. SPEC_impl.md, Status heuristics / Last-activity timestamp / Work-start ordering (:4321-4429), defines successful-sample evidence, first-sample baseline suppression and owned sample counts; Recovery and checkpoints (:2179 onward) explicitly describes the encoding view. These source checks independently support the caller-provided g134/l2 interface result. Suggested bucket: other for the considered cosmetic status claim; no established security or loss-of-work route. Confidence: confirmed source refutation; no execution. proposed_drop: source refutation of a regression introduced by this patch, with identical prior production host reads and filter. possible_cover: none. Could-be-highest: no for this considered claim. Caveats: does not adjudicate separate pre-existing host gap/re-adoption behavior or every status heuristic; residual documentation of the removed reset is recorded independently under c3."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g132/findings.jsonl",
+        "id": "c1",
+        "line": 6,
+        "disposition": "excluded",
+        "group": "host-screen-read-never-used-tmux-capture-failure-reset",
+        "reason": "Parent explicitly accepted named refuted proposal from claims-083 after inspecting it. Removing tmux's failed-capture branch does not introduce a host-read failure regression: production host screen/title reads were already infallible, and the same caught-up/owned-live eligibility rule already applied. The encoding view remains readable. Source refutation of the claimed regression from removing fallible tmux capture dispatch. The established considered impact is cosmetic status/activity ordering, with no security or user-work-loss route. Checked source/results: [\"At parent of 1ed482dde220452e424973faf38a5e1318986333, terminals.rs:319-339 returns Ok(host.screen_tail(...)) and Ok(host.title()); ticker.rs:1712-1719 already requires caught_up and owned-live. Reviewed ticker.rs:1330-1337 preserves this filter.\",\"Reviewed hosts/terminal.rs:2229-2247 returns String for screen/title; :2275-2284 selects the live emulator or retained view without awaiting encoding. Reviewed ticker.rs:586-629 retains successful-sample baseline logic; :288-319 requires prior and fresh readings for activity/work starts.\",\"The deleted injection seam simulated a failure production host reads did not return. No runtime test was run. The check does not prove wall-time liveness from an encoding view or adjudicate separate gap/re-adoption behavior.\"] Current coverage/results: [\"Both specifications searched; SPEC_impl.md Recovery/checkpoints describes retained encoding views, and Status heuristics/Last-activity/Work-start (:4164-4272 current) describes successful-sample evidence. These support the retained behavior; they do not excuse a real host recovery defect.\",\"TODO.md Planned empty; BUGS.md, active TRIAGE_OUTCOMES.md, plans/queue, INDEX.md and matching queue text searched for failed captures, baseline and encoding. No exact claim coverage found. tmux cleanup plans are landed, not pending cover.\",\"FILTER.md checked; no filter invoked. g132/c3 is a distinct inaccurate-documentation finding and is retained.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"A session could retain stale Waiting evidence or date/reorder activity after a failed read because the old reset disappeared. The production host path never supplied that failure result before or after this patch. This refutation does not settle pre-existing host gaps, re-adoption or every heuristic, nor the separately retained false lifecycle comments.\"; null."
+      },
+      "accepted_parent_decision": {
+        "key": "g132/c1",
+        "line": 6,
+        "disposition": "excluded",
+        "group": "host-screen-read-never-used-tmux-capture-failure-reset",
+        "bucket": "other",
+        "recording": "refuted",
+        "queue_target_candidate": null,
+        "needs_independent_drop_check": false,
+        "reason": "Parent explicitly accepted named refuted proposal from claims-083 after inspecting it. Removing tmux's failed-capture branch does not introduce a host-read failure regression: production host screen/title reads were already infallible, and the same caught-up/owned-live eligibility rule already applied. The encoding view remains readable. Source refutation of the claimed regression from removing fallible tmux capture dispatch. The established considered impact is cosmetic status/activity ordering, with no security or user-work-loss route. Checked source/results: [\"At parent of 1ed482dde220452e424973faf38a5e1318986333, terminals.rs:319-339 returns Ok(host.screen_tail(...)) and Ok(host.title()); ticker.rs:1712-1719 already requires caught_up and owned-live. Reviewed ticker.rs:1330-1337 preserves this filter.\",\"Reviewed hosts/terminal.rs:2229-2247 returns String for screen/title; :2275-2284 selects the live emulator or retained view without awaiting encoding. Reviewed ticker.rs:586-629 retains successful-sample baseline logic; :288-319 requires prior and fresh readings for activity/work starts.\",\"The deleted injection seam simulated a failure production host reads did not return. No runtime test was run. The check does not prove wall-time liveness from an encoding view or adjudicate separate gap/re-adoption behavior.\"] Current coverage/results: [\"Both specifications searched; SPEC_impl.md Recovery/checkpoints describes retained encoding views, and Status heuristics/Last-activity/Work-start (:4164-4272 current) describes successful-sample evidence. These support the retained behavior; they do not excuse a real host recovery defect.\",\"TODO.md Planned empty; BUGS.md, active TRIAGE_OUTCOMES.md, plans/queue, INDEX.md and matching queue text searched for failed captures, baseline and encoding. No exact claim coverage found. tmux cleanup plans are landed, not pending cover.\",\"FILTER.md checked; no filter invoked. g132/c3 is a distinct inaccurate-documentation finding and is retained.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"A session could retain stale Waiting evidence or date/reorder activity after a failed read because the old reset disappeared. The production host path never supplied that failure result before or after this patch. This refutation does not settle pre-existing host gaps, re-adoption or every heuristic, nor the separately retained false lifecycle comments.\"; null."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-083",
+          "key": "g132/c1",
+          "latest_line": 6,
+          "recommendation": "refuted",
+          "bucket": "other",
+          "underlying_key": "host-screen-read-never-used-tmux-capture-failure-reset",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "Removing tmux's failed-capture branch does not introduce a host-read failure regression: production host screen/title reads were already infallible, and the same caught-up/owned-live eligibility rule already applied. The encoding view remains readable.",
+          "checks": [
+            "At parent of 1ed482dde220452e424973faf38a5e1318986333, terminals.rs:319-339 returns Ok(host.screen_tail(...)) and Ok(host.title()); ticker.rs:1712-1719 already requires caught_up and owned-live. Reviewed ticker.rs:1330-1337 preserves this filter.",
+            "Reviewed hosts/terminal.rs:2229-2247 returns String for screen/title; :2275-2284 selects the live emulator or retained view without awaiting encoding. Reviewed ticker.rs:586-629 retains successful-sample baseline logic; :288-319 requires prior and fresh readings for activity/work starts.",
+            "The deleted injection seam simulated a failure production host reads did not return. No runtime test was run. The check does not prove wall-time liveness from an encoding view or adjudicate separate gap/re-adoption behavior."
+          ],
+          "coverage_checked": [
+            "Both specifications searched; SPEC_impl.md Recovery/checkpoints describes retained encoding views, and Status heuristics/Last-activity/Work-start (:4164-4272 current) describes successful-sample evidence. These support the retained behavior; they do not excuse a real host recovery defect.",
+            "TODO.md Planned empty; BUGS.md, active TRIAGE_OUTCOMES.md, plans/queue, INDEX.md and matching queue text searched for failed captures, baseline and encoding. No exact claim coverage found. tmux cleanup plans are landed, not pending cover.",
+            "FILTER.md checked; no filter invoked. g132/c3 is a distinct inaccurate-documentation finding and is retained."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": null,
+          "original_stronger_consequence": "A session could retain stale Waiting evidence or date/reorder activity after a failed read because the old reset disappeared. The production host path never supplied that failure result before or after this patch. This refutation does not settle pre-existing host gaps, re-adoption or every heuristic, nor the separately retained false lifecycle comments.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Source refutation of the claimed regression from removing fallible tmux capture dispatch. The established considered impact is cosmetic status/activity ordering, with no security or user-work-loss route."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "host-screen-read-never-used-tmux-capture-failure-reset",
+        "destination": null
+      }
+    },
+    {
+      "key": "g132/c2",
+      "owner": "g132",
+      "id": "c2",
+      "domain": "supervisor-status-reporting",
+      "purpose": "supervisor-status-reporting: crates/farhelm-supervisor/src/service/ticker.rs; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 2,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c2",
+            "state": "open",
+            "summary": "Removed tmux ticker work has no remaining supported terminal to observe",
+            "location": "crates/farhelm-supervisor/src/service/ticker.rs:1011",
+            "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. TLDR: Considered whether removing pane-death wakes, pane-map observation, tmux-tab reaping and old-terminal-warning reconciliation leaves legacy sessions without the periodic behavior they still require. Source refutation: service/terminals.rs:1-7 and 122-141 resolve runtime terminals as HostTerminal, and 175-176 documents old-kind rows as ended at startup. service/core/old_terminals.rs:1-10 and 159-168 implement the replacement startup boundary; its module docs describe conversion and sweeping before ordinary operation. SPEC_impl.md:2882-2891, Terminal substrate: private tmux server, explicitly says: 'This release ends them at startup (below); every terminal runs in a terminal host' and 'The running supervisor runs no tmux at all, and its driver of the old terminals is gone'. SPEC.md:2804-2814 says the old warning is replaced by a startup notice and existing warnings are resolved at startup. The removed ticker routines are therefore not needed to service a supported legacy terminal. This is a removal/interface check, not a review or approval of the separate startup termination policy or its accepted failure residuals. Suggested bucket: other for the considered missing-periodic-work claim. Confidence: confirmed source/contract refutation; no execution. proposed_drop: the retained runtime uses only HostTerminal and the quoted specification retires the old ticker responsibilities. possible_cover: none. Could-be-highest: no for this considered claim; no path from ticker removal to killing user work was established or asserted."
+          }
+        },
+        {
+          "line": 8,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c2",
+            "state": "open",
+            "summary": "Old-terminal warning resolution moved to startup rather than disappearing with ticker work",
+            "location": "crates/farhelm-supervisor/src/service/ticker.rs:1318",
+            "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. TLDR: Synthesis confirms that deleting the ticker's old-terminal-warning and tmux observation work does not omit a continuing responsibility for supported terminals. Original considered consequence retained: legacy sessions could lose needed status/death/tab-reap updates or old-terminal warnings could remain unresolved after the periodic reconciliation is removed. Checks/results: service/terminals.rs:122-141 returns HostTerminal and its :175-176 identifies old tmux rows as ended by startup. service/core.rs:6142-6184 calls old-terminal termination before reload; :7080-7090 invokes old_terminals::record_ended for writable reloads even when the converted/ended list is empty. service/core/old_terminals.rs:525-546 records the new OldTerminalEnded notices separately and then resolves all OldTerminal warnings unconditionally with respect to ended-list membership; resolution failure is logged, and :522-524 documents retry at a later start. A complete supervisor-src reference search finds no remaining OldTerminal warning producer or reconcile_old_terminal_notifications call, only the startup resolver, enum compatibility and documentation. Exact contract: SPEC.md:2807 says 'no warning is recorded any more, and every supervisor start marks any unresolved one resolved'; :2811-2813 separately says nothing resolves the new notice. SPEC_impl.md:2883-2891 states 'This release ends them at startup (below); every terminal runs in a terminal host' and 'The running supervisor runs no tmux at all, and its driver of the old terminals is gone'. Those contracts and callers support retiring the ticker responsibilities while preserving the startup-only distinction between resolved warnings and persistent new notices. Suggested bucket: other for the considered missing periodic reconciliation claim. Confidence: confirmed source/contract refutation; no execution. proposed_drop: the claimed continuing ticker responsibility is refuted by the new terminal type and the cited startup resolver/contract. possible_cover: none. Could-be-highest: no for this considered claim; no route from this ticker deletion to killing user work is asserted. Caveats: does not judge or propose dropping a separate finding about startup termination's destructive policy, accepted cleanup failure residuals or database-failure behavior; those are distinct from whether the removed periodic warning/reap code is still required."
+          }
+        }
+      ],
+      "latest": {
+        "line": 8,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c2",
+          "state": "open",
+          "summary": "Old-terminal warning resolution moved to startup rather than disappearing with ticker work",
+          "location": "crates/farhelm-supervisor/src/service/ticker.rs:1318",
+          "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. TLDR: Synthesis confirms that deleting the ticker's old-terminal-warning and tmux observation work does not omit a continuing responsibility for supported terminals. Original considered consequence retained: legacy sessions could lose needed status/death/tab-reap updates or old-terminal warnings could remain unresolved after the periodic reconciliation is removed. Checks/results: service/terminals.rs:122-141 returns HostTerminal and its :175-176 identifies old tmux rows as ended by startup. service/core.rs:6142-6184 calls old-terminal termination before reload; :7080-7090 invokes old_terminals::record_ended for writable reloads even when the converted/ended list is empty. service/core/old_terminals.rs:525-546 records the new OldTerminalEnded notices separately and then resolves all OldTerminal warnings unconditionally with respect to ended-list membership; resolution failure is logged, and :522-524 documents retry at a later start. A complete supervisor-src reference search finds no remaining OldTerminal warning producer or reconcile_old_terminal_notifications call, only the startup resolver, enum compatibility and documentation. Exact contract: SPEC.md:2807 says 'no warning is recorded any more, and every supervisor start marks any unresolved one resolved'; :2811-2813 separately says nothing resolves the new notice. SPEC_impl.md:2883-2891 states 'This release ends them at startup (below); every terminal runs in a terminal host' and 'The running supervisor runs no tmux at all, and its driver of the old terminals is gone'. Those contracts and callers support retiring the ticker responsibilities while preserving the startup-only distinction between resolved warnings and persistent new notices. Suggested bucket: other for the considered missing periodic reconciliation claim. Confidence: confirmed source/contract refutation; no execution. proposed_drop: the claimed continuing ticker responsibility is refuted by the new terminal type and the cited startup resolver/contract. possible_cover: none. Could-be-highest: no for this considered claim; no route from this ticker deletion to killing user work is asserted. Caveats: does not judge or propose dropping a separate finding about startup termination's destructive policy, accepted cleanup failure residuals or database-failure behavior; those are distinct from whether the removed periodic warning/reap code is still required."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g132/findings.jsonl",
+        "id": "c2",
+        "line": 8,
+        "disposition": "under-investigation",
+        "group": "g132-c2",
+        "reason": "Record durably acknowledged; parent source/contract validation, cross-group synthesis, coverage/filter matching and any independent drop check remain pending. This preserves the claim and uncertainty without accepting, dropping or lowering it."
+      },
+      "accepted_parent_decision": null,
+      "returned_claim_checks": [
+        {
+          "batch": "claims-083",
+          "key": "g132/c2",
+          "latest_line": 8,
+          "recommendation": "covered",
+          "bucket": "other",
+          "underlying_key": "retired-tmux-periodic-warning-contract",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The new terminal model removes the continuing periodic tmux responsibilities. Warning resolution is performed during writable startup reload even when no old agent rows were converted; new termination notices remain separate and unresolved. No supported legacy runtime is left needing pane-map sampling or tmux-tab reap.",
+          "checks": [
+            "At 1ed482dde220452e424973faf38a5e1318986333, service/terminals.rs:122-141 resolves HostTerminal; :175-176 identifies old rows as ended by startup. core.rs:6142-6184 ends old terminals before reload; :7077-7091 calls old_terminals::record_ended on every writable reload.",
+            "At that revision, core/old_terminals.rs:525-546 records OldTerminalEnded separately and resolves all OldTerminal warnings independently of ended-list membership; :522-524 documents retry at later startup after failure.",
+            "Reviewed SPEC_impl.md:2882-2891 says the runtime has no tmux driver; SPEC.md:2804-2814 replaces periodic warning behavior. These checks concern retired ticker responsibilities, not approval of all startup destruction/failure behavior. No runtime experiment was performed."
+          ],
+          "coverage_checked": [
+            "Current SPEC.md:2804-2814 and :2998-3011 explicitly replace old warnings and retire old terminals; current SPEC_impl.md:2780-2824 specifies startup-only conversion, sweeps and resolution.",
+            "TODO.md Planned empty; BUGS.md and active TRIAGE_OUTCOMES.md contain no exact competing periodic-tmux obligation.",
+            "plans/queue checked; tmux-end-old-terminals and later cleanup plans are recorded landed at plans/REPORTS.md:29-32, so not unlanded-plan cover.",
+            "INDEX.md and notification-read-failure-leaves-stale-cell.md checked. The latter explicitly excludes the retired reconciler and retains another notification-publication failure; it does not refute this migration contract.",
+            "FILTER.md checked; no filter invoked. g131/c2 covers the removed warning tests only, so the records overlap but are not exact aliases."
+          ],
+          "exact_cover_quotes": [
+            "Reviewed SPEC_impl.md:2883-2891: 'This release ends them at startup' and 'The running supervisor runs no tmux at all, and its driver of the old terminals is gone'.",
+            "Current SPEC.md:2807-2808: 'no warning is recorded any more, and every supervisor start marks any unresolved one resolved.'"
+          ],
+          "missing_premise": null,
+          "original_stronger_consequence": "Legacy sessions might lose needed status/death/tab-reap updates, or old warnings might remain unresolved after periodic reconciliation is removed. No route from this ticker deletion to killing user work was asserted. Separate destructive startup policy, cleanup residuals and database-failure behavior are expressly outside this proposed omission.",
+          "needs_independent_drop_check": true,
+          "proposed_basis": "Exact specification retirement plus source refutation of the missing startup resolver. Conservatively register the proposed omission because the broader migration ends user processes; the check must not swallow a separate startup termination finding."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": true,
+        "clearly_refuted_candidate": false,
+        "needs_unfinished_gate": true,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "retired-tmux-periodic-warning-contract",
+        "destination": "trailing-retired-tmux-periodic-warning-contract.md"
+      }
+    },
+    {
+      "key": "g132/c3",
+      "owner": "g132",
+      "id": "c3",
+      "domain": "supervisor-status-reporting",
+      "purpose": "supervisor-status-reporting: crates/farhelm-supervisor/src/service/ticker.rs; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 3,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c3",
+            "state": "open",
+            "summary": "Residual failed-capture wording does not establish a sampler correctness defect",
+            "location": "crates/farhelm-supervisor/src/service/ticker.rs:411",
+            "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. TLDR: Some unchanged field comments still describe clearing evidence after failed captures, although this change removes that fallible path. Considered reporting this as an incorrect sampler contract; set aside as residual wording without a demonstrated runtime consequence. Source: ticker.rs:411-431 retains failed-capture descriptions for reading and transition_ready, while :408-409 now correctly says comparison is None before the first sample. The actual observer at :586-629 preserves successful-sample comparison and baseline rules, and hosts/terminal.rs:2229-2247 exposes infallible reads. This is a stale description of a retired case, not evidence that failure recovery is still expected from the retained host-only sampler. Suggested bucket: other. Confidence: confirmed source observation; no execution. proposed_drop: no behavioral or consequential contract error established; retired-path prose only. possible_cover: none. Could-be-highest: no; no security or loss-of-work route."
+          }
+        },
+        {
+          "line": 4,
+          "event": {
+            "version": 1,
+            "kind": "lead",
+            "id": "c3",
+            "state": "open",
+            "summary": "Check whether retained comments promise a removed failure-recovery lifecycle",
+            "location": "crates/farhelm-supervisor/src/service/ticker.rs:411",
+            "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. TLDR: Reopened the documentation candidate: the absence of runtime harm does not itself refute an incorrect lifecycle contract that future maintainers may trust. Original consequence retained: reading and transition_ready field comments describe withdrawal/reset after failed captures although the fallible capture path was removed. Source basis from initial pass: ticker.rs:411-431, :586-629 and host accessors at hosts/terminal.rs:2229-2247. Next checks: all retained production writes to those sampler fields, whether host unavailability/replay or encoding causes an equivalent reset, and whether the wording explicitly describes historical behavior rather than a current contract. Exact unresolved premise: whether any retained path still implements the reset the comments claim. Suggested bucket: other. Confidence: unresolved pending readily available source checks; no execution. proposed_drop: false while this premise is rechecked; the prior no-runtime-consequence rationale is insufficient for documentation correctness. possible_cover: none. Could-be-highest: no; the stated issue is a misleading sampler lifecycle contract, without a security or loss-of-work route."
+          }
+        },
+        {
+          "line": 5,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "c3",
+            "state": "open",
+            "summary": "Sampler field documentation still promises the deleted capture-failure reset",
+            "location": "crates/farhelm-supervisor/src/service/ticker.rs:425",
+            "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. TLDR: The sampler's current lifecycle documentation tells future maintainers that failed reads clear prompt evidence and reset the activity baseline, but this change deletes the only operation that did that. This is a documentation correctness defect; no current runtime regression is claimed. Details: ticker.rs:373-375 promises workspace_trust_prompt is 'cleared on failed capture', :411-416 describes reading falling back after 'a failed capture withdrew what the last screen showed', and :422-431 declares transition_ready 'False for a new or reloaded run and after a failed capture' and links that reset to suppressing activity/reordering after recovery. The assigned patch deletes ActivitySample::forget_tail and forget_tail_hinted, which previously fulfilled those statements. At the reviewed revision a complete src search for transition_ready finds only its declaration (:432), read (:609), and assignment to true (:614); Default at :364-365 and new/reloaded/replacement constructors establish its initial false state. The retained sampler skips unavailable/replaying hosts (:1327-1337), and infallible host screen reads have no failed-capture reset event. These comments are present-tense field contracts and explanatory baseline guarantees, not explicitly historical context. They should describe the actual retained lifecycle or explicitly label the retired tmux behavior as history. Original considered consequence retained: a future maintainer can rely on a nonexistent failure-recovery reset when reasoning about prompt hints and activity ordering. The earlier rationale that runtime harm had not been shown was insufficient to dismiss inaccurate documentation. Suggested bucket: other. Confidence: confirmed by source, including all transition_ready references; no execution. proposed_drop: false; parent owns coverage/filter judgment. possible_cover: none known, coverage sources not searched. Could-be-highest: no; this is an inaccurate internal lifecycle description, with no established security or loss-of-work route. Caveat: this does not assert the removed reset is needed by the host-only implementation, nor that host encoding/unavailability currently fabricates activity; c1 separately refutes that regression claim."
+          }
+        },
+        {
+          "line": 7,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "c3",
+            "state": "open",
+            "summary": "Sampler field documentation still promises the deleted capture-failure reset",
+            "location": "crates/farhelm-supervisor/src/service/ticker.rs:425",
+            "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. TLDR: The sampler's current lifecycle documentation tells future maintainers that failed reads clear prompt evidence and reset the activity baseline, but this change deletes the only operation that did that. This is a documentation correctness defect; no current runtime regression is claimed. Details: ticker.rs:373-375 promises workspace_trust_prompt is 'cleared on failed capture', :411-416 describes reading falling back after 'a failed capture withdrew what the last screen showed', and :422-431 declares transition_ready 'False for a new or reloaded run and after a failed capture' and links that reset to suppressing activity/reordering after recovery. The assigned patch deletes ActivitySample::forget_tail and forget_tail_hinted, which previously fulfilled those statements. At the reviewed revision a complete src search for transition_ready finds only its declaration (:432), read (:609), and assignment to true (:614); Default at :364-365 and new/reloaded/replacement constructors establish its initial false state. The retained sampler skips unavailable/replaying hosts (:1327-1337), and infallible host screen reads have no failed-capture reset event. These comments are present-tense field contracts and explanatory baseline guarantees, not explicitly historical context. They should describe the actual retained lifecycle or explicitly label the retired tmux behavior as history. Original considered consequence retained: a future maintainer can rely on a nonexistent failure-recovery reset when reasoning about prompt hints and activity ordering. The earlier rationale that runtime harm had not been shown was insufficient to dismiss inaccurate documentation. Suggested bucket: other. Confidence: confirmed by source, including all transition_ready references; no execution. proposed_drop: false; parent owns coverage/filter judgment. possible_cover: none known, coverage sources not searched. Could-be-highest: no; this is an inaccurate internal lifecycle description, with no established security or loss-of-work route. Caveat: this does not assert the removed reset is needed by the host-only implementation, nor that host encoding/unavailability currently fabricates activity; c1 separately refutes that regression claim. Additional synthesis check: ticker.rs:265-268 also documents Observation.prior as None on the first sample after a failed capture, and :379-380 says a later failed capture can withdraw a recognized waiting claim. Those present-tense statements depend on the same deleted reset, so this is one connected documentation finding, not separate issues. The retained constructors at :512-541 create fresh baseline evidence for new/reloaded/replacement runs; none is a capture-failure recovery path."
+          }
+        }
+      ],
+      "latest": {
+        "line": 7,
+        "event": {
+          "version": 1,
+          "kind": "finding",
+          "id": "c3",
+          "state": "open",
+          "summary": "Sampler field documentation still promises the deleted capture-failure reset",
+          "location": "crates/farhelm-supervisor/src/service/ticker.rs:425",
+          "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. TLDR: The sampler's current lifecycle documentation tells future maintainers that failed reads clear prompt evidence and reset the activity baseline, but this change deletes the only operation that did that. This is a documentation correctness defect; no current runtime regression is claimed. Details: ticker.rs:373-375 promises workspace_trust_prompt is 'cleared on failed capture', :411-416 describes reading falling back after 'a failed capture withdrew what the last screen showed', and :422-431 declares transition_ready 'False for a new or reloaded run and after a failed capture' and links that reset to suppressing activity/reordering after recovery. The assigned patch deletes ActivitySample::forget_tail and forget_tail_hinted, which previously fulfilled those statements. At the reviewed revision a complete src search for transition_ready finds only its declaration (:432), read (:609), and assignment to true (:614); Default at :364-365 and new/reloaded/replacement constructors establish its initial false state. The retained sampler skips unavailable/replaying hosts (:1327-1337), and infallible host screen reads have no failed-capture reset event. These comments are present-tense field contracts and explanatory baseline guarantees, not explicitly historical context. They should describe the actual retained lifecycle or explicitly label the retired tmux behavior as history. Original considered consequence retained: a future maintainer can rely on a nonexistent failure-recovery reset when reasoning about prompt hints and activity ordering. The earlier rationale that runtime harm had not been shown was insufficient to dismiss inaccurate documentation. Suggested bucket: other. Confidence: confirmed by source, including all transition_ready references; no execution. proposed_drop: false; parent owns coverage/filter judgment. possible_cover: none known, coverage sources not searched. Could-be-highest: no; this is an inaccurate internal lifecycle description, with no established security or loss-of-work route. Caveat: this does not assert the removed reset is needed by the host-only implementation, nor that host encoding/unavailability currently fabricates activity; c1 separately refutes that regression claim. Additional synthesis check: ticker.rs:265-268 also documents Observation.prior as None on the first sample after a failed capture, and :379-380 says a later failed capture can withdraw a recognized waiting claim. Those present-tense statements depend on the same deleted reset, so this is one connected documentation finding, not separate issues. The retained constructors at :512-541 create fresh baseline evidence for new/reloaded/replacement runs; none is a capture-failure recovery path."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g132/findings.jsonl",
+        "id": "c3",
+        "line": 7,
+        "disposition": "verified",
+        "group": "sampler-docs-promise-deleted-capture-failure-reset",
+        "reason": "Parent explicitly accepted named retain-verified proposal from claims-083 after inspecting it. The present-tense sampler contracts still describe resetting screen evidence and transition readiness on failed captures, but the patch deletes the operation implementing that lifecycle. Infallible host-only sampling does not supply an equivalent event. This is a documentation correctness defect, even though no runtime regression is established. Retain the inaccurate current lifecycle declarations with other priority. Keep the matching SPEC_impl wording and the already-landed cleanup plan visible as context, without treating either as cover for incorrect source documentation. Checked source/results: [\"At 1ed482dde220452e424973faf38a5e1318986333, ticker.rs:265-268 says the first sample after failed capture has no prior; :373-380 promises trust clearing and waiting-claim withdrawal; :411-431 describes fallback/reset after failure. These are current contracts, not labelled historical explanation.\",\"Parent ticker.rs:743-750 implements forget_tail clearing trust, comparison and transition_ready. The reviewed revision removes that method and forget_tail_hinted. A complete reviewed-src transition_ready search returns only declaration :432, read :609 and assignment true :614. Fresh/reloaded/replacement constructors (:512-541) establish initial state rather than failure recovery.\",\"Reviewed ticker.rs:1327-1337 skips unavailable/replaying hosts; hosts/terminal.rs:2229-2247 and :2275-2284 expose infallible emulator/view reads. No retained failed-capture reset was found. Diff through 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db changes unrelated ticker comments and leaves these contracts intact; current ticker.rs:267,372-424 still contains them.\",\"No runtime defect, fabricated activity during encoding, or need to restore the old reset is asserted. The earlier no-runtime-harm dismissal was withdrawn in the named history and is not a valid source refutation.\"] Current coverage/results: [\"Both specs searched. Current SPEC_impl.md:3702-3704 also says the trust bool resets after failed capture; :4234-4235 and :4251-4254 repeat capture-failure baseline language. These describe the same obsolete lifecycle, not explicit acceptance that source comments may falsely promise it. Preserve this contract ambiguity for triage; do not silently turn it into a runtime finding.\",\"TODO.md Planned empty. BUGS.md and active TRIAGE_OUTCOMES.md have no matching sampler-contract disposition.\",\"plans/queue/tmux-drop-from-docs.md:68-75 and :88-96 broadly require stale comments cleaned, but plans/REPORTS.md:32 records the plan landed. It is neither pending coverage nor evidence these particular comments were repaired.\",\"INDEX.md plus matching queue text searched. transition-accessor-comment.md concerns only an obsolete accessor spelling while preserving its contract, not this false recovery lifecycle. No exact existing item or useful same-root extension found.\",\"FILTER.md checked. A permanently misleading internal lifecycle contract has no rare runtime trigger or wholly self-correcting diagnostic consequence, so no full filter match.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Future maintainers can rely on a nonexistent failure-recovery reset when reasoning about prompt hints and activity ordering. The first record set this aside for lack of runtime harm, then explicitly reopened and verified the documentation contract. No security or user-work-loss route was claimed; g132/c1 separately refutes a new production host-read regression. New/reloaded/replacement initialization is not a failed-capture recovery event.\"; null."
+      },
+      "accepted_parent_decision": {
+        "key": "g132/c3",
+        "line": 7,
+        "disposition": "verified",
+        "group": "sampler-docs-promise-deleted-capture-failure-reset",
+        "bucket": "other",
+        "recording": "retain-verified",
+        "queue_target_candidate": null,
+        "needs_independent_drop_check": false,
+        "reason": "Parent explicitly accepted named retain-verified proposal from claims-083 after inspecting it. The present-tense sampler contracts still describe resetting screen evidence and transition readiness on failed captures, but the patch deletes the operation implementing that lifecycle. Infallible host-only sampling does not supply an equivalent event. This is a documentation correctness defect, even though no runtime regression is established. Retain the inaccurate current lifecycle declarations with other priority. Keep the matching SPEC_impl wording and the already-landed cleanup plan visible as context, without treating either as cover for incorrect source documentation. Checked source/results: [\"At 1ed482dde220452e424973faf38a5e1318986333, ticker.rs:265-268 says the first sample after failed capture has no prior; :373-380 promises trust clearing and waiting-claim withdrawal; :411-431 describes fallback/reset after failure. These are current contracts, not labelled historical explanation.\",\"Parent ticker.rs:743-750 implements forget_tail clearing trust, comparison and transition_ready. The reviewed revision removes that method and forget_tail_hinted. A complete reviewed-src transition_ready search returns only declaration :432, read :609 and assignment true :614. Fresh/reloaded/replacement constructors (:512-541) establish initial state rather than failure recovery.\",\"Reviewed ticker.rs:1327-1337 skips unavailable/replaying hosts; hosts/terminal.rs:2229-2247 and :2275-2284 expose infallible emulator/view reads. No retained failed-capture reset was found. Diff through 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db changes unrelated ticker comments and leaves these contracts intact; current ticker.rs:267,372-424 still contains them.\",\"No runtime defect, fabricated activity during encoding, or need to restore the old reset is asserted. The earlier no-runtime-harm dismissal was withdrawn in the named history and is not a valid source refutation.\"] Current coverage/results: [\"Both specs searched. Current SPEC_impl.md:3702-3704 also says the trust bool resets after failed capture; :4234-4235 and :4251-4254 repeat capture-failure baseline language. These describe the same obsolete lifecycle, not explicit acceptance that source comments may falsely promise it. Preserve this contract ambiguity for triage; do not silently turn it into a runtime finding.\",\"TODO.md Planned empty. BUGS.md and active TRIAGE_OUTCOMES.md have no matching sampler-contract disposition.\",\"plans/queue/tmux-drop-from-docs.md:68-75 and :88-96 broadly require stale comments cleaned, but plans/REPORTS.md:32 records the plan landed. It is neither pending coverage nor evidence these particular comments were repaired.\",\"INDEX.md plus matching queue text searched. transition-accessor-comment.md concerns only an obsolete accessor spelling while preserving its contract, not this false recovery lifecycle. No exact existing item or useful same-root extension found.\",\"FILTER.md checked. A permanently misleading internal lifecycle contract has no rare runtime trigger or wholly self-correcting diagnostic consequence, so no full filter match.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Future maintainers can rely on a nonexistent failure-recovery reset when reasoning about prompt hints and activity ordering. The first record set this aside for lack of runtime harm, then explicitly reopened and verified the documentation contract. No security or user-work-loss route was claimed; g132/c1 separately refutes a new production host-read regression. New/reloaded/replacement initialization is not a failed-capture recovery event.\"; null."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-083",
+          "key": "g132/c3",
+          "latest_line": 7,
+          "recommendation": "retain-verified",
+          "bucket": "other",
+          "underlying_key": "sampler-docs-promise-deleted-capture-failure-reset",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The present-tense sampler contracts still describe resetting screen evidence and transition readiness on failed captures, but the patch deletes the operation implementing that lifecycle. Infallible host-only sampling does not supply an equivalent event. This is a documentation correctness defect, even though no runtime regression is established.",
+          "checks": [
+            "At 1ed482dde220452e424973faf38a5e1318986333, ticker.rs:265-268 says the first sample after failed capture has no prior; :373-380 promises trust clearing and waiting-claim withdrawal; :411-431 describes fallback/reset after failure. These are current contracts, not labelled historical explanation.",
+            "Parent ticker.rs:743-750 implements forget_tail clearing trust, comparison and transition_ready. The reviewed revision removes that method and forget_tail_hinted. A complete reviewed-src transition_ready search returns only declaration :432, read :609 and assignment true :614. Fresh/reloaded/replacement constructors (:512-541) establish initial state rather than failure recovery.",
+            "Reviewed ticker.rs:1327-1337 skips unavailable/replaying hosts; hosts/terminal.rs:2229-2247 and :2275-2284 expose infallible emulator/view reads. No retained failed-capture reset was found. Diff through 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db changes unrelated ticker comments and leaves these contracts intact; current ticker.rs:267,372-424 still contains them.",
+            "No runtime defect, fabricated activity during encoding, or need to restore the old reset is asserted. The earlier no-runtime-harm dismissal was withdrawn in the named history and is not a valid source refutation."
+          ],
+          "coverage_checked": [
+            "Both specs searched. Current SPEC_impl.md:3702-3704 also says the trust bool resets after failed capture; :4234-4235 and :4251-4254 repeat capture-failure baseline language. These describe the same obsolete lifecycle, not explicit acceptance that source comments may falsely promise it. Preserve this contract ambiguity for triage; do not silently turn it into a runtime finding.",
+            "TODO.md Planned empty. BUGS.md and active TRIAGE_OUTCOMES.md have no matching sampler-contract disposition.",
+            "plans/queue/tmux-drop-from-docs.md:68-75 and :88-96 broadly require stale comments cleaned, but plans/REPORTS.md:32 records the plan landed. It is neither pending coverage nor evidence these particular comments were repaired.",
+            "INDEX.md plus matching queue text searched. transition-accessor-comment.md concerns only an obsolete accessor spelling while preserving its contract, not this false recovery lifecycle. No exact existing item or useful same-root extension found.",
+            "FILTER.md checked. A permanently misleading internal lifecycle contract has no rare runtime trigger or wholly self-correcting diagnostic consequence, so no full filter match."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": null,
+          "original_stronger_consequence": "Future maintainers can rely on a nonexistent failure-recovery reset when reasoning about prompt hints and activity ordering. The first record set this aside for lack of runtime harm, then explicitly reopened and verified the documentation contract. No security or user-work-loss route was claimed; g132/c1 separately refutes a new production host-read regression. New/reloaded/replacement initialization is not a failed-capture recovery event.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Retain the inaccurate current lifecycle declarations with other priority. Keep the matching SPEC_impl wording and the already-landed cleanup plan visible as context, without treating either as cover for incorrect source documentation."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": true,
+        "clearly_refuted_candidate": false,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Source-confirmed by an existing parent decision; not runtime reproduced",
+        "deduplication_key": "sampler-docs-promise-deleted-capture-failure-reset",
+        "destination": "trailing-sampler-docs-promise-deleted-capture-failure-reset.md"
+      }
+    },
+    {
+      "key": "g132/c4",
+      "owner": "g132",
+      "id": "c4",
+      "domain": "supervisor-status-reporting",
+      "purpose": "supervisor-status-reporting: crates/farhelm-supervisor/src/service/ticker.rs; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 9,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c4",
+            "state": "open",
+            "summary": "Removing the observer capture budget does not unbound retained host capture waits",
+            "location": "crates/farhelm-supervisor/src/service/ticker.rs:1129",
+            "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. TLDR: Considered whether changing observe_entries from observe_entry_with_capture_budget to observe_entry removes a per-pass bound and lets many failed launch excerpts delay the fleet's ticker work. Source refutation: parent service/launch_artifacts.rs:72-98 handles Terminal::Host before testing capture_available, appends only a processed-final-screen excerpt using host.screen_tail, and returns; its :67-70 explicitly says 'A host terminal's read is in memory, cannot fail, and is not budgeted.' Only the later tmux capture arm consumes the shared failure budget. The replacement append_launch_excerpt at the reviewed revision uses the same host final-evidence guard and screen_tail call. Thus removing this budget from ticker.rs:1129-1130 removes no bound previously applied to the retained host path. The observer still batches generation-fenced transitions after classification (:1174 onward). Suggested bucket: other for the considered background-work bound; no demonstrated user degradation. Confidence: confirmed source comparison only; no execution. proposed_drop: source refutation, the eliminated budget never applied to production host excerpts. possible_cover: none; no coverage sources searched. Could-be-highest: no established security or user-work-loss route. Caveat: this does not certify every possible resource cost of rendering a large host screen or auditing the excerpt reducer; those are separate implementation concerns, not introduced by this ticker budget deletion."
+          }
+        }
+      ],
+      "latest": {
+        "line": 9,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c4",
+          "state": "open",
+          "summary": "Removing the observer capture budget does not unbound retained host capture waits",
+          "location": "crates/farhelm-supervisor/src/service/ticker.rs:1129",
+          "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. TLDR: Considered whether changing observe_entries from observe_entry_with_capture_budget to observe_entry removes a per-pass bound and lets many failed launch excerpts delay the fleet's ticker work. Source refutation: parent service/launch_artifacts.rs:72-98 handles Terminal::Host before testing capture_available, appends only a processed-final-screen excerpt using host.screen_tail, and returns; its :67-70 explicitly says 'A host terminal's read is in memory, cannot fail, and is not budgeted.' Only the later tmux capture arm consumes the shared failure budget. The replacement append_launch_excerpt at the reviewed revision uses the same host final-evidence guard and screen_tail call. Thus removing this budget from ticker.rs:1129-1130 removes no bound previously applied to the retained host path. The observer still batches generation-fenced transitions after classification (:1174 onward). Suggested bucket: other for the considered background-work bound; no demonstrated user degradation. Confidence: confirmed source comparison only; no execution. proposed_drop: source refutation, the eliminated budget never applied to production host excerpts. possible_cover: none; no coverage sources searched. Could-be-highest: no established security or user-work-loss route. Caveat: this does not certify every possible resource cost of rendering a large host screen or auditing the excerpt reducer; those are separate implementation concerns, not introduced by this ticker budget deletion."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g132/findings.jsonl",
+        "id": "c4",
+        "line": 9,
+        "disposition": "excluded",
+        "group": "removed-tmux-launch-excerpt-capture-budget",
+        "reason": "Parent explicitly accepted named refuted proposal from claims-084 after inspecting it. The removed failure budget never applied to host excerpts. Removing it cannot remove a bound on the retained host path. Narrow source refutation: host reads bypassed the deleted budget before this change. Do not generalize this to every possible observer resource cost. Checked source/results: [\"1ed482dde220452e424973faf38a5e1318986333^:crates/farhelm-supervisor/src/service/launch_artifacts.rs:67-98 handles Host and returns before checking capture_available; only the later tmux capture consumes that budget.\",\"1ed482dde220452e424973faf38a5e1318986333:crates/farhelm-supervisor/src/service/launch_artifacts.rs:59-76 retains the processed-owned-dead guard and synchronous screen_tail read; service/ticker.rs:1121-1130 calls the ordinary observer.\",\"Source comparison only. No timing, rendering-cost, excerpt-reducer or artifact-I/O conclusion and no runtime execution.\"] Current coverage/results: [\"Current SPEC.md:2888-2900 and SPEC_impl.md:2658-2667 describe bounded final-screen error excerpts, not a failed host-capture budget.\",\"TODO.md Planned:25-26 is empty. Searches of plans/queue, BUGS.md, review_feedback_queue/INDEX.md and active TRIAGE_OUTCOMES.md found no exact capture-budget claim. The tmux-removal plan's helper-preservation/test-footing section:273-284 is context, not independent coverage.\",\"FILTER.md: no entire filter boundary matches this removed-operation concern.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Many failed launch excerpt captures might delay the fleet's serial ticker after its shared capture-error budget disappears. No material degradation was established.\"; null."
+      },
+      "accepted_parent_decision": {
+        "key": "g132/c4",
+        "line": 9,
+        "disposition": "excluded",
+        "group": "removed-tmux-launch-excerpt-capture-budget",
+        "bucket": "other",
+        "recording": "refuted",
+        "queue_target_candidate": null,
+        "needs_independent_drop_check": false,
+        "reason": "Parent explicitly accepted named refuted proposal from claims-084 after inspecting it. The removed failure budget never applied to host excerpts. Removing it cannot remove a bound on the retained host path. Narrow source refutation: host reads bypassed the deleted budget before this change. Do not generalize this to every possible observer resource cost. Checked source/results: [\"1ed482dde220452e424973faf38a5e1318986333^:crates/farhelm-supervisor/src/service/launch_artifacts.rs:67-98 handles Host and returns before checking capture_available; only the later tmux capture consumes that budget.\",\"1ed482dde220452e424973faf38a5e1318986333:crates/farhelm-supervisor/src/service/launch_artifacts.rs:59-76 retains the processed-owned-dead guard and synchronous screen_tail read; service/ticker.rs:1121-1130 calls the ordinary observer.\",\"Source comparison only. No timing, rendering-cost, excerpt-reducer or artifact-I/O conclusion and no runtime execution.\"] Current coverage/results: [\"Current SPEC.md:2888-2900 and SPEC_impl.md:2658-2667 describe bounded final-screen error excerpts, not a failed host-capture budget.\",\"TODO.md Planned:25-26 is empty. Searches of plans/queue, BUGS.md, review_feedback_queue/INDEX.md and active TRIAGE_OUTCOMES.md found no exact capture-budget claim. The tmux-removal plan's helper-preservation/test-footing section:273-284 is context, not independent coverage.\",\"FILTER.md: no entire filter boundary matches this removed-operation concern.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Many failed launch excerpt captures might delay the fleet's serial ticker after its shared capture-error budget disappears. No material degradation was established.\"; null."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-084",
+          "key": "g132/c4",
+          "latest_line": 9,
+          "recommendation": "refuted",
+          "bucket": "other",
+          "underlying_key": "removed-tmux-launch-excerpt-capture-budget",
+          "aliases": [
+            "g133/c2"
+          ],
+          "target_queue_file": null,
+          "why": "The removed failure budget never applied to host excerpts. Removing it cannot remove a bound on the retained host path.",
+          "checks": [
+            "1ed482dde220452e424973faf38a5e1318986333^:crates/farhelm-supervisor/src/service/launch_artifacts.rs:67-98 handles Host and returns before checking capture_available; only the later tmux capture consumes that budget.",
+            "1ed482dde220452e424973faf38a5e1318986333:crates/farhelm-supervisor/src/service/launch_artifacts.rs:59-76 retains the processed-owned-dead guard and synchronous screen_tail read; service/ticker.rs:1121-1130 calls the ordinary observer.",
+            "Source comparison only. No timing, rendering-cost, excerpt-reducer or artifact-I/O conclusion and no runtime execution."
+          ],
+          "coverage_checked": [
+            "Current SPEC.md:2888-2900 and SPEC_impl.md:2658-2667 describe bounded final-screen error excerpts, not a failed host-capture budget.",
+            "TODO.md Planned:25-26 is empty. Searches of plans/queue, BUGS.md, review_feedback_queue/INDEX.md and active TRIAGE_OUTCOMES.md found no exact capture-budget claim. The tmux-removal plan's helper-preservation/test-footing section:273-284 is context, not independent coverage.",
+            "FILTER.md: no entire filter boundary matches this removed-operation concern."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": null,
+          "original_stronger_consequence": "Many failed launch excerpt captures might delay the fleet's serial ticker after its shared capture-error budget disappears. No material degradation was established.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Narrow source refutation: host reads bypassed the deleted budget before this change. Do not generalize this to every possible observer resource cost."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "removed-tmux-launch-excerpt-capture-budget",
+        "destination": null
+      }
+    },
+    {
+      "key": "g132/c5",
+      "owner": "g132",
+      "id": "c5",
+      "domain": "supervisor-status-reporting",
+      "purpose": "supervisor-status-reporting: crates/farhelm-supervisor/src/service/ticker.rs; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 10,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c5",
+            "state": "open",
+            "summary": "Deleting pane-death publication does not remove terminal-host attachment death evidence",
+            "location": "crates/farhelm-supervisor/src/service/ticker.rs (deleted publish_pane_deaths)",
+            "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. TLDR: Considered whether deleting the ticker's publish_pane_deaths call and helper could make terminal-host attachments lose final-output or exit notification. Source refutation: parent service/terminals.rs:1989-1997 dispatches AttachBackend::observed_death exclusively to the Tmux pane-death latch, returning None for AttachBackend::Host. The removed helper only iterates attachment backends through that method; it therefore never published host attachment death evidence. Grid streams have their own host subscription, identified at reviewed service/grid_stream.rs:387, and their own exit mapping (:901 onward), independently of the deleted pane latch. This rejects an additional retained-host attachment consequence of the ticker deletion. Suggested bucket: other for the unestablished missed-exit display claim. Confidence: confirmed parent dispatch refutation; no runtime execution. proposed_drop: the removed publisher never handled Host attachments. possible_cover: none; no prohibited coverage source read. Could-be-highest: no established security or loss-of-work route; no claim that retained host output was actually lost. Caveat: this is a removal/interface check, not a comprehensive grid-stream correctness audit or a proposed drop of the separate intentional old-tmux history loss reported by interface groups."
+          }
+        }
+      ],
+      "latest": {
+        "line": 10,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c5",
+          "state": "open",
+          "summary": "Deleting pane-death publication does not remove terminal-host attachment death evidence",
+          "location": "crates/farhelm-supervisor/src/service/ticker.rs (deleted publish_pane_deaths)",
+          "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. TLDR: Considered whether deleting the ticker's publish_pane_deaths call and helper could make terminal-host attachments lose final-output or exit notification. Source refutation: parent service/terminals.rs:1989-1997 dispatches AttachBackend::observed_death exclusively to the Tmux pane-death latch, returning None for AttachBackend::Host. The removed helper only iterates attachment backends through that method; it therefore never published host attachment death evidence. Grid streams have their own host subscription, identified at reviewed service/grid_stream.rs:387, and their own exit mapping (:901 onward), independently of the deleted pane latch. This rejects an additional retained-host attachment consequence of the ticker deletion. Suggested bucket: other for the unestablished missed-exit display claim. Confidence: confirmed parent dispatch refutation; no runtime execution. proposed_drop: the removed publisher never handled Host attachments. possible_cover: none; no prohibited coverage source read. Could-be-highest: no established security or loss-of-work route; no claim that retained host output was actually lost. Caveat: this is a removal/interface check, not a comprehensive grid-stream correctness audit or a proposed drop of the separate intentional old-tmux history loss reported by interface groups."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g132/findings.jsonl",
+        "id": "c5",
+        "line": 10,
+        "disposition": "under-investigation",
+        "group": "g132-c5",
+        "reason": "Record durably acknowledged; parent source/contract validation, cross-group synthesis, coverage/filter matching and any independent drop check remain pending. This preserves the claim and uncertainty without accepting, dropping or lowering it."
+      },
+      "accepted_parent_decision": null,
+      "returned_claim_checks": [
+        {
+          "batch": "claims-084",
+          "key": "g132/c5",
+          "latest_line": 10,
+          "recommendation": "refuted",
+          "bucket": "other",
+          "underlying_key": "removed-tmux-pane-death-publisher-host-consequence",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The deleted publisher had no host attachment death latch to publish. Host grid streams independently subscribe to their host.",
+          "checks": [
+            "1ed482dde220452e424973faf38a5e1318986333^:crates/farhelm-supervisor/src/service/terminals.rs:1989-1997 returns None for AttachBackend::Host; parent service/ticker.rs:1248-1268 only publishes latches returned by observed_death.",
+            "1ed482dde220452e424973faf38a5e1318986333:crates/farhelm-supervisor/src/service/grid_stream.rs:385-399 subscribes directly to the host; :901-912 maps host exit evidence.",
+            "No runtime attachment or final-output observation. This does not certify all grid-stream exit handling or dismiss the separate old-tmux history-loss question."
+          ],
+          "coverage_checked": [
+            "Current SPEC_impl.md Terminal host:1888-1905 and SPEC.md:2888-2900 require retained host terminal contents; they do not accept losing host death evidence.",
+            "Empty TODO Planned; plans/queue, BUGS.md, queue INDEX and active ledger searches found no exact host consequence of publish_pane_deaths deletion. Old-tmux removal decisions have a different substrate and scope.",
+            "FILTER.md: no entire boundary applied."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": null,
+          "original_stronger_consequence": "Removing pane-death publication might remove final-output or exit notification for retained terminal-host attachments. No retained output loss was established.",
+          "needs_independent_drop_check": true,
+          "proposed_basis": "Refute only the asserted dependency on the deleted publisher. Flagged conservatively for independent checking because the original wording mentions final output."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": true,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "removed-tmux-pane-death-publisher-host-consequence",
+        "destination": null
+      }
+    }
+  ],
+  "replies": [
+    {
+      "turn": 1,
+      "reply": "Initial pass complete: all 1,131 assigned patch lines reviewed. No substantive findings or unresolved leads.\n\nRecorded three set-aside candidates in [findings.jsonl]([private-run]/g132/findings.jsonl) and updated progress. Source and contract analysis only; no tests or reproductions run."
+    },
+    {
+      "turn": 2,
+      "reply": "- Revised c1: parent reads/filter and encoding-view source confirm unchanged host baseline behavior.\n- Revised c2: startup resolves old warnings even with no converted sessions; new notices remain separate.\n- Promoted c3 to a confirmed documentation finding (`other`): comments promise a deleted failure-reset lifecycle. No runtime regression claimed.\n\nAll revisions recorded under original IDs. Unresolved leads: none."
+    },
+    {
+      "turn": 3,
+      "reply": "Discovery pass 1 complete. Checked observer budgets, attachment exit publication, wake/shutdown handling, outcome persistence, and tab-close admission.\n\n- New verified findings: none.\n- New unverified findings: none.\n- Open leads: none.\n- Recorded refuted candidates c4 and c5.\n\nNo new substantive issue found. Progress updated; source-only review, no execution."
+    }
+  ],
+  "progress": "Group g132 — supervisor-status-reporting\n\nInitial review turn 1 complete. Discovery-pass count: 0. Next action: await the caller's later synthesis/discovery prompt; this turn did not simulate later passes.\n\nReviewed revision: 1ed482dde220452e424973faf38a5e1318986333. Complete commits field of inventory.json read; excluded coverage metadata was not read. Root AGENTS.md End sentinel was present. Reviewer instructions, priority buckets, recording template, machine rules, skillette and scode-voice read.\n\nAll assigned material delivered through evidence read: prep/parts/00945-000.patch lines 1–1131, in packets 1–180, 181–360, 361–540, 541–720, 721–900, 901–1080, 1081–1131. No assigned material unread.\n\nInterface assumptions checked: the runtime terminal is now HostTerminal; tmux shutdown/conversion and warning resolution happen before ordinary operation, rather than on the ticker. Host evidence becomes dead only after processing the exit record and therefore final output. Unavailable hosts supply unattributed evidence and are not sampled; caught-up is required. Screen/title reads are infallible in-memory accessors, identical to the former Host dispatch, including the encoding view. The round robin, activity observation and generation-fenced outcome batching remain intact. Host tab reaping retains its budget, non-waiting close admission and retired-session exclusion. No GUI handler is in the patch.\n\nPinned context read: ticker.rs 390–690, 870–1435, 1600–1708; hosts/terminal.rs 757–891, 2060–2265; service/status.rs 111–337 and 520–768; service/terminals.rs 1–240; service/core/old_terminals.rs 1–240; service/core.rs 6135–6192 and 7034–7102. Parent revision context: service/terminals.rs 20–260 and 309–343. Targeted symbol searches identified shared observer, evidence and former dispatch call sites; no independent retired-implementation defect hunt.\n\nPinned contracts read: SPEC.md Status 2651–2854 (with nearby 2632–2650), session-view/tab and cleanup paragraphs 2102–2176, old-terminal notifications 2782–2822, terminal-experience opening paragraphs 2856–2957. SPEC_impl.md terminal-host runtime/recovery/switch/create/tab/restart context 2100–2375; private-tmux retirement contract 2880–2939; status, permission, activity, work-start and reconciliation contracts 4310–4457 with following input/notification paragraph 4458 onward; Answers bind to what was drawn and adjacent context 1063–1120.\n\nNew verified findings: none. New unverified findings: none. Candidates logged as complete source/contract refutations or non-substantive retired-path prose: c1, c2, c3. Open leads: none. Every considered issue retained in findings.jsonl. One evidence-record attempt rejected an unsupported state value; corrected to the accepted open state and recorded successfully, without truncating the log.\n\nValidation: source and contract analysis only. No runtime tests, builds, reproductions, repository edits or live-install operations. No separate final report created.\n\nSynthesis turn 2 complete. Total review turns: 2; discovery-pass count remains 0. Current state supersedes the initial-pass disposition above: c3 is now a confirmed documentation finding, suggested bucket other, proposed_drop false. c1 and c2 remain source-refuted candidates with revised complete records. Open leads: none. New verified IDs this turn: c3 (documentation only). New unverified IDs: none. No new runtime defect established. Next action: caller-directed later discovery pass; the substantive documentation discovery has not been treated as several passes inside this turn.\n\nSynthesis checks: compared parent ticker live-host filter (1670–1734) and capture dispatch/error path (1755–1801) with retained filter and host accessors. Read ticker.rs 258–276, 277–433, 502–542, 586–629, 1306–1339; searched all supervisor src transition_ready references, finding only declaration, prior-read and true assignment. First accepted samples have no prior, so dating and burst-start predicates reject them; encoding still provides the same processed emulator view, not a failed capture. Read hosts/terminal.rs 1413–1472, 1697–1724, 2229–2248, 2271–2288, 3560–3660 to check view construction, slot replacement, accessor behavior and encode return. The caller's g134/l2 parent-behavior premise is independently corroborated.\n\nOld-warning responsibility checked through core/old_terminals.rs 510–581 and core.rs 7075–7092 plus all OldTerminal producer/resolver references under supervisor src. The resolver runs even for an empty converted list; it resolves only the old warning kind, leaving new termination notices persistent. Reread exact SPEC.md 2804–2814 and SPEC_impl.md 2880–2929 contracts. These checks refine c2 without approving any separate destructive-startup policy finding or accepting a parent drop.\n\nc3 was first reopened as a lead, then resolved to a finding after checking the complete transition_ready write set and actual constructors. The false present-tense failure-reset promises occur in workspace_trust_prompt, startup_provisional, reading, transition_ready and Observation.prior comments. The prior lack-of-runtime-harm dismissal is explicitly superseded; parent owns coverage and filters. Every revision used the original ID and the append-only evidence recorder.\n\nAll assigned patch material remains read and audited. Unread assigned scope: none. No runtime execution, reproduction, repository edit or live-install action this turn.\n\nDiscovery turn 3 complete. Discovery-pass count: 1. Result: no new substantive finding beyond the existing record. New verified finding IDs: none. New unverified-after-investigation finding IDs: none. Open leads: none. New considered-and-refuted candidate IDs recorded immediately: c4 (observer excerpt budget), c5 (attachment death publication). Existing findings and proposed-drop bases remain unchanged; no parent drop or lowering accepted.\n\nNeighbour synthesis: read the complete discovery-neighbours.json, 152228 bytes, as exact text. The first 1–180-line display was clipped; repaired by eight byte-bounded reads with dd bs=20000 skip=0 through skip=7, reaching the closing JSON sentinel. The interface records supply no pending named question for this group. Received startup retirement, hidden-old-tab Delete authority, failed-startup spare cleanup and orphan tab-host Delete findings concern separate owners/paths; this pass did not recast their acceptance, refutation or severity. Received ticker-test catch-up finding g131/l1 concerns a different assigned test packet, not a new issue in this production ticker patch. Existing c2's narrow removed-periodic-responsibility disposition does not purport to dispose any of those distinct migration/Delete routes.\n\nNew checks beyond the known sample-baseline/documentation issues: traced deletion of publish_pane_deaths through parent AttachBackend::observed_death (terminals.rs 1956–2037); Host returned None, so removing the ticker publisher cannot remove Host attachment evidence. Checked retained grid_stream.rs 358–406, 580–645, 896–923: independent host subscription, liveness handling and exit-state mapping remain. Compared observer budget removal through the parent/reviewed launch_artifacts.rs diff and parent capture_available references: Host returns its final-screen excerpt before the tmux budget check, so the removed budget never bounded Host reads.\n\nRechecked retained ticker.rs 925–969, 1011–1049, 1085–1106, 1121–1165, 1174–1230, 1641–1673 for wake coalescing/readoption notification, sampling admission, stop handling, dead-agent selection, generation-fenced batched outcomes, negative-read settlement and bounded tab-close starts. Checked the reaper's caller contracts at core.rs 13920–14049 and core/host_tabs.rs 156–213, 317–341, 929–998: starts take nonwaiting close/lifecycle permits; automatic closes recheck reap eligibility; failed-end retries are explicitly represented. No additional changed-source defect established. These are source/contract checks, not execution observations or a broad review of those interface modules.\n\nAll assigned material remains read; unread assigned scope: none. No tests, builds, reproductions, live-install actions, prohibited coverage searches or checkout edits. Next action: await caller; no unresolved readily checkable premise retained.\n"
+}

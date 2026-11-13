@@ -1,0 +1,244 @@
+[
+  {
+    "key": "g164/c5",
+    "latest_line": 12,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "deleted-tmux-start-directory-formatter-oracle",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The removed assertion tests a deleted formatter, rather than a shell prompt or a surviving host cwd contract. No distinct lost host regression oracle is established.",
+    "checks": [
+      "1ed482dde220452e424973faf38a5e1318986333^:crates/farhelm-supervisor/src/tmux.rs:5424-5438 calls tmux_start_directory directly; inputs include roots, trailing slashes, a symlink spelling and /C#Samples/. It launches no shell.",
+      "git grep at 1ed482dde220452e424973faf38a5e1318986333 found no tmux_start_directory in supervisor src/tests.",
+      "1ed482d:service/core.rs:11348-11366 passes launch_cwd to spawn_agent_in_host; service/core/host_launch.rs:508-518 stores cwd directly in ChildSpec. terminal-host/src/spawn.rs:574-577 performs chdir then execve. Source analysis only."
+    ],
+    "coverage_checked": [
+      "Current SPEC.md Terminal experience and SPEC_impl.md Terminal host describe host launches; neither accepts a lost generic cwd regression. The claim is refuted by its actual test subject, not by specification acceptance.",
+      "TODO.md Planned is empty; plans/queue/INDEX.md has no unlanded plans. Retained tmux plan documents are not pending coverage.",
+      "BUGS.md has only an SSH transfer hang, unrelated. INDEX.md and active TRIAGE_OUTCOMES.md searches for cwd, working directory, start directory and tmux found no exact matching item. The folder-refusal classifier ledger section concerns advisory error parsing, not this formatter. Archive not read.",
+      "FILTER.md read; no filter needed."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": "A specific surviving host behavior formerly asserted by this formatter-only test has not been shown. This does not establish comprehensive cwd or prompt coverage.",
+    "original_stronger_consequence": "Possible loss of cwd/prompt coverage was considered; the record establishes no security or loss-of-work route and no new product defect.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Refute only the alleged survival of this formatter's test responsibility; preserve independent host cwd/restart contracts."
+  },
+  {
+    "key": "g165/f1",
+    "latest_line": 9,
+    "recommendation": "covered",
+    "bucket": "highest",
+    "underlying_key": "intentional-startup-retirement-of-private-tmux-work",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The loss of old terminal programs and screen contents is real by source and explicitly accepted by both specifications. This recommendation covers that deliberate migration and its stated failed-termination residual only; independent drop approval remains required.",
+    "checks": [
+      "1ed482dde220452e424973faf38a5e1318986333:service/core.rs:6142-6151 calls OldTerminals::end_private_server before reload, only with the state-directory claim.",
+      "1ed482d:service/core/old_terminals.rs:176-279 connects to the private socket, checks peer user/identity, snapshots its panes, invokes terminate_process_within and removes server files after confirmed termination. This establishes intentional process loss, not an executed observation.",
+      "Current SPEC.md:2998-3011 and SPEC_impl.md:2780-2827 explicitly retain retirement, loss of old screens/tabs and startup continuing despite failure. No new wrong-target or later Delete defect is established by this record."
+    ],
+    "coverage_checked": [
+      "Both current specifications read at the exact old-terminal retirement sections; trigger, consequence and old-private-server scope match.",
+      "TODO.md Planned is empty. Its Mid term phase-3 removal item explicitly preserves retirement until a later decision and is not an alternate coverage basis. plans/queue/INDEX.md is empty.",
+      "BUGS.md has no matching acceptance. INDEX.md and active TRIAGE_OUTCOMES.md searches for old terminals, tmux, retirement and process survival yielded no exact additional item/decision. Archive not read.",
+      "FILTER.md's upgrade-plus-rare-condition filter does not apply to unconditional retirement on upgrade. No filter is used."
+    ],
+    "exact_cover_quotes": [
+      {"source": "SPEC.md:3000-3005", "quote": "A supervisor that finds that tmux server when it starts ends it, and with it everything that still ran in an old terminal, without needing a tmux program."},
+      {"source": "SPEC.md:3004", "quote": "last screen, which lived in the server, is gone; old tabs are closed."},
+      {"source": "SPEC.md:3008-3010", "quote": "A failure to end the server or to stop what ran there is logged and never stops the supervisor from starting; those sessions are treated as ended all the same, accepting that a Restart could then start a second agent beside one still running."},
+      {"source": "SPEC_impl.md:2825-2827", "quote": "A failure anywhere is logged and never fatal (the maintainer chose to start anyway and treat old sessions as ended, accepting that a Restart could then start a second agent beside one still running)"}
+    ],
+    "missing_premise": null,
+    "original_stronger_consequence": "Starting the release ends agents and tab programs in the old private tmux server, losing running processes and old terminal contents. A failed termination can also leave an old agent running beside one subsequently restarted. Both consequences remain preserved as highest-impact provenance.",
+    "needs_independent_drop_check": true,
+    "proposed_basis": "Exact specification acceptance, pending independent drop check. It does not accept missing update warnings, wrong-target termination or unconfirmed later Delete."
+  },
+  {
+    "key": "g165/c1",
+    "latest_line": 6,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "deleted-tmux-excerpt-sanitizer-oracle",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The replacement test directly asserts the alleged lost escaping, nonblank-tail selection and byte bound. Production correctness alone is not the basis.",
+    "checks": [
+      "1ed482dde220452e424973faf38a5e1318986333:service/launch_artifacts.rs:804-840 calls the actual reducer with six nonblank lines followed by 20,000 blank rows and checks the exact five-line escaped result.",
+      "The same test uses 1,000 multibyte/bidi sequences, checks at most 500 bytes and absence of presentation-unsafe characters, and checks an all-blank input returns None. Omitting these behaviors would violate actual assertions; no mutation test was run.",
+      "launch_artifacts.rs:96-123 implements tail selection, escaping and a UTF-8-boundary suffix cut. Its input is already str, so the retired streaming reducer's split-byte input case is a different responsibility."
+    ],
+    "coverage_checked": [
+      "Current SPEC.md:2888-2893 and SPEC_impl.md:2658-2668 require the same five-line/500-byte escaped diagnostic; they do not accept injection.",
+      "TODO.md Planned and unlanded-plan INDEX are empty. BUGS.md has no matching item.",
+      "INDEX.md and active TRIAGE_OUTCOMES.md searched for excerpts, sanitization, controls, presentation and tmux. The remote-version-display item concerns another diagnostic sink and does not cover this claim. No exact queue/ledger coverage found; archive not read.",
+      "FILTER.md read; no filter needed for source refutation."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": "No actual lost assertion or unsafe launch-excerpt presentation route is established. This is not an audit of every diagnostic sink.",
+    "original_stronger_consequence": "Deleting the old reducer tests might permit unsafe presentation injection or remove output bounds. That potential security consequence must remain in the independent drop register even though the narrow lost-oracle concern is refuted.",
+    "needs_independent_drop_check": true,
+    "proposed_basis": "Replacement assertion sensitivity refutes this particular test-deletion claim, subject to independent check of the original security consequence."
+  },
+  {
+    "key": "g165/c2",
+    "latest_line": 7,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "deleted-runtime-tmux-tests-versus-installation-floor",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "Runtime-driver deletion did not remove the selected-binary and version-floor installation tests at the reviewed revision. Subsequent deliberate removal of the installation requirement is a separate change.",
+    "checks": [
+      "1ed482dde220452e424973faf38a5e1318986333:crates/farhelm/src/setup.rs:2341-2383 executes setup with injected empty PATH and missing/old/malformed explicit candidates, checking the complete refusal and candidate/version details.",
+      "setup.rs:3586-3635 asserts environment selection off PATH, flag precedence and empty override falling through to PATH. tmux.rs:1043-1082,1147-1183,1199-1253 retains probe verdict, precedence and executable-PATH diagnostic assertions.",
+      "1ed482d:SPEC_impl.md:2882-2889,2958-2988 explicitly separates the retired runtime driver from still-required installation checks. Source/assertion analysis only."
+    ],
+    "coverage_checked": [
+      "Reviewed SPEC_impl sections accept the runtime/installation split. Current SPEC.md Supported user environments and SPEC_impl.md:7996-8020 instead describe the later complete removal of tmux setup/provisioning checks; this is not evidence of a defect caused by the earlier deletion.",
+      "TODO.md Planned and plans/queue/INDEX.md are empty; retained tmux-drop-from-install plan is not unlanded coverage.",
+      "BUGS.md, INDEX.md and active TRIAGE_OUTCOMES.md searched for tmux, floor, preflight, version selection and overrides. No exact finding/decision found. Other preflight test items concern different mechanisms. Archive not read.",
+      "FILTER.md read; no filter needed."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": "No surviving installation requirement or selected-binary assertion removed by the assigned runtime-driver deletion has been identified. This does not establish comprehensive probe coverage.",
+    "original_stronger_consequence": "Deletion could stop enforcement of the documented installation dependency or check a different binary. No security or user-work-loss route was established; retirement process loss is separately preserved in g165/f1.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Refute the specific deletion implication with actual surviving setup and shared-probe assertions."
+  },
+  {
+    "key": "g165/c3",
+    "latest_line": 11,
+    "recommendation": "needs-parent",
+    "bucket": "other",
+    "underlying_key": "restart-seed-history-promoted-into-launch-excerpt",
+    "aliases": ["g166/c2"],
+    "target_queue_file": null,
+    "why": "The conditional same-session history-promotion route is source-established, and the prior blanket refutation is withdrawn. Its runtime and blanket blank-seed rationale already exist at the exclusive base. Preserve it for consolidation with the separately owned in-range contract claim rather than treating this test deletion as a newly introduced runtime bug.",
+    "checks": [
+      "1ed482dde220452e424973faf38a5e1318986333:host_restart.rs:237-256 passes history seed,294-305 confirms the new host,363-388 publishes it. host_launch.rs:508-518 puts the seed in ChildSpec;639-645 tracks the pending launch spec and returns without requiring shell consumption.",
+      "snapshot/v1/paint.rs:404-436 puts prior history above blank screen rows. vendor/alacritty_terminal/src/grid/resize.rs:25-28,46-71 promotes history into visible rows when height grows. service/handlers.rs:2060-2083 forwards owned viewer resizes; hosts/terminal.rs:4058-4070 applies emulator resizing.",
+      "screen.rs:50-95 reads visible rows, including promoted ones. launch_artifacts.rs:63-74 quotes this host's final screen,96-123 retains its last nonblank rows. status.rs:624-652 calls it for dead terminal/unconsumed-spec/no-sentinel classification. A quiet startup failure can therefore attribute imported history to the failed launch. No execution.",
+      "host_terminals.rs:184-218 tests a complaint without seed/resize;3803-3841 checks a blank seed only immediately after restoration. Those actual assertions do not settle this interaction.",
+      "6e423e30068b62c6cfa276c6d720ee35bb70387a:launch_artifacts.rs:52-94 already has the host quote and false blanket rationale. Base-to-1ed482d diff changes neither grow_lines nor paint_history (paint.rs only loses unrelated sgr_setting). f96dd4363d97dc7e07dea5b8947c96be6bf912e8:SPEC.md removes the old-tmux excerpt exception; the prior host-specific never-previous-run assertion was already present."
+    ],
+    "coverage_checked": [
+      "Current SPEC.md:2888-2893 requires omitting unattributable excerpts; SPEC_impl.md:2658-2668 claims blank seeds prevent previous-run quotes. These conflict with this route rather than explicitly accepting it. The old exception was restricted to old terminals and is not exact host coverage.",
+      "TODO.md Planned and plans/queue/INDEX.md are empty. BUGS.md has no matching acceptance.",
+      "INDEX.md and active TRIAGE_OUTCOMES.md searched for excerpts, previous-run/inherited history, blank screens, resize and launch diagnostics. No exact matching item found. host-restart-history-painter-omits-palette.md was read: it concerns palette loss, not provenance, and is not an alias or coverage. Archive not read.",
+      "FILTER.md: Session status and history after a partly failed operation may cover the runtime-only wrong launch diagnostic, but does not clearly settle an independently recorded false code/spec guarantee. Rare-diagnostic filter excludes durable wrong records. Keep this ambiguity for the parent."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": "The runtime route is conditional, not reproduced. Parent must resolve whole-range scope with the supplied g013/f2 and g100/c1 owners: no new runtime introduction is established here, and the host provenance assertion also predates the range. Whether in-range rewriting/caveat deletion itself warrants a documentation finding is not settled by this consultation.",
+    "original_stronger_consequence": "A failed new launch could quote the preceding conversation or tmux exit banner. The tmux-banner/reused-pane mechanisms are absent; inherited same-session history can still be quoted. Earlier broad source refutations are withdrawn for that latter route, not silently treated as accepted drops. No cross-session disclosure or user-work-loss route was established in this record.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Consolidate the established conditional mechanism and preserve range/filter uncertainty. Do not queue this deletion as an independently introduced runtime defect or silently discard the related in-range contract question."
+  },
+  {
+    "key": "g165/c4",
+    "latest_line": 12,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "deleted-tmux-tail-trimming-oracle",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "Actual retained tests independently assert the surviving trimming and suffix-cut behavior after tmux capture helpers disappear.",
+    "checks": [
+      "1ed482dde220452e424973faf38a5e1318986333:farhelm-terminal-emulator/tests/screen.rs:141-148 exercises an emulator and asserts trailing-padding removal, a multibyte suffix, split-character empty result and zero cap.",
+      "screen.rs:161-168 directly asserts whitespace trimming, exact-length cap, suffix retention and two multibyte cuts. These outputs distinguish the named regressions without relying solely on production correctness.",
+      "hosts/terminal.rs:2229-2239 uses shared trimming for published and emulator views; emulator/src/screen.rs:134-143 implements it. git grep at the reviewed hash found no supervisor src/tests references to retain_pane_tail, capture_pane_tail, classify_tmux_refusal or TmuxDriver. Source/assertion analysis, no execution."
+    ],
+    "coverage_checked": [
+      "Current SPEC_impl.md The supervisor's terminal emulator and screen-text contract agree with visible screen tails; neither accepts a lost regression oracle.",
+      "TODO.md Planned and unlanded-plan INDEX are empty; BUGS.md has no matching item.",
+      "INDEX.md and active TRIAGE_OUTCOMES.md searched for screen tails, trimming, padding, UTF-8, tmux and capture. No exact item/decision covers the alleged oracle loss. Archive not read.",
+      "FILTER.md read; no filter needed."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": "No lost assertion of the surviving tail-trimming contract has been shown. This does not establish equivalents for every deleted test.",
+    "original_stronger_consequence": "Deleting last_words_trims_padding_and_keeps_the_tail_within_the_cap might remove the host screen-tail oracle. No security or loss-of-work consequence was established. Launch-excerpt provenance remains separate.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Refute only the particular lost-trimming-oracle claim using the retained assertion outputs."
+  },
+  {
+    "key": "g166/c1",
+    "latest_line": 7,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "retired-tmux-cwd-format-execution",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The removed tests address tmux -c format evaluation. Host child startup uses cwd as a filesystem path rather than feeding it to that interpreter. The potential security/work-loss consequence still needs the independent drop check.",
+    "checks": [
+      "1ed482dde220452e424973faf38a5e1318986333:terminal-host/src/spawn.rs:531-581 resets child process state, calls libc::chdir(prepared.cwd.as_ptr()), then libc::execve. There is no tmux-format parser at this boundary.",
+      "service/core/host_launch.rs:135-159 supplies PWD from cwd;508-518 uses PathBuf cwd in ChildSpec. core.rs:11348-11366 launches creates in a host.",
+      "crates/farhelm/tests/e2e/command_shell.rs:117-149 checks a cwd containing a quote, semicolon, command substitution, reserved marker and $HOME, asserts full literal output and absence of the injected marker. It covers command-placeholder quoting, not every removed tmux #() case or create/restart/tab path. No tests executed."
+    ],
+    "coverage_checked": [
+      "Current SPEC.md Terminal experience and SPEC_impl.md Terminal host require host terminals. No specification accepts arbitrary command execution through cwd.",
+      "TODO.md Planned and unlanded-plan INDEX are empty. BUGS.md has no relevant acceptance.",
+      "INDEX.md and active TRIAGE_OUTCOMES.md searched for cwd, directory formats, literal paths, command substitution and tmux. No exact finding/decision found. The folder-refusal ledger concerns advisory classification only. g164/c5 is related removed formatter coverage, not the same arbitrary-command allegation. Archive not read.",
+      "FILTER.md read; no filter used."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": "A surviving evaluation of tmux-format syntax in the requested cwd has not been shown. This does not review arbitrary shell-startup behavior or prove exhaustive launch-path test coverage.",
+    "original_stronger_consequence": "Removing directory-format regressions might permit unexpected commands or launch work in the wrong folder, with potential security or destructive consequences. Preserve that original highest possibility for independent judgment.",
+    "needs_independent_drop_check": true,
+    "proposed_basis": "Source refutation of the retired interpreter route, supported by a distinct surviving literal-placeholder regression; not acceptance of an unsafe cwd."
+  },
+  {
+    "key": "g166/c2",
+    "latest_line": 20,
+    "recommendation": "duplicate",
+    "bucket": "other",
+    "underlying_key": "restart-seed-history-promoted-into-launch-excerpt",
+    "aliases": ["g165/c3"],
+    "target_queue_file": null,
+    "why": "Its latest established conditional mechanism is identical to g165/c3: inherited same-session seed history enters the screen on growth and is quoted after startup failure. Consolidation must preserve its original potential-highest cross-session disclosure concern and withdrawn blanket refutation; independent check is required for that lowering.",
+    "checks": [
+      "At 1ed482dde220452e424973faf38a5e1318986333, checked paint.rs:404-436, vendor grid/resize.rs:25-28,46-71, host_restart.rs:237-256,294-305,363-388, host_launch.rs:508-518,639-645, service/handlers.rs:2060-2083, hosts/terminal.rs:2229-2239,4058-4070 and launch_artifacts.rs:63-123. These support the exact seed/publish/resize/final-screen quote chain.",
+      "status.rs:624-652 binds launch artifacts to entry id/generation and quotes that entry's terminal after never-started evidence. This route uses the same session's old history, not a sibling terminal lookup. It does not by itself establish unrelated-session disclosure.",
+      "The base host quote and rationale at 6e423e30068b62c6cfa276c6d720ee35bb70387a:launch_artifacts.rs:52-94 already exist. The reviewed deletion does not introduce the runtime route. f96dd4363d97dc7e07dea5b8947c96be6bf912e8 removes an old-tmux caveat; host no-previous-run wording predates that rewrite. Source-only; no reproduced behavior."
+    ],
+    "coverage_checked": [
+      "Current SPEC.md:2888-2893 requires safe attribution; SPEC_impl.md:2658-2668 overstates blank-screen provenance. Neither explicitly accepts seeded host history in an excerpt.",
+      "TODO.md Planned and plans/queue/INDEX.md are empty; BUGS.md has no match.",
+      "INDEX.md and active ledger searches for excerpts, inherited/previous-run history, resize and blank screens found no exact coverage. Palette-loss queue item read and rejected as a different root. Archive not read.",
+      "FILTER.md's partial-failure session-history filter is a possible basis for the runtime-only diagnostic, but not clearly for the linked false-contract concern. Preserve parent range/filter decision with g165/c3."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": "Unrelated-session private text requires another source premise not established by this seed route. Parent must also resolve the related in-range documentation scope; the runtime and blanket host rationale predate the exclusive base. Supplied references to g013/f2 and g100/c1 were not independently read, as they are outside this input batch.",
+    "original_stronger_consequence": "Initial suspicion included disclosure of another run's or another session's private terminal text, potentially highest. Later records withdraw the blanket previous-run refutation but establish only misleading same-session durable diagnostics. This consequence lowering remains unapproved pending independent drop check.",
+    "needs_independent_drop_check": true,
+    "proposed_basis": "Exact same-root alias to g165/c3 for consolidation, not silent deletion. Independent judgment must cover the original cross-session-security refutation/lowering and preserve unresolved range/filter scope."
+  },
+  {
+    "key": "g166/c3",
+    "latest_line": 8,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "deleted-tmux-visible-grid-status-oracle",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The alleged direct sampling of offscreen scrollback is refuted by both the host sampler path and retained assertions that exclude scrolled-off numbered rows.",
+    "checks": [
+      "1ed482dde220452e424973faf38a5e1318986333:service/ticker.rs:1365-1394 samples this terminal's screen_tail. hosts/terminal.rs:2229-2239 reads its own emulator/published view.",
+      "farhelm-terminal-emulator/src/screen.rs:50-95 iterates only 0..screen_lines, then134-143 trims/cuts the tail. This does not directly iterate negative history rows.",
+      "farhelm-terminal-emulator/tests/screen.rs:17-27,44-129 feeds eight numbered lines into a six-row terminal and asserts exactly rows3-8, excluding1-2; primary/alternate screen cases assert complete expected text too. Those assertions distinguish adding offscreen history. No execution or mutation test.",
+      "This narrow refutation does not claim screen provenance is resize-stable: history promoted into visible rows is the separate g165/c3/g166/c2 mechanism."
+    ],
+    "coverage_checked": [
+      "Current SPEC_impl.md The supervisor's terminal emulator defines screen text as visible/alternate screen, one line per row; this supports the contract rather than accepting a wrong-status bug.",
+      "TODO.md Planned and unlanded-plan INDEX are empty. BUGS.md has no matching entry.",
+      "INDEX.md and active TRIAGE_OUTCOMES.md searched for screen tails, scrollback status, visible grid and stale prompts; no exact lost-oracle item found. Snapshot/history-notice queue items describe different consequences. Archive not read.",
+      "FILTER.md read; no filter needed for the narrow source/test refutation."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": "No sampler reading offscreen history, or lost assertion that distinguishes that behavior, has been shown. This is not a claim that old text can never reach visible rows or affect status through a distinct mechanism.",
+    "original_stronger_consequence": "Deleting visible-grid tests might let old scrollback make sessions falsely busy or waiting, with a possible high UX consequence. The record establishes no security or loss-of-work route. Source refutation remains limited to direct offscreen sampling and the named oracle.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Refute direct offscreen-sampling/oracle-loss allegation using actual retained assertion sensitivity; preserve the separate inherited-history interaction."
+  }
+]

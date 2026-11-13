@@ -1,0 +1,328 @@
+[
+  {
+    "key": "g139/g139-c4",
+    "latest_line": 13,
+    "recommendation": "out-of-range",
+    "bucket": "other",
+    "underlying_key": "wrapper-resume-doc-obsolete-arm",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The obsolete Resume-arm explanation is real documentation drift, but both the phrase and the single-path helper already exist at the exclusive base. The in-range owner-name edit is accurate.",
+    "checks": [
+      "6e423e30068b62c6cfa276c6d720ee35bb70387a:crates/farhelm/tests/e2e/wrapper_launch.rs:471-481 already says relaunch_argv's Resume arm; 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513 at the same lines preserves it and changes spawn_agent to prepare_launch.",
+      "Base:crates/farhelm-supervisor/src/service/core.rs:3906-3942 and reviewed 647f0227:3816-3852 both contain the same single resume-argv path, with no Resume arm. This is attribution, not a claim that correct production behavior refutes a comment defect."
+    ],
+    "coverage_checked": {
+      "SPEC.md/SPEC_impl.md": "Searched resume/relaunch/wrapper and terminal sections; no accepted obsolete navigation explanation.",
+      "TODO.md Planned": "Empty bucket at lines 25-26.",
+      "plans/queue": "Searched actual phrase, helper and wrapper-test terms; no unlanded exact fix found.",
+      "BUGS.md": "Only retained SSH-transfer hang; unrelated.",
+      "INDEX.md and matching queue files": "Read index; searched Resume arm/relaunch_argv/wrapper test. No exact item.",
+      "TRIAGE_OUTCOMES.md": "Searched resume/wrapper and exact helper terms; no same finding.",
+      "FILTER.md": "No filter needed: exact defect predates range."
+    },
+    "exact_cover_quotes": [],
+    "missing_premise": null,
+    "original_stronger_consequence": "Misleading maintainer navigation to a nonexistent Resume arm. No runtime, oracle-loss, security or user-work-loss consequence was alleged; stale wording persists but predates the entire range.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Exclude this exact unchanged documentation defect from the specified exclusive-base review range."
+  },
+  {
+    "key": "g140/f1",
+    "latest_line": 11,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "stop-survival-test-grid-attachment-compatibility",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The retained helper requests grids, decodes their output and waits for replay completion. The post-stop probe asks the surviving agent for a new UUID response after the supervisor has exited.",
+    "checks": [
+      "647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513:crates/farhelm/tests/e2e/harness.rs:315-372 uses ViewerStreams::BytesOrGrid and registers attachment kind; :397-438 sends GridInput::Text for grid channels; :2705-2735 decodes Data with append_transcript until ReplayComplete.",
+      "647f0227:crates/farhelm/tests/e2e/supervisor_stop.rs:148-156 uses that helper, then :182-189 waits for successful supervisor exit before :222-233 adopts the host and requires echo:after-stop-<fresh UUID>.",
+      "647f0227:crates/farhelm/tests/e2e/host_restarts.rs:183-193 requires InputFate::Written; host_terminals.rs:136-152 waits for actual screen text; farhelm-fixtures/src/fake_agent.rs:1715 supplies the echo: prefix. Old screen contents and PTY input echo cannot provide the fresh full answer. Source checks only."
+    ],
+    "coverage_checked": {
+      "SPEC.md/SPEC_impl.md": "Terminal host/grid-stream contracts agree with grid attachment and a host retaining a dead program's screen; freshness must come from the new agent answer.",
+      "TODO.md Planned": "Empty.",
+      "plans/queue": "Searched stop-survival, supervisor_stop, raw-input/replay terms; no exact unresolved item. tmux-end-old-terminals and tooling plans are landed per plans/REPORTS.md:29,31.",
+      "BUGS.md": "No matching case.",
+      "INDEX.md and matching queue files": "Index read and stop/survival/grid-attachment terms searched; no exact case. Existing tab-survival observation item concerns a different oracle.",
+      "TRIAGE_OUTCOMES.md": "No same trigger/consequence found.",
+      "FILTER.md": "No match required; source refutes the premise."
+    },
+    "exact_cover_quotes": [],
+    "missing_premise": null,
+    "original_stronger_consequence": "Migrated stop-survival tests could fail setup or inspect the wrong stream because attach_live was bytes-only. Refutation does not establish parity of the separately deleted legacy replay or shutdown tests.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Source refutation of the hypothesized test setup and observation regression; no test execution claimed."
+  },
+  {
+    "key": "g140/f2",
+    "latest_line": 9,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "stop-survival-test-owned-host-cleanup",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "Owned TestDir teardown independently stops the surviving hosts before deleting state, and retains state if shutdown cannot be confirmed. Removing the tmux guard did not remove teardown ownership.",
+    "checks": [
+      "647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513:crates/farhelm/tests/e2e/supervisor_stop.rs:89 creates state before child/runtime locals; :182-189 reaps the supervisor before adoption at :222-230. Reverse local drop order releases later handles first.",
+      "647f0227:crates/farhelm-teststate/src/lib.rs:794-817 invokes blocking end_hosts in TestDir::drop before directory removal, keeping the directory on unconfirmed cleanup.",
+      "647f0227:crates/farhelm-teststate/src/hosts.rs:56-59 traverses depth three, including d/hosts; :107-164 stops sockets and requires socket disappearance; :319-362 sends takeover Hello plus Shutdown and waits for stream close. It does not depend on the dropped Tokio runtime.",
+      "647f0227:crates/farhelm-supervisor/src/hosts/terminal.rs:3015 ends its task on control-channel closure. This is not a claim that panic-time kill_on_drop synchronously reaps the supervisor, nor that cleanup always succeeds."
+    ],
+    "coverage_checked": {
+      "SPEC.md/SPEC_impl.md": "Current SPEC_impl.md:2590-2603 explicitly requires every owned TestDir drop to stop hosts and retain unconfirmed cleanup; source implements it.",
+      "TODO.md Planned": "Empty.",
+      "plans/queue": "No exact surviving-host cleanup omission found; terminal-removal/tooling plans are already landed.",
+      "BUGS.md": "No matching case.",
+      "INDEX.md and matching queue files": "Index read and stop-test/host-cleanup terms searched. Other concrete cleanup defects have different triggers; none covers an absent TestDir teardown premise here.",
+      "TRIAGE_OUTCOMES.md": "No exact same case found.",
+      "FILTER.md": "No filtering proposed."
+    },
+    "exact_cover_quotes": [],
+    "missing_premise": null,
+    "original_stronger_consequence": "Intentionally surviving test hosts could leak or their state could be removed too early after deletion of the old tmux guard. Considered harm was test-owned resources; no user-owned process loss was alleged.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "The missing-cleanup premise is source-refuted; retain the caveat that unconfirmed cleanup intentionally keeps evidence."
+  },
+  {
+    "key": "g140/f3",
+    "latest_line": 12,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "rename-test-drain-import-removal",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The existing glob imports a compatible helper with the same body as the previously selected helper. The assigned import deletion changes neither symbol resolution nor observation behavior.",
+    "checks": [
+      "1ed482dde220452e424973faf38a5e1318986333:crates/farhelm/tests/e2e/session_rename.rs:10 imports harness::*; :591-597 still calls drain_for then sends new input.",
+      "1ed482dd:crates/farhelm/tests/e2e/harness.rs:2067-2089 and 1ed482dd^:crates/farhelm/tests/e2e/terminal_backpressure.rs:20-43 have identical deadline, raw Data append, ignored ReplayComplete, detach/close and timeout behavior. No build run."
+    ],
+    "coverage_checked": {
+      "SPEC.md/SPEC_impl.md": "Searched rename/attachment/grid contracts; no rule makes this same-body import selection a behavior change.",
+      "TODO.md Planned": "Empty.",
+      "plans/queue": "No exact drain_for/import/rename-test issue found; tmux removal plan is landed.",
+      "BUGS.md": "No matching case.",
+      "INDEX.md and matching queue files": "Index read; import/helper and rename terms give no same-root item.",
+      "TRIAGE_OUTCOMES.md": "No exact case found.",
+      "FILTER.md": "No filtering proposed."
+    },
+    "exact_cover_quotes": [],
+    "missing_premise": null,
+    "original_stronger_consequence": "Missing drain_for import could break test compilation or change grid observation. Broader inherited raw-grid transcript issues were not resolved by this narrow same-body comparison and are not claimed out of range generally.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Refute only the regression attributed to the assigned import deletion."
+  },
+  {
+    "key": "g140/f4",
+    "latest_line": 10,
+    "recommendation": "retain-verified",
+    "bucket": "other",
+    "underlying_key": "deleted-legacy-deep-replay-tail-oracle",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "Deletion removed a discriminating deep legacy replay-tail/exactly-once oracle while that terminal path was still supported. Later retirement removes the product path; preserve that historical scope rather than demanding legacy fixtures at current main.",
+    "checks": [
+      "647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513^:crates/farhelm/tests/e2e/replay_marker.rs:575-605 seeds 4,000 rows and requires both retained head and spam-line-4000 before the marker, with more than 32 KiB before it. assert_marker_splits at :422-454 drains later frames and requires exactly one marker.",
+      "647f0227:SPEC_impl.md:2954-2988 still serves existing tmux terminals. connection.rs:1627-1668 documents the marker after every replay byte and before live output, once per attach.",
+      "647f0227:crates/farhelm-supervisor/src/service/grid_stream/tests.rs:300-332 asserts marker after the first history message and eventual convergence; :335-408 exercises eventual multi-read host-grid convergence. Those checks do not assert a legacy multi-chunk tail before its marker.",
+      "647f0227:service/handlers.rs:11034-11063,11475-11501 retain small legacy marker arrival, including channel 2. Non-default correlation, Attached-before-data and markerless recovery are not asserted wholly lost.",
+      "Later in-range dbfc69751215dbf15e1d31d5bed73c3754c4ebc4:SPEC_impl.md:2956-2963 ends legacy terminals at startup; 1ed482dde220452e424973faf38a5e1318986333 removes the driver. This is historical lost coverage, not an extant final-tip legacy replay bug. No runtime observation."
+    ],
+    "coverage_checked": {
+      "SPEC.md/SPEC_impl.md": "Current SPEC.md:2998-3011 and SPEC_impl.md Grid streams retire legacy terminals and byte streams. They do not explicitly accept the intermediate supported-path coverage loss; they do make a current legacy-fixture repair obsolete.",
+      "TODO.md Planned": "Empty.",
+      "plans/queue": "tmux-end-old-terminals: Test footing permits tmux/byte-subject test deletion, but plans/REPORTS.md:29 records it landed. It is not an unlanded plan fixing this intermediate gap. No exact unlanded replacement oracle found.",
+      "BUGS.md": "No matching case.",
+      "INDEX.md and matching queue files": "Index read; replay-marker, replay-tail and deep-replay searches found no exact queue item. Existing recovery/reconnect items concern different production boundaries.",
+      "TRIAGE_OUTCOMES.md": "No exact deletion/oracle case found; shallow-pause flake decision is not this claim.",
+      "FILTER.md": "No complete filter matches test-oracle removal. No product failure or user-work loss established."
+    },
+    "exact_cover_quotes": [],
+    "missing_premise": "No missing source premise for the bounded intermediate coverage loss. Current actionability needs the parent's recording judgment because later in-range retirement removed the tested substrate.",
+    "original_stronger_consequence": "Initial candidate proposed dropping all replay-suite loss because replacement implementation/tests exist. That rationale was withdrawn. Final claim is specifically deep legacy replay-tail/exactly-once regression protection, not no marker tests, not total ordering-coverage loss, and not a demonstrated replay failure.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Preserve the source-established historical finding and the later retirement qualification. Do not silently turn later product correctness or removal into refutation of the intermediate test defect."
+  },
+  {
+    "key": "g140/f5",
+    "latest_line": 14,
+    "recommendation": "retain-verified",
+    "bucket": "other",
+    "underlying_key": "deleted-signal-legacy-two-client-shutdown-oracle",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "Host-survival assertions replace an end-to-end legacy shutdown assertion while existing legacy terminals remain supported at the reviewed intermediate revision. Direct driver shutdown tests retain a useful narrower oracle. Later legacy retirement bounds the finding's lifetime.",
+    "checks": [
+      "647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513^:crates/farhelm/tests/e2e/supervisor_stop.rs:262-283 reads successful no-output acknowledgements after STOP and requires at least two distinct clients. Reviewed :136-156 uses a host, and :216-233 checks Host kind plus fresh agent echo after exit.",
+      "647f0227:SPEC_impl.md:2954-2988 still serves legacy terminals; :3134-3167 preserves acknowledged no-output before client close, while explicitly declining further significant defenses without a modern tmux abort observation.",
+      "647f0227:crates/farhelm-supervisor/src/tmux/stream.rs:2724-2833 directly invokes shutdown, gates the acknowledgement and verifies client liveness/reap. It does not signal the supervisor or assert both clients in its roster.",
+      "647f0227:service/teardown.rs:4881-4898 uses a fake sink without a real tmux client; :4912-4995 checks lease/reaper completion and :5005-5016 the attachment-lock budget. Pinned DisableOutputGate search finds uses only in direct stream tests.",
+      "dbfc69751215dbf15e1d31d5bed73c3754c4ebc4 ends old terminals at startup and 1ed482dde220452e424973faf38a5e1318986333 removes the driver. The latest record correctly limits this to the earlier supported-legacy revision. No current abort or user-work-loss route is established and no execution occurred."
+    ],
+    "coverage_checked": {
+      "SPEC.md/SPEC_impl.md": "Current legacy retirement rules remove any need for current legacy shutdown fixtures. The intermediate no-output discipline was still specified, not explicitly waived; its rare-abort design limit does not itself waive existing whole-path test protection.",
+      "TODO.md Planned": "Empty.",
+      "plans/queue": "No exact unlanded whole-path stop-ack oracle work found. Terminal-removal/tooling plans are landed per plans/REPORTS.md:29,31; their test triage is contextual, not an unlanded fix.",
+      "BUGS.md": "No matching case.",
+      "INDEX.md and matching queue files": "Index read and no-output/signal/stop-survival terms searched; no exact item.",
+      "TRIAGE_OUTCOMES.md": "No same test-deletion case found.",
+      "FILTER.md": "No full filter applies to loss of this test oracle. Do not infer an actual server abort from its deletion."
+    },
+    "exact_cover_quotes": [],
+    "missing_premise": "No missing premise for bounded intermediate oracle loss. Parent must preserve that later retirement makes a present-day legacy-fixture repair obsolete.",
+    "original_stronger_consequence": "Original lead was potential loss of orderly legacy output acknowledgements. Final consequence remains lost regression coverage; no current crash, user-work loss, final-tip host cleanup gap, or need to retain legacy tests after retirement is claimed.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Retain the historical source-established test gap separately from replay-marker loss; scope any queue wording to the supported intermediate revision."
+  },
+  {
+    "key": "g140/f6",
+    "latest_line": 15,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "quiet-grid-attachment-marker-oracle",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "A retained test requires replay completion on an empty fresh host before it supplies any program output. A marker incorrectly waiting for the first live byte would fail that setup.",
+    "checks": [
+      "647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513:crates/farhelm-supervisor/src/service/grid_stream/tests.rs:485-494 waits for viewer.converged(0) before test_host.output; :215-221 explicitly requires replay_complete_after.is_some().",
+      "647f0227:grid_stream/tests.rs:53-64 uses fresh TestHostSpec::default with only options changed; hosts/terminal/test_host.rs:241-259 derives Default with empty journaled and no exit, and :536-551 starts its Journal empty at end zero. Merely drawing an empty screen cannot satisfy the marker condition."
+    ],
+    "coverage_checked": {
+      "SPEC.md/SPEC_impl.md": "Current grid attach contract sends initial state/screen/history then ReplayComplete; no dependency on later live output.",
+      "TODO.md Planned": "Empty.",
+      "plans/queue": "No exact unresolved quiet-marker issue found; removal/tooling plans are landed.",
+      "BUGS.md": "No matching case.",
+      "INDEX.md and matching queue files": "Index read and marker/quiet-attach terms searched; no exact item.",
+      "TRIAGE_OUTCOMES.md": "No matching case.",
+      "FILTER.md": "No filtering proposed."
+    },
+    "exact_cover_quotes": [],
+    "missing_premise": null,
+    "original_stronger_consequence": "A missing quiet-attach oracle could permit a host viewer to wait forever for a first live byte before reveal. Refuted as a missing-test claim, without certifying every removed tmux replay scenario or changing f4/f5.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Actual discriminating retained test refutes the alleged oracle absence; source-only conclusion."
+  },
+  {
+    "key": "g141/c1",
+    "latest_line": 8,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "grid-agent-echo-helper-freshness",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "Removing the stream argument preserves the agent-only echo prefix and callers provide freshness through tokens never previously sent to that generation.",
+    "checks": [
+      "f560058da19e02716e6f943883a9508b447aff4e:crates/farhelm/tests/e2e/harness.rs:128-130 makes real streams grid-only; :165-194 decodes run text without colors; :1125-1133 defines agent_echo as echo: plus submitted text.",
+      "f560058d:crates/farhelm-fixtures/src/fake_agent.rs:1715 emits echo: itself. structured_launches.rs:430-461 uses a process-id/monotonic-sequence token with liveness checks before and after; restart_under_concurrency.rs:381-401 sends GENERATION-ONE-HANDOFF only after the new generation's replay boundary.",
+      "Repeated grid rows or clearing a local transcript alone do not prove freshness. Here the fresh token/generation premise and agent-created prefix do. Stale comments referring to colored response do not invalidate that discriminator. No execution."
+    ],
+    "coverage_checked": {
+      "SPEC.md/SPEC_impl.md": "Current terminal-host/grid contracts allow repeated screen updates and retain dead screens, so caller freshness remains necessary; inspected callers meet it.",
+      "TODO.md Planned": "Empty.",
+      "plans/queue": "No exact echo-helper/fresh-token issue found; grid-only protocol removal plan is landed.",
+      "BUGS.md": "No matching case.",
+      "INDEX.md and matching queue files": "Index read; echo-helper and live-exchange terms show no same-root record. tab-survival-missing-live-exchange concerns an absent exchange, unlike these callers.",
+      "TRIAGE_OUTCOMES.md": "No exact same case found.",
+      "FILTER.md": "No filtering proposed."
+    },
+    "exact_cover_quotes": [],
+    "missing_premise": null,
+    "original_stronger_consequence": "Echo-helper simplification might weaken generation and live-input witnesses. Refutation is limited to these two adapted callers; it does not certify every liveness helper or generation classification, and stale colored-response comments remain acknowledged.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Source-refute the alleged adaptation regression using helper, fixture and actual freshness premises together."
+  },
+  {
+    "key": "g141/c2",
+    "latest_line": 2,
+    "recommendation": "covered",
+    "bucket": "other",
+    "underlying_key": "retired-tmux-adoption-option-test",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The removed test requires continuing adoption and reconfiguration of a legacy server, the opposite of the newly explicit startup retirement contract.",
+    "checks": [
+      "dbfc69751215dbf15e1d31d5bed73c3754c4ebc4:SPEC_impl.md:2956-2963 explicitly ends legacy terminals at startup and runs no tmux thereafter.",
+      "dbfc6975:crates/farhelm-supervisor/src/service/core.rs:6427-6439 performs OldTerminals::end_private_server only for the state-directory owner, then calls no_server_after_startup; :6455-6472 reloads using that result. This is source context, not certification of destructive attribution/sweeping outside this named removed test.",
+      "Current SPEC.md:2998-3011 retains startup retirement. Current SPEC_impl.md:2937-2953 removes old terminal streams and selectors."
+    ],
+    "coverage_checked": {
+      "SPEC.md/SPEC_impl.md": "Exact continued-adoption requirement is retired explicitly at both reviewed revision and recording-time main.",
+      "TODO.md Planned": "Empty.",
+      "plans/queue": "tmux-end-old-terminals is landed (plans/REPORTS.md:29), so coverage basis is the accepted specification, not future plan work.",
+      "BUGS.md": "No matching case.",
+      "INDEX.md and matching queue files": "Index read; adopted-options/startup-adoption test terms show no exact item.",
+      "TRIAGE_OUTCOMES.md": "No exact same finding.",
+      "FILTER.md": "No filter used."
+    },
+    "exact_cover_quotes": [
+      "dbfc69751215dbf15e1d31d5bed73c3754c4ebc4:SPEC_impl.md:2956-2963: This release ends them at startup (below); every terminal runs in a terminal host",
+      "dbfc69751215dbf15e1d31d5bed73c3754c4ebc4:SPEC_impl.md:2962-2963: The running supervisor runs no tmux at all."
+    ],
+    "missing_premise": null,
+    "original_stronger_consequence": "Removing the adopted-server options regression might conceal a required startup behavior. The named concern is the obsolete test only, not possible loss of user work in the independently reviewed server shutdown implementation.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Accepted specification explicitly removes the precise behavior the deleted test demanded."
+  },
+  {
+    "key": "g141/c3",
+    "latest_line": 9,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "upload-channel-reuse-grid-capability-removal",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The removed grid selector has no remaining protocol meaning. The same assertions still protect admission and catch-up setup after channel reuse; they do not prove live input or acknowledgement priority.",
+    "checks": [
+      "f560058da19e02716e6f943883a9508b447aff4e:crates/farhelm-proto/src/lib.rs:3777-3844 contains no grid flag and declares every Attached channel a grid stream. Current SPEC_impl.md:2937-2953 explicitly records protocol 77's selector removal.",
+      "f560058d:crates/farhelm-supervisor/src/service/channels.rs:120-131 rejects live uploads and installed terminal routes but excludes finished tombstones; :136-143 installs/looks up the input route separately.",
+      "f560058d:crates/farhelm/tests/e2e/attachment_uploads.rs:1099-1189 proves upload exclusion, exact published file bytes, correlated in-use retry, Attached on channel 1 and ReplayComplete. harness/raw_peer.rs:76-93 discards data while seeking controls, so the test proves setup/catch-up only. It creates no terminal backlog and performs no live terminal input exchange."
+    ],
+    "coverage_checked": {
+      "SPEC.md/SPEC_impl.md": "Grid-only protocol removal explicitly accepts removal of capability selectors; setup-only limitations remain distinct from other upload test requirements.",
+      "TODO.md Planned": "Empty.",
+      "plans/queue": "No exact channel-reuse adaptation defect found; terminal-removal plan is landed.",
+      "BUGS.md": "No matching case.",
+      "INDEX.md and matching queue files": "Index read; upload/terminal reuse terms show no exact defect. No existing item was used to justify broader upload-coverage dismissal.",
+      "TRIAGE_OUTCOMES.md": "No exact same adaptation finding.",
+      "FILTER.md": "No filtering proposed."
+    },
+    "exact_cover_quotes": [],
+    "missing_premise": null,
+    "original_stronger_consequence": "Initial wording called the reused channel a working stream. Latest narrows that to admission and ReplayComplete; decoded content, fresh input and UploadAck-versus-backlog priority are unproved by this test. Parent-reported g139-l1 is distinct, not covered or refuted here.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Refute regression from this one-field adaptation only; preserve the setup-only limit and separate backlog-priority issue."
+  },
+  {
+    "key": "g141/c4",
+    "latest_line": 13,
+    "recommendation": "retain-verified",
+    "bucket": "other",
+    "underlying_key": "deleted-raw-pty-cursor-control-sequence-oracle",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The removed raw receiver pinned ordered DEL/CSI/ETX delivery. Remaining real-PTY tests pin ESC/CR for other chords and cooked erase/interrupt behavior, but the source explicitly records loss of the raw cursor-sequence end-to-end oracle.",
+    "checks": [
+      "647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513^:crates/farhelm/tests/e2e/session_lifecycle.rs:3586-3650 sends a DEL b ESC [ A ETX then z, reconstructs raw hex bytes and requires [61,7f,62,1b,5b,41,03,7a]. The final acknowledgement fences earlier delivery.",
+      "647f0227:crates/farhelm/tests/e2e/harness.rs:397-438 supports the valid-UTF-8 sequence as GridInput::Text. tmux command quoting and arbitrary invalid-UTF-8 payload variants do not transfer to the grid contract.",
+      "00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db:e2e/tests/terminal-flood.spec.ts:155-175 excludes ArrowUp because canonical ECHOCTL cannot distinguish real ESC from literal caret text and explicitly says the raw end-to-end check is gone.",
+      "Tip:terminal-keys.spec.ts:1-46 scopes its real noncanonical no-echo proof to ESC, CR and printable sentinels; :215-290 checks Shift+Enter/plain Enter and related modifiers. Targeted tip searches find no DEL/ETX/ArrowUp raw replacement there; prompt_running_agent.rs:463-479 ignores its delivery proofs while agent prompts are disabled.",
+      "Tip:terminal-flood.spec.ts:85-152 independently proves >1 MiB printable paste count/digest plus a later live exchange. This is not absent large-paste coverage. Earlier c4 checks also retain ordinary scrollback/geometry and host bystander cleanup oracles; no additional zero-size attach or alternate-screen defect is decided here."
+    ],
+    "coverage_checked": {
+      "SPEC.md/SPEC_impl.md": "Current terminal-host/grid input contracts retain control-key encoding and PTY delivery. No explicit acceptance of losing this real-receiver sequence oracle found. Current grid-only protocol does obsolete tmux parser and invalid-UTF-8 raw-input tests.",
+      "TODO.md Planned": "Empty. Maybe later IME item at TODO.md:547-552 concerns composition presentation, not DEL/CSI/ETX delivery or raw receiver coverage.",
+      "plans/queue": "Searched raw-input/hexecho/control-sequence/replay terms. No exact unlanded replacement found. tmux-end-old-terminals Test footing permits tmux/byte-subject deletion, but it is landed per plans/REPORTS.md:29 and does not clearly waive the surviving grid-to-PTY behavior boundary.",
+      "BUGS.md": "Only SSH-transfer hang, unrelated.",
+      "INDEX.md and matching queue files": "Full index read and raw-input/control-byte/hexecho/cursor-sequence terms searched; no exact item. Shift+Enter reader-readiness concerns a different test premise, not this removed sequence.",
+      "TRIAGE_OUTCOMES.md": "No exact raw-sequence test-deletion decision found.",
+      "FILTER.md": "No full filter matches this coverage defect; rarity alone is not omission."
+    },
+    "exact_cover_quotes": [],
+    "missing_premise": "No missing source premise for the narrowed raw-sequence oracle loss. No current product byte mangling or harmful user-work route has been demonstrated. Earlier broad bystander/alternate-screen coverage dismissals are not certified by this narrow raw-input check.",
+    "original_stronger_consequence": "Initial broad candidate treated all retired tmux tests as nontransferable and proposed dropping coverage concerns; that rationale was withdrawn. A later claim said control-byte delivery had no end-to-end oracle; it was narrowed after finding ESC/CR raw chord tests. Preserve the final specific DEL/CSI/ETX sequence gap, existing partial coverage, and absence of runtime evidence. Bystander-process protection appeared in the original broad dropped set; raw transcript uniqueness, tmux parser quoting and arbitrary binary input are obsolete for new grids. Positive alternate-screen reattach was referred to separate l5, not resolved in this batch.",
+    "needs_independent_drop_check": true,
+    "proposed_basis": "Record the narrowed raw-receiver test gap as other. Before disposing of the earlier broad bystander-process-protection omission, parent should include that named historical dismissal in the independent drop register; this consultation does not approve that drop."
+  }
+]

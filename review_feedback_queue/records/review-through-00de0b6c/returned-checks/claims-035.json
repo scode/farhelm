@@ -1,0 +1,314 @@
+[
+  {
+    "key": "g055/l1",
+    "latest_line": 2,
+    "recommendation": "covered",
+    "bucket": "other",
+    "underlying_key": "environment-unconditional-stdin-option-compatibility",
+    "aliases": ["g056/c2"],
+    "target_queue_file": null,
+    "why": "The alleged unsupported-helper generation is expressly excluded by the environment-helper contract. This is specification acceptance, not runtime proof about deployed helpers.",
+    "checks": [
+      "1038bb1f4549f6896fa6e064fecf540f4548b4da transport.rs:190-201 uses HostAccess::stdio_argv; 56659839785691f76da3af5d8f51b511cff4ba8b access.rs:30-47,234-247 appends 120 for Tensorlake and Podman only.",
+      "1038bb1 SPEC_impl.md:6478-6481 and 7127-7139 explicitly replace help negotiation and state that the option shipped with Tensorlake host support. No execution performed."
+    ],
+    "coverage_checked": {
+      "SPEC.md": "Searched environment, compatibility and helper behavior; no narrower unsupported-helper promise found.",
+      "SPEC_impl.md": "Current One route for transport and provisioning:5999-6003 and Tensorlake hosts:6763 onward preserve unconditional environment invocation and supported-helper premise.",
+      "TODO.md Planned": "Empty bucket at recording-time main.",
+      "plans/queue": "INDEX.md has no unlanded plans; residual plan files are historical, not current coverage.",
+      "BUGS.md": "Only escaped local SSH-helper transfer hang; different trigger and consequence.",
+      "queue INDEX and files": "Searched helper/idle/probe/route terms; no exact open item. tunnel-helper-exit-may-block-flushing-stdout.md concerns exit flushing after a deadline, not option compatibility.",
+      "TRIAGE_OUTCOMES.md": "Searched relevant environment/helper/route terms; no exact active decision.",
+      "FILTER.md": "No filter needed; upgrade rarity is not the basis."
+    },
+    "exact_cover_quotes": [
+      "SPEC_impl.md:5999-6000: All environment stdio routes pass `--stdin-idle-limit-secs 120` unconditionally and emit the existing 30-second heartbeat. The supported environment helper has that option.",
+      "1038bb1 SPEC_impl.md:7128-7129: The option shipped in the same release as Tensorlake host support, and new Podman environments carry a prepared helper."
+    ],
+    "missing_premise": "No supported Tensorlake helper lacking this option was established; deployment incidence was not tested.",
+    "original_stronger_consequence": "An older environment helper could reject the flag before repairable version-skew handling and prevent connection; conditionally high UX impact, with no established security or user-work-loss route. The later record withdrew the defect on explicit specification acceptance.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Exact supported-helper specification acceptance; preserve the historical compatibility concern and its withdrawal."
+  },
+  {
+    "key": "g055/c2",
+    "latest_line": 3,
+    "recommendation": "covered",
+    "bucket": "other",
+    "underlying_key": "nested-environment-supervisor-master-capacity",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "Nested provisioning borrowing the place supervisor master and its finite channel capacity are expressly accepted. The separate promised session-limit diagnosis remains enforceable and is the subject of g056/f1.",
+    "checks": [
+      "56659839785691f76da3af5d8f51b511cff4ba8b access.rs:64-94 and 302-327 force Supervisor sharing for base and nested exec, retain ordinary fallback and expose mux refusals.",
+      "1038bb1f4549f6896fa6e064fecf540f4548b4da transport.rs:249-264 returns for PodmanExec rather than closing the place masters.",
+      "1038bb1 SPEC_impl.md:6481-6487 explicitly states borrowing, capacity, fallback and diagnostic contracts; current SPEC_impl.md:6002-6008 retains them. No runtime observation."
+    ],
+    "coverage_checked": {
+      "SPEC.md": "Container sessions says remote connections use the container host SSH connection; no contrary separate-master promise found.",
+      "SPEC_impl.md": "Exact acceptance in One route for transport and provisioning; ordinary two-master transport policy remains general context, with this explicit nested exception.",
+      "TODO.md Planned": "Empty.",
+      "plans/queue": "No unlanded index entries.",
+      "BUGS.md": "Transfer-pipe hang is different.",
+      "queue INDEX and files": "No shared-master capacity item found by targeted master/session-limit/container searches.",
+      "TRIAGE_OUTCOMES.md": "No matching active decision found.",
+      "FILTER.md": "No filter applied; accepted design is the basis."
+    },
+    "exact_cover_quotes": [
+      "SPEC_impl.md:6003-6004: Exec channels ride the place host's supervisor master, preserving logins that need interactive second factor.",
+      "SPEC_impl.md:6005-6007: After a full master refuses a channel, OpenSSH can open another noninteractive login. Hosts that require interactive approval for each login therefore allow about ten concurrent container connections, with actual capacity depending on their configuration and other channels."
+    ],
+    "missing_premise": null,
+    "original_stronger_consequence": "Provisioning or builder operations can fail at shared-session capacity even when the caller requests OneShot or Provisioning; conditionally high material UX, but no established lost-work or security route. This record already proposed specification acceptance.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Exact specification acceptance of nested sharing and capacity; do not use it to cover missing failure diagnosis."
+  },
+  {
+    "key": "g055/c3",
+    "latest_line": 10,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "common-container-route-shell-and-option-boundaries",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The inspected lowering preserves literal words at both parsing shells. Immediate executable option boundaries were checked separately; this is a narrow refutation, not certification of arbitrary callers.",
+    "checks": [
+      "56659839785691f76da3af5d8f51b511cff4ba8b access.rs:145-160,193-231,294-327,343-374 quotes inner argv and outer SSH argv; CLEAN_PLACE_EXEC:16 invokes positional arguments through exec \"$@\" without eval.",
+      "5665983 farhelm-proto/src/text.rs:97-99 surrounds each word in single quotes and closes/escapes/reopens embedded quotes. ssh.rs:293-297 and :325-334 put -- before destination in both shared and non-sharing prefixes.",
+      "5665983 access.rs:203-205 requires an absolute Podman executable, :214-227 supplies user/home as option values and terminates before the container; store/podman.rs:202-209 validates canonical 64-hex container IDs.",
+      "5665983 environment/podman/build.rs:59-73 uses getent passwd -- with a quoted account; :808-832 terminates options before pull/image-inspect references. These are only the explicitly named caller boundaries.",
+      "SPEC_impl.md Helm transport and One route for transport and provisioning require pre-destination SSH termination and quoting once per shell. No execution performed."
+    ],
+    "coverage_checked": {
+      "SPEC.md": "Security and container sections do not authorize injection.",
+      "SPEC_impl.md": "Quoting and option-termination contracts support the source refutation, not an exception accepting injection.",
+      "TODO.md Planned": "Empty.",
+      "plans/queue": "No unlanded entries.",
+      "BUGS.md": "No matching injection acceptance.",
+      "queue INDEX and files": "Targeted shell_quote/quote_argv/Podman route searches found no exact existing item.",
+      "TRIAGE_OUTCOMES.md": "No matching active decision found.",
+      "FILTER.md": "Security is outside applicable generic filters; no filter applied."
+    },
+    "exact_cover_quotes": [],
+    "missing_premise": "No interpolation or option-injection hole was established in these boundaries; arbitrary caller argv and other image consumers remain outside this refutation.",
+    "original_stronger_consequence": "Hostile container/user/home/program text might execute commands on the container host: highest/security. Earlier broad wording is superseded by the explicit separation of shell escaping from immediate option interpretation.",
+    "needs_independent_drop_check": true,
+    "proposed_basis": "Narrow source refutation of the named shell and option consumers, for the parent's fresh independent security drop check."
+  },
+  {
+    "key": "g055/c4",
+    "latest_line": 11,
+    "recommendation": "retain-verified",
+    "bucket": "highest",
+    "underlying_key": "pending-environment-launch-place-authority-before-registration",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "Registration blocks later retargeting but does not bind a waiting first-container approval to its earlier place route. Source establishes the phase gap and conditional credential delivery. Coverage is ambiguous because the product specification also expressly accepts same-entry retargets; retain and surface that conflict.",
+    "checks": [
+      "56659839785691f76da3af5d8f51b511cff4ba8b store/podman.rs:215-250 guards existing environment and recipe references only; :355-394 registers the current place by numeric ID without an expected destination.",
+      "190d844e58c96cf197aa838d0b0eea8062f48435 agent_requests.rs:4485-4515 freezes only Place and place_name across approval; :4516-4528 checks source ownership, then :4541-4549 passes Place to start_session_environment without expected place authority.",
+      "190d844 provisioning/tensorlake_add.rs:346-398 rechecks current availability and registers; :597-605 invokes recipe credential setup. provisioning/credential_delivery.rs:347-364 selects recipe bindings; :590-608 and :631-651 install configured Codex login and GitHub token at that selected target.",
+      "5665983 access.rs:397-427 resolves a registered binding's current place route; this does not repair earlier approval authority. No execution or actual credential disclosure was observed."
+    ],
+    "coverage_checked": {
+      "SPEC.md": "Container sessions:4869-4872 guards referenced places only. Topology:405-414 expressly allows approvals/creates/clones in flight to follow the same logical entry after destination change, with an explicit narrower exception only for agent host edits/removals. This may cover the retained claim and must be reconciled with the implementation-spec approval rule.",
+      "SPEC_impl.md": "Permission prompts for agent actions:9090-9100 says what a card shows is what approval does and refuses changed target connections. That is the contrary contract relied on by this finding.",
+      "TODO.md Planned": "Empty.",
+      "plans/queue": "INDEX has no unlanded entries; retained environment-agent-operations plan file is not pending coverage.",
+      "BUGS.md": "No matching acceptance.",
+      "queue INDEX and files": "update-preplanning-retarget-consent-ambiguity.md is related consent/specification context, but concerns individual GUI Update planning before its target freeze, not an agent's already waiting environment-launch approval or recipe credentials; not an exact alias.",
+      "TRIAGE_OUTCOMES.md": "No matching pending-environment approval decision found in active ledger.",
+      "FILTER.md": "Wrong-target execution/credential delivery falls outside rare recoverable and diagnostic filters."
+    },
+    "exact_cover_quotes": [
+      "Possible but ambiguous coverage, SPEC.md:407-411: Approvals, settings changes and confirmed operations therefore follow the entry. One still in flight when the destination changes or a new identity is adopted (an approved stop, restart, rename, create or clone, an \"Always allow\" answer, a change to the setting for running `farhelm` commands without asking, a confirmed uninstall) may be carried out against the entry's new machine, and Farhelm adds no check of the installation identity to prevent that.",
+      "Conflicting contract, SPEC_impl.md:9097-9098: A launch is also refused if the target host's connection changed while the card waited, since the approval was for the machine the card named."
+    ],
+    "missing_premise": "No source premise remains for the conditional route, assuming the first-place has no existing resource references, a permitted retarget occurs while approval waits, and the new place permits preparation. Credential disclosure additionally requires configured credentials and successful delivery. Whether this is accepted same-logical-entry behavior is unresolved by the conflicting specifications.",
+    "original_stronger_consequence": "Wrong-host execution and recipe credentials, highest/security. The initial blanket refutation was explicitly withdrawn: registered-container retargeting is prevented, but pending pre-registration approvals are not. Parent-supplied g020/l1 was identified as the same pending-card root and g043/l1 as the distinct registered-route refutation; those external histories were not scanned here.",
+    "needs_independent_drop_check": true,
+    "proposed_basis": "Retain the source-established phase gap and security consequence while naming the exact specification ambiguity. Any acceptance-based drop or lowering, and the separately refuted registered-container hypothesis, require the parent's independent drop check.",
+    "new_interface_evidence": "The latest source trace is valid, but current SPEC.md:405-414 and the same text at 190d844 SPEC.md:399-409 expressly permit approved create/clone work to follow a retargeted logical entry. Send this exact coverage ambiguity to the owner of g020/l1; SPEC_impl.md:9097-9098 says the opposite about target connection changes. No new defect is claimed."
+  },
+  {
+    "key": "g055/l5",
+    "latest_line": 14,
+    "recommendation": "retain-verified",
+    "bucket": "other",
+    "underlying_key": "environment-provisioning-probe-omits-stdin-watchdog",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The admitted environment Update probe bypasses the environment stdin policy and invokes an unlimited helper. The contract mismatch is established; actual orphan duration or billing remains conditional and unobserved.",
+    "checks": [
+      "56659839785691f76da3af5d8f51b511cff4ba8b backend.rs:1606-1622 emits internal stdio with optional state only; :1626-1664 wraps it through route.command without HostAccess::stdio_argv. access.rs:30-47 is the environment-only flag constructor it bypasses.",
+      "5665983 service.rs:1343-1373 admits installed environments and calls probe_target_for_row/backend.probe; :2992-3009 converts their resolved access to Remote ProbeTarget. This proves production Update reachability, not the separately refused Podman uninstall path.",
+      "5665983 farhelm/src/main.rs:2746-2751 documents a sleeping helm with retained gateway stdin; :2761,2821-2827 supplies no watchdog without a passed limit and disables it after clean EOF.",
+      "Exclusive base SPEC_impl.md:6942-6946 limited the policy to Tensorlake steady-state transport. The c8bc155cc36723c8c53870944d07ce8ec61ef9ed SPEC_impl diff adds all environment routes and removes that exception. 566 ships the Podman Update path. Thus the new contract/route mismatch is in range even though old Tensorlake probes were unlimited.",
+      "Endpoint 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db backend.rs:1602-1618 still omits the option. Ordinary successful cleanup/clean EOF is not alleged to leak; no runtime test performed."
+    ],
+    "coverage_checked": {
+      "SPEC.md": "Container sessions promises ordinary updates in containers; no exemption for provisioning helper expiry found.",
+      "SPEC_impl.md": "Current One route for transport and provisioning:5999-6003 requires the flag for all environment stdio routes; Tensorlake hosts preserves the no-default-watchdog/clean-EOF distinction. No short-probe exemption found.",
+      "TODO.md Planned": "Empty.",
+      "plans/queue": "No unlanded index entries.",
+      "BUGS.md": "Accepted local escaped-helper transfer hang is different from a missing remote input-silence watchdog.",
+      "queue INDEX and files": "probe-timeout-discards-parsed-remote-path.md concerns lost parser metadata at cleanup, and tunnel-helper-exit-may-block-flushing-stdout.md concerns blocking exit after the watchdog fires. Neither removes this missing flag or covers it exactly.",
+      "TRIAGE_OUTCOMES.md": "No exact environment-probe expiry decision found.",
+      "FILTER.md": "No filter fully matches: potential retained process lifetime is not merely a rare display/diagnostic or safe retry."
+    },
+    "exact_cover_quotes": [],
+    "missing_premise": "Actual orphaning/billing incidence and external client's retained-stdin behavior were not reproduced. Local cleanup cannot run while the helm machine sleeps; clean EOF already delivered is outside the claim. No security or user-owned-work loss is established.",
+    "original_stronger_consequence": "Initial lead suggested a helper outliving two minutes and possible extra process lifetime/billing. The latest record confines its verified consequence to the missing invocation/expiry contract, retaining the conditional remote-orphan premise and normal-cleanup caveat. No highest consequence was asserted.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Record a verified invocation-contract defect in other, with conditional lifetime/billing consequences and full-range attribution caveat intact."
+  },
+  {
+    "key": "g055/c6",
+    "latest_line": 15,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "container-destination-test-narrow-oracle",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The test claims and distinguishes current destination resolution. Its fixed executable cannot prove every metadata freshness invariant, but it does not claim to do so.",
+    "checks": [
+      "56659839785691f76da3af5d8f51b511cff4ba8b access.rs:454-470 fixes /usr/bin/podman in the probe fake; :473-477 names and explains the current-place-destination oracle.",
+      "access.rs:504-532 compares complete routes before.example and after.example around a raw destination update. Caching the old destination fails that oracle; caching only executable metadata would not, which is a limitation rather than this test's stated claim. No test execution."
+    ],
+    "coverage_checked": {
+      "SPEC.md": "Container host probe/route requirements do not state that each individual regression must certify all probe metadata.",
+      "SPEC_impl.md": "Current-route contract read; not used as a substitute for examining the test's oracle.",
+      "TODO.md Planned": "Empty.",
+      "plans/queue": "No unlanded entries.",
+      "BUGS.md": "No test-oracle coverage.",
+      "queue INDEX and files": "No exact destination-resolution test item in targeted searches; container-template-replacement-test-reuses-old-config.md concerns another oracle.",
+      "TRIAGE_OUTCOMES.md": "No matching active decision.",
+      "FILTER.md": "No filter applied; narrow source refutation."
+    },
+    "exact_cover_quotes": [],
+    "missing_premise": "No overstated per-endpoint executable-freshness claim was identified in this test.",
+    "original_stronger_consequence": "Possible false test assurance about all executable freshness, other/test assurance; no established security or user-work-loss route. The candidate was set aside based on the test's own scope, not production correctness.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "The stated oracle distinguishes its intended competing mechanism; lack of exhaustive assertions alone is not a defect."
+  },
+  {
+    "key": "g055/c7",
+    "latest_line": 16,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "private-podman-plan-json-not-execution-authority",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "Execution retains the typed route, including the private executable; it does not deserialize the public confirmation JSON to reconstruct authority.",
+    "checks": [
+      "56659839785691f76da3af5d8f51b511cff4ba8b access.rs:110-126 derives Serialize only and skips private podman; :173-185 executes retained program/args.",
+      "5665983 provisioning/plan.rs:53-74 and :544-551 retain typed RemoteRoute and equality in target/plan. service.rs:2216-2355 takes PendingPlan by reference and revalidates original/retained targets; :2231-2234 clones pending.plan.target rather than consuming public JSON. No execution performed."
+    ],
+    "coverage_checked": {
+      "SPEC.md": "No permission to substitute an executable found or needed.",
+      "SPEC_impl.md": "Shared route/confirmation shape contract agrees with retaining private execution facts; not an acceptance of substitution.",
+      "TODO.md Planned": "Empty.",
+      "plans/queue": "No unlanded entries.",
+      "BUGS.md": "No matching acceptance.",
+      "queue INDEX and files": "No exact public-plan/private-Podman-authority item found by targeted searches.",
+      "TRIAGE_OUTCOMES.md": "No exact active decision found.",
+      "FILTER.md": "No filter applied."
+    },
+    "exact_cover_quotes": [],
+    "missing_premise": "No JSON-to-route reconstruction or concrete unsafe executable substitution is established. Future arbitrary consumers of these types remain outside this check.",
+    "original_stronger_consequence": "Omitting the private executable from confirmation JSON might permit silent program substitution. Reviewer suggested other absent a concrete unsafe target route; this authority question could nevertheless implicate security if that missing route existed.",
+    "needs_independent_drop_check": true,
+    "proposed_basis": "Narrow source refutation of serialized confirmation JSON as execution authority; send any security-sensitive dismissal to the parent's independent check."
+  },
+  {
+    "key": "g056/c1",
+    "latest_line": 1,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "container-release-must-not-close-place-master",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The route release method returns for container exec before resolving SSH access or issuing either control-exit command.",
+    "checks": [
+      "1038bb1f4549f6896fa6e064fecf540f4548b4da transport.rs:249-264 accepts only direct Ssh for release and returns on PodmanExec/Local; :272-314 is reachable only for direct SSH routes.",
+      "1038bb1 SPEC_impl.md:6481-6482 and current SPEC_impl.md:6002-6003 forbid closing the container host masters for a nested environment. This implementation satisfies the narrow route-ownership contract; other lifecycle cleanup was not certified. No execution performed."
+    ],
+    "coverage_checked": {
+      "SPEC.md": "Container suspend closes its own exec connection, not sibling supervisor processes.",
+      "SPEC_impl.md": "Exact nested master-release prohibition read.",
+      "TODO.md Planned": "Empty.",
+      "plans/queue": "No unlanded entries.",
+      "BUGS.md": "Different provisioning pipe-hang root.",
+      "queue INDEX and files": "No exact nested-master release finding found.",
+      "TRIAGE_OUTCOMES.md": "No exact active decision.",
+      "FILTER.md": "No filter applied."
+    },
+    "exact_cover_quotes": [],
+    "missing_premise": "The suspected control-exit call for a nested route does not occur in this method.",
+    "original_stronger_consequence": "Container suspend/delete could disconnect the place and siblings: conditional high connectivity impact. Supervisor sessions outlive the connection; no lost-work or security route established. The original record already proposed source refutation.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Nested-route early return refutes the named release behavior only."
+  },
+  {
+    "key": "g056/c2",
+    "latest_line": 2,
+    "recommendation": "duplicate",
+    "bucket": "other",
+    "underlying_key": "environment-unconditional-stdin-option-compatibility",
+    "aliases": ["g055/l1"],
+    "target_queue_file": null,
+    "why": "Exact same old-helper option-compatibility hypothesis and specification acceptance as g055/l1; consolidate its caveat there.",
+    "checks": [
+      "1038bb1f4549f6896fa6e064fecf540f4548b4da transport.rs:190-201 uses stdio_argv; 56659839785691f76da3af5d8f51b511cff4ba8b access.rs:30-47,234-247 supplies the unconditional environment flag.",
+      "1038bb1 SPEC_impl.md:6478-6481 and :7127-7130 states supported helpers have the option and it shipped with Tensorlake support. No deployed-helper execution evidence was obtained."
+    ],
+    "coverage_checked": {
+      "SPEC.md": "Environment/compatibility search found no narrower exception.",
+      "SPEC_impl.md": "Exact same accepted supported-helper contract as g055/l1, retained at current 5999-6003 and Tensorlake hosts.",
+      "TODO.md Planned": "Empty.",
+      "plans/queue": "No unlanded entries.",
+      "BUGS.md": "No exact coverage.",
+      "queue INDEX and files": "No exact existing compatibility item; deadline-exit flushing item is distinct.",
+      "TRIAGE_OUTCOMES.md": "No exact active decision.",
+      "FILTER.md": "No filter applied."
+    },
+    "exact_cover_quotes": ["SPEC_impl.md:6000: The supported environment helper has that option."],
+    "missing_premise": "No supported helper lacking the option established; this does not prove all deployed helper binaries implement it.",
+    "original_stronger_consequence": "An old sandbox helper could reject the new unconditional option before hello, causing high connection unavailability; no user-work-loss or security consequence established. Reviewer proposed explicit specification acceptance.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Exact alias of g055/l1 and the same explicit specification acceptance; preserve its deployment-evidence caveat."
+  },
+  {
+    "key": "g056/f1",
+    "latest_line": 14,
+    "recommendation": "retain-verified",
+    "bucket": "other",
+    "underlying_key": "podman-dial-kind-advances-before-process-marker",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "Container dials have process diagnostics but are advanced to WaitingForHello from the host-kind predicate, disabling their pre-helper exit classifier. This removes intended explanation from an independently failing dial; it does not cause connectivity failure or erase all evidence.",
+    "checks": [
+      "56659839785691f76da3af5d8f51b511cff4ba8b lib.rs:2465-2488 installs the real provider/store-backed transport; manager.rs:4175-4223 admits provisioned environments observed Running and reaches dial. Earlier 04ff production reachability was correctly withdrawn.",
+      "5665983 store.rs:896-901 returns None for Podman ssh_access. manager.rs:4251-4289 retains process diagnostics but advances at :4268-4269 before the marker. :4335-4345 settles the process and forwards the progress to attempt_failure.",
+      "5665983 manager.rs:5372-5402 gates LocalPodman and NestedSsh diagnoses on ConnectingToHost; :5443-5482 still preserves bounded stderr/refusal evidence and numeric status. attempt_failure:5501-5521 passes progress.stage unchanged. Current marker, successful hello, protocol and version-skew precedence remain outside the finding.",
+      "1038bb1f4549f6896fa6e064fecf540f4548b4da transport.rs:190-233 creates process connections for every RemoteRoute. 5665983 access.rs:302-327 selects the place supervisor master and podman_probe.rs:338-362 returns route/probe values without reserving an SSH session across status and dial.",
+      "Endpoint 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db manager.rs:4477-4478 and :5621-5642 retains the defect. No reproduction or runtime observation."
+    ],
+    "coverage_checked": {
+      "SPEC.md": "Container sessions uses the ordinary supervisor connection and errors contract; no acceptance of this false stage found.",
+      "SPEC_impl.md": "One route for transport and provisioning:5995-6008 requires process diagnostics for local/remote Podman and explicit container-host session-limit explanation. Helm transport:2825-2936 distinguishes marker/hello evidence from exit status; it does not authorize kind-only advancement.",
+      "TODO.md Planned": "Empty.",
+      "plans/queue": "No unlanded index entries. Residual Podman plan's session-limit requirement is already landed, not covering planned repair.",
+      "BUGS.md": "Escaped SSH-helper transfer hang is unrelated.",
+      "queue INDEX and files": "Targeted WaitingForHello/process-exit/session-limit/master/route searches found no exact existing item.",
+      "TRIAGE_OUTCOMES.md": "No exact active decision found.",
+      "FILTER.md": "Rare imprecise-diagnostic filter could cover a narrowly timed capacity-race subset alone. The finding also covers ordinary local/remote pre-helper container process failures with no established rarity premise, so its entire boundary does not match. Retain."
+    },
+    "exact_cover_quotes": [],
+    "missing_premise": "Actual incidence is unmeasured. The nested capacity scenario specifically needs successful Running status and route resolution followed by an independently failed dial; a master full already at status may refuse earlier. Concurrent slot use can produce the later failure, and local Podman has no SSH-capacity premise. No stronger security or lost-work consequence established.",
+    "original_stronger_consequence": "Missing session-limit explanation and other pre-helper exit diagnoses, other. Earlier attribution to production Podman at 04ff was narrowed to 566, where the provider ships. Raw escaped stderr/numeric status survive, provisioning's separate classifier is unaffected, and this is not a general connectivity or security finding.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Record verified diagnostic-stage defect in other; preserve reachability correction, capacity timing caveat, marker/hello precedence and retained raw evidence. Do not filter the whole record using only one rare subset."
+  }
+]

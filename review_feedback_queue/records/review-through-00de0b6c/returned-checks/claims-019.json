@@ -1,0 +1,283 @@
+[
+  {
+    "key": "g032/l1",
+    "latest_line": 2,
+    "recommendation": "retain-unverified",
+    "bucket": "other",
+    "underlying_key": "wake-budget-unaccepted-resume-request-latency",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The alleged queued busy wait is refuted, but the broad timing suspicion is not mathematically refuted: an in-flight request remains outside the wait deadline until its result identifies it. Preserve this as investigated uncertainty if recording it; no shipped avoidable overrun beyond ordinary request/transport delay was established.",
+    "checks": [
+      "At ba7cc0264028eebb39647deb1d25b055e6886935, crates/farhelm-ui/src/api.rs:5724-5734 awaits post_lifecycle outside WakeBudget::within; only success excludes elapsed time. Lines 5736-5754 subsequently charge fetch and sleep against the shared budget.",
+      "At that revision, crates/farhelm-helm/src/environment/lifecycle.rs:28-34 uses try_host_provision_lock and returns HostBusy immediately; change_with_manager:51-69 reads the registry and dispatches the provider. This does not queue behind the busy owner.",
+      "SPEC_impl.md:6731-6742 requires both one shared 60-second waiting budget and never cutting off an accepted slow Resume. Source supports the latter constraint; it does not prove every nonaccepted network request finishes within the former. No execution performed."
+    ],
+    "coverage_checked": {
+      "specifications": "Searched SPEC.md and SPEC_impl.md for wake, busy refusal and budgets; current SPEC_impl.md:6731-6742 is the governing contract, not acceptance of an avoidable overrun.",
+      "TODO_Planned": "TODO.md:23-25 has an empty Planned bucket. Near-term and plan-decision wake wording is not exact Planned coverage.",
+      "plans_queue": "sandbox-suspend-overlap.md:78-81 requires bounded busy waiting without cutting off an accepted Resume; wake-launch-stuck.md:52-68 covers a separate post-wake page-observation wait. Both are landed per plans/REPORTS.md:23,27, not unlanded repair coverage.",
+      "BUGS": "Read BUGS.md; its local SSH transfer-helper hang is a different trigger and scope.",
+      "queue": "Searched and read INDEX.md; no exact wake busy-request latency item. Similar lifecycle polling timeout items concern different provider phases.",
+      "active_triage": "Searched TRIAGE_OUTCOMES.md for wake, busy, Resume and budgets; no matching decision.",
+      "filter": "No filter applied: the premise needed to identify a distinct defect remains missing."
+    },
+    "exact_cover_quotes": [],
+    "missing_premise": "A shipped avoidable delay of a request that ultimately refuses busy, beyond ordinary transport or registry-read latency, sufficient to violate the waiting allowance. Actual incidence is unmeasured.",
+    "original_stronger_consequence": "A launch waiting for a busy host may remain pending beyond its stated 60-second allowance; the request timeout is longer. No security or work-loss route was claimed.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "The latest non-report decision validly rejects deliberate queueing behind the busy lock. It should not be recorded as proof that delayed refusal cannot exceed 60 seconds."
+  },
+  {
+    "key": "g032/c2",
+    "latest_line": 3,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "container-leftover-delete-rendered-target-binding",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The proposed destructive retargeting does not occur on this route: the answered render supplies both the opening token and the copied deletion target. This is a proposed source refutation requiring independent checking because the original hypothesis concerned destructive consent.",
+    "checks": [
+      "At 350a4b33b6d4476f4a78e43cea124bc2b828f462, crates/farhelm-ui/src/containers_settings.rs:128-165 draws confirm.current(), clones shown into the closure, requires confirm.take(&shown), then synchronously constructs delete_container_leftover(&base, shown.key()).",
+      "At that revision, crates/farhelm-ui/src/api/environments.rs:76-99 chooses the URL from row.host or serializes the captured row.place/row.id before returning an owned future. It does not reread the catalog or confirmation after awaiting.",
+      "Current SPEC_impl.md:1069-1090 requires answers to bind to what was drawn. The inspected source follows that target/opening contract. No execution performed."
+    ],
+    "coverage_checked": {
+      "specifications": "Searched both specifications for leftover deletion, confirmation and target binding; SPEC.md:4838-4848,4888-4890 requires confirmed whole-container cleanup, and SPEC_impl.md:6046-6050 defines its ownership path. These do not accept wrong-target deletion.",
+      "TODO_Planned": "Empty at TODO.md:23-25.",
+      "plans_queue": "Search found podman-environments and tmux-related plans, but no unlanded work covering this hypothetical rebinding. Podman work is landed per plans/REPORTS.md:21.",
+      "BUGS": "Read BUGS.md; no matching trigger/consequence.",
+      "queue": "INDEX.md has no exact container leftover confirmation-retargeting item; orphan ownership-lock wording is a different contract.",
+      "active_triage": "Searched TRIAGE_OUTCOMES.md for container/orphan deletion and rendered target; no exact decision.",
+      "filter": "No filter used; proposed disposition rests on captured target and token."
+    },
+    "exact_cover_quotes": [],
+    "missing_premise": null,
+    "original_stronger_consequence": "A refreshed leftover list might redirect a confirmed permanent deletion to a different container, losing its files, processes and unpushed work. Source refutes that target-switch mechanism.",
+    "needs_independent_drop_check": true,
+    "proposed_basis": "Refute only the named live-catalog/confirmation rebinding suspicion. This does not certify all container-deletion ownership behavior."
+  },
+  {
+    "key": "g032/l3",
+    "latest_line": 11,
+    "recommendation": "retain-verified",
+    "bucket": "high",
+    "underlying_key": "container-leftover-delete-registers-global-configuration-save",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "Source establishes a remote cleanup operation holding the initiating client's configuration-save barrier, delaying unrelated reads and actions until cleanup answers or its client deadline expires. This is broader than a harmless diagnostic delay and contradicts the explicit host-mutation exclusion.",
+    "checks": [
+      "At 350a4b33b6d4476f4a78e43cea124bc2b828f462, api/environments.rs:80-91 selects whole-host or orphan DELETE then calls send_save. api.rs:2259-2267 registers CONFIGURATION_SAVES synchronously and holds its ticket through the response future.",
+      "At that revision, api.rs:2488-2507 captures preceding tickets and awaits them before HTTP dispatch; api/save_order.rs:47-65,69-82 releases readers only on ticket drop, and :89-108 charges that wait to their deadline with the configuration-save timeout diagnostic. fetch_hosts at api.rs:4603-4605 is a concrete unrelated consumer. READ_TIMEOUT at :2167 is 10 seconds, REQUEST_TIMEOUT at :2127 is 60 seconds.",
+      "containers_settings.rs:155-176 constructs the request at :165 and runs it in spawn_forever at :166-167. mounted is checked only after sending.await, so closing Settings does not release the ticket. This separates request lifetime from save ordering.",
+      "farhelm-helm/src/hosts.rs:1470-1500 awaits connection withdrawal and provider.destroy. environment/podman.rs:1294-1335 reaches remove_container:400-414, including inspect, remote rm --force and absence verification; COMMAND at :25 is 30 seconds. The endpoint performs remote work rather than returning an admission receipt.",
+      "git diff from that revision through 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db for api/environments.rs was empty. This is a conditional slow-cleanup source route, not an observed outage. Other clients, already-dispatched requests, terminal/event sockets and page JavaScript HTTP are outside its scope."
+    ],
+    "coverage_checked": {
+      "specifications": "Searched both specifications for container leftovers and save ordering. SPEC_impl.md:327-341 explicitly excludes host mutations from tickets and names bypasses; SPEC.md:4888-4890 promises retryable leftover cleanup, not global client blockage.",
+      "TODO_Planned": "Empty at TODO.md:23-25. The broader near-term infallible-GUI-transport proposal is neither Planned nor an exact remedy for wrongly classifying a remote mutation as a save.",
+      "plans_queue": "Searched save ticket/order, leftover delete and host mutation terms; no unlanded plan removes this cause. Podman and nonblocking-session-action plans concern broader landed work.",
+      "BUGS": "Read BUGS.md; its provisioning transfer-helper hang is unrelated and does not cover blocking the GUI funnel behind a container delete.",
+      "queue": "INDEX.md searched and read; no exact alias. orphan-cleanup-promises-unheld-provisioning-lock concerns server ownership-lock documentation, not this client-side barrier.",
+      "active_triage": "Searched TRIAGE_OUTCOMES.md for container, save ordering, tickets and remote host mutation; no exact decision.",
+      "filter": "No full match: remote slowness need not be a rare fault, and the consequence includes unrelated host/session interaction degradation in the initiating client."
+    },
+    "exact_cover_quotes": [],
+    "missing_premise": "No missing source premise for the conditional barrier. Cleanup latency and frequency have not been measured.",
+    "original_stronger_consequence": "Unrelated host/session requests stall or time out while container cleanup runs, even after Settings closes. No established security or user-work-loss route.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Record high for material same-client interaction degradation. Retain the limited scope and eventual ticket release; use ordinary send while keeping the existing owned future."
+  },
+  {
+    "key": "g032/c4",
+    "latest_line": 12,
+    "recommendation": "filtered",
+    "bucket": "other",
+    "underlying_key": "restart-success-retired-by-precompletion-stale-listing",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The revised conditional mechanism is supported; the original blanket refutation was wrong for stale Interrupted rows. The surviving consequence is a temporary interrupted card and absent terminal until fresh detail, within the rare self-correcting display filter. Cross-batch duplicate claims are reported in the history but were not independently compared here.",
+    "checks": [
+      "At f560058da19e02716e6f943883a9508b447aff4e, session_ops.rs:79-80 accepts session.stale regardless of Interrupted; :91-107 allows retirement once pending clears; :215-225 clears restart_succeeded.",
+      "At that revision list/view.rs:3416-3419 publishes Restart completion, requests refresh and releases pending. commit_listing:1945-1953 applies normal admission then :1985 retires success. ops.rs:182-187 checks last-applied generation, with no Restart-completion floor. aggregate.rs:547 captures host snapshots before awaited cached_slice at :578.",
+      "session_view.rs:549-564 increments mount generation but sets relaunched only while restart_succeeded remains true. terminal_absence:3701-3707 and keep_terminal_surface:3714-3722 can therefore keep the prior mounted nonstale Interrupted view on its card. The conditional ordering is before its completion observer or a live detail read; no runtime schedule was observed.",
+      "The history's earlier nonstale-Interrupted argument remains valid only for that narrower input. A stale Interrupted row bypasses it. No permanent failure, lost Resume offer, process termination or user-work loss was established."
+    ],
+    "coverage_checked": {
+      "specifications": "Searched both specifications for Restart completion, reattachment and listings; SPEC_impl.md:1134-1140 requires mounted completion observation and reattachment, rather than accepting premature retirement.",
+      "TODO_Planned": "Empty at TODO.md:23-25.",
+      "plans_queue": "Read session-action-leftovers.md's goal, criteria, decisions and proposals: its listing-retirement work is landed (plans/REPORTS.md:24). It does not supply unlanded repair coverage. Its accepted second-reboot residual differs from this stale pre-completion reply.",
+      "BUGS": "Read BUGS.md; no matching item.",
+      "queue": "Read review_feedback_queue/retained-restart-hides-reboot-card.md in full. It concerns retaining optimism through a second reboot without any eligible observation, the opposite retirement direction; not an exact alias or extension. No other matching INDEX entry.",
+      "active_triage": "Searched TRIAGE_OUTCOMES.md for Restart outcomes, stale listings and retirement; no exact decision.",
+      "filter": "FILTER.md:25-43, Rare, self-correcting glitches and imprecise diagnostics: narrow asynchronous ordering; whole established consequence is briefly wrong recovery presentation healed by the next fresh detail. None of that filter's exclusions is established."
+    },
+    "exact_cover_quotes": [
+      "FILTER.md, Rare, self-correcting glitches and imprecise diagnostics: 'a display that is briefly wrong and corrects itself on the next refresh, retry or reconnect, or when the user leaves the view'"
+    ],
+    "missing_premise": "Incidence and exact task/effect ordering were not observed. The supplied histories name g037/f3 and g038/l1 as aliases, but those records are outside this batch and were not opened. g036/l1 is explicitly a distinct newer-eligible-listing route.",
+    "original_stronger_consequence": "Initially suspected high impact: an old listing could retire successful Restart too early and leave the session unavailable. The latest record bounds this to temporary blocked terminal access until fresh detail; no process or work-loss consequence was claimed.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Proposed filter only for the bounded temporary presentation consequence. If another batch establishes a lasting or destructive consequence, this basis no longer covers it. Reconcile the underlying key with the supplied cross-batch owners without merging the separate eligible-listing route."
+  },
+  {
+    "key": "g032/l5",
+    "latest_line": 13,
+    "recommendation": "filtered",
+    "bucket": "highest",
+    "underlying_key": "update-interrupted-restart-confirmation-denies-survivor-cleanup",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "Source supports the misleading-confirmation route and loss of surviving agent work. The specification's cleanup acceptance does not itself accept misleading later consent. A separate proposed omission basis is the exact older-release-plus-rare-condition filter, which expressly includes work loss in affected sessions. This requires the parent's independent drop check; no drop is authorized here.",
+    "checks": [
+      "At dbfc69751215dbf15e1d31d5bed73c3754c4ebc4, session_view.rs:199-200 opens a question only for Running; :2255-2264 stores a ConfirmSlot<()> opening. The retained question's render uses current shown.status at :2594-2595 and captured restart_prompt_stops at :2008/:2621.",
+      "status.rs:634-635 says a reboot or Farhelm update left 'nothing left to stop'; :641-651 documents rendered stop consent and returns false for Interrupted. session_view.rs:2612 consumes the drawn opening before sending that false consent. The generic stop-running-agent tooltip at :2600 conflicts with the consequence sentence rather than removing its false assertion.",
+      "At that revision old_terminals.rs:283-318 sweeps recorded old-agent scopes using Warn, and :350-357 times out without refusing conversion. core.rs:12906/:12957 guards only alive_pane; refuse_unconsented_stop:3784-3797 requires alive && Running. The no-pane Restart path at :12985-13010 reaps the recorded prior scope and agent-only descendants before relaunch, including survivors a timed-out startup sweep did not reach.",
+      "This needs an already-open Running question that stays mounted, an update of old-terminal state, incomplete startup cleanup, a later Interrupted render and its answer. Ordinary Interrupted clicks bypass the question; unmount/cancel ends this route. Only prior agent work is claimed, not tabs, unrelated processes or persistent-file deletion. No execution or incidence measurement."
+    ],
+    "coverage_checked": {
+      "specifications": "Searched both specifications for old terminal ending, Restart, survivors and confirmation. SPEC.md:2997-3010 and SPEC_impl.md:2781-2823 accept cleanup failure and later cleanup/duplicate agents; SPEC_impl.md:1069-1090 binds destructive answers to drawn consequences. Cleanup acceptance does not explicitly cover the false consequence sentence.",
+      "TODO_Planned": "Empty at TODO.md:23-25. Eventual removal of startup shutdown is outside Planned and has an undecided release boundary.",
+      "plans_queue": "tmux-end-old-terminals.md describes the accepted startup conversion but is landed per plans/REPORTS.md:29. No unlanded plan found that repairs the warning. Sandbox confirmation guards concern different frozen/suspended state.",
+      "BUGS": "Read BUGS.md; no matching accepted bug.",
+      "queue": "INDEX.md has no exact misleading update-interrupted Restart consequence item. Container tab-close copy and generic confirmation items have different scope.",
+      "active_triage": "Searched TRIAGE_OUTCOMES.md for old terminal cleanup, survivor Restart and consequence wording; no exact active decision.",
+      "filter": "FILTER.md:136-158, Upgrades from older releases combined with another rare condition: old tmux session/process state must survive into the upgrade, plus startup cleanup failure and the unusual retained-question sequence. The only established harm stays in those affected sessions. No broken installation/database or separate security/trust-boundary consequence is established."
+    },
+    "exact_cover_quotes": [
+      "FILTER.md, Upgrades from older releases combined with another rare condition: 'state an older release wrote, a session or agent that kept running through the upgrade' plus 'a narrow timing window, a crash or fault at a specific point, or an unusual sequence of user or agent actions'.",
+      "The same filter: 'Unlike the filters above, this one also covers losing user-owned work within the affected sessions, such as resuming the wrong conversation.'",
+      "SPEC_impl.md:2814-2816: 'A sweep that runs out of time leaves the rest for the session's Restart or Delete: the conversion commits regardless.' This accepts the survivor/cleanup premise, not the misleading confirmation."
+    ],
+    "missing_premise": "Actual incidence is unmeasured. Independent adjudication must confirm the upgrade filter's full boundary, including whether the deceptive consent has any distinct security/trust consequence beyond affected-session work loss.",
+    "original_stronger_consequence": "A retained Restart question can say nothing remains to stop, then terminate surviving user-owned agent/process work. The earlier proposed spec-acceptance drop was withdrawn at line 13; preserve that withdrawal. The full established consequence remains highest if retained.",
+    "needs_independent_drop_check": true,
+    "proposed_basis": "Do not reinstate the withdrawn claim that imperfect cleanup acceptance authorizes misleading confirmation. Independently check the separate upgrade filter. If its security boundary is unclear, retain highest."
+  },
+  {
+    "key": "g032/l6",
+    "latest_line": 15,
+    "recommendation": "retain-unverified",
+    "bucket": "highest",
+    "underlying_key": "legacy-xterm-raw-paste-decoded-as-grid-input",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The assigned UI/API interlocks do not block the old-page premise. Retain the possible successful data-to-input reinterpretation and its work-loss/security consequence for reconciliation with its supplied owner g196/l1. This batch did not read that owner's record and therefore does not independently authorize cross-batch deduplication.",
+    "checks": [
+      "At f560058da19e02716e6f943883a9508b447aff4e parent, skew.rs:30-35 explicitly declines blocking, render refusal and automatic reload. BuildSkewNotice:287-293 is a PeerLine. lib.rs:2042-2098 keeps the authenticated PreferencesGate tree while showing skew; api.rs:2522 notes skew and :2549 still returns successful responses.",
+      "At that parent lib.rs:520-521 defaults missing agent_terminal to None; session_view.rs:3839-3849 preserves it in agent_spec_kind; terminal.js:4650-4665 builds xterm for unknown kind. terminal.js:5887-5915 treats a missing notice as bytes, and :4158-4159 sends text as raw encoded bytes on the open socket.",
+      "At f560058da19e02716e6f943883a9508b447aff4e, farhelm-proto/src/grid.rs:1650-1655 parses the whole frame as GridInput JSON and :1686-1693 bounds Text size rather than refusing control characters. farhelm-supervisor/src/grid_input.rs:175 encodes Text as data.as_bytes().to_vec(). This supports interpretation of valid Text-shaped raw content after JSON string decoding.",
+      "No payload was constructed or executed. The complete paste-dispatch and unbracketed-surface premises remain supplied from g196, not independently reproduced here. Ordinary keystrokes generally detach; bracketed paste can prevent the particular Text route."
+    ],
+    "coverage_checked": {
+      "specifications": "Searched both specifications for old pages, terminal kinds, raw bytes, paste and malformed input. SPEC_impl.md:2943-2955 expressly accepts old-page misdrawing and malformed-input attachment failure; it does not explicitly accept successful reinterpretation as instructions. SPEC_impl.md:1859-1865 distinguishes structured input from terminal bytes.",
+      "TODO_Planned": "Empty at TODO.md:23-25. The near-term infallible-GUI-transport proposal is not Planned or exact coverage of protocol interpretation.",
+      "plans_queue": "tmux-end-old-terminals.md's removal is landed per plans/REPORTS.md:29. No unlanded input-compatibility repair found. environment-agent-operations.md's unknown card-kind refusal addresses approval cards, not terminal paste frames.",
+      "BUGS": "Read BUGS.md; no matching acceptance.",
+      "queue": "INDEX.md has no exact raw-paste/GridInput confusion item. Other stale-page or terminal input concerns have different triggers and consequences.",
+      "active_triage": "Searched TRIAGE_OUTCOMES.md for old page, JSON paste, grid input and stream notice; no exact active decision.",
+      "filter": "The upgrade filter is possible only if this has no security/trust-boundary consequence. Successful reinterpretation of literal document escapes into terminal control instructions raises exactly that unresolved boundary; unclear matches do not justify omission. No filter applied."
+    },
+    "exact_cover_quotes": [
+      "Potential cover, not accepted: SPEC_impl.md:2950 says 'A page loaded from the previous helm and left open across the update must be reloaded; nothing keeps it working.'",
+      "The same paragraph specifies 'what is typed into it ends the attachment as malformed input' and concludes 'a reload is the whole remedy'; successful decoded instructions are not expressly named."
+    ],
+    "missing_premise": "Independently comparing the supplied g196/l1 record and completing its whole-message, unbracketed-paste chain is outside this batch's assigned interface check. Clipboard occurrence and runtime incidence are unmeasured.",
+    "original_stronger_consequence": "An old page's literal pasted JSON can become actual Enter/control input outside paste wrapping, execute unintended commands and lose user-owned work. Preserve both the security interpretation and all old-page/bracketed-paste caveats.",
+    "needs_independent_drop_check": true,
+    "proposed_basis": "Retain highest while the successful-interpretation and upgrade-filter security boundary are reconciled. Do not treat reload-only compatibility wording as acceptance of every possible old-page consequence.",
+    "new_interface_evidence": "Direct source checks confirm the supplied owner's App/API premise: build skew is a notice, successful responses remain usable, missing kind mounts xterm, and raw Text-shaped input is structurally accepted and encoded as decoded bytes. Send this supporting interface evidence to g196 without commissioning new discovery."
+  },
+  {
+    "key": "g032/c7",
+    "latest_line": 16,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "removed-terminal-kind-smoke-evidence-consumer",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The considered test-oracle omission is refuted by active grid, socket, replay and focus assertions on the requested session, and no remaining named evidence consumer was found. This conclusion is about the smoke's source oracle, not an inference from production correctness.",
+    "checks": [
+      "At f560058da19e02716e6f943883a9508b447aff4e, desktop/appearance_smoke.rs:283-292 requires the requested session's grid, OPEN WebSocket and replay reveal; :293-300 pins that exact attachment and establishes input focus.",
+      "At :325-348 the smoke calls grid.paste, sends encoded grid text Enter, checks exact 512-line burst order and subsequent input, and records terminalRoundtrip. Removing historical xterm insertion/kind metadata does not remove these active substrate checks.",
+      "Pinned git grep for terminalKind and xtermMounted across scripts and crates/farhelm-ui/src/desktop returned no matches. No tests or builds were run."
+    ],
+    "coverage_checked": {
+      "specifications": "Searched both specifications for appearance smoke, terminal kind and grid input; current grid-only widget contract in SPEC_impl.md:1838-1865 does not require the removed metadata fields.",
+      "TODO_Planned": "Empty at TODO.md:23-25.",
+      "plans_queue": "tmux-drop-from-tooling.md:72-88 addresses stale terminal-kind tooling and conflicting appearance-smoke documentation; landed per plans/REPORTS.md:31. No unlanded exact evidence-consumer repair found or needed for the named hypothesis.",
+      "BUGS": "Read BUGS.md; no matching maintainer-smoke issue.",
+      "queue": "INDEX.md has other smoke-fixture concerns but no exact removed terminalKind/xtermMounted evidence consumer.",
+      "active_triage": "Searched TRIAGE_OUTCOMES.md for appearance smoke and removed kind metadata; no exact decision.",
+      "filter": "No filter needed; source refutation."
+    },
+    "exact_cover_quotes": [],
+    "missing_premise": null,
+    "original_stronger_consequence": "Removing xtermMounted and evidence.terminalKind might weaken the native smoke oracle or break an evidence consumer. Maintainer-test evidence only; no security or user-work-loss route identified.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Refute the named missing-oracle/consumer hypothesis using retained assertions and the pinned consumer search. This does not certify physical native keyboard coverage."
+  },
+  {
+    "key": "g032/c8",
+    "latest_line": 17,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "environment-history-deleted-origin-host-decode-authority",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "Deleting the original disposable host does not turn its diagnostic history id into null, and the reusable target, rather than that origin id, supplies new-launch authority. The claimed decode/retargeting route is source-refuted.",
+    "checks": [
+      "At 350a4b33b6d4476f4a78e43cea124bc2b828f462, farhelm-helm/src/store/environment_history.rs:107-144 reads origin_host_id as HostId without a host-row join. decode_entry:152-169 emits that integer and target: Some(...), canonical_cwd: None, cwd '~' and creation sequence.",
+      "At that revision list/create_form/draft.rs:1994-2009 bypasses ordinary-host admission for target-bearing entries and :2015-2021 promotes environment history then selects entry.target. The old host id is not reused as the ordinary destination authority.",
+      "Current SPEC.md:4873-4876 says recent setups survive environment deletion and create fresh environments; SPEC_impl.md:6014-6023 separates recipe/place intent from installed-host identity. Source supports that contract. No runtime validation performed."
+    ],
+    "coverage_checked": {
+      "specifications": "Searched both specifications for reusable environment history, diagnostic host and recent setups after Delete; governing sections read at SPEC.md:4873-4876 and SPEC_impl.md:6014-6023. They require reuse, not acceptance of failed decode or silent retargeting.",
+      "TODO_Planned": "Empty at TODO.md:23-25. Near-term sandbox conveniences reflect older feature scope, not exact current decode failure coverage.",
+      "plans_queue": "Podman reusable history work is landed per plans/REPORTS.md:21; no unlanded repair matching the suspected missing-host decode route found.",
+      "BUGS": "Read BUGS.md; no matching history failure.",
+      "queue": "INDEX.md history identity/provenance items concern ordinary-host installation changes; none covers this deleted-origin environment-history claim.",
+      "active_triage": "Searched TRIAGE_OUTCOMES.md for environment history, origin host and recent setups deletion; no exact active decision.",
+      "filter": "No filter used; source refutation."
+    },
+    "exact_cover_quotes": [],
+    "missing_premise": null,
+    "original_stronger_consequence": "Reusable recent setups might stop decoding after disposable-host deletion; wrong-host launch was also considered and refuted by target-based admission. No concrete harmful wrong-host launch was established.",
+    "needs_independent_drop_check": true,
+    "proposed_basis": "Independent check should preserve and judge the earlier wrong-host concern as well as the decode hypothesis; this batch does not authorize a destructive-target drop."
+  },
+  {
+    "key": "g033/r1",
+    "latest_line": 11,
+    "recommendation": "covered",
+    "bucket": "high",
+    "underlying_key": "old-terminal-cleanup-failure-publishes-ended-state-and-allows-restart",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The full-range cleanup-failure behavior is real but expressly accepted by both current specifications. Separately, removing the GUI migration banner did not newly conceal these survivors because its prior predicate and projection already excluded them. Neither conclusion excludes the distinct misleading confirmation in g032/l5. This proposed omission and consequence classification require independent checking.",
+    "checks": [
+      "At f560058da19e02716e6f943883a9508b447aff4e parent, migration.rs:99-117 requires Tmux and !status.has_ended() for the agent banner, or a Tmux-kind visible tab. service/status.rs:384-388 reports only listed host tabs and derives agent kind from entry.terminal.",
+      "At f560058da19e02716e6f943883a9508b447aff4e, service/core.rs:6675-6679 supplies no terminal for Tmux rows; :7045-7050 sweeps before committing converted outcomes, and :7077-7090 records ended notices/resolves old warnings. A failed sweep does not establish process death. Retaining the deleted banner would not reveal a terminal-less Interrupted survivor.",
+      "At that revision proto/lib.rs:255 sets protocol 77; proto/io.rs:629-643 admits only exact protocol equality, excluding the hypothesized older serving supervisor. This does not eliminate current-supervisor cleanup failures.",
+      "Pinned git log over exclusive 6e423e30068b62c6cfa276c6d720ee35bb70387a through f560058da19e02716e6f943883a9508b447aff4e identifies dbfc69751215dbf15e1d31d5bed73c3754c4ebc4 as startup ending and f560058d as GUI removal. Therefore failure risk predates the assigned GUI patch, not the full review range. Do not call it out-of-range.",
+      "Source establishes incorrect-ended-state/possible second-agent behavior under failed cleanup. Actual loss of work from concurrent agents was not established or executed; high is proposed for that established consequence, with the original possible highest harm preserved."
+    ],
+    "coverage_checked": {
+      "specifications": "Searched and read SPEC.md:2997-3010 and SPEC_impl.md:2781-2823. Both explicitly accept failed cleanup, treating sessions as ended and possible second agents. This exactly matches r1's trigger/consequence/scope, not g032/l5's later misleading warning.",
+      "TODO_Planned": "Empty at TODO.md:23-25. Eventual removal of startup shutdown is not Planned exact repair coverage.",
+      "plans_queue": "tmux-end-old-terminals.md records the same conversion design but is landed per plans/REPORTS.md:29. No unlanded plan found that changes the accepted cleanup-failure result.",
+      "BUGS": "Read BUGS.md; no separate matching entry; specification acceptance supplies the proposed coverage.",
+      "queue": "INDEX.md has no exact r1 item. Existing late terminal-host adoption and restart-recovery items concern different terminal substrates or later states. g032/l5 is distinct and must not be deduplicated here.",
+      "active_triage": "Searched TRIAGE_OUTCOMES.md for migration banner, startup old-terminal failure and second agents; no exact active decision.",
+      "filter": "Upgrade-plus-rare-condition filter may independently apply, but is unnecessary to the proposed exact specification coverage and was not used to expand it."
+    },
+    "exact_cover_quotes": [
+      "SPEC.md:3008-3010: 'A failure to end the server or to stop what ran there is logged and never stops the supervisor from starting; those sessions are treated as ended all the same, accepting that a Restart could then start a second agent beside one still running.'",
+      "SPEC_impl.md:2819-2821: 'A failure anywhere is logged and never fatal (the maintainer chose to start anyway and treat old sessions as ended, accepting that a Restart could then start a second agent beside one still running)'."
+    ],
+    "missing_premise": "A shipped route from duplicate agents to actual user-work loss is unestablished. That missing stronger consequence does not itself justify dropping the established behavior; exact specification acceptance is the proposed omission basis.",
+    "original_stronger_consequence": "Failed cleanup can conceal living work behind an ended-state claim; Restart can create concurrent agents acting on the same user-owned work, potentially damaging it. Earlier history proposed highest, later high; neither lowering nor omission has been accepted by the parent. g032/l5 separately establishes a process-loss confirmation route and remains distinct.",
+    "needs_independent_drop_check": true,
+    "proposed_basis": "Independent check: (1) exact specification acceptance of ended state and a second agent after failed cleanup; (2) narrowly refuted attribution to the GUI banner deletion; (3) proposed high rather than highest because actual duplicate-agent work loss is not established. Do not erase in-range introduction at dbfc6975 or collapse the distinct supplied g004/f1 update-survival promise or g032/l5 confirmation."
+  }
+]

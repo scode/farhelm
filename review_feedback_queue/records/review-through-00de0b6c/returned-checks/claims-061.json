@@ -1,0 +1,314 @@
+[
+  {
+    "key": "g093/f1",
+    "latest_line": 9,
+    "recommendation": "needs-parent",
+    "bucket": "other",
+    "underlying_key": "podman-test-prerequisites-retain-removed-tmux-payload",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The intermediate defect is source-established and within the range, but its exact repair is also within the range. Preserve it as resolved historical review evidence; do not describe it as a residual tip defect. Parent must decide how resolved-in-range findings are represented rather than silently dropping the history or opening an item with no remaining repair.",
+    "checks": [
+      "500548b9253b07a26fd03119679184b69544e31d:scripts/build-podman-test-payloads.sh:29-49 stages only farhelm-{target}.tar.gz; its final checks require only that archive.",
+      "At the same hash crates/farhelm/tests/e2e/podman_environments.rs:190-196 asserts the archive AND tmux-{target}; :1600-1601 calls prerequisites before Fixture::new. A fresh producer output lacking cached tmux therefore cannot reach the scenario.",
+      "04d85f0c98a9b635709d00b056719a0baa7fd3fc:.config/nextest.toml:83-90 selects the bash producer for this module.",
+      "d751ff1633bb479c7bf53920f2e4ea4ba932a1c2 explicitly replaces the two-file loop with the single archive assertion. 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db:podman_environments.rs:190-197 retains the repair. No runtime reproduction was performed."
+    ],
+    "coverage_checked": [
+      "SPEC.md and SPEC_impl.md searched for Podman payload prerequisites, tmux and testing. SPEC_impl.md Testing and provisioning payload paragraphs describe ordinary farhelm payloads; they do not accept the intermediate mismatch.",
+      "TODO.md Planned is empty (:25-26). BUGS.md and active TRIAGE_OUTCOMES.md searches found no exact trigger/consequence/scope.",
+      "plans/queue/tmux-drop-from-install.md:77-79 mentions removing this producer's tmux; tmux-drop-from-tooling covers tooling cleanup. plans/REPORTS.md:29-32 records these plans landed, so neither is unlanded coverage.",
+      "INDEX.md and candidate-specific queue searches found no exact producer/consumer prerequisite item. Existing Podman storage/lifecycle findings concern product resources, not this test setup.",
+      "FILTER.md: no complete match. Failure repeats with the same clean payload directory; rarity alone is insufficient. The later source repair is the reason for resolved status, not a filter."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": null,
+    "original_stronger_consequence": "A fresh real Podman lifecycle run cannot reach its scenario because the producer stopped staging tmux while the consumer still asserted it. Cached tmux can mask the mismatch. The reviewer never alleged user-data loss and explicitly preserved the in-range repair.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Confirmed historical defect, repaired by d751ff16 before the pinned tip; retain that attribution in the review record and ask the parent to classify it as resolved-in-range."
+  },
+  {
+    "key": "g093/c1",
+    "latest_line": 2,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "desktop-refusal-smoke-colon-symlink-path-spelling",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "Canonicalization of the separate executable identity does not erase the colon-bearing path passed to the prerequisite validator.",
+    "checks": [
+      "17a3fe858c5511a24b7403af15dd41c93bf69fd7:crates/farhelm-ui/src/desktop/bundle.rs:406-412 returns the override as a PathBuf without canonicalizing it.",
+      "Same hash desktop.rs:454-455 uses std::path::absolute for the program spelling and separately constructs ProgramFile identity. :1149-1158 validates self.absolute except for the versioned app-bundle forwarder layout.",
+      "Same hash scripts/desktop-smoke.sh:1669-1697 supplies a Linux scratch symlink under replace:refused, expects the prerequisite error, and checks that the incumbent pid and record survive. That fixture is outside the versioned app layout. Source-only check."
+    ],
+    "coverage_checked": [
+      "SPEC.md/SPEC_impl.md searched for prerequisites, program paths and replacement. SPEC_impl.md:7477-7508 requires replacement prerequisites before stopping the incumbent; this supports the expected test contract, not acceptance of a defect.",
+      "TODO Planned empty; plans/queue, BUGS.md, INDEX.md and active TRIAGE_OUTCOMES.md searched for this colon/symlink/refusal route with no exact coverage.",
+      "The matching desktop-smoke queue files about space-bearing run paths and supervisor cleanup-record publication were read in full. They have different triggers and consequences.",
+      "FILTER.md does not supply this disposition; source refutes the suspected test failure."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": null,
+    "original_stronger_consequence": "Suspected replacement-refusal smoke failure because symlink canonicalization might erase its colon trigger. No security or loss-of-work consequence was alleged; the record already sets it aside on source grounds.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "The validator receives the uncanonicalized absolute symlink spelling, so the named refusal trigger survives."
+  },
+  {
+    "key": "g093/c2",
+    "latest_line": 3,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "retired-tmux-test-gates-and-resource-reservations",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The removed exact e2e selections and memory reservation refer to scenarios removed in the same patch; the remaining stream tests still run in the workspace release selection until that driver is removed.",
+    "checks": [
+      "647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513 removes scripts/test-tmux-pinned-shutdown.sh and removes the named terminal_tabs scenarios and memory_stays_flat_while_a_viewer_is_stalled from their source files.",
+      "At that hash the three surviving shutdown/replay unit tests remain in crates/farhelm-supervisor/src/tmux/stream.rs:2632,2724,2845. .github/dist-build-setup.yml:274-278 runs the complete workspace with .ci-tmux on PATH and --tmux required.",
+      "1ed482dde220452e424973faf38a5e1318986333 removes the tmux stream/sink driver and associated nextest group. Its tmux.rs:1-13 explicitly limits the remaining module to installation version policy. No runtime run or coverage measurement was made."
+    ],
+    "coverage_checked": [
+      "SPEC.md Acceptance test and SPEC_impl.md Testing/Grid streams were read after targeted searches. They require terminal-host coverage, not preservation of the deleted old-driver selections.",
+      "TODO Planned empty. BUGS.md, INDEX.md, active TRIAGE_OUTCOMES.md and plans/queue searches found no exact unresolved gate/reservation defect.",
+      "The tmux-removal plans explicitly retire old selections and groups, but plans/REPORTS.md:29-32 shows them landed; they are context, not unlanded coverage.",
+      "FILTER.md was checked; no filter is needed for this source-refuted candidate."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": null,
+    "original_stronger_consequence": "Suspected loss of required validation from deleting the focused pinned-tmux gate and resource reservations. The named record does not claim that all terminal-host coverage is complete; it only refutes these removal-specific concerns.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Removed selections have no remaining test or driver, while surviving unit tests remain in the actual release selection."
+  },
+  {
+    "key": "g093/f2",
+    "latest_line": 14,
+    "recommendation": "retain-verified",
+    "bucket": "other",
+    "underlying_key": "retired-ci-tmux-python-ignore-removed-without-residue-cleanup",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "Source and tool contracts establish a conditional route for retained pre-3.13 venv files to become automatically tracked. Occurrence in an actual retained checkout and total tracked bytes remain unobserved. Keep that distinction and the explicit retraction of blanket 350 MB tracking.",
+    "checks": [
+      "d751ff1633bb479c7bf53920f2e4ea4ba932a1c2:.gitignore removes .ci-tmux-python/ while deliberately retaining .ci-tmux/ to prevent automatic snapshotting of old output. The same patch deletes build-pinned-tmux-ci.sh, including its old-residue cleanup at former :30-33.",
+      "0503114305dccf054d575faca3e2e35d1b6010c1:scripts/build-pinned-tmux-ci.sh:29-31,44-61 creates .ci-tmux-python using unpinned python3 -m venv and installs ziglang. e1817212f18c02109c9c469001af8cc6644a9324 moved the environment to temporary storage and added invocation-time removal of the old directory.",
+      "Pinned-tip git grep for ci-tmux-python/tmux-python under scripts, .agents, .github, docs and deflake returned no replacement cleanup. The complete pinned-tip root .gitignore does not cover ordinary pyvenv.cfg or activation-script names in that directory.",
+      "Read-only jj --ignore-working-copy config list --include-defaults snapshot reports auto-track all() and max-new-file-size 1MiB in this checkout. https://raw.githubusercontent.com/jj-vcs/jj/v0.47.1/lib/src/local_working_copy.rs:1687-1727 checks ignores and tracking eligibility per new file and leaves oversized files untracked without failing the whole snapshot solely for size.",
+      "https://docs.python.org/3.13/library/venv.html records default .gitignore creation starting in 3.13; https://raw.githubusercontent.com/python/cpython/v3.13.0/Lib/venv/__init__.py:260-270 writes a star rule. https://raw.githubusercontent.com/python/cpython/v3.12.0/Lib/venv/__init__.py:54-79 has no ignore phase and creates metadata/scripts. These establish the conditional version distinction, not a manifest of a real affected environment. No snapshot or reproduction was performed."
+    ],
+    "coverage_checked": [
+      "SPEC.md/SPEC_impl.md searches for Python environments, ci-tmux, generated-file tracking and build cleanup found no accepted contract for exposing retained build output. Product upgrade compatibility is not a maintainer-checkout ignore rule.",
+      "TODO Planned empty. BUGS.md, INDEX.md and active TRIAGE_OUTCOMES.md searches found no matching retained-venv tracking item.",
+      "plans/queue/tmux-drop-from-tooling.md:35-45 mentions removing .ci-tmux entries, but plans/REPORTS.md:31 records it landed; no unlanded plan promises this residual ignore repair. That broad removal instruction does not explicitly accept accidental additions.",
+      "FILTER.md: old-release upgrade filter concerns installation/session state, not upgrading a source checkout retaining a build venv. Rare diagnostic filter does not cover persistent generated-file additions. No complete filter boundary matches."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": "For an observed affected checkout: a retained environment created before Python 3.13, no intervening build cleanup, and eligible files not excluded by additional user/global ignores. Actual prevalence, file manifest and aggregate bytes are unknown. These are occurrence premises, not an unresolved source mechanism.",
+    "original_stronger_consequence": "Line 4 claimed hundreds of megabytes could be swept into the next jj change from the documented roughly 350 MB environment. Lines 10-14 retract blanket inclusion: per-file size limits and all ignores apply; intact Python 3.13+ environments self-ignore. Only conditional small generated-file additions and review/cleanup noise remain established. No committed payload, credential disclosure, user-data destruction or catastrophic tooling harm was observed or substantiated.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Retain the conditional source-established ignore regression at other priority, preserving every size/version/occurrence caveat and the earlier consequence retraction."
+  },
+  {
+    "key": "g093/c3",
+    "latest_line": 5,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "grid-only-smoke-protocol-and-appearance-oracles",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The probe and appearance checks match the grid-only protocol. This does not refute l2's distinct claim that a helper comment overstates whose socket received the stream.",
+    "checks": [
+      "f560058da19e02716e6f943883a9508b447aff4e:scripts/desktop-smoke.sh:330-411 replaces stream-kind negotiation with the first binary data payload's grid hello, retains replay_complete gating and sends JSON input.",
+      "Same hash crates/farhelm-helm/src/terminal.rs:342-357 retains the text replay_complete marker; :702 wraps terminal data in WebSocket Binary. :110-133 traces the terminal field as agent without requiring a following field.",
+      "Same hash crates/farhelm-ui/src/desktop/appearance_smoke.rs:217-222 waits for a mounted/revealed grid and painted background; subsequent checks inspect terminal paint and unchanged document/attachment behavior. No runtime claim is made."
+    ],
+    "coverage_checked": [
+      "SPEC_impl.md Grid streams (:2937 onward) was read: every attachment is grid-only and viewer input/control messages remain JSON. This confirms the protocol, not acceptance of a known oracle defect. SPEC.md terminal and acceptance-test searches yield no contrary requirement to retain terminalKind.",
+      "TODO Planned empty; BUGS.md, INDEX.md, active TRIAGE_OUTCOMES.md and plans/queue searched for terminalKind, smoke protocol and appearance oracle concerns. No exact unresolved item found. Landed tmux-end-old-terminals plan is contextual only.",
+      "FILTER.md not used; this candidate is source-refuted."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": null,
+    "original_stronger_consequence": "Suspected smoke incompatibility or loss of the relevant terminal oracle when stream-kind notices and terminalKind checks were removed. No shipped terminal failure or security/work-loss route was alleged.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "The new checks observe the fields and frame types the new protocol actually produces; the removed kind field no longer distinguishes valid terminals."
+  },
+  {
+    "key": "g093/c4",
+    "latest_line": 6,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "desktop-appearance-conditional-built-alias-lifetime",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "Appearance execution exits before reaching either later use of the ordinary-smoke alias.",
+    "checks": [
+      "17a3fe858c5511a24b7403af15dd41c93bf69fd7:scripts/desktop-smoke.sh:694 opens the ordinary-only branch; :714 initializes BUILT_FARHELM_DESKTOP there.",
+      "Same hash :1087-1088 sets PASS and exits from the appearance branch. Later second-launch checks at :1149 and :1171 use the alias only after that exit. Appearance launches use APP. Source control-flow check, not execution."
+    ],
+    "coverage_checked": [
+      "SPEC.md and SPEC_impl.md searched for desktop appearance, test modes and smoke; their Testing/desktop context does not require executing ordinary second-launch checks in appearance mode.",
+      "TODO Planned empty. plans/queue, BUGS.md, INDEX.md and active TRIAGE_OUTCOMES.md searched for the conditional alias and appearance-mode failure; no exact item found.",
+      "Existing desktop-smoke queue items read for c1 concern other triggers. FILTER.md not used for this source refutation."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": null,
+    "original_stronger_consequence": "Suspected unset-variable failure in appearance mode after alias initialization moved into the ordinary branch; confined to the maintainer smoke harness.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Every relevant appearance path exits before an alias read."
+  },
+  {
+    "key": "g093/c5",
+    "latest_line": 7,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "retired-recorder-tmux-option-and-stack-cleanup-decoy",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The recorder option is gone, the CentOS fixture still supplies its actual inputs, and the cleanup test retains a live terminal-host decoy for the resource the stack now cleans. Because the dismissed boundary concern touches unrelated processes, route this proposal through the parent's independent drop check.",
+    "checks": [
+      "d751ff1633bb479c7bf53920f2e4ea4ba932a1c2:scripts/record-test-run.py:223-258 has no --tmux option. scripts/test-nextest-cleanup.py removes that obsolete argument; test-provision-centos.sh:493-498 explicitly forwards FARHELM_TEST_SSH_DESTINATION and FARHELM_TEST_BINARY.",
+      "Same hash crates/farhelm-helm/src/provisioning.rs:12917-12969 reads the farhelm payload and builds MutablePayload with farhelm alone; no tmux payload premise remains there.",
+      "Same hash e2e/start-stack.sh:350-410 waits for creators, stops hosts in its two owned state directories and keeps uncertain state. No tmux command remains in that cleanup.",
+      "Same hash scripts/test-start-stack-cleanup.sh:80-215 retains an unrelated process, another stack's locked state directory and a real host in that directory; check_decoys checks the process, directory marker, host identity and socket. Removal of the obsolete tmux decoy does not remove this host-isolation observable. Source-only; no process was operated or test run."
+    ],
+    "coverage_checked": [
+      "SPEC.md/SPEC_impl.md searched for cleanup, test stack ownership and testing; SPEC_impl.md Testing describes terminal hosts as current test substrate. These do not accept harming unrelated processes.",
+      "TODO Planned empty; BUGS.md, INDEX.md and active TRIAGE_OUTCOMES.md searches found no exact option/decoy-removal defect. Existing desktop supervisor-cleanup publication item is different.",
+      "plans/queue/tmux-drop-from-tooling.md:61-64 explicitly requires preserving other-stack cleanup coverage when retiring the tmux decoy. It is landed per plans/REPORTS.md:31, and the source retains a current-host decoy.",
+      "FILTER.md not invoked. This is a proposed source refutation, not a claim that a wrong-target cleanup consequence would be low priority or filtered."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": null,
+    "original_stronger_consequence": "Considered whether removing cleanup harness arguments/decoys breaks recorder invocation or weakens the boundary protecting unrelated processes and other stacks. Latest record says no remaining unrelated-process or user-work route was established. Preserve that investigated boundary concern for independent judgment rather than treating its other label as permission to omit it.",
+    "needs_independent_drop_check": true,
+    "proposed_basis": "Source refutes the named obsolete-option and missing-current-resource-oracle concerns. Independent check should judge only that narrow refutation, not certify every cleanup path safe."
+  },
+  {
+    "key": "g093/l1",
+    "latest_line": 19,
+    "recommendation": "needs-parent",
+    "bucket": "other",
+    "underlying_key": "mac-devbuild-header-retains-removed-local-tmux-requirement",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "A real intermediate source-comment defect is established, but cb762a31 repairs it before the pinned tip. Preserve the historical finding and repair; parent should classify it as resolved-in-range rather than claim the tip still has the prerequisite.",
+    "checks": [
+      "17a3fe858c5511a24b7403af15dd41c93bf69fd7:scripts/devbuild-mac.sh:53-60 still says tmux is needed to run the result and every requirement is checked. Its preflight section after the patch no longer checks tmux.",
+      "17a3fe85's desktop.rs patch removes the tmux preflight from startup/prerequisites. This is why the inherited header becomes false here. Separate static remote Linux tmux staging does not require a Mac-local runtime tmux.",
+      "cb762a313abbe6da03ae0bf041f07486c4ed4df9:scripts/devbuild-mac.sh patch at old :55-60 removes the runtime tmux clause. 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db:49-55 retains that correction. No execution occurred."
+    ],
+    "coverage_checked": [
+      "SPEC.md:5257-5258 explicitly says Farhelm neither requires nor looks for user tmux. SPEC_impl.md Testing and developer payload paragraphs do not accept a false local runtime prerequisite.",
+      "TODO Planned empty. BUGS.md, INDEX.md and active TRIAGE_OUTCOMES.md searches for devbuild/tmux requirements found no exact item; current devbuild Rustup/LLVM items concern different failures.",
+      "plans/queue/tmux-drop-from-install.md:77-79 targets developer-script tmux staging; plans/REPORTS.md:30 shows that plan landed. No unlanded coverage found.",
+      "FILTER.md no complete match: ordinary misleading instructions do not have a rare trigger. Disposition rests on the exact in-range repair."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": null,
+    "original_stronger_consequence": "The Mac developer is falsely told to install tmux to run the app and that the script checks it. This is historical maintainer documentation in executable tooling, not a new product runtime failure. The reviewer explicitly preserves that the pinned tip is corrected.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Source-confirmed intermediate comment/contract mismatch, repaired by cb762a31. Parent to represent resolved historical evidence without inventing a remaining repair."
+  },
+  {
+    "key": "g093/c6",
+    "latest_line": 17,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "podman-nextest-per-setting-override-precedence",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "Nextest resolves each setting independently; the earlier e2e group override does not configure the two Podman settings. The recorder supplies no implicit timeout.",
+    "checks": [
+      "04d85f0c98a9b635709d00b056719a0baa7fd3fc:.config/nextest.toml:44-46 sets only test-group; :60-66 reserves four threads and gives podman_environments forty one-minute periods.",
+      "https://nexte.st/docs/configuration/per-test-overrides/ (Override precedence, lines 189-199) states that the first matching override configuring each setting wins; entries omitting a setting are ignored for that setting.",
+      "Same reviewed hash scripts/record-test-run.py:231 has --timeout without a default; :1375 computes a deadline only when timeout is not None. The configured test allowance exceeds the declared thirty-minute scenario plus five-minute cleanup. No runtime duration was measured."
+    ],
+    "coverage_checked": [
+      "SPEC.md Acceptance test and SPEC_impl.md Testing searched/read; neither promises a conflicting nextest precedence or recorder cutoff.",
+      "TODO Planned empty. plans/queue, BUGS.md, INDEX.md and active TRIAGE_OUTCOMES.md searched for Podman overrides, slot reservation and implicit timeout; no exact item found.",
+      "FILTER.md not used; external primary tool contract and caller source refute this candidate."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": null,
+    "original_stronger_consequence": "Suspected premature Podman test termination or missing four-slot reservation from a shadowing general override or implicit five-minute recorder cutoff. No product/security/work-loss consequence was alleged.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Per-setting override precedence and the recorder's optional deadline contradict both suspected cutoff routes."
+  },
+  {
+    "key": "g093/l2",
+    "latest_line": 21,
+    "recommendation": "retain-verified",
+    "bucket": "other",
+    "underlying_key": "desktop-smoke-direct-websocket-comment-overclaims-page-delivery",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The new local comment attributes an independent Python socket's received hello to the desktop page. Its particular assertion can succeed while the page receive/render path is broken. This establishes a comment/test-evidence overclaim, not a product failure or a requirement to turn this API probe into complete GUI coverage.",
+    "checks": [
+      "f560058da19e02716e6f943883a9508b447aff4e:scripts/desktop-smoke.sh:330-333 changes the narrower host-kind claim into a statement that the grid stream reached the page. The patch itself shows the old and new wording.",
+      "Same hash :334-411 creates an independent Python TCP/WebSocket client, reads hello/replay on it, sends input there and checks a command-written file. No frame is observed on the page's actual socket by this helper.",
+      "Same hash :1959-1980 checks survival/listing/listening after supervisor replacement and invokes this API round trip; it does not bind the helper's hello to page consumption. Opening caveats at :1-46 correctly distinguish transport/state and optional pixel interaction, but do not validate the narrower local claim.",
+      "00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db:scripts/desktop-smoke.sh:303-310 still contains the same page-delivery claim and starts the independent Python client. In-range file history confirms no later repair. Source analysis only."
+    ],
+    "coverage_checked": [
+      "SPEC_impl.md Grid streams/Terminal widget/Testing and SPEC.md Acceptance test searched/read for page-delivery and GUI observables. Grid-only protocol correctness does not make receipt by one socket prove receipt by another; no specification accepts this overclaim.",
+      "TODO Planned empty. BUGS.md and active TRIAGE_OUTCOMES.md searched for desktop smoke page delivery/oracle/probe claims; no exact cover found.",
+      "plans/queue tmux cleanup/audit matches were read through their acceptance criteria; plans/REPORTS.md:29-32 marks them landed. No unlanded plan specifically repairs this evidence wording.",
+      "INDEX.md and candidate-specific queue searches found no exact page-delivery overclaim. desktop-smoke-misparses-space-bearing-run-path.md and desktop-smoke-supervisor-precedes-cleanup-record.md were read in full and concern independent path parsing and resource-lifetime defects. c3 in this batch concerns protocol compatibility, not this claim's observation boundary.",
+      "FILTER.md: no complete boundary matches. Reading a routine test comment is not a rare timing/crash/input trigger, and a persistent assurance overclaim is not a self-correcting display glitch."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": null,
+    "original_stronger_consequence": "Initial lead asked whether callers independently establish page consumption; later source inspection establishes they do not bind this helper's frame to the page. The final finding expressly alleges no demonstrated product failure, security issue or loss of user work, and asks only to calibrate the comment to the probe's actual boundary.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Retain at other priority. Correct the comment to describe delivery through the embedded helm to this probe; separate actual page observations remain separate evidence."
+  },
+  {
+    "key": "g093/c7",
+    "latest_line": 22,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "desktop-smoke-intermediate-tmux-tool-preflight",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The smoke harness still invokes tmux at that intermediate revision and explicitly preflights its own external tools. That is distinct from l1's false statement about the app's local runtime prerequisites.",
+    "checks": [
+      "17a3fe858c5511a24b7403af15dd41c93bf69fd7:scripts/desktop-smoke.sh:97-110 describes the list as external binaries the harness invokes and declares local optional-skip/CI-fail behavior.",
+      "Same hash :238-240 still invokes tmux in the old terminal-kind branch; :457 and :581-583 still invoke it during cleanup. d751ff1633bb479c7bf53920f2e4ea4ba932a1c2 removes those calls together with the prerequisite. No test was run."
+    ],
+    "coverage_checked": [
+      "SPEC.md:5257-5258 removes product tmux requirements; SPEC_impl.md Testing does not forbid a test harness from preflighting a binary it still invokes.",
+      "TODO Planned empty. plans/queue, BUGS.md, INDEX.md and active TRIAGE_OUTCOMES.md searched for the desktop-smoke tmux tool selection/skip contract; no separate unresolved defect found. Landed tooling plan is context only.",
+      "FILTER.md not needed for the source refutation. l1 and l2 are distinct and remain accounted for."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": null,
+    "original_stronger_consequence": "Suspected unnecessary harness skip on a machine without tmux after the app stopped requiring it. The existing contract lists harness tools, and the intermediate harness still runs tmux. No security/work-loss route alleged.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Actual remaining harness callers justify its declared preflight; subsequent removal is paired with caller removal."
+  },
+  {
+    "key": "g093/c8",
+    "latest_line": 23,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "podman-payload-producer-shell-invocation-mode",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "Both named entrypoints invoke bash with the script as an input file, so its non-executable mode does not prevent either from starting it.",
+    "checks": [
+      "git ls-tree at 04d85f0c98a9b635709d00b056719a0baa7fd3fc shows scripts/build-podman-test-payloads.sh mode 100644.",
+      "That hash .config/nextest.toml:83-85 uses command = [bash, scripts/build-podman-test-payloads.sh]. scripts/tensorlake/rust-tests.ts:45-65 likewise invokes bash with the script, then tars the returned directory contents directly. Neither uses exec permission on the script.",
+      "This does not refute f1's separate intermediate producer/consumer filename mismatch. No runtime reproduction was performed."
+    ],
+    "coverage_checked": [
+      "SPEC.md and SPEC_impl.md searched for staged payloads and testing; no alternate executable-bit entrypoint contract found. SPEC_impl.md developer payload paragraphs concern payload contents, not shell file mode.",
+      "TODO Planned empty; plans/queue, BUGS.md, INDEX.md and active TRIAGE_OUTCOMES.md searched for producer mode/bash invocation failures; no exact item found.",
+      "FILTER.md not used. The supplied mention of g147/c4 is not treated as an independently checked alias; it is outside this batch's named claims."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": null,
+    "original_stronger_consequence": "Suspected inability to start newly added payload setup because the script has mode 100644. The actual shell-based callers refute that concern; no security/work-loss route was alleged.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Actual callers require script readability, not its execute bit."
+  }
+]

@@ -1,0 +1,283 @@
+[
+  {
+    "key": "g020/l1",
+    "latest_line": 13,
+    "recommendation": "needs-parent",
+    "bucket": "highest",
+    "underlying_key": "agent-environment-approval-place-retarget",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The cold-place retarget route is supported by source, including delivery of configured credentials. However, the product specification explicitly lets in-flight create/clone approvals follow a logical host entry to its new machine. That acceptance materially conflicts with the implementation specification's machine-bound approval statement. Retain pending the parent's coverage decision; do not describe this as an unqualified authorization violation without preserving that conflict.",
+    "checks": [
+      "At 190d844e58c96cf197aa838d0b0eea8062f48435, agent_requests.rs:4380-4555 fixes command/trust and retains recipe/place and place_name in the card, but dispatches only the same numeric place after Allow. Clone additionally rechecks its source; create has no such source check.",
+      "At that revision, store.rs:7521-7601 permits SSH destination updates after store/podman.rs:215-253 checks environment rows and retained recipe resources. Pending approval cards are absent from those references. The claimed cold-place restriction is material.",
+      "At that revision, provisioning/tensorlake_add.rs:346-400 attaches the target and registers only after approval; environment/podman.rs:148-188 resolves the current route and compares it with the current successful probe. A probe refreshed for B can therefore admit B.",
+      "At that revision, provisioning/tensorlake_add.rs:597-605 calls credential delivery. The correct fully qualified source path is crates/farhelm-helm/src/provisioning/credential_delivery.rs:434-440,575-654: it resolves current access and installs configured Codex auth/GitHub token bytes. The original record's abbreviated credential_delivery.rs path must resolve to provisioning/, not src/.",
+      "The introducing commit is in the supplied range. No runtime observation or reproduction was performed. The requesting session must be on a different host from the edited container place, and remain live; existing environments/images/helpers otherwise block the retarget. Reconnection alone is not the asserted disclosure route."
+    ],
+    "coverage_checked": {
+      "SPEC.md": "Current Topology, lines 405-415, expressly accepts in-flight create/clone approvals following the same logical host entry to a changed machine. Historical 190d844 SPEC.md:399-412 contains the same rule. Agents and environments requires the card to name the recipe/place but adds no explicit container-place exception to that acceptance.",
+      "SPEC_impl.md": "Current Permission prompts for agent actions:9090-9105 says approval is for the machine named and rejects changed target connections. Shared recipes and prepared artifacts:6012-6032 separates symbolic recipe/place targets from installation identity. These leave a genuine scope conflict with the broader product rule.",
+      "TODO.md Planned": "Empty at recording main; no coverage.",
+      "plans/queue": "INDEX.md contains no unlanded plan entries. Searches of retained plan text found resource-reference guards, not a pending-card endpoint-binding repair.",
+      "BUGS.md": "Only the local SSH helper output-open hang is accepted; unrelated.",
+      "queue": "INDEX.md and matching update-preplanning-retarget-consent-ambiguity.md read. That item preserves a related logical-entry/rendered-binding conflict for Update planning; different trigger/action and no exact duplicate or full coverage.",
+      "TRIAGE_OUTCOMES.md": "Searched active ledger for retarget, approval, container place, and environment launch; the installation-provenance history discard concerns late history replies, not this approval route. No exact decision found.",
+      "FILTER.md": "No complete match. Wrong-target execution and credential delivery are outside the rare-glitch and sub-second-race filters."
+    },
+    "exact_cover_quotes": [
+      "SPEC.md, Topology: 'Approvals, settings changes and confirmed operations therefore follow the entry.'",
+      "SPEC.md, Topology: 'One still in flight when the destination changes or a new identity is adopted (an approved stop, restart, rename, create or clone, an \"Always allow\" answer, a change to the setting for running `farhelm` commands without asking, a confirmed uninstall) may be carried out against the entry's new machine' (line wrapping removed).",
+      "SPEC_impl.md, Permission prompts for agent actions: 'A launch is also refused if the target host's connection changed while the card waited, since the approval was for the machine the card named.' (line wrapping removed)."
+    ],
+    "missing_premise": "A recording decision must settle whether the explicit logical-entry acceptance applies to the ordinary SSH row used as a new environment's container place, or whether this new card has a narrower physical-machine contract. Source proves the route but cannot resolve the contradictory written contracts.",
+    "original_stronger_consequence": "Initial lead included changed recipe definitions, changed commands/trust, and delivery of credentials/execution to a replacement machine. Command/trust remain fixed; current recipe/credential consumption is specified. The physical container-place concern was first withdrawn at line 3, reopened at line 8, and retained as highest at lines 9-13. Preserve both that history and the narrower frozen-recipe withdrawal.",
+    "needs_independent_drop_check": true,
+    "proposed_basis": "Retain the source-supported route and specification conflict for parent handling. Any coverage dismissal under the logical-entry acceptance, or dismissal of the earlier recipe/authority consequence, requires an independent drop check. Highest is provisional while the security-sensitive contract scope remains unsettled.",
+    "new_interface_evidence": "The broad logical-entry approval acceptance exists at the reviewed revision as well as recording main. The cited existing Update queue item already records its conflict with rendered-binding wording; this exact acceptance needs to reach the original environment-approval reviewer."
+  },
+  {
+    "key": "g020/c2",
+    "latest_line": 4,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "agent-environment-folder-normalization",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "An arbitrary explicit folder is refused before planning; it is not silently discarded. Inherited non-GitHub placement becomes the new environment's home under the stated launcher contract.",
+    "checks": [
+      "190d844e58c96cf197aa838d0b0eea8062f48435: crates/farhelm-proto/src/launcher.rs:941-988 normalizes newly selected recipe targets to home, applies explicit destination, then rejects a nonempty folder other than ~.",
+      "Same revision: crates/farhelm-helm/src/agent_launch.rs:234-273 applies shared template/flag validation before deriving cwd; sessions.rs:1192-1253 constructs the already-validated home/GitHub request.",
+      "The revised line-4 account corrects line 2's broad replacement wording. No runtime test was run."
+    ],
+    "coverage_checked": {
+      "SPEC.md": "Agents and environments expressly specifies home for a folder and cloning within it for --gh; Sandbox sessions:1446-1465 also fixes Folder to the new home.",
+      "SPEC_impl.md": "Tensorlake sandbox sessions and Agent requests and environments retain recipe/place and repository-or-home intent; no arbitrary new-environment folder promise found.",
+      "TODO.md Planned": "Empty.",
+      "plans/queue": "INDEX.md empty; no unlanded coverage.",
+      "BUGS.md": "No matching case.",
+      "queue": "INDEX and targeted home/folder/environment searches reveal no exact item.",
+      "TRIAGE_OUTCOMES.md": "No matching home-normalization decision found.",
+      "FILTER.md": "Not needed; source and explicit contract settle the candidate."
+    },
+    "exact_cover_quotes": [
+      "SPEC.md, Agents and environments: 'The destination follows the launcher's rules for a new environment: a folder is the new environment's home, and `--gh` clones the repository inside it.' (line wrapping removed)."
+    ],
+    "missing_premise": null,
+    "original_stronger_consequence": "A requested working directory silently lost when the environment plan drops resolution.cwd. No security or user-work-loss route was proposed.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Source-refuted silent-loss claim; explicit non-home destinations fail shared validation."
+  },
+  {
+    "key": "g020/l3",
+    "latest_line": 12,
+    "recommendation": "retain-verified",
+    "bucket": "other",
+    "underlying_key": "agent-environment-missing-local-ssh-key-preflight",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "With a built recipe and API key, an already absent local SSH key does not prevent an agent approval card. Allow reaches the provider's later local-key prerequisite and refuses. This is a source-supported unnecessary approval, with no billed create or security consequence.",
+    "checks": [
+      "190d844e58c96cf197aa838d0b0eea8062f48435: agent_requests.rs:4390-4515 checks cached places, source, trust and request validity before the card, without local-key admission.",
+      "Same revision: tensorlake/hosts.rs:187-192 reports only API-key availability from places; ensure_prepared:205-219 separately requires SshKeyStatus::Ready before billed work.",
+      "Same revision: provisioning/tensorlake_add.rs:346-400 registers the owned task/row after approval and deliberately defers the provider's fresh launch check. This does not establish that all later preparation refusals are bugs; the retained case is a known local prerequisite already missing when the card opens.",
+      "No runtime behavior was observed. Missing state after recovery is one stated possible producer; frequency is unmeasured. Unreadable private files that incorrectly still report Ready belong to a different existing status-detection defect."
+    ],
+    "coverage_checked": {
+      "SPEC.md": "Sandbox sessions:1455-1460 requires an absent/unreadable local key to disable sandbox recipe selection. Account registration remains explicitly uncheckable.",
+      "SPEC_impl.md": "Agent requests and environments:6192-6194 promises pre-card cached-place/launcher validation. Tensorlake sandbox sessions:6593-6598 lists API key, readable local SSH pair and built snapshot as prerequisites. No acceptance of this already-known missing local prerequisite found.",
+      "TODO.md Planned": "Empty.",
+      "plans/queue": "INDEX.md empty. Retained key-order plans concern SSH identity offering, not this pre-card check.",
+      "BUGS.md": "No matching acceptance.",
+      "queue": "unreadable-sandbox-ssh-key-reports-ready.md read in full: it concerns metadata falsely declaring an unreadable private pair Ready. This record also holds for NotCreated/Unavailable accurately reported locally and arises because the agent path never checks that state before asking. Different root; the existing item is not exact coverage.",
+      "TRIAGE_OUTCOMES.md": "Targeted local-key/card/approval searches found no exact decision.",
+      "FILTER.md": "Rare-glitch coverage is incomplete: retries still fail until the local prerequisite is repaired. The unnecessary approval is not merely an imprecise diagnostic. Retain on ambiguity."
+    },
+    "exact_cover_quotes": [],
+    "missing_premise": null,
+    "original_stronger_consequence": "Unnecessary approval followed by a knowable setup refusal. The history never established billing, lost work or credential disclosure; the latest record expressly excludes network/account-registration failures and keys removed during the wait.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Record as other, source-confirmed and not reproduced, with the already-missing local-state restriction and later no-billing guard intact."
+  },
+  {
+    "key": "g020/c4",
+    "latest_line": 7,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "confined-agent-template-reread-placement",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The proposed intervening template edit cannot select another host. Ordinary confined create returns the origin environment, while a late recipe target is rejected.",
+    "checks": [
+      "190d844e58c96cf197aa838d0b0eea8062f48435: agent_requests.rs:2174-2216 checks current flags/templates for placement before resolution.",
+      "Same revision: agent_requests.rs:2436-2521 rereads templates, requires target.is_none(), and selects AgentScope::Environment(own) before explicit/template host resolution. Installed-host template fields cannot alter own.",
+      "Shared launcher application with host_fixed rejects placement for spawn; the examined refutation is actual authority selection, not an assumption that the initial template read remains current. No execution was performed."
+    ],
+    "coverage_checked": {
+      "SPEC.md": "Agents and environments requires own-environment authority and rejects host/recipe placement. The considered cross-host consequence would violate it, but the checked branches prevent that consequence.",
+      "SPEC_impl.md": "Agent requests and environments:6168-6186 describes confinement by the origin's session-owned row and own-host create resolution; no acceptance of cross-host escape.",
+      "TODO.md Planned": "Empty.",
+      "plans/queue": "INDEX.md empty; no unlanded entry.",
+      "BUGS.md": "No match.",
+      "queue": "INDEX and confined/template-race searches found no exact item.",
+      "TRIAGE_OUTCOMES.md": "No exact matching confinement decision found.",
+      "FILTER.md": "Not a filter dismissal; authority selection refutes the route."
+    },
+    "exact_cover_quotes": [],
+    "missing_premise": null,
+    "original_stronger_consequence": "Unauthorized cross-host execution by a confined agent if a template changes between two reads. This is potentially security-sensitive despite the latest record's other bucket.",
+    "needs_independent_drop_check": true,
+    "proposed_basis": "Propose source refutation only for the named between-read placement escape. Independent agreement is required before dropping the security-sensitive candidate."
+  },
+  {
+    "key": "g020/l5",
+    "latest_line": 17,
+    "recommendation": "retain-verified",
+    "bucket": "other",
+    "underlying_key": "environment-history-admits-agent-origin",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "Successful approved agent environment creates carry a reusable target into GUI convenience bookkeeping after agent origin has been reduced to None selection. The target alone updates the remembered container place and ages the shared recent window. This is distinct from approval authority and SSH-key admission.",
+    "checks": [
+      "190d844e58c96cf197aa838d0b0eea8062f48435: sessions.rs:1192-1253 preserves an agent-origin marker; provisioning/tensorlake_add.rs:357-361 separately attaches environment_target; agent_requests.rs:4477-4550 dispatches that request.",
+      "Same revision: sessions.rs:2055-2060 deliberately gives agents no explicit_selection, but record_created_history:2180-2242 still passes environment_target and accepts a current session-owned connection when that target exists.",
+      "Same revision: store.rs:9015-9018 invokes environment_history::record independently of selection. store/environment_history.rs:39-114 accepts None selection, inserts an admission, overwrites last_container_host, evicts beyond MAX_LAUNCH_HISTORY, then hides None-selection rows from reusable setup reads.",
+      "git log of the supplied range includes environment history's introducing 52cc5d72 and the new agent consumer's 190d844e. A successful current-connection create is required, and sufficient repeated creates are needed for broad suggestion eviction. No runtime reproduction or measured frequency."
+    ],
+    "coverage_checked": {
+      "SPEC.md": "Remote input, session defaults, and availability:5122-5127 expressly excludes anything an agent creates from GUI future-default/suggestion provenance. Container sessions:4873-4875 retains environment choices after Delete, without changing that origin rule.",
+      "SPEC_impl.md": "Shared recipes and prepared artifacts:6020-6023 calls this captured request intent. Composer history:5054-5087 permits raw command launches to age a shared window, but agent-launch there describes launch kind, not agent-request origin; it does not explicitly accept this agent-origin effect.",
+      "TODO.md Planned": "Empty.",
+      "plans/queue": "INDEX.md empty; no unlanded repair.",
+      "BUGS.md": "No matching acceptance.",
+      "queue": "INDEX and environment-history/default searches found no exact item. sandbox-launch-skips-remembered-agent-choices is the opposite GUI-origin omission, not coverage for agent-origin admission.",
+      "TRIAGE_OUTCOMES.md": "Targeted history/default/environment searches found no exact decision accepting agent-created convenience updates.",
+      "FILTER.md": "No complete match. Effects are durable convenience state from successful ordinary creates, with no sub-second human action prerequisite."
+    },
+    "exact_cover_quotes": [],
+    "missing_premise": null,
+    "original_stronger_consequence": "Wrong future container-place default and eviction of GUI recent setups; no security or lost user-owned work claimed. The history explicitly identifies overlap with externally supplied g050/l1 rather than claiming an independently novel storage cause.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Retain as source-verified other. Use underlying_key to reconcile the supplied g050/l1 overlap in the parent; that record is outside this named batch and was not independently inspected here, so aliases is intentionally empty."
+  },
+  {
+    "key": "g020/c6",
+    "latest_line": 16,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "agent-environment-reply-nested-reference-projection",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The actual agent reply projection contains no nested parent or working-copy-origin references. Only the checked session ID is unqualified and then qualified once for the accepted host.",
+    "checks": [
+      "190d844e58c96cf197aa838d0b0eea8062f48435: agent_requests.rs:4278-4291 parses SessionRef, requires its entry UUID to equal the accepted SessionClaim, and replaces only id with its bare suffix.",
+      "Same revision: agent_requests.rs:4841-4864 projects AgentSession with id, host fields, title/cwd, agent/status, current, restart_offer and stale. No parent or working-copy-origin reference survives to be double-qualified.",
+      "No runtime execution or wrong-target route established."
+    ],
+    "coverage_checked": {
+      "SPEC.md": "Remote input, session defaults, and availability:5134-5140 binds references/replies to the entry UUID. The checked prefix guard implements this requirement.",
+      "SPEC_impl.md": "Agent requests and environments and session-reference sections found no promise to expose nested references in this reply.",
+      "TODO.md Planned": "Empty.",
+      "plans/queue": "INDEX.md empty.",
+      "BUGS.md": "No match.",
+      "queue": "INDEX and unqualification/nested-reference searches found no exact item.",
+      "TRIAGE_OUTCOMES.md": "No exact matching decision found.",
+      "FILTER.md": "No filter basis proposed; source projection refutes the candidate."
+    },
+    "exact_cover_quotes": [],
+    "missing_premise": null,
+    "original_stronger_consequence": "Nested IDs double-qualified or later operations routed to the wrong host. The original record explicitly considered wrong-host routing, so preserve it for independent dismissal review.",
+    "needs_independent_drop_check": true,
+    "proposed_basis": "Source-refuted for this reply path; require independent agreement before dropping its potentially security-sensitive wrong-host consequence."
+  },
+  {
+    "key": "g021/f1",
+    "latest_line": 2,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "seal-finisher-test-owned-runtime-lifetime",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The detached finisher belongs to each test's owned Tokio runtime, which is explicitly dropped before the test wrapper returns, including on body unwind. A JoinHandle drop alone does not establish cross-test survival.",
+    "checks": [
+      "222bf6253bcd168db04bcbb1df20180c88306998: agent_requests.rs:17980-18065 gives both named tests farhelm_testtrace::test and stores plain _finisher handles.",
+      "Same revision: sessions/sandbox.rs:344-361 spawns the async lifetime loop. farhelm-testtrace-macros/src/lib.rs:53-64 lowers async tests into run_async; farhelm-testtrace/src/lib.rs:994-1025 catches the body result and explicitly drops its owned runtime before reporting/returning.",
+      "No runtime run or leak measurement. The original allegation concerns test-owned connections/state accumulating across test completion, not shipped user sessions."
+    ],
+    "coverage_checked": {
+      "SPEC.md": "Environment Delete/seal behavior governs product cleanup; no cross-test resource-survival acceptance or requirement settles a different lifecycle here.",
+      "SPEC_impl.md": "Environment Delete and the seal:6137-6158 requires the helm-owned finisher during helm life, consistent with its cancellation when the test runtime ends.",
+      "TODO.md Planned": "Empty.",
+      "plans/queue": "INDEX.md empty.",
+      "BUGS.md": "No matching case.",
+      "queue": "INDEX and finisher/test-lifetime searches found no exact item; idle-readoption-task-outlives-supervisor-drop concerns a different task surviving within a still-live runtime.",
+      "TRIAGE_OUTCOMES.md": "No exact seal-finisher test decision found.",
+      "FILTER.md": "No filter dismissal; wrapper lifecycle refutes the claim."
+    },
+    "exact_cover_quotes": [],
+    "missing_premise": null,
+    "original_stronger_consequence": "Finisher-owned fixture connections/state survive a completed test and accumulate across the test binary. No user-owned-work consequence was alleged.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Source-refuted cross-test leak; preserve that handles detach while runtime teardown cancels their tasks."
+  },
+  {
+    "key": "g021/f2",
+    "latest_line": 8,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "seal-delete-hanging-peer-heartbeat-teardown",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "Peer EOF alone intentionally leaves the splice open, but the environment client's heartbeat reaches the closed peer and tears down that remaining transport. The suspected full four-minute wait and ordinary nextest timeout do not follow.",
+    "checks": [
+      "222bf6253bcd168db04bcbb1df20180c88306998: agent_requests.rs:17605-17648 returns from the scripted peer on Answer::Hangs. rest_harness.rs:595-665 keeps EOF upstream from closing the manager side, but forwards non-intercepted frames and aborts its manager-facing writer when downstream fails.",
+      "Same revision: manager.rs:4484-4489 enables heartbeat for every environment provider. client.rs:1814-1836 selects a 30-second period; :1953-1970 constructs interval_at(now + period, period) and prioritizes its empty channel-zero data frame. The splice only intercepts SetBrowserForwarding and ListSessions, so this frame reaches the dropped peer.",
+      "Same revision: .config/nextest.toml:20 terminates after five 60-second periods, with grace, not one. No paused clock or measured duration is claimed; an incidental wait up to roughly one heartbeat remains."
+    ],
+    "coverage_checked": {
+      "SPEC.md": "Topology:362-364 specifies 30-second heartbeats for environment connections; no four-minute-fixture guarantee found.",
+      "SPEC_impl.md": "Environment Delete and the seal:6137-6150 specifies unknown/unanswered outcomes and bounded reply handling; it does not establish this test uses the whole production deadline.",
+      "TODO.md Planned": "Empty.",
+      "plans/queue": "INDEX.md empty.",
+      "BUGS.md": "No matching case.",
+      "queue": "INDEX and lost-answer/deletion-timeout/heartbeat fixture searches found no exact item.",
+      "TRIAGE_OUTCOMES.md": "No exact matching test decision found.",
+      "FILTER.md": "No filter basis; source refutes the stated full-deadline consequence."
+    },
+    "exact_cover_quotes": [],
+    "missing_premise": null,
+    "original_stronger_consequence": "The lost-answer fixture waits the full 240-second production deletion deadline, causing ordinary runner termination or four-minute validation cost. A shorter heartbeat wait remains and has not been timed.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Refute only the four-minute/ordinary-timeout claim using the enabled heartbeat, failed splice write and actual runner threshold; do not claim zero delay."
+  },
+  {
+    "key": "g021/f3",
+    "latest_line": 9,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "nonfinal-environment-delete-fixed-listing-refresh",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The test's initial refresh completes before Delete, and its successful peer sends no refresh hint or reconnect. Its fixed stale list has no ordinary opportunity to repopulate the deleted helper during the assertion.",
+    "checks": [
+      "222bf6253bcd168db04bcbb1df20180c88306998: agent_requests.rs:14465-14472 awaits the initial owned-environment refresh. :17775-17820 deletes helper and checks the durable cache; the scripted success peer stays connected and sends no SessionsChanged.",
+      "Same revision: rest_harness.rs:65-85 sets refresh/reprobe to one hour. manager.rs:4795-4974 waits for client closure, refresh cadence, explicit refresh/nudge or protocol hints after publication; FleetEvents bumps are not a refresh wake.",
+      "Same revision: manager.rs:2534 advances seed_epoch when forgetting the session, guarding stale in-flight snapshots. No runtime flake or exact timing was observed."
+    ],
+    "coverage_checked": {
+      "SPEC.md": "Environment deletion rules require retaining the environment when sessions remain; no product behavior proves a test refresh occurs.",
+      "SPEC_impl.md": "Environment Delete and the seal:6143-6147 specifies ordinary local forgetting on Deleted. The fixture implements that observation with its first-refresh barrier.",
+      "TODO.md Planned": "Empty.",
+      "plans/queue": "INDEX.md empty.",
+      "BUGS.md": "No match.",
+      "queue": "INDEX and fixed-listing/cache-delete/refresh-race searches found no exact item.",
+      "TRIAGE_OUTCOMES.md": "No exact matching fixture decision found.",
+      "FILTER.md": "No filter basis; absence of a refresh source refutes the proposed race in this fixture lifetime."
+    },
+    "exact_cover_quotes": [],
+    "missing_premise": null,
+    "original_stronger_consequence": "Intermittent test-only failure because a fixed scripted list reinserts the deleted helper before the cache assertion. No shipped user-data consequence was alleged.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Source-refuted within the stated fixture lifetime; preserve its hour cadence, completed initial refresh and absence of an alternate refresh wake as essential premises."
+  }
+]

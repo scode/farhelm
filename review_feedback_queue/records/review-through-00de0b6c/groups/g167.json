@@ -1,0 +1,647 @@
+{
+  "group": {
+    "id": "g167",
+    "domain": "retired-supervisor-tmux",
+    "purpose": "retired-supervisor-tmux: crates/farhelm-supervisor/src/tmux/control_codec.rs; phases complete small per-commit changes",
+    "interfaces": [
+      "g001",
+      "g007",
+      "g008",
+      "g009",
+      "g071",
+      "g072",
+      "g073",
+      "g097",
+      "g098",
+      "g099",
+      "g100",
+      "g101",
+      "g102",
+      "g103",
+      "g104",
+      "g105",
+      "g106",
+      "g107",
+      "g108",
+      "g109",
+      "g110",
+      "g111",
+      "g112",
+      "g113",
+      "g114",
+      "g115",
+      "g116",
+      "g117",
+      "g118",
+      "g119",
+      "g120",
+      "g121",
+      "g127",
+      "g128",
+      "g129",
+      "g130",
+      "g131",
+      "g132",
+      "g133",
+      "g134",
+      "g144",
+      "g145",
+      "g146",
+      "g149",
+      "g150",
+      "g151",
+      "g152",
+      "g153",
+      "g154",
+      "g155",
+      "g156",
+      "g157",
+      "g158",
+      "g159",
+      "g166",
+      "g168"
+    ],
+    "sources": [
+      {
+        "path": "[private-run]/prep/parts/00952-000.patch",
+        "ranges": [
+          [
+            1,
+            1289
+          ]
+        ],
+        "original_path": "crates/farhelm-supervisor/src/tmux/control_codec.rs",
+        "commit": "1ed482dde220452e424973faf38a5e1318986333",
+        "notes": "patch header; patch character offsets [0,59703)",
+        "lines": 1289,
+        "bytes": 59789,
+        "start": 0,
+        "end": 59703,
+        "original": "[private-run]/prep/originals/00952.patch"
+      }
+    ],
+    "lines": 1289,
+    "bytes": 59789
+  },
+  "records": [
+    {
+      "key": "g167/l1",
+      "owner": "g167",
+      "id": "l1",
+      "domain": "retired-supervisor-tmux",
+      "purpose": "retired-supervisor-tmux: crates/farhelm-supervisor/src/tmux/control_codec.rs; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 1,
+          "event": {
+            "version": 1,
+            "kind": "lead",
+            "id": "l1",
+            "state": "open",
+            "summary": "Verify decoder removal cannot strand supported old terminals",
+            "location": "crates/farhelm-supervisor/src/tmux/control_codec.rs:1",
+            "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. TLDR: Removing the decoder would make still-supported old terminals unusable and could lose running work if removal implicitly terminates them. Source basis: assigned deletion removes pane discovery, control framing, replay cutover, passthrough decoding and their tests. SPEC_impl.md at this revision, Terminal substrate: private tmux server, explicitly says: \"The running supervisor runs no tmux at all, and its driver of the old terminals is gone: what remains is the startup step that ends them\" and \"A failure anywhere is logged and never fatal (the maintainer chose to start anyway and treat old sessions as ended, accepting that a Restart could then start a second agent beside one still running)\". Suggested bucket: potentially highest (running user processes); confidence: source-backed lead requiring caller/startup checks. proposed_drop: not decided; intentional retirement is an apparent specification basis, but validate actual startup ordering and replacement callers before settlement. possible_cover: specification acceptance quoted above; no other coverage sources read. Checks so far: entire assigned patch packet lines 1-1289 read, pinned retirement section read fully. Missing premise: whether startup actually gates reload and old terminal rows avoid the removed APIs. Next check: pinned lib/core startup and terminal-host dispatch. No execution or reproduction performed."
+          }
+        },
+        {
+          "line": 2,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "l1",
+            "state": "open",
+            "summary": "Old terminal work and history intentionally end before decoder removal",
+            "location": "crates/farhelm-supervisor/src/tmux/control_codec.rs:1",
+            "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. TLDR: An upgrade ends programs still running in old terminals and discards their screen/scrollback; if cleanup fails, those programs can remain inaccessible and Restart may start another beside them. This potentially highest consequence (user-owned processes/work) is retained for independent proposed-drop review because the specification explicitly accepts it. Source: deletion removes the old decoder and pane discovery (original control_codec.rs:1-849, assigned patch lines 1-855). At the reviewed revision service/core.rs:6112-6117 checks the store first; 6142-6151 gates end_private_server on state-directory ownership before 6168-6184 reloads sessions. core/old_terminals.rs:176-233 identifies the socket peer and invokes verified termination without a tmux binary. core.rs:6675-6679 always resolves old-kind rows as no terminal, 6805-6822 converts live old rows to TerminalEnded, and 7042-7090 sweeps before committing conversions and recording notices. service/terminals.rs:122-127,225-248 resolves only host runtimes, with old-agent absence explained at 195-207. Pinned git grep across crates found no remaining references to control_codec, read_command_block, PassthroughDecoder, parse_pane_facts or unescape_control_output. Suggested bucket: highest if treated as a bug. Could-be-highest: yes, established process-ending route. Confidence: confirmed by source and specification, not execution. proposed_drop: explicit specification acceptance. Exact SPEC.md Terminal experience text at this revision, lines 3003-3016: 'This release ends them: the first time a host’s supervisor of this release starts, it ends that tmux server, and with it everything that still ran in an old terminal, without needing a tmux program.' [The source uses an ASCII apostrophe in host's.] Also: 'one whose agent had already ended keeps its outcome, but its terminal’s last screen, which lived in the server, is gone; old tabs are closed.' [The source uses an ASCII apostrophe in terminal's.] Also: 'A failure to end the server or to stop what ran there is logged and never stops the supervisor from starting; those sessions are treated as ended all the same, accepting that a Restart could then start a second agent beside one still running.' SPEC_impl.md Terminal substrate: private tmux server, lines 2882-2889: 'This release ends them at startup (below); every terminal runs in a terminal host' and 'The running supervisor runs no tmux at all, and its driver of the old terminals is gone'. These rules accept the full original consequence; removal does not independently introduce a still-supported terminal path requiring this decoder. possible_cover: quoted specifications only; no queue/coverage search performed. Caveat: caller must independently judge the proposed drop because of its highest consequence. No tests or reproductions performed; this concerns retirement/removal implications, not unrelated defects in retired parser code."
+          }
+        },
+        {
+          "line": 3,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "l1",
+            "state": "open",
+            "summary": "Old terminal work and history intentionally end before decoder removal",
+            "location": "crates/farhelm-supervisor/src/tmux/control_codec.rs:1",
+            "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. TLDR: An upgrade ends programs still running in old terminals and discards their screen/scrollback; if cleanup fails, those programs can remain inaccessible and Restart may start another beside them. This potentially highest consequence (user-owned processes/work) is retained for independent proposed-drop review because the specification explicitly accepts it. Source: deletion removes the old decoder and pane discovery (original control_codec.rs:1-849, assigned patch lines 1-855). At the reviewed revision service/core.rs:6112-6117 checks the store first; 6142-6151 gates end_private_server on state-directory ownership before 6168-6184 reloads sessions. core/old_terminals.rs:176-233 identifies the socket peer and invokes verified termination without a tmux binary. core.rs:6675-6679 always resolves old-kind rows as no terminal, 6805-6822 converts live old rows to TerminalEnded, and 7042-7090 sweeps before committing conversions and recording notices. service/terminals.rs:122-127,225-248 resolves only host runtimes, with old-agent absence explained at 195-207. Pinned git grep across crates found no remaining references to control_codec, read_command_block, PassthroughDecoder, parse_pane_facts or unescape_control_output. Suggested bucket: highest if treated as a bug. Could-be-highest: yes, established process-ending route. Confidence: confirmed by source and specification, not execution. proposed_drop: explicit specification acceptance. Exact SPEC.md Terminal experience text at this revision, lines 3003-3016: 'This release ends them: the first time a host's supervisor of this release starts, it ends that tmux server, and with it everything that still ran in an old terminal, without needing a tmux program.' Also: 'one whose agent had already ended keeps its outcome, but its terminal's last screen, which lived in the server, is gone; old tabs are closed.' Also: 'A failure to end the server or to stop what ran there is logged and never stops the supervisor from starting; those sessions are treated as ended all the same, accepting that a Restart could then start a second agent beside one still running.' SPEC_impl.md Terminal substrate: private tmux server, lines 2882-2889: 'This release ends them at startup (below); every terminal runs in a terminal host' and 'The running supervisor runs no tmux at all, and its driver of the old terminals is gone'. These rules accept the full original consequence; removal does not independently introduce a still-supported terminal path requiring this decoder. possible_cover: quoted specifications only; no queue/coverage search performed. Caveat: caller must independently judge the proposed drop because of its highest consequence. No tests or reproductions performed; this concerns retirement/removal implications, not unrelated defects in retired parser code."
+          }
+        },
+        {
+          "line": 6,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "l1",
+            "state": "open",
+            "summary": "Old terminal work loss predates decoder removal and is explicitly accepted",
+            "location": "crates/farhelm-supervisor/src/tmux/control_codec.rs:1",
+            "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. TLDR: The upgrade ends programs still running in old terminals and discards their screen/scrollback; failed cleanup can instead leave them inaccessible, with Restart starting a second agent beside them. Preserve this original potentially highest consequence for independent proposed-drop review. Suggested bucket: highest if treated as a bug; could-be-highest: yes, user-owned running processes/work. Confidence: confirmed by source, not execution. Source checks: service/core.rs:6112-6117 checks the store first; 6142-6151 ends the private server only under state-directory ownership, before 6168-6184 reloads sessions; 6675-6679 treats old terminal rows as terminal-less; 6805-6822 converts live rows; 7042-7090 sweeps then commits conversions/notices. core/old_terminals.rs:176-233 identifies the socket peer and invokes verified termination without needing this codec. service/terminals.rs:225-248,259-265 resolves only host terminals and explains absence at 195-207. Pinned git grep across crates found no remaining references to control_codec/read_command_block/PassthroughDecoder/parse_pane_facts/unescape_control_output. Final attribution check: git diff of core/old_terminals.rs against this commit's parent is empty; the parent already calls end_private_server (parent core.rs:6434), returns no terminal for Tmux (6969), converts TerminalEnded (7110), and records the notice (7382). Thus this group's decoder deletion does not newly end or strand a supported terminal; retirement was already operative. proposed_drop: both source refutation of introduction by this deletion and explicit specification acceptance of the preserved consequence. Exact pinned SPEC.md Terminal experience, lines 3003-3016: 'This release ends them: the first time a host's supervisor of this release starts, it ends that tmux server, and with it everything that still ran in an old terminal, without needing a tmux program.' Also: 'one whose agent had already ended keeps its outcome, but its terminal's last screen, which lived in the server, is gone; old tabs are closed.' Also: 'A failure to end the server or to stop what ran there is logged and never stops the supervisor from starting; those sessions are treated as ended all the same, accepting that a Restart could then start a second agent beside one still running.' Pinned SPEC_impl.md Terminal substrate: private tmux server, 2882-2889: 'This release ends them at startup (below); every terminal runs in a terminal host' and 'The running supervisor runs no tmux at all, and its driver of the old terminals is gone'. possible_cover: these exact specifications only, no coverage sources searched. Caveats: independent caller drop check still required because the preserved consequence could be highest. No runtime tests or reproductions. Lead settled; no missing source premise remains for the assigned removal implication."
+          }
+        }
+      ],
+      "latest": {
+        "line": 6,
+        "event": {
+          "version": 1,
+          "kind": "finding",
+          "id": "l1",
+          "state": "open",
+          "summary": "Old terminal work loss predates decoder removal and is explicitly accepted",
+          "location": "crates/farhelm-supervisor/src/tmux/control_codec.rs:1",
+          "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. TLDR: The upgrade ends programs still running in old terminals and discards their screen/scrollback; failed cleanup can instead leave them inaccessible, with Restart starting a second agent beside them. Preserve this original potentially highest consequence for independent proposed-drop review. Suggested bucket: highest if treated as a bug; could-be-highest: yes, user-owned running processes/work. Confidence: confirmed by source, not execution. Source checks: service/core.rs:6112-6117 checks the store first; 6142-6151 ends the private server only under state-directory ownership, before 6168-6184 reloads sessions; 6675-6679 treats old terminal rows as terminal-less; 6805-6822 converts live rows; 7042-7090 sweeps then commits conversions/notices. core/old_terminals.rs:176-233 identifies the socket peer and invokes verified termination without needing this codec. service/terminals.rs:225-248,259-265 resolves only host terminals and explains absence at 195-207. Pinned git grep across crates found no remaining references to control_codec/read_command_block/PassthroughDecoder/parse_pane_facts/unescape_control_output. Final attribution check: git diff of core/old_terminals.rs against this commit's parent is empty; the parent already calls end_private_server (parent core.rs:6434), returns no terminal for Tmux (6969), converts TerminalEnded (7110), and records the notice (7382). Thus this group's decoder deletion does not newly end or strand a supported terminal; retirement was already operative. proposed_drop: both source refutation of introduction by this deletion and explicit specification acceptance of the preserved consequence. Exact pinned SPEC.md Terminal experience, lines 3003-3016: 'This release ends them: the first time a host's supervisor of this release starts, it ends that tmux server, and with it everything that still ran in an old terminal, without needing a tmux program.' Also: 'one whose agent had already ended keeps its outcome, but its terminal's last screen, which lived in the server, is gone; old tabs are closed.' Also: 'A failure to end the server or to stop what ran there is logged and never stops the supervisor from starting; those sessions are treated as ended all the same, accepting that a Restart could then start a second agent beside one still running.' Pinned SPEC_impl.md Terminal substrate: private tmux server, 2882-2889: 'This release ends them at startup (below); every terminal runs in a terminal host' and 'The running supervisor runs no tmux at all, and its driver of the old terminals is gone'. possible_cover: these exact specifications only, no coverage sources searched. Caveats: independent caller drop check still required because the preserved consequence could be highest. No runtime tests or reproductions. Lead settled; no missing source premise remains for the assigned removal implication."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g167/findings.jsonl",
+        "id": "l1",
+        "line": 6,
+        "disposition": "under-investigation",
+        "group": "g167-l1",
+        "reason": "Record durably acknowledged; parent source/contract validation, cross-group synthesis, coverage/filter matching and any independent drop check remain pending. This preserves the claim and uncertainty without accepting, dropping or lowering it."
+      },
+      "accepted_parent_decision": null,
+      "returned_claim_checks": [
+        {
+          "batch": "claims-105",
+          "key": "g167/l1",
+          "latest_line": 6,
+          "recommendation": "covered",
+          "bucket": "highest",
+          "underlying_key": "accepted-retirement-of-old-tmux-terminals",
+          "aliases": [
+            "g166/c4 (same retirement cause; history-loss subset)"
+          ],
+          "target_queue_file": null,
+          "why": "Ending old tmux programs, losing screen/history, and treating failed cleanup as ended are explicit product decisions. Removing the now-unused decoder adds no still-supported terminal path loss. Retirement itself was introduced inside this review range, so immediate-parent preexistence alone is insufficient; exact acceptance supplies the broader basis.",
+          "checks": [
+            "At 1ed482dde220452e424973faf38a5e1318986333, service/core.rs:6112-6117 opens/checks the store first, :6142-6184 gates server retirement on ownership before reload, :6675-6679 never resolves old-kind terminal addresses, and :6805-6822 converts live old rows to TerminalEnded.",
+            "core/old_terminals.rs:176-233 obtains the socket peer, checks same-user ownership and invokes verified termination without the deleted decoder. Parent-to-reviewed diff for old_terminals.rs is empty; parent core.rs:6434 already invokes retirement and :6969 resolves tmux to no terminal.",
+            "Pinned git grep across crates finds no references to control_codec, read_command_block, PassthroughDecoder, parse_pane_facts, unescape_control_output or MAX_CONTROL_LINE. No surviving codec caller was established.",
+            "Full-range source log identifies dbfc69751215dbf15e1d31d5bed73c3754c4ebc4 as introducing end_private_server. Thus the broader retirement consequence is in range, though not newly introduced by decoder deletion. All conclusions are source-only."
+          ],
+          "coverage_checked": [
+            "Read current SPEC.md:2998-3013 and SPEC_impl.md:2780-2823: exact retirement, screen loss, leftover-work and possible duplicate-agent consequences are accepted. Pinned SPEC.md:3003-3016 and SPEC_impl.md:2880-2928 state the same decisions.",
+            "TODO Planned (:25-27) is empty. Phase-3 TODO :225-232 is future removal of obsolete retirement infrastructure, not a promise to preserve old work. Searched plans/queue; tmux plans are already landed per plans/REPORTS.md:29-32 and no unlanded plan reverses the decision.",
+            "Searched BUGS.md, INDEX.md and active TRIAGE_OUTCOMES.md for tmux retirement, old-terminal work/history and codec removal. No exact queue or ledger item. Existing host-to-host seed palette feedback is a separate surviving path. No FILTER applied: ordinary retirement needs no second rare condition, and the upgrade filter cannot be broadened to cover it."
+          ],
+          "exact_cover_quotes": [
+            "Current SPEC.md:3000-3002: A supervisor that finds that tmux server when it starts ends it, and with it everything that still ran in an old terminal, without needing a tmux program.",
+            "Current SPEC.md:3003-3004: one whose agent had already ended keeps its outcome, but its terminal's last screen, which lived in the server, is gone; old tabs are closed.",
+            "Current SPEC.md:3008-3010: A failure to end the server or to stop what ran there is logged and never stops the supervisor from starting; those sessions are treated as ended all the same, accepting that a Restart could then start a second agent beside one still running. Restart, Clone and Replace start such a session in a new, empty terminal.",
+            "Current SPEC_impl.md:2819-2821: A failure anywhere is logged and never fatal (the maintainer chose to start anyway and treat old sessions as ended, accepting that a Restart could then start a second agent beside one still running)"
+          ],
+          "missing_premise": null,
+          "original_stronger_consequence": "Upgrade ends programs still running in old terminals and loses their last screen/scrollback; failed cleanup may leave them inaccessible and let Restart start a duplicate agent. User-owned processes/work make this highest if unaccepted.",
+          "needs_independent_drop_check": true,
+          "proposed_basis": "Exact current and reviewed specifications accept the full preserved consequence; source refutes an additional loss introduced by deleting this unused decoder."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": true,
+        "clearly_refuted_candidate": false,
+        "needs_unfinished_gate": true,
+        "provisional_bucket": "highest",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "accepted-retirement-of-old-tmux-terminals",
+        "destination": "trailing-accepted-retirement-of-old-tmux-terminals.md"
+      }
+    },
+    {
+      "key": "g167/c1",
+      "owner": "g167",
+      "id": "c1",
+      "domain": "retired-supervisor-tmux",
+      "purpose": "retired-supervisor-tmux: crates/farhelm-supervisor/src/tmux/control_codec.rs; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 4,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c1",
+            "state": "open",
+            "summary": "Removing the tmux line cap does not remove the active transport's bounds",
+            "location": "crates/farhelm-supervisor/src/tmux/control_codec.rs:17",
+            "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. TLDR considered: deleting read_control_line and MAX_CONTROL_LINE might allow terminal output to consume unbounded supervisor memory or accept truncated replay. Suggested bucket if established: high (terminal/control availability); could-be-highest: no established security or work-loss route; terminal hosts retain running programs independently. Confidence: confirmed source refutation for this removal. proposed_drop: source refutation, not specification-only acceptance. The deleted bounds applied only to the retired tmux newline protocol. Active host transport hosts/client.rs:1016-1049 decodes buffered messages before each further read and enforces deadlines, 1078-1099 passes MAX_FRAME into split_frame and rejects malformed frames; terminal-host/src/protocol.rs:322-340 rejects zero/oversized declared lengths as soon as four bytes arrive and waits for the whole declared frame, while 777-783 caps each Output at MAX_OUTPUT_CHUNK and rejects empty output. The assigned deletion has no surviving callers (pinned git grep of crates for control_codec/read_command_block/PassthroughDecoder/parse_pane_facts/unescape_control_output returned no matches). SPEC_impl.md Terminal host, lines 1963-1980, declares each terminal's separate host protocol and old-terminal retirement; the frame checks are on that replacement path, not dependent on the removed line parser. possible_cover: none searched. Caveats: not a full independent audit of the host transport's resource accounting; conclusion is limited to deletion of this codec. No execution/reproduction performed."
+          }
+        },
+        {
+          "line": 7,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c1",
+            "state": "open",
+            "summary": "Active framing bounds retain direct tests after tmux codec removal",
+            "location": "crates/farhelm-supervisor/src/tmux/control_codec.rs:17",
+            "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. Original TLDR considered: 'deleting read_control_line and MAX_CONTROL_LINE might allow terminal output to consume unbounded supervisor memory or accept truncated replay.' Suggested bucket if established: high (terminal/control availability); could-be-highest: no established security/work-loss route. Confidence: source-refuted for this removal, not executed. proposed_drop: source refutation. Production basis remains hosts/client.rs:1016-1049,1078-1099 and terminal-host/src/protocol.rs:322-340,777-783: active host frames have their own bounds and whole-frame parse, independent of deleted newline parsing. Synthesis checked test sensitivity separately from production: retained terminal-host/tests/protocol_codec.rs:520-549 directly asserts rejection from an oversized length header alone, incomplete frame => None, exact cap accepted, cap+1 rejected. Removing length rejection, accepting partial frames, or changing the boundary makes those direct assertions fail by inspection. The deleted control_codec.rs control_mode_lines_are_bounded and control_mode_partial_line_at_eof_is_an_error tested only retired read_control_line_with_limit; no active caller depended on them. Thus production correctness alone is not being used to refute test coverage: actual surviving boundary assertions were read. SPEC_impl.md Terminal host: every terminal is a host and old tmux terminals are ended at startup; no surviving newline-control responsibility was identified. possible_cover: none searched. Caveats: no claim of complete transport test coverage; no runtime or mutation test performed. All original consequences retained above for later independent checks."
+          }
+        }
+      ],
+      "latest": {
+        "line": 7,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c1",
+          "state": "open",
+          "summary": "Active framing bounds retain direct tests after tmux codec removal",
+          "location": "crates/farhelm-supervisor/src/tmux/control_codec.rs:17",
+          "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. Original TLDR considered: 'deleting read_control_line and MAX_CONTROL_LINE might allow terminal output to consume unbounded supervisor memory or accept truncated replay.' Suggested bucket if established: high (terminal/control availability); could-be-highest: no established security/work-loss route. Confidence: source-refuted for this removal, not executed. proposed_drop: source refutation. Production basis remains hosts/client.rs:1016-1049,1078-1099 and terminal-host/src/protocol.rs:322-340,777-783: active host frames have their own bounds and whole-frame parse, independent of deleted newline parsing. Synthesis checked test sensitivity separately from production: retained terminal-host/tests/protocol_codec.rs:520-549 directly asserts rejection from an oversized length header alone, incomplete frame => None, exact cap accepted, cap+1 rejected. Removing length rejection, accepting partial frames, or changing the boundary makes those direct assertions fail by inspection. The deleted control_codec.rs control_mode_lines_are_bounded and control_mode_partial_line_at_eof_is_an_error tested only retired read_control_line_with_limit; no active caller depended on them. Thus production correctness alone is not being used to refute test coverage: actual surviving boundary assertions were read. SPEC_impl.md Terminal host: every terminal is a host and old tmux terminals are ended at startup; no surviving newline-control responsibility was identified. possible_cover: none searched. Caveats: no claim of complete transport test coverage; no runtime or mutation test performed. All original consequences retained above for later independent checks."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g167/findings.jsonl",
+        "id": "c1",
+        "line": 7,
+        "disposition": "under-investigation",
+        "group": "g167-c1",
+        "reason": "Record durably acknowledged; parent source/contract validation, cross-group synthesis, coverage/filter matching and any independent drop check remain pending. This preserves the claim and uncertainty without accepting, dropping or lowering it."
+      },
+      "accepted_parent_decision": null,
+      "returned_claim_checks": [
+        {
+          "batch": "claims-105",
+          "key": "g167/c1",
+          "latest_line": 7,
+          "recommendation": "refuted",
+          "bucket": "high",
+          "underlying_key": "removed-tmux-line-codec-independent-of-host-framing",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The deleted newline parser bounded a retired transport. The active host transport retains its own frame limits, whole-frame parsing and direct boundary assertions. No additional unbounded-memory or truncated-replay route from this deletion is established.",
+          "checks": [
+            "At 1ed482dde220452e424973faf38a5e1318986333, hosts/client.rs:1016-1049 decodes buffered data before more reads and checks deadlines; :1078-1099 calls split_frame with MAX_FRAME and rejects malformed data.",
+            "terminal-host/src/protocol.rs:322-340 rejects zero/oversized lengths from the header alone and returns None until the complete frame arrives; :777-783 bounds Output and rejects empty output.",
+            "terminal-host/tests/protocol_codec.rs:520-549 directly asserts header-only oversize rejection, partial-frame None, exact-cap acceptance and cap-plus-one rejection. These assertions independently cover the named parser boundary; no mutation or runtime test was performed.",
+            "Pinned crate search finds no surviving references to the removed codec symbols or MAX_CONTROL_LINE. The specifications retire old tmux terminals; this is not a full resource-accounting audit of host transport."
+          ],
+          "coverage_checked": [
+            "Current SPEC_impl.md:1888-1907 identifies the permanent independent host protocol; :2780-2823 retires the old server. SPEC.md Terminal experience describes only host terminals and accepts old-terminal retirement. Neither accepts an active framing defect; refutation comes from source and assertions.",
+            "TODO Planned (:25-27) is empty. Searched plans/queue for old codec removal, frame bounds, truncated replay and host confirmation: no unlanded plan fixing the suspected active transport regression; tmux removal plans are landed per plans/REPORTS.md:29-32.",
+            "Searched BUGS.md, INDEX.md and active TRIAGE_OUTCOMES.md for codec/line-limit/framing and truncated replay consequences. No exact matching decision or item. Existing snapshot/history feedback concerns different codecs or retained-history behavior. FILTER.md does not justify omitting general unbounded memory/truncated replay. No filter applied."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": "A surviving host transport dependency on the removed newline codec, or a specific removed assertion whose active responsibility is not covered by the retained frame tests, was not identified.",
+          "original_stronger_consequence": "Deleting read_control_line/MAX_CONTROL_LINE might permit unbounded supervisor memory use or accepted truncated replay. Original priority was high for availability; no security or user-work-loss route was established, and terminal hosts preserve running programs independently.",
+          "needs_independent_drop_check": true,
+          "proposed_basis": "Narrow source refutation of a regression from deleting the retired newline parser, corroborated by surviving frame-boundary assertions. Conservatively include in the drop check because truncated retained replay could implicate user terminal history, even though that stronger route was not established."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": true,
+        "provisional_bucket": "high",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "removed-tmux-line-codec-independent-of-host-framing",
+        "destination": null
+      }
+    },
+    {
+      "key": "g167/c2",
+      "owner": "g167",
+      "id": "c2",
+      "domain": "retired-supervisor-tmux",
+      "purpose": "retired-supervisor-tmux: crates/farhelm-supervisor/src/tmux/control_codec.rs; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 5,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c2",
+            "state": "open",
+            "summary": "Retiring tmux notification decoding does not remove host replay or pane isolation",
+            "location": "crates/farhelm-supervisor/src/tmux/control_codec.rs:311",
+            "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. TLDR considered: removal of command-block cutover validation, pane-id filtering and passthrough provenance might mix neighboring terminals or manufacture/repeat replay output. Confidence: confirmed source refutation for the codec deletion. Suggested bucket if established: high for corrupted terminal display; could-be-highest: no established route from this removal to security impact or loss of work. proposed_drop: source refutation. Each active terminal resolves to a HostTerminal (service/terminals.rs:225-248,259-265); hosts/terminal.rs:1-43 describes its own connection, raw-output journal and replay boundaries rather than a session-wide tmux control stream. Active output messages carry bytes and a journal offset, terminal-host/src/protocol.rs:777-783; there is no tmux notification grammar or octal transform to decode. hosts/terminal.rs:3424-3435 skips bytes below the processed offset, 3449-3503 splits feeds at seen/unseen/live journal boundaries, and 2728-2773 chooses the corresponding FeedMode. The same-commit diff of hosts/terminal.rs leaves these replay functions unchanged. SPEC_impl.md Terminal host, Recovery and checkpoints, lines 2130-2143 explicitly defines those byte-bound replay effects; the active stream therefore does not depend on the deleted command-block or pane-id machinery. The deleted tests pin a transport that no active terminal uses, and their removal does not alone establish a test gap for this group's assigned change. possible_cover: none searched. Caveats: this is a deletion-contract check, not an independent audit of the replacement emulator or host protocol. No execution or reproductions performed."
+          }
+        },
+        {
+          "line": 8,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c2",
+            "state": "open",
+            "summary": "Retained tests distinguish active replay effects and terminal isolation",
+            "location": "crates/farhelm-supervisor/src/tmux/control_codec.rs:311",
+            "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. Original TLDR considered: 'removal of command-block cutover validation, pane-id filtering and passthrough provenance might mix neighboring terminals or manufacture/repeat replay output.' Suggested bucket if established: high for corrupted terminal display; could-be-highest: no established security/work-loss route from this deletion. Confidence: source-refuted for this removal, not executed. proposed_drop: source refutation; independent checker remains free to reject it. Original production basis remains service/terminals.rs:225-248,259-265 (specific host runtime), terminal-host/src/protocol.rs:777-783 (raw bytes plus offset), hosts/terminal.rs:3424-3503,2728-2773 (duplicate skipping and seen/unseen/live boundaries), unchanged replay functions in the same-commit diff. Synthesis explicitly checked test sensitivity instead of inferring it from correct production. Retained hosts/terminal/tests.rs:336-350 puts seen/unseen/live bytes in one Output and asserts exactly STATUS_ANSWER then DA1_ANSWER plus caught_up; 405-414 puts seen query in a synchronized update closed by live bytes and asserts only the live status answer; 536-586 distinguishes snapshot, seen, unseen and live queries/OSC52 and asserts only the unseen status answer and live clipboard notice, with a final status roundtrip before asserting no more notices. Retained farhelm/tests/e2e/terminal_tabs.rs:1339-1393 attaches agent and tab on one client connection, sends distinct markers to each, verifies positive delivery, drains both and asserts neither transcript contains the other's marker. By source inspection these observables distinguish duplicate/wrong-zone effects and mixed-terminal output; they exercise active host responsibilities rather than the retired control-mode grammar. Deleted command-block/notification/passthrough tests called retired APIs and are not the only assertions protecting those surviving responsibilities. Governing contract: SPEC_impl.md Terminal host, Recovery and checkpoints, lines 2130-2143 defines seen/unseen/live effects and one-runtime terminal isolation. possible_cover: none searched. Caveats: no assertion of exhaustive coverage or mutation-test execution; this only refutes a defect attributed to removing this codec's tests. All original consequences preserved above."
+          }
+        }
+      ],
+      "latest": {
+        "line": 8,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c2",
+          "state": "open",
+          "summary": "Retained tests distinguish active replay effects and terminal isolation",
+          "location": "crates/farhelm-supervisor/src/tmux/control_codec.rs:311",
+          "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. Original TLDR considered: 'removal of command-block cutover validation, pane-id filtering and passthrough provenance might mix neighboring terminals or manufacture/repeat replay output.' Suggested bucket if established: high for corrupted terminal display; could-be-highest: no established security/work-loss route from this deletion. Confidence: source-refuted for this removal, not executed. proposed_drop: source refutation; independent checker remains free to reject it. Original production basis remains service/terminals.rs:225-248,259-265 (specific host runtime), terminal-host/src/protocol.rs:777-783 (raw bytes plus offset), hosts/terminal.rs:3424-3503,2728-2773 (duplicate skipping and seen/unseen/live boundaries), unchanged replay functions in the same-commit diff. Synthesis explicitly checked test sensitivity instead of inferring it from correct production. Retained hosts/terminal/tests.rs:336-350 puts seen/unseen/live bytes in one Output and asserts exactly STATUS_ANSWER then DA1_ANSWER plus caught_up; 405-414 puts seen query in a synchronized update closed by live bytes and asserts only the live status answer; 536-586 distinguishes snapshot, seen, unseen and live queries/OSC52 and asserts only the unseen status answer and live clipboard notice, with a final status roundtrip before asserting no more notices. Retained farhelm/tests/e2e/terminal_tabs.rs:1339-1393 attaches agent and tab on one client connection, sends distinct markers to each, verifies positive delivery, drains both and asserts neither transcript contains the other's marker. By source inspection these observables distinguish duplicate/wrong-zone effects and mixed-terminal output; they exercise active host responsibilities rather than the retired control-mode grammar. Deleted command-block/notification/passthrough tests called retired APIs and are not the only assertions protecting those surviving responsibilities. Governing contract: SPEC_impl.md Terminal host, Recovery and checkpoints, lines 2130-2143 defines seen/unseen/live effects and one-runtime terminal isolation. possible_cover: none searched. Caveats: no assertion of exhaustive coverage or mutation-test execution; this only refutes a defect attributed to removing this codec's tests. All original consequences preserved above."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g167/findings.jsonl",
+        "id": "c2",
+        "line": 8,
+        "disposition": "excluded",
+        "group": "retired-tmux-codec-replay-and-terminal-isolation",
+        "reason": "Parent explicitly accepted named refuted proposal from claims-106 after inspecting it. The named regression depends on active terminals still using the deleted control-mode decoder. They use separate host runtimes and offset-bearing raw output instead. Retained tests assert replay side effects and cross-terminal exclusion directly. This refutes attribution to this deletion, not every possible replacement-runtime defect. Source refutation limited to the codec deletion and its retired tests. No claim of exhaustive replacement coverage. Checked source/results: [\"At 1ed482dde220452e424973faf38a5e1318986333, service/terminals.rs:225-248,259-265 resolves the selected agent or tab to its HostTerminal without a fallback to another terminal.\",\"At that revision, hosts/terminal.rs:3424-3503 skips already-processed output and splits seen/unseen/live replay; service/grid_stream.rs:423-461 publishes emulator screen/state grids.\",\"Read retained hosts/terminal/tests.rs:336-350,405-414,536-586: they assert exact status/device answers, suppress seen replies and replay clipboard notices, and require a final live roundtrip before checking no extra notice.\",\"Read farhelm/tests/e2e/terminal_tabs.rs:1339-1393: two channels on one connection must receive their own markers and exclude the other's. Source assertions only; no execution or mutation testing.\"] Current coverage/results: {\"SPEC.md\":\"Terminal experience requires isolated attachment and viewer-independent work; it does not accept mixed or repeated output.\",\"SPEC_impl.md\":\"Terminal host / Recovery and checkpoints explicitly requires seen/unseen/live byte effects and no duplicate query answer. This is the replacement contract, not acceptance of a defect.\",\"TODO.md Planned\":\"Empty at recording-time main; no cover.\",\"plans/queue\":\"Searches for replay, terminal isolation, tmux and output found no unlanded plan removing this alleged cause. The four tmux-removal plans are recorded as landed in plans/REPORTS.md:29-32.\",\"BUGS.md\":\"No match; only retained SSH-helper provisioning hang is recorded.\",\"INDEX.md and matching queue files\":\"No exact replay/isolation deletion item. Retired-runtime receipt and Gone-retry items were read and concern different roots.\",\"TRIAGE_OUTCOMES.md\":\"No matching trigger/consequence/scope.\",\"FILTER.md\":\"No filter used.\"} Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Removing command-block cutover validation, pane-id filtering and passthrough provenance might mix neighboring terminals or manufacture/repeat replay output. Suggested high for corrupted display; no established security or work-loss route.\"; \"An active caller or surviving test responsibility that still depends on the deleted tmux decoder was not found.\"."
+      },
+      "accepted_parent_decision": {
+        "key": "g167/c2",
+        "line": 8,
+        "disposition": "excluded",
+        "group": "retired-tmux-codec-replay-and-terminal-isolation",
+        "bucket": "high",
+        "recording": "refuted",
+        "queue_target_candidate": null,
+        "needs_independent_drop_check": false,
+        "reason": "Parent explicitly accepted named refuted proposal from claims-106 after inspecting it. The named regression depends on active terminals still using the deleted control-mode decoder. They use separate host runtimes and offset-bearing raw output instead. Retained tests assert replay side effects and cross-terminal exclusion directly. This refutes attribution to this deletion, not every possible replacement-runtime defect. Source refutation limited to the codec deletion and its retired tests. No claim of exhaustive replacement coverage. Checked source/results: [\"At 1ed482dde220452e424973faf38a5e1318986333, service/terminals.rs:225-248,259-265 resolves the selected agent or tab to its HostTerminal without a fallback to another terminal.\",\"At that revision, hosts/terminal.rs:3424-3503 skips already-processed output and splits seen/unseen/live replay; service/grid_stream.rs:423-461 publishes emulator screen/state grids.\",\"Read retained hosts/terminal/tests.rs:336-350,405-414,536-586: they assert exact status/device answers, suppress seen replies and replay clipboard notices, and require a final live roundtrip before checking no extra notice.\",\"Read farhelm/tests/e2e/terminal_tabs.rs:1339-1393: two channels on one connection must receive their own markers and exclude the other's. Source assertions only; no execution or mutation testing.\"] Current coverage/results: {\"SPEC.md\":\"Terminal experience requires isolated attachment and viewer-independent work; it does not accept mixed or repeated output.\",\"SPEC_impl.md\":\"Terminal host / Recovery and checkpoints explicitly requires seen/unseen/live byte effects and no duplicate query answer. This is the replacement contract, not acceptance of a defect.\",\"TODO.md Planned\":\"Empty at recording-time main; no cover.\",\"plans/queue\":\"Searches for replay, terminal isolation, tmux and output found no unlanded plan removing this alleged cause. The four tmux-removal plans are recorded as landed in plans/REPORTS.md:29-32.\",\"BUGS.md\":\"No match; only retained SSH-helper provisioning hang is recorded.\",\"INDEX.md and matching queue files\":\"No exact replay/isolation deletion item. Retired-runtime receipt and Gone-retry items were read and concern different roots.\",\"TRIAGE_OUTCOMES.md\":\"No matching trigger/consequence/scope.\",\"FILTER.md\":\"No filter used.\"} Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Removing command-block cutover validation, pane-id filtering and passthrough provenance might mix neighboring terminals or manufacture/repeat replay output. Suggested high for corrupted display; no established security or work-loss route.\"; \"An active caller or surviving test responsibility that still depends on the deleted tmux decoder was not found.\"."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-106",
+          "key": "g167/c2",
+          "latest_line": 8,
+          "recommendation": "refuted",
+          "bucket": "high",
+          "underlying_key": "retired-tmux-codec-replay-and-terminal-isolation",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The named regression depends on active terminals still using the deleted control-mode decoder. They use separate host runtimes and offset-bearing raw output instead. Retained tests assert replay side effects and cross-terminal exclusion directly. This refutes attribution to this deletion, not every possible replacement-runtime defect.",
+          "checks": [
+            "At 1ed482dde220452e424973faf38a5e1318986333, service/terminals.rs:225-248,259-265 resolves the selected agent or tab to its HostTerminal without a fallback to another terminal.",
+            "At that revision, hosts/terminal.rs:3424-3503 skips already-processed output and splits seen/unseen/live replay; service/grid_stream.rs:423-461 publishes emulator screen/state grids.",
+            "Read retained hosts/terminal/tests.rs:336-350,405-414,536-586: they assert exact status/device answers, suppress seen replies and replay clipboard notices, and require a final live roundtrip before checking no extra notice.",
+            "Read farhelm/tests/e2e/terminal_tabs.rs:1339-1393: two channels on one connection must receive their own markers and exclude the other's. Source assertions only; no execution or mutation testing."
+          ],
+          "coverage_checked": {
+            "SPEC.md": "Terminal experience requires isolated attachment and viewer-independent work; it does not accept mixed or repeated output.",
+            "SPEC_impl.md": "Terminal host / Recovery and checkpoints explicitly requires seen/unseen/live byte effects and no duplicate query answer. This is the replacement contract, not acceptance of a defect.",
+            "TODO.md Planned": "Empty at recording-time main; no cover.",
+            "plans/queue": "Searches for replay, terminal isolation, tmux and output found no unlanded plan removing this alleged cause. The four tmux-removal plans are recorded as landed in plans/REPORTS.md:29-32.",
+            "BUGS.md": "No match; only retained SSH-helper provisioning hang is recorded.",
+            "INDEX.md and matching queue files": "No exact replay/isolation deletion item. Retired-runtime receipt and Gone-retry items were read and concern different roots.",
+            "TRIAGE_OUTCOMES.md": "No matching trigger/consequence/scope.",
+            "FILTER.md": "No filter used."
+          },
+          "exact_cover_quotes": [],
+          "missing_premise": "An active caller or surviving test responsibility that still depends on the deleted tmux decoder was not found.",
+          "original_stronger_consequence": "Removing command-block cutover validation, pane-id filtering and passthrough provenance might mix neighboring terminals or manufacture/repeat replay output. Suggested high for corrupted display; no established security or work-loss route.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Source refutation limited to the codec deletion and its retired tests. No claim of exhaustive replacement coverage."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "high",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "retired-tmux-codec-replay-and-terminal-isolation",
+        "destination": null
+      }
+    },
+    {
+      "key": "g167/c3",
+      "owner": "g167",
+      "id": "c3",
+      "domain": "retired-supervisor-tmux",
+      "purpose": "retired-supervisor-tmux: crates/farhelm-supervisor/src/tmux/control_codec.rs; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 9,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c3",
+            "state": "open",
+            "summary": "Host tab identity does not depend on deleted tmux marker joins",
+            "location": "crates/farhelm-supervisor/src/tmux/control_codec.rs:250",
+            "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. TLDR considered: removing authoritative pane-fact/marker joins could let tab Close act on an agent or another tab, terminating work the user did not authorize. Suggested bucket if established: highest; could-be-highest: yes, wrong-target process termination. Confidence: source-refuted for the assigned decoder removal; no execution. proposed_drop: source refutation, pending caller independent check, not an accepted drop. Removed parse_pane_facts_flagged/join_pane_markers operate solely on the retired tmux driver's mutable window-option text. Replacement host identity uses the host's tag and the session's own HostTab cell: core/host_tabs.rs:1279-1405 builds records per session/tab, passes only named sockets to discovery and checks names_tab before adoption; 1474-1479 requires exact session id AND Tab role AND tab id. close_host_tab_under_claim at 915-929 rechecks both tab id and the runtime handle and refuses the agent runtime; 932-943 refuses an unreadable host; 964-969 rechecks automatic reap eligibility. Failed termination at 1026-1037 retains the tab for retry, while 1013-1024 forgets it only after end_tab_host succeeded. end_tab_host at 1052-1062 checks the adopted process even when the runtime says Gone. Thus the new path neither parses tmux option rows nor loses an identity check supplied by this codec. Contract: pinned SPEC_impl.md Tabs in hosts, 2331-2343, requires the tag/cell/agent-runtime checks and preservation on unconfirmed end. Exact source supplies the refutation; specification acceptance of deliberate old-terminal retirement is not being extended to this separate unauthorized-termination consequence. possible_cover: none searched. Caveats: limited to consequences of deleting this codec and its discovery helper; this is not a full independent audit of every host lifecycle implementation. Original wrong-target/security/loss-of-work consequence is preserved for later independent checking."
+          }
+        },
+        {
+          "line": 11,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c3",
+            "state": "open",
+            "summary": "Host tab identity remains bound across open, reload, retry and close",
+            "location": "crates/farhelm-supervisor/src/tmux/control_codec.rs:250",
+            "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. Original TLDR considered: 'removing authoritative pane-fact/marker joins could let tab Close act on an agent or another tab, terminating work the user did not authorize.' Suggested bucket if established: highest; could-be-highest: yes, wrong-target process termination. Confidence: source-refuted for the assigned decoder removal; no execution. proposed_drop: source refutation pending independent caller check, not accepted. The deleted joins parse only retired tmux mutable window-option rows. Surviving lifecycle checked end to end for the identity premise: open_host_tab (core/host_tabs.rs:403-418) mints a new tab UUID, records entry.info.id as session, and explicitly tags HostRole::Tab with that UUID; 439-447 publishes the corresponding runtime and id. Reload at 1403-1434 adopts only after names_tab succeeds, with mismatches kept as unavailable placeholders; names_tab at 1474-1479 requires exact session id, Tab role and tab id. Retry at 1136-1151 repeats that tag check and likewise keeps a mismatch unavailable; install at 1183-1207 requires the same current session cell, exact tab id, original runtime handle and no failed end, and aborts a losing replacement runtime. Close at 915-943 rechecks id plus runtime, rejects the agent runtime and refuses unreadable hosts; 964-969 rechecks automatic eligibility. 1013-1037 forgets only after successful termination and retains an unconfirmed end for retry; 1052-1062 confirms an adopted process even if its runtime says Gone. Contract: pinned SPEC_impl.md Tabs in hosts, 2311-2346, requires tag/cell attribution and preservation on unconfirmed end. Removal therefore eliminates no active identity barrier furnished by this codec. The known acceptance of old-terminal retirement is not a basis for accepting this separate unauthorized-termination consequence. possible_cover: none searched. Caveats: this only validates identity/lifecycle consequences of deleting the codec; no blanket claim about other Delete paths or all host internals. Original security/loss-of-work consequence remains preserved for later independent checking."
+          }
+        }
+      ],
+      "latest": {
+        "line": 11,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c3",
+          "state": "open",
+          "summary": "Host tab identity remains bound across open, reload, retry and close",
+          "location": "crates/farhelm-supervisor/src/tmux/control_codec.rs:250",
+          "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. Original TLDR considered: 'removing authoritative pane-fact/marker joins could let tab Close act on an agent or another tab, terminating work the user did not authorize.' Suggested bucket if established: highest; could-be-highest: yes, wrong-target process termination. Confidence: source-refuted for the assigned decoder removal; no execution. proposed_drop: source refutation pending independent caller check, not accepted. The deleted joins parse only retired tmux mutable window-option rows. Surviving lifecycle checked end to end for the identity premise: open_host_tab (core/host_tabs.rs:403-418) mints a new tab UUID, records entry.info.id as session, and explicitly tags HostRole::Tab with that UUID; 439-447 publishes the corresponding runtime and id. Reload at 1403-1434 adopts only after names_tab succeeds, with mismatches kept as unavailable placeholders; names_tab at 1474-1479 requires exact session id, Tab role and tab id. Retry at 1136-1151 repeats that tag check and likewise keeps a mismatch unavailable; install at 1183-1207 requires the same current session cell, exact tab id, original runtime handle and no failed end, and aborts a losing replacement runtime. Close at 915-943 rechecks id plus runtime, rejects the agent runtime and refuses unreadable hosts; 964-969 rechecks automatic eligibility. 1013-1037 forgets only after successful termination and retains an unconfirmed end for retry; 1052-1062 confirms an adopted process even if its runtime says Gone. Contract: pinned SPEC_impl.md Tabs in hosts, 2311-2346, requires tag/cell attribution and preservation on unconfirmed end. Removal therefore eliminates no active identity barrier furnished by this codec. The known acceptance of old-terminal retirement is not a basis for accepting this separate unauthorized-termination consequence. possible_cover: none searched. Caveats: this only validates identity/lifecycle consequences of deleting the codec; no blanket claim about other Delete paths or all host internals. Original security/loss-of-work consequence remains preserved for later independent checking."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g167/findings.jsonl",
+        "id": "c3",
+        "line": 11,
+        "disposition": "under-investigation",
+        "group": "g167-c3",
+        "reason": "Record durably acknowledged; parent source/contract validation, cross-group synthesis, coverage/filter matching and any independent drop check remain pending. This preserves the claim and uncertainty without accepting, dropping or lowering it."
+      },
+      "accepted_parent_decision": null,
+      "returned_claim_checks": [
+        {
+          "batch": "claims-106",
+          "key": "g167/c3",
+          "latest_line": 11,
+          "recommendation": "refuted",
+          "bucket": "highest",
+          "underlying_key": "retired-tmux-marker-join-wrong-tab-close",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The replacement establishes tab identity from its own session/tab tag and current runtime cell, independently of the deleted tmux option-row joins. The wrong-target consequence remains preserved for independent checking.",
+          "checks": [
+            "At 1ed482dde220452e424973faf38a5e1318986333, core/host_tabs.rs:403-447 mints the tab id, writes the session id and Tab role into its tag, and constructs its corresponding HostTab.",
+            "Read core/host_tabs.rs:1136-1151,1183-1207,1403-1442,1474-1479: reload/retry require the exact session and tab tag; replacement installation requires the current cell, original runtime and no failed end. A mismatched host stays unavailable.",
+            "Read core/host_tabs.rs:915-943,964-969,1013-1062: close rechecks tab id/runtime, refuses the agent runtime and unreadable host, preserves failed endings, and verifies the adopted process even for Gone.",
+            "The separate session Delete Gone shortcut is not this close path and is not refuted by these checks. No runtime observation."
+          ],
+          "coverage_checked": {
+            "SPEC.md": "Terminal experience and lifecycle rules do not accept closing another terminal.",
+            "SPEC_impl.md": "Tabs in hosts explicitly requires tag/cell attribution, refusal of the agent runtime, adopted-process confirmation for Gone, and record retention on an unconfirmed end.",
+            "TODO.md Planned": "Empty; no cover.",
+            "plans/queue": "No unlanded matching identity/close plan. Tmux-removal plans are landed per plans/REPORTS.md:29-32.",
+            "BUGS.md": "No matching item.",
+            "INDEX.md and matching queue files": "No exact marker-join/tab-close item. gone-retry-forgets-pinned-foreground-child.md concerns forgetting a child identity during recovery, not selecting the wrong tab.",
+            "TRIAGE_OUTCOMES.md": "No matching trigger/consequence/scope.",
+            "FILTER.md": "No filter used; wrong-target termination is outside the ordinary rare-glitch filters."
+          },
+          "exact_cover_quotes": [],
+          "missing_premise": "No replacement path depending on the deleted marker join, or bypassing its replacement identity checks as a result of this deletion, was established.",
+          "original_stronger_consequence": "Removing authoritative pane-fact/marker joins could let tab Close act on an agent or another tab, terminating work the user did not authorize. Potential security/loss-of-work consequence and highest suggestion are unchanged.",
+          "needs_independent_drop_check": true,
+          "proposed_basis": "Narrow source refutation of deletion-induced wrong-target close. Deliberate old-terminal retirement is not a basis for this disposition; no broader lifecycle guarantee is asserted."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": true,
+        "provisional_bucket": "highest",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "retired-tmux-marker-join-wrong-tab-close",
+        "destination": null
+      }
+    },
+    {
+      "key": "g167/c4",
+      "owner": "g167",
+      "id": "c4",
+      "domain": "retired-supervisor-tmux",
+      "purpose": "retired-supervisor-tmux: crates/farhelm-supervisor/src/tmux/control_codec.rs; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 10,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c4",
+            "state": "open",
+            "summary": "Prompt mode and launch excerpts retain host-specific production gates and tests",
+            "location": "crates/farhelm-supervisor/src/tmux/control_codec.rs:522",
+            "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. TLDR considered: removal of tmux pane-mode/capture parsing might make follow-up prompts use stale paste modes (newlines submitted as keys), or quote another launch's terminal output in a durable launch error. Suggested bucket if established: high for ordinary misdelivery/incorrect diagnostics; could-be-highest: potentially, if an established stale-mode route executed unintended commands or damaged work. No such route was established from this assigned removal. Confidence: source-refuted for codec removal, not executed. proposed_drop: source refutation, pending independent caller check for the preserved potential work-loss consequence. Actual surviving caller checks: core.rs:11913-11915 validates prompt then takes the target's lifecycle claim, 11944-11958 requires that entry's running HostTerminal, 11999-12010 requires caught_up and emulator bracketed-paste mode. deliver_prompt_to_host at 2192-2233 sends paste and submit on the same host input sequence and submits only after paste fate Written. No deleted tmux mode query runs there. launch_artifacts.rs:59-76 uses the entry's host only after HostEvidence::Owned dead; hosts/terminal.rs:2229-2239 returns only the emulator's visible screen, not its seeded history. Pinned SPEC_impl.md Launch failure classification, 2701-2766, and Terminal host's prompt switch-point contract require final-screen attribution and caught-up paste modes. Test sensitivity checked independently: core/tests/host_terminals.rs:541-588 refuses mode-off prompt with empty received bytes, then turns mode on and asserts exact byte delivery for short and multi-input pastes; 1484-1535 establishes paste-on but not-caught-up, asserts refusal for restoration plus no input, completes replay and asserts exact delivery. Removing the restoration gate would make that refusal/received-byte assertion fail by inspection. The retained excerpt test at 184-218 sends its own complaint, waits for processed exit, and asserts the error ends in that complaint. Removed control_codec tests of bracket_paste_warning_fires_only_for_genuinely_old_tmux and a_capture_block_loses_exactly_its_final_row_terminator tested the retired tmux warning/capture grammar, not these surviving paths. possible_cover: none searched. Caveats: no exhaustive proof of prompt-mode race freedom or excerpt-generation coverage; no runtime/mutation tests. The conclusion is only that this decoder deletion removes no gate or test that those paths invoke, supported also by direct surviving boundary assertions."
+          }
+        },
+        {
+          "line": 12,
+          "event": {
+            "version": 1,
+            "kind": "lead",
+            "id": "c4",
+            "state": "open",
+            "summary": "Narrow the earlier excerpt refutation against neighbour g100's history-promotion route",
+            "location": "crates/farhelm-supervisor/src/tmux/control_codec.rs:522",
+            "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. Original considered consequences preserved: deleting pane-mode/capture parsing might make follow-up prompts use stale paste modes (newlines submitted as keys), or quote another launch's terminal output in a durable launch error. Earlier c4 source-refuted the codec-deletion route using host-only prompt gates, processed exit and the new host's visible blank screen. New supplied context: g100/c1 reports a separate, source-confirmed route by which a later height increase promotes seeded history into that visible screen before failure classification, and says this runtime route already exists at the excluded base; g013/f2 owns an in-range contract/caveat change. Correct host-only production and the retained complaint test do not refute that independent attribution/documentation issue. proposed_drop: pending refinement; earlier blanket excerpt refutation must be narrowed to this assigned codec's removal, preserving the separate known concern. Confidence: prompt-path/deleted-caller conclusions remain source-backed; neighbour route not yet independently source-checked here. Suggested bucket of original prompt risk: potentially highest only if unintended command execution/work loss is established, which this deletion did not establish. Excerpt consequence: other per supplied g100/c1, no established security/work-loss route. Could-be-highest: original prompt possibility retained for independent check; history-contaminated diagnostic alone has no established highest route. possible_cover: exact supplied neighbour g100/c1 and g013/f2 overlap, not searched coverage. Next: finish required neighbour-context read, then check minimal pinned resize/seed/excerpt sources and base attribution and revise this same ID. This is not a new discovery or duplicate finding. No execution."
+          }
+        },
+        {
+          "line": 13,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "c4",
+            "state": "open",
+            "summary": "Earlier codec-removal refutation does not refute the known inherited-history excerpt route",
+            "location": "crates/farhelm-supervisor/src/tmux/control_codec.rs:522",
+            "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333; excluded range base compared: 6e423e30068b62c6cfa276c6d720ee35bb70387a. Original TLDR considered remains: deleting pane-mode/capture parsing might make follow-up prompts use stale paste modes (newlines submitted as keys), or quote another launch's terminal output in a durable launch error. Original proposed-drop basis was correct host-only gates, processed exit and a blank new screen. Synthesis correction: these refute a dependency on deleted tmux parsing, but do not refute contamination after inherited history is promoted into that screen. Supplied neighbour g100/c1 establishes that distinct known route, overlapping g013/f2's later in-range specification change; no new discovery is claimed. Own source checks now confirm grid/resize.rs:25-28 grows screen height through grow_lines and :57-71 promotes existing history; snapshot/v1/mod.rs:242-268 seeds primary history above a blank screen; launch_artifacts.rs:59-76 quotes current visible screen after processed exit. The history-promotion mechanism invalidates a blanket assertion that visible-screen extraction always excludes previous-run content. Base launch_artifacts.rs:52-94 already contains the same host-only quote and blank-screen rationale, and grid/resize.rs has no base-to-reviewed diff. Do not infer that the bug predates the entire range merely because it predates this assigned deletion: g100/c1 and g013/f2 retain the known in-range documentation/contract attribution for parent reconciliation. This group's codec deletion supplies no additional changed responsibility or independent route. Confidence: source-confirmed correction of the earlier refutation, with the complete viewer/publication route supplied by g100's exact latest record; no execution. Suggested bucket for inherited-content diagnostic: other; could-be-highest: no established work-loss/security route for that diagnostic. Preserve the earlier potential-highest prompt hypothesis (unsafe submission could damage work if its missing route were established); source checks and direct retained tests still refute that hypothesis as a consequence of this codec deletion. proposed_drop: false for the known inherited-history diagnostic; earlier blanket source refutation withdrawn. Attribution-only proposed drop of a new defect in this codec deletion remains a proposal, not an accepted disposition of the known broader issue. Prompt-specific source-refutation proposal remains unchanged: core.rs:11913-12010 gates the current entry's host on liveness/caught_up/paste mode, helper 2192-2233 awaits paste Written before submit, and host_terminals.rs:541-588,1484-1535 directly asserts refusal and exact delivery. Those tests do not claim to test inherited-screen provenance. possible_cover: supplied g100/c1 and g013/f2 are known overlapping records; no prohibited sources searched. No readily checkable premise remains open for this reconciliation. No runtime tests or reproductions."
+          }
+        }
+      ],
+      "latest": {
+        "line": 13,
+        "event": {
+          "version": 1,
+          "kind": "finding",
+          "id": "c4",
+          "state": "open",
+          "summary": "Earlier codec-removal refutation does not refute the known inherited-history excerpt route",
+          "location": "crates/farhelm-supervisor/src/tmux/control_codec.rs:522",
+          "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333; excluded range base compared: 6e423e30068b62c6cfa276c6d720ee35bb70387a. Original TLDR considered remains: deleting pane-mode/capture parsing might make follow-up prompts use stale paste modes (newlines submitted as keys), or quote another launch's terminal output in a durable launch error. Original proposed-drop basis was correct host-only gates, processed exit and a blank new screen. Synthesis correction: these refute a dependency on deleted tmux parsing, but do not refute contamination after inherited history is promoted into that screen. Supplied neighbour g100/c1 establishes that distinct known route, overlapping g013/f2's later in-range specification change; no new discovery is claimed. Own source checks now confirm grid/resize.rs:25-28 grows screen height through grow_lines and :57-71 promotes existing history; snapshot/v1/mod.rs:242-268 seeds primary history above a blank screen; launch_artifacts.rs:59-76 quotes current visible screen after processed exit. The history-promotion mechanism invalidates a blanket assertion that visible-screen extraction always excludes previous-run content. Base launch_artifacts.rs:52-94 already contains the same host-only quote and blank-screen rationale, and grid/resize.rs has no base-to-reviewed diff. Do not infer that the bug predates the entire range merely because it predates this assigned deletion: g100/c1 and g013/f2 retain the known in-range documentation/contract attribution for parent reconciliation. This group's codec deletion supplies no additional changed responsibility or independent route. Confidence: source-confirmed correction of the earlier refutation, with the complete viewer/publication route supplied by g100's exact latest record; no execution. Suggested bucket for inherited-content diagnostic: other; could-be-highest: no established work-loss/security route for that diagnostic. Preserve the earlier potential-highest prompt hypothesis (unsafe submission could damage work if its missing route were established); source checks and direct retained tests still refute that hypothesis as a consequence of this codec deletion. proposed_drop: false for the known inherited-history diagnostic; earlier blanket source refutation withdrawn. Attribution-only proposed drop of a new defect in this codec deletion remains a proposal, not an accepted disposition of the known broader issue. Prompt-specific source-refutation proposal remains unchanged: core.rs:11913-12010 gates the current entry's host on liveness/caught_up/paste mode, helper 2192-2233 awaits paste Written before submit, and host_terminals.rs:541-588,1484-1535 directly asserts refusal and exact delivery. Those tests do not claim to test inherited-screen provenance. possible_cover: supplied g100/c1 and g013/f2 are known overlapping records; no prohibited sources searched. No readily checkable premise remains open for this reconciliation. No runtime tests or reproductions."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g167/findings.jsonl",
+        "id": "c4",
+        "line": 13,
+        "disposition": "under-investigation",
+        "group": "g167-c4",
+        "reason": "Record durably acknowledged; parent source/contract validation, cross-group synthesis, coverage/filter matching and any independent drop check remain pending. This preserves the claim and uncertainty without accepting, dropping or lowering it."
+      },
+      "accepted_parent_decision": null,
+      "returned_claim_checks": [
+        {
+          "batch": "claims-106",
+          "key": "g167/c4",
+          "latest_line": 13,
+          "recommendation": "retain-verified",
+          "bucket": "other",
+          "underlying_key": "restart-seeded-history-promoted-into-launch-error-screen",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "Retain the corrected inherited-history diagnostic/specification concern for parent reconciliation. The earlier blanket excerpt refutation is withdrawn: a host's visible screen can contain seeded prior-run history after height growth. The runtime mechanism predates the range, but this range adds the false blanket specification claim. The prompt-mode deletion hypothesis remains separately source-refuted.",
+          "checks": [
+            "At 1ed482dde220452e424973faf38a5e1318986333, snapshot/v1/mod.rs:242-268 encodes primary history above a blank screen; vendor/alacritty_terminal/src/grid/resize.rs:25-28,57-71 grows the visible grid by pulling history into it; service/launch_artifacts.rs:59-76 quotes the current visible screen once processed exit establishes deadness.",
+            "Exclusive base 6e423e30068b62c6cfa276c6d720ee35bb70387a already has the host excerpt and blank-screen rationale in service/launch_artifacts.rs:52-94; grid/resize.rs has no base-to-reviewed diff. This limits runtime attribution, not the entire claim.",
+            "The 1ed482dde220452e424973faf38a5e1318986333 SPEC_impl.md diff adds the Launch failure classification paragraph asserting that no quote reaches back into the previous run (reviewed lines 2757-2764; current lines 2659-2666). git log -G over the whole requested range identifies that commit for this wording.",
+            "Prompt portion checked at core.rs:2192-2233,11913-12010: lifecycle claim, current running host, caught_up and paste-mode gates, paste Written before submit. Retained host_terminals.rs:541-588,1484-1535 asserts empty input on mode/restoration refusal and exact delivery afterward. Those tests do not establish excerpt provenance.",
+            "Source-only conditional diagnostic route. No runtime reproduction, exhaustive mode-race proof or complete publication-route review performed here."
+          ],
+          "coverage_checked": {
+            "SPEC.md": "Restart retains history; no exact acceptance of a host launch error quoting inherited prior-run content was found. Ordinary live-screen retention is not acceptance of diagnostic attribution.",
+            "SPEC_impl.md": "Launch failure classification currently repeats the incorrect no-prior-run guarantee; this is the defect, not cover. Terminal switch points supplies the separate prompt gating contract.",
+            "TODO.md Planned": "Empty. The Mid term agent-prompt reconsideration entry concerns answering vendor approval prompts from stale status, not this deleted mode decoder or excerpt provenance.",
+            "plans/queue": "No unlanded exact excerpt/history-promotion repair. Landed tmux-removal plan requires shared excerpt helpers to survive, without accepting this provenance error.",
+            "BUGS.md": "No matching acceptance.",
+            "INDEX.md and matching queue files": "No current launch-excerpt/history-promotion item found. restart-unwind-omits-tree-sweep-failure.md is a different Restart restoration contract; no alias inferred.",
+            "TRIAGE_OUTCOMES.md": "No matching decision.",
+            "FILTER.md": "No filter used: persistent diagnostic attribution is not automatically a rare, self-correcting glitch."
+          },
+          "exact_cover_quotes": [],
+          "missing_premise": "No missing premise for the source contradiction. Parent must reconcile with supplied neighboring g100/c1 and g013/f2, whose logs are outside this batch and were not read. No established unintended-command/work-loss route for the prompt-mode hypothesis.",
+          "original_stronger_consequence": "Deleting pane-mode/capture parsing might make follow-up prompts use stale paste modes, submitting newlines as keys and potentially damaging work if an execution route existed, or quote another launch's output in a durable launch error. Earlier blank-new-screen refutation of the excerpt consequence was explicitly withdrawn; the diagnostic consequence is other, with no established security/work-loss route.",
+          "needs_independent_drop_check": true,
+          "proposed_basis": "Keep the inherited-content/specification claim; reconcile rather than write a second item if g013/f2 already owns it. Independently check the separate proposed refutation of the potential-highest prompt route. Do not call the whole issue out-of-range merely because its runtime mechanism exists at the base."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": true,
+        "clearly_refuted_candidate": false,
+        "needs_unfinished_gate": true,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "restart-seeded-history-promoted-into-launch-error-screen",
+        "destination": "trailing-restart-seeded-history-promoted-into-launch-error-screen.md"
+      }
+    }
+  ],
+  "replies": [
+    {
+      "turn": 1,
+      "reply": "Initial pass complete; all 1,289 assigned patch lines read.\n\n- No introduced defect established.\n- `l1`: retirement consequence retained for independent proposed-drop review.\n- `c1`, `c2`: refuted by source.\n- No unresolved leads or unread assigned scope.\n\nFindings and progress are recorded. No tests or reproductions run."
+    },
+    {
+      "turn": 2,
+      "reply": "- Revised `c1` and `c2` with retained tests that directly distinguish framing, replay, and terminal-isolation failures.\n- Added source-refuted candidates `c3` and `c4` covering tab identity, prompt modes, and excerpt attribution. Potential loss-of-work consequences remain preserved for independent checking.\n- No new defect established. No runtime reproduction performed.\n- Unresolved lead IDs: none."
+    },
+    {
+      "turn": 3,
+      "reply": "Discovery pass 1 found nothing new.\n\n- Checked full-range file history, remaining codec references, host environment filtering, and raw-byte framing.\n- Revised `c4` to preserve the known neighbouring excerpt concern; the earlier blanket refutation is withdrawn.\n- New verified IDs: none.\n- New unverified IDs: none.\n- Open leads: none.\n\nProgress updated. No runtime execution."
+    }
+  ],
+  "progress": "# g167 retired-supervisor-tmux\n\nTurn type/count: initial / 1. Discovery-pass count: 0.\nState: initial pass complete; awaiting the caller's later synthesis/discovery instruction.\nReviewed revision: 1ed482dde220452e424973faf38a5e1318986333.\nComplete inventory commits field read. Excluded inventory metadata was not inspected.\n\nMandatory scope: prep/parts/00952-000.patch lines 1-1289 delivered through evidence read as 1-200, 201-400, 401-600, 601-800, 801-1000, 1001-1200, 1201-1289. No assigned material unread. This is a partial packet of a larger deleted file; unassigned trailing deletion lines are outside this group's scope.\n\nRecords: l1 started as a lead, revised to a source-confirmed retirement consequence with proposed_drop, then settled by pinned parent attribution checks. Its potentially highest consequence is preserved and requires the caller's independent drop check. c1 refutes removal of active transport bounds. c2 refutes removal of active replay and terminal isolation. No open unresolved leads. No defect introduced by the assigned removal was established.\nNew verified IDs this pass: l1 (accepted retirement consequence, not an introduced defect), c1/c2 (source-refuted candidates). New unverified IDs: none.\n\nInterface assumptions: active terminals resolve to one HostTerminal runtime/connection per terminal; no active caller uses the deleted decoder. Old-kind rows are retained for reservation provenance but are never resolved as tmux panes. Startup ends the old server under ownership before reload; this retirement already existed in the parent. Host framing and replay keep their own bounds and byte-offset policy. Replacement components were checked only to validate removal implications, not audited in full.\n\nPinned context read:\n- SPEC.md:2855-3187 (complete Terminal experience section).\n- SPEC_impl.md:2880-2990 (complete Terminal substrate: private tmux server section); 1963-2255 (Terminal host introduction, socket/connection/discovery/runtime/replay/checkpoint/switch-point contracts; final line begins the next, unneeded creation subsection).\n- crates/farhelm-supervisor/src/lib.rs:1-260.\n- crates/farhelm-supervisor/src/service/terminals.rs:1-290.\n- crates/farhelm-supervisor/src/service/core.rs:6100-6215,6370-6425,6650-6845,7030-7110.\n- crates/farhelm-supervisor/src/service/core/old_terminals.rs:1-245.\n- crates/farhelm-supervisor/src/hosts/client.rs:1008-1120.\n- crates/farhelm-supervisor/src/hosts/terminal.rs:1-105,2710-2790,3420-3520, and its complete same-commit diff.\n- crates/terminal-host/src/protocol.rs:305-352,766-795 (plus targeted constant and decoder searches).\n- crates/farhelm-supervisor/src/tmux.rs:1-180.\n- Complete commit metadata/stat; pinned crate-wide deleted-symbol search returned no matches. Parent core.rs targeted retirement references were inspected; old_terminals.rs diff against parent was empty.\n\nInstructions read: injected root AGENTS.md with End sentinel; skillette and scripts instructions; scode-voice; .agents/machine.md; review_feedback_queue/AGENTS.md; review_feedback_queue/.agents/recording.md. An initial combined instruction output clipped part of queue AGENTS.md; both bounded chunks were reread without clipping. An initial broad unpinned symbol grep returned unrelated path snippets; discarded it and repeated the relevant symbol check at the pinned revision restricted to crates. No coverage inference used those snippets.\n\nNo checkout files changed. No tests, builds or reproductions run; source-only review was requested. All consequences reported are source conclusions, not runtime observations.\nNext action: caller-directed later synthesis/discovery turn; do not run that protocol in this initial turn.\n\n## Synthesis turn 2\n\nState: complete. Turn type/count: synthesis / 2 total turns. Discovery-pass count: 0. No new verified defect or unresolved lead. New source-refuted candidate IDs: c3 (wrong-target tab termination, potentially highest) and c4 (stale prompt modes/wrong-launch excerpt, potential work-loss route preserved). Revised c1 and c2 with direct retained-test sensitivity evidence; revised c3 with open/reload/retry/close identity checks. l1 is unchanged: known deliberate retirement consequence and provenance preserved, proposed drop still awaiting independent decision. No proposed drop is accepted by this reviewer.\n\nUseful results: active frame-bound tests directly assert incomplete/exact-cap/over-cap cases; active replay tests distinguish seen/unseen/live bytes and OSC52/query effects; e2e terminal isolation asserts both positive delivery and absence from the other transcript. Prompt tests distinguish paste-off and replay-not-caught-up from eligible delivery, asserting exact received bytes. The final-screen excerpt uses the entry's own processed-exit host and visible screen. Tab creation tags the exact session/role/UUID; reload/retry reject mismatches; close rechecks the current runtime and preserves unconfirmed hosts. No concrete distinct route supplied by this assigned decoder deletion supports broader misleading update guidance, missing retirement warning, wrong-target cleanup or unconfirmed Delete allegations, so no unrelated lifecycle audit was launched.\n\nAdditional pinned reads this turn (all at 1ed482dde220452e424973faf38a5e1318986333):\n- SPEC_impl.md:2311-2499 (Tabs, Restart, Delete contracts, then opening context of restarts),2701-2766 (complete Launch failure classification).\n- service/core.rs:2170-2270,11890-12035,19920-20145.\n- service/launch_artifacts.rs:1-160.\n- service/core/host_tabs.rs:384-535,900-1110,1110-1214,1279-1471,1470-1525,1682-1827.\n- hosts/terminal.rs:2220-2250.\n- hosts/terminal/tests.rs:318-455,519-590.\n- terminal-host/tests/protocol_codec.rs:490-555.\n- farhelm/tests/e2e/terminal_tabs.rs:1330-1394.\n- service/core/tests/host_terminals.rs:174-223,529-592,1469-1537.\n- Targeted source/test inventory and symbol searches in the above pinned crates; a large test-name search clipped a small middle snippet, which was not used as substantive evidence. Relevant test bodies were subsequently read in bounded ranges listed here.\n\nInterface assumptions remain those in the initial pass, now supported by direct host-only prompt/excerpt/tab caller and retained-test checks. All assigned patch material remains read; no mandatory scope omitted. No checkout mutations, tests, builds or reproductions. Next: caller-directed discovery or independent-check follow-up only.\n\n## Discovery turn 3\n\nTurn type/count: discovery / 3 total turns. Discovery-pass count: 1. Result: empty separate discovery pass; nothing new found. New verified IDs: none. New unverified-after-investigation IDs: none. Remaining lead IDs: none. No parent drop or lowering accepted.\n\nRequired neighbour context read in full before the new search: discovery-neighbours.json lines 1-806, through bounded chunks 1-65,66-120,121-185,186-255,256-320,321-380,381-440,441-500,501-555,556-615,616-670,671-725,726-780,781-806. These supplied records were used for novelty/interface reconciliation only, not mandatory source credit or prohibited coverage searches.\n\nReconciliation before new search: c4 temporarily reopened as a lead, then revised under the original ID to finding after checking g100/c1's known inherited-history promotion premise. Removed the earlier blanket excerpt refutation. Source checks confirm grow_lines promotes history, history seeding starts with a blank screen, and visible-screen-only quoting therefore does not exclude all previous-run content. Compared the excluded range base, not just the assigned commit's parent: the host excerpt and blank-seed rationale already exist there and resize has no base-to-reviewed diff. The supplied g100/c1 and g013/f2 retain in-range contract/documentation provenance for parent reconciliation. c4 is not a new discovery or an independent duplicate of that known route. Prompt-specific source-refutation proposal and original potential-highest unsafe-submission consequence remain preserved; no drop accepted.\n\nFresh discovery checks/results after reconciliation:\n- Complete pinned source/path history for control_codec.rs over exclusive 6e423e3 through inclusive 00de0b6: only the assigned deletion at 1ed482d. No later file changes or resurrection. No newly added intermediate codec behavior was skipped.\n- Pinned git grep across crates, SPEC.md, SPEC_impl.md, docs, website and README.md for the full deleted codec identifier set, including exported framing/marker/passthrough helpers and private splitter/bound helpers: no surviving references. This checks residual callers and dangling documentation pointers within the named surfaces; historical/prohibited sources were excluded.\n- host_launch.rs:85-158: after applying launch_env, removes TMUX, TMUX_PANE and FARHELM_TMUX and overwrites terminal identity. No inherited claim to the removed private tmux codec remains.\n- terminal-host protocol.rs:405-450: output byte fields copy exact length-delimited bytes after cap/short-body checks, with no line splitting, octal decoding or UTF-8 normalization that would inherit the deleted codec's responsibilities.\n\nAdditional reconciliation source reads at 1ed482d: vendor/alacritty_terminal/src/grid/resize.rs:1-82; terminal-emulator/src/snapshot/v1/mod.rs:238-275. Excluded base launch_artifacts.rs:42-106 and base-to-reviewed resize diff also read. These settle c4's readily checkable correction; they are not a fresh issue search outside scope.\n\nAll mandatory scope remains read, no omission. No tests/builds/runtime reproductions/live-install actions or checkout mutations. Conclusions are source analysis. Next: caller-directed follow-up only.\n"
+}

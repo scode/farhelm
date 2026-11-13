@@ -1,0 +1,1126 @@
+{
+  "group": {
+    "id": "g067",
+    "domain": "podman-environments",
+    "purpose": "podman-environments: crates/farhelm-helm/src/environment/podman/tests.rs, crates/farhelm-helm/src/environment/podman_probe.rs, crates/farhelm/tests/e2e/podman_environments.rs; phases complete small per-commit changes",
+    "interfaces": [
+      "g022",
+      "g023",
+      "g024",
+      "g025",
+      "g026",
+      "g027",
+      "g028",
+      "g029",
+      "g055",
+      "g056",
+      "g057",
+      "g058",
+      "g059",
+      "g060",
+      "g064",
+      "g066",
+      "g068",
+      "g070",
+      "g093"
+    ],
+    "sources": [
+      {
+        "path": "[private-run]/prep/parts/00181-000.patch",
+        "ranges": [
+          [
+            1,
+            891
+          ]
+        ],
+        "original_path": "crates/farhelm-helm/src/environment/podman/tests.rs",
+        "commit": "56659839785691f76da3af5d8f51b511cff4ba8b",
+        "notes": "patch header; patch character offsets [0,31953)",
+        "lines": 891,
+        "bytes": 31953,
+        "start": 0,
+        "end": 31953,
+        "original": "[private-run]/prep/originals/00181.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/00182-000.patch",
+        "ranges": [
+          [
+            1,
+            428
+          ]
+        ],
+        "original_path": "crates/farhelm-helm/src/environment/podman_probe.rs",
+        "commit": "56659839785691f76da3af5d8f51b511cff4ba8b",
+        "notes": "patch header; patch character offsets [0,17174)",
+        "lines": 428,
+        "bytes": 17174,
+        "start": 0,
+        "end": 17174,
+        "original": "[private-run]/prep/originals/00182.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/00722-000.patch",
+        "ranges": [
+          [
+            1,
+            358
+          ]
+        ],
+        "original_path": "crates/farhelm/tests/e2e/podman_environments.rs",
+        "commit": "2ef10815f12ed719ab6c51c6e3ac6fcd3f8bc1fa",
+        "notes": "patch header; patch character offsets [0,15420)",
+        "lines": 358,
+        "bytes": 15420,
+        "start": 0,
+        "end": 15420,
+        "original": "[private-run]/prep/originals/00722.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/01578-000.patch",
+        "ranges": [
+          [
+            1,
+            14
+          ]
+        ],
+        "original_path": "crates/farhelm/tests/e2e/podman_environments.rs",
+        "commit": "08399d092d20815ced6619c26df2391944ae2b4a",
+        "notes": "patch header; patch character offsets [0,796)",
+        "lines": 14,
+        "bytes": 796,
+        "start": 0,
+        "end": 796,
+        "original": "[private-run]/prep/originals/01578.patch"
+      }
+    ],
+    "lines": 1691,
+    "bytes": 65343
+  },
+  "records": [
+    {
+      "key": "g067/c1",
+      "owner": "g067",
+      "id": "c1",
+      "domain": "podman-environments",
+      "purpose": "podman-environments: crates/farhelm-helm/src/environment/podman/tests.rs, crates/farhelm-helm/src/environment/podman_probe.rs, crates/farhelm/tests/e2e/podman_environments.rs; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 1,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c1",
+            "state": "open",
+            "summary": "No-input commands do not fail the private-input race",
+            "location": "crates/farhelm-helm/src/environment/podman_probe.rs:217",
+            "detail": "Reviewed commit: 56659839785691f76da3af5d8f51b511cff4ba8b. TLDR: considered whether ordinary Podman probes and lifecycle commands could spuriously fail with a private-input error even though they supply no input; source refutes this route. Details: SystemPlaceCommands::execute constructs send as an inline async future; with input=None it completes immediately with Ok at lines 205-213. The biased select at lines 217-221 polls send first, then awaits capture. Thus an already completed capture cannot select the artificial incomplete-input error for a no-input command. Existing capture_child drains both pipes and bounds child execution (provisioning/backend.rs:1973-2020). Suggested bucket: other if it existed. Confidence: confirmed by source, not executed. proposed_drop: the immediate successful send future and biased selection refute the suspected failure. possible_cover: none; no coverage sources consulted. Could-be-highest: false; the considered consequence was command refusal, not established data loss or credential disclosure. No finding is claimed about cancellation of descendants or remote cleanup from this check."
+          }
+        }
+      ],
+      "latest": {
+        "line": 1,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c1",
+          "state": "open",
+          "summary": "No-input commands do not fail the private-input race",
+          "location": "crates/farhelm-helm/src/environment/podman_probe.rs:217",
+          "detail": "Reviewed commit: 56659839785691f76da3af5d8f51b511cff4ba8b. TLDR: considered whether ordinary Podman probes and lifecycle commands could spuriously fail with a private-input error even though they supply no input; source refutes this route. Details: SystemPlaceCommands::execute constructs send as an inline async future; with input=None it completes immediately with Ok at lines 205-213. The biased select at lines 217-221 polls send first, then awaits capture. Thus an already completed capture cannot select the artificial incomplete-input error for a no-input command. Existing capture_child drains both pipes and bounds child execution (provisioning/backend.rs:1973-2020). Suggested bucket: other if it existed. Confidence: confirmed by source, not executed. proposed_drop: the immediate successful send future and biased selection refute the suspected failure. possible_cover: none; no coverage sources consulted. Could-be-highest: false; the considered consequence was command refusal, not established data loss or credential disclosure. No finding is claimed about cancellation of descendants or remote cleanup from this check."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g067/findings.jsonl",
+        "id": "c1",
+        "line": 1,
+        "disposition": "excluded",
+        "group": "podman-no-input-command-private-input-race",
+        "reason": "Parent explicitly accepted named refuted proposal from claims-042 after inspecting it. With no input, the inline send future is immediately successful and the biased select polls it first. Already-ready capture cannot choose the incomplete-input error before that successful branch. Source-refute this no-input select-ordering route only. Checked source/results: [\"56659839785691f76da3af5d8f51b511cff4ba8b:environment/podman_probe.rs:175-187 selects null stdin for no input; 205-213 makes send return Ok without suspension when input=None; biased select at 217-221 tries send first and then awaits capture.\",\"The suspected artificial private-input refusal at 230 is therefore not reachable merely from capture finishing first on a no-input command. This is source reasoning, not executed behavior.\"] Current coverage/results: {\"specifications\":\"Read current container-host probe/lifecycle contracts in SPEC.md and SPEC_impl.md. No separate accepted spurious-refusal rule is needed; the exact route is source-refuted.\",\"TODO.md Planned and plans\":\"Empty/no unlanded entries.\",\"BUGS.md\":\"Read; no same-route coverage. Its escaped SSH-output stall is different.\",\"queue and active triage\":\"Searched private-input race/incomplete-input text, podman_probe and no-input command terms. No exact cover/alias found.\",\"FILTER.md\":\"No filter invoked.\"} Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Ordinary probes/lifecycle commands might fail spuriously with a private-input error despite supplying no input. The considered impact was command refusal only. No conclusion is drawn about descendant cancellation, remote cleanup, data loss or credential disclosure.\"; \"The hypothesis requires capture to win before an immediately-ready first biased branch; the select ordering refutes it.\"."
+      },
+      "accepted_parent_decision": {
+        "key": "g067/c1",
+        "line": 1,
+        "disposition": "excluded",
+        "group": "podman-no-input-command-private-input-race",
+        "bucket": "other",
+        "recording": "refuted",
+        "queue_target_candidate": null,
+        "needs_independent_drop_check": false,
+        "reason": "Parent explicitly accepted named refuted proposal from claims-042 after inspecting it. With no input, the inline send future is immediately successful and the biased select polls it first. Already-ready capture cannot choose the incomplete-input error before that successful branch. Source-refute this no-input select-ordering route only. Checked source/results: [\"56659839785691f76da3af5d8f51b511cff4ba8b:environment/podman_probe.rs:175-187 selects null stdin for no input; 205-213 makes send return Ok without suspension when input=None; biased select at 217-221 tries send first and then awaits capture.\",\"The suspected artificial private-input refusal at 230 is therefore not reachable merely from capture finishing first on a no-input command. This is source reasoning, not executed behavior.\"] Current coverage/results: {\"specifications\":\"Read current container-host probe/lifecycle contracts in SPEC.md and SPEC_impl.md. No separate accepted spurious-refusal rule is needed; the exact route is source-refuted.\",\"TODO.md Planned and plans\":\"Empty/no unlanded entries.\",\"BUGS.md\":\"Read; no same-route coverage. Its escaped SSH-output stall is different.\",\"queue and active triage\":\"Searched private-input race/incomplete-input text, podman_probe and no-input command terms. No exact cover/alias found.\",\"FILTER.md\":\"No filter invoked.\"} Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Ordinary probes/lifecycle commands might fail spuriously with a private-input error despite supplying no input. The considered impact was command refusal only. No conclusion is drawn about descendant cancellation, remote cleanup, data loss or credential disclosure.\"; \"The hypothesis requires capture to win before an immediately-ready first biased branch; the select ordering refutes it.\"."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-042",
+          "key": "g067/c1",
+          "latest_line": 1,
+          "recommendation": "refuted",
+          "bucket": "other",
+          "underlying_key": "podman-no-input-command-private-input-race",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "With no input, the inline send future is immediately successful and the biased select polls it first. Already-ready capture cannot choose the incomplete-input error before that successful branch.",
+          "checks": [
+            "56659839785691f76da3af5d8f51b511cff4ba8b:environment/podman_probe.rs:175-187 selects null stdin for no input; 205-213 makes send return Ok without suspension when input=None; biased select at 217-221 tries send first and then awaits capture.",
+            "The suspected artificial private-input refusal at 230 is therefore not reachable merely from capture finishing first on a no-input command. This is source reasoning, not executed behavior."
+          ],
+          "coverage_checked": {
+            "specifications": "Read current container-host probe/lifecycle contracts in SPEC.md and SPEC_impl.md. No separate accepted spurious-refusal rule is needed; the exact route is source-refuted.",
+            "TODO.md Planned and plans": "Empty/no unlanded entries.",
+            "BUGS.md": "Read; no same-route coverage. Its escaped SSH-output stall is different.",
+            "queue and active triage": "Searched private-input race/incomplete-input text, podman_probe and no-input command terms. No exact cover/alias found.",
+            "FILTER.md": "No filter invoked."
+          },
+          "exact_cover_quotes": [],
+          "missing_premise": "The hypothesis requires capture to win before an immediately-ready first biased branch; the select ordering refutes it.",
+          "original_stronger_consequence": "Ordinary probes/lifecycle commands might fail spuriously with a private-input error despite supplying no input. The considered impact was command refusal only. No conclusion is drawn about descendant cancellation, remote cleanup, data loss or credential disclosure.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Source-refute this no-input select-ordering route only."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "podman-no-input-command-private-input-race",
+        "destination": null
+      }
+    },
+    {
+      "key": "g067/l1",
+      "owner": "g067",
+      "id": "l1",
+      "domain": "podman-environments",
+      "purpose": "podman-environments: crates/farhelm-helm/src/environment/podman/tests.rs, crates/farhelm-helm/src/environment/podman_probe.rs, crates/farhelm/tests/e2e/podman_environments.rs; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 2,
+          "event": {
+            "version": 1,
+            "kind": "lead",
+            "id": "l1",
+            "state": "open",
+            "summary": "Environment Delete test may not distinguish authoritative membership",
+            "location": "crates/farhelm/tests/e2e/podman_environments.rs:1414",
+            "detail": "Reviewed commit: 2ef10815f12ed719ab6c51c6e3ac6fcd3f8bc1fa. TLDR: the new real-container test claims it rejects a helm that counts its own session list, but its premise appears to give the helm the same two sessions as the container. Details: delete_sessions_until_sealed asserts both first and last in the helm listing (lines 1433-1437), then expects environment_remaining=1 (1446-1450). Its docstring says a helm that counted its own list fails here (1419-1422). SPEC.md, Sandbox sessions, instead requires the supervisor's count precisely because the helm list can miss sessions. Need inspect the enclosing lifecycle sequence and Delete route to determine whether any intervening step deliberately makes membership differ, and whether this is a substantive test-oracle defect or only an overstatement of the test's scope. Suggested bucket: other for test assurance only, not an established shipped deletion defect. Confidence: unresolved pending those source checks; no runtime behavior observed. proposed_drop: false pending investigation. possible_cover: none; no coverage sources consulted. Could-be-highest: false for this test-only issue; an actual destructive implementation route has not been established."
+          }
+        },
+        {
+          "line": 3,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "l1",
+            "state": "open",
+            "summary": "Real-container deletion test covers two-session lifecycle, not hidden membership",
+            "location": "crates/farhelm/tests/e2e/podman_environments.rs:1414",
+            "detail": "Reviewed commit: 2ef10815f12ed719ab6c51c6e3ac6fcd3f8bc1fa. TLDR: considered whether the new container deletion test leaves users exposed to destructive membership guesses. The test's comment overstates its oracle, but no shipped deletion defect is established; retain this as a scope limitation, not a reported bug. Details: the full exercise sequence at lines 1128-1316 creates a kept agent session, pauses/resumes, restarts the helm, stops/starts the container and finally deletes both remaining sessions. It deliberately asserts that both sessions are present in the helm listing before deletion. A helm-side count could agree here, so the docstring's claim that such an implementation necessarily fails this test is stronger than its observable. However the test does distinguish keeping a two-session environment from destroying its last session and checks independent Podman state. The production route at crates/farhelm-helm/src/sessions/sandbox.rs:196-261 performs no membership count: it calls delete_session_or_seal and reports the supervisor's returned remaining count, or destroys on Sealed. SPEC.md, Sandbox sessions: 'So no Delete decides from the helm’s list, a cache or anything stored on the helm’s side that a session is the last one.' (ASCII apostrophe in source.) SPEC_impl.md, Environment Delete and the seal, specifies the same authoritative supervisor request. Suggested bucket: other for the test-comment/oracle limitation; no product impact established. Confidence: confirmed by source, not executed. proposed_drop: retain as a considered test-scope limitation; the source review confirms that the real route uses the specified authoritative request, and this normal-lifecycle test need not independently cover every hidden-membership case. possible_cover: none; no other group's tests or coverage sources were searched. Could-be-highest: false for this test-only concern. The original suspected consequence was false assurance against helm-side membership guesses; there is no established shipped route to environment data loss in the reviewed code."
+          }
+        },
+        {
+          "line": 8,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "l1",
+            "state": "open",
+            "summary": "Deletion test does not distinguish the membership authority it claims",
+            "location": "crates/farhelm/tests/e2e/podman_environments.rs:1414",
+            "detail": "Reviewed commit: 2ef10815f12ed719ab6c51c6e3ac6fcd3f8bc1fa. TLDR: the real-container deletion test claims to catch decisions based on the helm's session list, but gives the helm the same membership as the container, so that regression could pass the asserted scenario. This is a test-oracle/documentation defect, not an established shipped deletion bug. Details: delete_sessions_until_sealed says, 'The count must be exactly the one session left; a helm that counted its own list, or a supervisor that sealed with a session remaining, fails here.' Yet the fixture deliberately asserts that both first and last are present in the helm listing before either Delete, then expects remaining=1 after deleting first. Its full enclosing lifecycle sequence at 1128-1316 creates the kept agent session, pauses/resumes, restarts the helm, stops/starts the container and eventually deletes both sessions; no step establishes a membership discrepancy. A helm-side count of the same two visible sessions followed by ordinary session deletion could produce remaining=1, preserve the container, and destroy it on deleting the last visible session, satisfying these assertions. SPEC.md, Sandbox sessions: 'So no Delete decides from the helm's list, a cache or anything stored on the helm's side that a session is the last one.' The supplied test-authoring contract requires an observable that distinguishes competing mechanisms. Either establish a controlled discrepancy and assert the supervisor's authoritative answer, or narrow the comment to the two-session lifecycle guarantee this test actually establishes; this does not demand that one lifecycle scenario test every deletion case. The current production route at crates/farhelm-helm/src/sessions/sandbox.rs:196-261 correctly calls delete_session_or_seal and reports the returned supervisor count or destroys on Sealed. That refutes an actual product defect here, but does not refute the test's overstated sensitivity. Suggested bucket: other (test assurance and misleading claimed coverage only). Confidence: confirmed by source and comparison of fixture premise with its assertions; no execution. proposed_drop: false. possible_cover: none established; no queue/filter metadata or other groups' coverage searched. Could-be-highest: false; no shipped destructive route is established by this test-only finding. This revises candidate l1 after synthesis and preserves the original narrow consequence: false assurance against helm-side membership counting. Correct production code is no longer used as a basis to drop the test-oracle issue."
+          }
+        },
+        {
+          "line": 14,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "l1",
+            "state": "open",
+            "summary": "Deletion test does not distinguish the membership authority it claims",
+            "location": "crates/farhelm/tests/e2e/podman_environments.rs:1416",
+            "detail": "Reviewed commit: 2ef10815f12ed719ab6c51c6e3ac6fcd3f8bc1fa; persistence checked at pinned tip 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db (same comment at 1415-1418). TLDR: the real-container deletion test claims to catch decisions based on the helm's session list, but gives the helm the same membership as the container, so that regression could pass this scenario. This is a test-oracle/documentation defect, not an established shipped deletion bug. Details: original lines 1416-1418 say, 'The count must be exactly the one session left; a helm that counted its own list, or a supervisor that sealed with a session remaining, fails here.' The fixture asserts both first and last are present in the helm listing before either Delete (1427-1431), then expects remaining=1 (1439-1443), checks the container is running, and asserts only the other session remains listed (1444-1454). The enclosing lifecycle sequence at 1128-1316 creates the kept agent session, pauses/resumes, restarts the helm, stops/starts the container and eventually deletes both; no step establishes a membership discrepancy. A helm-side count of the same two visible sessions followed by ordinary session deletion could produce remaining=1, preserve the container, and destroy it on deleting the last visible session, satisfying these assertions. The guarantee against premature sealing with another session present is meaningful; the specific claim that helm-side counting necessarily fails here is unsupported. SPEC.md, Sandbox sessions: 'So no Delete decides from the helm's list, a cache or anything stored on the helm's side that a session is the last one.' The supplied test-authoring contract requires an observable that distinguishes competing mechanisms. Either establish a controlled discrepancy and assert the supervisor's authoritative answer, or narrow the comment to the two-session lifecycle guarantee this test establishes; this does not require one scenario to cover every deletion case. The production route at crates/farhelm-helm/src/sessions/sandbox.rs:196-261 correctly calls delete_session_or_seal and reports its returned count or destroys on Sealed. That refutes a product defect here, but does not refute the test's overstated sensitivity. Suggested bucket: other (test assurance and misleading claimed coverage only). Confidence: confirmed by pinned source, fixture/observable comparison and tip persistence; no execution. proposed_drop: false. possible_cover: none established; no queue/filter metadata or other groups' coverage searched. Could-be-highest: false; no shipped destructive route is established. This revision corrects precise line references and preserves the original narrow consequence: false assurance against helm-side membership counting."
+          }
+        }
+      ],
+      "latest": {
+        "line": 14,
+        "event": {
+          "version": 1,
+          "kind": "finding",
+          "id": "l1",
+          "state": "open",
+          "summary": "Deletion test does not distinguish the membership authority it claims",
+          "location": "crates/farhelm/tests/e2e/podman_environments.rs:1416",
+          "detail": "Reviewed commit: 2ef10815f12ed719ab6c51c6e3ac6fcd3f8bc1fa; persistence checked at pinned tip 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db (same comment at 1415-1418). TLDR: the real-container deletion test claims to catch decisions based on the helm's session list, but gives the helm the same membership as the container, so that regression could pass this scenario. This is a test-oracle/documentation defect, not an established shipped deletion bug. Details: original lines 1416-1418 say, 'The count must be exactly the one session left; a helm that counted its own list, or a supervisor that sealed with a session remaining, fails here.' The fixture asserts both first and last are present in the helm listing before either Delete (1427-1431), then expects remaining=1 (1439-1443), checks the container is running, and asserts only the other session remains listed (1444-1454). The enclosing lifecycle sequence at 1128-1316 creates the kept agent session, pauses/resumes, restarts the helm, stops/starts the container and eventually deletes both; no step establishes a membership discrepancy. A helm-side count of the same two visible sessions followed by ordinary session deletion could produce remaining=1, preserve the container, and destroy it on deleting the last visible session, satisfying these assertions. The guarantee against premature sealing with another session present is meaningful; the specific claim that helm-side counting necessarily fails here is unsupported. SPEC.md, Sandbox sessions: 'So no Delete decides from the helm's list, a cache or anything stored on the helm's side that a session is the last one.' The supplied test-authoring contract requires an observable that distinguishes competing mechanisms. Either establish a controlled discrepancy and assert the supervisor's authoritative answer, or narrow the comment to the two-session lifecycle guarantee this test establishes; this does not require one scenario to cover every deletion case. The production route at crates/farhelm-helm/src/sessions/sandbox.rs:196-261 correctly calls delete_session_or_seal and reports its returned count or destroys on Sealed. That refutes a product defect here, but does not refute the test's overstated sensitivity. Suggested bucket: other (test assurance and misleading claimed coverage only). Confidence: confirmed by pinned source, fixture/observable comparison and tip persistence; no execution. proposed_drop: false. possible_cover: none established; no queue/filter metadata or other groups' coverage searched. Could-be-highest: false; no shipped destructive route is established. This revision corrects precise line references and preserves the original narrow consequence: false assurance against helm-side membership counting."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g067/findings.jsonl",
+        "id": "l1",
+        "line": 14,
+        "disposition": "verified",
+        "group": "podman-delete-lifecycle-test-equal-membership-oracle",
+        "reason": "Parent explicitly accepted named retain-verified proposal from claims-042 after inspecting it. The deletion test claims a helm-side membership count would fail but deliberately makes the helm list both container sessions. Counting that same list could satisfy the reported count and keep/delete assertions. Correct production code does not refute the overstated test claim. Record other. Establish an intentionally divergent membership premise and authoritative result, or narrow the comment to the two-session lifecycle guarantee actually demonstrated. Production correctness is not a basis to drop the test claim. Checked source/results: [\"2ef10815f12ed719ab6c51c6e3ac6fcd3f8bc1fa:crates/farhelm/tests/e2e/podman_environments.rs:1416-1418 claims a helm counting its own list fails; 1427-1431 establishes both sessions listed; 1439-1454 expects one remaining and keeps the container; 1456-1486 deletes the last and expects absence.\",\"The enclosing sequence at 1128-1316 pauses/resumes, restarts/reconnects the helm and stops/restarts the container but establishes no hidden/unlisted surviving session. A helm-side count agreeing with those two visible sessions can satisfy the assertions.\",\"At pinned tip 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db, the same unsupported claim persists at 1415-1418 and the equal-membership premise at 1426-1429.\",\"Production at 2ef10815f12ed719ab6c51c6e3ac6fcd3f8bc1fa:farhelm-helm/src/sessions/sandbox.rs:196-261 correctly calls delete_session_or_seal and uses its result/count. Thus this is a test/comment defect, not an established production destructive route. No tests or reproduction ran.\"] Current coverage/results: {\"SPEC.md\":\"Read Sandbox sessions in full, including current 1507 onward: helm lists may miss sessions, so deletion must ask the environment's Farhelm. Container sessions adopts the rule. No acceptance of the overstated oracle.\",\"SPEC_impl.md\":\"Read Environment Delete and the seal at 6106-6166; authoritative supervisor count is the intended mechanism.\",\"test-authoring contract\":\"Read in full: an observable must distinguish competing mechanisms.\",\"TODO.md Planned and plans\":\"Planned is empty. plans/queue/INDEX.md has no unlanded entries. Historical environment-agent-operations plan at 584-601 asks for hidden/offline-admitted membership cases, but it is no longer an unlanded plan and does not correct this specific false claim.\",\"BUGS.md\":\"Read; no test-oracle acceptance.\",\"queue and active triage\":\"Searched test/helper names, helm counting/list, membership authority and test oracle terms in INDEX/queue and active ledger. No exact same-root item/decision found; unrelated attention membership and template test-oracle items are not coverage.\",\"FILTER.md\":\"No full match. Persistent overstated test assurance is neither a rare imprecise runtime diagnostic nor a self-correcting display.\"} Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"False assurance against deleting from helm-side membership guesses. The history briefly proposed dropping this as a scope limitation because production is correct, then restored it as a test-oracle/documentation defect. Preserve that withdrawal/reversal. The test meaningfully covers two-session lifecycle and premature sealing; it need not test every deletion case. No shipped user-work-loss route is claimed.\"; null."
+      },
+      "accepted_parent_decision": {
+        "key": "g067/l1",
+        "line": 14,
+        "disposition": "verified",
+        "group": "podman-delete-lifecycle-test-equal-membership-oracle",
+        "bucket": "other",
+        "recording": "retain-verified",
+        "queue_target_candidate": null,
+        "needs_independent_drop_check": false,
+        "reason": "Parent explicitly accepted named retain-verified proposal from claims-042 after inspecting it. The deletion test claims a helm-side membership count would fail but deliberately makes the helm list both container sessions. Counting that same list could satisfy the reported count and keep/delete assertions. Correct production code does not refute the overstated test claim. Record other. Establish an intentionally divergent membership premise and authoritative result, or narrow the comment to the two-session lifecycle guarantee actually demonstrated. Production correctness is not a basis to drop the test claim. Checked source/results: [\"2ef10815f12ed719ab6c51c6e3ac6fcd3f8bc1fa:crates/farhelm/tests/e2e/podman_environments.rs:1416-1418 claims a helm counting its own list fails; 1427-1431 establishes both sessions listed; 1439-1454 expects one remaining and keeps the container; 1456-1486 deletes the last and expects absence.\",\"The enclosing sequence at 1128-1316 pauses/resumes, restarts/reconnects the helm and stops/restarts the container but establishes no hidden/unlisted surviving session. A helm-side count agreeing with those two visible sessions can satisfy the assertions.\",\"At pinned tip 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db, the same unsupported claim persists at 1415-1418 and the equal-membership premise at 1426-1429.\",\"Production at 2ef10815f12ed719ab6c51c6e3ac6fcd3f8bc1fa:farhelm-helm/src/sessions/sandbox.rs:196-261 correctly calls delete_session_or_seal and uses its result/count. Thus this is a test/comment defect, not an established production destructive route. No tests or reproduction ran.\"] Current coverage/results: {\"SPEC.md\":\"Read Sandbox sessions in full, including current 1507 onward: helm lists may miss sessions, so deletion must ask the environment's Farhelm. Container sessions adopts the rule. No acceptance of the overstated oracle.\",\"SPEC_impl.md\":\"Read Environment Delete and the seal at 6106-6166; authoritative supervisor count is the intended mechanism.\",\"test-authoring contract\":\"Read in full: an observable must distinguish competing mechanisms.\",\"TODO.md Planned and plans\":\"Planned is empty. plans/queue/INDEX.md has no unlanded entries. Historical environment-agent-operations plan at 584-601 asks for hidden/offline-admitted membership cases, but it is no longer an unlanded plan and does not correct this specific false claim.\",\"BUGS.md\":\"Read; no test-oracle acceptance.\",\"queue and active triage\":\"Searched test/helper names, helm counting/list, membership authority and test oracle terms in INDEX/queue and active ledger. No exact same-root item/decision found; unrelated attention membership and template test-oracle items are not coverage.\",\"FILTER.md\":\"No full match. Persistent overstated test assurance is neither a rare imprecise runtime diagnostic nor a self-correcting display.\"} Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"False assurance against deleting from helm-side membership guesses. The history briefly proposed dropping this as a scope limitation because production is correct, then restored it as a test-oracle/documentation defect. Preserve that withdrawal/reversal. The test meaningfully covers two-session lifecycle and premature sealing; it need not test every deletion case. No shipped user-work-loss route is claimed.\"; null."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-042",
+          "key": "g067/l1",
+          "latest_line": 14,
+          "recommendation": "retain-verified",
+          "bucket": "other",
+          "underlying_key": "podman-delete-lifecycle-test-equal-membership-oracle",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The deletion test claims a helm-side membership count would fail but deliberately makes the helm list both container sessions. Counting that same list could satisfy the reported count and keep/delete assertions. Correct production code does not refute the overstated test claim.",
+          "checks": [
+            "2ef10815f12ed719ab6c51c6e3ac6fcd3f8bc1fa:crates/farhelm/tests/e2e/podman_environments.rs:1416-1418 claims a helm counting its own list fails; 1427-1431 establishes both sessions listed; 1439-1454 expects one remaining and keeps the container; 1456-1486 deletes the last and expects absence.",
+            "The enclosing sequence at 1128-1316 pauses/resumes, restarts/reconnects the helm and stops/restarts the container but establishes no hidden/unlisted surviving session. A helm-side count agreeing with those two visible sessions can satisfy the assertions.",
+            "At pinned tip 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db, the same unsupported claim persists at 1415-1418 and the equal-membership premise at 1426-1429.",
+            "Production at 2ef10815f12ed719ab6c51c6e3ac6fcd3f8bc1fa:farhelm-helm/src/sessions/sandbox.rs:196-261 correctly calls delete_session_or_seal and uses its result/count. Thus this is a test/comment defect, not an established production destructive route. No tests or reproduction ran."
+          ],
+          "coverage_checked": {
+            "SPEC.md": "Read Sandbox sessions in full, including current 1507 onward: helm lists may miss sessions, so deletion must ask the environment's Farhelm. Container sessions adopts the rule. No acceptance of the overstated oracle.",
+            "SPEC_impl.md": "Read Environment Delete and the seal at 6106-6166; authoritative supervisor count is the intended mechanism.",
+            "test-authoring contract": "Read in full: an observable must distinguish competing mechanisms.",
+            "TODO.md Planned and plans": "Planned is empty. plans/queue/INDEX.md has no unlanded entries. Historical environment-agent-operations plan at 584-601 asks for hidden/offline-admitted membership cases, but it is no longer an unlanded plan and does not correct this specific false claim.",
+            "BUGS.md": "Read; no test-oracle acceptance.",
+            "queue and active triage": "Searched test/helper names, helm counting/list, membership authority and test oracle terms in INDEX/queue and active ledger. No exact same-root item/decision found; unrelated attention membership and template test-oracle items are not coverage.",
+            "FILTER.md": "No full match. Persistent overstated test assurance is neither a rare imprecise runtime diagnostic nor a self-correcting display."
+          },
+          "exact_cover_quotes": [],
+          "missing_premise": null,
+          "original_stronger_consequence": "False assurance against deleting from helm-side membership guesses. The history briefly proposed dropping this as a scope limitation because production is correct, then restored it as a test-oracle/documentation defect. Preserve that withdrawal/reversal. The test meaningfully covers two-session lifecycle and premature sealing; it need not test every deletion case. No shipped user-work-loss route is claimed.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Record other. Establish an intentionally divergent membership premise and authoritative result, or narrow the comment to the two-session lifecycle guarantee actually demonstrated. Production correctness is not a basis to drop the test claim."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": true,
+        "clearly_refuted_candidate": false,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Source-confirmed by an existing parent decision; not runtime reproduced",
+        "deduplication_key": "podman-delete-lifecycle-test-equal-membership-oracle",
+        "destination": "trailing-podman-delete-lifecycle-test-equal-membership-oracle.md"
+      }
+    },
+    {
+      "key": "g067/l2",
+      "owner": "g067",
+      "id": "l2",
+      "domain": "podman-environments",
+      "purpose": "podman-environments: crates/farhelm-helm/src/environment/podman/tests.rs, crates/farhelm-helm/src/environment/podman_probe.rs, crates/farhelm/tests/e2e/podman_environments.rs; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 4,
+          "event": {
+            "version": 1,
+            "kind": "lead",
+            "id": "l2",
+            "state": "open",
+            "summary": "New Podman unit-test file may not be registered as a Rust module",
+            "location": "crates/farhelm-helm/src/environment/podman/tests.rs:1",
+            "detail": "Reviewed commit: 56659839785691f76da3af5d8f51b511cff4ba8b. TLDR: the new ownership and private-input tests may never be compiled or run. Details: the assigned patch creates podman/tests.rs containing the provider failure-boundary tests. The top of its parent podman.rs declares build and failure_tests, but no tests module; the parent's final 60 lines also do not declare it. This is a substantive lead, not yet a conclusion: inspect the full parent's module/include references and the revision's module tree before reporting. Suggested bucket: other, maintainer test assurance. Confidence: unresolved pending module-graph checks; no build or test execution. proposed_drop: false. possible_cover: none. Could-be-highest: false; loss of test assurance alone is not an established product security or data-loss route."
+          }
+        },
+        {
+          "line": 5,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "l2",
+            "state": "open",
+            "summary": "Podman ownership tests are outside the Rust module tree",
+            "location": "crates/farhelm-helm/src/environment/podman/tests.rs:1",
+            "detail": "Reviewed commit: 56659839785691f76da3af5d8f51b511cff4ba8b. TLDR: the new tests for interrupted container creation, safe cleanup and private proxy input never compile or run, so a passing test suite gives no evidence for these checks. Details: this commit adds the 885-line crates/farhelm-helm/src/environment/podman/tests.rs, but its parent podman.rs:19-23 declares only build and failure_tests, with no cfg(test) mod tests anywhere in the file. Source searches at the pinned revision for mod tests, tests.rs, include! and path attributes in the parent, environment/mod.rs, lib.rs and build.rs found no inclusion; a crate-wide search for podman/tests.rs and the test symbol interrupted_helper_send_retains_name_and_revalidates_collision_labels found only the new file itself. environment/mod.rs:53 declares podman normally. Rust does not discover an arbitrary src subdirectory test file without a module declaration, so all tests in this file are excluded. This defeats the stated test contract at tests.rs:1-2, 'Failure-boundary tests execute the real provider over bounded fake commands.' It also leaves the proxy cleanup and canonical-identity assertions unavailable to validation. Wire the file into the test module graph and resolve any compile failures exposed by doing so; confirm the intended test names are discoverable. This finding concerns the missing registration, not a claim that the tested product behavior is broken. Suggested bucket: other (maintainer test assurance; no established shipped security or loss-of-work route). Confidence: confirmed through source/module-graph analysis; no build, test run or reproduction was performed. proposed_drop: false. possible_cover: none; no queue, exclusion metadata or other groups' coverage was consulted. Could-be-highest: false. This revises lead l2 after the complete parent/module-reference searches settled its missing premise."
+          }
+        },
+        {
+          "line": 6,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "l2",
+            "state": "open",
+            "summary": "Podman ownership tests are outside the Rust module tree",
+            "location": "crates/farhelm-helm/src/environment/podman/tests.rs:1",
+            "detail": "Reviewed commit: 56659839785691f76da3af5d8f51b511cff4ba8b. TLDR: the new tests for interrupted container creation, safe cleanup and private proxy input never compile or run, so a passing suite gives no evidence for these checks. Details: this commit adds the 885-line crates/farhelm-helm/src/environment/podman/tests.rs, but its parent podman.rs:19-23 declares only build and failure_tests, with no cfg(test) mod tests anywhere in the file. Source searches at the pinned revision for mod tests, tests.rs, include! and path attributes in the parent, environment/mod.rs, lib.rs and build.rs found no inclusion; a crate-wide search for podman/tests.rs and interrupted_helper_send_retains_name_and_revalidates_collision_labels found only the new file itself. environment/mod.rs:53 declares podman normally. Rust does not discover an arbitrary src subdirectory test file without a module declaration, so all tests in this file are excluded. This defeats the file's stated contract, 'Failure-boundary tests execute the real provider over bounded fake commands.' Wire the file into the test module graph and resolve the compile failures that exposes; confirm the intended test names are discoverable. A follow-up source check already identifies one such failure under normal mod tests wiring: tests.rs:527 and 530 call super::super::script_failure_output, which would resolve in environment, while the function is defined only in podman.rs:1488 and should be found in the parent podman module. A pinned git grep for script_failure_output confirms only the podman definition, its production call, and these test calls. This is supporting evidence for the missing compilation, not a separate product defect. Suggested bucket: other (maintainer test assurance; no established shipped security or loss-of-work route). Confidence: confirmed through source/module-graph analysis; no build, test run or reproduction performed. proposed_drop: false. possible_cover: none; no queue, exclusion metadata or other groups' coverage consulted. Could-be-highest: false. This revision preserves the original consequence and adds the stale namespace evidence; it does not claim that the tested product behavior itself is broken."
+          }
+        },
+        {
+          "line": 7,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "l2",
+            "state": "open",
+            "summary": "Podman ownership tests are outside the Rust module tree",
+            "location": "crates/farhelm-helm/src/environment/podman/tests.rs:1",
+            "detail": "Reviewed commit: 56659839785691f76da3af5d8f51b511cff4ba8b; persistence checked at pinned tip 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db. TLDR: the new tests for interrupted container creation, safe cleanup and private proxy input never compile or run, so a passing suite gives no evidence for these checks. Details: this commit adds the 885-line crates/farhelm-helm/src/environment/podman/tests.rs, but its parent podman.rs:19-23 declares only build and failure_tests, with no cfg(test) mod tests anywhere in the file. Original-revision searches for mod tests, tests.rs, include! and path attributes in the parent, environment/mod.rs, lib.rs and build.rs found no inclusion; a crate-wide search for podman/tests.rs and interrupted_helper_send_retains_name_and_revalidates_collision_labels found only the new file itself. environment/mod.rs:53 declares podman normally. Rust does not discover an arbitrary src subdirectory test file without a module declaration, so all tests in this file are excluded. This defeats the file's stated contract, 'Failure-boundary tests execute the real provider over bounded fake commands.' The pinned-tip parent still declares only build and failure_tests at lines 19 and 23 and has no tests/include/path reference, so this was not repaired in the reviewed range. Wire the file into the test module graph and resolve compile failures that exposes; confirm intended test names are discoverable. Supporting stale-namespace evidence is preserved: tests.rs:527 and 530 call super::super::script_failure_output, which under normal mod tests wiring resolves in environment, while the function is defined only in podman.rs:1488 (1486 at tip), in the immediate parent podman module. The original pinned git grep found only that definition, its production call, and these test calls. No claim of substitute coverage follows from the separate registered failure_tests module or its fake structure. Suggested bucket: other (maintainer test assurance; no established shipped security or loss-of-work route). Confidence: confirmed through source/module-graph analysis; no build, test run or reproduction performed. proposed_drop: false. possible_cover: none established; no queue or exclusion metadata consulted. Could-be-highest: false. This synthesis revision adds pinned-tip persistence and preserves the original missing-registration consequence and supporting stale namespace; it does not claim the product behavior itself is broken."
+          }
+        },
+        {
+          "line": 11,
+          "event": {
+            "version": 1,
+            "kind": "lead",
+            "id": "l2",
+            "state": "open",
+            "summary": "Nested build-module inclusion may refute the orphan-test finding",
+            "location": "crates/farhelm-helm/src/environment/podman/build.rs:10",
+            "detail": "Reviewed commit: 56659839785691f76da3af5d8f51b511cff4ba8b; new contradictory source found at pinned tip 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db. TLDR: the previous missing-registration conclusion may be wrong: a nested build module explicitly includes tests.rs. Details: the expanded tip module-reference search found podman/build.rs:10-11 with #[path = \"tests.rs\"] mod tests. The prior searches checked the immediate podman.rs parent, top-level environment/lib/build files, and literal podman/tests.rs references, but omitted this nested module's relative path attribute. Need read this declaration and its original-revision history before retaining or retracting the finding. If tests.rs is build::tests, its super::super::script_failure_output references resolve to podman, so the previously reported stale namespace may also be correct under the actual graph. The original claimed consequence (all ownership, cleanup and private-input tests excluded) remains the hypothesis being checked, not an established conclusion now. Suggested bucket: other if upheld. Confidence: unresolved after discovery of direct counterevidence; no runtime/build execution. proposed_drop: pending original-revision source check. possible_cover: explicit inclusion is direct compilation evidence, distinct from any shared fake or g066 substitute test coverage. Could-be-highest: false. This revision reopens l2 for immediate resolution rather than preserving a source-refuted finding."
+          }
+        },
+        {
+          "line": 13,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "l2",
+            "state": "open",
+            "summary": "Nested build module registers the Podman tests and validates their namespace",
+            "location": "crates/farhelm-helm/src/environment/podman/build.rs:9",
+            "detail": "Reviewed commit: 56659839785691f76da3af5d8f51b511cff4ba8b; also checked pinned tip 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db. TLDR: the previous claim that ownership, cleanup and private-input tests never compile or run is refuted by an explicit nested test-module declaration present at both revisions. Details: podman.rs:19 declares mod build. podman/build.rs:9-11 declares the tests module under #[cfg(test)], uses a path attribute selecting tests.rs, and declares 'mod tests;'. For this out-of-line module file, the path attribute resolves tests.rs beside build.rs in podman/, registering the assigned file as environment::podman::build::tests. The earlier analysis incorrectly treated the absence of mod tests in the immediate podman.rs file as proof, and omitted the nested build module from its relative-path search. tests.rs:4 imports super::* from build, whose line 6 imports its parent podman. The reported stale namespace is also refuted: tests.rs:527 and 530 use super::super::script_failure_output, and from build::tests that correctly resolves to podman::script_failure_output, defined at podman.rs:1488 (1486 at tip). Both missing-registration and stale-namespace claims are therefore withdrawn as factual conclusions, with their original records retained in this ID's history. This uses direct module inclusion, not presumed equivalent coverage in g066's separate failure_tests. Suggested bucket: other if the original exclusion had existed. Confidence: confirmed by original-revision and tip source/module-path analysis; no build, test run or reproduction. proposed_drop: explicit source refutation by podman/build.rs:9-11 and the resulting build::tests namespace. possible_cover: no substitute-coverage assertion is needed; this is the assigned file's own registration. Could-be-highest: false. Original suspected consequence was wholesale exclusion of the file's ownership, cleanup and proxy tests; that consequence has no source basis under the actual module graph. Parent should reject the earlier finding on this evidence."
+          }
+        },
+        {
+          "line": 15,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "l2",
+            "state": "open",
+            "summary": "Nested build module registers the Podman tests and validates their namespace",
+            "location": "crates/farhelm-helm/src/environment/podman/build.rs:9",
+            "detail": "Reviewed commit: 56659839785691f76da3af5d8f51b511cff4ba8b; also checked pinned tip 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db. TLDR: the prior claim that ownership, cleanup and private-input tests never compile or run is refuted by an explicit nested module declaration at both revisions. Details: podman.rs:19 declares 'mod build;'. podman/build.rs:9-11 says exactly '#[cfg(test)]', '#[path = \"tests.rs\"]' and 'mod tests;'. This path resolves tests.rs beside build.rs in podman/, registering the assigned file as environment::podman::build::tests. The earlier searches omitted this nested build module's relative path attribute. tests.rs:4 imports super::* from build, whose line 6 imports its parent podman. The claimed stale namespace is also refuted: tests.rs:527 and 530 use super::super::script_failure_output; from build::tests that correctly resolves to podman::script_failure_output at podman.rs:1488 (1486 at tip). Both missing-registration and stale-namespace claims are withdrawn as factual conclusions, while all prior events remain under this ID. This is direct inclusion of the assigned file, not equivalent coverage inferred from g066's registered failure_tests or its fake structure. Original suspected consequence was wholesale exclusion of the ownership, cleanup and private-input tests; that consequence has no source basis under the actual graph. Suggested bucket: other if the exclusion had existed. Confidence: confirmed by original-revision and tip module/source analysis; no runtime/build execution. proposed_drop: explicit source refutation by the quoted declarations at podman/build.rs:9-11 and their build::tests namespace. possible_cover: none needed; the assigned file is itself registered. Could-be-highest: false. This revision preserves both original claims and their refutation and supplies the exact path-attribute text for the parent's independent drop check."
+          }
+        }
+      ],
+      "latest": {
+        "line": 15,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "l2",
+          "state": "open",
+          "summary": "Nested build module registers the Podman tests and validates their namespace",
+          "location": "crates/farhelm-helm/src/environment/podman/build.rs:9",
+          "detail": "Reviewed commit: 56659839785691f76da3af5d8f51b511cff4ba8b; also checked pinned tip 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db. TLDR: the prior claim that ownership, cleanup and private-input tests never compile or run is refuted by an explicit nested module declaration at both revisions. Details: podman.rs:19 declares 'mod build;'. podman/build.rs:9-11 says exactly '#[cfg(test)]', '#[path = \"tests.rs\"]' and 'mod tests;'. This path resolves tests.rs beside build.rs in podman/, registering the assigned file as environment::podman::build::tests. The earlier searches omitted this nested build module's relative path attribute. tests.rs:4 imports super::* from build, whose line 6 imports its parent podman. The claimed stale namespace is also refuted: tests.rs:527 and 530 use super::super::script_failure_output; from build::tests that correctly resolves to podman::script_failure_output at podman.rs:1488 (1486 at tip). Both missing-registration and stale-namespace claims are withdrawn as factual conclusions, while all prior events remain under this ID. This is direct inclusion of the assigned file, not equivalent coverage inferred from g066's registered failure_tests or its fake structure. Original suspected consequence was wholesale exclusion of the ownership, cleanup and private-input tests; that consequence has no source basis under the actual graph. Suggested bucket: other if the exclusion had existed. Confidence: confirmed by original-revision and tip module/source analysis; no runtime/build execution. proposed_drop: explicit source refutation by the quoted declarations at podman/build.rs:9-11 and their build::tests namespace. possible_cover: none needed; the assigned file is itself registered. Could-be-highest: false. This revision preserves both original claims and their refutation and supplies the exact path-attribute text for the parent's independent drop check."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g067/findings.jsonl",
+        "id": "l2",
+        "line": 15,
+        "disposition": "excluded",
+        "group": "podman-tests-nested-build-module-registration",
+        "reason": "Parent explicitly accepted named refuted proposal from claims-042 after inspecting it. The alleged orphan file is explicitly included as podman::build::tests. Its reported stale namespace is correct for that actual module graph. Accept the narrow source refutation while preserving the withdrawn records. Inclusion does not prove compilation/runtime success; it disproves the asserted missing module and wrong super namespace. Checked source/results: [\"56659839785691f76da3af5d8f51b511cff4ba8b:environment/podman.rs:19 declares mod build; podman/build.rs:9-11 declares #[cfg(test)] #[path = \\\"tests.rs\\\"] mod tests. That relative path selects podman/tests.rs alongside build.rs.\",\"tests.rs:4 imports super::* from build, whose line 6 imports podman. Calls at tests.rs:527,530 to super::super::script_failure_output therefore name podman::script_failure_output, not environment.\",\"The same nested module declaration was read at pinned tip 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db:build.rs:9-11. No compile/run was performed; source registration refutes the claimed lack of registration without claiming all tests pass.\"] Current coverage/results: {\"specifications\":\"Read governing container/ownership/proxy sections. Those contracts do not establish that a test file is excluded; actual module declarations decide it.\",\"TODO.md Planned and plans\":\"Planned empty; no unlanded entries.\",\"BUGS.md\":\"Read; no matching orphan-module acceptance.\",\"queue and active triage\":\"Searched podman/tests.rs, registration, orphan-module and helper symbol terms; no exact coverage. Existing landing-tests-import-unregistered-module index entry is Python tooling with a different module/contract, not this Rust path attribute.\",\"FILTER.md\":\"No filter invoked.\"} Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Wholesale exclusion of ownership, cleanup and private-input tests, with suspected compilation errors if wired normally. Both were explicitly withdrawn in later history. This refutation relies on the assigned file's own registration, not substitute coverage from failure_tests. No product security/data-loss route was asserted.\"; \"The earlier searches omitted the nested build module's relative path attribute. Both missing-registration and stale-namespace conclusions are contradicted by the actual graph.\"."
+      },
+      "accepted_parent_decision": {
+        "key": "g067/l2",
+        "line": 15,
+        "disposition": "excluded",
+        "group": "podman-tests-nested-build-module-registration",
+        "bucket": "other",
+        "recording": "refuted",
+        "queue_target_candidate": null,
+        "needs_independent_drop_check": false,
+        "reason": "Parent explicitly accepted named refuted proposal from claims-042 after inspecting it. The alleged orphan file is explicitly included as podman::build::tests. Its reported stale namespace is correct for that actual module graph. Accept the narrow source refutation while preserving the withdrawn records. Inclusion does not prove compilation/runtime success; it disproves the asserted missing module and wrong super namespace. Checked source/results: [\"56659839785691f76da3af5d8f51b511cff4ba8b:environment/podman.rs:19 declares mod build; podman/build.rs:9-11 declares #[cfg(test)] #[path = \\\"tests.rs\\\"] mod tests. That relative path selects podman/tests.rs alongside build.rs.\",\"tests.rs:4 imports super::* from build, whose line 6 imports podman. Calls at tests.rs:527,530 to super::super::script_failure_output therefore name podman::script_failure_output, not environment.\",\"The same nested module declaration was read at pinned tip 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db:build.rs:9-11. No compile/run was performed; source registration refutes the claimed lack of registration without claiming all tests pass.\"] Current coverage/results: {\"specifications\":\"Read governing container/ownership/proxy sections. Those contracts do not establish that a test file is excluded; actual module declarations decide it.\",\"TODO.md Planned and plans\":\"Planned empty; no unlanded entries.\",\"BUGS.md\":\"Read; no matching orphan-module acceptance.\",\"queue and active triage\":\"Searched podman/tests.rs, registration, orphan-module and helper symbol terms; no exact coverage. Existing landing-tests-import-unregistered-module index entry is Python tooling with a different module/contract, not this Rust path attribute.\",\"FILTER.md\":\"No filter invoked.\"} Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Wholesale exclusion of ownership, cleanup and private-input tests, with suspected compilation errors if wired normally. Both were explicitly withdrawn in later history. This refutation relies on the assigned file's own registration, not substitute coverage from failure_tests. No product security/data-loss route was asserted.\"; \"The earlier searches omitted the nested build module's relative path attribute. Both missing-registration and stale-namespace conclusions are contradicted by the actual graph.\"."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-042",
+          "key": "g067/l2",
+          "latest_line": 15,
+          "recommendation": "refuted",
+          "bucket": "other",
+          "underlying_key": "podman-tests-nested-build-module-registration",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The alleged orphan file is explicitly included as podman::build::tests. Its reported stale namespace is correct for that actual module graph.",
+          "checks": [
+            "56659839785691f76da3af5d8f51b511cff4ba8b:environment/podman.rs:19 declares mod build; podman/build.rs:9-11 declares #[cfg(test)] #[path = \"tests.rs\"] mod tests. That relative path selects podman/tests.rs alongside build.rs.",
+            "tests.rs:4 imports super::* from build, whose line 6 imports podman. Calls at tests.rs:527,530 to super::super::script_failure_output therefore name podman::script_failure_output, not environment.",
+            "The same nested module declaration was read at pinned tip 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db:build.rs:9-11. No compile/run was performed; source registration refutes the claimed lack of registration without claiming all tests pass."
+          ],
+          "coverage_checked": {
+            "specifications": "Read governing container/ownership/proxy sections. Those contracts do not establish that a test file is excluded; actual module declarations decide it.",
+            "TODO.md Planned and plans": "Planned empty; no unlanded entries.",
+            "BUGS.md": "Read; no matching orphan-module acceptance.",
+            "queue and active triage": "Searched podman/tests.rs, registration, orphan-module and helper symbol terms; no exact coverage. Existing landing-tests-import-unregistered-module index entry is Python tooling with a different module/contract, not this Rust path attribute.",
+            "FILTER.md": "No filter invoked."
+          },
+          "exact_cover_quotes": [],
+          "missing_premise": "The earlier searches omitted the nested build module's relative path attribute. Both missing-registration and stale-namespace conclusions are contradicted by the actual graph.",
+          "original_stronger_consequence": "Wholesale exclusion of ownership, cleanup and private-input tests, with suspected compilation errors if wired normally. Both were explicitly withdrawn in later history. This refutation relies on the assigned file's own registration, not substitute coverage from failure_tests. No product security/data-loss route was asserted.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Accept the narrow source refutation while preserving the withdrawn records. Inclusion does not prove compilation/runtime success; it disproves the asserted missing module and wrong super namespace."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": true,
+        "clearly_refuted_candidate": false,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "podman-tests-nested-build-module-registration",
+        "destination": "trailing-podman-tests-nested-build-module-registration.md"
+      }
+    },
+    {
+      "key": "g067/l3",
+      "owner": "g067",
+      "id": "l3",
+      "domain": "podman-environments",
+      "purpose": "podman-environments: crates/farhelm-helm/src/environment/podman/tests.rs, crates/farhelm-helm/src/environment/podman_probe.rs, crates/farhelm/tests/e2e/podman_environments.rs; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 9,
+          "event": {
+            "version": 1,
+            "kind": "lead",
+            "id": "l3",
+            "state": "open",
+            "summary": "Payload producer and consumer may disagree about staged tmux",
+            "location": "crates/farhelm/tests/e2e/podman_environments.rs:190",
+            "detail": "Reviewed commit under investigation: 500548b9253b07a26fd03119679184b69544e31d. TLDR: parent interface input reports that the payload script stops staging tmux while the same-revision real-container test still requires it, so a fresh payload directory would fail before test resources are created. Details: parent identifies g093/f1 as the producer-side report. My owned consumer patches include later comment-only 08399d092d20815ced6619c26df2391944ae2b4a. A direct source read at tip 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db confirms prerequisites now requires only the farhelm archive and cached Ubuntu base, with no tmux check (lines 175-203). Need directly inspect the reported intermediate revision and consumer history to establish the defect and exact repair commit rather than treating tip correctness as refutation. Suggested bucket: other (maintainer test startup failure). Confidence: unresolved pending source history checks; no runtime execution. proposed_drop: false. possible_cover: parent supplied g093/f1 may be the same producer/consumer mismatch; no queue/filter metadata consulted. Could-be-highest: false; the reported consequence is blocked maintainer validation, not product work loss."
+          }
+        },
+        {
+          "line": 10,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "l3",
+            "state": "open",
+            "summary": "Real-container prerequisites require a payload the producer no longer stages",
+            "location": "crates/farhelm/tests/e2e/podman_environments.rs:190",
+            "detail": "Reviewed commit: 500548b9253b07a26fd03119679184b69544e31d. TLDR: preparing fresh payloads then starting the real Podman tests fails before exercising Farhelm, because the test still requires a tmux binary the payload producer has stopped supplying. Old staged files can mask the mismatch. Details: same-revision prerequisites at lines 190-195 asserts both farhelm-{target}.tar.gz and tmux-{target} exist. In scripts/build-podman-test-payloads.sh, this commit removes the pinned tmux build, static check, install, move into the payload directory and final tmux existence check, retaining only the farhelm archive. A fresh script-created directory therefore satisfies the producer contract but deterministically fails the consumer's is_file assertion. The producer creates/reuses its directory with mkdir -p and never removes an earlier tmux file, explaining why existing staged output can pass. This conflicts with the test prerequisite contract at lines 175-177: required payloads are the same-revision staged inputs, and the producer no longer supplies this one. Suggested fix is to remove the obsolete consumer requirement together with the producer change. Tip 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db already requires only the archive at lines 190-196, so the defect was repaired later; git path history narrows the repair to d751ff1633bb479c7bf53920f2e4ea4ba932a1c2 or the later comment-only 08399d092d20815ced6619c26df2391944ae2b4a, with exact patch confirmation still next. This finding preserves the intermediate defect even though tip is correct. Suggested bucket: other (maintainer runtime-validation startup failure). Confidence: confirmed by source and producer/consumer contract analysis; no execution. proposed_drop: false. possible_cover: parent-supplied g093/f1 appears to describe the same mismatch from the producer side; retain for parent deduplication. Could-be-highest: false. This revises lead l3 after direct pinned source and producer-patch checks established its route; exact repair attribution remains to be checked."
+          }
+        },
+        {
+          "line": 12,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "l3",
+            "state": "open",
+            "summary": "Real-container prerequisites require a payload the producer no longer stages",
+            "location": "crates/farhelm/tests/e2e/podman_environments.rs:190",
+            "detail": "Reviewed commit: 500548b9253b07a26fd03119679184b69544e31d. TLDR: preparing fresh payloads then starting the real Podman tests fails before exercising Farhelm, because the test still requires a tmux binary the producer has stopped supplying. Old staged files can mask the mismatch. Details: same-revision prerequisites at lines 190-195 asserts both farhelm-{target}.tar.gz and tmux-{target} exist. scripts/build-podman-test-payloads.sh in this commit removes the pinned tmux build, static check, install, move into the payload directory and final tmux existence check, retaining only the farhelm archive. A fresh script-created directory satisfies the producer contract but fails the consumer's is_file assertion. The producer reuses its directory with mkdir -p and never removes an earlier tmux file, so old staged output can conceal the mismatch. This violates the same-revision staging prerequisite at the consumer's lines 175-177. Exact repair is now source-confirmed: d751ff1633bb479c7bf53920f2e4ea4ba932a1c2 replaces the two-file loop with a single farhelm archive assertion and explains that provisioning no longer pushes static tmux. The assigned later patch 08399d092d20815ced6619c26df2391944ae2b4a merely removes that parenthetical explanation; it is not the behavioral repair. Tip 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db retains the corrected single-archive prerequisite. Preserve the defect at 500548b and its later repair rather than claiming a current-tip failure. Suggested bucket: other (maintainer runtime-validation startup failure). Confidence: confirmed by direct intermediate source, producer patch, exact consumer repair patch and tip source; no execution. proposed_drop: false; repaired-in-range status is explicit for parent filtering. possible_cover: parent-supplied g093/f1 describes the same producer/consumer mismatch; retain for parent deduplication. Could-be-highest: false. This revision settles the exact repair premise while preserving the original intermediate consequence."
+          }
+        }
+      ],
+      "latest": {
+        "line": 12,
+        "event": {
+          "version": 1,
+          "kind": "finding",
+          "id": "l3",
+          "state": "open",
+          "summary": "Real-container prerequisites require a payload the producer no longer stages",
+          "location": "crates/farhelm/tests/e2e/podman_environments.rs:190",
+          "detail": "Reviewed commit: 500548b9253b07a26fd03119679184b69544e31d. TLDR: preparing fresh payloads then starting the real Podman tests fails before exercising Farhelm, because the test still requires a tmux binary the producer has stopped supplying. Old staged files can mask the mismatch. Details: same-revision prerequisites at lines 190-195 asserts both farhelm-{target}.tar.gz and tmux-{target} exist. scripts/build-podman-test-payloads.sh in this commit removes the pinned tmux build, static check, install, move into the payload directory and final tmux existence check, retaining only the farhelm archive. A fresh script-created directory satisfies the producer contract but fails the consumer's is_file assertion. The producer reuses its directory with mkdir -p and never removes an earlier tmux file, so old staged output can conceal the mismatch. This violates the same-revision staging prerequisite at the consumer's lines 175-177. Exact repair is now source-confirmed: d751ff1633bb479c7bf53920f2e4ea4ba932a1c2 replaces the two-file loop with a single farhelm archive assertion and explains that provisioning no longer pushes static tmux. The assigned later patch 08399d092d20815ced6619c26df2391944ae2b4a merely removes that parenthetical explanation; it is not the behavioral repair. Tip 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db retains the corrected single-archive prerequisite. Preserve the defect at 500548b and its later repair rather than claiming a current-tip failure. Suggested bucket: other (maintainer runtime-validation startup failure). Confidence: confirmed by direct intermediate source, producer patch, exact consumer repair patch and tip source; no execution. proposed_drop: false; repaired-in-range status is explicit for parent filtering. possible_cover: parent-supplied g093/f1 describes the same producer/consumer mismatch; retain for parent deduplication. Could-be-highest: false. This revision settles the exact repair premise while preserving the original intermediate consequence."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g067/findings.jsonl",
+        "id": "l3",
+        "line": 12,
+        "disposition": "rejected",
+        "group": "podman-test-payload-producer-consumer-tmux-mismatch",
+        "reason": "Parent read claims043 in full. The intermediate500548b9 producer stops staging tmux while the consumer still requires it; fresh staging fails, stale staging may hide it. This is a real historical defect, not refuted retroactively. The later d751ff16 consumer explicitly repairs that mismatch and tip retains the single-archive assertion. Preserve original g093/f1 and g070/l2 counterparts for final reconciliation; no current actionable remainder from this exact pairing and no highest consequence. Historical source and repair are recorded in the audit rather than an obsolete queue item."
+      },
+      "accepted_parent_decision": {
+        "key": "g067/l3",
+        "line": 12,
+        "disposition": "rejected",
+        "group": "podman-test-payload-producer-consumer-tmux-mismatch",
+        "bucket": "other",
+        "recording": "repaired-in-range",
+        "needs_independent_drop_check": false,
+        "reason": "Parent read claims043 in full. The intermediate500548b9 producer stops staging tmux while the consumer still requires it; fresh staging fails, stale staging may hide it. This is a real historical defect, not refuted retroactively. The later d751ff16 consumer explicitly repairs that mismatch and tip retains the single-archive assertion. Preserve original g093/f1 and g070/l2 counterparts for final reconciliation; no current actionable remainder from this exact pairing and no highest consequence. Historical source and repair are recorded in the audit rather than an obsolete queue item."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-043",
+          "key": "g067/l3",
+          "latest_line": 12,
+          "recommendation": "needs-parent",
+          "bucket": "other",
+          "underlying_key": "podman-test-payload-producer-consumer-tmux-mismatch",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The intermediate defect is source-established, and its later repair is also established. Preserve both facts; this is not a current-tip startup failure. The available disposition vocabulary has no repaired-in-range category.",
+          "checks": [
+            "500548b9253b07a26fd03119679184b69544e31d:crates/farhelm/tests/e2e/podman_environments.rs:175-195 requires same-revision payloads and asserts both the farhelm archive and tmux file exist.",
+            "500548b9253b07a26fd03119679184b69544e31d:scripts/build-podman-test-payloads.sh patch removes every tmux build/staging/existence operation, retains mkdir -p for the reusable output directory, and only requires the farhelm archive. Fresh output therefore lacks the required tmux file; stale output can conceal it.",
+            "d751ff1633bb479c7bf53920f2e4ea4ba932a1c2 patch replaces the consumer's two-file loop with the single archive assertion. At reviewed tip 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db:podman_environments.rs:190-196 the corrected assertion remains. No test execution was performed."
+          ],
+          "coverage_checked": [
+            "SPEC.md Container sessions and SPEC_impl.md Disposable environments/Testing contain no acceptance of inconsistent test payloads.",
+            "TODO.md Planned is empty. Searches of plans/queue found tmux-drop-from-install's payload-removal work; plans/REPORTS.md:30 records that plan as landed, so it is not an unlanded repair covering a retained defect.",
+            "BUGS.md, review_feedback_queue/INDEX.md and active TRIAGE_OUTCOMES.md searches for payload/tmux/Podman staging found no exact trigger/consequence/scope cover. FILTER.md has no full-boundary match: fresh-output startup failure is not a rare safe failure."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": "No source premise is missing for the historical mismatch or repair. Parent must reconcile the supplied g093/f1 producer-side identity; that record is outside this named batch and was not inspected.",
+          "original_stronger_consequence": "Freshly prepared payloads cause the real Podman suite to fail before resources are created. No product work-loss consequence was claimed.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Keep the historical finding and explicit repair in the recording audit. Do not silently refute it from correct tip code or describe it as still actionable. Parent decides whether repaired-in-range findings belong in its resulting queue."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": true,
+        "clearly_refuted_candidate": false,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "podman-test-payload-producer-consumer-tmux-mismatch",
+        "destination": "trailing-podman-test-payload-producer-consumer-tmux-mismatch.md"
+      }
+    },
+    {
+      "key": "g067/c2",
+      "owner": "g067",
+      "id": "c2",
+      "domain": "podman-environments",
+      "purpose": "podman-environments: crates/farhelm-helm/src/environment/podman/tests.rs, crates/farhelm-helm/src/environment/podman_probe.rs, crates/farhelm/tests/e2e/podman_environments.rs; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 16,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c2",
+            "state": "open",
+            "summary": "Proxy formatter and private-input tests do not establish reboot persistence",
+            "location": "crates/farhelm-helm/src/environment/podman/tests.rs:542",
+            "detail": "Reviewed commit: 56659839785691f76da3af5d8f51b511cff4ba8b. TLDR: the assigned tests establish generated proxy text and local shell input semantics, not persistence through the container's environment.d generator after reboot. Treating them as persistence evidence would overstate their boundary. Details: parent input g065/l1:14 establishes a separately owned product issue: Ubuntu systemd 255.4 drops an empty environment.d assignment although live import initially sets it. My source checks confirm proxy_writers_preserve_literal_values_and_omit_absent_names (tests.rs:542-575) compares proxy_file output with an expected string containing HTTP_PROXY=empty quotes and inspects shell-export text. It never invokes a generator or manager. The next test (578-637) explicitly says 'No container or user manager is needed to exercise that byte/cleanup boundary.' It runs the real local input wrapper and observes HTTP_PROXY present-but-empty in a shell; that is a different contract from reboot regeneration. Production proxies at podman.rs:588-617 writes the file and at 618 onward separately imports live values, matching g065's distinction. The formatter docstring says 'Empty and absent proxies remain distinct, and literal dollars/newlines must survive into the login manager rather than expand in the container.' This states the intended product contract; the named formatter test's actual assertions are correct observations of its output, but cannot prove the full contract. Suggested bucket: other if a separate misleading-test-evidence report were retained. Confidence: confirmed assigned-test boundary by source; g065's generator conclusion is supplied interface evidence, not independently executed here. proposed_drop: no separate new finding because these tests explicitly cover formatting and a local byte/cleanup boundary, not a claimed real-generator/reboot execution; the unmet product persistence consequence is already owned by g065/l1:14. This is a precise boundary/overlap proposal for parent filtering, not an assertion that correct production code refutes a test defect or that the product is correct. possible_cover: parent-supplied g065/l1:14 for the empty-value persistence bug. Could-be-highest: false for the considered test-evidence limitation; no credential disclosure or work-loss route is established here. No runtime tests, reproduction, generator execution or queue/filter search."
+          }
+        }
+      ],
+      "latest": {
+        "line": 16,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c2",
+          "state": "open",
+          "summary": "Proxy formatter and private-input tests do not establish reboot persistence",
+          "location": "crates/farhelm-helm/src/environment/podman/tests.rs:542",
+          "detail": "Reviewed commit: 56659839785691f76da3af5d8f51b511cff4ba8b. TLDR: the assigned tests establish generated proxy text and local shell input semantics, not persistence through the container's environment.d generator after reboot. Treating them as persistence evidence would overstate their boundary. Details: parent input g065/l1:14 establishes a separately owned product issue: Ubuntu systemd 255.4 drops an empty environment.d assignment although live import initially sets it. My source checks confirm proxy_writers_preserve_literal_values_and_omit_absent_names (tests.rs:542-575) compares proxy_file output with an expected string containing HTTP_PROXY=empty quotes and inspects shell-export text. It never invokes a generator or manager. The next test (578-637) explicitly says 'No container or user manager is needed to exercise that byte/cleanup boundary.' It runs the real local input wrapper and observes HTTP_PROXY present-but-empty in a shell; that is a different contract from reboot regeneration. Production proxies at podman.rs:588-617 writes the file and at 618 onward separately imports live values, matching g065's distinction. The formatter docstring says 'Empty and absent proxies remain distinct, and literal dollars/newlines must survive into the login manager rather than expand in the container.' This states the intended product contract; the named formatter test's actual assertions are correct observations of its output, but cannot prove the full contract. Suggested bucket: other if a separate misleading-test-evidence report were retained. Confidence: confirmed assigned-test boundary by source; g065's generator conclusion is supplied interface evidence, not independently executed here. proposed_drop: no separate new finding because these tests explicitly cover formatting and a local byte/cleanup boundary, not a claimed real-generator/reboot execution; the unmet product persistence consequence is already owned by g065/l1:14. This is a precise boundary/overlap proposal for parent filtering, not an assertion that correct production code refutes a test defect or that the product is correct. possible_cover: parent-supplied g065/l1:14 for the empty-value persistence bug. Could-be-highest: false for the considered test-evidence limitation; no credential disclosure or work-loss route is established here. No runtime tests, reproduction, generator execution or queue/filter search."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g067/findings.jsonl",
+        "id": "c2",
+        "line": 16,
+        "disposition": "excluded",
+        "group": "podman-proxy-tests-formatting-versus-environment-generator-boundary",
+        "reason": "Parent read claims043 in full. The formatter test542-575 asserts environment.d serialization;578-637 deliberately tests wrapper bytes/cleanup. Neither claims a reboot occurred. An intended contract in the formatter docstring does not falsely state these tests execute a user-manager restart. No standalone oracle defect is shown by lack of that execution alone. Preserve exact empty-value expectation and intended contract as context when judging g065/l1's distinct persistence finding; this exclusion does not refute that product finding or certify its semantics. No higher consequence proposed."
+      },
+      "accepted_parent_decision": {
+        "key": "g067/c2",
+        "line": 16,
+        "disposition": "excluded",
+        "group": "podman-proxy-tests-formatting-versus-environment-generator-boundary",
+        "bucket": "other",
+        "recording": "refuted",
+        "needs_independent_drop_check": false,
+        "reason": "Parent read claims043 in full. The formatter test542-575 asserts environment.d serialization;578-637 deliberately tests wrapper bytes/cleanup. Neither claims a reboot occurred. An intended contract in the formatter docstring does not falsely state these tests execute a user-manager restart. No standalone oracle defect is shown by lack of that execution alone. Preserve exact empty-value expectation and intended contract as context when judging g065/l1's distinct persistence finding; this exclusion does not refute that product finding or certify its semantics. No higher consequence proposed."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-043",
+          "key": "g067/c2",
+          "latest_line": 16,
+          "recommendation": "needs-parent",
+          "bucket": "other",
+          "underlying_key": "podman-proxy-tests-formatting-versus-environment-generator-boundary",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The limited test boundary is established. It does not itself establish a separate misleading-evidence defect, and it does not refute the supplied product persistence finding. The formatter oracle and docstring must remain visible when the parent handles that finding.",
+          "checks": [
+            "56659839785691f76da3af5d8f51b511cff4ba8b:crates/farhelm-helm/src/environment/podman/tests.rs:542-575 asserts generated environment.d text, including HTTP_PROXY=\"\", and shell-export spelling. It never invokes an environment generator.",
+            "Same revision:tests.rs:578-637 executes the real private-input wrapper in a local shell and verifies bytes, empty versus absent shell variables, and private-file cleanup. Its docstring explicitly bounds this to the byte/cleanup boundary.",
+            "The first test's docstring at 542-544 states an intended login-manager contract; its text assertions alone do not prove that contract across reboot. This review did not execute or independently verify Ubuntu systemd's empty-assignment behavior."
+          ],
+          "coverage_checked": [
+            "Current SPEC.md:4877-4879 and SPEC_impl.md:6082-6085 require deterministic inheritance through environment.d; they do not accept dropping empty values or claim these local tests execute a reboot.",
+            "TODO.md Planned is empty. plans/queue/podman-environments.md:242-244 describes deterministic proxy inheritance, but plans/REPORTS.md:21 records it as landed. No unlanded matching repair found.",
+            "BUGS.md, queue INDEX plus proxy-related search results, and active TRIAGE_OUTCOMES.md contain no exact cover for these formatter/input tests. Privacy-scrubber findings concern different inputs and consequences. FILTER.md has no applicable full boundary."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": "A separate oracle defect needs the actual environment.d semantics and exact false expectation checked. The supplied g065/l1:14 product conclusion is outside this named batch; do not treat it as independently verified here.",
+          "original_stronger_consequence": "The tests cannot establish persistence through the in-container user manager after reboot. The supplied product issue says an empty proxy is lost there; that consequence is preserved, not dismissed by these tests passing.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "No separate finding for an assertion that these tests perform a reboot, since they make no such assertion. Carry the formatter expectation and its broader docstring as useful test-fix context for the parent's g065 persistence record. Do not call that product finding covered or refuted here."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": false,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "podman-proxy-tests-formatting-versus-environment-generator-boundary",
+        "destination": null
+      }
+    },
+    {
+      "key": "g067/c3",
+      "owner": "g067",
+      "id": "c3",
+      "domain": "podman-environments",
+      "purpose": "podman-environments: crates/farhelm-helm/src/environment/podman/tests.rs, crates/farhelm-helm/src/environment/podman_probe.rs, crates/farhelm/tests/e2e/podman_environments.rs; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 17,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c3",
+            "state": "open",
+            "summary": "Probe waiters do not lose completion solely in the notification-registration gap",
+            "location": "crates/farhelm-helm/src/environment/podman_probe.rs:383",
+            "detail": "Reviewed commit: 56659839785691f76da3af5d8f51b511cff4ba8b. TLDR: considered whether a quickly completed background Podman probe could leave a launch waiting until its timeout because fresh starts refresh before registering its notification. Source refutes that specific missed-completion route. Details: fresh at 391-400 does start refresh before constructing a Notified future, but enables that future before checking refreshing. If completion already occurred, the in-flight set no longer contains the host and it immediately reads ready; if completion occurs after the check, its enabled notification wakes the waiter. Refreshing::drop at 485-493 removes the in-flight entry before notify_waiters, and successful refresh publishes the cache entry at 458-472 before that guard drops. runtime at 346-348 similarly enables its notification before reading state or awaiting refresh. Exact source signposts include 'changed.as_mut().enable();', 'if !self.cache.lock().unwrap().refreshing.contains(&host)' and 'self.service.changed.notify_waiters();'. Thus the apparent start-before-registration gap is guarded by the state check rather than relying on a stored Notify permit. Suggested bucket: other if the suspected spurious launch timeout existed. Confidence: confirmed source ordering for this specific gap; no execution. proposed_drop: source refutation by the enable-before-state-check ordering and remove-before-notify completion protocol at the cited lines. possible_cover: none; no queue/filter search. Could-be-highest: false; the suspected consequence was a bounded launch delay/refusal, not established work loss. No broad claim is made that every possible cache interleaving is safe; this record closes only the concrete notification-loss concern checked in this discovery pass."
+          }
+        }
+      ],
+      "latest": {
+        "line": 17,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c3",
+          "state": "open",
+          "summary": "Probe waiters do not lose completion solely in the notification-registration gap",
+          "location": "crates/farhelm-helm/src/environment/podman_probe.rs:383",
+          "detail": "Reviewed commit: 56659839785691f76da3af5d8f51b511cff4ba8b. TLDR: considered whether a quickly completed background Podman probe could leave a launch waiting until its timeout because fresh starts refresh before registering its notification. Source refutes that specific missed-completion route. Details: fresh at 391-400 does start refresh before constructing a Notified future, but enables that future before checking refreshing. If completion already occurred, the in-flight set no longer contains the host and it immediately reads ready; if completion occurs after the check, its enabled notification wakes the waiter. Refreshing::drop at 485-493 removes the in-flight entry before notify_waiters, and successful refresh publishes the cache entry at 458-472 before that guard drops. runtime at 346-348 similarly enables its notification before reading state or awaiting refresh. Exact source signposts include 'changed.as_mut().enable();', 'if !self.cache.lock().unwrap().refreshing.contains(&host)' and 'self.service.changed.notify_waiters();'. Thus the apparent start-before-registration gap is guarded by the state check rather than relying on a stored Notify permit. Suggested bucket: other if the suspected spurious launch timeout existed. Confidence: confirmed source ordering for this specific gap; no execution. proposed_drop: source refutation by the enable-before-state-check ordering and remove-before-notify completion protocol at the cited lines. possible_cover: none; no queue/filter search. Could-be-highest: false; the suspected consequence was a bounded launch delay/refusal, not established work loss. No broad claim is made that every possible cache interleaving is safe; this record closes only the concrete notification-loss concern checked in this discovery pass."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g067/findings.jsonl",
+        "id": "c3",
+        "line": 17,
+        "disposition": "excluded",
+        "group": "podman-probe-notification-registration-gap",
+        "reason": "Parent explicitly accepted named refuted proposal from claims-043 after inspecting it. The specific lost-completion route is refuted by enabling notification before reading the in-flight state, combined with publishing the result and removing the state before notifying. Close only the concrete start-before-notification-registration hypothesis. This does not certify every cache interleaving. Checked source/results: [\"56659839785691f76da3af5d8f51b511cff4ba8b:crates/farhelm-helm/src/environment/podman_probe.rs:391-400 starts refresh, enables Notified, then checks refreshing. Completion before registration is observed through the cleared state; completion after the check wakes the enabled waiter.\",\"Same file:458-472 publishes the route-bound result before Refreshing drops; 485-493 removes the in-flight host before notify_waiters. runtime:346-348 likewise enables before its state reads. No runtime experiment was performed.\"] Current coverage/results: [\"SPEC.md Container sessions and SPEC_impl.md Podman places require background probes; neither accepts lost completion, and neither is the proposed refutation basis.\",\"TODO.md Planned is empty; searches of unlanded plans, BUGS.md, queue INDEX and active TRIAGE_OUTCOMES.md for probe notification/registration/completion found no exact cover. Landed podman-environments is context only.\",\"FILTER.md was read; no filter is needed for this source refutation.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"A fast probe could allegedly leave launch waiting until its bounded timeout. No security or user-owned-work consequence was claimed.\"; null."
+      },
+      "accepted_parent_decision": {
+        "key": "g067/c3",
+        "line": 17,
+        "disposition": "excluded",
+        "group": "podman-probe-notification-registration-gap",
+        "bucket": "other",
+        "recording": "refuted",
+        "queue_target_candidate": null,
+        "needs_independent_drop_check": false,
+        "reason": "Parent explicitly accepted named refuted proposal from claims-043 after inspecting it. The specific lost-completion route is refuted by enabling notification before reading the in-flight state, combined with publishing the result and removing the state before notifying. Close only the concrete start-before-notification-registration hypothesis. This does not certify every cache interleaving. Checked source/results: [\"56659839785691f76da3af5d8f51b511cff4ba8b:crates/farhelm-helm/src/environment/podman_probe.rs:391-400 starts refresh, enables Notified, then checks refreshing. Completion before registration is observed through the cleared state; completion after the check wakes the enabled waiter.\",\"Same file:458-472 publishes the route-bound result before Refreshing drops; 485-493 removes the in-flight host before notify_waiters. runtime:346-348 likewise enables before its state reads. No runtime experiment was performed.\"] Current coverage/results: [\"SPEC.md Container sessions and SPEC_impl.md Podman places require background probes; neither accepts lost completion, and neither is the proposed refutation basis.\",\"TODO.md Planned is empty; searches of unlanded plans, BUGS.md, queue INDEX and active TRIAGE_OUTCOMES.md for probe notification/registration/completion found no exact cover. Landed podman-environments is context only.\",\"FILTER.md was read; no filter is needed for this source refutation.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"A fast probe could allegedly leave launch waiting until its bounded timeout. No security or user-owned-work consequence was claimed.\"; null."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-043",
+          "key": "g067/c3",
+          "latest_line": 17,
+          "recommendation": "refuted",
+          "bucket": "other",
+          "underlying_key": "podman-probe-notification-registration-gap",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The specific lost-completion route is refuted by enabling notification before reading the in-flight state, combined with publishing the result and removing the state before notifying.",
+          "checks": [
+            "56659839785691f76da3af5d8f51b511cff4ba8b:crates/farhelm-helm/src/environment/podman_probe.rs:391-400 starts refresh, enables Notified, then checks refreshing. Completion before registration is observed through the cleared state; completion after the check wakes the enabled waiter.",
+            "Same file:458-472 publishes the route-bound result before Refreshing drops; 485-493 removes the in-flight host before notify_waiters. runtime:346-348 likewise enables before its state reads. No runtime experiment was performed."
+          ],
+          "coverage_checked": [
+            "SPEC.md Container sessions and SPEC_impl.md Podman places require background probes; neither accepts lost completion, and neither is the proposed refutation basis.",
+            "TODO.md Planned is empty; searches of unlanded plans, BUGS.md, queue INDEX and active TRIAGE_OUTCOMES.md for probe notification/registration/completion found no exact cover. Landed podman-environments is context only.",
+            "FILTER.md was read; no filter is needed for this source refutation."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": null,
+          "original_stronger_consequence": "A fast probe could allegedly leave launch waiting until its bounded timeout. No security or user-owned-work consequence was claimed.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Close only the concrete start-before-notification-registration hypothesis. This does not certify every cache interleaving."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "podman-probe-notification-registration-gap",
+        "destination": null
+      }
+    },
+    {
+      "key": "g067/l4",
+      "owner": "g067",
+      "id": "l4",
+      "domain": "podman-environments",
+      "purpose": "podman-environments: crates/farhelm-helm/src/environment/podman/tests.rs, crates/farhelm-helm/src/environment/podman_probe.rs, crates/farhelm/tests/e2e/podman_environments.rs; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 18,
+          "event": {
+            "version": 1,
+            "kind": "lead",
+            "id": "l4",
+            "state": "open",
+            "summary": "Check whether direct Podman status permits the idle-manager retention route",
+            "location": "crates/farhelm-helm/src/environment/podman_probe.rs:338",
+            "detail": "Reviewed commit: 56659839785691f76da3af5d8f51b511cff4ba8b. Parent-supplied interface: g024/l5 events 31-33 and 35. TLDR under investigation: dropping a manager without explicit shutdown can retain its tasks and connections if stopped-container actors keep strong manager references across staggered idle waits. My assigned synthesis premise is whether Podman can still report Stopped when the ordinary container place lacks a manager-connected supervisor; a hidden connection precondition would refute that specific gate-false route. Supplied source basis is provider status at podman.rs:1237-1276, place/command at 148-188, and runtime/command at podman_probe.rs:338-378 and 409-415. Need trace the actual base route, probe refresh and status calls for manager connectivity requirements, then compare tip. The already-attempted idle branch is separate and normal explicit graceful shutdown is protected, as g024 records; neither is to be broadened or silently dropped. Suggested bucket: other (manager/resource lifetime), confidence unresolved pending own source checks, proposed_drop:false, possible_cover:g024/l5 is the original owner of the same consequence. Could-be-highest:false; no user-work loss, secret exposure or process loss is established. No runtime execution, build or reproduction requested or performed. Earlier g067 histories and proposed-drop bases remain unchanged."
+          }
+        },
+        {
+          "line": 19,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "l4",
+            "state": "open",
+            "summary": "Direct Podman status supports stopped-actor manager retention without a connected place",
+            "location": "crates/farhelm-helm/src/environment/podman_probe.rs:338",
+            "detail": "Reviewed commit: 56659839785691f76da3af5d8f51b511cff4ba8b. TLDR: stopped containers can keep reporting Stopped even while their ordinary place's Farhelm supervisor is disconnected, supporting g024/l5's route where idle actors retain the manager and its other connections after a caller drops it without explicit shutdown. This record is interface evidence for that same lifetime defect, not a new independent root. Details checked directly: podman.rs:1237-1276 obtains the confirmed container ID, calls inspect, validates session ownership labels and maps exited/stopped/created to EnvironmentStatus::Stopped. inspect at 226-236 calls exists then the bounded container-inspect command. command at 169-184 resolves place and calls places.command; place at 148-164 only reads registry state, obtains runtime route/capabilities and checks route equality. In the assigned podman_probe.rs:338-378, runtime reads current_row/base_route and accepts a cached successful current-route probe; it never checks ConnectionManager or manager.status(place). Its command at 409-415 directly delegates to run_bounded. The production runner already read in this review executes BaseRoute::command as a local process or ordinary SSH process. BaseRoute::command at access.rs:64-94 either lowers local argv directly or uses SharedConnection::Supervisor as an SSH sharing policy; that label is not a manager-connected-supervisor admission check. A local ordinary place with a usable systemd user manager and Podman can therefore answer these status commands while its Farhelm supervisor is unavailable. No invented external command sequence is needed: registered containers can be stopped/exited under the supported lifecycle and host-availability model. Supplied g024/l5 events 31-33 and 35 establish the manager-side local Arc retention, direct-drop fallback, staggered two-actor continuation and separate already-attempted branch. Normal explicit graceful shutdown calls shutdown_and_wait and remains protected; no ordinary desktop/standalone graceful-shutdown failure is claimed. Suggested bucket: other (retained manager tasks/store/connections on a direct-drop path). Confidence: provider-route premise confirmed by own pinned source; manager lifetime/short-circuit/drop analysis supplied by g024 and next checked only as needed for this interface. proposed_drop:false. possible_cover:g024/l5 event35 is the original owner and same-root finding; consolidate as supporting alias, not duplicate novelty. Could-be-highest:false; no user-work loss, secret exposure or process loss established. No runtime observation, tests, builds or reproduction. Tip route persistence and final manager-call boundary checks remain next; there is no observed incidence claim."
+          }
+        },
+        {
+          "line": 20,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "l4",
+            "state": "open",
+            "summary": "Direct Podman status supports stopped-actor manager retention without a connected place",
+            "location": "crates/farhelm-helm/src/environment/podman_probe.rs:338",
+            "detail": "Reviewed commit: 56659839785691f76da3af5d8f51b511cff4ba8b; relevant provider/probe route persists through pinned tip 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db. TLDR: an ordinary container place can keep answering Podman status commands while its Farhelm supervisor is disconnected. This supports g024/l5's conditional route in which stopped actors keep the manager and its other connections alive after a caller drops it without explicit shutdown. This is same-root interface evidence, not a second independent lifetime defect. Details checked directly: podman.rs:1237-1276 obtains a confirmed ID, inspects the container, validates its session ownership and maps exited/stopped/created to Stopped. inspect at 226-236 invokes exists and container inspect through command at 169-184. place at 148-164 checks only registry existence, cached/current base route and route equality. Assigned podman_probe.rs runtime at 338-378 reads current_row/base_route and accepts an older successful current-route probe; command at 409-415 delegates directly to run_bounded. current_row at 499-505 only reads the store. SystemPlaceCommands::process at 143-165 lowers BaseRoute::command without any manager status input. access.rs:434-447 admits Local or ordinary SSH rows by kind/destination; :64-94 executes local argv directly or selects the ordinary SSH sharing policy. The SharedConnection::Supervisor name chooses an SSH master; it is not admission based on a connected Farhelm supervisor. Therefore a local place with working Podman and a systemd user manager, but no answering Farhelm supervisor, directly establishes the required route without any SSH assumption. Existing stopped environments may share that place.\n\nCaller prerequisite checked rather than omitted: manager.rs:4185-4197 refuses an initial unadmitted environment whose saved remote_farhelm or remote_state_dir is missing. The reported route uses normally provisioned environments retaining both coordinates. For those, :4198-4219 asks provider.status and maps Stopped before testing whether the place is manager-connected. The later arm at :3845-3892 upgrades the weak manager into a named local, computes the place-connected gate, and only moves that local when both !attempted and gate hold. When gate is false it retains the local across the idle select. Direct inspection of the tip arm at :4050-4101 confirms the same structure. A diff of podman_probe.rs/access.rs from 566 to tip contains comments only; podman.rs changes only lifecycle lock error handling outside the status/place/command route. No manager-connection prerequisite was found that refutes g024's provider-route premise.\n\nPreserved lifetime consequence and limits: g024/l5 events 31-33 and 35 establish staggered stopped actors repeatedly retaining the manager, its store, tasks and unrelated connections on the documented direct-drop path. One actor can delay destruction until it leaves the arm; two persistently stopped actors with overlapping waits can retain it indefinitely while one reacquires a reference held by the other. This is conditional source/control-flow evidence, not an observed leak or frequency claim. manager.rs:3137-3145 explicitly relies on Drop to call shutdown and stop spawned actors. The already-attempted idle path is distinct and remains in g024's original record, irrespective of the place gate. Normal explicit graceful shutdown is protected: lib.rs:2582-2584 stops background services and calls shutdown_and_wait, and no desktop/standalone graceful-shutdown hang is asserted. Fixing the unused strong reference must preserve real owned lifecycle tasks through settlement.\n\nSuggested bucket: other (manager/resource lifetime on a direct-drop path). Confidence: source-confirmed provider/caller premise and independently inspected manager boundary; original lifetime/drop-language analysis supplied by g024. No runtime observation, test, build, reproduction, installation, live action or checkout change. proposed_drop:false. possible_cover:g024/l5 event35 is the original same-root owner; consolidate this record as supporting alias, not duplicate novelty. Could-be-highest:false; no user-work loss, secret exposure or user-process loss established. This revision resolves all readily checkable premises assigned to g067, adds admitted-installation and tip-persistence checks, and preserves the original consequences/exclusions. No open lead remains. Earlier g067 findings and candidate/drop bases are unchanged."
+          }
+        }
+      ],
+      "latest": {
+        "line": 20,
+        "event": {
+          "version": 1,
+          "kind": "finding",
+          "id": "l4",
+          "state": "open",
+          "summary": "Direct Podman status supports stopped-actor manager retention without a connected place",
+          "location": "crates/farhelm-helm/src/environment/podman_probe.rs:338",
+          "detail": "Reviewed commit: 56659839785691f76da3af5d8f51b511cff4ba8b; relevant provider/probe route persists through pinned tip 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db. TLDR: an ordinary container place can keep answering Podman status commands while its Farhelm supervisor is disconnected. This supports g024/l5's conditional route in which stopped actors keep the manager and its other connections alive after a caller drops it without explicit shutdown. This is same-root interface evidence, not a second independent lifetime defect. Details checked directly: podman.rs:1237-1276 obtains a confirmed ID, inspects the container, validates its session ownership and maps exited/stopped/created to Stopped. inspect at 226-236 invokes exists and container inspect through command at 169-184. place at 148-164 checks only registry existence, cached/current base route and route equality. Assigned podman_probe.rs runtime at 338-378 reads current_row/base_route and accepts an older successful current-route probe; command at 409-415 delegates directly to run_bounded. current_row at 499-505 only reads the store. SystemPlaceCommands::process at 143-165 lowers BaseRoute::command without any manager status input. access.rs:434-447 admits Local or ordinary SSH rows by kind/destination; :64-94 executes local argv directly or selects the ordinary SSH sharing policy. The SharedConnection::Supervisor name chooses an SSH master; it is not admission based on a connected Farhelm supervisor. Therefore a local place with working Podman and a systemd user manager, but no answering Farhelm supervisor, directly establishes the required route without any SSH assumption. Existing stopped environments may share that place.\n\nCaller prerequisite checked rather than omitted: manager.rs:4185-4197 refuses an initial unadmitted environment whose saved remote_farhelm or remote_state_dir is missing. The reported route uses normally provisioned environments retaining both coordinates. For those, :4198-4219 asks provider.status and maps Stopped before testing whether the place is manager-connected. The later arm at :3845-3892 upgrades the weak manager into a named local, computes the place-connected gate, and only moves that local when both !attempted and gate hold. When gate is false it retains the local across the idle select. Direct inspection of the tip arm at :4050-4101 confirms the same structure. A diff of podman_probe.rs/access.rs from 566 to tip contains comments only; podman.rs changes only lifecycle lock error handling outside the status/place/command route. No manager-connection prerequisite was found that refutes g024's provider-route premise.\n\nPreserved lifetime consequence and limits: g024/l5 events 31-33 and 35 establish staggered stopped actors repeatedly retaining the manager, its store, tasks and unrelated connections on the documented direct-drop path. One actor can delay destruction until it leaves the arm; two persistently stopped actors with overlapping waits can retain it indefinitely while one reacquires a reference held by the other. This is conditional source/control-flow evidence, not an observed leak or frequency claim. manager.rs:3137-3145 explicitly relies on Drop to call shutdown and stop spawned actors. The already-attempted idle path is distinct and remains in g024's original record, irrespective of the place gate. Normal explicit graceful shutdown is protected: lib.rs:2582-2584 stops background services and calls shutdown_and_wait, and no desktop/standalone graceful-shutdown hang is asserted. Fixing the unused strong reference must preserve real owned lifecycle tasks through settlement.\n\nSuggested bucket: other (manager/resource lifetime on a direct-drop path). Confidence: source-confirmed provider/caller premise and independently inspected manager boundary; original lifetime/drop-language analysis supplied by g024. No runtime observation, test, build, reproduction, installation, live action or checkout change. proposed_drop:false. possible_cover:g024/l5 event35 is the original same-root owner; consolidate this record as supporting alias, not duplicate novelty. Could-be-highest:false; no user-work loss, secret exposure or user-process loss established. This revision resolves all readily checkable premises assigned to g067, adds admitted-installation and tip-persistence checks, and preserves the original consequences/exclusions. No open lead remains. Earlier g067 findings and candidate/drop bases are unchanged."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g067/findings.jsonl",
+        "id": "l4",
+        "line": 20,
+        "disposition": "duplicate",
+        "group": "stopped-idle-local-arc-blocks-direct-manager-drop",
+        "reason": "Full primary and129 independently establish admitted remote_farhelm/state-dir coordinates, canonical owned container and usable route/probe prerequisites. Direct local place commands can report Stopped while place manager supervisor disconnected; SSH sharing policy is not admission. This corroborates024l5 gate-false premise; same root, no runtime frequency/security/user-work claim."
+      },
+      "accepted_parent_decision": {
+        "key": "g067/l4",
+        "line": 20,
+        "disposition": "duplicate",
+        "group": "stopped-idle-local-arc-blocks-direct-manager-drop",
+        "bucket": "other",
+        "recording": "supporting-provenance",
+        "needs_independent_drop_check": false,
+        "reason": "Full primary and129 independently establish admitted remote_farhelm/state-dir coordinates, canonical owned container and usable route/probe prerequisites. Direct local place commands can report Stopped while place manager supervisor disconnected; SSH sharing policy is not admission. This corroborates024l5 gate-false premise; same root, no runtime frequency/security/user-work claim."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-129",
+          "key": "g067/l4",
+          "latest_line": 20,
+          "recommendation": "duplicate",
+          "bucket": "other",
+          "underlying_key": "helm-manager/stopped-idle-local-arc-blocks-direct-drop",
+          "aliases": [
+            "g024/l5",
+            "g022/f3",
+            "g026/f8",
+            "g027/l8"
+          ],
+          "alias_scope": "Same underlying lifetime defect, with narrower provider-route corroboration rather than independent novelty. Preserve its admitted-installation prerequisite in the canonical entry.",
+          "target_queue_file": null,
+          "why": "The provider can report Stopped using direct local commands independently of the place's Farhelm connection. That establishes a concrete gate-false route for the canonical manager-lifetime defect; it is not a second defect to queue.",
+          "checks": [
+            {
+              "source": "g067/findings.jsonl:18-20",
+              "result": "Read every l4 event. Unresolved route lead becomes confirmed provider evidence, then adds admitted-row and endpoint checks. It expressly retains the separate already-attempted branch, conditional overlap consequence and explicit-shutdown exclusion."
+            },
+            {
+              "source": "566:environment/podman.rs:148-236,1237-1276; environment/podman_probe.rs:143-165,338-378,409-415; access.rs:64-94",
+              "result": "Own source confirms canonical-ID/ownership inspection maps exited/stopped/created to Stopped. Route resolution reads registry/current base route and cached successful probe. SystemPlaceCommands lowers BaseRoute directly. Local command execution requires no manager supervisor status; SharedConnection::Supervisor is an SSH sharing policy, not connected-supervisor admission. Local place suffices without SSH assumptions."
+            },
+            {
+              "source": "566:manager.rs:4185-4219,3838-3893; tip manager.rs:4050-4102",
+              "result": "Initial unadmitted environments are refused before provider status if either install coordinate is absent. The supported claim uses normally provisioned rows retaining both. Provider status precedes the place gate; the local Arc is retained on gate false. The endpoint has the same local/condition/wait shape."
+            },
+            {
+              "source": "566:manager.rs:1075-1162,3067-3145,11929-11976; tip lib.rs:2568-2592 and rest_harness.rs:1007-1016; original-to-tip/recording-main diffs",
+              "result": "Own reads confirm Drop-dependent cleanup, a genuine ordinary-host direct-drop fixture and explicit serving/REST cancellation. No later relevant repair found. Source permits staggered idle actors to keep one reference available across each other's probes; language rules confirm the named local's ownership survives the idle await. No execution or incidence measurement."
+            }
+          ],
+          "coverage_checked": [
+            {
+              "source": "SPEC.md Container sessions; SPEC_impl.md Disposable environments/provider state, one-route, actor/cadence, lifecycle and serving teardown",
+              "result": "Ordinary local places and directly inspectable stopped containers support the premise. One automatic start and explicit serving cancellation do not accept idle manager retention on direct drop."
+            },
+            {
+              "source": "TODO.md Planned; plans/queue; BUGS.md",
+              "result": "Planned empty. Targeted lifetime/provider/hold searches and matching Podman/overlap plan context reveal no exact stated repair or acceptance. Known SSH transfer-output hang is distinct."
+            },
+            {
+              "source": "review_feedback_queue/INDEX.md and matching retired-connection/suspend/shutdown-test entries; TRIAGE_OUTCOMES.md",
+              "result": "No exact existing queue item or active decision for this trigger/consequence/scope. Matching items concern different mechanisms; archive not read."
+            },
+            {
+              "source": "review_feedback_queue/FILTER.md",
+              "result": "No full filter boundary matches resource retention on this direct-drop route. Not dependent on a hung user manager, older-release upgrade, non-first-class harness or human sub-second action."
+            }
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": "No missing source premise for the direct-local provider route or conditional lifetime result. Requires admitted install coordinates, owned existing stopped containers and usable Podman/current route. Runtime incidence and overlap frequency remain unmeasured; no security or user-owned-work consequence established.",
+          "original_stronger_consequence": "Original l4 carries g024's one-actor delay and conditional overlapping-actor retention of tasks/connections, resource-only other impact. Later events strengthen that same premise rather than lower it. Normal explicit graceful teardown remains protected throughout.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Consolidate supporting provider-route evidence into canonical g024/l5. Keep the normally admitted-row and direct-local-place qualifications. This is alias attribution, not correctness rejection, consequence lowering or an independent drop decision."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": true,
+        "clearly_refuted_candidate": false,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "stopped-idle-local-arc-blocks-direct-manager-drop",
+        "destination": "trailing-stopped-idle-local-arc-blocks-direct-manager-drop.md"
+      }
+    },
+    {
+      "key": "g067/l5",
+      "owner": "g067",
+      "id": "l5",
+      "domain": "podman-environments",
+      "purpose": "podman-environments: crates/farhelm-helm/src/environment/podman/tests.rs, crates/farhelm-helm/src/environment/podman_probe.rs, crates/farhelm/tests/e2e/podman_environments.rs; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 21,
+          "event": {
+            "version": 1,
+            "kind": "lead",
+            "id": "l5",
+            "state": "open",
+            "summary": "Check whether lost-create test observes its claimed pre-send durability boundary",
+            "location": "crates/farhelm-helm/src/environment/podman/tests.rs:248",
+            "detail": "Reviewed commit: 56659839785691f76da3af5d8f51b511cff4ba8b. TLDR under investigation: the lost-session-create test may claim to protect login/install-fact persistence before the external send while only inspecting that state after the failed send returns. A regression that persists the same facts after sending could then evade this test's stated temporal guarantee. Concrete assigned-source basis already in context: tests.rs:248-250 says selected login/install facts become durable before run; :299-327 invokes create and only afterward reads saved login, pending marker and facts; :335-344 counts external runs. The fake runner has a helper_oracle flag used to inspect recipe state at the send boundary, but the session test sets only lost_run. Need recheck the full fake send branch, the production create admission order, and any directly adjacent oracle that might already make post-send writes fail. This is not a claimed production ordering defect or a demand for every scenario in one lifecycle test. Suggested bucket if retained: other/test assurance. Confidence unresolved pending those source checks; no runtime observation. proposed_drop:false pending source verification. possible_cover:none established in refreshed supplied neighbours; g066's proxy shared-serializer finding is distinct. Could-be-highest:false for the test-only consequence. No runtime tests, builds or reproductions."
+          }
+        },
+        {
+          "line": 22,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "l5",
+            "state": "open",
+            "summary": "Lost-create test does not observe its promised pre-send durability boundary",
+            "location": "crates/farhelm-helm/src/environment/podman/tests.rs:248",
+            "detail": "Reviewed commit: 56659839785691f76da3af5d8f51b511cff4ba8b. TLDR: the new lost-create test says login/install facts become durable before container creation is sent, but reads them only after the failed send has returned. Persisting those facts after the send could pass this test, leaving its stated crash-boundary guarantee untested. This is a test-oracle limitation, not a claim that current product ordering is wrong. Details: tests.rs:248-250 states 'The selected login and install facts become durable before run.' The test establishes an initially absent login at :270-273, invokes create at :299-308, and only then reads the login, pending marker and selected facts at :309-327. Its second create/error and systemd-run count at :329-344 establish retained retry protection, but add no observation of the first send boundary. The fake run_bounded at :57-86 records argv and returns the scripted lost reply. Its only send-time database oracle is conditional helper_oracle at :66-82 and reads recipe builder ownership, not the session host's login/install admission. This test sets only lost_run at :254, so that oracle is off. As a concrete competing mechanism, keeping the result of run, persisting the selected session facts and pending marker afterward, and then processing the run result would satisfy all these assertions while allowing a crash during run to leave no recorded login/install facts. The fake supplies the same lost error and absent observation regardless of those session store fields. Production currently correctly awaits set_podman_prepared_create at podman.rs:1103-1115 before run at :1116-1125; that correctness does not refute the distinct test sensitivity gap. SPEC_impl.md Disposable environments requires preparation to atomically record login identity, prepared facts and pending-send marker before creation is sent. Supplied test-authoring rules require a fixture premise/observable that distinguishes competing mechanisms. Add a session-send oracle that reads this host's stored login, facts and pending marker before the fake run returns, analogous to the existing helper oracle, or narrow the test comment to its post-return persistence/retry guarantee. No requirement to test every failure in this one scenario is made. Suggested bucket: other (maintainer regression assurance). Confidence: confirmed source/fixture/temporal assertion analysis; no execution, mutation, reproduction or runtime observation. proposed_drop:false. possible_cover:none established in the supplied refreshed neighbours; g066's serializer-oracle finding concerns a different test and mechanism. Could-be-highest:false; no shipped security or user-work-loss route is alleged. This revises lead l5 and preserves its original narrow false-assurance consequence. Whole-range introduction/persistence and final run-path premise will be checked before ending this discovery pass."
+          }
+        },
+        {
+          "line": 23,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "l5",
+            "state": "open",
+            "summary": "Lost-create test does not observe its promised pre-send durability boundary",
+            "location": "crates/farhelm-helm/src/environment/podman/tests.rs:248",
+            "detail": "Reviewed commit: 56659839785691f76da3af5d8f51b511cff4ba8b; unchanged through pinned tip 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db. TLDR: the new lost-create test says login/install facts become durable before container creation is sent, but reads them only after the failed send returns. Persisting those facts after sending could pass this test, leaving its stated crash-boundary guarantee untested. This is test assurance, not an established product ordering defect. Details: tests.rs:248-250 states 'The selected login and install facts become durable before run.' The initial absent-login assertion at :270-273, create call at :299-308 and saved login/pending/facts assertions at :309-327 observe only before the whole create and after its return, never during send. The retry/error and external-run count at :329-344 protect post-return retry behavior. In fake run_bounded at :57-86, the sole send-time store read is conditional helper_oracle at :66-82, checks recipe-builder ownership and is off in this session test, which sets only lost_run at :254. The fake supplies a lost error and subsequent absent observation independently of the session store fields. Concrete competing ordering: await run into a local result, then write selected facts/login/pending marker, then process that result. This would preserve the same post-return assertions and second-run refusal while leaving the required facts absent during the external send. Own source checks rule out an accidental lower-layer oracle: production run at podman.rs:421-470 uses the selected image/name/labels, and scoped_output at :295-321 resolves the ordinary place and invokes the command. Neither reads this session host's stored login/install admission before sending. Current create correctly awaits set_podman_prepared_create at :1103-1115 before run at :1116-1125; correctness today does not establish the test's sensitivity. Exact SPEC_impl.md:6430-6431 contract: 'Preparation observes and atomically records the full login identity, prepared facts and pending-send marker before container creation is sent.' Supplied test-authoring rules require an observable that distinguishes competing mechanisms. Add a session-send store oracle for this host's selected login, facts and pending marker, analogous to the helper oracle, or narrow the comment to post-return persistence/retry. This does not require every failure case in one test. Whole-range attribution: git log of this file over exclusive 6e423e30068b62c6cfa276c6d720ee35bb70387a through inclusive tip lists only its introduction at reviewed commit56659839785691f76da3af5d8f51b511cff4ba8b, and the full reviewed-to-tip file diff is empty. Thus this assigned temporal claim and oracle omission are in-range and unrepaired. Suggested bucket: other (maintainer regression assurance). Confidence: confirmed by source/fixture/counterfactual assertion analysis; no execution, mutation, reproduction or runtime observation. proposed_drop:false. possible_cover:none established in supplied refreshed neighbours; g066's shared-serializer oracle and g064's scheduling oracle are different tests/mechanisms. Could-be-highest:false; no shipped security or user-work-loss route alleged. This revision resolves the introduction/persistence and lower-layer-call premises, retaining the original narrow false-assurance consequence. No open lead remains under l5. The discovery pass continues after recording."
+          }
+        }
+      ],
+      "latest": {
+        "line": 23,
+        "event": {
+          "version": 1,
+          "kind": "finding",
+          "id": "l5",
+          "state": "open",
+          "summary": "Lost-create test does not observe its promised pre-send durability boundary",
+          "location": "crates/farhelm-helm/src/environment/podman/tests.rs:248",
+          "detail": "Reviewed commit: 56659839785691f76da3af5d8f51b511cff4ba8b; unchanged through pinned tip 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db. TLDR: the new lost-create test says login/install facts become durable before container creation is sent, but reads them only after the failed send returns. Persisting those facts after sending could pass this test, leaving its stated crash-boundary guarantee untested. This is test assurance, not an established product ordering defect. Details: tests.rs:248-250 states 'The selected login and install facts become durable before run.' The initial absent-login assertion at :270-273, create call at :299-308 and saved login/pending/facts assertions at :309-327 observe only before the whole create and after its return, never during send. The retry/error and external-run count at :329-344 protect post-return retry behavior. In fake run_bounded at :57-86, the sole send-time store read is conditional helper_oracle at :66-82, checks recipe-builder ownership and is off in this session test, which sets only lost_run at :254. The fake supplies a lost error and subsequent absent observation independently of the session store fields. Concrete competing ordering: await run into a local result, then write selected facts/login/pending marker, then process that result. This would preserve the same post-return assertions and second-run refusal while leaving the required facts absent during the external send. Own source checks rule out an accidental lower-layer oracle: production run at podman.rs:421-470 uses the selected image/name/labels, and scoped_output at :295-321 resolves the ordinary place and invokes the command. Neither reads this session host's stored login/install admission before sending. Current create correctly awaits set_podman_prepared_create at :1103-1115 before run at :1116-1125; correctness today does not establish the test's sensitivity. Exact SPEC_impl.md:6430-6431 contract: 'Preparation observes and atomically records the full login identity, prepared facts and pending-send marker before container creation is sent.' Supplied test-authoring rules require an observable that distinguishes competing mechanisms. Add a session-send store oracle for this host's selected login, facts and pending marker, analogous to the helper oracle, or narrow the comment to post-return persistence/retry. This does not require every failure case in one test. Whole-range attribution: git log of this file over exclusive 6e423e30068b62c6cfa276c6d720ee35bb70387a through inclusive tip lists only its introduction at reviewed commit56659839785691f76da3af5d8f51b511cff4ba8b, and the full reviewed-to-tip file diff is empty. Thus this assigned temporal claim and oracle omission are in-range and unrepaired. Suggested bucket: other (maintainer regression assurance). Confidence: confirmed by source/fixture/counterfactual assertion analysis; no execution, mutation, reproduction or runtime observation. proposed_drop:false. possible_cover:none established in supplied refreshed neighbours; g066's shared-serializer oracle and g064's scheduling oracle are different tests/mechanisms. Could-be-highest:false; no shipped security or user-work-loss route alleged. This revision resolves the introduction/persistence and lower-layer-call premises, retaining the original narrow false-assurance consequence. No open lead remains under l5. The discovery pass continues after recording."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g067/findings.jsonl",
+        "id": "l5",
+        "line": 23,
+        "disposition": "verified",
+        "group": "podman-lost-session-create-test-misses-presend-store-witness",
+        "reason": "Parentreadallprimary21-23/directtest240-346/fake45-90, thenfullfreshfocused130result. New566testcommentpromisesselectedlogin/installfacts/pendingmarkeratomicdurabilitybeforesend, butobservesabsentbeforewholecreate andsavedafterreturn; sendhelperoracleoffandonlybuilderstate, actualrunpathdoesnotreadsessionadmission. Concreteawaitrun→persist→processresultcounterpartpassesretry/count/postreturnassertionsyetviolatespresendcontract. Productioncurrentlycorrectordernotrefutation. Fileintroduced566/unchangedtip. BothSPECcontractsrequireboundary; Planned/unlandedindexempty, BUGS/queue/activeledgernoexactcover, existingrebuildorderpersistenceitemdifferentresource/fake. NoentireFILTERmatch. Retainothernarrowtestassurance, no actualcrash/orphan/userworkfailureorunrunmutationclaim. Allfocusedcoverage/caveats retainedinclaims130result."
+      },
+      "accepted_parent_decision": {
+        "key": "g067/l5",
+        "line": 23,
+        "disposition": "verified",
+        "group": "podman-lost-session-create-test-misses-presend-store-witness",
+        "bucket": "other",
+        "recording": "new",
+        "needs_independent_drop_check": false,
+        "reason": "Parentreadallprimary21-23/directtest240-346/fake45-90, thenfullfreshfocused130result. New566testcommentpromisesselectedlogin/installfacts/pendingmarkeratomicdurabilitybeforesend, butobservesabsentbeforewholecreate andsavedafterreturn; sendhelperoracleoffandonlybuilderstate, actualrunpathdoesnotreadsessionadmission. Concreteawaitrun→persist→processresultcounterpartpassesretry/count/postreturnassertionsyetviolatespresendcontract. Productioncurrentlycorrectordernotrefutation. Fileintroduced566/unchangedtip. BothSPECcontractsrequireboundary; Planned/unlandedindexempty, BUGS/queue/activeledgernoexactcover, existingrebuildorderpersistenceitemdifferentresource/fake. NoentireFILTERmatch. Retainothernarrowtestassurance, no actualcrash/orphan/userworkfailureorunrunmutationclaim. Allfocusedcoverage/caveats retainedinclaims130result."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-130",
+          "key": "g067/l5",
+          "latest_line": 23,
+          "recommendation": "retain-verified",
+          "bucket": "other",
+          "underlying_key": "podman-lost-session-create-test-misses-presend-store-witness",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The test promises that login/install facts are durable before sending creation, but observes those facts only after create returns. Its fake send has no enabled session-state oracle. The established consequence is missing regression assurance for that temporal contract; current production ordering is correct.",
+          "checks": [
+            {
+              "source": "g067/findings.jsonl:21-23",
+              "result": "Read the complete named history; the file ends at line 23. The lead became a source-confirmed finding, without withdrawal or a stronger shipped consequence. Latest record is line 23."
+            },
+            {
+              "source": "56659839785691f76da3af5d8f51b511cff4ba8b:crates/farhelm-helm/src/environment/podman/tests.rs:248-346",
+              "result": "The comment claims pre-run persistence. The test sets only lost_run, observes an absent login before create, and checks saved login, pending marker and prepared facts after create returns. The retry and run-count assertions establish no second send, not persistence during the first send."
+            },
+            {
+              "source": "56659839785691f76da3af5d8f51b511cff4ba8b:crates/farhelm-helm/src/environment/podman/tests.rs:14-25,50-117,157-192,198-204",
+              "result": "helper_oracle defaults false. Its conditional send-time reads concern recipe-builder ownership and build_started_at; the adjacent helper test explicitly enables it, while the named session test does not. Scripted lost_run and absent-container replies do not depend on session login/install facts."
+            },
+            {
+              "source": "56659839785691f76da3af5d8f51b511cff4ba8b:crates/farhelm-helm/src/environment/podman.rs:148-184,295-321,421-470,1103-1147",
+              "result": "Production currently awaits the atomic prepared-create write before run. The send lowers the place route and selected arguments without asserting this session's saved facts. Moving that write after awaiting run but before inspecting/processing its result would preserve the named test's post-return observations and retry refusal. This is a source counterfactual, not an executed mutation."
+            },
+            {
+              "source": "56659839785691f76da3af5d8f51b511cff4ba8b:SPEC_impl.md:6408-6432; 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db:SPEC_impl.md:5951-5953; .agents/test-authoring.md",
+              "result": "The reviewed and pinned-tip contract requires atomically recording full login identity, prepared facts and pending-send marker before creation is sent. The test-authoring checklist requires an observable distinguishing competing mechanisms. Correct production order does not supply that observable to the test."
+            },
+            {
+              "source": "git log 6e423e30068b62c6cfa276c6d720ee35bb70387a..00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db -- crates/farhelm-helm/src/environment/podman/tests.rs; git diff 56659839785691f76da3af5d8f51b511cff4ba8b 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db -- same path",
+              "result": "The sole in-range file change is its introduction at 56659839785691f76da3af5d8f51b511cff4ba8b; the reviewed-to-tip diff is empty. The gap is introduced in range and persists through the review tip."
+            }
+          ],
+          "coverage_checked": [
+            {
+              "source": "SPEC.md, Container sessions, current lines 4806-4891; SPEC_impl.md, Disposable environments and Podman places, creation and images, current lines 5929-5953 and 6058-6093",
+              "result": "The specifications require ownership and pre-send persistence; neither accepts a test claiming to witness that boundary without observing it. No exact accepted-behavior cover."
+            },
+            {
+              "source": "TODO.md:25-27",
+              "result": "The current Planned bucket is empty. No coverage."
+            },
+            {
+              "source": "plans/queue/INDEX.md; targeted searches of plans/queue/*.md",
+              "result": "The current index has no unlanded plans. Retained plan files were searched for the named test, pre-send boundary, login/install facts and pending-send marker; no work targeting this test-oracle gap was found."
+            },
+            {
+              "source": "BUGS.md",
+              "result": "Its sole accepted bug concerns a stalled SSH transfer; it does not cover this test boundary."
+            },
+            {
+              "source": "review_feedback_queue/INDEX.md in full; targeted queue searches; review_feedback_queue/rebuild-order-test-misses-persistence-boundary.md",
+              "result": "No exact test or session-send-state item was found. The rebuild-order item also concerns a missing persistence witness, but targets Tensorlake snapshot replacement and a different fake boundary. It is neither an alias nor coverage of this Podman session-create test. No useful extension to an existing item was established."
+            },
+            {
+              "source": "TRIAGE_OUTCOMES.md targeted searches; lines 1325-1336",
+              "result": "No decision covers the named test or contract. The static-oracle discard found by search concerns launcher subscriptions and is limited to that fixture, not a general acceptance of oracle gaps. Archive not read."
+            },
+            {
+              "source": "review_feedback_queue/FILTER.md in full",
+              "result": "No filter matches the whole trigger and consequence. This is a test's unwitnessed temporal guarantee, not a rare self-correcting display/diagnostic failure or another listed filtered route."
+            }
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": "No missing source premise for the narrow test-assurance claim. No runtime or mutation experiment was run. A shipped ordering bug, real crash, actual orphan, process loss or user-work loss has not been established and must not be inferred from the test counterfactual.",
+          "original_stronger_consequence": "None alleged beyond test assurance. Events 21-23 explain that a hypothetical run-then-persist implementation could pass while a crash during run leaves facts absent; they explicitly do not claim that current production has that order or that any crash/work loss occurred. No withdrawal or consequence lowering appears in this named history.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Retain as other with source-confirmed confidence and the execution caveat. A session-send oracle can inspect this host's saved login, prepared facts and pending marker before returning the fake outcome; alternatively narrow the test comment to the post-return persistence/retry guarantee it currently observes. This consultation makes no parent disposition and is not an independent drop check."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": true,
+        "clearly_refuted_candidate": false,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Source-confirmed by an existing parent decision; not runtime reproduced",
+        "deduplication_key": "podman-lost-session-create-test-misses-presend-store-witness",
+        "destination": "trailing-podman-lost-session-create-test-misses-presend-store-witness.md"
+      }
+    }
+  ],
+  "replies": [
+    {
+      "turn": 1,
+      "reply": "Initial review complete. All four patches and 1,691 assigned lines reviewed.\n\nLogged one confirmed finding, `l2`: the new Podman unit-test file is absent from the Rust module tree, so its tests never compile or run. Suggested bucket: `other`.\n\nTwo considered candidates recorded; no open leads. Findings and progress logs updated. No tests, reproductions, or checkout changes performed."
+    },
+    {
+      "turn": 2,
+      "reply": "- `l1`: promoted to a finding for the test’s unsupported claim that it detects helm-side membership counting.\n- `l2`: refuted and revised to a candidate. `podman/build.rs` includes the file as `build::tests`; its namespace references are correct.\n- `l3`: confirmed the payload mismatch at `500548b…`, repaired by `d751ff1…`. Recorded possible duplication with `g093/f1`.\n\nLogs updated. Source-only checks; no execution. Unresolved leads: none."
+    },
+    {
+      "turn": 3,
+      "reply": "Discovery pass 1 complete. No new reportable issue found.\n\nChecked proxy-test boundaries, input/capture handling, refresh notifications, ownership/cancellation assertions, and end-to-end fixture premises. Recorded candidates `c2` and `c3`.\n\nNew verified IDs: none. New unverified-after-investigation IDs: none. Open leads: none.\n\nLogs updated. Source-only; no execution."
+    },
+    {
+      "turn": 4,
+      "reply": "Recorded `l4` as supporting evidence for `g024/l5`: admitted containers can report Stopped through direct Podman commands without a connected place supervisor. No hidden connection precondition refutes that route; it persists at tip. Explicit graceful shutdown remains protected.\n\nLogs updated. Source-only synthesis; no discovery pass performed. Unresolved leads: none."
+    },
+    {
+      "turn": 5,
+      "reply": "Discovery pass 2 found one new issue: `l5`, a test-oracle gap in the claimed pre-send durability guarantee.\n\nChecked the fake’s observations, creation call path, specification, full-range attribution and tip persistence. Continued through probe redaction, image-cleanup assertions and Delete helpers; no second issue found.\n\nNew verified IDs: `l5`. New unverified IDs: none. Open leads: none.\n\nLogs updated. Source-only; no execution."
+    },
+    {
+      "turn": 6,
+      "reply": "Discovery pass 3 found nothing new.\n\nChecked status/deletion proofs, row-backed cleanup refusal, command seam dispatch, private-input handling, and the end-to-end kept-session return boundary.\n\nNew verified IDs: none. New unverified-after-investigation IDs: none. Open leads: none.\n\nProgress updated; findings unchanged. Source-only, no execution."
+    }
+  ],
+  "progress": "# g067 progress\n\nInitial review, turn 1 completed. Discovery passes: 0 (the initial assigned review is not a later discovery pass).\n\nRead the full brief and the complete inventory commits field, without excluded coverage metadata. Delivered all 1,691 assigned patch lines through the prescribed evidence reads: 00181 (1-891), 00182 (1-428), 00722 (1-358), and 01578 (1-14). The first 00181 packet was initially wrapped in a result object, then immediately reread with stdout delivered directly. No assigned material remains unread.\n\nRead the pinned SPEC.md Container sessions and SPEC_impl.md Disposable environments contracts for 56659839785691f76da3af5d8f51b511cff4ba8b. Read the pinned Sandbox sessions, Container sessions, Environment Delete and the seal, and Agent requests and environments contracts for 2ef10815f12ed719ab6c51c6e3ac6fcd3f8bc1fa, plus the relevant Testing contracts. Inspected the comment-only 08399d092d20815ced6619c26df2391944ae2b4a patch and its payload-prerequisite context. Also read the Answers bind to what was drawn rule; the assigned scope contains no GUI handler.\n\nInterface checks: the real place runner keeps private input out of argv, feeds it while capture drains stdout/stderr, and uses the base route's shared SSH command construction. Cache waiters register notifications before checking in-flight work. Runtime accepts older successful observations; launch preparation requires fresh capabilities. Provider calls distinguish command refusal from unknown outcomes. Environment session Delete uses the supervisor's returned count and seal rather than counting the helm's listing. The e2e module is registered in tests/e2e/main.rs.\n\nRecords this pass: c1 is a source-refuted no-input/select concern. l1 was opened as a lead and revised to a candidate: the real-container deletion test comment overstates its ability to distinguish hidden membership, but its normal two-session lifecycle assertions are valid and the production route uses the required supervisor request. l2 was opened as a lead and revised to a confirmed finding: the newly added podman/tests.rs is never registered in the Rust module tree. Its super::super::script_failure_output references also show a compile error that wiring it in will expose. Suggested bucket is other; no product data-loss or credential-disclosure route is claimed.\n\nNew verified findings: l2. Unverified findings: none. Open leads: none. Candidate IDs: c1, l1. Continued the assigned pass after finding l2, checking e2e module registration, SSH argv/stdin policy and the test helper's namespace. All conclusions are source-based; no runtime tests, builds or reproductions were run. No checkout files were changed; git status --short remained empty.\n\nRecording diagnostics: the first c1 record attempt used a mistyped event path and failed. Its retry rejected state=closed; tooling.md confirmed only open/withdrawn are valid, and state=open was recorded successfully. A later attempted replacement of event.json with two patch operations on the same path failed before any write; the event was then written and recorded successfully. Existing logs were never truncated.\n\nNext action: return to the caller for its later synthesis turn. Durable findings and considered candidates are in findings.jsonl; no separate report file was created.\n\n## Synthesis turn 2\n\nCompleted later-turn synthesis. Discovery passes: 0; this was the requested synthesis, not a separate discovery turn. No mandatory scope remains unread; the parent reports audited delivery of all 1,691 assigned lines without gaps or rejected packets.\n\nChanges this turn:\n\n- l1 revised from candidate to confirmed finding, suggested bucket other. The test explicitly claims that helm-side counting fails, while both sessions are deliberately present in the helm list and no controlled discrepancy is established. The real production route being correct does not refute this narrow test-oracle/documentation limitation. Checked precise original lines 1416-1454 and tip persistence at 1415-1453. No product deletion bug is claimed.\n- l2 first received the requested immediate-parent tip check, but an expanded module-reference search then found direct contradictory source. Original and tip podman/build.rs:9-11 both include the assigned tests.rs as build::tests under cfg(test) and a relative path attribute. That also makes super::super::script_failure_output correct. The missing-registration and stale-namespace conclusions were wrong and are now refuted under l2 as a candidate proposed for dropping. All original findings and intermediate lead revisions remain in the append-only log. No substitute-coverage claim is made from g066's fake tests.\n- l3 added from the supplied g093/f1 interface input and confirmed through direct source: 500548b9253b07a26fd03119679184b69544e31d stops producing tmux while prerequisites still demands tmux-{target}. A fresh payload directory fails the consumer check; old output may mask it. Exact repair d751ff1633bb479c7bf53920f2e4ea4ba932a1c2 removes the consumer's tmux requirement. Assigned patch 08399d092d20815ced6619c26df2391944ae2b4a only changes the explanatory comment; tip retains the repair. Recorded the intermediate defect, repair and possible duplicate g093/f1 explicitly.\n\nInterface assumptions settled: tests.rs belongs to the nested build module, not the immediate podman module; direct module registration is stronger evidence than a guessed conventional file layout. The script's staging contract and test prerequisites diverged only in the recorded intermediate span; tip agreement does not erase that reviewed defect. c1 remains preserved with its original source refutation. No queue/filter/exclusion metadata was searched.\n\nNew verified/unverified IDs in this turn: l1 confirmed test-oracle limitation; l3 confirmed intermediate payload mismatch with exact repair. l2 refuted by source and revised to candidate. No unverified findings or open leads remain. Current reported findings: l1 and l3. Current candidates: c1 and l2. No runtime tests, builds or reproductions were run, and no checkout files were changed.\n\nRecording diagnostic: one l2 candidate event attempt had an unescaped quote in its private JSON and was rejected before append. The corrected event was recorded, then revised with the exact path-attribute text using JSON Unicode quoting. No log was truncated.\n\nNext: return only this turn's delta and unresolved lead IDs to the caller; parent owns deduplication, drop checks and queue filters.\n\n## Discovery turn 3 — pass 1\n\nCompleted the requested separate discovery pass beyond known findings. Discovery-pass count: 1. Result: no new reportable finding; no new verified or unverified-after-investigation finding IDs; no open lead IDs. Existing findings and every prior candidate/refutation remain unchanged.\n\nRead discovery-neighbours.json completely in bounded ranges 1-40, 41-90, 91-125, 126-165, 166-205, 206-245 and 246-285. An earlier 1-120 read was clipped and was superseded by those complete smaller chunks. Used this supplied context for interfaces and novelty only; did not search prohibited queue/filter/coverage sources.\n\nReconciled supplied g065/l1:14 before the new search. Direct assigned-source checks distinguish proxy_file formatting, local shell input transport, live manager import and later environment.d generation. Recorded c2 immediately: the formatter test observes its expected generated text, and the private-input test explicitly covers a byte/cleanup boundary without a manager. Neither establishes reboot persistence. The reported empty-value product consequence remains g065's; c2 proposes a precise boundary/overlap basis rather than asserting product correctness or adopting duplicate novelty.\n\nNew source checks: bounded private-input feeding and capture completion in podman_probe.rs:168-231; refresh waiter registration, state checks, cache publication and guard completion at 335-405 and 435-494; lost-session-create ownership and retry assertions in tests.rs:248-345; foreign-label cleanup refusal at 194-245; deletion admission/cancellation barrier and endpoint identity fixtures at 706-885; paused-container refusal plus post-Resume process evidence at e2e podman_environments.rs:1138-1185; kept sibling creation/marker/identity/membership premises at 755-798 and 858-888; and the assigned 08399d comment-only patch. These checks remained within the assigned group with minimal caller context already in view.\n\nRecorded c3 immediately after ruling out a concrete lost-notification concern: fresh starts refresh before constructing a waiter, but enables the waiter before checking the refreshing set; completed work is consumed directly and later completion wakes the enabled waiter. Cache publication precedes guard removal/notification. This refutes the specific registration-gap timeout route and makes no broader cache-race claim.\n\nNew candidate IDs: c2 (proxy evidence boundary, parent-supplied product counterpart) and c3 (source-refuted notification gap). New verified IDs: none. New unverified-after-investigation IDs: none. Remaining leads: none. All observations are source/contract analysis, not observed execution. No runtime tests, builds, reproductions, live-install actions or checkout mutations were performed. No assigned mandatory scope is unread.\n\nNext: return the empty discovery result, useful checks and candidate IDs to the parent. Parent retains disposition, deduplication and queue-filter ownership.\n\n## Reopened synthesis turn 4\n\nCompleted the concrete late-interface synthesis requested for g024/l5 event35, including its earlier events31-33. Read the complete own findings history (all 17 pre-turn events) before revising or adding records. The first combined history/interface output clipped event33; reread exact events33 and35 separately in full. Own history was delivered fully in ranges1-6,7-12 and13-17. No earlier finding, consequence, candidate or proposed-drop basis was removed or changed.\n\nNew local ID l4 was immediately recorded as a lead, then as a finding, then revised with complete route/caller/tip checks. It is supporting same-root interface evidence for g024/l5, explicitly marked for alias consolidation rather than independent novelty. Confirmed the requested premise: Podman status reaches registry/base-route commands directly, with no ConnectionManager status precondition in current_row, runtime, place, command or the system runner. The Local base route alone suffices to show that a working Podman/systemd user manager can answer while its ordinary Farhelm supervisor is disconnected. The SSH sharing-policy name is also not such a precondition, but the finding does not need a remote assumption.\n\nResolved caller prerequisite: environment rows must have admitted remote_farhelm and remote_state_dir coordinates. manager attempt at 4175-4219 refuses unadmitted rows, but otherwise calls provider.status and can return Stopped before the later place-connected gate. Read the original manager stopped arm3841-3892 and endpoint arm4050-4101: the idle named strong reference remains across the wait when gate=false, independently of the already-attempted branch. Original Drop contract3137-3145 and explicit graceful shutdown lib.rs2582-2584 were checked directly. Preserved the stronger boundary: normal explicit shutdown is protected; no normal desktop/standalone graceful-shutdown hang is asserted.\n\nPersistence checked by exact provider/probe/access diff from56659839785691f76da3af5d8f51b511cff4ba8b through00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db: probe/access changes are comments only, and provider change is a lifecycle lock-error helper outside the status/place/command route. Endpoint manager retains the relevant local-upgrade/gate/move/wait structure. No hidden provider connection precondition refutes g024's gate-false route. Source-only; no occurrence or leak frequency observed.\n\nAll readily checkable premises assigned to g067 are resolved. New source-confirmed supporting ID: l4 (possible_cover g024/l5 event35; suggested other). New unverified-after-investigation IDs: none. Remaining lead IDs: none. This turn was synthesis only. Discovery-pass count remains1; no separate discovery was performed in this turn, as instructed. No tests/builds/reproductions/installs/live actions/checkout changes or prohibited coverage searches.\n\nRecording diagnostic: the final l4 event draft had raw paragraph line breaks inside its JSON detail and was rejected before append. Escaped those newlines in the private event file and recorded successfully; the append-only findings log was not truncated.\n\nNext: return only this turn's source-confirmed interface delta and lead status, then await the separate post-audit discovery request.\n\n## Discovery turn 5 — pass 2\n\nCompleted a separate discovery pass beyond the preserved findings/candidate history. Discovery-pass count: 2. Read refreshed discovery-neighbours.json completely before source search in bounded ranges1-40,41-65,66-90,91-130,131-165,166-200,201-235,236-260,261-285,286-310,311-340,341-365,366-395,396-420,421-445 and446-478. No clipping or missing range in these reads. There were no named pending synthesis questions. Used the supplied neighbours for interface context and novelty only; no prohibited queue/filter/coverage search.\n\nNew finding l5: the assigned lost-session-create test promises pre-send durability of selected login/install facts, but its session-state observations occur only before the entire call and after its failed return. Its fake's only send-time store oracle is disabled helper-only builder checking. Source-derived competing ordering (save run result, persist selected facts afterward, then process the result) preserves the observed post-return state and second-run refusal while violating the specified before-send crash boundary. Recorded a lead immediately, then a finding immediately after source checks, then a revision settling the remaining call-path/range premises. Suggested bucket other; no current product-ordering bug, security or user-work-loss route is claimed.\n\nUseful checks/results for l5: read tests.rs30-117 and248-345 in full targeted context; current create at podman.rs1062-1175 correctly writes before run; run417-470 and scoped_output295-321 supply no lower-level session-admission store oracle. Exact SPEC_impl6430-6431 requires full identity/facts/pending marker before sending. Full pinned-range file history lists only its introduction at56659839785691f76da3af5d8f51b511cff4ba8b; reviewed-to-tip tests.rs diff is empty. The test-sensitivity omission and its promise are assigned in-range material, not an old independent defect.\n\nContinued the pass after recording l5: checked probe raw-error redaction/type preservation at516-540 and its test695-739; image retirement/in-use and unresolved-tag assertions at tests.rs412-510; and e2e Delete response/header/body/listed helpers at1367-1408. These additional checks produced no second independent concern. Existing image-pruning, deduplication, CLI membership and shared serializer findings in the neighbour projection were not adopted as duplicate novelty. All earlier local consequences and proposed-drop bases remain unchanged.\n\nPass result: something new was found. New verified IDs: l5 (test temporal-oracle limitation). New unverified-after-investigation IDs: none. Remaining lead IDs: none. No assigned mandatory scope is unread. All checks and conclusions are source/contract analysis; no runtime tests, builds, reproductions, installs, live-install actions or checkout modifications were performed.\n\nNext: return only this pass's useful checks/results and new-ID/lead status to the parent. Parent owns semantic consolidation, independent drops/filters and any later synthesis request.\n\n## Discovery turn 6 — pass 3\n\nCompleted another separate source-only discovery pass beyond all existing local findings and candidates. Discovery-pass count: 3. Result: empty; nothing new reportable found. New verified finding IDs: none. New unverified-after-investigation IDs: none. New candidate IDs: none. Remaining lead IDs: none. No original consequence, provenance or proposed-drop basis was changed.\n\nRead the refreshed478-line discovery-neighbours.json fully before the search in bounded chunks1-35,36-90,91-165,166-235,236-285,286-340,341-395,396-435 and436-478. No clipping/missing interval in these reads. There were no named pending synthesis inputs. The supplied expanded interface findings were used only for context/novelty; no prohibited queue/filter/coverage sources were searched or adopted as new local issues.\n\nUseful source checks: tests.rs348-416 establishes stopped/paused fixture state, canonical resource deletion, row-backed proof consumption and repeated-absence removal count. tests.rs640-705 distinguishes lifecycle verbs and demonstrates that an incomplete session row is listed with host association and refuses the rowless cleanup adapter with no recorded rm. podman_probe.rs65-137 checks the default fake seam versus production overrides: required run, bounded-result default, explicit private-input opt-in refusal, and production run_bounded/run_with_input dispatch to execute without recursive fallback. execute168-232 retains the input pipe in an inline future, shares capture, rejects incomplete delivery and preserves typed SSH session refusal before generic private-input errors. These checks found no additional concrete defect beyond preserved earlier records.\n\nAlso checked the changed ordinary_features kept-reference return boundary in e2e podman_environments.rs626-694: terminal detach/close observations, owned TCP relay joining and inside protocol child teardown precede returning the kept session reference. The assigned08399d092d20815ced6619c26df2391944ae2b4a patch remains a comment-only clarification of an already corrected payload requirement. No new whole-range attribution premise arose from this pass and no reproduction was needed.\n\nAll checks were source/contract analysis, not execution evidence. No runtime tests, builds, reproductions, installs, live actions or checkout file mutations. No mandatory assigned material remains unread. Findings log remains at23 events; progress is the durable record of this empty pass.\n\nNext: return useful checks, the empty new-ID sets and no-open-leads result to the parent. Parent retains all disposition and queue-filter decisions.\n"
+}

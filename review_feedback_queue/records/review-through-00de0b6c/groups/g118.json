@@ -1,0 +1,480 @@
+{
+  "group": {
+    "id": "g118",
+    "domain": "supervisor-terminal-streaming",
+    "purpose": "supervisor-terminal-streaming: crates/farhelm-supervisor/src/service/terminals.rs; phases complete small per-commit changes",
+    "interfaces": [
+      "g001",
+      "g007",
+      "g008",
+      "g009",
+      "g074",
+      "g075",
+      "g076",
+      "g079",
+      "g080",
+      "g081",
+      "g082",
+      "g083",
+      "g084",
+      "g102",
+      "g103",
+      "g104",
+      "g105",
+      "g106",
+      "g107",
+      "g108",
+      "g109",
+      "g110",
+      "g111",
+      "g112",
+      "g113",
+      "g114",
+      "g115",
+      "g116",
+      "g117",
+      "g119",
+      "g120",
+      "g121",
+      "g159",
+      "g160",
+      "g161",
+      "g162",
+      "g163",
+      "g164",
+      "g165",
+      "g166",
+      "g167",
+      "g168",
+      "g169",
+      "g170",
+      "g171",
+      "g172",
+      "g173"
+    ],
+    "sources": [
+      {
+        "path": "[private-run]/prep/parts/00944-000.patch",
+        "ranges": [
+          [
+            1,
+            1146
+          ]
+        ],
+        "original_path": "crates/farhelm-supervisor/src/service/terminals.rs",
+        "commit": "1ed482dde220452e424973faf38a5e1318986333",
+        "notes": "patch header; patch character offsets [0,58738)",
+        "lines": 1146,
+        "bytes": 58816,
+        "start": 0,
+        "end": 58738,
+        "original": "[private-run]/prep/originals/00944.patch"
+      }
+    ],
+    "lines": 1146,
+    "bytes": 58816
+  },
+  "records": [
+    {
+      "key": "g118/c1",
+      "owner": "g118",
+      "id": "c1",
+      "domain": "supervisor-terminal-streaming",
+      "purpose": "supervisor-terminal-streaming: crates/farhelm-supervisor/src/service/terminals.rs; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 1,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c1",
+            "state": "open",
+            "summary": "Removed terminal wrapper preserves the pinned sweep root and final-state barrier",
+            "location": "crates/farhelm-supervisor/src/hosts/terminal.rs:2571",
+            "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. TLDR: considered whether removing Terminal::live_root and holds_final_state could make Stop target a reused process or classify a failed launch from incomplete output. Details: the assigned deletion at terminals.rs parent lines 185–274 is replaced by HostTerminal::sweep_root at hosts/terminal.rs:2571–2583, retaining the exact pid equality check against the pinned runtime root, and holds_final_state at 2599–2612, retaining the subscription plus Owned/dead barrier. Source refutes a defect in the removed wrappers themselves. Suggested bucket if real: highest for killing an unrelated process; could-be-highest: yes. Confidence: confirmed source equivalence for these adapters; lifecycle callers still to be inspected. proposed_drop: source refutation, both safeguards remain in the host-only implementation. possible_cover: none. No execution performed; this record makes no claim about independent defects inside the host runtime."
+          }
+        },
+        {
+          "line": 4,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c1",
+            "state": "open",
+            "summary": "Removed terminal wrapper preserves the pinned sweep root and final-state barrier",
+            "location": "crates/farhelm-supervisor/src/hosts/terminal.rs:2571",
+            "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. TLDR: considered whether removing Terminal::live_root and holds_final_state could make Stop target a reused process or classify a failed launch from incomplete output. Details: the assigned deletion at terminals.rs parent lines 185–274 is replaced by HostTerminal::sweep_root at hosts/terminal.rs:2571–2583, retaining the exact pid equality check against the pinned runtime root, and holds_final_state at 2599–2612, retaining the subscription plus Owned/dead barrier. Source refutes a defect in the removed wrappers themselves. Follow-up source checks: Stop calls probe then sweep_root and refuses errors at service/handlers.rs:865–909; Restart does the same at service/core.rs:12381–12397; tab cleanup does it at core.rs:14128–14138. Stop waits for holds_final_state and passes final_state && dead into launch classification at handlers.rs:1009–1034. Thus callers retain both safeguards. Suggested bucket if real: highest for killing an unrelated process; could-be-highest: yes. Confidence: confirmed source equivalence and retained caller checks. proposed_drop: source refutation, safeguards remain in the host-only implementation and its lifecycle call sites. possible_cover: none. No execution performed; this record makes no claim about independent defects inside the host runtime."
+          }
+        }
+      ],
+      "latest": {
+        "line": 4,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c1",
+          "state": "open",
+          "summary": "Removed terminal wrapper preserves the pinned sweep root and final-state barrier",
+          "location": "crates/farhelm-supervisor/src/hosts/terminal.rs:2571",
+          "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. TLDR: considered whether removing Terminal::live_root and holds_final_state could make Stop target a reused process or classify a failed launch from incomplete output. Details: the assigned deletion at terminals.rs parent lines 185–274 is replaced by HostTerminal::sweep_root at hosts/terminal.rs:2571–2583, retaining the exact pid equality check against the pinned runtime root, and holds_final_state at 2599–2612, retaining the subscription plus Owned/dead barrier. Source refutes a defect in the removed wrappers themselves. Follow-up source checks: Stop calls probe then sweep_root and refuses errors at service/handlers.rs:865–909; Restart does the same at service/core.rs:12381–12397; tab cleanup does it at core.rs:14128–14138. Stop waits for holds_final_state and passes final_state && dead into launch classification at handlers.rs:1009–1034. Thus callers retain both safeguards. Suggested bucket if real: highest for killing an unrelated process; could-be-highest: yes. Confidence: confirmed source equivalence and retained caller checks. proposed_drop: source refutation, safeguards remain in the host-only implementation and its lifecycle call sites. possible_cover: none. No execution performed; this record makes no claim about independent defects inside the host runtime."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g118/findings.jsonl",
+        "id": "c1",
+        "line": 4,
+        "disposition": "under-investigation",
+        "group": "g118-c1",
+        "reason": "Record durably acknowledged; parent source/contract validation, cross-group synthesis, coverage/filter matching and any independent drop check remain pending. This preserves the claim and uncertainty without accepting, dropping or lowering it."
+      },
+      "accepted_parent_decision": null,
+      "returned_claim_checks": [
+        {
+          "batch": "claims-076",
+          "key": "g118/c1",
+          "latest_line": 4,
+          "recommendation": "refuted",
+          "bucket": "other",
+          "underlying_key": "terminal-wrapper-removal-pinned-sweep-final-state",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "Both removed-wrapper safeguards survive in the host implementation and its lifecycle callers. No reused-process or premature-classification route is established by this removal.",
+          "checks": [
+            "1ed482dd parent:service/terminals.rs:185-237 retains the host pid-equality and final-state watch branches. 1ed482dde220452e424973faf38a5e1318986333:hosts/terminal.rs:2571-2583,2599-2612 preserves those branches in sweep_root and holds_final_state.",
+            "1ed482dd:service/handlers.rs:865-910 probes and captures the pinned sweep root before intent; :1009-1034 requires final_state && dead for inferred launch classification. service/core.rs:12381-12397 and :14128-14138 retain probe/root checks for Restart and tab cleanup."
+          ],
+          "coverage_checked": [
+            "SPEC_impl.md Grid streams and Launch failure classification:2551-2668 requires final exit evidence and attribution; no exception accepts a wrong-process sweep. SPEC.md Terminal experience retains ended screens and scoped ownership.",
+            "TODO Planned empty. Searches of plans/queue, BUGS.md, INDEX.md and active TRIAGE_OUTCOMES.md for sweep-root/final-state wrapper removal reveal no exact covered finding. Adjacent gone-host and stop-wait test items are different causes.",
+            "FILTER's numeric-signal handoff exception is different from deleting root identity checks and is not used."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": "The suspected missing guard is contradicted by the surviving implementation. Independent defects inside process identity or host runtime are outside this named claim.",
+          "original_stronger_consequence": "Stop might kill an unrelated process after pid reuse (highest), or durable launch classification might use incomplete final output. Neither route follows from the wrapper removal.",
+          "needs_independent_drop_check": true,
+          "proposed_basis": "Source-equivalent host safeguards and retained lifecycle call-site checks; independent highest-impact drop check still required."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": true,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "terminal-wrapper-removal-pinned-sweep-final-state",
+        "destination": null
+      }
+    },
+    {
+      "key": "g118/f1",
+      "owner": "g118",
+      "id": "f1",
+      "domain": "supervisor-terminal-streaming",
+      "purpose": "supervisor-terminal-streaming: crates/farhelm-supervisor/src/service/terminals.rs; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 2,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "f1",
+            "state": "open",
+            "summary": "Old tmux terminals lose access and work under the explicit migration policy",
+            "location": "crates/farhelm-supervisor/src/service/terminals.rs:242",
+            "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. TLDR: an update removes access to old terminals and their retained screens, and ends the programs still running there. Details: the assigned patch deletes the tmux terminal variant, discovery and resolution, including the former resolve_terminal_inner tmux branch (parent terminals.rs:973–1004); the replacement at terminals.rs:242–247 resolves host tabs only and agent_terminal:263–274 serves host handles only. This is intentional specification acceptance, not a proposed fix. Suggested bucket: highest if treated as a defect, because processes and retained terminal work are lost; could-be-highest: yes. Confidence: confirmed from the patch and pinned specification; startup implementation still to be checked for the migration premise. proposed_drop: explicit acceptance in SPEC.md, Terminal experience, lines 3006–3016: \"This release ends them: the first time a host's supervisor of this release starts, it ends that tmux server, and with it everything that still ran in an old terminal, without needing a tmux program.\" The same paragraph says \"one whose agent had already ended keeps its outcome, but its terminal's last screen, which lived in the server, is gone; old tabs are closed.\" SPEC_impl.md, Terminal substrate: private tmux server, lines 2882–2888 also explicitly says the old terminals are ended and the driver is gone. possible_cover: those exact pinned specification sections. Caveat: this record covers the authorized migration loss itself, not unintended destruction of host terminals or unsafe cleanup; those require separate source checks. No runtime execution or observed behavior."
+          }
+        },
+        {
+          "line": 5,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "f1",
+            "state": "open",
+            "summary": "Old tmux terminals lose access and work under the explicit migration policy",
+            "location": "crates/farhelm-supervisor/src/service/terminals.rs:242",
+            "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. TLDR: an update removes access to old terminals and their retained screens, and ends the programs still running there. Details: the assigned patch deletes the tmux terminal variant, discovery and resolution, including the former resolve_terminal_inner tmux branch (parent terminals.rs:973–1004); the replacement at terminals.rs:242–247 resolves host tabs only and agent_terminal:263–274 serves host handles only. Startup does enact that policy: service/core.rs:6142–6151 calls OldTerminals::end_private_server before reload when holding the state-directory claim. core/old_terminals.rs:176–231 connects to the old socket, identifies the same-user peer and invokes verified termination; :247–251 removes server files after confirmed termination. This is intentional specification acceptance, not a proposed fix. Suggested bucket: highest if treated as a defect, because processes and retained terminal work are lost; could-be-highest: yes. Confidence: confirmed from source and the pinned specification. proposed_drop: explicit acceptance in SPEC.md, Terminal experience, lines 3006–3016: \"This release ends them: the first time a host's supervisor of this release starts, it ends that tmux server, and with it everything that still ran in an old terminal, without needing a tmux program.\" The same paragraph says \"one whose agent had already ended keeps its outcome, but its terminal's last screen, which lived in the server, is gone; old tabs are closed.\" SPEC_impl.md, Terminal substrate: private tmux server, lines 2882–2888 also explicitly says the old terminals are ended and the driver is gone. possible_cover: those exact pinned specification sections. Caveat: this record covers the authorized migration loss itself, not unintended destruction of host terminals or unsafe cleanup; other groups own the complete startup-cleanup implementation review. No runtime execution or observed behavior. Parent must independently check this highest-impact proposed drop."
+          }
+        },
+        {
+          "line": 6,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "f1",
+            "state": "open",
+            "summary": "Old tmux terminals lose access and work under the explicit migration policy",
+            "location": "crates/farhelm-supervisor/src/service/terminals.rs:242",
+            "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. TLDR: an update removes access to old terminals and their retained screens, and ends the programs still running there. Details: the assigned patch deletes the tmux terminal variant, discovery and resolution, including the former resolve_terminal_inner tmux branch (parent terminals.rs:973–1004); the replacement at terminals.rs:242–247 resolves host tabs only and agent_terminal:263–274 serves host handles only. Startup enacts that policy: service/core.rs:6142–6151 calls OldTerminals::end_private_server before reload when holding the state-directory claim. core/old_terminals.rs:176–231 connects to the old socket, identifies the same-user peer and invokes verified termination; :247–251 removes server files after confirmed termination. Suggested bucket: highest if treated as a defect, because processes and retained terminal work are lost; could-be-highest: yes. Confidence: confirmed source and pinned specification. proposed_drop: explicit acceptance in SPEC.md, Terminal experience, lines 3006–3016: \"This release ends them: the first time a host's supervisor of this release starts, it ends that tmux server, and with it everything that still ran in an old terminal, without needing a tmux program.\" The same paragraph says \"one whose agent had already ended keeps its outcome, but its terminal's last screen, which lived in the server, is gone; old tabs are closed.\" SPEC_impl.md, Terminal substrate: private tmux server, lines 2882–2888 also explicitly says the old terminals are ended and the driver is gone. possible_cover: those exact pinned specification sections; parent reports likely duplicate retirement/history-loss records in g099/g110/g113/g053, which this reviewer has not read or independently matched. This remains a proposed drop only: no parent drop has been accepted and no event is withdrawn or lowered. Coverage-repair turn redelivered and re-read all 1,146 mandatory patch lines as direct stdout; source bytes and hash are unchanged, and the conclusion is unchanged. Caveat: this record covers the authorized migration loss itself, not unintended destruction of host terminals or unsafe cleanup; other groups own the complete startup-cleanup implementation review. No runtime execution or observed behavior. Parent must independently check this highest-impact proposed drop."
+          }
+        }
+      ],
+      "latest": {
+        "line": 6,
+        "event": {
+          "version": 1,
+          "kind": "finding",
+          "id": "f1",
+          "state": "open",
+          "summary": "Old tmux terminals lose access and work under the explicit migration policy",
+          "location": "crates/farhelm-supervisor/src/service/terminals.rs:242",
+          "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. TLDR: an update removes access to old terminals and their retained screens, and ends the programs still running there. Details: the assigned patch deletes the tmux terminal variant, discovery and resolution, including the former resolve_terminal_inner tmux branch (parent terminals.rs:973–1004); the replacement at terminals.rs:242–247 resolves host tabs only and agent_terminal:263–274 serves host handles only. Startup enacts that policy: service/core.rs:6142–6151 calls OldTerminals::end_private_server before reload when holding the state-directory claim. core/old_terminals.rs:176–231 connects to the old socket, identifies the same-user peer and invokes verified termination; :247–251 removes server files after confirmed termination. Suggested bucket: highest if treated as a defect, because processes and retained terminal work are lost; could-be-highest: yes. Confidence: confirmed source and pinned specification. proposed_drop: explicit acceptance in SPEC.md, Terminal experience, lines 3006–3016: \"This release ends them: the first time a host's supervisor of this release starts, it ends that tmux server, and with it everything that still ran in an old terminal, without needing a tmux program.\" The same paragraph says \"one whose agent had already ended keeps its outcome, but its terminal's last screen, which lived in the server, is gone; old tabs are closed.\" SPEC_impl.md, Terminal substrate: private tmux server, lines 2882–2888 also explicitly says the old terminals are ended and the driver is gone. possible_cover: those exact pinned specification sections; parent reports likely duplicate retirement/history-loss records in g099/g110/g113/g053, which this reviewer has not read or independently matched. This remains a proposed drop only: no parent drop has been accepted and no event is withdrawn or lowered. Coverage-repair turn redelivered and re-read all 1,146 mandatory patch lines as direct stdout; source bytes and hash are unchanged, and the conclusion is unchanged. Caveat: this record covers the authorized migration loss itself, not unintended destruction of host terminals or unsafe cleanup; other groups own the complete startup-cleanup implementation review. No runtime execution or observed behavior. Parent must independently check this highest-impact proposed drop."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g118/findings.jsonl",
+        "id": "f1",
+        "line": 6,
+        "disposition": "under-investigation",
+        "group": "g118-f1",
+        "reason": "Record durably acknowledged; parent source/contract validation, cross-group synthesis, coverage/filter matching and any independent drop check remain pending. This preserves the claim and uncertainty without accepting, dropping or lowering it."
+      },
+      "accepted_parent_decision": null,
+      "returned_claim_checks": [
+        {
+          "batch": "claims-076",
+          "key": "g118/f1",
+          "latest_line": 6,
+          "recommendation": "covered",
+          "bucket": "highest",
+          "underlying_key": "intentional-old-tmux-terminal-retirement",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The source does enact the loss of old terminals, their screens and running programs. The current product and implementation specifications explicitly accept exactly that migration. This does not cover unintended host-terminal destruction or unsafe startup cleanup.",
+          "checks": [
+            "1ed482dde220452e424973faf38a5e1318986333:service/terminals.rs:231-247,263-274 resolves only host terminals; old-kind missing-terminal wording at :204-206 names deliberate retirement.",
+            "1ed482dd:service/core.rs:6142-6151 calls OldTerminals::end_private_server before reload only for a state-directory owner. service/core/old_terminals.rs:176-231 identifies same-user peer and invokes verified termination; :247-251 removes server files after confirmed termination. Source-only, no observed shutdown."
+          ],
+          "coverage_checked": [
+            "Exact current cover: SPEC.md Terminal experience:2998-3010 and SPEC_impl.md Ending the old private tmux server:2780-2823. They match trigger, loss and scope.",
+            "TODO Planned empty; phase-3 removal at TODO.md:225-232 is outside Planned and is not the basis. plans/queue/tmux-end-old-terminals.md states the same retirement, while the docs follow-up preserves its startup shutdown; no additional plan cover is needed.",
+            "BUGS.md, INDEX.md and active TRIAGE_OUTCOMES searches show no exact queued/ledger item for intentional retirement. Other reviewers' mentioned possible aliases were not supplied and are not asserted here. FILTER is unnecessary; no filter is applied."
+          ],
+          "exact_cover_quotes": [
+            "SPEC.md:3000-3004: 'A supervisor that finds that tmux server when it starts ends it, and with it everything that still ran in an old terminal, without needing a tmux program.'",
+            "SPEC.md:3003-3005: 'one whose agent had already ended keeps its outcome, but its terminal's last screen, which lived in the server, is gone; old tabs are closed.'",
+            "SPEC.md:3008-3010: 'A session whose agent or tabs already run in terminal hosts keeps them.'"
+          ],
+          "missing_premise": "None for intentional migration behavior and exact specification cover. Safety of every startup-cleanup operation is not part of this acceptance.",
+          "original_stronger_consequence": "Update ends programs still running in old terminals and discards old terminal screens/tabs: loss of processes and retained terminal work, highest if treated as a defect. No withdrawal or lowering has occurred.",
+          "needs_independent_drop_check": true,
+          "proposed_basis": "Explicit specification acceptance of this exact old-terminal migration; independent highest-impact coverage check must agree before dropping."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": true,
+        "clearly_refuted_candidate": false,
+        "needs_unfinished_gate": true,
+        "provisional_bucket": "highest",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "intentional-old-tmux-terminal-retirement",
+        "destination": "trailing-intentional-old-tmux-terminal-retirement.md"
+      }
+    },
+    {
+      "key": "g118/c2",
+      "owner": "g118",
+      "id": "c2",
+      "domain": "supervisor-terminal-streaming",
+      "purpose": "supervisor-terminal-streaming: crates/farhelm-supervisor/src/service/terminals.rs; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 3,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c2",
+            "state": "open",
+            "summary": "Removing tmux sinks does not remove host-stream viewer isolation",
+            "location": "crates/farhelm-supervisor/src/service/terminals.rs:406",
+            "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. TLDR: considered whether deleting the per-session sink lifecycle could let a stalled viewer freeze an agent or another session. Details: assigned patch lines 1071–1146 begin removal of the tmux sink constants and shutdown machinery. The replacement attachment path at service/handlers.rs:1914–1945 starts a GridStream over the already-driven HostTerminal. GridStream::catch_up at service/grid_stream.rs:427–460 and 475–484 takes owned snapshots through read_home, and read_home:524–560 finishes the emulator read before returning or waiting on status. GridStream::send:818–831 waits only on the viewer writer queue and its own pause/stall path; it neither suspends the terminal-host connection nor holds the emulator read across that wait. Thus the tmux sink's purpose has no remaining tmux output client to protect. SPEC.md Terminal experience:3031–3038 requires that no new-terminal viewer slow its agent; SPEC_impl.md Grid streams:3106–3122 describes the independent viewer pause. Suggested bucket if real: high/material UX, not highest; could-be-highest: no established loss-of-work or security route. Confidence: confirmed source refutation of the deletion concern. proposed_drop: source refutation, independent runtime plus owned grid snapshots preserve the relevant isolation. possible_cover: none. No runtime behavior observed. This does not claim a full independent audit of grid output or host runtime internals."
+          }
+        }
+      ],
+      "latest": {
+        "line": 3,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c2",
+          "state": "open",
+          "summary": "Removing tmux sinks does not remove host-stream viewer isolation",
+          "location": "crates/farhelm-supervisor/src/service/terminals.rs:406",
+          "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. TLDR: considered whether deleting the per-session sink lifecycle could let a stalled viewer freeze an agent or another session. Details: assigned patch lines 1071–1146 begin removal of the tmux sink constants and shutdown machinery. The replacement attachment path at service/handlers.rs:1914–1945 starts a GridStream over the already-driven HostTerminal. GridStream::catch_up at service/grid_stream.rs:427–460 and 475–484 takes owned snapshots through read_home, and read_home:524–560 finishes the emulator read before returning or waiting on status. GridStream::send:818–831 waits only on the viewer writer queue and its own pause/stall path; it neither suspends the terminal-host connection nor holds the emulator read across that wait. Thus the tmux sink's purpose has no remaining tmux output client to protect. SPEC.md Terminal experience:3031–3038 requires that no new-terminal viewer slow its agent; SPEC_impl.md Grid streams:3106–3122 describes the independent viewer pause. Suggested bucket if real: high/material UX, not highest; could-be-highest: no established loss-of-work or security route. Confidence: confirmed source refutation of the deletion concern. proposed_drop: source refutation, independent runtime plus owned grid snapshots preserve the relevant isolation. possible_cover: none. No runtime behavior observed. This does not claim a full independent audit of grid output or host runtime internals."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g118/findings.jsonl",
+        "id": "c2",
+        "line": 3,
+        "disposition": "excluded",
+        "group": "tmux-sink-removal-host-viewer-isolation",
+        "reason": "Parent explicitly accepted named refuted proposal from claims-076 after inspecting it. The host runtime is driven independently and the viewer waits after releasing its emulator read. Removing tmux sinks therefore does not establish stalled-viewer backpressure on the agent. Source refutation of the sink-deletion concern by independent runtime ownership and released emulator reads. Checked source/results: [\"1ed482dde220452e424973faf38a5e1318986333:service/handlers.rs:1914-1945 constructs the stream over an already-connected host and performs streaming inside its own task.\",\"1ed482dd:service/grid_stream.rs:524-560 completes host.try_read before returning/waiting, and :818-831 waits on only the viewer queue/pause/failure path. The owned read result is no emulator lock held across the send await.\"] Current coverage/results: [\"SPEC.md:3013-3028 and SPEC_impl.md Grid streams:2551-2589 require and describe independent slow-viewer behavior. They corroborate the source; they do not accept a freeze.\",\"TODO Planned empty; searches of plans/queue, BUGS.md, INDEX.md and active TRIAGE_OUTCOMES.md found no exact product finding about sink removal freezing a host agent. Existing stopped-reader/host-flood items concern test premises, not this defect.\",\"FILTER read; no rare-trigger argument needed or used for this refutation.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"A stalled viewer could freeze its agent or another session (high if real); no security or loss-of-work route was established.\"; \"No surviving dependency from the viewer's queue wait to the runtime reader is established by the deletion. This does not certify every grid/runtime implementation detail.\"."
+      },
+      "accepted_parent_decision": {
+        "key": "g118/c2",
+        "line": 3,
+        "disposition": "excluded",
+        "group": "tmux-sink-removal-host-viewer-isolation",
+        "bucket": "other",
+        "recording": "refuted",
+        "queue_target_candidate": null,
+        "needs_independent_drop_check": false,
+        "reason": "Parent explicitly accepted named refuted proposal from claims-076 after inspecting it. The host runtime is driven independently and the viewer waits after releasing its emulator read. Removing tmux sinks therefore does not establish stalled-viewer backpressure on the agent. Source refutation of the sink-deletion concern by independent runtime ownership and released emulator reads. Checked source/results: [\"1ed482dde220452e424973faf38a5e1318986333:service/handlers.rs:1914-1945 constructs the stream over an already-connected host and performs streaming inside its own task.\",\"1ed482dd:service/grid_stream.rs:524-560 completes host.try_read before returning/waiting, and :818-831 waits on only the viewer queue/pause/failure path. The owned read result is no emulator lock held across the send await.\"] Current coverage/results: [\"SPEC.md:3013-3028 and SPEC_impl.md Grid streams:2551-2589 require and describe independent slow-viewer behavior. They corroborate the source; they do not accept a freeze.\",\"TODO Planned empty; searches of plans/queue, BUGS.md, INDEX.md and active TRIAGE_OUTCOMES.md found no exact product finding about sink removal freezing a host agent. Existing stopped-reader/host-flood items concern test premises, not this defect.\",\"FILTER read; no rare-trigger argument needed or used for this refutation.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"A stalled viewer could freeze its agent or another session (high if real); no security or loss-of-work route was established.\"; \"No surviving dependency from the viewer's queue wait to the runtime reader is established by the deletion. This does not certify every grid/runtime implementation detail.\"."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-076",
+          "key": "g118/c2",
+          "latest_line": 3,
+          "recommendation": "refuted",
+          "bucket": "other",
+          "underlying_key": "tmux-sink-removal-host-viewer-isolation",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The host runtime is driven independently and the viewer waits after releasing its emulator read. Removing tmux sinks therefore does not establish stalled-viewer backpressure on the agent.",
+          "checks": [
+            "1ed482dde220452e424973faf38a5e1318986333:service/handlers.rs:1914-1945 constructs the stream over an already-connected host and performs streaming inside its own task.",
+            "1ed482dd:service/grid_stream.rs:524-560 completes host.try_read before returning/waiting, and :818-831 waits on only the viewer queue/pause/failure path. The owned read result is no emulator lock held across the send await."
+          ],
+          "coverage_checked": [
+            "SPEC.md:3013-3028 and SPEC_impl.md Grid streams:2551-2589 require and describe independent slow-viewer behavior. They corroborate the source; they do not accept a freeze.",
+            "TODO Planned empty; searches of plans/queue, BUGS.md, INDEX.md and active TRIAGE_OUTCOMES.md found no exact product finding about sink removal freezing a host agent. Existing stopped-reader/host-flood items concern test premises, not this defect.",
+            "FILTER read; no rare-trigger argument needed or used for this refutation."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": "No surviving dependency from the viewer's queue wait to the runtime reader is established by the deletion. This does not certify every grid/runtime implementation detail.",
+          "original_stronger_consequence": "A stalled viewer could freeze its agent or another session (high if real); no security or loss-of-work route was established.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Source refutation of the sink-deletion concern by independent runtime ownership and released emulator reads."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "tmux-sink-removal-host-viewer-isolation",
+        "destination": null
+      }
+    },
+    {
+      "key": "g118/c3",
+      "owner": "g118",
+      "id": "c3",
+      "domain": "supervisor-terminal-streaming",
+      "purpose": "supervisor-terminal-streaming: crates/farhelm-supervisor/src/service/terminals.rs; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 7,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c3",
+            "state": "open",
+            "summary": "Host-only resolution retains exact selector and exited-tab boundaries",
+            "location": "crates/farhelm-supervisor/src/service/terminals.rs:231",
+            "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. TLDR: considered whether deleting tmux discovery and splitting agent lookup from tab lookup could redirect a stale tab selector into the agent, bypass retired-session refusal, or expose a finished tab as live. Source refutes those resolver routes: service/terminals.rs:231 preserves require_active_launch before either branch; :232–247 sends only Agent to agent_terminal, looks up Tab exclusively by that session cell and exact id, returns NotFound on absence and rejects finished tabs for LiveOnly. DeadIncluded is used only by resolve_terminal_for_close (:136–141). The parent host-tab branch at terminals.rs:899–912 has the identical active-launch guard, session-cell lookup and finished predicate; this comparison establishes that the surviving host behavior is preserved, not merely that a possible defect predates this commit. The removed tmux fallback is not replaced by an agent fallback. Related caller check: handlers.rs:2060–2083 ignores failed resolution and checks both channel and owning connection under the attachment lock before resizing. Suggested bucket if such misrouting existed: high/material UX, with potential highest only if wrong-target input or cleanup destroyed work; could-be-highest: yes as a considered consequence, but no shipped wrong-target route is established. Confidence: confirmed source refutation of these exact resolver hypotheses, no execution. proposed_drop: source refutation at the cited selector/guard branches; no specification exception or parent drop is assumed. possible_cover: none. Caveat: this is not an independent certification of all host attribution, process cleanup, or stream inputs. Neighbour findings about hidden old-tab Delete consent and gone-host cleanup are distinct and are not refuted by this resolver check."
+          }
+        },
+        {
+          "line": 8,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c3",
+            "state": "open",
+            "summary": "Host-only resolution retains exact selector and exited-tab boundaries",
+            "location": "crates/farhelm-supervisor/src/service/terminals.rs:231",
+            "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. TLDR: considered whether deleting tmux discovery and splitting agent lookup from tab lookup could redirect a stale tab selector into the agent, bypass retired-session refusal, or expose a finished tab as live. Source refutes those resolver routes: service/terminals.rs:231 preserves require_active_launch before either branch; :232–247 sends only Agent to agent_terminal, looks up Tab exclusively by that session cell and exact id, returns NotFound on absence and rejects finished tabs for LiveOnly. DeadIncluded is used only by resolve_terminal_for_close (:136–141). The parent host-tab branch at terminals.rs:899–912 has the identical active-launch guard, session-cell lookup and finished predicate; this comparison establishes that the surviving host behavior is preserved, not merely that a possible defect predates this commit. The removed tmux fallback is not replaced by an agent fallback. Discovery follow-up caller checks: handlers.rs:2060–2083 ignores failed resolution and checks both channel and owning connection under the attachment lock before resizing; the only close-capable call at core.rs:14049–14058 explicitly constructs TerminalId::Tab with the requested id under the existing lifecycle claim. HostTab::finished at core/host_tabs.rs:182–187 treats owned dead and absent as finished, but unattributed as unfinished, so unknown is not silently classified gone; handlers.rs:1572–1587 then refuses an unavailable host as Unavailable. The explicit wire selector contract at farhelm-proto/src/lib.rs:1710–1715 requires NotFound without fallback for a stale tab, which this resolver satisfies. Suggested bucket if such misrouting existed: high/material UX, with potential highest only if wrong-target input or cleanup destroyed work; could-be-highest: yes as a considered consequence, but no shipped wrong-target route is established. Confidence: confirmed source refutation of these exact resolver hypotheses, no execution. proposed_drop: source refutation at the cited selector/guard/caller branches; no specification exception or parent drop is assumed. possible_cover: none. Caveat: this is not an independent certification of all host attribution, process cleanup, stream inputs or adjacent documentation. Neighbour findings about hidden old-tab Delete consent and gone-host cleanup are distinct and are not refuted by this resolver check. No new defect is established by this candidate."
+          }
+        }
+      ],
+      "latest": {
+        "line": 8,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c3",
+          "state": "open",
+          "summary": "Host-only resolution retains exact selector and exited-tab boundaries",
+          "location": "crates/farhelm-supervisor/src/service/terminals.rs:231",
+          "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. TLDR: considered whether deleting tmux discovery and splitting agent lookup from tab lookup could redirect a stale tab selector into the agent, bypass retired-session refusal, or expose a finished tab as live. Source refutes those resolver routes: service/terminals.rs:231 preserves require_active_launch before either branch; :232–247 sends only Agent to agent_terminal, looks up Tab exclusively by that session cell and exact id, returns NotFound on absence and rejects finished tabs for LiveOnly. DeadIncluded is used only by resolve_terminal_for_close (:136–141). The parent host-tab branch at terminals.rs:899–912 has the identical active-launch guard, session-cell lookup and finished predicate; this comparison establishes that the surviving host behavior is preserved, not merely that a possible defect predates this commit. The removed tmux fallback is not replaced by an agent fallback. Discovery follow-up caller checks: handlers.rs:2060–2083 ignores failed resolution and checks both channel and owning connection under the attachment lock before resizing; the only close-capable call at core.rs:14049–14058 explicitly constructs TerminalId::Tab with the requested id under the existing lifecycle claim. HostTab::finished at core/host_tabs.rs:182–187 treats owned dead and absent as finished, but unattributed as unfinished, so unknown is not silently classified gone; handlers.rs:1572–1587 then refuses an unavailable host as Unavailable. The explicit wire selector contract at farhelm-proto/src/lib.rs:1710–1715 requires NotFound without fallback for a stale tab, which this resolver satisfies. Suggested bucket if such misrouting existed: high/material UX, with potential highest only if wrong-target input or cleanup destroyed work; could-be-highest: yes as a considered consequence, but no shipped wrong-target route is established. Confidence: confirmed source refutation of these exact resolver hypotheses, no execution. proposed_drop: source refutation at the cited selector/guard/caller branches; no specification exception or parent drop is assumed. possible_cover: none. Caveat: this is not an independent certification of all host attribution, process cleanup, stream inputs or adjacent documentation. Neighbour findings about hidden old-tab Delete consent and gone-host cleanup are distinct and are not refuted by this resolver check. No new defect is established by this candidate."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g118/findings.jsonl",
+        "id": "c3",
+        "line": 8,
+        "disposition": "under-investigation",
+        "group": "g118-c3",
+        "reason": "Record durably acknowledged; parent source/contract validation, cross-group synthesis, coverage/filter matching and any independent drop check remain pending. This preserves the claim and uncertainty without accepting, dropping or lowering it."
+      },
+      "accepted_parent_decision": null,
+      "returned_claim_checks": [
+        {
+          "batch": "claims-076",
+          "key": "g118/c3",
+          "latest_line": 8,
+          "recommendation": "refuted",
+          "bucket": "other",
+          "underlying_key": "host-only-terminal-selector-boundaries",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "Retirement refusal and exact session-tab lookup survive. An absent or finished tab on an interactive path fails instead of falling back to the agent; resize additionally checks the owning connection/channel.",
+          "checks": [
+            "1ed482dde220452e424973faf38a5e1318986333:service/terminals.rs:130-148 restricts DeadIncluded to close; :225-248 checks require_active_launch first and branches Agent separately from exact tab lookup. No tab-to-agent fallback exists.",
+            "1ed482dd parent:service/terminals.rs:899-912 has the same active-launch and finished-tab predicates. At 1ed482dd service/handlers.rs:2060-2083 ignores failed resolution and resizes only if both channel and owning writer still match under the attachment lock."
+          ],
+          "coverage_checked": [
+            "SPEC.md Terminal experience:2998-3028 and Retired containerized sessions:4892-4900 require relevant refusal/ownership boundaries; SPEC_impl.md Grid streams:2551-2589 and Rootless Podman sessions:8312-8326 do not accept selector fallback.",
+            "TODO Planned empty. Searched plans/queue, BUGS.md, INDEX.md and active TRIAGE_OUTCOMES for stale-tab fallback/retired attach/finished-tab exposure: no exact outstanding cover. Adjacent gone-host cleanup and old-tab consent issues are different routes.",
+            "FILTER has no applicable wrong-target exception; not applied."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": "The hypothesized fallback/bypass is contradicted by the resolver. This result does not certify independent host attribution or cleanup mechanisms.",
+          "original_stronger_consequence": "Wrong-target terminal input or cleanup could destroy work (potential highest); stale-selector misrouting or finished-tab exposure could degrade UX. Neither route is established here.",
+          "needs_independent_drop_check": true,
+          "proposed_basis": "Source refutation of exact selector/retirement hypotheses; independent work-loss drop check required."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": true,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "host-only-terminal-selector-boundaries",
+        "destination": null
+      }
+    }
+  ],
+  "replies": [
+    {
+      "turn": 1,
+      "reply": "Initial pass complete: all 1,146 assigned patch lines reviewed. No unaccepted defect found.\n\nRecorded `f1` as a spec-accepted migration loss requiring independent drop review, plus source-refuted candidates `c1` and `c2`. No unresolved leads.\n\nFindings and progress logs are updated. No runtime execution or checkout changes."
+    },
+    {
+      "turn": 2,
+      "reply": "Coverage repaired: all 1,146 mandatory lines redelivered in six direct-stdout evidence packets.\n\nSynthesis found no new defect or unresolved lead. Revised `f1` with possible duplicate references, preserving its strongest consequence and exact specification acceptance. No drop accepted. Progress log updated; no runtime execution."
+    },
+    {
+      "turn": 3,
+      "reply": "Discovery pass complete. Checked resolver branches, parent comparison, selector contracts, and attach/resize/close callers.\n\n- New verified findings: none.\n- New unverified findings: none.\n- Candidate `c3`: source-refuted selector/failure concern.\n- Open leads: none.\n\nNo new defect found. Findings and progress logs updated; no runtime execution."
+    }
+  ],
+  "progress": "Group: g118, supervisor-terminal-streaming.\nTurn: 3 completed, separate discovery pass. Discovery passes: 1 completed.\nState: read discovery-neighbours.json fully in bounded chunks 1–160, 161–230, 231–300, 301–380, 381–450, 451–520, 521–590, 591–629 before starting the new source search. All existing events are preserved; c3 and its caller-check revision appended. Mandatory delivery and prior synthesis remain complete.\nDiscovery interface synthesis: g117/c3 is the intermediate missing-terminal documentation error corrected by this assigned patch. g008/f2 concerns the separate SPEC_impl architecture pointer, not a new runtime issue here. Neighbours' intentional retirement records overlap f1 without accepting a drop. g007/c4 (hidden old-tab Delete consent), g111/l1 (spare cleanup), g166/c5 (gone host confirmation), and test-oracle findings are distinct and must not be refuted by intentional retirement or general production correctness; they belong to the supplied neighbours' scopes and will not be rediscovered as new local findings. No named pending question was supplied. New search focuses on this patch's host terminal resolution, selector failure behavior, and removed abstraction contracts beyond c1/c2/f1.\nInterface assumptions: source and contracts are pinned to 1ed482dde220452e424973faf38a5e1318986333. The startup implementation owns old-terminal retirement; host runtimes own emulator ingestion and process identity; grid senders own viewer backpressure. Other groups own independent audits of those implementations. No GUI handler is in this assignment.\nAssigned coverage: this turn's six direct-stdout evidence-read packets for 00944-000.patch cover 1–190, 191–390, 391–590, 591–790, 791–980, 981–1146. All 1,146 assigned lines re-read, each packet at most 200 lines and below 24,000 encoded bytes, with SHA-256 67c7a10d705a826ae3f141d86cf393f1b7b7c0ca314376900b206fad58343ac3. No clipping or command rejection. The brief and complete commits field were read; excluded coverage metadata and prohibited queue/coverage files were not read.\nSource context read at the pinned commit: service/terminals.rs 1–440; hosts/terminal.rs 2500–2670; service/core/host_tabs.rs 1–230 (the clipped 167–225 subsection was re-read), 245–300; service/handlers.rs 860–930, 990–1045, 1600–1945; service/core.rs 6130–6170, 12350–12425, 14110–14155; core/old_terminals.rs 125–275; service/grid_stream.rs 414–562, 795–850. Targeted git grep searches located replacement methods and lifecycle callers.\nGoverning contracts read: SPEC.md Terminal experience 2855–3187 in full and Session view 2127–2175 in full. SPEC_impl.md Terminal substrate: private tmux server 2880–2991, Grid streams 3104–3196, and Terminal host 1963–2766 (including Launch failure classification) in full; Answers bind to what was drawn 1071–1096 as context. Root AGENTS.md includes its End sentinel; machine.md, feedback AGENTS.md and recording.md were read in full, and skillette/scode-voice loaded.\nInitial-pass IDs remain f1, c1 and c2; no new IDs this turn. Revised f1 with the caller's likely duplicate groups g099/g110/g113/g053, preserving process and terminal-history loss, highest bucket, exact specification acceptance, and pending independent drop handling. No drop accepted here. Caller reports g098/g101 independently confirm retained pinned-root/final-state barriers, and g120/g121 confirm the replacement sender is in-process rather than an external tmux reader; these corroborate c1/c2 without changing their scope or conclusions.\nSynthesis: removal concerns map to retained host safeguards and the independent grid sender; no unresolved interface premise or new substantive issue remains within this assigned patch. f1 is intentional retirement under an explicit specification rule and remains in the durable log for the parent's independent acceptance/deduplication decision. Rereading did not produce a new defect.\nNew unverified IDs: none. Open leads: none.\nUnread assigned scope: none. No runtime tests, builds or reproductions; conclusions are from source and contract analysis. No checkout files changed.\nDiscovery checks/results: re-read pinned terminals.rs:105–299 against parent :887–1006, tracing the complete new resolver/absence helper rather than only removal headlines. Read handlers.rs:2000–2125 and :1530–1600, core.rs:14005–14095, host_tabs.rs:167–201 and protocol selector contract lib.rs:1674–1725. Enumerated every resolver caller with pinned git grep: only attach, resize and explicit tab-close paths; the close caller always constructs Tab. Examined base-to-reviewed terminals.rs diff hunk/symbol inventory for range attribution without reviewing unrelated deleted implementation for independent defects. LiveOnly/DeadIncluded use, active-launch refusal, missing-id NotFound, per-channel resize ownership, and unavailable-versus-absent behavior retain their source contracts. These checks establish c3's source refutation, not a test-oracle or adjacent-documentation verdict.\nDiscovery result: no new verified defect and no new unverified-after-investigation finding. New candidate ID c3 records and closes the examined selector/failure hypotheses by source refutation; no open lead IDs. Nothing new was found beyond this considered-and-refuted candidate. Existing f1 consequences and proposed-drop basis are unchanged, and no parent drop/lowering is accepted. All assigned mandatory scope remains read; no omitted scope in this pass. No runtime tests, reproductions or live-install actions.\nNext action: await caller follow-up and independent disposition. Parent owns coverage acceptance, novelty consolidation and proposed-drop checks.\n"
+}

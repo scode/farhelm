@@ -1,0 +1,115 @@
+[
+  {
+    "key": "g013/f1",
+    "latest_line": 7,
+    "recommendation": "covered",
+    "bucket": "other",
+    "underlying_key": "old-terminal-startup-failure-versus-restart-reap",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The literal acceptance exactly covers failed startup cleanup followed by possible duplicate agents. The stronger claim that an ordinary startup failure alone makes Restart launch beside the survivor is not established: Restart performs fresh cleanup and refuses unconfirmed cleanup. Proposed coverage and lowering only; the original possible loss of user work requires an independent drop check before any parent disposition.",
+    "checks": [
+      "Read every supplied history event, including the original highest finding, the intervening leads and line 7's superseding confidence/bucket proposal. None reports a reproduction.",
+      "At f96dd4363d97dc7e07dea5b8947c96be6bf912e8, SPEC.md:2998-3010 and SPEC_impl.md:2780-2824 explicitly permit startup to continue after failure and explicitly accept a second agent beside a survivor.",
+      "At f96dd436, service/core/old_terminals.rs:67-84,176-278 logs identification, connection, signal and deadline failures without making startup fatal. This establishes failure-tolerant startup, not a complete later duplicate-agent route.",
+      "At f96dd436, crates/farhelm-supervisor/src/service/core.rs:6808-6820 preserves the converted row's generation and launch_scoped; :7042-7047 runs startup sweeping; :7144-7145 derives the prior scope; :7251-7260 retains that scope in the entry.",
+      "At f96dd436, core.rs:12341-12347 has no live PID for a terminal-less converted row, but :12418-12443 still awaits reap_process_tree with the prior recorded scope, AgentOnly and ScopeKillFailure::Refuse before relaunch. Errors propagate. The live-terminal branch at :12391-12415 also refuses unconfirmed cleanup.",
+      "At f96dd436, service/sweep.rs:251-259 claims both agent-marked and legacy session-only processes; :1463-1512 retains fallback sweeping for missing or failed scope evidence; :1527-1550 refuses recorded scope errors even after a successful portable sweep, and propagates sweep errors.",
+      "At f96dd436, SPEC.md:2078-2129 distinguishes accepted deliberate scope escape, unscoped hidden/scrubbed environments, and coincident rare faults from ordinary unconfirmed cleanup. Those accepted limits do not establish an ordinary supported old foreground agent bypassing the fresh successful cleanup. No new bypass search or runtime experiment was performed."
+    ],
+    "coverage_checked": [
+      "Current SPEC.md:2998-3010 and SPEC_impl.md:2780-2824 retain the exact startup-failure/possible-second-agent acceptance; this is sufficient proposed cover for that narrowly stated concern.",
+      "TODO.md Planned bucket at :25-26 is empty. The phase-3 removal entry at :225-232 is Mid term, not Planned, and is not alternate coverage.",
+      "Searched plans/queue for old-terminal, duplicate-agent, cleanup and second-agent wording. tmux-end-old-terminals.md:73-105 repeats the exact acceptance, but plans/REPORTS.md:29 records that plan landed; the three follow-on tmux plans also landed (:30-32). Their obsolete presence in queue is not unlanded-plan coverage. No other matching unlanded plan found.",
+      "Searched and read BUGS.md: its sole local-SSH-helper transfer hang is unrelated.",
+      "Searched current INDEX.md and matching queue text for second agents, old terminals, launch cleanup, retained history and environment. Read restart-unwind-omits-tree-sweep-failure.md in full: it concerns inaccurate failed-replacement unwind documentation, not startup conversion or a successful Restart bypass. No exact existing queue alias found.",
+      "Searched active TRIAGE_OUTCOMES.md for second/duplicate agents, old terminals, Restart/excerpt and retained-environment claims; no matching active decision. Archive not read.",
+      "Read FILTER.md in full. The upgrade-plus-rare-condition filter might apply to a fully demonstrated surviving-agent route, but this record lacks that route; no filter needed or proposed. Rarity alone is not the basis."
+    ],
+    "exact_cover_quotes": [
+      {
+        "source": "SPEC.md:3008-3010, current recording tree and f96dd436",
+        "quote": "A failure to end the server or to stop what ran there is logged and never stops the supervisor from starting; those sessions are treated as ended all the same, accepting that a Restart could then start a second agent beside one still running."
+      },
+      {
+        "source": "SPEC_impl.md:2819-2821, current recording tree and f96dd436",
+        "quote": "A failure anywhere is logged and never fatal (the maintainer chose to start anyway and treat old sessions as ended, accepting that a Restart could then start a second agent beside one still running)"
+      }
+    ],
+    "missing_premise": "A supported old agent remains alive after conversion and evades the subsequent successful AgentOnly scope/marker cleanup without relying on an explicitly accepted escape or combined-fault exception. Ordinary startup cleanup failure alone is insufficient. The source guard is established; no complete supported old-launch bypass was supplied or reproduced.",
+    "original_stronger_consequence": "Original lines 1/4 claimed an update could mark an old terminal ended despite failed termination and Restart could then start a second agent in the same folder; concurrent agents could damage user work. Original suggested bucket highest and claimed runtime confidence were superseded at line 7, not silently erased. Actual file damage always depended on the agents' activity. The latest established consequence is the literal specification wording; the runtime duplicate-agent route remains unverified after investigation.",
+    "needs_independent_drop_check": true,
+    "proposed_basis": "Exact specification acceptance for the literal concern, plus a source-supported narrowing: ordinary startup failure is insufficient because fresh Restart cleanup is mandatory and errors refuse relaunch. Do not treat this consultation as approval of coverage, lowering or withdrawal; send the preserved original user-work consequence and these exact sources to the independent drop checker."
+  },
+  {
+    "key": "g013/f2",
+    "latest_line": 16,
+    "recommendation": "retain-verified",
+    "bucket": "other",
+    "underlying_key": "launch-excerpt-inherited-history-provenance",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "Retain the newly authored implementation-spec false proof as an in-range documentation defect. A blank initial visible screen does not prove later visible rows belong to this launch: terminal growth can expose inherited history before a shell-start failure is classified. The conditional runtime route and the SPEC.md promise predate the exclusive base, so they are provenance, not a newly introduced runtime regression. The latest history points to g009/l1 as the possible owning record, but that record is outside this batch and was not independently checked as an alias.",
+    "checks": [
+      "Read all nine supplied history events. Initial line 2 proposed source refutation from blank-screen seeding; lines 8-11 withdrew that argument after tracing resize, publication and excerpt selection. Lines 13-16 then corrected range attribution while preserving the conditional diagnostic consequence. No reproduction was reported or performed.",
+      "At f96dd4363d97dc7e07dea5b8947c96be6bf912e8, crates/farhelm-terminal-emulator/src/snapshot/v1/paint.rs:401-437 paints old primary history above blank visible rows. vendor/alacritty_terminal/src/grid/resize.rs:25-28,41-72 grows the visible grid by pulling retained history into it. emulator.rs:224-226 delegates resize to that terminal; :265-275 exposes the resulting visible screen.",
+      "At f96dd436, crates/farhelm-supervisor/src/service/core/host_launch.rs:508-518 supplies the inherited snapshot; :579-625 waits for host start/adoption, and :639-645 tracks the still-pending spec and returns the host. core/host_restart.rs:294-305 confirms the host and :363-388 publishes it/replies without requiring launch-spec consumption.",
+      "At f96dd436, service/handlers.rs:1881-1887 resizes on attach and :2042-2054 accepts an owner's resize without a launch-readiness condition. hosts/terminal.rs:2341-2353 accepts valid sizes while its runtime exists; :3854-3866 applies a resize record; :4040-4050 resizes the emulator. Thus an ordinary height increase during login-shell startup can expose inherited rows.",
+      "At f96dd436, service/status.rs:620-632 appends the excerpt for the unconsumed-spec/no-sentinel failure shape. service/launch_artifacts.rs:59-75 reads the final visible screen without row provenance; :96-102 excludes blank rows and selects the last five nonblank rows, so blank rows below promoted history do not exclude it.",
+      "Exclusive base 6e423e30068b62c6cfa276c6d720ee35bb70387a already has paint_history at snapshot/v1/paint.rs:401-437, history promotion at vendor/alacritty_terminal/src/grid/resize.rs:41-72, attach/viewer resizing at service/handlers.rs:1912-1918,2220-2235 routed to hosts by service/terminals.rs:271-283, and host-screen quoting at service/launch_artifacts.rs:80-94. Its :52-64 already contains the same false blank-screen rationale. Base SPEC.md:2852-2857 already promises safe attribution and excludes new terminals from its old-tmux contamination exception. Therefore f96dd436's deletion of that old-tmux-only exception did not newly introduce this host route or host promise.",
+      "git diff 1ed482dde220452e424973faf38a5e1318986333^..1ed482dde220452e424973faf38a5e1318986333 -- SPEC_impl.md shows the newly added host-specific paragraph claiming a blank screen means no quote reaches the previous run; the replaced excerpt paragraph instead concerns tmux fences. At f96dd436 and current SPEC_impl.md:2657-2667, the newly added false explanation persists. This is an in-range authoritative-documentation defect despite pre-existing runtime behavior."
+    ],
+    "coverage_checked": [
+      "Current SPEC.md:2887-2897 promises safe attribution, and SPEC_impl.md:2657-2667 supplies the false proof. Neither explicitly accepts host inherited-history contamination. The removed historical exception was for old tmux terminals only.",
+      "TODO.md Planned bucket at :25-26 is empty; no planned entry for excerpt provenance or this documentation proof.",
+      "Searched plans/queue for excerpt, prior/previous run, blank screen, attribution and Restart history. tmux-end-old-terminals.md moves shared excerpt helpers unchanged; tmux-drop-from-docs.md is a general documentation sweep, not a stated fix of this source contradiction. Both are already landed per plans/REPORTS.md:29,32. No matching unlanded plan found.",
+      "Searched/read BUGS.md; the unrelated SSH transfer hang does not cover this trigger, consequence or scope.",
+      "Searched INDEX.md and queue text for launch excerpts, blank-screen proof, previous-run quoting and history promotion. Read restart-unwind-omits-tree-sweep-failure.md: its false proof concerns replacement cleanup, not excerpt provenance. host-restart-history-painter-omits-palette.md's index description concerns palette preservation, not provenance; no exact queued alias or useful extension of a currently indexed item was identified.",
+      "Searched active TRIAGE_OUTCOMES.md for excerpt/attribution, old/prior/previous terminal output and blank-screen wording; no matching active outcome. Archive not read.",
+      "FILTER.md's rare-diagnostic and partial-failure session-history filters do not cover the whole retained claim: an authoritative specification asserts an invalid general provenance proof. The pre-existing runtime diagnostic route is separately out of range; no filter is used to erase the newly authored false proof."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": "No missing source premise for the documentation contradiction. Runtime manifestation remains conditional on retained history, a height increase after publication but before classification, and a login shell exiting before consuming the launch spec without overwriting all promoted rows. No actual occurrence, frequency or stronger security/user-work consequence was established. Parent should reconcile the supplied g009/l1 pointer before deciding which record carries the documentation finding.",
+    "original_stronger_consequence": "The considered diagnostic consequence was always other: a failed Restart can durably quote unrelated previous-run output as this failed launch's last output. The first candidate called that route refuted by visible-screen-only reads and blank seeding; later events explicitly withdrew the refutation. The initial attribution to f96dd436's SPEC.md caveat deletion was later withdrawn after exclusive-base comparison. The conditional route itself remains supported, but predates the range; the distinct false implementation-spec proof was newly authored at 1ed482. No established loss of user work or security route was ever claimed.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Record or reconcile one other-bucket in-range documentation finding for SPEC_impl.md's invalid blank-screen provenance argument, retaining the pre-existing conditional route as its concrete counterexample. Do not record a new runtime regression against f96dd436; do not reinstate the superseded blank-screen refutation. Underlying key permits reconciliation with the other batch owning g009/l1 without claiming an unchecked alias."
+  },
+  {
+    "key": "g013/f3",
+    "latest_line": 12,
+    "recommendation": "covered",
+    "bucket": "other",
+    "underlying_key": "terminal-environment-is-fixed-at-child-launch",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The contract explicitly preserves an already-running child's old environment until Restart. The patch's current launch defaults do not require rewriting existing processes. No security, user-work loss or application failure was asserted. An actual fresh launch retaining the obsolete placeholder would be a separate issue, not established here.",
+    "checks": [
+      "Read both supplied history events. Line 12 corrects source coordinates and corroborates the original explicit-acceptance basis; it neither withdraws a stronger harmful consequence nor reports runtime observation.",
+      "At f96dd4363d97dc7e07dea5b8947c96be6bf912e8, SPEC_impl.md:2187-2200 specifies current terminal variables and explicitly says a host started under the old environment retains it until the agent restarts. SPEC.md:3496-3498 states launch-time environment evaluation rather than updates to running sessions.",
+      "At f96dd436, crates/farhelm-supervisor/src/service/core/host_launch.rs:108-115 strips TMUX/TMUX_PANE through NOT_INHERITED; :135-159 removes those inherited entries and replaces all four terminal variables. :490-518 invokes this for the new child's ChildSpec. These are launch-time defaults, consistent with the historical exception.",
+      "Current SPEC_impl.md:2187-2200 and SPEC.md:3496-3498 retain those same contracts. Current SPEC.md:3956-3958 also explicitly says existing agents and tabs keep their environments in the BROWSER convenience context, consistent supporting context rather than the primary cover."
+    ],
+    "coverage_checked": [
+      "SPEC_impl.md:2197-2199 exactly accepts the old TERM_PROGRAM/tmux placeholder environment remaining until agent Restart. SPEC.md:3496-3498 supplies the general lifetime rule.",
+      "TODO.md Planned bucket at :25-26 is empty; no Planned work needed for this accepted behavior.",
+      "Searched plans/queue for TERM_PROGRAM, TMUX_PANE, retained environments and old hosts. tmux-drop-from-docs.md:60-67 explicitly preserves documentation about old host-child environments; it already landed per plans/REPORTS.md:32 and is not unlanded-plan coverage. No other matching unlanded plan found.",
+      "Searched/read BUGS.md; its SSH transfer hang is unrelated.",
+      "Searched INDEX.md, matching queue text and active TRIAGE_OUTCOMES.md. Read review_feedback_queue/version-agreement-lifetime-doc.md in full: it explicitly agrees existing children retain their environment and instead concerns the separate mismatch between fixed launch-version environment and current-emulator query replies after adoption. It is not an alias, a fresh-launch placeholder defect, or a reason to change running children. No exact queue/active-ledger coverage beyond the specification is needed or found. Archive not read.",
+      "Read FILTER.md; no filter needed. Preserved old environment alone is normal accepted lifetime behavior and has no second rare trigger."
+    ],
+    "exact_cover_quotes": [
+      {
+        "source": "SPEC_impl.md:2197-2199, current recording tree and f96dd436",
+        "quote": "until 2026-11 the child got `TERM_PROGRAM=tmux`, the private server's version and a placeholder `TMUX` that held such an autostart back, and a host started then keeps that environment until its agent is restarted."
+      },
+      {
+        "source": "SPEC.md:3496-3498, current recording tree and f96dd436",
+        "quote": "The environment is evaluated at each launch: edit your rc files and the next launch or restart sees the change; already-running sessions do not."
+      }
+    ],
+    "missing_premise": null,
+    "original_stronger_consequence": "Only a documentation/upgrade interpretation was considered: running agents might retain TERM_PROGRAM=tmux and the historical placeholder after the current-launch wording changes. Suggested bucket remained other throughout. No security, lost user work or application failure was established; a new launch still setting the obsolete placeholder was expressly excluded as a different issue.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Exact explicit specification acceptance and matching launch-only environment construction. This does not dismiss or narrow the separate existing version-agreement-lifetime-doc.md finding."
+  }
+]

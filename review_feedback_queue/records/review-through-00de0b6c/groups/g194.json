@@ -1,0 +1,455 @@
+{
+  "group": {
+    "id": "g194",
+    "domain": "retired-xterm-vendor",
+    "purpose": "retired-xterm-vendor: crates/farhelm-ui/assets/vendor/xterm.js; phases webpack module 7093: Property 7093 | webpack module 7093 method dispose: MethodDefinition dispose | webpack module 5394: Property 5394 | webpack module 8234: Property 8234",
+    "interfaces": [
+      "g009",
+      "g010",
+      "g011",
+      "g061",
+      "g062",
+      "g063",
+      "g079",
+      "g080",
+      "g081",
+      "g082",
+      "g083",
+      "g084",
+      "g135",
+      "g136",
+      "g186",
+      "g187",
+      "g188",
+      "g189",
+      "g190",
+      "g191",
+      "g192",
+      "g193",
+      "g195",
+      "g196",
+      "g197"
+    ],
+    "sources": [
+      {
+        "path": "[private-run]/prep/parts/01085-018.patch",
+        "ranges": [
+          [
+            1,
+            1
+          ]
+        ],
+        "original_path": "crates/farhelm-ui/assets/vendor/xterm.js",
+        "commit": "f560058da19e02716e6f943883a9508b447aff4e",
+        "notes": "webpack module 7093: Property 7093; patch character offsets [289298,308987)",
+        "lines": 1,
+        "bytes": 19689,
+        "start": 289298,
+        "end": 308987,
+        "original": "[private-run]/prep/originals/01085.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/01085-019.patch",
+        "ranges": [
+          [
+            1,
+            1
+          ]
+        ],
+        "original_path": "crates/farhelm-ui/assets/vendor/xterm.js",
+        "commit": "f560058da19e02716e6f943883a9508b447aff4e",
+        "notes": "webpack module 7093 method dispose: MethodDefinition dispose; patch character offsets [308987,326202)",
+        "lines": 1,
+        "bytes": 17215,
+        "start": 308987,
+        "end": 326202,
+        "original": "[private-run]/prep/originals/01085.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/01085-020.patch",
+        "ranges": [
+          [
+            1,
+            1
+          ]
+        ],
+        "original_path": "crates/farhelm-ui/assets/vendor/xterm.js",
+        "commit": "f560058da19e02716e6f943883a9508b447aff4e",
+        "notes": "webpack module 5394: Property 5394; patch character offsets [326202,339268)",
+        "lines": 1,
+        "bytes": 13066,
+        "start": 326202,
+        "end": 339268,
+        "original": "[private-run]/prep/originals/01085.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/01085-022.patch",
+        "ranges": [
+          [
+            1,
+            1
+          ]
+        ],
+        "original_path": "crates/farhelm-ui/assets/vendor/xterm.js",
+        "commit": "f560058da19e02716e6f943883a9508b447aff4e",
+        "notes": "webpack module 8234: Property 8234; patch character offsets [346711,359780)",
+        "lines": 1,
+        "bytes": 13069,
+        "start": 346711,
+        "end": 359780,
+        "original": "[private-run]/prep/originals/01085.patch"
+      }
+    ],
+    "lines": 4,
+    "bytes": 63039
+  },
+  "records": [
+    {
+      "key": "g194/c1",
+      "owner": "g194",
+      "id": "c1",
+      "domain": "retired-xterm-vendor",
+      "purpose": "retired-xterm-vendor: crates/farhelm-ui/assets/vendor/xterm.js; phases webpack module 7093: Property 7093 | webpack module 7093 method dispose: MethodDefinition dispose | webpack module 5394: Property 5394 | webpack module 8234: Property 8234",
+      "history": [
+        {
+          "line": 1,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c1",
+            "state": "open",
+            "summary": "Removing vendor DOM disposables does not leave grid gesture listeners installed",
+            "location": "crates/farhelm-ui/assets/vendor/xterm.js:2",
+            "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e. TLDR: considered whether removing the old terminal's disposable DOM/event utilities leaves mouse drags or animation work alive after closing a terminal. Source refutation: the deleted portions 01085-018/019 contain vendor-local event listeners, animation scheduling, focus and pointer-monitor helpers; the replacement owns its own lifecycle. At the reviewed revision, crates/farhelm-ui/assets/grid-terminal.js:1747-1759 removes document mousemove/mouseup handlers in stopGesture, and :2109-2140 dispose cancels painting, pixel-ratio and visibility listeners, history-drain work, gesture listeners, slider listeners and fade timers, clears callbacks and removes its element. The ordering explicitly releases the slider before clearing its newly armed fade timer. Contract: SPEC_impl.md, Terminal widget: the grid island / The grid client, assigns all terminal DOM/input/selection to the grid and connection lifetime to terminal.js. Suggested bucket: other if established; confidence: confirmed source refutation, no execution. proposed_drop: refuted by the replacement's own disposal paths, not by specification acceptance. possible_cover: none. Could-be-highest: false; the considered consequence was stale listeners or retained DOM work, with no established security or loss-of-work route. Caveat: this record addresses removal of the assigned vendor helpers, not a whole-grid lifecycle audit."
+          }
+        },
+        {
+          "line": 5,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c1",
+            "state": "open",
+            "summary": "Removing vendor DOM disposables does not leave grid gesture listeners installed",
+            "location": "crates/farhelm-ui/assets/vendor/xterm.js:2",
+            "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e. TLDR: considered whether deleting vendor DOM/event utilities leaves mouse drags, stale listeners or animation work alive after a terminal closes. The replacement owns its lifecycle independently. Initial source refutation remains: grid-terminal.js:1747-1759 removes document gesture handlers; :2109-2140 cancels paint, media-query, visibility, history-drain, gesture, slider and fade work, clears callbacks and removes the element. Synthesis checked the callers rather than assuming disposal is reached: terminal.js:4670-4697 stores the actual grid and its lifecycle callbacks in the island; :4701-4728 rolls back window listeners, ResizeObserver, attachment drivers, deferred work, grid and socket after a failed mount; :4761-4831 tears down a successful island and either disposes the grid or freezes the deliberately retained snapshot. The retained snapshot is subsequently disposed by buryTombstone at :899-908. The program-drag guidance driver's document mouseup and resize listeners are independently removed at :4448-4460, including before a frozen snapshot is kept. Contract: SPEC_impl.md, Terminal widget: the grid island / The grid client, assigns DOM/input/selection to the grid and connection lifetime to terminal.js; SPEC.md, Terminal experience, requires a displaced client to retain its selectable non-live snapshot. Suggested bucket: other if the original lifecycle defect were established; confidence: confirmed source refutation, no execution. proposed_drop: replacement lifecycle and caller paths refute the suspected removal defect; no specification-only acceptance is needed. possible_cover: none. Could-be-highest: false; the original considered consequence was retained DOM/listeners, with no established security or loss-of-work route. Caveat: this is the assigned vendor-removal boundary, not a whole-grid lifecycle certification."
+          }
+        },
+        {
+          "line": 7,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c1",
+            "state": "open",
+            "summary": "Removing vendor DOM disposables does not leave grid gesture listeners installed",
+            "location": "crates/farhelm-ui/assets/vendor/xterm.js:2",
+            "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e. TLDR: considered whether deleting vendor DOM/event utilities leaves mouse drags, stale listeners or animation work alive after terminal closure. Original consequence preserved: retained DOM/listeners and animation work. Source refutation of the assigned deletion remains grid-terminal.js:1747-1759 and :2109-2140, which independently remove gesture handlers, cancel pending work, clear callbacks and remove the returned grid element. Successful unmount at terminal.js:4761-4831 reaches grid.dispose or intentionally keeps a frozen snapshot; buryTombstone at :899-908 later disposes that retained surface. Synthesis qualification from supplied discovery-neighbours.json: g083/l1, g135/l2 and g136/l1 establish a distinct failed-constructor view-getter/test-fixture defect. The earlier c1 event's failed-mount rollback description must not be read as certifying that links dispose safely before the grid constructor returns, preserving the original exception, or reclaiming every allocation of a throwing constructor. The outer catch contains rollback calls (:4701-4728), but those calls alone do not establish that stronger guarantee. Those interface findings are not refuted or covered by this vendor-helper candidate. Contract: SPEC_impl.md, Terminal widget: the grid island / The grid client, separates grid DOM lifetime from terminal.js connection lifetime; SPEC.md requires retained non-live takeover snapshots. Suggested bucket: other for the original considered retained-work consequence; confidence: confirmed source refutation of a removed helper dependency, no execution. proposed_drop: independent replacement lifecycle refutes this specific deletion concern; no accepted parent drop and no specification-only acceptance asserted. possible_cover: supplied g083/l1, g135/l2 and g136/l1 are related distinct test/constructor concerns, not duplicates or coverage for c1. Could-be-highest: false; no security or user-work-loss route proposed for this candidate. Caveat: normal returned-grid disposal is established; constructor-failure cleanup is explicitly not certified. No new finding from this interface synthesis."
+          }
+        }
+      ],
+      "latest": {
+        "line": 7,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c1",
+          "state": "open",
+          "summary": "Removing vendor DOM disposables does not leave grid gesture listeners installed",
+          "location": "crates/farhelm-ui/assets/vendor/xterm.js:2",
+          "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e. TLDR: considered whether deleting vendor DOM/event utilities leaves mouse drags, stale listeners or animation work alive after terminal closure. Original consequence preserved: retained DOM/listeners and animation work. Source refutation of the assigned deletion remains grid-terminal.js:1747-1759 and :2109-2140, which independently remove gesture handlers, cancel pending work, clear callbacks and remove the returned grid element. Successful unmount at terminal.js:4761-4831 reaches grid.dispose or intentionally keeps a frozen snapshot; buryTombstone at :899-908 later disposes that retained surface. Synthesis qualification from supplied discovery-neighbours.json: g083/l1, g135/l2 and g136/l1 establish a distinct failed-constructor view-getter/test-fixture defect. The earlier c1 event's failed-mount rollback description must not be read as certifying that links dispose safely before the grid constructor returns, preserving the original exception, or reclaiming every allocation of a throwing constructor. The outer catch contains rollback calls (:4701-4728), but those calls alone do not establish that stronger guarantee. Those interface findings are not refuted or covered by this vendor-helper candidate. Contract: SPEC_impl.md, Terminal widget: the grid island / The grid client, separates grid DOM lifetime from terminal.js connection lifetime; SPEC.md requires retained non-live takeover snapshots. Suggested bucket: other for the original considered retained-work consequence; confidence: confirmed source refutation of a removed helper dependency, no execution. proposed_drop: independent replacement lifecycle refutes this specific deletion concern; no accepted parent drop and no specification-only acceptance asserted. possible_cover: supplied g083/l1, g135/l2 and g136/l1 are related distinct test/constructor concerns, not duplicates or coverage for c1. Could-be-highest: false; no security or user-work-loss route proposed for this candidate. Caveat: normal returned-grid disposal is established; constructor-failure cleanup is explicitly not certified. No new finding from this interface synthesis."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g194/findings.jsonl",
+        "id": "c1",
+        "line": 7,
+        "disposition": "excluded",
+        "group": "xterm-removal-normal-grid-lifecycle-dependency",
+        "reason": "Parent explicitly accepted named refuted proposal from claims-121 after inspecting it. The independent grid releases its gestures, listeners and scheduled work, and normal unmount reaches that cleanup. This source-refutes a removed-helper dependency without certifying a constructor that throws. Refute this narrow normal-lifecycle removal concern. Exact named root alias g193/c5; no independent defect search and no dismissal of the separately supplied constructor/test concerns. Checked source/results: [\"All three history events read. Line 5's failed-mount rollback claim is explicitly qualified at line 7: outer rollback calls do not establish all failed-constructor cleanup or preservation of the original exception.\",\"f560058da19e02716e6f943883a9508b447aff4e:grid-terminal.js:1747-1759 removes document gesture handlers; :1877-1940 owns history scheduling with disposed guards; :2109-2140 cancels frames, channels, watchers, gestures and slider/fade work.\",\"f560058:terminal.js:4761-4832 reaches independent cleanup for a returned grid, freezing only a deliberately retained snapshot. createGridSurface:4294-4358 was read; it is not evidence that normal dispose runs before successful construction.\",\"No runtime test or repeated-mount measurement.\"] Current coverage/results: [\"SPEC_impl.md:1692-1718 and :1836-1873 assigns the grid lifetime; SPEC.md Terminal experience accepts the deliberately retained selectable non-live takeover snapshot, not arbitrary leaked DOM work.\",\"TODO.md Planned empty; BUGS.md unrelated. INDEX read fully and queue/active-ledger searches found no exact removed-helper lifecycle item. detached-grid-retains-program-drag-guidance concerns a different retained-snapshot callback, not a missing old DOM utility.\",\"plans/queue searches found no unlanded repair of the hypothesized normal-grid dependency. FILTER.md provides no basis used here.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Stale gesture listeners, retained DOM and animation work after terminal closure. The failed-mount wording was narrowed, not silently accepted. No security or user-work-loss route was proposed for this record.\"; \"No retained DOM utility dependency. Failed-construction cleanup and supplied test-oracle/diagnostic claims are expressly outside this refutation.\"."
+      },
+      "accepted_parent_decision": {
+        "key": "g194/c1",
+        "line": 7,
+        "disposition": "excluded",
+        "group": "xterm-removal-normal-grid-lifecycle-dependency",
+        "bucket": "other",
+        "recording": "refuted",
+        "queue_target_candidate": null,
+        "needs_independent_drop_check": false,
+        "reason": "Parent explicitly accepted named refuted proposal from claims-121 after inspecting it. The independent grid releases its gestures, listeners and scheduled work, and normal unmount reaches that cleanup. This source-refutes a removed-helper dependency without certifying a constructor that throws. Refute this narrow normal-lifecycle removal concern. Exact named root alias g193/c5; no independent defect search and no dismissal of the separately supplied constructor/test concerns. Checked source/results: [\"All three history events read. Line 5's failed-mount rollback claim is explicitly qualified at line 7: outer rollback calls do not establish all failed-constructor cleanup or preservation of the original exception.\",\"f560058da19e02716e6f943883a9508b447aff4e:grid-terminal.js:1747-1759 removes document gesture handlers; :1877-1940 owns history scheduling with disposed guards; :2109-2140 cancels frames, channels, watchers, gestures and slider/fade work.\",\"f560058:terminal.js:4761-4832 reaches independent cleanup for a returned grid, freezing only a deliberately retained snapshot. createGridSurface:4294-4358 was read; it is not evidence that normal dispose runs before successful construction.\",\"No runtime test or repeated-mount measurement.\"] Current coverage/results: [\"SPEC_impl.md:1692-1718 and :1836-1873 assigns the grid lifetime; SPEC.md Terminal experience accepts the deliberately retained selectable non-live takeover snapshot, not arbitrary leaked DOM work.\",\"TODO.md Planned empty; BUGS.md unrelated. INDEX read fully and queue/active-ledger searches found no exact removed-helper lifecycle item. detached-grid-retains-program-drag-guidance concerns a different retained-snapshot callback, not a missing old DOM utility.\",\"plans/queue searches found no unlanded repair of the hypothesized normal-grid dependency. FILTER.md provides no basis used here.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Stale gesture listeners, retained DOM and animation work after terminal closure. The failed-mount wording was narrowed, not silently accepted. No security or user-work-loss route was proposed for this record.\"; \"No retained DOM utility dependency. Failed-construction cleanup and supplied test-oracle/diagnostic claims are expressly outside this refutation.\"."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-121",
+          "key": "g194/c1",
+          "latest_line": 7,
+          "recommendation": "refuted",
+          "bucket": "other",
+          "underlying_key": "xterm-removal-normal-grid-lifecycle-dependency",
+          "aliases": [
+            "g193/c5"
+          ],
+          "target_queue_file": null,
+          "why": "The independent grid releases its gestures, listeners and scheduled work, and normal unmount reaches that cleanup. This source-refutes a removed-helper dependency without certifying a constructor that throws.",
+          "checks": [
+            "All three history events read. Line 5's failed-mount rollback claim is explicitly qualified at line 7: outer rollback calls do not establish all failed-constructor cleanup or preservation of the original exception.",
+            "f560058da19e02716e6f943883a9508b447aff4e:grid-terminal.js:1747-1759 removes document gesture handlers; :1877-1940 owns history scheduling with disposed guards; :2109-2140 cancels frames, channels, watchers, gestures and slider/fade work.",
+            "f560058:terminal.js:4761-4832 reaches independent cleanup for a returned grid, freezing only a deliberately retained snapshot. createGridSurface:4294-4358 was read; it is not evidence that normal dispose runs before successful construction.",
+            "No runtime test or repeated-mount measurement."
+          ],
+          "coverage_checked": [
+            "SPEC_impl.md:1692-1718 and :1836-1873 assigns the grid lifetime; SPEC.md Terminal experience accepts the deliberately retained selectable non-live takeover snapshot, not arbitrary leaked DOM work.",
+            "TODO.md Planned empty; BUGS.md unrelated. INDEX read fully and queue/active-ledger searches found no exact removed-helper lifecycle item. detached-grid-retains-program-drag-guidance concerns a different retained-snapshot callback, not a missing old DOM utility.",
+            "plans/queue searches found no unlanded repair of the hypothesized normal-grid dependency. FILTER.md provides no basis used here."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": "No retained DOM utility dependency. Failed-construction cleanup and supplied test-oracle/diagnostic claims are expressly outside this refutation.",
+          "original_stronger_consequence": "Stale gesture listeners, retained DOM and animation work after terminal closure. The failed-mount wording was narrowed, not silently accepted. No security or user-work-loss route was proposed for this record.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Refute this narrow normal-lifecycle removal concern. Exact named root alias g193/c5; no independent defect search and no dismissal of the separately supplied constructor/test concerns."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "xterm-removal-normal-grid-lifecycle-dependency",
+        "destination": null
+      }
+    },
+    {
+      "key": "g194/c2",
+      "owner": "g194",
+      "id": "c2",
+      "domain": "retired-xterm-vendor",
+      "purpose": "retired-xterm-vendor: crates/farhelm-ui/assets/vendor/xterm.js; phases webpack module 7093: Property 7093 | webpack module 7093 method dispose: MethodDefinition dispose | webpack module 5394: Property 5394 | webpack module 8234: Property 8234",
+      "history": [
+        {
+          "line": 2,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c2",
+            "state": "open",
+            "summary": "No surviving page dependency on the removed vendor helpers",
+            "location": "crates/farhelm-ui/assets/vendor/xterm.js:2",
+            "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e. TLDR: considered whether deleting the assigned vendor modules leaves terminal mounting or ordinary keyboard/scroll input dependent on absent code. Source refutation: pinned git grep across crates/farhelm-ui/assets and src/lib.rs found xterm mentions only in explanatory provenance and retained-license text, not executable calls to the removed globals/modules. The lib.rs patch removes vendor registrations, while lib.rs:1914-1926 loads the grid and shared support assets. terminal.js:3203-3222 waits for those actual globals, and :4294-4355 directly constructs farhelmGridTerminal with keyboard/input, resize, copy, link and paste callbacks. The replacement independently owns key normalization (grid-input.js:254-377), keyboard/text/composition event handling (grid-terminal.js:1514-1575), scrolling (wheelPixels :271-282 and wheel listener :1817-1848), and slider dragging (:986-1020); none imports webpack helpers. Contract: SPEC_impl.md, Terminal widget: the grid island, states every terminal is a grid and the grid client section makes the page's checked-in keydown/mouse tables authoritative. Suggested bucket: high if a missing runtime dependency had been established; confidence: confirmed source refutation, no execution. proposed_drop: refuted by independent replacement and absence of surviving imports. possible_cover: none. Could-be-highest: false; this consideration concerns unavailable terminal display/input, with no established security or loss-of-work route. Caveat: does not certify every input-table entry or audit other groups' grid changes."
+          }
+        }
+      ],
+      "latest": {
+        "line": 2,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c2",
+          "state": "open",
+          "summary": "No surviving page dependency on the removed vendor helpers",
+          "location": "crates/farhelm-ui/assets/vendor/xterm.js:2",
+          "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e. TLDR: considered whether deleting the assigned vendor modules leaves terminal mounting or ordinary keyboard/scroll input dependent on absent code. Source refutation: pinned git grep across crates/farhelm-ui/assets and src/lib.rs found xterm mentions only in explanatory provenance and retained-license text, not executable calls to the removed globals/modules. The lib.rs patch removes vendor registrations, while lib.rs:1914-1926 loads the grid and shared support assets. terminal.js:3203-3222 waits for those actual globals, and :4294-4355 directly constructs farhelmGridTerminal with keyboard/input, resize, copy, link and paste callbacks. The replacement independently owns key normalization (grid-input.js:254-377), keyboard/text/composition event handling (grid-terminal.js:1514-1575), scrolling (wheelPixels :271-282 and wheel listener :1817-1848), and slider dragging (:986-1020); none imports webpack helpers. Contract: SPEC_impl.md, Terminal widget: the grid island, states every terminal is a grid and the grid client section makes the page's checked-in keydown/mouse tables authoritative. Suggested bucket: high if a missing runtime dependency had been established; confidence: confirmed source refutation, no execution. proposed_drop: refuted by independent replacement and absence of surviving imports. possible_cover: none. Could-be-highest: false; this consideration concerns unavailable terminal display/input, with no established security or loss-of-work route. Caveat: does not certify every input-table entry or audit other groups' grid changes."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g194/findings.jsonl",
+        "id": "c2",
+        "line": 2,
+        "disposition": "excluded",
+        "group": "xterm-removal-retained-private-utility-consumer",
+        "reason": "Parent explicitly accepted named refuted proposal from claims-121 after inspecting it. The page loads and mounts the independent grid. Targeted references to the deleted bundle, Terminal global and private helpers are absent at the reviewed commit. Refute the absent-helper dependency; reconcile named g195/c1 and g196/c1 under this root while preserving their individual checks. Checked source/results: [\"All supplied history read; line 2 proposes source refutation, no withdrawal.\",\"f560058da19e02716e6f943883a9508b447aff4e:lib.rs:1479-1483,1914-1926 declares and loads grid assets; terminal.js:3203-3222 gates on those globals and :3387-3394 builds and fits the grid before its socket.\",\"f560058:terminal.js:4294-4358 constructs farhelmGridTerminal with retained input, resize, clipboard, link and paste callbacks.\",\"Pinned git grep across UI/helm/desktop/scripts/.github for vendor/xterm, VENDOR_XTERM, window.Terminal, new Terminal and representative retired event/cancellation/hash/scroll helpers returned no matches (exit 1). No runtime behavior inferred beyond this dependency boundary.\"] Current coverage/results: [\"SPEC_impl.md:1692-1718,1836-1873 states the current grid-only ownership/input contract; SPEC.md Terminal experience confirms the new terminal route.\",\"TODO.md Planned empty; BUGS.md unrelated. INDEX read fully and queue/active-ledger searches found no exact absent-private-helper dependency. Existing keyboard/mouse parity items concern behavior of retained code, not such a dependency.\",\"plans/queue removal and comment-audit scope does not specify an unlanded repair for a retained private helper. FILTER.md checked, no filter invoked.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Hypothetical terminal mount failure or unavailable keyboard/scroll input, originally suggested high if established. No actual defect, security or work-loss route was established or lowered.\"; \"No missing runtime consumer identified. This does not certify all key-table entries, scrolling behavior, build artifacts or incompatible old pages.\"."
+      },
+      "accepted_parent_decision": {
+        "key": "g194/c2",
+        "line": 2,
+        "disposition": "excluded",
+        "group": "xterm-removal-retained-private-utility-consumer",
+        "bucket": "other",
+        "recording": "refuted",
+        "queue_target_candidate": null,
+        "needs_independent_drop_check": false,
+        "reason": "Parent explicitly accepted named refuted proposal from claims-121 after inspecting it. The page loads and mounts the independent grid. Targeted references to the deleted bundle, Terminal global and private helpers are absent at the reviewed commit. Refute the absent-helper dependency; reconcile named g195/c1 and g196/c1 under this root while preserving their individual checks. Checked source/results: [\"All supplied history read; line 2 proposes source refutation, no withdrawal.\",\"f560058da19e02716e6f943883a9508b447aff4e:lib.rs:1479-1483,1914-1926 declares and loads grid assets; terminal.js:3203-3222 gates on those globals and :3387-3394 builds and fits the grid before its socket.\",\"f560058:terminal.js:4294-4358 constructs farhelmGridTerminal with retained input, resize, clipboard, link and paste callbacks.\",\"Pinned git grep across UI/helm/desktop/scripts/.github for vendor/xterm, VENDOR_XTERM, window.Terminal, new Terminal and representative retired event/cancellation/hash/scroll helpers returned no matches (exit 1). No runtime behavior inferred beyond this dependency boundary.\"] Current coverage/results: [\"SPEC_impl.md:1692-1718,1836-1873 states the current grid-only ownership/input contract; SPEC.md Terminal experience confirms the new terminal route.\",\"TODO.md Planned empty; BUGS.md unrelated. INDEX read fully and queue/active-ledger searches found no exact absent-private-helper dependency. Existing keyboard/mouse parity items concern behavior of retained code, not such a dependency.\",\"plans/queue removal and comment-audit scope does not specify an unlanded repair for a retained private helper. FILTER.md checked, no filter invoked.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Hypothetical terminal mount failure or unavailable keyboard/scroll input, originally suggested high if established. No actual defect, security or work-loss route was established or lowered.\"; \"No missing runtime consumer identified. This does not certify all key-table entries, scrolling behavior, build artifacts or incompatible old pages.\"."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-121",
+          "key": "g194/c2",
+          "latest_line": 2,
+          "recommendation": "refuted",
+          "bucket": "other",
+          "underlying_key": "xterm-removal-retained-private-utility-consumer",
+          "aliases": [
+            "g195/c1",
+            "g196/c1"
+          ],
+          "target_queue_file": null,
+          "why": "The page loads and mounts the independent grid. Targeted references to the deleted bundle, Terminal global and private helpers are absent at the reviewed commit.",
+          "checks": [
+            "All supplied history read; line 2 proposes source refutation, no withdrawal.",
+            "f560058da19e02716e6f943883a9508b447aff4e:lib.rs:1479-1483,1914-1926 declares and loads grid assets; terminal.js:3203-3222 gates on those globals and :3387-3394 builds and fits the grid before its socket.",
+            "f560058:terminal.js:4294-4358 constructs farhelmGridTerminal with retained input, resize, clipboard, link and paste callbacks.",
+            "Pinned git grep across UI/helm/desktop/scripts/.github for vendor/xterm, VENDOR_XTERM, window.Terminal, new Terminal and representative retired event/cancellation/hash/scroll helpers returned no matches (exit 1). No runtime behavior inferred beyond this dependency boundary."
+          ],
+          "coverage_checked": [
+            "SPEC_impl.md:1692-1718,1836-1873 states the current grid-only ownership/input contract; SPEC.md Terminal experience confirms the new terminal route.",
+            "TODO.md Planned empty; BUGS.md unrelated. INDEX read fully and queue/active-ledger searches found no exact absent-private-helper dependency. Existing keyboard/mouse parity items concern behavior of retained code, not such a dependency.",
+            "plans/queue removal and comment-audit scope does not specify an unlanded repair for a retained private helper. FILTER.md checked, no filter invoked."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": "No missing runtime consumer identified. This does not certify all key-table entries, scrolling behavior, build artifacts or incompatible old pages.",
+          "original_stronger_consequence": "Hypothetical terminal mount failure or unavailable keyboard/scroll input, originally suggested high if established. No actual defect, security or work-loss route was established or lowered.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Refute the absent-helper dependency; reconcile named g195/c1 and g196/c1 under this root while preserving their individual checks."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "high",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "xterm-removal-retained-private-utility-consumer",
+        "destination": null
+      }
+    },
+    {
+      "key": "g194/l1",
+      "owner": "g194",
+      "id": "l1",
+      "domain": "retired-xterm-vendor",
+      "purpose": "retired-xterm-vendor: crates/farhelm-ui/assets/vendor/xterm.js; phases webpack module 7093: Property 7093 | webpack module 7093 method dispose: MethodDefinition dispose | webpack module 5394: Property 5394 | webpack module 8234: Property 8234",
+      "history": [
+        {
+          "line": 3,
+          "event": {
+            "version": 1,
+            "kind": "lead",
+            "id": "l1",
+            "state": "open",
+            "summary": "Check whether deleting vendor touch gestures removes a still-used input route",
+            "location": "crates/farhelm-ui/assets/vendor/xterm.js:2",
+            "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e. TLDR: the deleted 01085-020 packet includes touch scrolling/gesture support, whereas the reviewed grid uses mouse listeners and wheel input. A lost touch scrolling route would impair a touch-only viewer. Source basis: deleted module 8594 in the assigned packet implements touchstart/touchmove/touchend and inertia; replacement grid-terminal.js:1006-1020 and :1761-1848 uses mousedown/document mouse listeners and wheel. Contract: SPEC_impl.md, Terminal widget: the grid island, assigns all terminals to the grid, and SPEC.md:2999-3017 explains retirement of old terminals. Suggested bucket: high if a still-supported viewer route was removed; confidence: unverified pending source comparison of the parent route, not observed execution. proposed_drop: false at this stage. possible_cover: none. Could-be-highest: false; suspected consequence is inability to scroll a touch-only terminal, not loss of terminal data or processes. Next check: determine whether this commit actually removes a route the already-shipped grid used, or only unreachable vendor internals. No runtime test or reproduction requested."
+          }
+        },
+        {
+          "line": 4,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "l1",
+            "state": "open",
+            "summary": "Vendor touch helper removal does not remove a terminal-host input route",
+            "location": "crates/farhelm-ui/assets/vendor/xterm.js:2",
+            "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e. TLDR: considered whether deletion of bundled touch/inertia helpers removes scrolling from a still-used terminal route. The original suspected consequence was unavailable touch scrolling for a touch-only viewer. Source checks settle the deletion-specific premise: the parent terminal.js:4650-4667 already sends every known terminal-host terminal directly to createGridSurface, building no xterm surface; parent SPEC_impl.md:1896-1918 explicitly describes that same route ('A new terminal mounts the grid component directly: nothing of xterm.js is built, measured, waited for or published as a test hook for it'). Parent grid-terminal.js:1830-1870 already uses the same mouse/wheel path. Removing the vendor helpers therefore cannot remove touch handling from the grid route. The reviewed contract SPEC.md:2999-3017 retires old terminals, while SPEC_impl.md:1504-1514 assigns every served terminal to the grid. No continuing old-terminal route requiring these helpers is established by this assignment. Suggested bucket: high for the originally suspected unavailable input; confidence: confirmed source refutation of a newly removed grid dependency, no execution. proposed_drop: source refutation, with the deletion-review boundary: the brief says 'For deletions, assess the implications of removal and the replacement's contracts; do not search retired implementation for independent defects unrelated to removal.' possible_cover: none. Could-be-highest: false; no security or loss-of-work consequence was proposed. Caveat: this is not a finding that touch interaction is complete, nor a claim of explicit specification acceptance for missing touch support; any broader pre-existing grid touch audit belongs to that source group's scope. Lead settled as candidate; no missing source premise retained."
+          }
+        },
+        {
+          "line": 6,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "l1",
+            "state": "open",
+            "summary": "Vendor touch helper removal does not remove a terminal-host input route",
+            "location": "crates/farhelm-ui/assets/vendor/xterm.js:2",
+            "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e. TLDR: the original lead suspected that deleting bundled touch/inertia helpers removes scrolling for a touch-only viewer. The deletion-specific premise remains refuted: parent terminal.js:4650-4667 already routes known terminal-host sessions directly to the grid, without xterm, as parent SPEC_impl.md:1896-1918 states ('A new terminal mounts the grid component directly: nothing of xterm.js is built, measured, waited for or published as a test hook for it'). Parent grid-terminal.js:1830-1870 already has the same mouse/wheel route. Synthesis resolved the additional server-side premise instead of relying on an asserted retirement boundary: service/core.rs:6142-6185 ends old terminals before reloading session state; :6372-6388 declares that old-kind rows reload with no terminal; the actual lookup at :6675-6682 returns None for TerminalKind::Tmux and never resolves its recorded pane address. There is thus no old-terminal display route that needs the removed gesture helpers. Reviewed terminal.js:3387-3394 unconditionally creates and fits the grid before opening its socket. Contract: SPEC.md, Terminal experience, states 'Every terminal is new: it runs in a terminal host of its own' and explains the old-terminal retirement; SPEC_impl.md:1504-1514 assigns all page terminals to the grid. Suggested bucket: high for the original suspected unavailable touch input; confidence: confirmed source refutation of a removal regression, no execution. proposed_drop: source refutation of a surviving dependency, within the brief's deletion-review boundary; not specification acceptance of absent touch support. possible_cover: none. Could-be-highest: false; no security or loss-of-work consequence was proposed. Caveat: this does not certify complete touch interaction in the pre-existing grid, nor review retirement's unrelated process-cleanup behavior. No unresolved source premise remains for this lead."
+          }
+        }
+      ],
+      "latest": {
+        "line": 6,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "l1",
+          "state": "open",
+          "summary": "Vendor touch helper removal does not remove a terminal-host input route",
+          "location": "crates/farhelm-ui/assets/vendor/xterm.js:2",
+          "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e. TLDR: the original lead suspected that deleting bundled touch/inertia helpers removes scrolling for a touch-only viewer. The deletion-specific premise remains refuted: parent terminal.js:4650-4667 already routes known terminal-host sessions directly to the grid, without xterm, as parent SPEC_impl.md:1896-1918 states ('A new terminal mounts the grid component directly: nothing of xterm.js is built, measured, waited for or published as a test hook for it'). Parent grid-terminal.js:1830-1870 already has the same mouse/wheel route. Synthesis resolved the additional server-side premise instead of relying on an asserted retirement boundary: service/core.rs:6142-6185 ends old terminals before reloading session state; :6372-6388 declares that old-kind rows reload with no terminal; the actual lookup at :6675-6682 returns None for TerminalKind::Tmux and never resolves its recorded pane address. There is thus no old-terminal display route that needs the removed gesture helpers. Reviewed terminal.js:3387-3394 unconditionally creates and fits the grid before opening its socket. Contract: SPEC.md, Terminal experience, states 'Every terminal is new: it runs in a terminal host of its own' and explains the old-terminal retirement; SPEC_impl.md:1504-1514 assigns all page terminals to the grid. Suggested bucket: high for the original suspected unavailable touch input; confidence: confirmed source refutation of a removal regression, no execution. proposed_drop: source refutation of a surviving dependency, within the brief's deletion-review boundary; not specification acceptance of absent touch support. possible_cover: none. Could-be-highest: false; no security or loss-of-work consequence was proposed. Caveat: this does not certify complete touch interaction in the pre-existing grid, nor review retirement's unrelated process-cleanup behavior. No unresolved source premise remains for this lead."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g194/findings.jsonl",
+        "id": "l1",
+        "line": 6,
+        "disposition": "excluded",
+        "group": "xterm-removal-touch-gesture-dependency",
+        "reason": "Parent explicitly accepted named refuted proposal from claims-121 after inspecting it. Deleting the vendor touch helper does not newly remove touch handling from a known terminal-host grid: that grid already bypassed xterm. Old tmux terminal rows no longer resolve a live terminal. This does not establish complete touch support or acceptance of missing touch support. Refute the new dependency-removal regression only; do not cite this as specification acceptance or comprehensive source refutation of missing touch support. Checked source/results: [\"All history read: line 3's open touch-scrolling lead, line 4's deletion-specific refutation and line 6's server-lookup qualification. No accepted drop appears.\",\"f560058da19e02716e6f943883a9508b447aff4e^:terminal.js:4650-4667 routes known host terminals directly to createGridSurface. Parent grid-terminal.js:1830-1870 already uses its own mouse/wheel path.\",\"f560058:service/core.rs:6372-6388 describes old rows reloading without a terminal; :6675-6682 actually returns None for TerminalKind::Tmux and never looks up its old pane address. terminal.js:3387-3394 unconditionally creates the grid.\",\"git log --diff-filter=A over the full exclusive/inclusive review range for grid-terminal.js returned no addition. Its only changes in that range were f560058 removal migration and 61e632323dbc6b4a35ed27bf5b9833102ffd5a4e comment cleanup. No new whole-grid touch audit was performed.\"] Current coverage/results: [\"SPEC.md Terminal experience explicitly ends old private-tmux terminals and uses terminal hosts; SPEC_impl.md:1692-1718,1836-1873 assigns the grid. These do not explicitly accept absent touch support.\",\"TODO.md Planned empty; no exact touch-scroll removal item in BUGS.md, full INDEX, queue search or active ledger. SPEC_impl.md's wheel/touch navigation wording is about the sidebar, a different scope.\",\"plans/queue removal plans and docs audit do not state a touch-input implementation. No exact unlanded coverage found. FILTER.md checked; neither rarity nor touch use alone supplies a filter.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"A touch-only viewer unable to scroll, originally high if a still-supported route was removed. The record resolves the deletion-specific premise, not the general UX question. No security/work-loss consequence claimed.\"; \"A surviving supported terminal route that used the deleted touch helper was not shown. Broader pre-existing grid touch completeness remains outside this named deletion concern.\"."
+      },
+      "accepted_parent_decision": {
+        "key": "g194/l1",
+        "line": 6,
+        "disposition": "excluded",
+        "group": "xterm-removal-touch-gesture-dependency",
+        "bucket": "other",
+        "recording": "refuted",
+        "queue_target_candidate": null,
+        "needs_independent_drop_check": false,
+        "reason": "Parent explicitly accepted named refuted proposal from claims-121 after inspecting it. Deleting the vendor touch helper does not newly remove touch handling from a known terminal-host grid: that grid already bypassed xterm. Old tmux terminal rows no longer resolve a live terminal. This does not establish complete touch support or acceptance of missing touch support. Refute the new dependency-removal regression only; do not cite this as specification acceptance or comprehensive source refutation of missing touch support. Checked source/results: [\"All history read: line 3's open touch-scrolling lead, line 4's deletion-specific refutation and line 6's server-lookup qualification. No accepted drop appears.\",\"f560058da19e02716e6f943883a9508b447aff4e^:terminal.js:4650-4667 routes known host terminals directly to createGridSurface. Parent grid-terminal.js:1830-1870 already uses its own mouse/wheel path.\",\"f560058:service/core.rs:6372-6388 describes old rows reloading without a terminal; :6675-6682 actually returns None for TerminalKind::Tmux and never looks up its old pane address. terminal.js:3387-3394 unconditionally creates the grid.\",\"git log --diff-filter=A over the full exclusive/inclusive review range for grid-terminal.js returned no addition. Its only changes in that range were f560058 removal migration and 61e632323dbc6b4a35ed27bf5b9833102ffd5a4e comment cleanup. No new whole-grid touch audit was performed.\"] Current coverage/results: [\"SPEC.md Terminal experience explicitly ends old private-tmux terminals and uses terminal hosts; SPEC_impl.md:1692-1718,1836-1873 assigns the grid. These do not explicitly accept absent touch support.\",\"TODO.md Planned empty; no exact touch-scroll removal item in BUGS.md, full INDEX, queue search or active ledger. SPEC_impl.md's wheel/touch navigation wording is about the sidebar, a different scope.\",\"plans/queue removal plans and docs audit do not state a touch-input implementation. No exact unlanded coverage found. FILTER.md checked; neither rarity nor touch use alone supplies a filter.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"A touch-only viewer unable to scroll, originally high if a still-supported route was removed. The record resolves the deletion-specific premise, not the general UX question. No security/work-loss consequence claimed.\"; \"A surviving supported terminal route that used the deleted touch helper was not shown. Broader pre-existing grid touch completeness remains outside this named deletion concern.\"."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-121",
+          "key": "g194/l1",
+          "latest_line": 6,
+          "recommendation": "refuted",
+          "bucket": "other",
+          "underlying_key": "xterm-removal-touch-gesture-dependency",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "Deleting the vendor touch helper does not newly remove touch handling from a known terminal-host grid: that grid already bypassed xterm. Old tmux terminal rows no longer resolve a live terminal. This does not establish complete touch support or acceptance of missing touch support.",
+          "checks": [
+            "All history read: line 3's open touch-scrolling lead, line 4's deletion-specific refutation and line 6's server-lookup qualification. No accepted drop appears.",
+            "f560058da19e02716e6f943883a9508b447aff4e^:terminal.js:4650-4667 routes known host terminals directly to createGridSurface. Parent grid-terminal.js:1830-1870 already uses its own mouse/wheel path.",
+            "f560058:service/core.rs:6372-6388 describes old rows reloading without a terminal; :6675-6682 actually returns None for TerminalKind::Tmux and never looks up its old pane address. terminal.js:3387-3394 unconditionally creates the grid.",
+            "git log --diff-filter=A over the full exclusive/inclusive review range for grid-terminal.js returned no addition. Its only changes in that range were f560058 removal migration and 61e632323dbc6b4a35ed27bf5b9833102ffd5a4e comment cleanup. No new whole-grid touch audit was performed."
+          ],
+          "coverage_checked": [
+            "SPEC.md Terminal experience explicitly ends old private-tmux terminals and uses terminal hosts; SPEC_impl.md:1692-1718,1836-1873 assigns the grid. These do not explicitly accept absent touch support.",
+            "TODO.md Planned empty; no exact touch-scroll removal item in BUGS.md, full INDEX, queue search or active ledger. SPEC_impl.md's wheel/touch navigation wording is about the sidebar, a different scope.",
+            "plans/queue removal plans and docs audit do not state a touch-input implementation. No exact unlanded coverage found. FILTER.md checked; neither rarity nor touch use alone supplies a filter."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": "A surviving supported terminal route that used the deleted touch helper was not shown. Broader pre-existing grid touch completeness remains outside this named deletion concern.",
+          "original_stronger_consequence": "A touch-only viewer unable to scroll, originally high if a still-supported route was removed. The record resolves the deletion-specific premise, not the general UX question. No security/work-loss consequence claimed.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Refute the new dependency-removal regression only; do not cite this as specification acceptance or comprehensive source refutation of missing touch support."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "high",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "xterm-removal-touch-gesture-dependency",
+        "destination": null
+      }
+    }
+  ],
+  "replies": [
+    {
+      "turn": 1,
+      "reply": "Initial review complete. All four assigned packets and governing contracts read.\n\nNo actionable findings or open leads. Recorded three refuted candidates (`c1`, `c2`, `l1`) in findings.jsonl and updated progress.md.\n\nNo assigned scope unread. No tests, reproductions, or checkout changes."
+    },
+    {
+      "turn": 2,
+      "reply": "Revised `c1` with cleanup caller evidence and `l1` with the server’s retirement/reload boundary. Both remain refuted candidates.\n\nNo new findings. Unresolved lead IDs: none."
+    },
+    {
+      "turn": 3,
+      "reply": "Discovery pass 1 found nothing new. Checked full-range file history, surviving helper references, direct DOM/style replacement and retained port notices.\n\nRevised `c1` to preserve the distinct constructor-failure caveat from interface findings.\n\nNew verified IDs: none. New unverified IDs: none. Open leads: none. Progress updated."
+    }
+  ],
+  "progress": "g194: initialized, awaiting initial source review.\n\nGroup g194, retired-xterm-vendor. Initial review, turn 1; discovery passes 0.\nRead the full brief and inventory commits field. Findings log exists; no events appended yet.\nCurrent state: reading assigned deletion packets and pinned terminal contracts.\nInterface assumption: xterm removal is evaluated against the replacement terminal's contracts, not as an independent audit of retired vendor internals.\nNext action: deliver all four mandatory evidence packets, then trace replacement callers.\nUnread scope: all four assigned packets and governing pinned SPEC sections.\n\nInitial review turn 1 complete. Discovery-pass count remains 0 (initial analysis only).\nAll four mandatory ranges were delivered with evidence read: 01085-018.patch:1,\n01085-019.patch:1, 01085-020.patch:1 and 01085-022.patch:1 (63,039 source bytes total).\nRead the complete commits field; did not read inventory coverage metadata or prohibited coverage sources.\n\nContracts read at f560058da19e02716e6f943883a9508b447aff4e:\nSPEC.md:2855-3177 (complete Terminal experience section); SPEC_impl.md:1504-1887\n(complete Terminal widget section including The grid client), and :1060-1105\n(Answers bind to what was drawn and surrounding GUI guidance).\nAlso read the parent SPEC_impl.md:1896-1932 for the previous direct-grid route.\nRoot AGENTS.md was injected with its End sentinel; queue AGENTS.md and recording.md,\nmachine.md, skillette, scode-voice and skillette-scripts were read. The first combined\ninstruction output clipped machine.md and queue AGENTS.md; both were then reread in full.\n\nSource context read at the reviewed revision:\ngrid-terminal.js:250-405,950-1068,1470-1640,1740-1870,1930-2148;\ngrid-input.js:250-400; terminal.js:3190-3245,4280-4385,4761-4839;\nlib.rs:1640-1840,1906-1934 and its commit patch lines 1-240.\nParent terminal.js:4640-4680; parent grid-terminal.js:1830-1870;\ngrid-terminal.js commit patch lines 1-200. Targeted searches covered terminal/grid\nscript dependencies, event lifetimes, input normalization and asset registration.\n\nDurable events: c1 and c2 are source-refuted candidates. l1 was first recorded as a\nlead, then revised under the same ID to a source-refuted candidate after checking\nthe parent direct-grid route. No findings; no open leads; no newly verified or\nunverified finding IDs. The recorder rejected c1's initial state value closed;\nit was changed to the accepted open value and recorded, without truncating the log.\n\nInterface assumptions: assigned vendor helpers are internal to the retired xterm\nbundle; terminal-host sessions already mounted the independent grid in the parent.\nThe grid and shared support assets are registered and awaited by their actual globals.\nClosing a surface reaches the replacement's own disposal path. Other groups own\nwhole-grid input parity and the broader server/protocol retirement.\n\nUnread assigned scope: none. Broader replacement source was read only as context,\nnot certified as a full review. No tests or reproductions run (source-only charter).\nNo checkout files changed; git status --short was empty.\nNext action: return for the caller's later synthesis/discovery turn; do not count\nthis initial turn as the later-turn protocol.\n\nSynthesis turn 2 complete; discovery-pass count 0. No new findings or IDs.\nRevised c1 with checked caller paths for successful unmount, failed-mount rollback,\nkept snapshots and their later disposal. Revised l1 with the actual server startup\nand reload boundary: old-kind rows resolve to no terminal rather than a continuing\nxterm display route. c2 remains source-refuted; a fresh search for retired asset\npaths and constructor/add-on globals found no executable dependency in terminal.js\nor lib.rs. No open leads, verified findings or unverified findings this turn.\n\nAdditional source context read at f560058da19e02716e6f943883a9508b447aff4e:\nterminal.js:885-917,3370-3435,4440-4540,4555-4740;\nservice/core.rs:6136-6190,6370-6410,6600-6685,10020-10145;\nservice/capture.rs:1-180 (context only, not an additional reviewed group).\nTargeted searches inspected mount/resize/disposal callers, retired constructors\nand assets, and server terminal-retirement references. Existing contracts from the\ninitial turn remain in context. No runtime execution or reproductions.\n\nInterface assumptions now checked: unconditional grid construction supplies the\nactual surface recorded by the island; early fit's resize callback is guarded\nbefore the socket exists and onopen resends size; successful and failed mounts\nboth reach cleanup. A deliberately kept snapshot stays selectable and is disposed\nwhen its owner buries it. Old terminal addresses are not resolved on reload.\nUnread assigned scope: none. Broader groups remain context only.\nNext action: return synthesis delta and await the caller's next turn.\n\nDiscovery turn 3 complete; discovery-pass count 1. Empty discovery result.\nRead discovery-neighbours.json completely in bounded ranges 1-120,121-190,191-246\nbefore the new search. No named pending questions were supplied. Interface synthesis\nrevised c1 immediately to qualify earlier failed-mount wording: normal returned-grid\ndisposal does not refute g083/l1, g135/l2 or g136/l1's distinct constructor-getter and\ntest-premise defect. Their findings were not adopted as new local discoveries or dropped.\nOther supplied findings do not change this group's assigned vendor-helper conclusions.\nNo parent drop or lowering is treated as accepted.\n\nSeparate discovery checks beyond the earlier lifecycle/input-route review:\n- Confirmed with git log across the entire pinned range that the assigned xterm.js\n  file changes only in f560058da19e02716e6f943883a9508b447aff4e, by complete deletion.\n- Searched all crates at that revision for the retired asset path, xterm constructor,\n  asset constant and assigned DOM/keyboard/scroll-helper class names. No surviving\n  executable reference was found (the command returned no matches).\n- Read grid-terminal.js:407-465,640-790 for the replacement's direct metric/DOM/style\n  work; it constructs its own spans and assigns textContent/styles without a vendor\n  DOM helper or global stylesheet registry. Read app.css:8617-8673 for independent\n  grid structure and cell styles.\n- Checked retained port provenance with THIRD_PARTY_NOTICES.md:19-45,\n  lib.rs:1468-1501 and grid-ported-code-LICENSES.txt:118-150. The retained VS Code\n  wheel port has its own declared bundled notice; deleting xterm's bundle does not\n  remove that retained notice. This was a dependency/retained-artifact check, not a\n  legal-opinion claim or a new finding.\n\nNew verified finding IDs: none. New unverified-after-investigation IDs: none.\nNew candidate/lead IDs: none. Revised existing ID: c1 only.\nOpen lead IDs: none. No new substantive finding or unsettled premise was found.\nUnread assigned scope: none. No tests, reproductions, live-install actions or\ncheckout changes. Broader interface source remains context, not extra review credit.\nNext action: return the discovery result to the caller.\n"
+}

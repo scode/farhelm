@@ -1,0 +1,199 @@
+[
+  {
+    "key": "g083/c4",
+    "latest_line": 9,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "ui-paste-sanitizer-extraction-preserves-filter",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The extraction preserves the sanitizer and waits for its new global. The suspected ordinary-paste sanitizer regression is source-refuted. This does not settle the separate legacy-page JSON reinterpretation claim in c5 or the program's bracketed-paste mode.",
+    "checks": [
+      "f560058da19e02716e6f943883a9508b447aff4e^:crates/farhelm-ui/assets/term-bytes.js:48-57 and f560058da19e02716e6f943883a9508b447aff4e:crates/farhelm-ui/assets/paste-sanitizer.js:19-37 use the identical text.replace(/\\x1b\\[201~|\\x1b/g, \"\") filter and export the new global.",
+      "f560058:terminal.js:3203-3221 requires farhelmPasteSanitizer before mount; 1910 sanitizes attachment insertion; 4354 passes the sanitizer into the grid. crates/farhelm-ui/src/lib.rs:1440-1445 registers the new asset.",
+      "Source inspection only; no product execution or reproduction. Both history entries preserve the same narrow suspicion and proposed refutation."
+    ],
+    "coverage_checked": [
+      "At recording-time main, searched SPEC.md and SPEC_impl.md for paste, sanitizer, byte-stream and grid contracts; read SPEC.md Terminal experience paste clauses and clipboard boundary, SPEC_impl.md The grid client and Grid streams. No specification accepts unsanitized ordinary paste; the source refutation does not rely on acceptance.",
+      "TODO.md:25-27 has an empty Planned bucket. Searched plans/queue; relevant tmux plans concern renderer retirement, not this filter. plans/REPORTS.md:29-32 records all four as landed, so they supply no unlanded-plan cover.",
+      "BUGS.md only records the SSH helper provisioning hang. INDEX.md read in full; targeted queue-content and active TRIAGE_OUTCOMES.md searches found no exact sanitizer-regression item or decision. Attachment failure announcement and paste-receipt items have different causes and consequences. Archive not read.",
+      "FILTER.md read in full; no filter used. A security-impacting sanitizer failure would be outside the rare-glitch filter."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": "No surviving ordinary-paste path losing the filter was established. This finding does not assert security of every clipboard or compatibility path.",
+    "original_stronger_consequence": "An unsanitized embedded bracketed-paste terminator could turn the rest of a paste into typed input, a potential highest-priority security consequence. The initial and latest records both proposed refuting that regression; no accepted drop was recorded.",
+    "needs_independent_drop_check": true,
+    "proposed_basis": "Proposed dismissal only of the sanitizer-extraction regression, based on identical implementation, registered asset, readiness gate and both callback paths. Independent drop agreement is still required."
+  },
+  {
+    "key": "g083/c5",
+    "latest_line": 17,
+    "recommendation": "retain-verified",
+    "bucket": "highest",
+    "underlying_key": "legacy-page-raw-json-reinterpreted-as-grid-input",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The latest record supersedes the original broad no-security conclusion. The narrow display/malformed-input compatibility break is explicitly accepted, but the same transport can successfully decode a pasted JSON document as Text and deliver its escaped carriage return as unbracketed program input. Retain that conditional security mechanism. This is source evidence, not an observed command execution.",
+    "checks": [
+      "f560058da19e02716e6f943883a9508b447aff4e^:terminal.js:4650-4666 builds xterm when kind is unknown; 5718-5723 treats a missing stream notice as bytes. 4628-4634 inserts attachment text through term.paste. 4158-4159 and 4191-4195 send its data as UTF-8 binary WebSocket messages.",
+      "At the same parent revision, assets/vendor/xterm.js:1, bounded excerpts around bracketedPasteMode, show its default is false and paste adds framing only when that mode is true. A newly built legacy surface therefore has a raw-paste path. This does not claim every pre-existing surface retains that mode.",
+      "f560058:crates/farhelm-helm/src/terminal.rs:762-773 forwards browser binary messages to send_grid_input. crates/farhelm-proto/src/grid.rs:1564-1566,1608-1620,1647-1655,1686-1693 decodes a JSON object tagged t, accepts Text data within its length bound, and imposes no control-character exclusion on that data.",
+      "f560058:crates/farhelm-supervisor/src/grid_input.rs:175-176 emits Text bytes as-is, separately from Paste. service/grid_stream.rs:1064-1090 decodes, encodes and queues Text as one-off input; it does not regain paste framing. Thus one complete valid JSON Text document containing an escaped CR can become a command submission rather than literal pasted JSON.",
+      "Reviewed current and pinned SPEC_impl.md Grid streams. Its stated old-page effects are misdrawing and malformed input ending the attachment; successful reinterpretation is a different consequence. No runtime reproduction performed."
+    ],
+    "coverage_checked": [
+      "SPEC_impl.md:2938-2956 (f560058:3011-3027), Grid streams, accepts an old page requiring reload and malformed input ending the attachment. That is partial cover only. SPEC.md paste/clipboard clauses authorize delivery of pasted content, not decoding its JSON escapes into typed commands.",
+      "TODO.md Planned is empty. Searched plans/queue for old-page, stream-kind, byte-stream and paste terms. The matching tmux removal plans have landed per plans/REPORTS.md:29-32; their retirement intent supplies no unlanded repair or acceptance of JSON input reinterpretation.",
+      "BUGS.md has no matching root. INDEX.md read in full; targeted queue-content and active TRIAGE_OUTCOMES.md searches found no exact old-page JSON input item or decision. legacy-page-server-rebinding-source-gap.md is an unrelated local static-server boundary. The record cites g196/l1 as related reviewer evidence, not an existing queue item checked here.",
+      "FILTER.md does not cover security consequences. In particular, the older-release-plus-rare-condition filter expressly excludes security or trust-boundary consequences. No filter applied."
+    ],
+    "exact_cover_quotes": [
+      {
+        "source": "SPEC_impl.md:2949-2956; f560058:3021-3027, Grid streams",
+        "quote": "A page loaded from the previous helm and left open across the update must be reloaded; nothing keeps it working.",
+        "scope": "Partial cover for the retired renderer requiring reload. It does not explicitly accept successful decoding of pasted JSON into unbracketed input."
+      },
+      {
+        "source": "SPEC_impl.md:2954-2956; f560058:3026-3027",
+        "quote": "what is typed into it ends the attachment as malformed input",
+        "scope": "This describes safe rejection, rather than the successful Text decode identified in the revised consequence."
+      }
+    ],
+    "missing_premise": "No runtime observation of the complete old-page sequence. The source mechanism requires an admitted fresh legacy/unknown-kind surface, an open socket, and one complete valid GridInput JSON object delivered in a data event. Actual user harm additionally requires meaningful program input in its data; arbitrary ordinary paste usually fails JSON decoding. These narrow trigger conditions do not erase the source-established escaped-CR route.",
+    "original_stronger_consequence": "Lines 5 and 13 proposed dropping display breakage/attachment rejection as explicitly accepted and said no highest route was established. Lines 14 and 17 explicitly supersede that broad statement with potential command execution, security or user-work loss from pasted JSON interpreted as Text. No drop or lowering was accepted; server-side termination of old processes remains outside this claim.",
+    "needs_independent_drop_check": true,
+    "proposed_basis": "Retain the conditional JSON reinterpretation route at highest; separate its security consequence from the narrowly accepted reload/misdrawing behavior. g196/l1 is a supplied related label for the parent to reconcile, not an independently checked alias in this batch. Any dismissal or lowering based on renderer retirement needs the independent check."
+  },
+  {
+    "key": "g083/l1",
+    "latest_line": 18,
+    "recommendation": "retain-verified",
+    "bucket": "other",
+    "underlying_key": "file-links-failed-grid-mount-fixture-getter-mismatch",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The rewritten test claims grid-hosting coverage but its getter safely returns undefined where production dereferences an unconstructed component. The production masking route predates the full range; the in-range defect is the rewritten fixture and coverage claim. Neither fact refutes the other.",
+    "checks": [
+      "f560058:crates/farhelm-ui/js-tests/terminal-files.test.js:615-619 claims grid hosting; 671-678 always creates host and returns host.element; 834-849 claims failed mounts dispose safely and tests the safer getter. The f560058 patch changes XtermFileLinksAddon to FileLinks and rewrites these claims.",
+      "f560058:terminal.js:940-950 instead reads getGrid().element. createGridSurface:4302-4313 supplies () => created before the constructor assigns created; catch:4356-4358 disposes links before rethrowing. terminal-files.js:460-469,641-647 accesses the getter during clearHover; optional chaining cannot suppress an exception inside that getter.",
+      "Exclusive base 6e423e30068b62c6cfa276c6d720ee35bb70387a:terminal.js:1194-1214,5989-6000,6042-6044 already has the unsafe getter, unassigned closure and dispose-before-rethrow. The production diagnostic-masking path is outside the full range. No broader allocation leak or work-loss consequence is established.",
+      "Source only. Construction throwing is the conditional trigger; no runtime reproduction was attempted. Histories progress from an unverified lead through production attribution to the narrower test defect, without withdrawing that test defect."
+    ],
+    "coverage_checked": [
+      "SPEC.md/SPEC_impl.md searched for failed mount, grid construction, links and rollback; The grid client describes hosting but accepts no fixture mismatch or masking diagnostic. terminal.js:4288-4292 explicitly promises preconstruction rollback and link disposal.",
+      "TODO.md Planned empty. Matching tmux plans rewrite retired-renderer tests, but all four landed per plans/REPORTS.md:29-32; no unlanded plan found whose stated work fixes this getter mismatch.",
+      "BUGS.md has no matching root. INDEX.md read in full; targeted queue and active TRIAGE_OUTCOMES.md searches for failed mount, getGrid, FileLinks, constructor and grid-hosting terms found no exact existing item or decision. The supplied histories name g135/l2 and g136/l1; their records are outside this assigned batch and were not inspected, so exact alias status is left to the parent.",
+      "No FILTER.md boundary covers the complete test-oracle/coverage-description defect. The rare diagnostic filter cannot dismiss the test defect merely because the older production route masks an error."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": "No missing premise for the fixture-versus-production source mismatch. Real construction-failure frequency, runtime manifestation and a broader resource leak were not established.",
+    "original_stronger_consequence": "Initial production suspicion: cleanup replaces the constructor error with an undefined-element error. Source checks confirm that conditional path but show it predates the exclusive base. The latest retained consequence is misleading rewritten regression coverage, with the older diagnostic failure as its concrete counterexample. No security/process/user-work loss was claimed.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Record the in-range test fixture and explanatory-contract defect, with whole-range production attribution and no runtime claim. Preserve the supplied g135/l2 and g136/l1 consolidation leads for the parent; no independent source defect search was performed."
+  },
+  {
+    "key": "g083/c6",
+    "latest_line": 15,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "removed-byte-mount-result-has-no-repository-consumer",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The production caller discards mount's result; the retained result still holds grid and socket. No surviving repository caller consuming the removed byte-renderer member is established.",
+    "checks": [
+      "f560058:terminal.js:3195-3226 calls farhelmTerm.mount without reading its result. 4680-4697 registers the live island and returns { grid, ws }.",
+      "Pinned-tree git grep over crates and e2e for farhelmTerm.mount(, revealedInWriteCallback, bufferedChunks and writesWhileHidden returned only terminal.js:3221. This is a textual repository-caller check, not an assertion about undocumented externally injected code.",
+      "SPEC_impl.md The grid client states that terminal.js mounts the grid for every terminal before connecting. No runtime execution."
+    ],
+    "coverage_checked": [
+      "Searched both specifications for mount, grid and byte compatibility; read The grid client and Grid streams. No specification promises the removed byte-return member.",
+      "TODO.md Planned empty. Relevant renderer-removal plans in plans/queue all landed per plans/REPORTS.md:29-32 and do not supply unlanded-plan coverage.",
+      "BUGS.md, full INDEX.md plus targeted queue searches, and active TRIAGE_OUTCOMES.md contain no exact removed-return-member finding or decision. The retained legacy-page compatibility concern in c5 is a different root.",
+      "FILTER.md not used; disposition is source refutation within the stated caller scope."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": "A surviving supported repository caller that reads the removed term member and fails. Text search does not certify arbitrary external scripts.",
+    "original_stronger_consequence": "A surviving caller could suffer high/material terminal UI failure. No such caller, security route or loss-of-work route was identified; the record proposed source refutation, without an accepted parent drop.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Dismiss only the repository-consumer regression suspicion, based on the production call and exact pinned-tree textual search."
+  },
+  {
+    "key": "g083/c7",
+    "latest_line": 16,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "grid-first-fit-null-socket-guard-and-open-retry",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The initial fit cannot reach grid.size through an absent or unopened socket: sendResize returns first. The open handler retries the fitted size. This refutes only the named initialization-order/resize-loss suspicion.",
+    "checks": [
+      "f560058:terminal.js:3387-3393 creates and assigns grid before explicit fit; 3424 constructs ws afterward. 4560-4565 checks ws and OPEN before grid.size; 4594-4604 retries sendResize on open.",
+      "f560058:grid-terminal.js:473-498 only calls onResize for a changed valid proposal; receive:1973-1988 requests fitted dimensions once on a mismatching hello.",
+      "SPEC_impl.md The grid client explains the before-socket fit because the URL carries the measured size. Source only, not a runtime geometry or lifecycle certification; l1's failed-constructor boundary is distinct."
+    ],
+    "coverage_checked": [
+      "Both specifications searched for resize/fit/socket initialization; read The grid client and Grid streams. No accepted failure is needed for the guarded initialization path.",
+      "TODO.md Planned empty; matching tmux plans landed per plans/REPORTS.md:29-32. No unlanded repair for this exact initial callback suspicion found.",
+      "BUGS.md and active TRIAGE_OUTCOMES.md have no exact match. INDEX.md read in full and targeted queue search performed; initial-oversized-grid-cannot-attach.md read in full. That item concerns supervisor admission above 1000 and its removed xterm size producer, not dereferencing an uninitialized socket or losing the open-time retry.",
+      "FILTER.md not used; source refutation is narrower than declaring every grid geometry or framework lifecycle correct."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": "A callback reaching the grid read before the ws guard, or a supported initial size update that survives neither the URL nor onopen/hello retry. None is established.",
+    "original_stronger_consequence": "High/material UI failure from a mount exception or stale dimensions. No security/user-work-loss route identified; the candidate proposed refutation and distinguished constructor-failure l1.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Dismiss the changed sendResize/first-fit suspicion based on the null/non-OPEN guard and current-size retries."
+  },
+  {
+    "key": "g084/c1",
+    "latest_line": 3,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "grid-accessible-reading-omission-comment-is-accurate",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The new omission comment accurately describes the DOM. The inaccessible reading surface is older than the full range; the changed comment does not newly implement it or promise accessible output.",
+    "checks": [
+      "61e632323dbc6b4a35ed27bf5b9833102ffd5a4e:grid-terminal.js:149-152 explicitly lists accessible reading as unbuilt. 343-349 sets aria-hidden=true on screen; 617-631 inserts output rows inside that screen. 366-379 creates a separate Terminal input textarea, not a terminal-output reading representation.",
+      "The 61e6323 patch changes comments in this scope and retains aria-hidden. Exclusive base 6e423e30068b62c6cfa276c6d720ee35bb70387a:grid-terminal.js:352-356 already hides that screen and explicitly describes no accessible reading. Thus the original functional limitation also predates the whole pinned range, not just this patch.",
+      "SPEC_impl.md The grid client leaves composition display unbuilt; the source's composition handlers send committed text. No assistive-technology run or independent accessibility review performed."
+    ],
+    "coverage_checked": [
+      "Both specifications searched for accessible reading, aria-hidden, screen-reader and terminal terms; The grid client read in full. No newly promised accessible output was found, and no explicit acceptance is used to declare the existing limitation adequate.",
+      "TODO.md Planned empty. The matched input-method TODO is outside Planned and concerns composition, not output accessibility. The tmux comment-sweep plan is landed per plans/REPORTS.md:32 and supplies no unlanded accessibility repair.",
+      "BUGS.md has no matching root. INDEX.md read in full and targeted queue/active-ledger searches performed. attachment-failure-announcement-unresolved.md read in full: it concerns live announcement of separate attachment errors whose text remains manually accessible, not the grid output hidden by aria-hidden. No exact coverage or alias found.",
+      "FILTER.md not used. An inaccessible output surface is not dismissed as merely scrollable dialog content."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": "No source contradiction in the new documentation. Broader terminal accessibility adequacy and real screen-reader behavior remain outside this check.",
+    "original_stronger_consequence": "The first record said the existing accessibility limitation could merit high priority. The latest narrows to other for comment accuracy while explicitly retaining that older high-impact limitation; neither record claims security or loss of user-owned work.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Refute the documentation-accuracy concern using the rendered-output/input responsibilities. The functional limitation is out of this full range; do not generalize this to a product-accessibility endorsement."
+  },
+  {
+    "key": "g084/c2",
+    "latest_line": 2,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "grid-xterm-provenance-rewrite-retains-operative-contracts",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The rewritten explanation retains concrete constraints and local provenance. The header's row-object shorthand still points to the detailed history-token contract. No named missing operative constraint or stale-link security route is established by the comment change.",
+    "checks": [
+      "Read the 61e632323dbc6b4a35ed27bf5b9833102ffd5a4e grid-terminal.js comment diff in bounded parts. Size remains fixed-reference fitting with padding/scrollbar reserve and authoritative committed drawing size; the header at 134-145 explicitly makes retained behavior this component's contract.",
+      "Retained local explanations specify midpoint tie-breaking at 1096-1102, column trim at 942-947, every reported input clearing selection at 1632-1643, one wheel message per qualifying event at 1816-1826 and immediate focus-state reporting at 1974-1976. The rewrite retains their operative rules rather than only upstream comparisons.",
+      "61e6323:grid-terminal.js:1243-1266 distinguishes stable screen objects from history tokens, and 1285-1289 reads historyIdentity. grid-model.js:1090-1109 returns independently decoded history rows and separate storage-independent tokens. This directly supports the detailed identity explanation despite the abbreviated header.",
+      "61e6323:THIRD_PARTY_NOTICES.md:19-44 maps retained ports, and local selection/measurement comments still name origins. Source inspection only; historical benchmark numbers and universal test coverage were not certified."
+    ],
+    "coverage_checked": [
+      "SPEC.md and SPEC_impl.md searched for selection, fitting, links/history identity and xterm contracts. SPEC_impl.md The grid client read in full: it independently retains the fit formula, committed drawing size, input tables, independent history decoding and stable identity-token guarantees.",
+      "TODO.md Planned empty. plans/queue/tmux-drop-from-docs.md Acceptance criteria 3 requires retained own-behavior rationales and local port attributions; plans/REPORTS.md:32 shows it landed. It is context, not unlanded-plan coverage of a missing contract.",
+      "BUGS.md, full INDEX.md plus targeted queue-content searches, and active TRIAGE_OUTCOMES.md searches found no exact provenance-rewrite/missing-operative-constraint finding or decision. Existing link-redraw and hover-performance items have different mechanisms and are not covered or refuted by this comment assessment.",
+      "No FILTER.md rule used. Any established stale-link trust-boundary consequence would be outside the rare-glitch boundary."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": "A concrete operative constraint erased by this patch, or a documentation statement that wrongly authorizes stale link identity. Neither is established by the named checks. This is not a review of every grid behavior or benchmark claim.",
+    "original_stronger_consequence": "Considered loss of selection/fitting/input constraints and a stale-link/security interpretation of row identity. The record explicitly found no such security route and proposed source refutation; no accepted parent drop is recorded. Preserve that considered security dimension for independent dismissal review.",
+    "needs_independent_drop_check": true,
+    "proposed_basis": "Proposed dismissal of the comment-regression suspicion based on retained explicit contracts and the detailed history identity explanation, including the named stale-link concern. Independent drop agreement remains required for that security-related interpretation."
+  }
+]

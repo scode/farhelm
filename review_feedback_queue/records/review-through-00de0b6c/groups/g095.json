@@ -1,0 +1,562 @@
+{
+  "group": {
+    "id": "g095",
+    "domain": "supervisor-workspace-ownership",
+    "purpose": "supervisor-workspace-ownership: crates/farhelm-supervisor/src/container.rs; phases -    fn failed_creation_cleanup_rejects_unconfirmed_absence() {",
+    "interfaces": [
+      "g001",
+      "g007",
+      "g008",
+      "g009",
+      "g096",
+      "g127",
+      "g128"
+    ],
+    "sources": [
+      {
+        "path": "[private-run]/prep/parts/00291-000.patch",
+        "ranges": [
+          [
+            1,
+            1334
+          ]
+        ],
+        "original_path": "crates/farhelm-supervisor/src/container.rs",
+        "commit": "04d85f0c98a9b635709d00b056719a0baa7fd3fc",
+        "notes": "patch header; patch character offsets [0,59564)",
+        "lines": 1334,
+        "bytes": 59564,
+        "start": 0,
+        "end": 59564,
+        "original": "[private-run]/prep/originals/00291.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/00291-001.patch",
+        "ranges": [
+          [
+            1,
+            109
+          ]
+        ],
+        "original_path": "crates/farhelm-supervisor/src/container.rs",
+        "commit": "04d85f0c98a9b635709d00b056719a0baa7fd3fc",
+        "notes": "-    fn failed_creation_cleanup_rejects_unconfirmed_absence() {; patch character offsets [59564,64676)",
+        "lines": 109,
+        "bytes": 5112,
+        "start": 59564,
+        "end": 64676,
+        "original": "[private-run]/prep/originals/00291.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/00905-000.patch",
+        "ranges": [
+          [
+            1,
+            13
+          ]
+        ],
+        "original_path": "crates/farhelm-supervisor/src/container.rs",
+        "commit": "1ed482dde220452e424973faf38a5e1318986333",
+        "notes": "patch header; patch character offsets [0,702)",
+        "lines": 13,
+        "bytes": 702,
+        "start": 0,
+        "end": 702,
+        "original": "[private-run]/prep/originals/00905.patch"
+      }
+    ],
+    "lines": 1456,
+    "bytes": 65378
+  },
+  "records": [
+    {
+      "key": "g095/l1",
+      "owner": "g095",
+      "id": "l1",
+      "domain": "supervisor-workspace-ownership",
+      "purpose": "supervisor-workspace-ownership: crates/farhelm-supervisor/src/container.rs; phases -    fn failed_creation_cleanup_rejects_unconfirmed_absence() {",
+      "history": [
+        {
+          "line": 1,
+          "event": {
+            "version": 1,
+            "kind": "lead",
+            "id": "l1",
+            "state": "open",
+            "summary": "Deletion treats unavailable Podman executable as confirmed cleanup",
+            "location": "crates/farhelm-supervisor/src/container.rs:180",
+            "detail": "Reviewed commit: 04d85f0c98a9b635709d00b056719a0baa7fd3fc. TLDR: deleting a retired container session may forget the session when Podman cannot be resolved, potentially leaving its container behind. Source basis: assigned patch 00291-000 lines 561-565 resolves Podman into an Option and passes it to remove_with_podman; its new doc comment says an absent executable leaves no supported local container. Contract and caller checks pending; this may be explicit specification acceptance. Suggested bucket: other on present evidence; could-be-highest if deletion can orphan user processes/work without recovery, route not established. Confidence: uninvestigated lead. proposed_drop: false. possible_cover: none. Next checks: read full replacement, pinned retired-container deletion contract, resolve_program and delete callers. No execution performed."
+          }
+        },
+        {
+          "line": 2,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "l1",
+            "state": "open",
+            "summary": "Deletion treats unavailable Podman executable as confirmed cleanup",
+            "location": "crates/farhelm-supervisor/src/container.rs:170",
+            "detail": "Reviewed commit: 04d85f0c98a9b635709d00b056719a0baa7fd3fc. TLDR: deleting a retired container session may forget the session when Podman cannot be resolved, potentially leaving its container behind. Source: container.rs:170-190 passes missing resolution as None, skips engine commands and clears the initialization marker. Suggested bucket: other on established cleanup consequence; could-be-highest if orphaning loses user-owned processes/work, which has not been established. Confidence: confirmed source behavior; no execution performed. proposed_drop: exact explicit specification acceptance. SPEC.md:4816-4823, Retired containerized sessions, says: 'Delete retains the legacy container-removal path and confirms absence. Missing Podman counts as nothing left to remove.' This finding is recorded for independent drop checking because the potential strongest consequence is accepted only by specification. possible_cover: none. Remaining caller/resolver checks will verify that no broader condition is being silently treated as missing Podman; retain original suspected orphaned-container consequence."
+          }
+        },
+        {
+          "line": 5,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "l1",
+            "state": "open",
+            "summary": "Deletion treats unavailable Podman executable as confirmed cleanup",
+            "location": "crates/farhelm-supervisor/src/container.rs:170",
+            "detail": "Reviewed commit: 04d85f0c98a9b635709d00b056719a0baa7fd3fc.\n\nTLDR: deleting a retired container session may forget the session when Podman cannot be resolved, potentially leaving its container behind.\n\nDetails: container.rs:170-190 passes missing resolution as None, skips engine commands and clears the initialization marker. service/teardown.rs:533-590 reconstructs the retired runtime, holds its permanent flock, revokes creation and calls remove before proceeding with process cleanup and eventual row deletion. scope.rs:1233-1281 searches absolute PATH entries for a regular executable with a UTF-8 path, returning None if none resolves; a resolved executable's spawn, command or storage failures remain errors unless a subsequent exists command confirms absence with status 1. The new behavior deliberately differs from the prior eager executable requirement. A container could outlive removal of its executable; no such runtime state was exercised.\n\nSuggested bucket: other for the established cleanup consequence; could-be-highest if orphaning loses user-owned processes/work, which the inspected source does not establish. Confidence: confirmed source behavior, not an observed runtime failure. proposed_drop: exact explicit specification acceptance. SPEC.md:4816-4823, Retired containerized sessions, says: 'Delete retains the legacy container-removal path and confirms absence. Missing Podman counts as nothing left to remove.' SPEC_impl.md:8651-8655, Rootless Podman sessions, says: 'Resolve Podman lazily. A host without Podman has nothing left to remove. Other unconfirmed cleanup keeps the session for retry.' Both contracts remain at 1ed482dde220452e424973faf38a5e1318986333 (SPEC.md:4910-4917; SPEC_impl.md:8439-8453), whose assigned container.rs change only broadens a comment from private to any inherited tmux coordinates; the environment-removal loop is unchanged.\n\nRecorded as a finding with proposed_drop for independent checking because the potential strongest consequence is accepted only by specification. Original suspected orphaned-container consequence is preserved. possible_cover: none; coverage sources were not consulted. Checks: complete assigned patches, full replacement source, resolver, teardown caller, prior creator lock/ticket contract, and pinned retirement contracts read. No runtime tests or reproductions performed. No unresolved source check remains for this proposed drop."
+          }
+        },
+        {
+          "line": 6,
+          "event": {
+            "version": 1,
+            "kind": "lead",
+            "id": "l1",
+            "state": "open",
+            "summary": "PATH lookup failure is broader than genuine Podman absence",
+            "location": "crates/farhelm-supervisor/src/container.rs:170",
+            "detail": "Reviewed commit: 04d85f0c98a9b635709d00b056719a0baa7fd3fc.\n\nTLDR: deleting a retired container session can skip container cleanup and forget its handle when the supervisor cannot find Podman, even though the engine may still be installed. Original consequence retained: a container and its user-owned processes/work may be orphaned.\n\nDetails: container.rs:170-190 treats every None from scope::resolve_program as cleanup success. scope.rs:1233-1281 returns None for an unset PATH, an installed executable omitted from PATH, relative-only search entries, metadata failures (all errors, not just NotFound), nonexecutable/nonregular candidates and non-UTF-8 candidate paths. This is not proof that Podman is absent from the host. A resolved executable that fails to spawn or run does produce a cleanup error, so the distinction is specifically pre-spawn resolution failure.\n\nExact acceptance: SPEC.md:4820-4821 says 'Delete retains the legacy container-removal path and confirms absence. Missing Podman counts as nothing left to remove.' SPEC_impl.md:8652-8654 says 'Resolve Podman lazily. A host without Podman has nothing left to remove. Other unconfirmed cleanup keeps the session for retry.' Those sentences literally accept genuine missing-engine cleanup, but do not explicitly equate PATH omission or metadata inspection failure with a host without Podman. scope.rs:1245-1257 does explicitly document unsupported non-UTF-8 tool paths as absent; that narrower documented case must not silently authorize every other failure.\n\nSuggested bucket: other on established cleanup/handle consequence; could-be-highest if an established shipped route loses user processes/work; this strongest premise is not established. Confidence: confirmed resolver branch distinction, remaining consequence/contract interpretation under investigation. proposed_drop: partial only, for genuine engine absence under the quoted specification; blanket drop of PATH/metadata ambiguity is no longer proposed. possible_cover: caller reports likely same lazy-missing-engine claim as g001/f2; no external finding file or coverage metadata read.\n\nNext source checks: determine whether startup guarantees a PATH containing any previously used Podman, whether old tickets retain resolved executable coordinates, and whether legacy creator revocation or subsequent scope cleanup independently proves container absence. No experiments or reproductions performed."
+          }
+        },
+        {
+          "line": 7,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "l1",
+            "state": "open",
+            "summary": "PATH lookup failure is broader than genuine Podman absence",
+            "location": "crates/farhelm-supervisor/src/container.rs:170",
+            "detail": "Reviewed commit: 04d85f0c98a9b635709d00b056719a0baa7fd3fc.\n\nTLDR: deleting a retired container session can skip container removal and forget its handle when the supervisor cannot find Podman, even though the engine may still be installed. Original suspected consequence retained: a container and its user-owned processes/work may be orphaned.\n\nDetails: container.rs:170-190 maps every None from scope::resolve_program into cleanup success. scope.rs:1233-1281 returns None for unset PATH, an installed executable omitted from PATH, relative-only search entries, metadata failures of any kind, nonexecutable/nonregular candidates and non-UTF-8 candidate paths. In particular the metadata match at scope.rs:1266-1268 erases inspection errors instead of preserving an unconfirmed result. None proves only no accepted candidate in this process's search path, not a host without Podman. Errors after a path resolves remain retryable unless a subsequent exists command confirms absence with status 1.\n\nCaller route: service/teardown.rs:533-590 holds the creation flock, revokes the ticket and calls remove before ordinary process cleanup; if other cleanup succeeds, teardown.rs:999-1002 removes the session row. No later engine-absence check exists on that route. service/sweep.rs:1410-1564 only checks/kills scopes and process identities; it contains no Podman call or storage-removal/absence check. Even if its signals stop a live container, that is not removal of an already-stopped container's storage. The old creator contract (parent revision container.rs:1-6,484-522,569-573) deliberately placed creation outside agent containment, optionally in its own scope, and stored the absolute Podman path in CreationTicket.runtime.podman (parent lines 31-47). The new cleanup unlinks that ticket at container.rs:160-164 and never reads that known path. Revocation prevents delayed helpers from newly creating a container; it does not prove an existing container disappeared. The permanent-inode source refutation in c2 remains valid for creation after Delete, with this narrowed meaning.\n\nStartup checks: main.rs:2172-2199 delegates to service::run; core.rs:18851-18900 starts the owned runtime and constructor; core.rs:6345-6383,6429-6520 processes startup overrides and validates Farhelm/state paths without restoring a prior Podman path. Targeted PATH searches in the supervisor constructor/service and CLI plus a complete set_var search over supervisor source and main.rs found no process PATH replacement. The resolver reads the current inherited supervisor PATH, not the agent login-shell environment or the retired ticket's resolved path. These checks do not prove an affected installation has actually changed PATH.\n\nExact acceptance: SPEC.md:4820-4821 says 'Delete retains the legacy container-removal path and confirms absence. Missing Podman counts as nothing left to remove.' SPEC_impl.md:8652-8654 says 'Resolve Podman lazily. A host without Podman has nothing left to remove. Other unconfirmed cleanup keeps the session for retry.' The same wording is retained at the second assigned commit 1ed482dde220452e424973faf38a5e1318986333 (SPEC.md:4914-4915, SPEC_impl.md:8449-8451). This literally accepts genuine engine absence. It does not explicitly define an installed engine omitted from PATH, or failed metadata inspection, as genuine absence. scope.rs:1245-1257 separately documents unsupported non-UTF-8 tool paths as absent; that narrower case is documented acceptance and cannot silently broaden the rest. SPEC.md Supported host setup limits hand-written/modified service setups to best effort, so a manually damaged service PATH is not asserted as a supported automatic-upgrade regression.\n\nSuggested bucket: other for cleanup/handle loss; could-be-highest: original possible loss of orphaned user-owned processes/work is preserved, but the strongest consequence is not established and is not used to choose the bucket. Confidence: source-confirmed branch and caller behavior; unverified after investigation as a reportable contract violation. Exact remaining premise: whether the maintainer's accepted term 'Missing Podman' intentionally includes every PATH/metadata resolution failure, and whether a supported deployed host retains old container state while hitting that branch. Source settles the implementation distinction but contains no explicit acceptance for all those cases and cannot establish historical operator environments. A maintainer interpretation or a supported deployment's retained path/container evidence would settle those premises; no runtime investigation was requested or performed.\n\nproposed_drop: partial only for genuine engine absence and documented unsupported non-UTF-8 locations under the quoted rules; no blanket proposed drop for other PATH/metadata ambiguity. The parent has not accepted a drop. possible_cover: caller reports likely overlap with g001/f2 on lazy missing-engine removal and specified Delete acceptance; preserve this ID and the narrower ambiguity for parent synthesis. No other group's findings or coverage sources read. Suggested fix direction if ambiguity is not accepted: preserve a resolution-error category and retain the row on inspection errors; do not infer installation-wide absence from failure to find a command on the supervisor PATH. No experiments, reproductions, tests or builds performed. All readily checkable source premises pursued; no uninvestigated source lead remains."
+          }
+        },
+        {
+          "line": 9,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "l1",
+            "state": "open",
+            "summary": "PATH lookup failure is broader than genuine Podman absence",
+            "location": "crates/farhelm-supervisor/src/container.rs:170",
+            "detail": "Reviewed commit: 04d85f0c98a9b635709d00b056719a0baa7fd3fc.\n\nTLDR: deleting a retired container session can skip container removal and forget its handle when the supervisor cannot find Podman although the engine may remain installed. Original possible consequence retained: orphaned container storage or user-owned processes/work. No process survival, credential exposure or extra loss of work beyond the requested Delete is established.\n\nDetails: container.rs:170-190 treats None from scope::resolve_program as successful cleanup. scope.rs:1233-1281 returns None for missing/unusable PATH entries and any metadata failure, not proof of installation-wide absence. teardown.rs:570-590 revokes creation under its permanent flock, then runs ordinary process cleanup; :999-1002 deletes the row if the other steps pass. sweep.rs:1410-1564 checks processes/scopes and does not remove or inspect Podman storage. Creation revocation prevents future ticket consumption but does not prove removal of existing state. Existing stopped-container storage is the narrow cleanup consequence; strongest process/work consequences remain conditional.\n\nDiscovery-turn premise resolution requested by parent: checked actual pre-retirement producer, not just CreationTicket's type. 04d85f0c^ service/core.rs:9553-9557 calls container::preflight in supervisor request validation. More decisively, :17271-17303 constructs ContainerRuntime and calls container::executable at :17276 inside the supervisor's launch construction, before serializing LaunchSpec or starting the shim. Parent container.rs:101-107 resolves through scope::resolve_program; publish at :500-509 stores that already-resolved runtime in CreationTicket. Therefore the absolute Podman path came from the old supervisor's own inherited PATH, not an agent login shell. The agent login environment cannot supply a hidden engine that the same supervisor could not initially resolve. This disproves that proposed ordinary same-startup shipped producer; it does not establish PATH stability across a later supervisor restart, or rule out a later metadata inspection error. No supported automatic transition changing that PATH has been demonstrated.\n\nCurrent startup sources checked in the previous turn (main.rs:2172-2199; core.rs:6345-6383,6429-6520,18851-18900) neither read the old ticket's executable nor restore a previous Podman PATH. Complete supervisor/main set_var search found no process PATH replacement. A supported deployed environment's historical PATH transition is still not established from that fact alone. The old ticket's absolute path is discarded by revocation, but using it would be a possible implementation choice, not an established requirement.\n\nExact acceptance retained: SPEC.md:4820-4821 says 'Delete retains the legacy container-removal path and confirms absence. Missing Podman counts as nothing left to remove.' SPEC_impl.md:8652-8654 says 'Resolve Podman lazily. A host without Podman has nothing left to remove. Other unconfirmed cleanup keeps the session for retry.' This wording persists at the second assigned commit. scope.rs:1245-1257 explicitly treats unsupported non-UTF-8 tool locations as absent. No literal rule found equates every omitted PATH entry or metadata failure with a host without Podman. Hand-edited units and manual remote supervisor setups are best effort under SPEC.md:5251-5283, so such edits are not asserted to prove a guaranteed automatic-upgrade regression.\n\nSuggested bucket: other for unconfirmed resource cleanup and record loss. Could-be-highest: original orphaned-process/work possibility retained for independent judgment, but not established; Delete already authorizes destruction of the container and its internal files, and later process cleanup may stop it. Confidence: confirmed source route and newly resolved producer premise; unverified after investigation as a reportable contract violation. Exact missing premises remain whether 'Missing Podman' intentionally includes every pre-spawn lookup failure, and a supported deployment retaining a legacy container while hitting an unaccepted failure. Source proves old supervisor-PATH origin, not historical deployment environments or the maintainer's unstated interpretation. Retained deployment PATH/container evidence or an explicit acceptance interpretation would settle those premises; no reproduction requested/performed.\n\nproposed_drop: partial only for genuine engine absence and documented unsupported non-UTF-8 locations under the exact quoted exceptions; no blanket drop of PATH/metadata ambiguity accepted by parent. No lowering of established strongest impact. possible_cover: discovery-neighbours.json provides g001/f2 with the same lazy missing-engine cleanup/row-loss route, likely duplicate; preserve l1 for parent reconciliation. Adjacent old-terminal guarded-Delete findings are distinct, already recorded by their owners, and are not new discoveries here. All prior source references, consequences and caveats remain preserved in this event history. No new ID or newly verified bug in this premise check; source-only analysis, no execution."
+          }
+        },
+        {
+          "line": 11,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "l1",
+            "state": "open",
+            "summary": "PATH lookup failure is broader than genuine Podman absence",
+            "location": "crates/farhelm-supervisor/src/container.rs:170",
+            "detail": "Reviewed commit: 04d85f0c98a9b635709d00b056719a0baa7fd3fc.\n\nTLDR: deleting a retired container session can skip container removal and forget its handle when the supervisor cannot find Podman although the engine may remain installed. Original possible consequence retained: orphaned container storage or user-owned processes/work. No process survival, credential exposure or extra loss of work beyond the requested Delete is established.\n\nDetails: container.rs:170-190 treats None from scope::resolve_program as successful cleanup. scope.rs:1233-1281 returns None for missing/unusable PATH entries and any metadata failure, not proof of installation-wide absence. teardown.rs:570-590 revokes creation under its permanent flock, then runs ordinary process cleanup; :999-1002 deletes the row if the other steps pass. sweep.rs:1410-1564 checks processes/scopes and does not remove or inspect Podman storage. Creation revocation prevents future ticket consumption but does not prove removal of existing state. Existing stopped-container storage is the narrow cleanup consequence; strongest process/work consequences remain conditional.\n\nDiscovery-turn premise resolution requested by parent: checked actual pre-retirement producer, not just CreationTicket's type. 04d85f0c^ service/core.rs:9553-9557 calls container::preflight in supervisor request validation. More decisively, :17271-17303 constructs ContainerRuntime and calls container::executable at :17276 inside the supervisor's launch construction, before serializing LaunchSpec or starting the shim. Parent container.rs:101-107 resolves through scope::resolve_program; publish at :500-509 stores that already-resolved runtime in CreationTicket. Therefore the absolute Podman path came from the old supervisor's own inherited PATH, not an agent login shell. The agent login environment cannot supply a hidden engine that the same supervisor could not initially resolve. This disproves that proposed ordinary same-startup shipped producer; it does not establish PATH stability across a later supervisor restart, or rule out a later metadata inspection error. No supported automatic transition changing that PATH has been demonstrated.\n\nCurrent startup sources checked in the previous turn (main.rs:2172-2199; core.rs:6345-6383,6429-6520,18851-18900) neither read the old ticket's executable nor restore a previous Podman PATH. Complete supervisor/main set_var search found no process PATH replacement. A supported deployed environment's historical PATH transition is still not established from that fact alone. The old ticket's absolute path is discarded by revocation, but using it would be a possible implementation choice, not an established requirement.\n\nExact acceptance retained: SPEC.md:4820-4821 says 'Delete retains the legacy container-removal path and confirms absence. Missing Podman counts as nothing left to remove.' SPEC_impl.md:8652-8654 says 'Resolve Podman lazily. A host without Podman has nothing left to remove. Other unconfirmed cleanup keeps the session for retry.' This wording persists at the second assigned commit. scope.rs:1245-1257 explicitly treats unsupported non-UTF-8 tool locations as absent. No literal rule found equates every omitted PATH entry or metadata failure with a host without Podman. Hand-edited units and manual remote supervisor setups are best effort under SPEC.md:5251-5283, so such edits are not asserted to prove a guaranteed automatic-upgrade regression.\n\nSuggested bucket: other for unconfirmed resource cleanup and record loss. Could-be-highest: original orphaned-process/work possibility retained for independent judgment, but not established; Delete already authorizes destruction of the container and its internal files, and later process cleanup may stop it. Confidence: confirmed source route and newly resolved producer premise; unverified after investigation as a reportable contract violation. Exact missing premises remain whether 'Missing Podman' intentionally includes every pre-spawn lookup failure, and a supported deployment retaining a legacy container while hitting an unaccepted failure. Source proves old supervisor-PATH origin, not historical deployment environments or the maintainer's unstated interpretation. Retained deployment PATH/container evidence or an explicit acceptance interpretation would settle those premises; no reproduction requested/performed.\n\nproposed_drop: partial only for genuine engine absence and documented unsupported non-UTF-8 locations under the exact quoted exceptions; no blanket drop of PATH/metadata ambiguity accepted by parent. No lowering of established strongest impact. possible_cover: discovery-neighbours.json provides g001/f2 with the same lazy missing-engine cleanup/row-loss route, likely duplicate; preserve l1 for parent reconciliation. Adjacent old-terminal guarded-Delete findings are distinct, already recorded by their owners, and are not new discoveries here. All prior source references, consequences and caveats remain preserved in this event history. No new ID or newly verified bug in this premise check; source-only analysis, no execution.\n\nAdditional declared startup-PATH check this discovery turn: units.rs:57-60,94-106,132-160 explicitly composes the supported Linux supervisor service PATH from the directories holding Farhelm and the pinned tmux, followed by /usr/local/bin:/usr/bin:/bin. It does not inherit arbitrary agent login-shell PATH. Ordinary creation already requires Podman to resolve in that old supervisor PATH (parent core.rs:17274-17276), so an engine available only in an agent login shell is not a shipped producer. No change of the Farhelm/tmux directories or engine location was established. This source narrows, rather than supplies, a supported trigger for l1. Range attribution check: git log of container.rs across the whole exclusive-base/inclusive-tip range shows only the retirement and later comment-only tmux-removal commits; the base-to-retirement-parent diff for this file is empty. No later in-range repair or additional assigned edit was omitted."
+          }
+        },
+        {
+          "line": 12,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "l1",
+            "state": "open",
+            "summary": "unverified after investigation: PATH lookup failure versus Podman absence",
+            "location": "crates/farhelm-supervisor/src/container.rs:170",
+            "detail": "Reviewed commit: 04d85f0c98a9b635709d00b056719a0baa7fd3fc.\n\nTLDR: deleting a retired container session can skip container removal and forget its handle when the supervisor cannot find Podman although the engine may remain installed. Original possible consequence retained: orphaned container storage or user-owned processes/work. No process survival, credential exposure or extra loss of work beyond the requested Delete is established.\n\nDetails: container.rs:170-190 treats None from scope::resolve_program as successful cleanup. scope.rs:1233-1281 returns None for missing/unusable PATH entries and any metadata failure, not proof of installation-wide absence. teardown.rs:570-590 revokes creation under its permanent flock, then runs ordinary process cleanup; :999-1002 deletes the row if the other steps pass. sweep.rs:1410-1564 checks processes/scopes and does not remove or inspect Podman storage. Creation revocation prevents future ticket consumption but does not prove removal of existing state. Existing stopped-container storage is the narrow cleanup consequence; strongest process/work consequences remain conditional.\n\nDiscovery-turn premise resolution requested by parent: checked actual pre-retirement producer, not just CreationTicket's type. 04d85f0c^ service/core.rs:9553-9557 calls container::preflight in supervisor request validation. More decisively, :17271-17303 constructs ContainerRuntime and calls container::executable at :17276 inside the supervisor's launch construction, before serializing LaunchSpec or starting the shim. Parent container.rs:101-107 resolves through scope::resolve_program; publish at :500-509 stores that already-resolved runtime in CreationTicket. Therefore the absolute Podman path came from the old supervisor's own inherited PATH, not an agent login shell. The agent login environment cannot supply a hidden engine that the same supervisor could not initially resolve. This disproves that proposed ordinary same-startup shipped producer; it does not establish PATH stability across a later supervisor restart, or rule out a later metadata inspection error. No supported automatic transition changing that PATH has been demonstrated.\n\nCurrent startup sources checked in the previous turn (main.rs:2172-2199; core.rs:6345-6383,6429-6520,18851-18900) neither read the old ticket's executable nor restore a previous Podman PATH. Complete supervisor/main set_var search found no process PATH replacement. A supported deployed environment's historical PATH transition is still not established from that fact alone. The old ticket's absolute path is discarded by revocation, but using it would be a possible implementation choice, not an established requirement.\n\nExact acceptance retained: SPEC.md:4820-4821 says 'Delete retains the legacy container-removal path and confirms absence. Missing Podman counts as nothing left to remove.' SPEC_impl.md:8652-8654 says 'Resolve Podman lazily. A host without Podman has nothing left to remove. Other unconfirmed cleanup keeps the session for retry.' This wording persists at the second assigned commit. scope.rs:1245-1257 explicitly treats unsupported non-UTF-8 tool locations as absent. No literal rule found equates every omitted PATH entry or metadata failure with a host without Podman. Hand-edited units and manual remote supervisor setups are best effort under SPEC.md:5251-5283, so such edits are not asserted to prove a guaranteed automatic-upgrade regression.\n\nSuggested bucket: other for unconfirmed resource cleanup and record loss. Could-be-highest: original orphaned-process/work possibility retained for independent judgment, but not established; Delete already authorizes destruction of the container and its internal files, and later process cleanup may stop it. Confidence: confirmed source route and newly resolved producer premise; unverified after investigation as a reportable contract violation. Exact missing premises remain whether 'Missing Podman' intentionally includes every pre-spawn lookup failure, and a supported deployment retaining a legacy container while hitting an unaccepted failure. Source proves old supervisor-PATH origin, not historical deployment environments or the maintainer's unstated interpretation. Retained deployment PATH/container evidence or an explicit acceptance interpretation would settle those premises; no reproduction requested/performed.\n\nproposed_drop: partial only for genuine engine absence and documented unsupported non-UTF-8 locations under the exact quoted exceptions; no blanket drop of PATH/metadata ambiguity accepted by parent. No lowering of established strongest impact. possible_cover: discovery-neighbours.json provides g001/f2 with the same lazy missing-engine cleanup/row-loss route, likely duplicate; preserve l1 for parent reconciliation. Adjacent old-terminal guarded-Delete findings are distinct, already recorded by their owners, and are not new discoveries here. All prior source references, consequences and caveats remain preserved in this event history. No new ID or newly verified bug in this premise check; source-only analysis, no execution.\n\nAdditional declared startup-PATH check this discovery turn: units.rs:57-60,94-106,132-160 explicitly composes the supported Linux supervisor service PATH from the directories holding Farhelm and the pinned tmux, followed by /usr/local/bin:/usr/bin:/bin. It does not inherit arbitrary agent login-shell PATH. Ordinary creation already requires Podman to resolve in that old supervisor PATH (parent core.rs:17274-17276), so an engine available only in an agent login shell is not a shipped producer. No change of the Farhelm/tmux directories or engine location was established. This source narrows, rather than supplies, a supported trigger for l1. Range attribution check: git log of container.rs across the whole exclusive-base/inclusive-tip range shows only the retirement and later comment-only tmux-removal commits; the base-to-retirement-parent diff for this file is empty. No later in-range repair or additional assigned edit was omitted."
+          }
+        }
+      ],
+      "latest": {
+        "line": 12,
+        "event": {
+          "version": 1,
+          "kind": "finding",
+          "id": "l1",
+          "state": "open",
+          "summary": "unverified after investigation: PATH lookup failure versus Podman absence",
+          "location": "crates/farhelm-supervisor/src/container.rs:170",
+          "detail": "Reviewed commit: 04d85f0c98a9b635709d00b056719a0baa7fd3fc.\n\nTLDR: deleting a retired container session can skip container removal and forget its handle when the supervisor cannot find Podman although the engine may remain installed. Original possible consequence retained: orphaned container storage or user-owned processes/work. No process survival, credential exposure or extra loss of work beyond the requested Delete is established.\n\nDetails: container.rs:170-190 treats None from scope::resolve_program as successful cleanup. scope.rs:1233-1281 returns None for missing/unusable PATH entries and any metadata failure, not proof of installation-wide absence. teardown.rs:570-590 revokes creation under its permanent flock, then runs ordinary process cleanup; :999-1002 deletes the row if the other steps pass. sweep.rs:1410-1564 checks processes/scopes and does not remove or inspect Podman storage. Creation revocation prevents future ticket consumption but does not prove removal of existing state. Existing stopped-container storage is the narrow cleanup consequence; strongest process/work consequences remain conditional.\n\nDiscovery-turn premise resolution requested by parent: checked actual pre-retirement producer, not just CreationTicket's type. 04d85f0c^ service/core.rs:9553-9557 calls container::preflight in supervisor request validation. More decisively, :17271-17303 constructs ContainerRuntime and calls container::executable at :17276 inside the supervisor's launch construction, before serializing LaunchSpec or starting the shim. Parent container.rs:101-107 resolves through scope::resolve_program; publish at :500-509 stores that already-resolved runtime in CreationTicket. Therefore the absolute Podman path came from the old supervisor's own inherited PATH, not an agent login shell. The agent login environment cannot supply a hidden engine that the same supervisor could not initially resolve. This disproves that proposed ordinary same-startup shipped producer; it does not establish PATH stability across a later supervisor restart, or rule out a later metadata inspection error. No supported automatic transition changing that PATH has been demonstrated.\n\nCurrent startup sources checked in the previous turn (main.rs:2172-2199; core.rs:6345-6383,6429-6520,18851-18900) neither read the old ticket's executable nor restore a previous Podman PATH. Complete supervisor/main set_var search found no process PATH replacement. A supported deployed environment's historical PATH transition is still not established from that fact alone. The old ticket's absolute path is discarded by revocation, but using it would be a possible implementation choice, not an established requirement.\n\nExact acceptance retained: SPEC.md:4820-4821 says 'Delete retains the legacy container-removal path and confirms absence. Missing Podman counts as nothing left to remove.' SPEC_impl.md:8652-8654 says 'Resolve Podman lazily. A host without Podman has nothing left to remove. Other unconfirmed cleanup keeps the session for retry.' This wording persists at the second assigned commit. scope.rs:1245-1257 explicitly treats unsupported non-UTF-8 tool locations as absent. No literal rule found equates every omitted PATH entry or metadata failure with a host without Podman. Hand-edited units and manual remote supervisor setups are best effort under SPEC.md:5251-5283, so such edits are not asserted to prove a guaranteed automatic-upgrade regression.\n\nSuggested bucket: other for unconfirmed resource cleanup and record loss. Could-be-highest: original orphaned-process/work possibility retained for independent judgment, but not established; Delete already authorizes destruction of the container and its internal files, and later process cleanup may stop it. Confidence: confirmed source route and newly resolved producer premise; unverified after investigation as a reportable contract violation. Exact missing premises remain whether 'Missing Podman' intentionally includes every pre-spawn lookup failure, and a supported deployment retaining a legacy container while hitting an unaccepted failure. Source proves old supervisor-PATH origin, not historical deployment environments or the maintainer's unstated interpretation. Retained deployment PATH/container evidence or an explicit acceptance interpretation would settle those premises; no reproduction requested/performed.\n\nproposed_drop: partial only for genuine engine absence and documented unsupported non-UTF-8 locations under the exact quoted exceptions; no blanket drop of PATH/metadata ambiguity accepted by parent. No lowering of established strongest impact. possible_cover: discovery-neighbours.json provides g001/f2 with the same lazy missing-engine cleanup/row-loss route, likely duplicate; preserve l1 for parent reconciliation. Adjacent old-terminal guarded-Delete findings are distinct, already recorded by their owners, and are not new discoveries here. All prior source references, consequences and caveats remain preserved in this event history. No new ID or newly verified bug in this premise check; source-only analysis, no execution.\n\nAdditional declared startup-PATH check this discovery turn: units.rs:57-60,94-106,132-160 explicitly composes the supported Linux supervisor service PATH from the directories holding Farhelm and the pinned tmux, followed by /usr/local/bin:/usr/bin:/bin. It does not inherit arbitrary agent login-shell PATH. Ordinary creation already requires Podman to resolve in that old supervisor PATH (parent core.rs:17274-17276), so an engine available only in an agent login shell is not a shipped producer. No change of the Farhelm/tmux directories or engine location was established. This source narrows, rather than supplies, a supported trigger for l1. Range attribution check: git log of container.rs across the whole exclusive-base/inclusive-tip range shows only the retirement and later comment-only tmux-removal commits; the base-to-retirement-parent diff for this file is empty. No later in-range repair or additional assigned edit was omitted."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g095/findings.jsonl",
+        "id": "l1",
+        "line": 12,
+        "disposition": "under-investigation",
+        "group": "g095-l1",
+        "reason": "Record durably acknowledged; parent source/contract validation, cross-group synthesis, coverage/filter matching and any independent drop check remain pending. This preserves the claim and uncertainty without accepting, dropping or lowering it."
+      },
+      "accepted_parent_decision": null,
+      "returned_claim_checks": [
+        {
+          "batch": "claims-063",
+          "key": "g095/l1",
+          "latest_line": 12,
+          "recommendation": "retain-unverified",
+          "bucket": "other",
+          "underlying_key": "legacy-container-delete-conflates-podman-resolution-failure-with-absence",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The cleanup branch is real, but the latest record correctly leaves its supported trigger and contract interpretation unresolved. Genuine missing Podman is explicitly accepted; failure to resolve an installed engine is not expressly distinguished in the specifications. Retain that uncertainty rather than turning either interpretation into a fact. The reported g001/f2 overlap is outside this supplied batch and was not independently checked.",
+          "checks": [
+            "At 04d85f0c98a9b635709d00b056719a0baa7fd3fc, crates/farhelm-supervisor/src/container.rs:170-195 resolves Podman to Option, skips both rm and exists when None, and removes the initialization marker. scope.rs:1233-1281 returns None for absent PATH, relative entries, metadata errors, unusable candidates and unsupported non-UTF-8 locations. This proves process-search failure, not installation-wide engine absence.",
+            "At the same revision, service/teardown.rs:533-590 reconstructs removal authority, acquires the permanent lock, revokes the ticket, calls remove, then performs ordinary process cleanup; :999-1002 settles row removal. Ticket revocation does not itself establish removal of existing storage.",
+            "At 04d85f0c^, container.rs:101-107 resolves the executable before shell startup; service/core.rs:17271-17303 obtains that executable while constructing the runtime and publishes it. container.rs:484-509 serializes the runtime in the ticket. A Podman available only through an agent login shell is therefore not the shipped original-creation producer.",
+            "At 04d85f0c, crates/farhelm-helm/src/units.rs:57-60,94-106,132-160 constructs the supported Linux service PATH from Farhelm and tmux directories plus /usr/local/bin:/usr/bin:/bin. This narrows, but does not prove stability of, the supported deployment environment across upgrades. No affected deployment or metadata failure was observed.",
+            "The range log for container.rs contains 04d85f0c and 1ed482dde220452e424973faf38a5e1318986333; the latter changes only a control-command comment. The missing-engine branch is introduced within the review range. No runtime test, build or reproduction was run."
+          ],
+          "coverage_checked": [
+            "Current SPEC.md:4892-4899 and SPEC_impl.md:8312-8326 explicitly accept missing Podman while requiring other unconfirmed cleanup to retain the session. The same rules were checked at 04d85f0c, SPEC.md:4816-4824 and SPEC_impl.md:8647-8656. They completely cover genuine absence; whether they also mean every pre-spawn resolution failure remains ambiguous.",
+            "Current SPEC.md:5326-5358 makes hand-written/modified remote service setups best effort. Such an edit is not evidence of a supported automatic-update regression. The resolver separately documents unsupported non-UTF-8 tool locations as absent.",
+            "TODO.md:25-27 has an empty Planned bucket. BUGS.md has only the unrelated SSH transfer-helper hang. Searches of active TRIAGE_OUTCOMES.md found no matching legacy-container lookup/forgetting decision; the archive was not read.",
+            "Searched plans/queue for missing/absent Podman, retirement, lookup/resolution, tickets and cleanup. podman-environments.md:284-295,453-455 repeats genuine missing-engine acceptance; its retirement implementation already landed in 04d85f0c. No unlanded work found that remedies lookup ambiguity. The later environment-agent-operations plan concerns requests from new environment hosts.",
+            "Searched INDEX.md and read podman-storage-selection-escapes-lifecycle-lookup.md, podman-remote-routing-host-contract-ambiguity.md, confirmation-rollback-omits-container-cleanup.md and anonymous-container-volumes-survive-removal.md. None matches this executable-resolution trigger. Different storage selection, rollback omission and retained volumes are separate causes, so this is neither exact coverage nor a demonstrated extension.",
+            "FILTER.md:137-156 may cover an older retained container plus an unusual PATH change or metadata fault, and it permits affected-session work loss. The record has not established which supported transition produces its lookup failure, so a blanket classification of every claimed case as an additional rare condition is not established. No other filter fits durable false cleanup/ownership loss."
+          ],
+          "exact_cover_quotes": [
+            "SPEC.md:4896-4897: Missing Podman counts as nothing left to remove.",
+            "SPEC_impl.md:8323-8324: A host without Podman has nothing left to remove. Other unconfirmed cleanup keeps the session for retry."
+          ],
+          "missing_premise": "A supported deployment retaining an old container while hitting a lookup failure outside the intended missing-Podman acceptance; whether that acceptance intentionally includes PATH omissions and inspection failures. A stronger bucket additionally needs an established loss route beyond the destruction Delete already authorizes; process survival, credential exposure and extra work loss were not established.",
+          "original_stronger_consequence": "The initial suspicion was that forgetting a retired session could orphan its container and user-owned processes/work. The later records preserve that possibility but establish only conditional unconfirmed storage cleanup and row loss. Creation under an agent-only login PATH was source-refuted; subsequent supervisor PATH changes or metadata failures remain unobserved. No accepted blanket withdrawal exists.",
+          "needs_independent_drop_check": true,
+          "proposed_basis": "Retain the unresolved remainder. Any dismissal of genuine absence or unsupported non-UTF-8 locations, application of the upgrade filter, or exclusion of the possible process/work consequence still goes to the parent's independent drop register. This consultation is not that approval."
+        }
+      ],
+      "parent_proposals": [
+        {
+          "artifact": "parent-flagged-judgments-063.json",
+          "key": "g095/l1",
+          "proposal": "claim-checks/claims-063/result.json",
+          "parent_proposal": "retain-investigated-installed-Podman-resolution-versus-absence-ambiguity",
+          "final_independent_gate": "required-for-accepted-subcase-filter-or-original-work-consequence-lowering",
+          "reason": "Parent reread063 in complete095 and096 chunks after clipped combined output. ResolverNone can mean PATH/metadata/unusable/nonUTF8, skipping rm/exists and settling marker/row; genuine absent engine explicitly accepted, other unconfirmed cleanup should retain. Original creation resolved before agent login shell, so login-onlyPATH producer refuted; supported unitPATH narrows but does not establish future stability or actual lookup-failure deployment. Retain investigated contract/trigger uncertainty, proposed other conditional unconfirmed storage cleanup, not confirmed orphan/security/workloss. Existing001f2 likely same root must reconcile actual history. Nonstandard hand-edits/nonUTF8 explicit limits and upgrade-plus-rare filter cannot be blanket cover without a supported transition. Original possible orphaned processes/work stays for fresh gate."
+        }
+      ],
+      "collection": {
+        "retain": true,
+        "clearly_refuted_candidate": false,
+        "needs_unfinished_gate": true,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "legacy-container-delete-conflates-podman-resolution-failure-with-absence",
+        "destination": "trailing-legacy-container-delete-conflates-podman-resolution-failure-with-absence.md"
+      }
+    },
+    {
+      "key": "g095/c2",
+      "owner": "g095",
+      "id": "c2",
+      "domain": "supervisor-workspace-ownership",
+      "purpose": "supervisor-workspace-ownership: crates/farhelm-supervisor/src/container.rs; phases -    fn failed_creation_cleanup_rejects_unconfirmed_absence() {",
+      "history": [
+        {
+          "line": 3,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c2",
+            "state": "open",
+            "summary": "Delayed legacy creator cannot recreate state after deletion",
+            "location": "crates/farhelm-supervisor/src/container.rs:128",
+            "detail": "Reviewed commit: 04d85f0c98a9b635709d00b056719a0baa7fd3fc. TLDR: considered whether removing the old creator implementation permits a previously started helper to recreate a deleted session's container. Source refutation: container.rs:102-117,128-165 retains the permanent lock inode and revokes its positive ticket while holding the flock; service/teardown.rs:570-590 holds that guard across engine removal and process sweeping. The prior revision's container.rs:569-573 obtains the same ticket.with_extension(lock) flock before reading its ticket, so a waiting old helper reads a missing ticket after Delete and cannot create. A helper already holding the lock must finish before Delete gets it; lock timeout returns an error rather than revoking or forgetting ownership. Contract: SPEC_impl.md:8651-8655 requires lock/ticket handling to serialize deletion with an already-started creator and keeps unconfirmed cleanup retryable. Suggested bucket: other; could-be-highest: yes in the rejected hypothesis (untracked user processes/work), but source disproves the post-delete recreation route. Confidence: confirmed by source, no execution. proposed_drop: source refutation of the delayed-creator race; retained test container.rs:242-268 verifies shared-inode exclusion and revocation, although it does not run an old binary. possible_cover: none."
+          }
+        },
+        {
+          "line": 8,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c2",
+            "state": "open",
+            "summary": "Creator revocation prevents recreation but does not prove existing-container removal",
+            "location": "crates/farhelm-supervisor/src/container.rs:128",
+            "detail": "Reviewed commit: 04d85f0c98a9b635709d00b056719a0baa7fd3fc.\n\nTLDR: a previously started creation helper cannot spend its old ticket after Delete has revoked it; that protection does not establish removal of an already-existing container if engine lookup fails. Original rejected consequence retained: post-delete recreation could strand a container and user-owned processes/work.\n\nDetails: container.rs:102-117,128-165 retains the old permanent lock inode and removes its positive ticket under the flock. service/teardown.rs:570-590 holds the guard across removal and process sweeping. The parent revision's container.rs:569-573 acquires ticket.with_extension(lock) before reading the ticket; a waiting helper therefore cannot create after revocation. A creator already holding the flock must finish before Delete acquires it, and a lock timeout retains the session. However parent container.rs:31-47,484-509 stores a resolved absolute engine path in that ticket, while new cleanup removes the ticket without using it. Neither deleting the ticket nor serializing with the creator says whether a previously created container is absent. The independent c2 recreation refutation cannot be used to drop l1's PATH/metadata lookup ambiguity or its possible orphaned-process/work consequence. No change in the relevant executable code at the second assigned container.rs patch.\n\nContract: SPEC_impl.md:8651-8655 requires legacy removal/absence checks plus lock/ticket serialization, and explicitly accepts a host without Podman. These are separate requirements. Suggested bucket: other; could-be-highest: yes in the rejected recreation hypothesis, but source disproves that route and does not establish the separate l1 strongest consequence. Confidence: confirmed source refutation for delayed-ticket creation only. proposed_drop: source refutation limited to recreation after successful ticket revocation; no assertion that this proves removal of existing state. possible_cover: none for this independent serialization consideration; caller reports g001/f2 overlap only for l1's engine-absence route. No execution performed."
+          }
+        }
+      ],
+      "latest": {
+        "line": 8,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c2",
+          "state": "open",
+          "summary": "Creator revocation prevents recreation but does not prove existing-container removal",
+          "location": "crates/farhelm-supervisor/src/container.rs:128",
+          "detail": "Reviewed commit: 04d85f0c98a9b635709d00b056719a0baa7fd3fc.\n\nTLDR: a previously started creation helper cannot spend its old ticket after Delete has revoked it; that protection does not establish removal of an already-existing container if engine lookup fails. Original rejected consequence retained: post-delete recreation could strand a container and user-owned processes/work.\n\nDetails: container.rs:102-117,128-165 retains the old permanent lock inode and removes its positive ticket under the flock. service/teardown.rs:570-590 holds the guard across removal and process sweeping. The parent revision's container.rs:569-573 acquires ticket.with_extension(lock) before reading the ticket; a waiting helper therefore cannot create after revocation. A creator already holding the flock must finish before Delete acquires it, and a lock timeout retains the session. However parent container.rs:31-47,484-509 stores a resolved absolute engine path in that ticket, while new cleanup removes the ticket without using it. Neither deleting the ticket nor serializing with the creator says whether a previously created container is absent. The independent c2 recreation refutation cannot be used to drop l1's PATH/metadata lookup ambiguity or its possible orphaned-process/work consequence. No change in the relevant executable code at the second assigned container.rs patch.\n\nContract: SPEC_impl.md:8651-8655 requires legacy removal/absence checks plus lock/ticket serialization, and explicitly accepts a host without Podman. These are separate requirements. Suggested bucket: other; could-be-highest: yes in the rejected recreation hypothesis, but source disproves that route and does not establish the separate l1 strongest consequence. Confidence: confirmed source refutation for delayed-ticket creation only. proposed_drop: source refutation limited to recreation after successful ticket revocation; no assertion that this proves removal of existing state. possible_cover: none for this independent serialization consideration; caller reports g001/f2 overlap only for l1's engine-absence route. No execution performed."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g095/findings.jsonl",
+        "id": "c2",
+        "line": 8,
+        "disposition": "under-investigation",
+        "group": "g095-c2",
+        "reason": "Record durably acknowledged; parent source/contract validation, cross-group synthesis, coverage/filter matching and any independent drop check remain pending. This preserves the claim and uncertainty without accepting, dropping or lowering it."
+      },
+      "accepted_parent_decision": null,
+      "returned_claim_checks": [
+        {
+          "batch": "claims-063",
+          "key": "g095/c2",
+          "latest_line": 8,
+          "recommendation": "refuted",
+          "bucket": "other",
+          "underlying_key": "legacy-container-delayed-creator-after-ticket-revocation",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The source disproves the narrowly stated post-Delete ticket-spending race. Delete and an old helper use the same permanent lock inode, and the old helper reads its positive ticket only after acquiring that lock. This says nothing about removal of an already-existing container in g095/l1.",
+          "checks": [
+            "At 04d85f0c98a9b635709d00b056719a0baa7fd3fc, container.rs:102-117 derives the permanent lock/ticket paths; :128-165 acquires the flock and revokes the ticket without unlinking the lock. A lock timeout errors before removal/forgetting.",
+            "At the same revision, service/teardown.rs:570-590 retains container_guard across revocation, removal and the subsequent sweep. At 04d85f0c^, container.rs:569-579 opens ticket.with_extension(\"lock\"), acquires it, then reads/deserializes the ticket. A waiter after successful revocation sees no ticket; a creator already holding the lock must finish before Delete acquires it.",
+            "The retained test at container.rs:242-268 models shared-inode exclusion and revocation. It was read as supporting source, not run or represented as an old-binary experiment. The 1ed482d container change is comment-only."
+          ],
+          "coverage_checked": [
+            "Current SPEC.md:4892-4899 and SPEC_impl.md:8312-8326 require deletion-only retirement and lock/ticket serialization. They agree with the implemented fence; acceptance of genuine missing Podman is a separate rule.",
+            "TODO Planned is empty; BUGS contains no corresponding creator race. Searches of plans/queue, INDEX.md and active TRIAGE_OUTCOMES.md for legacy container tickets, creation fences, delayed helpers and revocation found no exact item. podman-environments.md:284-295 specifies keeping necessary lock/ticket handling and its retirement code has landed. The existing lookup/storage queue item is a different root.",
+            "No filter is needed for the source refutation. The previously possible loss of processes/work is preserved and requires an independent drop check."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": "No remaining source premise supports creation after successful ticket revocation on this route. This refutation does not prove an existing container was removed when executable resolution fails.",
+          "original_stronger_consequence": "A delayed pre-upgrade helper might recreate a deleted session's container, stranding untracked user-owned processes/work. Both historical events reject that specific recreation route; line 8 expressly narrows the refutation so it cannot dismiss g095/l1's existing-state cleanup ambiguity.",
+          "needs_independent_drop_check": true,
+          "proposed_basis": "Source refutation limited to post-revocation creation through the old positive ticket, subject to the parent's fresh independent drop check."
+        }
+      ],
+      "parent_proposals": [
+        {
+          "artifact": "parent-flagged-judgments-063.json",
+          "key": "g095/c2",
+          "proposal": "claim-checks/claims-063/result.json",
+          "parent_proposal": "source-refuted-old-creator-spends-ticket-after-successful-Delete-revocation",
+          "final_independent_gate": "required-before-original-process-work-drop",
+          "reason": "Full063 old creator and Delete use same permanent lock inode, never unlinked; old helper obtains lock before positive ticket read, Delete retains guard through revocation/removal/sweep. Already-running creator finishes before Delete; later waiter sees revoked ticket. Lock timeout errors before forgetting. Refute post-revocation recreation only, not whether existing container was removed under resolver failure095l1. Preserve original untracked process/work theory for gate; retained test source not an executed old-binary experiment."
+        }
+      ],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": true,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "legacy-container-delayed-creator-after-ticket-revocation",
+        "destination": null
+      }
+    },
+    {
+      "key": "g095/c3",
+      "owner": "g095",
+      "id": "c3",
+      "domain": "supervisor-workspace-ownership",
+      "purpose": "supervisor-workspace-ownership: crates/farhelm-supervisor/src/container.rs; phases -    fn failed_creation_cleanup_rejects_unconfirmed_absence() {",
+      "history": [
+        {
+          "line": 4,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c3",
+            "state": "open",
+            "summary": "Canonical UUID reconstruction preserves shipped ticket coordinates",
+            "location": "crates/farhelm-supervisor/src/container.rs:90",
+            "detail": "Reviewed commit: 04d85f0c98a9b635709d00b056719a0baa7fd3fc. TLDR: considered whether normalizing a stored session UUID could cause Delete to lock/revoke different files from an old creator, whose ticket path used the raw ID. Source: new container.rs:90-93 canonicalizes the UUID; container.rs:106-123 derives ticket and lock paths from it. service/core.rs:2450-2464 mints session IDs with Uuid::new_v4().to_string(), the same canonical spelling, so the shipped allocation path does not produce an uppercase, compact, or braced legacy ID that would change coordinates. Suggested bucket: other; could-be-highest: yes for the hypothetical split-fence route allowing a forgotten creator/process, but no shipped noncanonical-ID premise exists in the inspected allocation source. Confidence: confirmed refutation for the inspected allocator; no execution and no assertion about hand-edited database rows. proposed_drop: no source route from the canonical session allocator to mismatched lock/ticket coordinates. possible_cover: none."
+          }
+        }
+      ],
+      "latest": {
+        "line": 4,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c3",
+          "state": "open",
+          "summary": "Canonical UUID reconstruction preserves shipped ticket coordinates",
+          "location": "crates/farhelm-supervisor/src/container.rs:90",
+          "detail": "Reviewed commit: 04d85f0c98a9b635709d00b056719a0baa7fd3fc. TLDR: considered whether normalizing a stored session UUID could cause Delete to lock/revoke different files from an old creator, whose ticket path used the raw ID. Source: new container.rs:90-93 canonicalizes the UUID; container.rs:106-123 derives ticket and lock paths from it. service/core.rs:2450-2464 mints session IDs with Uuid::new_v4().to_string(), the same canonical spelling, so the shipped allocation path does not produce an uppercase, compact, or braced legacy ID that would change coordinates. Suggested bucket: other; could-be-highest: yes for the hypothetical split-fence route allowing a forgotten creator/process, but no shipped noncanonical-ID premise exists in the inspected allocation source. Confidence: confirmed refutation for the inspected allocator; no execution and no assertion about hand-edited database rows. proposed_drop: no source route from the canonical session allocator to mismatched lock/ticket coordinates. possible_cover: none."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g095/findings.jsonl",
+        "id": "c3",
+        "line": 4,
+        "disposition": "under-investigation",
+        "group": "g095-c3",
+        "reason": "Record durably acknowledged; parent source/contract validation, cross-group synthesis, coverage/filter matching and any independent drop check remain pending. This preserves the claim and uncertainty without accepting, dropping or lowering it."
+      },
+      "accepted_parent_decision": null,
+      "returned_claim_checks": [
+        {
+          "batch": "claims-063",
+          "key": "g095/c3",
+          "latest_line": 4,
+          "recommendation": "refuted",
+          "bucket": "other",
+          "underlying_key": "legacy-container-canonical-uuid-split-creation-fence",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The suspected split fence requires a noncanonical stored session UUID. The shipped identity allocator already emits canonical UUID strings, including at the range base. Parsing and reformatting that string preserves the old creator's coordinates.",
+          "checks": [
+            "At 04d85f0c98a9b635709d00b056719a0baa7fd3fc, container.rs:90-93 canonicalizes the parsed UUID; :106-123 derives the lock/ticket/initialization paths from it. service/core.rs:2450-2464 allocates with Uuid::new_v4().to_string().",
+            "At base 6e423e30068b62c6cfa276c6d720ee35bb70387a, service/core.rs:2470-2473 already uses the same canonical allocator. At 04d85f0c^, container creation publishes and later consumes the same runtime's ticket under its sibling lock (container.rs:484-509,569-579). No uppercase, compact or braced ID producer was established.",
+            "No hand-edited database-row behavior was exercised or certified. No runtime work was performed."
+          ],
+          "coverage_checked": [
+            "Checked current SPEC.md:4892-4899 and SPEC_impl.md:8312-8326 for legacy deletion/creator serialization. Neither is relied on as accepting a mismatched lock; the disposition rests on the allocator premise being absent.",
+            "TODO Planned is empty; BUGS has no UUID/fence item. Searches of plans/queue, INDEX.md and active TRIAGE_OUTCOMES.md for noncanonical/canonical UUIDs, legacy ticket coordinates and split creation fences found no exact match. podman-environments.md's retirement section supplies context, not a separate fix for this hypothetical.",
+            "No FILTER rule is invoked; an unshipped noncanonical-ID premise is source-refuted rather than dismissed merely because it would be rare."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": "A shipped producer of noncanonical session IDs that existed in old tickets. The checked allocator produces canonical strings; hand-edited rows are outside the asserted source refutation.",
+          "original_stronger_consequence": "Different raw/canonical ticket and lock paths could split the creation fence and allow a forgotten creator or user-owned process to survive Delete. This was only a hypothetical route and was not observed.",
+          "needs_independent_drop_check": true,
+          "proposed_basis": "Source refutation of the shipped allocator-to-mismatched-coordinates route, retaining the explicit hand-edited-row limit, for the parent's independent drop check."
+        }
+      ],
+      "parent_proposals": [
+        {
+          "artifact": "parent-flagged-judgments-063.json",
+          "key": "g095/c3",
+          "proposal": "claim-checks/claims-063/result.json",
+          "parent_proposal": "source-refuted-canonicalization-splits-old-session-ticket-coordinates",
+          "final_independent_gate": "required-before-original-process-work-drop",
+          "reason": "Full063 production allocator emits canonical UUIDv4 strings at base and retirement revision; parsing/to_string preserves old helper runtime ticket/lock paths. No uppercase/compact/braced producer established. Refute shipped allocator→split fence only, not hand-edited DB rows; retain original forgotten creator/user-process possibility and independent gate, no rarity shortcut."
+        }
+      ],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": true,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "legacy-container-canonical-uuid-split-creation-fence",
+        "destination": null
+      }
+    },
+    {
+      "key": "g095/c4",
+      "owner": "g095",
+      "id": "c4",
+      "domain": "supervisor-workspace-ownership",
+      "purpose": "supervisor-workspace-ownership: crates/farhelm-supervisor/src/container.rs; phases -    fn failed_creation_cleanup_rejects_unconfirmed_absence() {",
+      "history": [
+        {
+          "line": 10,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c4",
+            "state": "open",
+            "summary": "Removing container exec does not turn queued legacy launches into host execution",
+            "location": "crates/farhelm-supervisor/src/container.rs:1",
+            "detail": "Reviewed commit: 04d85f0c98a9b635709d00b056719a0baa7fd3fc.\n\nTLDR: considered whether deleting this module's ContainerLaunch implementation lets a queued pre-upgrade container launch execute its agent on the outside host, discarding the requested isolation. That would be security-impacting, but the actual launch decoder refuses the queued spec.\n\nDetails: the assigned container.rs patch removes ContainerLaunch and its preparation/exec functions. The same revision's launch.rs:226-230 preserves the old container field as Option<serde_json::Value>, with serde default and skip_serializing, rather than silently ignoring it. launch.rs:1168-1175 checks its presence immediately after decoding and records the retirement refusal before checkout preparation, working-directory changes or agent exec. The patch also includes a_queued_retired_container_spec_never_executes_on_the_host at launch.rs:3252 onward. No runtime execution was performed; refutation rests on the production guard, not on a claimed test pass. Parent source previously serialized an object in that optional field; a null field represented no container, so null handling does not erase a shipped container intent.\n\nContract: SPEC_impl.md:8647-8656 requires refusal of every retired launch/exec path and no new old-style session. Suggested bucket: highest if the rejected host-execution route existed. Could-be-highest: yes, isolation bypass. Confidence: confirmed source refutation for current binaries consuming queued specs. proposed_drop: explicit compatibility marker and pre-exec refusal disprove the suspected route, not generic retirement acceptance. possible_cover: none known from supplied interface context; no prohibited coverage source searched. Caveat: an already-running older binary retains its own implementation and is separately governed by c2's lock/ticket handling. This candidate concerns consumption by a new binary only."
+          }
+        }
+      ],
+      "latest": {
+        "line": 10,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c4",
+          "state": "open",
+          "summary": "Removing container exec does not turn queued legacy launches into host execution",
+          "location": "crates/farhelm-supervisor/src/container.rs:1",
+          "detail": "Reviewed commit: 04d85f0c98a9b635709d00b056719a0baa7fd3fc.\n\nTLDR: considered whether deleting this module's ContainerLaunch implementation lets a queued pre-upgrade container launch execute its agent on the outside host, discarding the requested isolation. That would be security-impacting, but the actual launch decoder refuses the queued spec.\n\nDetails: the assigned container.rs patch removes ContainerLaunch and its preparation/exec functions. The same revision's launch.rs:226-230 preserves the old container field as Option<serde_json::Value>, with serde default and skip_serializing, rather than silently ignoring it. launch.rs:1168-1175 checks its presence immediately after decoding and records the retirement refusal before checkout preparation, working-directory changes or agent exec. The patch also includes a_queued_retired_container_spec_never_executes_on_the_host at launch.rs:3252 onward. No runtime execution was performed; refutation rests on the production guard, not on a claimed test pass. Parent source previously serialized an object in that optional field; a null field represented no container, so null handling does not erase a shipped container intent.\n\nContract: SPEC_impl.md:8647-8656 requires refusal of every retired launch/exec path and no new old-style session. Suggested bucket: highest if the rejected host-execution route existed. Could-be-highest: yes, isolation bypass. Confidence: confirmed source refutation for current binaries consuming queued specs. proposed_drop: explicit compatibility marker and pre-exec refusal disprove the suspected route, not generic retirement acceptance. possible_cover: none known from supplied interface context; no prohibited coverage source searched. Caveat: an already-running older binary retains its own implementation and is separately governed by c2's lock/ticket handling. This candidate concerns consumption by a new binary only."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g095/findings.jsonl",
+        "id": "c4",
+        "line": 10,
+        "disposition": "under-investigation",
+        "group": "g095-c4",
+        "reason": "Record durably acknowledged; parent source/contract validation, cross-group synthesis, coverage/filter matching and any independent drop check remain pending. This preserves the claim and uncertainty without accepting, dropping or lowering it."
+      },
+      "accepted_parent_decision": null,
+      "returned_claim_checks": [
+        {
+          "batch": "claims-063",
+          "key": "g095/c4",
+          "latest_line": 10,
+          "recommendation": "refuted",
+          "bucket": "other",
+          "underlying_key": "retired-container-launch-reinterpreted-as-host-execution",
+          "aliases": [
+            "g096/c1"
+          ],
+          "target_queue_file": null,
+          "why": "A new binary retains and rejects the old queued container marker before preparation or execution. Removal of ContainerLaunch therefore does not silently reinterpret that queued launch as host execution. The queued-spec branch is the same rejected root considered in g096/c1; that record also checks broader admission/account-authority concerns.",
+          "checks": [
+            "At 04d85f0c98a9b635709d00b056719a0baa7fd3fc, launch.rs:226-230 keeps container as Option<serde_json::Value> with default and skip_serializing, which still deserializes an old object-valued marker. launch.rs:1168-1175 checks is_some immediately after decoding and returns a recorded retirement failure before checkout preparation, cwd entry or exec.",
+            "At 04d85f0c^, service/core.rs:17271-17303 constructs Some(ContainerLaunch) when config exists; absence represents an ordinary launch. The old object intent therefore cannot become None merely because the new executable has removed the old implementation. Null is not the serialized form of a configured ContainerLaunch.",
+            "The regression at launch.rs:3252 onward was inspected but not run. The refutation rests on the production guard. An already-running older binary is a separate case governed by g095/c2's ticket fence."
+          ],
+          "coverage_checked": [
+            "Current SPEC.md:4892-4899 and SPEC_impl.md:8312-8326 require refusal of retired exec/lifecycle paths and no new old-style session. The historical retirement specification at 04d85f0c was also checked. These are constraints that the inspected guard meets, not permission for isolation bypass.",
+            "TODO Planned is empty; BUGS has no queued-container host-execution acceptance. Searched plans/queue, INDEX.md and active TRIAGE_OUTCOMES.md for retired/container host fallback, queued specs, removed account selection and isolation. podman-environments.md:284-295,453-455 requires retirement; no exact open issue or unlanded remedial plan found.",
+            "The existing Podman storage-selection and remote-routing records concern engine selection while the old implementation runs, not decoding a queued launch with a new binary. They do not cover this candidate. FILTER's upgrade rule excludes security/trust-boundary consequences and cannot justify dropping this isolation-bypass hypothesis."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": "No execution route remains through the decoded old object marker: the source guard rejects it. The checked conclusion applies to a new binary consuming the queued spec, not every endpoint or an older binary already executing.",
+          "original_stronger_consequence": "A queued pre-upgrade container launch could execute its agent directly on the outside host, discarding requested isolation. This would be highest if present; no bypass route or runtime occurrence was established.",
+          "needs_independent_drop_check": true,
+          "proposed_basis": "Production compatibility marker plus pre-exec refusal source-refutes the named host-execution route. Ask the parent's independent drop checker to assess that exact scope and preserve the old-binary caveat."
+        }
+      ],
+      "parent_proposals": [
+        {
+          "artifact": "parent-flagged-judgments-063.json",
+          "key": "g095/c4",
+          "proposal": "claim-checks/claims-063/result.json",
+          "parent_proposal": "source-refuted-new-binary-queued-container-object-becomes-host-launch",
+          "final_independent_gate": "required-before-highest-isolation-drop",
+          "reason": "Full063 new decode keeps object-valued old marker as Option<Value> despite skip_serializing; is_some refuses before preparation/cwd/exec. Old configured ContainerLaunch serializes object, not null. Refute new executable queued-spec reinterpretation only; older already-running binary separately needs095c2 ticket fence. Same queued subset096c1, not every endpoint. Preserve original outside-host Agent/isolation/security consequence for fresh check."
+        }
+      ],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": true,
+        "provisional_bucket": "highest",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "retired-container-launch-reinterpreted-as-host-execution",
+        "destination": null
+      }
+    }
+  ],
+  "replies": [
+    {
+      "turn": 1,
+      "reply": "Initial review complete: all 1,456 assigned patch lines reviewed.\n\nNo confirmed actionable defect. Logged `l1` with a specification-based proposed drop, plus source-refuted candidates `c2` and `c3`. No unresolved leads.\n\nFindings and progress saved in the assigned directory. No tests, reproductions, or checkout changes performed."
+    },
+    {
+      "turn": 2,
+      "reply": "Revised `l1`: genuine Podman absence is explicitly accepted; PATH omissions and metadata failures are broader. Removed the blanket proposed drop and documented remaining contract/deployment premises.\n\nRevised `c2`: creator revocation prevents recreation but does not prove removal of existing container state.\n\nNo new IDs. No open lead IDs; `l1` retains explicit unresolved premises. No execution performed."
+    },
+    {
+      "turn": 3,
+      "reply": "No new reportable issue found.\n\nChecked cleanup ordering, lock/ticket handling, retained test oracles, queued-launch refusal, and full-range attribution. Revised `l1`: the old creator resolved Podman from the supervisor’s PATH, not the agent’s login environment.\n\nNew verified IDs: none. New unverified IDs: none. Refuted candidate: `c4`. Open leads: none; `l1` retains documented external uncertainties.\n\nProgress updated. No execution performed."
+    },
+    {
+      "turn": 4,
+      "reply": "Appended `l1` revision at findings.jsonl line 12, explicitly labeled “unverified after investigation.” Detail unchanged.\n\nNo substantive discovery occurred. Discovery count remains 1, with turn 3 empty. Open lead IDs: none."
+    }
+  ],
+  "progress": "Group: g095 supervisor-workspace-ownership\nState: separate discovery pass complete; no new actionable finding or unresolved source lead.\nTurn type/count: discovery / 3 (initial 1, synthesis 1, discovery 1). Discovery-pass count: 1.\nCoverage: complete commits field read from inventory.json; excluded coverage metadata not consulted. All assigned evidence delivered: 00291-000.patch lines 1-1334, 00291-001.patch lines 1-109, 00905-000.patch lines 1-13 (1456 lines total). No omitted or unread assigned scope.\nContracts: pinned SPEC.md Retired containerized sessions, Ownership during cleanup and provisioning, Paths that are not valid UTF-8; SPEC_impl.md Rootless Podman sessions and Answers bind to what was drawn read. Retirement contracts checked at both selected commits. No GUI handler is present in assigned source.\nInterfaces: legacy removal reconstructs only UUID/state coordinates; teardown holds lifecycle ownership and the permanent creation flock across ticket revocation, the engine-removal branch and process sweeping. Prior helper acquires this same inode before reading its ticket. Current source has no old creator entry point; normal recipe-backed containers use their own supervisor. Podman resolution is lazy; genuine engine absence is explicitly accepted, but a None result also includes PATH/metadata ambiguity whose acceptance is not explicit. Resolved-engine errors do not authorize deletion without exists=1. Revocation bars future creation, while the subsequent scope/process sweep does not prove existing container storage removed. Allocation emits canonical UUID strings in both the reviewed commit and its parent.\nRecords this pass: revised original l1 with actual pre-retirement producer and supported Linux unit PATH checks. Parent core.rs:17274-17303 resolves the executable in the supervisor before publishing the spec/ticket; the agent login-shell PATH is not the source. units.rs:57-60,94-106,132-160 composes the supervisor PATH from Farhelm/tmux directories and fixed system directories. This narrows rather than supplies a supported PATH-change trigger; l1 retains its original consequence, exact acceptance text, partial proposed-drop bases, and external acceptance/deployment premises. New candidate c4 records source refutation of queued-spec host-execution concern: launch.rs retains the old container marker and refuses before preparation/exec. No new actionable finding. c2,c3 unchanged.\nDiscovery checks: read complete supplied discovery-neighbours.json (107 lines) for interface context/novelty; no original neighbour logs or prohibited queue sources read. Re-read full replacement container.rs and retained tests, checked removal/marker ordering, permanent-lock acquisition, installed-engine absence-status branches, fixture premises, fake-engine oracle and second commit's comment-only change. Queued-spec interface source/test read at launch.rs:1130-1215,3248-3320; the refusal message assertion distinguishes retirement from missing-cwd/preparation failure, so no distinct test-oracle issue was found. Entire pinned-range container.rs history has just the two assigned commits; base-to-retirement-parent diff is empty, preventing unsupported intermediate-change attribution. All assigned scope remains read.\nNew verified finding IDs: none. New unverified-after-investigation finding IDs: none. New refuted candidate IDs: c4. Revised known IDs: l1. Remaining open lead IDs: none. l1 retains explicit external contract/deployment uncertainties as a finding, with no uninvestigated readily checkable source premise. Discovery result: nothing new reportable found.\nExecution: source-only analysis; no builds, runtime tests or reproductions run. No checkout files modified. No coverage queue sources read.\nNext action: return discovery delta to parent; parent reconciles l1 with g001/f2 and checks exact acceptance independently. No parent drop/lowering accepted here. No separate final report created. No unread assigned scope.\nBookkeeping turn 4: appended one l1 revision with summary explicitly labeled \"unverified after investigation\". Its detail is unchanged from event line 11, preserving consequences, priority caveats, checks, missing premises, settling evidence, partial proposed drop and g001/f2 alias. Label correction only; no source search, new check, substantive discovery or accepted parent drop. Discovery-pass count remains 1; the final discovery pass remains the credibly empty turn 3. Open lead IDs remain none; l1 retains its stated external uncertainties.\n"
+}

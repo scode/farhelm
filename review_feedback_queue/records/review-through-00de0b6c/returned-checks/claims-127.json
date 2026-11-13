@@ -1,0 +1,73 @@
+[
+  {
+    "key": "g018/f9",
+    "latest_line": 29,
+    "recommendation": "retain-verified",
+    "bucket": "other",
+    "underlying_key": "recipe-template-management-refusal-denies-supported-agent-launch-use",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "An ordinary agent editing or deleting a saved recipe template receives a refusal saying recipe templates can only be used and edited in the GUI. Management refusal is intended, but the use restriction contradicts the supported create --template launch path. The obsolete pending-billing comment and matching test assertion are the same wording defect, not separate findings. This is diagnostic and contract accuracy; no authorization failure or loss of user work is alleged.",
+    "checks": [
+      {
+        "reference": "g018/findings.jsonl:26-29",
+        "result": "Read all four f9 events completely; a same-ID search found no later event. The lead becomes a source-confirmed finding; no withdrawal, proposed drop, or stronger security/work-loss consequence appears. Earlier attribution and caller uncertainties are explicitly resolved by events 28-29."
+      },
+      {
+        "reference": "190d844e58c96cf197aa838d0b0eea8062f48435:crates/farhelm-helm/src/agent_requests.rs:3164-3172,3207,3316-3337,3714-3741",
+        "result": "A supplied recipe target is refused before approval; existing recipe templates are rejected by find_template, reached by edit and delete. recipe_template_refusal says 'Recipe templates can only be used and edited in Farhelm's GUI' and documents GUI-only use pending billing design. This is a real management-request diagnostic, not merely unused text."
+      },
+      {
+        "reference": "190d844e58c96cf197aa838d0b0eea8062f48435:SPEC.md:1441-1568,4197-4227,4289-4342; SPEC_impl.md:6658-6702",
+        "result": "Complete governing sections distinguish management from launch: SPEC.md:1563-1564 limits GUI-only to listing and writing and expressly allows ordinary-host create --template; :4324-4335 permits recipe-target templates through their own Allow/Deny card. SPEC_impl.md:6680 expressly routes a plain hostless create using a recipe template through the environment-launch path. Thus correct management refusal does not make the broader guidance true."
+      },
+      {
+        "reference": "190d844e58c96cf197aa838d0b0eea8062f48435:crates/farhelm-helm/src/agent_requests.rs:1991-2008,4215-4245,14901-14920,15005-15115; exact parent-to-child diff",
+        "result": "The feature adds the fleet-origin, non-spawn, hostless recipe-template branch to plan and launch an environment using saved templates and known recipes. The management test retains the false wording. The launch test constructs a hostless Create with dev-container and expects LaunchEnvironment plus direct Allow before Deny. These are source and test-oracle checks only; no test was executed."
+      },
+      {
+        "reference": "6e423e30068b62c6cfa276c6d720ee35bb70387a:crates/farhelm-helm/src/agent_requests.rs:3417-3422; agent_launch.rs:150-180; 190d844e58c96cf197aa838d0b0eea8062f48435^:agent_requests.rs:2360-2390,3620-3640",
+        "result": "The literal and rationale predate the range. The exclusive base uses known_recipes: &[] and the feature parent uses the restricted resolver; the feature introduces the supported recipe-template launch path while retaining the message. Attribution is an in-range semantic contradiction introduced by 190d844e, not introduction of the literal."
+      },
+      {
+        "reference": "00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db:crates/farhelm-helm/src/agent_requests.rs:3171-3172,3208,3326,3726-3741,14921-14925; 24bc058066fd57848e788b465719b0e6da2f98f7:same file:3735-3741",
+        "result": "The endpoint preserves the production refusal callers, obsolete comment, message, and exact test assertion. Recording-time main still contains the same helper text. No repaired-current-state dismissal applies."
+      }
+    ],
+    "coverage_checked": [
+      {
+        "source": "SPEC.md and SPEC_impl.md at recording-time main 24bc058066fd57848e788b465719b0e6da2f98f7",
+        "result": "Searched recipe templates, GUI-only, use/edit wording, management refusal and billing rationale; read matching current Sandbox sessions and Agents and environments sections, Agent requests and environments, and recipe-template implementation paragraphs. SPEC.md:1568-1569 and :4286-4305 and SPEC_impl.md:6186-6206,6631-6637 preserve the use-versus-management distinction. They establish the defect rather than accept misleading diagnostic text."
+      },
+      {
+        "source": "TODO.md:25-27 and matching recipe-template context:325-328",
+        "result": "Planned is empty. The Mid term sandbox conveniences item defers recent setups, Save as template and bulk lifecycle operations; it does not address agent management-refusal wording. No coverage."
+      },
+      {
+        "source": "plans/queue searches; environment-agent-operations.md:1-178; sandbox-sessions.md:791-840; plans/REPORTS.md:7,21,28",
+        "result": "Searched exact recipe-template/refusal/billing wording and related launch terms across queued plans. The matching environment operations plan authorizes ordinary-host template launches; it and sandbox-sessions are already landed per REPORTS.md. The older sandbox prohibition is superseded by that landed feature and current specs. No unlanded plan was found whose stated work removes this wording defect."
+      },
+      {
+        "source": "BUGS.md, complete",
+        "result": "Only the unrelated SSH-helper output hang is recorded; no acceptance of inaccurate recipe-template guidance."
+      },
+      {
+        "source": "review_feedback_queue/INDEX.md, complete; targeted queue-file search; restart-template-plan-overstates-refusal.md, complete",
+        "result": "No exact recipe-template-management diagnostic item found. The similarly worded restart item concerns a historical plan's incorrect blanket assertion about kindless Restart templates, not this shipped refusal message. No exact alias or useful extension to an existing item identified. Primary g018/f2 is named in the supplied history as placement-catalog/helper-link documentation, a distinct root; its owner history was not searched."
+      },
+      {
+        "source": "TRIAGE_OUTCOMES.md targeted searches; matching sections restart-template-plan-overstates-refusal.md:1514-1528 and settings-save-races-final-replacement.md:1756-1784",
+        "result": "No exact trigger/consequence/scope decision found. The Restart-plan discard excludes operational planning artifacts; f9 concerns product diagnostic text and source comments. Recipe credential-delivery decisions are unrelated. Archive not read."
+      },
+      {
+        "source": "review_feedback_queue/FILTER.md, complete",
+        "result": "No full boundary matches. 'Rare, self-correcting glitches and imprecise diagnostics' requires a rare trigger as well as a diagnostic-only consequence. The supported shipped template edit/delete commands deterministically produce this wording; no crash, timing window, upgrade or unsupported input is needed. Other filters concern unrelated triggers."
+      }
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": "None for the narrow source-confirmed misleading-refusal claim. No runtime observation, frequency measurement, agent reliance, security impact, or lost-work consequence was established or claimed. No reproductions, tests, builds, process actions, live-install operations, checkout writes, or VCS mutations were performed.",
+    "original_stronger_consequence": "None. From event 26 onward the proposed consequence is inaccurate user-facing restriction guidance, independent of the valid edit/delete refusal. All events expressly deny an authorization or user-work-loss allegation; event 29 treats the stale assertion as corroboration rather than a separate test defect.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Retain one verified other-priority finding for the overbroad recipe-template-management refusal and obsolete rationale. Preserve intentional management restrictions and approval requirements. Correct wording and its existing assertion, rather than lifting the restriction. No coverage, filtering, refutation, withdrawal, consequence lowering, or final parent decision is proposed."
+  }
+]

@@ -1,0 +1,127 @@
+[
+  {
+    "key": "g087/l1",
+    "latest_line": 13,
+    "recommendation": "retain-verified",
+    "bucket": "high",
+    "underlying_key": "environment-recent-retargets-fixed-source-replace",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "An offered environment Recent sets a fresh-environment target in Replace with, whose submission refuses that target and whose placement picker is disabled. Reset choices preserves it. This is an ordinary workflow stall, recoverable by cancel/reopen or an applicable ordinary-host choice, not permanent inability to replace. Confirmed by source; not reproduced.",
+    "checks": [
+      "350a4b33b6d4476f4a78e43cea124bc2b828f462, draft.rs patch at accept_recent and the Recent search branch: newly bypasses ordinary-history admission for entry.target Some and sets draft.select_target(entry.target.clone()); parent direct admission at 1952-1968 and search at 2772-2776 had no target assignment. Bounded-range -G entry.target|WOKEN_CONNECTION history identifies 350a4b33 and the separate timeout commit. The introduction is within the review range, not the later retirement patch.",
+      "350a4b33:create_form.rs:5991-5998 refuses any fresh target under host_fixed; :7449-7456 disables PlacementPicker for host_fixed. These constraints coexist with the new Recent application.",
+      "04d85f0c98a9b635709d00b056719a0baa7fd3fc:create_form.rs:1478-1490,4296-4304 merges environment history without a fixed-source filter; :4336-4343 ranks recents; :8089-8119 offers enabled recents outside Restart and explicitly supplies Replace semantics.",
+      "04d85f0c:draft.rs:1958-1963 rejects Restart only; :1966-1974 rejects retired ContainerConfig, not modern environment targets; :2001-2015 and :2818-2825 accept modern entry.target. create_form.rs:5912-5919 refuses submission; :7353-7360 disables direct placement correction.",
+      "04d85f0c:draft.rs:2258-2290 calls :1090-1100 reset_choices, which preserves placement; :2880-2884,2931-2938 reseeds source placement only for a new prefill generation. Ordinary renders do not repair the accepted target. Ordinary recents can clear target at :2002-2005 subject to admission. Cancel/reopen reseeds. Compatible templates are not established as a general repair.",
+      "git diff 04d85f0c..00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db -- crates/farhelm-ui/src/list/create_form/draft.rs is empty: these owner operations persist through the inclusive tip. Historical SPEC.md:1480-1484 requires Restart/Replace to stay in the source sandbox while recents describe fresh environments."
+    ],
+    "coverage_checked": [
+      "Recording-time main 24bc058066fd57848e788b465719b0e6da2f98f7: SPEC.md:1290-1301,1492-1499,2012-2025 and SPEC_impl.md:6010-6024,6618-6635 require full Recent intent and fixed-source Replace; none accepts applying an unusable fresh target to Replace with.",
+      "TODO.md:25-27 Planned is empty. The recipe-recents convenience entry elsewhere in TODO is neither Planned coverage nor acceptance of this interaction.",
+      "Searched plans/queue for recent/Replace/fixed placement/environment intent. Matching podman-environments and sandbox-sessions describe fresh recipe recents and same-environment Replace, without an explicit correction for this admission gap. plans/REPORTS.md:7,21 confirms both plans already landed, so they are not unlanded-plan coverage.",
+      "BUGS.md read in full: only SSH transfer hang, unrelated.",
+      "INDEX.md searched for recent/environment/Replace/fixed placement/host_fixed; no exact trigger/consequence/scope item. Recent-description and other launcher findings concern different causes. Active TRIAGE_OUTCOMES.md searches find no decision for this Recent-to-fixed-Replace interaction; the preparation-alert entry at 1648-1663 concerns styling only. Archive not read.",
+      "FILTER.md read in full: deterministic offered action is not a rare self-correcting glitch or sub-second input race. No entire filter boundary matches."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": "No missing source premise for the bounded stall. Actual frequency and rendered runtime behavior were not measured. Supplied history names g085/l2 and g086/l2 as same-root reports; those records are outside this batch and were not independently checked.",
+    "original_stronger_consequence": "Initial lead: a new-environment Recent strands Replace with because submission is forbidden and placement changes disabled. Later records preserve accepted mutation, refusal, ineffective picker and Reset, while bounding recovery: another admissible ordinary Recent or offered source-host search can clear it; cancel/reopen reliably repairs it. No established wrong-environment replacement, security effect or loss of user-owned work; the submit guard blocks that route.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Record the source-confirmed stall at high, attributing introduction to 350a4b33. Parent may consolidate cross-batch reports using the underlying key; do not attribute it to retirement or claim permanent loss."
+  },
+  {
+    "key": "g087/l2",
+    "latest_line": 16,
+    "recommendation": "duplicate",
+    "bucket": "high",
+    "underlying_key": "failed-launch-reopens",
+    "aliases": ["review_feedback_queue/moved-on-launch-return.md"],
+    "target_queue_file": "review_feedback_queue/moved-on-launch-return.md",
+    "why": "The new wake timeout reaches the already queued failure-return admission defect. The existing item explicitly includes wake/preparation return, the same missing activity baseline, modal admission and focus consequence. Preserve the newly introduced timer as useful extension evidence in that item rather than a second root finding.",
+    "checks": [
+      "533169cf19571d34af3a8497eaceb8d2d7b7c852:create_form.rs:6240-6249 releases submitted launcher isolation; :6284-6297 parks the guard and arms woken_connection_wait. :7500-7522 times out the same still-waiting press and calls discard_guarded_preparation at :7519.",
+      "533169cf:create_form.rs:7462-7487 consumes the pending press, settles its source, sets the error and returns via return_prepared_composer without pending.press_baseline. :2124-2135 passes None to admit_composer_return. :2071-2117 compares activity and installs its listener only when the naming baseline is non-null, so later typing does not veto this failure return.",
+      "533169cf:create_form.rs:5595-5603 reveals errors; :5608-5634 restores modal isolation/focus after submitted waiting ends. :2175-2193 only exempts usable focus already inside the dialog. modal_dialog.rs:376-377,408-426 uses target_js with direct target.focus({preventScroll:true}); it does not apply the separate async focus guard.",
+      "533169cf:SPEC.md:1340-1350 combines the general moved-on notice requirement with the 60-second connection limit; :3221-3232 prohibits dialog/focus return after later input. SPEC_impl.md:1179-1187 calls launcher return an implementation gap and directs using the product spec as target. The timeout wording supplies no explicit exception.",
+      "Bounded-range -G history identifies 533169cf as the WOKEN_CONNECTION addition. The general failure-return helper predates this change; attribution is to a new timer caller. Complete create_form.rs diff from 533169cf to inclusive 00de0b6c changes Restart result typing, sandbox warning text and a fixture only, leaving this timer/admission/focus route intact.",
+      "Route remains conditional on the guard-bearing press still awaiting this window's connection snapshot at expiry. Successful continuation/cancellation consumes it first. Another modal delays return until it closes; a retired opening rejects it. No runtime observation or destructive follow-on input sequence was established."
+    ],
+    "coverage_checked": [
+      "Current SPEC.md:1340-1358,3222-3242 and SPEC_impl.md:1150-1192 do not accept the moved-on return; acknowledgment of implementation lag is not acceptance.",
+      "TODO.md Planned is empty. BUGS.md contains no launcher/focus root.",
+      "Searched plans/queue for wake/timeout/launcher return/focus. wake-launch-stuck's goal and acceptance criteria add the timeout, not moved-on activity admission; nonblocking-session-actions contains the earlier automatic Return policy. plans/REPORTS.md:16,23,27 confirms those matching plans landed. No unlanded stated work removes this cause.",
+      "INDEX.md:76-78 names moved-on-launch-return.md; read that file in full. Its Details explicitly cover wake/preparation return through the naming-only helper and restoring opening focus; this is exact same-root coverage, not the distinct host-add admission item suggested in the original history.",
+      "Active TRIAGE_OUTCOMES.md searches for moved-on return, launcher return/reopen, wake timeout and focus produced no decision covering this route. Archive not read.",
+      "FILTER.md: taking page modality and keyboard focus from another session is more than a brief wrong display, safe retry or diagnostic; no complete filter matches."
+    ],
+    "exact_cover_quotes": [
+      {
+        "source": "review_feedback_queue/moved-on-launch-return.md, TLDR",
+        "quote": "A failed launch or follow-up question can reopen the launcher and take the keyboard after the user has switched sessions or started typing elsewhere. It should wait behind a notice the user opens."
+      },
+      {
+        "source": "review_feedback_queue/moved-on-launch-return.md, Details",
+        "quote": "Failure and question paths pass `None`: ordinary create/Replace with at 7056-7090, sandbox create at 5955-5990, Restart with at 6417-6459, and wake/preparation return through 2004-2014 and 6145-6161."
+      }
+    ],
+    "missing_premise": "No missing source premise for unwanted automatic return/focus. No execution or destructive follow-on sequence is established; do not infer security or user-work loss from redirected typing alone.",
+    "original_stronger_consequence": "Lead alleged possible focus theft; later source checks established both modal reopening and direct focus transfer after switching sessions/typing. Keep that consequence. No original record established mutation, security, data loss or process loss, and no consequence was lowered out of highest.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Exact same underlying admission defect already queued at high. Extend moved-on-launch-return.md with 533169cf's timer trigger and its still-waiting-connection caveat. This is a consolidation proposal, not authorization to drop independently."
+  },
+  {
+    "key": "g087/c5",
+    "latest_line": 17,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "retired-recent-search-draft-retry-mutation-refuted",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The search wrapper really promotes offered suggestion history and invalidates Browse before classifying the retired Recent, but the claimed selected-setup/destination/retry mutation does not follow: refusal returns publish=false and changed=false. The narrower suggestion refresh is not demonstrated to violate the stated refusal contract.",
+    "checks": [
+      "04d85f0c98a9b635709d00b056719a0baa7fd3fc:draft.rs:2343-2412 admits the ordinary operation then invalidates Browse and promotes history at 2378-2379 before apply_search_result. Those side effects are present and must not be erased from the disposition.",
+      "04d85f0c:draft.rs:2650-2656 recognizes retired container intent before ordinary history-destination admission and returns (None,false,false), preventing a Browse path or historical destination adoption. The wrapper maps these to publish=false,changed=false at :2397-2409.",
+      "04d85f0c:draft.rs:1480-1502 clones the draft and writes it only for facts.publish; intent_key is cleared only for facts.changed. Neither happens on this refusal. The direct-only comment :1939-1943 promises refusal before its own history/draft/retry changes; the direct check :1966-1974 precedes that path's history writes.",
+      "04d85f0c:draft.rs:8543-8616 asserts unchanged whole draft/key, no Browse path, refusal explanations and unchanged history_activation_attempts; it does not assert that outer suggestion-history promotion or Browse invalidation never occurs. Production refusal and the test's actual assertions were assessed separately. No runtime reproduction performed."
+    ],
+    "coverage_checked": [
+      "SPEC.md:4892-4899 and SPEC_impl.md:8312-8326 require decoding retained old setups and dropping/refusing retired container choices with explanation; no promise forbids every outer suggestion refresh. These sections do not accept adoption of forbidden destination/launch choices; source blocks that adoption.",
+      "TODO.md:25-27 Planned is empty. plans/queue retirement/history matches are podman-environments:284-295,454-455; plans/REPORTS.md:21 says it already landed. No unlanded plan was found for this exact search-wrapper mutation claim.",
+      "BUGS.md read in full has no related root. INDEX.md searched for retired/recent/history/retry/refusal and active TRIAGE_OUTCOMES.md searched for retired Recent, history mutation and retry; no exact coverage or decision found. Archive not read.",
+      "FILTER.md read in full; refutation is by source, not a rarity filter. The real suggestion-side effects were not omitted through a filter."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": "To retain a distinct defect for the real preamble, a violated contract or harmful consequence from refreshing suggestions/invalidating a browse would need to be established. None is established by this named record; no new search was undertaken.",
+    "original_stronger_consequence": "Considered forbidden selected setup, historical destination or retry-identity mutation on refused retired Recent. Source refutes those mutations, while retaining the actual suggestion-history promotion and Browse invalidation. The record expressly disclaims established security or loss of user work; conservative independent checking is still requested for the proposed refusal/ownership dismissal.",
+    "needs_independent_drop_check": true,
+    "proposed_basis": "Propose no queue item for the selected-setup/retry-mutation candidate: explicit publish/changed gates refute it. Preserve real outer preamble side effects and avoid claiming blanket atomic absence of all UI state changes. Parent should independently check this proposed dismissal because it concerns refused launch/destination and retry ownership."
+  },
+  {
+    "key": "g087/c6",
+    "latest_line": 18,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "retired-recent-test-busy-noop-false-pass-refuted",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The regression cannot satisfy its assertions by silently taking only the busy no-op path. It requires newly populated, separate direct and search refusal messages, and the search call must return Some. The mutation snapshot is meaningfully different from the offered Agent Recent.",
+    "checks": [
+      "04d85f0c98a9b635709d00b056719a0baa7fd3fc:draft.rs:4833-4842 seed_placement_command asserts admission of concrete Command, YOLO, prompt and conversation edits before the snapshot. The fixture starts composer_reset_reason='old reset' at :3793 and a separate search template_error=None at :3943.",
+      "04d85f0c:draft.rs:8548-8587 seeds a command draft, records its retry pair, offers a retired Agent Recent, then requires unchanged draft/key and a direct error containing 'Delete only'. The branch at :1966-1974 sets that error; a busy refusal at :1491-1492 returns before the closure and cannot replace the initial 'old reset'.",
+      "04d85f0c:draft.rs:8588-8616 requires accept_search_result(...).expect(...), no Browse path, a separately populated template_error containing 'Delete only', unchanged whole draft/key and history attempts. Busy returns None and cannot satisfy either expect or the initially empty error slot.",
+      "The assertions therefore test actual refusal admission, not merely production safety or an unchanged compatible Agent draft. Their stated scope is owner-operation refusal, not every rendered control or wake timeout. No tests were executed."
+    ],
+    "coverage_checked": [
+      "SPEC.md:4892-4899 and SPEC_impl.md:8312-8326 establish the intended refusal; the fixture and assertions independently establish test sensitivity to the proposed busy-no-op mechanism.",
+      "TODO.md Planned is empty. Searched plans/queue for retired Recent/refusal tests and busy-gate coverage; matching retirement work in podman-environments already landed per plans/REPORTS.md:21, and no unlanded plan explicitly covers this alleged oracle gap.",
+      "BUGS.md has no related root. INDEX.md and active TRIAGE_OUTCOMES.md searches for recent/retired/refusal/busy tests found no exact trigger/consequence/scope item. Archive not read.",
+      "FILTER.md does not supply the basis; the named false-pass mechanism is source-refuted."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": "None for rejecting the busy-no-op false-pass claim. Broader test coverage is outside this named candidate and was not assessed.",
+    "original_stronger_consequence": "Considered maintainer regression-test false pass: unrelated busy refusal could leave snapshots equal without exercising the new retired-choice guard. Separate error initialization and assertions, plus the search Some requirement, refute it. No security or loss-of-work consequence was claimed.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Propose no finding for this specific test-oracle hypothesis. Do not substitute production correctness for test-quality evidence or generalize this narrow refutation to all coverage."
+  }
+]

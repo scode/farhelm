@@ -1,0 +1,292 @@
+[
+  {
+    "key": "g035/c1",
+    "latest_line": 13,
+    "recommendation": "duplicate",
+    "bucket": "other",
+    "underlying_key": "stopped-waiting-row-menu-order-disagrees-with-render",
+    "aliases": ["g035/l2"],
+    "target_queue_file": null,
+    "why": "The latest record correctly withdraws the broad projection refutation. Its retained disabled-item defect is exactly g035/l2; record that defect once. The original enabled wrong-direction projection is source-refuted. This does not dispose of the separately owned refreshed-callback direction or destructive-guard concerns.",
+    "checks": [
+      "350a4b33b6d4476f4a78e43cea124bc2b828f462:crates/farhelm-ui/src/list/row.rs:249-268,1377-1381 maps every Stopped state to resume-only order, excluding StopSuspend.",
+      "Same revision:sandbox_sessions.rs:230-245,274-286,338-341 instead makes stopped/waiting_for_place=true changing, resume=false and disabled=true; list/row.rs:2798-2810 draws the disabled Stop and suspend item. Thus enabled contradictory action is refused, but the disabled-item mismatch is real.",
+      "Same revision:sandbox_sessions.rs:294-300,305-336 carries the selected Operation through activity read/question/execute; this establishes post-capture direction preservation only. It does not establish rendered-event authority or the Stop guard's attribution. Source only; no execution."
+    ],
+    "coverage_checked": [
+      "Current SPEC.md:4806-4891 and SPEC_impl.md:1011-1046 require stopped-state presentation and focusable disabled menu commands; neither accepts the omission.",
+      "TODO.md:25-27 Planned is empty; plans/queue/INDEX.md has no unlanded entries. Stored podman plan retirement wording does not cover keyboard omission.",
+      "BUGS.md contains only the SSH transfer hang. Searches of INDEX.md and active TRIAGE_OUTCOMES.md found no exact stopped-waiting menu-order item. Existing sandbox-row-menu-owns-transient-lifecycle-state.md concerns conditional component lifetime, not order."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": null,
+    "original_stronger_consequence": "Original incorrect or unreachable lifecycle-menu direction; earlier refutation was narrowed after the disabled-item defect was found. Refreshed-event direction and destructive guard attribution were explicitly excluded and remain separately owned.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Same local trigger, implementation mismatch and navigation consequence as g035/l2; no second queue item. Preserve the c1 correction in provenance."
+  },
+  {
+    "key": "g035/l1",
+    "latest_line": 8,
+    "recommendation": "retain-verified",
+    "bucket": "other",
+    "underlying_key": "retired-only-bulk-delete-cancel-has-no-focus-target",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "Under stable retired-only marking, cancellation invokes a return script whose two possible destinations are both absent. This is a supported keyboard-focus regression, not an inferred destructive consequence.",
+    "checks": [
+      "04d85f0c98a9b635709d00b056719a0baa7fd3fc:crates/farhelm-ui/src/list/marking.rs:103-106,234-242 rejects retired rows from every metadata action, and :358-389 omits the toggle when order is empty. The marked count, Delete and Clear survive at :337-395.",
+      "Same revision:list/view.rs:5391-5417 chooses MarkedBar instead of SortMenu while marks remain. :4375-4379 consumes only the question and calls lifecycle::CANCEL_FOCUS, so marks and the absent-sort state persist.",
+      "Same revision:list/lifecycle.rs:263 selects only .marked-menu-toggle or .sort-title; :313-327 routes Escape and Close through on_cancel. modal_dialog.rs:137-148 schedules only that supplied body and explicitly documents missing-target no-op behavior.",
+      "Same revision:list/shared.rs:44-65 confirms live/with-tabs rows can require confirmation. The claim remains conditional on retained last-known live/tab facts and confirmations enabled, not on all retired rows. Tip 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db still omits the empty-order toggle (marking.rs:402) and uses the same cancellation selector (lifecycle.rs:417). Source only; activeElement was not observed."
+    ],
+    "coverage_checked": [
+      "SPEC.md:2176-2240 preserves marks on cancellation; :3282-3287 requires opener focus return. SPEC_impl.md:1204-1214 prescribes the enabled toolbar menu for cancellation but does not accept its absence.",
+      "Planned is empty (TODO.md:25-27); plans/queue/INDEX.md has no unlanded entries. The landed podman retirement plan supplies Delete-only context, not a focus fix.",
+      "BUGS.md has no focus exception. INDEX.md searches found templates-close-targets-disabled-bulk-button.md and bulk-completion-focuses-sort.md; both files were read. Templates targets a disabled surviving button, and bulk completion removes marks/toolbar. Neither covers cancellation with preserved marks and no toggle. Active ledger menu-close/menu-blur discard sections concern unrelated delayed focus ordering.",
+      "FILTER.md does not match: no narrow race, crash or unusual-size premise is required; the missing return repeats for the supported stable state."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": "Physical browser focus after close was not measured. The established defect is the missing deterministic rendered return target under stable state; unrelated navigation may independently place focus.",
+    "original_stronger_consequence": "Keyboard focus lost after cancelling retired-only bulk Delete. Later wording qualifies the stable rendered-state premise; no security or user-work-loss consequence was alleged.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Keep a new other-priority item. Existing focus items share a destination policy but require different fixes at different close owners; they are related, not exact coverage."
+  },
+  {
+    "key": "g035/c2",
+    "latest_line": 10,
+    "recommendation": "needs-parent",
+    "bucket": "high",
+    "underlying_key": "archive-trash-epoch-has-no-guaranteed-post-epoch-fleet-wake",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The UI consumer refutation is valid only if a changed host epoch is delivered. The original same-helm archive consequence is not refuted by that check. Preserve the supplied separately owned producer claim for parent reconciliation rather than writing or dismissing a second finding here.",
+    "checks": [
+      "06d4b68f3a9e913f47cd426fedee5946a4eed77b:crates/farhelm-ui/src/list/trash.rs:690-698 observes host trash_epoch; :738-764 requests Notice on epoch changes/recovery and preserves explicit revision/open changes. This supports the conditional consumer conclusion.",
+      "Same revision:crates/farhelm-helm/src/sessions.rs:3373-3379,4194-4199 increments the archive epoch before subsequent forgetting; manager.rs:2406-2434 makes its fleet bump conditional on actual cache change. Therefore the earlier assertion of a guaranteed late wake is too strong.",
+      "The supplied history attributes the early-event/changed-only wake route to g022/f2. This consultation did not inspect that other record or independently reconstruct its complete producer sequence. No runtime observation."
+    ],
+    "coverage_checked": [
+      "SPEC_impl.md:4039-4059 requires same-helm epoch invalidation but expressly accepts delayed discovery through another helm. That acceptance covers the other-helm branch only.",
+      "TODO Planned and the unlanded-plan index are empty; BUGS.md has no Trash entry. INDEX.md searches found no exact post-archive epoch/wake item. trash-read-eligibility-can-remain-cached.md was read and concerns admitting extra reads during cleanup, not missing epoch delivery.",
+      "Active TRIAGE_OUTCOMES.md Trash matches concern alias movement and a test witness; neither covers archive producer wakes. No filter proposed for the unrefuted producer route: a wrong count can persist without a delivered cause, and this record does not establish the full recovery boundary."
+    ],
+    "exact_cover_quotes": [
+      "SPEC_impl.md:4051-4052: Ordinary fleet events and fallback ticks do not themselves read Trash. Changes through another helm are noticed on reconnect, app load or dialog open."
+    ],
+    "missing_premise": "Parent must reconcile g022/f2's complete supported early-list-before-epoch sequence and its final priority. Conditional consumer correctness alone cannot dismiss that producer route.",
+    "original_stronger_consequence": "Another client's accepted cleanup/archive remains stale or missing in Trash. The original unqualified same-helm invalidation refutation was withdrawn; cross-helm delayed discovery remains explicitly accepted. Files remain archived; no work-loss route was alleged.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Do not create a second local consumer finding, and do not count the broad candidate as source-refuted. Keep the producer consequence with its owning claim; high is the supplied producer suggestion pending parent reconciliation."
+  },
+  {
+    "key": "g035/c3",
+    "latest_line": 5,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "sandbox-page-token-removal-preserves-launch-target-admission",
+    "aliases": ["g036/c2"],
+    "target_queue_file": null,
+    "why": "Removing the global token does not remove the specified same-host checks. The candidate assumes broader exclusion after admission than the contract promises.",
+    "checks": [
+      "1d24c6af0b6fdbbec854623ff53f90281b8271ab:crates/farhelm-ui/src/list/row.rs:2391-2403 disables and synchronously rechecks launch_targets_now before forwarding the rendered Stop-and-suspend answer.",
+      "Same revision:sandbox_sessions.rs:262-272 checks the host target again at execute, including after activity read/question; :292-300 refuses at start. ops.rs:49-58 records the launch's resolved existing host synchronously.",
+      "The conclusion is UI admission only, not proof of every backend lifecycle/launch ordering or a launch begun after this action's admission. Source only."
+    ],
+    "coverage_checked": [
+      "SPEC_impl.md:1143-1151 explicitly removes these controls from page-token claims and defines click/answer host-target refusal. SPEC.md:1894-1905 allows independent session navigation/actions; no broader exclusion found.",
+      "TODO Planned and plans/queue/INDEX.md are empty; BUGS.md has no matching exception. INDEX.md/active ledger searches found no exact token-removal item. Stored sandbox overlap/guard plans provide historical context, not an unlanded fix."
+    ],
+    "exact_cover_quotes": [
+      "SPEC_impl.md:1144-1148: Suspend and Resume, from Hosts or a sandbox session (Stop and suspend included), are not registry mutations and never claim it. The token instead records the existing host a launch resolved ... and those controls are refused while it names their host, at the click and again at the answer."
+    ],
+    "missing_premise": null,
+    "original_stronger_consequence": "Stop and suspend could race an already accepted same-host launch after page-token removal. Only an availability/ordering concern was established; no loss-of-work route was shown.",
+    "needs_independent_drop_check": true,
+    "proposed_basis": "Narrow source refutation plus explicit contract. Flagged conservatively for independent checking because the considered path includes the process-ending Stop-and-suspend action; this consultation is not that check."
+  },
+  {
+    "key": "g035/c4",
+    "latest_line": 6,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "clone-environment-target-preserves-recipe-and-place",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The target copy retains both recipe and place, and ordinary-host defaulting excludes session-owned hosts. The feared reuse/lost-placement route is contradicted by the named code.",
+    "checks": [
+      "350a4b33b6d4476f4a78e43cea124bc2b828f462:crates/farhelm-ui/src/list/shared.rs:675-685 copies environment.target intact; only legacy Tensorlake metadata constructs TensorlakeAccount. :549-556 excludes session_owned from ordinary host defaulting.",
+      "Corrected reference: the draft is crates/farhelm-ui/src/list/create_form/draft.rs, not src/create_form/draft.rs. At this revision :2937-2946 and :2980-2987 seed the disposable target only for modes not holding their existing host. Source only."
+    ],
+    "coverage_checked": [
+      "SPEC.md Sandbox sessions Clone rule and Container sessions:4832-4834 require a fresh recipe environment retaining selected place. SPEC_impl.md Environment Delete/ownership sections do not accept a wrong Clone destination.",
+      "Planned and unlanded-plan index are empty; BUGS has no Clone exception. INDEX.md/active ledger searches found clone-read-overwrites-manual-recipe-choice.md, whose described late-read/manual-choice trigger is distinct from loss in host_options' target copy. No exact coverage needed to establish the source refutation."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": null,
+    "original_stronger_consequence": "Clone could reuse the disposable host or lose its container placement. No destructive action, credential disclosure or loss-of-work route was alleged.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Source refutation of the specific target-copy/defaulting candidate; does not dismiss the separate asynchronous Clone-choice overwrite item."
+  },
+  {
+    "key": "g035/l2",
+    "latest_line": 14,
+    "recommendation": "retain-verified",
+    "bucket": "other",
+    "underlying_key": "stopped-waiting-row-menu-order-disagrees-with-render",
+    "aliases": ["g035/c1"],
+    "target_queue_file": null,
+    "why": "A supported stopped/waiting-for-place state draws a disabled Stop and suspend item outside the menu's navigation order. Disabled items are part of the specified keyboard contract. The condition can last as long as its container host is unavailable; rarity filters do not cover it.",
+    "checks": [
+      "350a4b33b6d4476f4a78e43cea124bc2b828f462:crates/farhelm-ui/src/list/row.rs:1377-1381 treats every Stopped as resume-only; :249-268 then excludes StopSuspend. sandbox_sessions.rs:230-245,338-341 makes stopped/waiting resume=false and disabled=true; row.rs:2798-2810 nevertheless renders that item with tabindex=-1.",
+      "Same revision:menu_panel.rs:737-743 ignores focus on absent-order actions; :781-819 and :893-914 navigate only order entries. This establishes the conditional rendered/navigation mismatch, not a mutation.",
+      "Same revision:crates/farhelm-helm/src/manager.rs:3845-3861 publishes waiting_for_place from the real place-host connectivity gate. row.rs:2149-2156 leaves its menu toggle available; list/view.rs:5919-5948 renders rows and derives local busy from claims/pending requests, not Stopped. A locally idle waiting row can open this menu.",
+      "Tip 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db:list/row.rs:1441-1445 retains the all-Stopped order projection. Retired-only filtering is a different row class. Source only; no physical navigation observed."
+    ],
+    "coverage_checked": [
+      "SPEC_impl.md:1025-1046 says disabled commands remain focusable and arrows follow actual focused items. SPEC.md:4806-4891 supports Stopped/Resume and unavailable container-host presentation; it does not waive keyboard access.",
+      "Planned and the unlanded-plan index are empty; BUGS has no menu exception. INDEX.md and active ledger searches found no stopped-waiting order item. sandbox-row-menu-owns-transient-lifecycle-state.md was read and concerns scope teardown, not omitted keyboard order.",
+      "FILTER.md: no required short-lived timing window or other matching trigger. A disabled command being unreachable by keyboard is also outside the scrollable-explanation filter."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": "Runtime incidence/navigation has not been measured; no missing source premise remains for the stated conditional mismatch.",
+    "original_stronger_consequence": "Disabled Stop and suspend is skipped by keyboard navigation and ignored by focus bookkeeping. No unintended lifecycle request or user-work-loss consequence was alleged; refreshed enabled callback authority remains a distinct record.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "New other-priority queue item; carry g035/c1 only as history/alias."
+  },
+  {
+    "key": "g035/l3",
+    "latest_line": 17,
+    "recommendation": "retain-verified",
+    "bucket": "other",
+    "underlying_key": "retired-delete-only-menu-invalidates-unconditional-rename-rationale",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The changed behavior makes an existing source explanation false. The correct separator implementation does not refute the distinct maintenance-documentation defect, which is in scope.",
+    "checks": [
+      "04d85f0c98a9b635709d00b056719a0baa7fd3fc:crates/farhelm-ui/src/list/row.rs:1414-1417 says Rename is unconditional and Delete always has a preceding item. :1396 selects session_menu_order_for_session, whose :5116-5121 retired branch contains only Delete, so Delete position is zero and :1418-1420 is materially needed today.",
+      "Exclusive-base-to-reviewed diff introduces the retired-only order/renderer gate while retaining that explanation. This is in-range drift, not an old independently false statement. Tip 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db:row.rs:1463-1469 retains it. No runtime separator defect is claimed."
+    ],
+    "coverage_checked": [
+      "SPEC.md:4892-4900 and SPEC_impl.md:8312 onward require retired Delete-only behavior; neither accepts contradictory source rationale. Root AGENTS documentation requirements reinforce updating the explanation.",
+      "Planned and unlanded-plan index are empty. Stored podman retirement section:284-296 specifies retirement but is already landed and does not repair the comment. BUGS.md, INDEX.md and active TRIAGE_OUTCOMES.md searches found no unconditional-Rename/separator item.",
+      "FILTER.md has no source-comment-drift filter; no race or large-content trigger applies."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": null,
+    "original_stronger_consequence": "Misleading separator rationale tells maintainers the first-item case does not happen. No runtime layout, data-loss or security consequence was alleged.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "New other-priority source-documentation item. Keep separate from retired cancellation focus and stopped-waiting keyboard order."
+  },
+  {
+    "key": "g036/l1",
+    "latest_line": 7,
+    "recommendation": "filtered",
+    "bucket": "other",
+    "underlying_key": "sidebar-retires-restart-success-before-mounted-observer",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The source supports the transient missing-completion presentation under the named scheduling order. Its entire established consequence is a display/attachment gap repaired by the next successful detail refresh, with no lost process, conversation, terminal history or security route. That exact boundary matches the rare self-correcting glitch filter.",
+    "checks": [
+      "b3d6b3eff6b7508e0b1fb6ec5b5cde31d27ebabe:crates/farhelm-ui/src/session_ops.rs:92-109,219-233 lets an eligible newer positive listing remove restart before a mounted observer acknowledges it. session_view.rs:549-564 always retains the revision-driven generation increment but sets relaunched/terminal kind only while the payload remains.",
+      "Same revision:session_view.rs:1252-1269 only copies selected title and requests independent detail; :1722-1730,3711-3732 excludes the interrupted terminal surface while relaunched=false. Thus generation preservation alone does not refute admission loss.",
+      "Pinned Dioxus 0.7.10 source: use_effect.rs:15-47 queues live-reading callbacks; core virtual_dom.rs:493-537 drains tasks/dirty work before effects; desktop webview.rs:537-590 waits for edits delivery. A newer eligible listing can retire the success during deferred observation. This is conditional source ordering, not an observed run.",
+      "Tip 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db:session_view.rs:551-565 still sets relaunched only while restart_succeeded is present. Old-terminal-kind override loss is historical to the earlier revision; the surface-admission aspect persists."
+    ],
+    "coverage_checked": [
+      "SPEC.md:1901-1905 requires completion observation; historical SPEC_impl.md at b3d6b3ef:1133-1138 promises terminal kind until current detail catches up. Current SPEC_impl.md:1133-1140 retains mounted completion/reattachment. No explicit acceptance of the observer race.",
+      "Planned and unlanded-plan index are empty. session-action-leftovers.md:20-70 concerns retiring new-view optimism after a listing, and its accepted second-reboot residual is a different trigger. retained-restart-hides-reboot-card.md was read; it concerns success retained too long after a later reboot, not removal before mounted observation. No exact queue/active-ledger/BUGS cover found.",
+      "FILTER.md, Rare, self-correcting glitches and imprecise diagnostics, applies to the narrow task/effect order and whole transient display/attachment consequence. The stated repair is an ordinary successful detail refresh; none of that filter's wrong-target, persistent-record, false-success, security or work-loss exceptions is established."
+    ],
+    "exact_cover_quotes": [
+      "FILTER.md: The trigger is rare: a narrow timing window, a crash or interruption at a specific point, or an input the shipped clients never send.",
+      "FILTER.md: The whole consequence is one of: a display that is briefly wrong and corrects itself on the next refresh, retry or reconnect, or when the user leaves the view; an operation that fails safely and succeeds when retried; or an error message, log line or other diagnostic that is imprecise, misleading, missing detail, or lost."
+    ],
+    "missing_premise": "Incidence is unmeasured. Any stronger persistent outage, destructive second-Restart consequence or loss of user work would need its own established route and would invalidate this filter basis.",
+    "original_stronger_consequence": "An already-open view can show its interrupted card or try an old terminal kind until a successful detail read. The retained generation increment does not itself admit a terminal. Old-kind impact belongs to the earlier protocol; no permanent outage or destructive second-Restart route was asserted.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Proposed filter only for the complete established transient presentation consequence; not a source refutation or drop of separately owned stale-listing/age-of-evidence concerns."
+  },
+  {
+    "key": "g036/l2",
+    "latest_line": 8,
+    "recommendation": "filtered",
+    "bucket": "other",
+    "underlying_key": "warned-delete-handoff-clears-error-before-view-admission",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The supported deferred-navigation handoff can lose a failed Delete's explanation and follow-up offer. Nothing destructive is sent by that loss. The complete established consequence is a lost diagnostic/retry explanation under a narrow scheduling window, which the rare diagnostic filter explicitly covers.",
+    "checks": [
+      "2ef10815f12ed719ab6c51c6e3ac6fcd3f8bc1fa:crates/farhelm-ui/src/list/view.rs:3022-3057 releases the source claim, selects HeaderQuestion only while that source is selected, then removes its error and publishes warned_delete. session_view.rs:784-793 clears the offer before checking identity/claim and supplies no failure fallback.",
+      "Same revision:list/view.rs:4011-4020 allows ordinary row navigation; lib.rs:2174-2176 changes selection and :2272-2282 keys SessionView by source. Replacing A with B can therefore discard A's queued effect; B can consume and reject A's offer. Dioxus 0.7.10 desktop webview.rs:43-84,190-194 dispatches events directly, :537-590 waits for edit delivery; core runtime.rs:179-205 removes queued effects with the old scope. Source supports the conditional admitted navigation sequence; no execution occurred.",
+      "Unselected completion already takes Error (list/view.rs:927-942). Different-source completions alone do not establish overwrite. The alternative claim-before-consumption branch is not needed and remains qualified because a newer explicit action may supersede error presentation."
+    ],
+    "coverage_checked": [
+      "SPEC.md:1901-1905 requires durable source result presentation; :1532-1547 and SPEC_impl.md:6140-6145 require separately warned whole-environment fallback. These do not accept losing the explanation.",
+      "Planned and unlanded-plan index are empty; BUGS has no matching exception. INDEX.md and active ledger searches found no warned_delete handoff item. sandbox-row-menu-owns-transient-lifecycle-state.md was read; its transient row Controls owner is different from this page-owned header handoff.",
+      "FILTER.md Rare, self-correcting glitches and imprecise diagnostics matches the narrow delivery/navigation interval and lost error/next-step explanation. Retrying ordinary Delete can offer the guarded fallback again. No silent deletion, wrong target, false success, durable wrong record, security breach or user-work loss is established."
+    ],
+    "exact_cover_quotes": [
+      "FILTER.md: The trigger is rare: a narrow timing window, a crash or interruption at a specific point, or an input the shipped clients never send.",
+      "FILTER.md: The whole consequence is one of ... an error message, log line or other diagnostic that is imprecise, misleading, missing detail, or lost."
+    ],
+    "missing_premise": "Actual timing/incidence was not observed. A stronger consequence involving a sent whole-environment request or lost work is not supported by this route and is not included in the proposed filter.",
+    "original_stronger_consequence": "Failed Delete loses its explanation/whole-environment offer after navigation or a competing claim. Initial simultaneous-different-source overwrite alone was narrowed as insufficient. No deletion or user-work loss was asserted.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Proposed filter of the named lost-diagnostic consequence only. This is not permission to waive destructive confirmation or any other Delete guard."
+  },
+  {
+    "key": "g036/c1",
+    "latest_line": 9,
+    "recommendation": "covered",
+    "bucket": "highest",
+    "underlying_key": "warned-whole-environment-delete-includes-unmarked-peers",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The destruction of unmarked/unlisted peers is established, but exactly matches the warned whole-resource consent the specifications accept. Keep the proposed drop in the independent register; no drop is authorized by this consultation.",
+    "checks": [
+      "2ef10815f12ed719ab6c51c6e3ac6fcd3f8bc1fa:crates/farhelm-ui/src/list/lifecycle.rs:263-286 deduplicates only whole-environment rows by captured host; :302-315 explicitly names whole environments in title/answer; :339-343 draws whole_delete_warning.",
+      "Same revision:environment_ui.rs:164-172 explicitly warns about every session, running process, file, checkout and unpushed change, including unlisted sessions; Tensorlake also names snapshots. It explains resuming/updating for a narrower deletion.",
+      "Same revision:list/view.rs:4555-4581 retains each target's captured environment scope and passes Bulk follow-up policy. api/sandbox_sessions.rs:188-197,214-246 uses distinct Session/Whole query opt-ins with no automatic escalation. list/view.rs:927-942 leaves Bulk Unasked as Error. Source only."
+    ],
+    "coverage_checked": [
+      "Current SPEC.md:1532-1548 expressly warns of unlisted work and permits one whole-sandbox Delete for marked members when its supervisor could not be asked. Session list:2221-2234 authorizes the drawn whole-resource consequences; Container sessions:4832-4849 inherits the same rule.",
+      "SPEC_impl.md:6608-6623 explicitly allows coalescing by host without a complete member set and accepts destruction of listed/unlisted leftovers. No specification accepts scope escalation or an uncaptured host.",
+      "Planned and unlanded-plan index are empty; BUGS/active ledger searches found no additional relevant cover. Existing bulk-sandbox-delete-drops-eligible-peer.md was read and concerns deleting nothing after refusal of the coalesced representative, not destruction beyond the warned resource. No filter needed."
+    ],
+    "exact_cover_quotes": [
+      "SPEC.md:1534-1537: whose confirmation warns that every session, process, file, checkout, unpushed change and snapshot in the sandbox will be removed, including sessions Farhelm does not list because they were started while it was not connected",
+      "SPEC.md:1544-1545: Marked sessions of a sandbox the helm could not ask when the modal opened get the whole-sandbox Delete, once per sandbox, and the modal says which rows are which.",
+      "SPEC_impl.md:6613-6616: Bulk Delete sends one supervisor request per marked session of a connected sandbox and coalesces only the rows of sandboxes it could not ask by host ID, without requiring a complete member set or a designated last session.",
+      "SPEC_impl.md:6620-6622: The warned whole-sandbox Delete may subsequently destroy any leftover session, listed or unlisted. This is accepted product behavior"
+    ],
+    "missing_premise": "Independent fresh-context agreement is still required before dropping this highest-capable claim. Coverage applies only within captured whole-resource consent, not to Session-to-Whole escalation or a different host.",
+    "original_stronger_consequence": "Bulk whole-environment Delete destroys unmarked/unlisted sessions, processes, files and unpushed work, even if shrink-only admission changes the representative. Highest if outside consent; that original consequence is preserved.",
+    "needs_independent_drop_check": true,
+    "proposed_basis": "Exact explicit specification acceptance plus drawn warning and scope-preservation source checks. Do not use this proposal as an independent drop verdict."
+  },
+  {
+    "key": "g036/c2",
+    "latest_line": 6,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "sandbox-page-token-removal-preserves-launch-target-admission",
+    "aliases": ["g035/c3"],
+    "target_queue_file": null,
+    "why": "The removed page guard is replaced by the specified same-host launch-target admission checks at click and execution/answer. Shared token ownership is not the stated contract.",
+    "checks": [
+      "1d24c6af0b6fdbbec854623ff53f90281b8271ab:crates/farhelm-ui/src/ops.rs:49-58 records the resolved launch host. sandbox_sessions.rs:267-272 refuses execution while that host is targeted, and :292-300 checks at click; the activity read cannot bypass the execute check.",
+      "Same revision:list/row.rs:2391-2403 independently rechecks Stop-and-suspend's answer before handing it to list-owned admission. This agrees with g035/c3's source basis. Backend lifecycle locks and later launch wake retries remain outside this narrow refutation. Source only."
+    ],
+    "coverage_checked": [
+      "SPEC_impl.md:1143-1151 explicitly says these controls never claim the registry token and are refused for its named host at click/answer. SPEC.md:1894-1905 permits independent actions; no broader UI exclusion found.",
+      "TODO Planned and plans/queue/INDEX.md have no entries; BUGS.md contains no matching exception. INDEX.md and active ledger searches found no exact page-token-removal claim. Related landed overlap/stop-guard plans are historical context, not unlanded coverage."
+    ],
+    "exact_cover_quotes": [
+      "SPEC_impl.md:1144-1148: Suspend and Resume, from Hosts or a sandbox session (Stop and suspend included), are not registry mutations and never claim it ... those controls are refused while it names their host, at the click and again at the answer."
+    ],
+    "missing_premise": null,
+    "original_stronger_consequence": "Dropping the page guard could let Suspend interfere with an already accepted launch on the same host. No established loss-of-work/security consequence; the source refutation is limited to this UI admission contract.",
+    "needs_independent_drop_check": true,
+    "proposed_basis": "Same narrow refutation as g035/c3. Flagged conservatively because the contract/candidate family includes Stop and suspend; retain both named histories when the parent reconciles this one underlying concern."
+  }
+]

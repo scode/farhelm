@@ -1,0 +1,571 @@
+{
+  "group": {
+    "id": "g168",
+    "domain": "retired-supervisor-tmux",
+    "purpose": "retired-supervisor-tmux: crates/farhelm-supervisor/src/tmux/input.rs, crates/farhelm-supervisor/src/tmux/presence.rs, crates/farhelm-supervisor/src/tmux/query_strip.rs; phases complete small per-commit changes",
+    "interfaces": [
+      "g001",
+      "g007",
+      "g008",
+      "g009",
+      "g071",
+      "g072",
+      "g073",
+      "g097",
+      "g098",
+      "g099",
+      "g100",
+      "g101",
+      "g102",
+      "g103",
+      "g104",
+      "g105",
+      "g106",
+      "g107",
+      "g108",
+      "g109",
+      "g110",
+      "g111",
+      "g112",
+      "g113",
+      "g114",
+      "g115",
+      "g116",
+      "g117",
+      "g118",
+      "g119",
+      "g120",
+      "g121",
+      "g127",
+      "g128",
+      "g129",
+      "g130",
+      "g131",
+      "g132",
+      "g133",
+      "g134",
+      "g144",
+      "g145",
+      "g146",
+      "g149",
+      "g150",
+      "g151",
+      "g152",
+      "g153",
+      "g154",
+      "g155",
+      "g156",
+      "g157",
+      "g158",
+      "g159",
+      "g167",
+      "g169",
+      "g166"
+    ],
+    "sources": [
+      {
+        "path": "[private-run]/prep/parts/00953-000.patch",
+        "ranges": [
+          [
+            1,
+            494
+          ]
+        ],
+        "original_path": "crates/farhelm-supervisor/src/tmux/input.rs",
+        "commit": "1ed482dde220452e424973faf38a5e1318986333",
+        "notes": "patch header; patch character offsets [0,23070)",
+        "lines": 494,
+        "bytes": 23108,
+        "start": 0,
+        "end": 23070,
+        "original": "[private-run]/prep/originals/00953.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/00954-000.patch",
+        "ranges": [
+          [
+            1,
+            491
+          ]
+        ],
+        "original_path": "crates/farhelm-supervisor/src/tmux/presence.rs",
+        "commit": "1ed482dde220452e424973faf38a5e1318986333",
+        "notes": "patch header; patch character offsets [0,21749)",
+        "lines": 491,
+        "bytes": 21749,
+        "start": 0,
+        "end": 21749,
+        "original": "[private-run]/prep/originals/00954.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/00955-000.patch",
+        "ranges": [
+          [
+            1,
+            220
+          ]
+        ],
+        "original_path": "crates/farhelm-supervisor/src/tmux/query_strip.rs",
+        "commit": "1ed482dde220452e424973faf38a5e1318986333",
+        "notes": "patch header; patch character offsets [0,9508)",
+        "lines": 220,
+        "bytes": 9510,
+        "start": 0,
+        "end": 9508,
+        "original": "[private-run]/prep/originals/00955.patch"
+      }
+    ],
+    "lines": 1205,
+    "bytes": 54367
+  },
+  "records": [
+    {
+      "key": "g168/c1",
+      "owner": "g168",
+      "id": "c1",
+      "domain": "retired-supervisor-tmux",
+      "purpose": "retired-supervisor-tmux: crates/farhelm-supervisor/src/tmux/input.rs, crates/farhelm-supervisor/src/tmux/presence.rs, crates/farhelm-supervisor/src/tmux/query_strip.rs; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 1,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c1",
+            "state": "open",
+            "summary": "Removing tmux presence knowledge does not erase unreadable host terminals",
+            "location": "crates/farhelm-supervisor/src/tmux/presence.rs:1",
+            "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. TLDR: considered whether removing the unusable-server guard could make Farhelm regard a running but unreadable terminal as absent and discard or duplicate its agent. Source refutation: service/terminals.rs:122-127,225-248 resolves only HostTerminal handles; service/core.rs:6675-6715 keeps unreadable hosts as unattributed handles, and :6743-6755 leaves their durable outcome alone. Startup invokes OldTerminals::end_private_server before reload (:6142-6183); the old-kind row branch is separate (:6675-6679). SPEC_impl.md, Terminal host, The terminal switch points, requires an unreadable host to record nothing durable and refuse lifecycle verbs. The replacement retains that absence/unavailable distinction independently of ServerPresence; no remaining production references to ServerPresence or the removed tmux input/query types were found in the pinned supervisor source. Suggested bucket: highest if that loss/duplication route existed; none established. Could-be-highest: yes, original suspected consequence was loss of or duplicate user processes; refuted for the removal of this guard. Confidence: confirmed by source for the stated replacement distinction, not runtime observation. proposed_drop: source refutation above, not specification acceptance alone. possible_cover: none. Caveats: not a review of all host discovery or lifecycle implementation; the prior release's deliberate ending of old terminals is a separate change and contract."
+          }
+        },
+        {
+          "line": 5,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c1",
+            "state": "open",
+            "summary": "Host lifecycle keeps unavailable terminals and confirms deletion independently of tmux presence",
+            "location": "crates/farhelm-supervisor/src/tmux/presence.rs:1",
+            "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. Original consequence preserved verbatim: removing the unusable-server guard could make Farhelm regard a running but unreadable terminal as absent and discard or duplicate its agent. Original severity retained: could-be-highest, loss of or duplicate user processes. TLDR: the replacement distinguishes unreadable hosts from absent ones, retains host identity at tab close, and propagates an unconfirmed host end before deleting the session row. Initial source refutation remains service/core.rs:6675-6715,6743-6755 and service/terminals.rs:122-127,225-248. Added lifecycle checks: core.rs:13325-13366 refuses an unreadable agent probe and rechecks tab uncertainty after counting; core/host_tabs.rs:1403-1442,1474-1478 requires both session and tab identity at adoption and retains mismatched/unreadable hosts as placeholders. At close, :915-943 requires the exact runtime in the tab cell, refuses the agent runtime and unreadable tabs; :1013-1037 removes the tab/record only on confirmed end, retaining failed endings for retry. session_hosts.rs:771-792 turns all error/missing outcomes into an Err; teardown.rs:531-561 propagates sweep and host-end errors before row removal and :611-651 preserves row/artifacts on failure. Those source checks do not derive later Delete success from the startup retirement's best-effort policy. Governing contracts remain SPEC_impl.md Terminal host, The terminal switch points, Tabs in hosts and Delete ends every terminal host of the session. Suggested bucket: highest if the original process-loss/duplication route existed; none established for deleting ServerPresence. Could-be-highest: yes, unchanged for the caller's independent check. Confidence: source-confirmed for the specified routing, identity and error propagation; no runtime observation. proposed_drop: source refutation, still proposed and not accepted by this reviewer. possible_cover: none. Caveats/provenance: deliberate old-tmux process/screen/history retirement and possible duplication after failed startup termination belong to the prior retirement change, as recorded in the initial event; they are not newly discovered or silently lowered here. This candidate does not rely on their specification acceptance to dismiss a distinct host wrong-target or unconfirmed-Delete route. It is not a review of the complete process-signalling implementation."
+          }
+        },
+        {
+          "line": 7,
+          "event": {
+            "version": 1,
+            "kind": "lead",
+            "id": "c1",
+            "state": "open",
+            "summary": "Qualify host-end confirmation against the Gone runtime shortcut",
+            "location": "crates/farhelm-supervisor/src/service/session_hosts.rs:733",
+            "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. Original considered consequence preserved: removing the unusable-server guard could make Farhelm regard a running but unreadable terminal as absent and discard or duplicate its agent; original could-be-highest process-loss/duplication consequence remains. Parent relayed g166/c5:13: an adopted nonplaceholder tab whose runtime reports Gone remains in SessionHosts.tabs and session Delete calls end_launch_host, potentially accepting Gone without verifying the adopted process, whereas end_tab_host performs that verification. TLDR: the previous c1 source evidence establishes propagation of errors that are returned, not that every success establishes process termination. The blanket host-end-confirmation rationale must therefore be qualified. Status: substantive cross-group lead to investigate before a new discovery search, not a confirmed new bug. Checks already made: prior pass read session_hosts.rs:733-740 and teardown.rs:558-561 error propagation; it did not inspect the Gone success branch of end_launch_host. Next checks: exact end_launch_host/end_tab_host implementations, runtime transitions to Gone, retained host process identity, and in-range attribution. Exact missing premise: a supported shipped route to a Gone runtime while the adopted host process survives and Delete can then forget it. Suggested bucket: highest if this loses access to live user work or leaves credential-bearing processes; no established shipped route yet. Could-be-highest: yes. Confidence: unresolved pending source checks; not labelled investigated. proposed_drop: prior source-refutation basis retained only for unreadable-versus-absent distinction, not a blanket Delete guarantee; no drop accepted. possible_cover: g166/c5:13 owns the related investigation. Caveats: source-only; no runtime, fixture substitution or reproduction establishes a production trigger; deliberate old-tmux retirement acceptance does not settle this distinct route."
+          }
+        },
+        {
+          "line": 8,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c1",
+            "state": "open",
+            "summary": "Presence-removal refutation is limited; Gone-runtime Delete shortcut is separately retained",
+            "location": "crates/farhelm-supervisor/src/tmux/presence.rs:1",
+            "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333; whole range base 6e423e30068b62c6cfa276c6d720ee35bb70387a checked for attribution. Original consequence preserved verbatim: removing the unusable-server guard could make Farhelm regard a running but unreadable terminal as absent and discard or duplicate its agent. Original could-be-highest consequence remains loss of or duplicate user processes; no parent drop or lowering is accepted. TLDR: the replacement retains unreadable-versus-absent handling, but my earlier broad all-host-end-confirmation conclusion was too strong. It is corrected here; error propagation cannot prove that a success branch verified termination. Source basis still refutes the narrow removal claim: core.rs:6675-6715,6743-6755 retains unreadable hosts and leaves durable outcomes unchanged, independently of removed ServerPresence. Cross-group reconciliation is now source-checked: session_hosts.rs:245-260 partitions by is_placeholder, which terminal.rs:2091-2097 says describes construction, so an adopted Gone runtime remains among retained tabs and its record is excluded from settlement. session_hosts.rs:733-740 calls end_launch_host directly; host_launch.rs:694-696 accepts Err(Gone) without adopted-process verification. terminal.rs:2374-2385 returns final liveness for an ended runtime. Close does have an extra adopted-process check at host_tabs.rs:1056-1062. session_hosts.rs:510-521 checks only the child's root; terminal.rs:771-784 may yield none after the child exits, independently of host-process survival. The retained close test at core/tests/host_terminals.rs:3685-3780 explicitly removes the socket and disconnects a stand-in, retaining its adopted live process; it proves the semantic distinction, not an ordinary real-host occurrence or that Delete itself removes the socket. Known g166/c5 records this conditional orphan-host consequence. It is not dismissed here and is not new discovery by g168. No user-process/data-loss consequence for that distinct orphan-host route is established here; the original potential-highest wrong absence/duplication concern above is preserved separately. Attribution check: the exclusive range base already contains host_launch.rs:684's Gone-success shortcut and session_hosts.rs:751's direct tab call. git log -G for those exact branches over the complete base-to-tip range returns no changes. Thus deleting presence.rs neither introduced this shortcut nor repaired it; this is not merely an immediate-parent comparison. Suggested bucket: highest if the original loss/duplication route existed; no route attributable to this removal established. Confidence: source-confirmed for the narrow model replacement and the separately known shortcut; no execution. proposed_drop: source refutation only of the removal's unreadable-host regression claim, still proposed; expressly not a proposed drop of g166/c5 or a blanket assertion that Delete always confirms host death. possible_cover: g166/c5 owns the independently retained conditional Gone-runtime issue. Caveats: supported occurrence of socket disappearance plus runtime loss is not established by the test's manual fixture; the conditional branch defect and its process-confirmation contract remain valid cross-group evidence without reproducing it. Known startup retirement/failed-termination duplication has separate earlier-change provenance, and its acceptance is not used to settle this route. c1's temporary cross-group source lead is resolved; no readily checkable premise remains in g168's assigned removal claim."
+          }
+        }
+      ],
+      "latest": {
+        "line": 8,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c1",
+          "state": "open",
+          "summary": "Presence-removal refutation is limited; Gone-runtime Delete shortcut is separately retained",
+          "location": "crates/farhelm-supervisor/src/tmux/presence.rs:1",
+          "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333; whole range base 6e423e30068b62c6cfa276c6d720ee35bb70387a checked for attribution. Original consequence preserved verbatim: removing the unusable-server guard could make Farhelm regard a running but unreadable terminal as absent and discard or duplicate its agent. Original could-be-highest consequence remains loss of or duplicate user processes; no parent drop or lowering is accepted. TLDR: the replacement retains unreadable-versus-absent handling, but my earlier broad all-host-end-confirmation conclusion was too strong. It is corrected here; error propagation cannot prove that a success branch verified termination. Source basis still refutes the narrow removal claim: core.rs:6675-6715,6743-6755 retains unreadable hosts and leaves durable outcomes unchanged, independently of removed ServerPresence. Cross-group reconciliation is now source-checked: session_hosts.rs:245-260 partitions by is_placeholder, which terminal.rs:2091-2097 says describes construction, so an adopted Gone runtime remains among retained tabs and its record is excluded from settlement. session_hosts.rs:733-740 calls end_launch_host directly; host_launch.rs:694-696 accepts Err(Gone) without adopted-process verification. terminal.rs:2374-2385 returns final liveness for an ended runtime. Close does have an extra adopted-process check at host_tabs.rs:1056-1062. session_hosts.rs:510-521 checks only the child's root; terminal.rs:771-784 may yield none after the child exits, independently of host-process survival. The retained close test at core/tests/host_terminals.rs:3685-3780 explicitly removes the socket and disconnects a stand-in, retaining its adopted live process; it proves the semantic distinction, not an ordinary real-host occurrence or that Delete itself removes the socket. Known g166/c5 records this conditional orphan-host consequence. It is not dismissed here and is not new discovery by g168. No user-process/data-loss consequence for that distinct orphan-host route is established here; the original potential-highest wrong absence/duplication concern above is preserved separately. Attribution check: the exclusive range base already contains host_launch.rs:684's Gone-success shortcut and session_hosts.rs:751's direct tab call. git log -G for those exact branches over the complete base-to-tip range returns no changes. Thus deleting presence.rs neither introduced this shortcut nor repaired it; this is not merely an immediate-parent comparison. Suggested bucket: highest if the original loss/duplication route existed; no route attributable to this removal established. Confidence: source-confirmed for the narrow model replacement and the separately known shortcut; no execution. proposed_drop: source refutation only of the removal's unreadable-host regression claim, still proposed; expressly not a proposed drop of g166/c5 or a blanket assertion that Delete always confirms host death. possible_cover: g166/c5 owns the independently retained conditional Gone-runtime issue. Caveats: supported occurrence of socket disappearance plus runtime loss is not established by the test's manual fixture; the conditional branch defect and its process-confirmation contract remain valid cross-group evidence without reproducing it. Known startup retirement/failed-termination duplication has separate earlier-change provenance, and its acceptance is not used to settle this route. c1's temporary cross-group source lead is resolved; no readily checkable premise remains in g168's assigned removal claim."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g168/findings.jsonl",
+        "id": "c1",
+        "line": 8,
+        "disposition": "under-investigation",
+        "group": "g168-c1",
+        "reason": "Record durably acknowledged; parent source/contract validation, cross-group synthesis, coverage/filter matching and any independent drop check remain pending. This preserves the claim and uncertainty without accepting, dropping or lowering it."
+      },
+      "accepted_parent_decision": null,
+      "returned_claim_checks": [
+        {
+          "batch": "claims-106",
+          "key": "g168/c1",
+          "latest_line": 8,
+          "recommendation": "refuted",
+          "bucket": "highest",
+          "underlying_key": "retired-tmux-presence-guard-unreadable-as-absent",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "Refute only the claim that removing ServerPresence loses the unreadable-versus-absent distinction. Do not preserve the earlier blanket assertion that all successful host endings confirm process death: the supplied Gone-runtime Delete concern remains a separate conditional issue.",
+          "checks": [
+            "At 1ed482dde220452e424973faf38a5e1318986333, core.rs:6675-6715,6743-6755 retains unattributed host handles and leaves their durable outcomes unchanged; terminals.rs:122-127,225-248 resolves host runtimes. Pinned git grep found no ServerPresence consumer.",
+            "session_hosts.rs:245-260 partitions tabs by construction-time placeholder status and excludes held tab sockets from record settlement; :733-740 calls end_launch_host directly for those tabs.",
+            "core/host_launch.rs:694-696 returns success for shutdown Err(Gone) without the adopted-process check. core/host_tabs.rs:1056-1062 performs that extra check for Close. Thus propagation of returned errors does not establish all success branches are safe.",
+            "Exclusive base already has the Gone-success branch in core/host_launch.rs:684 and the direct tab call in session_hosts.rs:751. git log -G for these exact branches over 6e423e30068b62c6cfa276c6d720ee35bb70387a..00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db returned no changes.",
+            "No runtime trigger was reproduced. A live adopted host whose socket disappears and runtime becomes Gone is a conditional distinction, not proof that a shipped action naturally produces that state."
+          ],
+          "coverage_checked": {
+            "SPEC.md": "No acceptance of discarding or duplicating an unreadable host agent. Exact old-tmux failed-retirement duplication is a different exception.",
+            "SPEC_impl.md": "Terminal switch points requires unreadable hosts to record nothing and refuse guarded lifecycle verbs. Delete ends every terminal host promises confirmation, so it does not cover the separate Gone-success shortcut.",
+            "TODO.md Planned": "Empty; no cover.",
+            "plans/queue": "No unlanded plan matching this unreadable-host deletion regression or the conditional Gone shortcut. The tmux plans are landed.",
+            "BUGS.md": "No matching item.",
+            "INDEX.md and matching queue files": "gone-retry-forgets-pinned-foreground-child.md was read: related cleanup context, but losing a child's identity during retry is not the same root as accepting a retained adopted host's Gone result. retired-runtime-retains-restart-seed-reply.md is also distinct.",
+            "TRIAGE_OUTCOMES.md": "No matching decision.",
+            "FILTER.md": "No filter used for the unreadable/absent claim or conditional host-forgetting consequence."
+          },
+          "exact_cover_quotes": [],
+          "missing_premise": "No deletion-induced route to treating an unreadable host as absent. Separately, supported occurrence of a live adopted host after socket disappearance/runtime Gone remains unestablished; the known fixture's manual socket removal is not that premise.",
+          "original_stronger_consequence": "Removing the unusable-server guard could regard a running but unreadable terminal as absent and discard or duplicate its agent: potential highest process/work loss. The later broad all-host-end-confirmation rationale was corrected, not silently retained. Known g166/c5 conditional orphan-host consequence is expressly not dismissed; no user-process/data-loss route for it was established here.",
+          "needs_independent_drop_check": true,
+          "proposed_basis": "Narrow source refutation of ServerPresence-removal regression only. Parent must preserve/reconcile the separately owned g166/c5 conditional Gone-runtime issue; this result does not authorize dropping it or claiming Delete always confirms death."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": true,
+        "provisional_bucket": "highest",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "retired-tmux-presence-guard-unreadable-as-absent",
+        "destination": null
+      }
+    },
+    {
+      "key": "g168/c2",
+      "owner": "g168",
+      "id": "c2",
+      "domain": "retired-supervisor-tmux",
+      "purpose": "retired-supervisor-tmux: crates/farhelm-supervisor/src/tmux/input.rs, crates/farhelm-supervisor/src/tmux/presence.rs, crates/farhelm-supervisor/src/tmux/query_strip.rs; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 2,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c2",
+            "state": "open",
+            "summary": "Input confirmation remains in the host attachment path",
+            "location": "crates/farhelm-supervisor/src/tmux/input.rs:195",
+            "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. TLDR: considered whether deleting the dedicated confirmed-input client silently loses typed input during a host connection failure or takeover. Source refutation: service/grid_stream.rs:1022-1036 gives each attachment a host InputSequence and pump; :1244-1275 retains and awaits every input receipt; :1209-1238 publishes input failure; :1285-1294 reports Unknown and NotSent instead of accepting them as successful delivery. This path resolves a HostTerminal (service/terminals.rs:122-127,225-248), so it does not fall back to an unconfirmed tmux pipe write. Contract: SPEC_impl.md, Terminal host, Grid streams, says input whose fate is unknown or not sent ends the attachment as an input failure; runtime input is never resent. Suggested bucket: high for lost interactive input if the route existed. Could-be-highest: no established security or loss-of-work route from this deletion; the considered consequence was silently dropped keystrokes. Confidence: confirmed by source for the attachment-to-receipt path, not runtime observation. proposed_drop: source refutation above. possible_cover: none. Caveats: handing input to the runtime is asynchronous; this is not a claim that a queued key has already been read by the agent. A connection loss is explicitly allowed to leave delivery unknown, and no runtime was exercised."
+          }
+        },
+        {
+          "line": 4,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c2",
+            "state": "open",
+            "summary": "Input confirmation remains in the host attachment and prompt paths",
+            "location": "crates/farhelm-supervisor/src/tmux/input.rs:195",
+            "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. Original considered consequence preserved: deleting the dedicated confirmed-input client silently loses typed input during a host connection failure or takeover. TLDR: the host attachment retains receipt/failure handling; the non-viewer prompt caller also checks delivery before submitting. Initial source basis retained: service/grid_stream.rs:1022-1036,1209-1238,1244-1294 uses an InputSequence, awaits receipts and reports Unknown/NotSent. Synthesis checks: service/core.rs:11913-11959 holds the session lifecycle claim while resolving and probing the exact session entry, :11978-12010 requires caught-up bracketed-paste modes, and :2192-2225 waits for InputFate::Written for the whole paste before sending submit through the same sequence, with a whole-operation timeout and partial-delivery errors. connection.rs's patch preserves the attachments-lock check of both channel and notify identity when routing input (:501 onward in the new revision); it changes the host branch from backend dispatch to direct HostAttach dispatch rather than removing identity validation. The deleted input tests proved the retired tmux client's whole-call timeout and confirmed chunks, not a generic host-runtime deadline. Surviving test code service/grid_stream/tests.rs:1014-1044 asserts received key/paste bytes; :1113-1146 fills the actual runtime input window with three held pieces before injecting query output and another producer, then asserts the entire received sequence. Thus the test check relies on actual competing bytes and fixture premises, not merely correct production code. Contract: SPEC_impl.md, Terminal host, Grid streams and The terminal switch points, requires failed unknown/not-sent input to break the attachment and a prompt to submit only after its whole paste is written. Suggested bucket: high for silently lost interactive input if the route existed. Could-be-highest: no established security or user-owned-work loss route from this deletion; original silent-keystroke consequence is unchanged. Confidence: source-confirmed for the stated paths and test assertions; no execution observation. proposed_drop: source refutation, still proposed and not accepted by this reviewer. possible_cover: none. Caveats: queued input is not proof of agent consumption; delivery can become unknown after disconnect. Accepted interleaving between a completed prompt paste and its separate submit is not being used to dismiss a distinct deletion bug. No assertion of complete host test coverage or mutation-test execution."
+          }
+        }
+      ],
+      "latest": {
+        "line": 4,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c2",
+          "state": "open",
+          "summary": "Input confirmation remains in the host attachment and prompt paths",
+          "location": "crates/farhelm-supervisor/src/tmux/input.rs:195",
+          "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. Original considered consequence preserved: deleting the dedicated confirmed-input client silently loses typed input during a host connection failure or takeover. TLDR: the host attachment retains receipt/failure handling; the non-viewer prompt caller also checks delivery before submitting. Initial source basis retained: service/grid_stream.rs:1022-1036,1209-1238,1244-1294 uses an InputSequence, awaits receipts and reports Unknown/NotSent. Synthesis checks: service/core.rs:11913-11959 holds the session lifecycle claim while resolving and probing the exact session entry, :11978-12010 requires caught-up bracketed-paste modes, and :2192-2225 waits for InputFate::Written for the whole paste before sending submit through the same sequence, with a whole-operation timeout and partial-delivery errors. connection.rs's patch preserves the attachments-lock check of both channel and notify identity when routing input (:501 onward in the new revision); it changes the host branch from backend dispatch to direct HostAttach dispatch rather than removing identity validation. The deleted input tests proved the retired tmux client's whole-call timeout and confirmed chunks, not a generic host-runtime deadline. Surviving test code service/grid_stream/tests.rs:1014-1044 asserts received key/paste bytes; :1113-1146 fills the actual runtime input window with three held pieces before injecting query output and another producer, then asserts the entire received sequence. Thus the test check relies on actual competing bytes and fixture premises, not merely correct production code. Contract: SPEC_impl.md, Terminal host, Grid streams and The terminal switch points, requires failed unknown/not-sent input to break the attachment and a prompt to submit only after its whole paste is written. Suggested bucket: high for silently lost interactive input if the route existed. Could-be-highest: no established security or user-owned-work loss route from this deletion; original silent-keystroke consequence is unchanged. Confidence: source-confirmed for the stated paths and test assertions; no execution observation. proposed_drop: source refutation, still proposed and not accepted by this reviewer. possible_cover: none. Caveats: queued input is not proof of agent consumption; delivery can become unknown after disconnect. Accepted interleaving between a completed prompt paste and its separate submit is not being used to dismiss a distinct deletion bug. No assertion of complete host test coverage or mutation-test execution."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g168/findings.jsonl",
+        "id": "c2",
+        "line": 4,
+        "disposition": "excluded",
+        "group": "retired-tmux-input-client-silent-delivery-loss",
+        "reason": "Parent explicitly accepted named refuted proposal from claims-106 after inspecting it. Deleting the tmux input client does not replace active input with an unconfirmed pipe write. Host attachments keep input receipts and propagate Unknown/NotSent failures; prompt delivery waits for paste completion before submitting. Source refutation of this deletion-induced transport regression, preserving known receipt-lifetime defects and the lack of exhaustive replacement test coverage. Checked source/results: [\"At 1ed482dde220452e424973faf38a5e1318986333, grid_stream.rs:1022-1036 creates the attachment's InputSequence; :1209-1238 publishes pump failure; :1244-1294 retains each receipt and rejects Unknown/NotSent as input failure.\",\"core.rs:2192-2233,11913-12010 uses the current running host, lifecycle claim, restoration/paste-mode gates and a bounded delivery operation whose submit follows paste Written.\",\"Read grid_stream/tests.rs:1014-1044,1113-1146: they assert received key/paste bytes, establish three held pieces filling the actual runtime input window, inject query/other input, and compare the whole resulting sequence.\",\"The current queue's retired-runtime receipt item describes a separate late reserved-send race; it prevents a blanket claim that every receipt always resolves, but does not show deletion of InputClient caused silent keystroke acceptance. No runtime execution.\"] Current coverage/results: {\"SPEC.md\":\"Terminal experience requires ordinary input delivery; no exact acceptance of silent successful loss found.\",\"SPEC_impl.md\":\"Terminal host / Terminal switch points and Grid streams require receipt-based input failure and paste Written before submit; explicitly accepted uncertainty after disconnect is not a deleted-client regression.\",\"TODO.md Planned\":\"Empty; no cover. Agent-prompt stale-approval entry concerns a different root.\",\"plans/queue\":\"No unlanded plan matching this deleted-client regression; tmux removal is landed.\",\"BUGS.md\":\"No matching item.\",\"INDEX.md and matching queue files\":\"Read retired-runtime-retains-restart-seed-reply.md: late bounded-channel reservation can retain a request/receipt after runtime end. Different root and consequence, not exact coverage or an alias. paste-receipt-test-checks-before-ack-processing.md is indexed as an oracle issue, not proof of silent transport loss.\",\"TRIAGE_OUTCOMES.md\":\"No exact decision.\",\"FILTER.md\":\"No filter used.\"} Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Deleting the confirmed-input client might silently lose typed input during host connection failure or takeover. Suggested high; no established security or loss-of-work route. A queued receipt is not proof that the agent consumed the input, and disconnect may legitimately leave delivery unknown.\"; \"A surviving caller that reports a deleted tmux-client write as host input success without the replacement receipt path was not established.\"."
+      },
+      "accepted_parent_decision": {
+        "key": "g168/c2",
+        "line": 4,
+        "disposition": "excluded",
+        "group": "retired-tmux-input-client-silent-delivery-loss",
+        "bucket": "high",
+        "recording": "refuted",
+        "queue_target_candidate": null,
+        "needs_independent_drop_check": false,
+        "reason": "Parent explicitly accepted named refuted proposal from claims-106 after inspecting it. Deleting the tmux input client does not replace active input with an unconfirmed pipe write. Host attachments keep input receipts and propagate Unknown/NotSent failures; prompt delivery waits for paste completion before submitting. Source refutation of this deletion-induced transport regression, preserving known receipt-lifetime defects and the lack of exhaustive replacement test coverage. Checked source/results: [\"At 1ed482dde220452e424973faf38a5e1318986333, grid_stream.rs:1022-1036 creates the attachment's InputSequence; :1209-1238 publishes pump failure; :1244-1294 retains each receipt and rejects Unknown/NotSent as input failure.\",\"core.rs:2192-2233,11913-12010 uses the current running host, lifecycle claim, restoration/paste-mode gates and a bounded delivery operation whose submit follows paste Written.\",\"Read grid_stream/tests.rs:1014-1044,1113-1146: they assert received key/paste bytes, establish three held pieces filling the actual runtime input window, inject query/other input, and compare the whole resulting sequence.\",\"The current queue's retired-runtime receipt item describes a separate late reserved-send race; it prevents a blanket claim that every receipt always resolves, but does not show deletion of InputClient caused silent keystroke acceptance. No runtime execution.\"] Current coverage/results: {\"SPEC.md\":\"Terminal experience requires ordinary input delivery; no exact acceptance of silent successful loss found.\",\"SPEC_impl.md\":\"Terminal host / Terminal switch points and Grid streams require receipt-based input failure and paste Written before submit; explicitly accepted uncertainty after disconnect is not a deleted-client regression.\",\"TODO.md Planned\":\"Empty; no cover. Agent-prompt stale-approval entry concerns a different root.\",\"plans/queue\":\"No unlanded plan matching this deleted-client regression; tmux removal is landed.\",\"BUGS.md\":\"No matching item.\",\"INDEX.md and matching queue files\":\"Read retired-runtime-retains-restart-seed-reply.md: late bounded-channel reservation can retain a request/receipt after runtime end. Different root and consequence, not exact coverage or an alias. paste-receipt-test-checks-before-ack-processing.md is indexed as an oracle issue, not proof of silent transport loss.\",\"TRIAGE_OUTCOMES.md\":\"No exact decision.\",\"FILTER.md\":\"No filter used.\"} Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Deleting the confirmed-input client might silently lose typed input during host connection failure or takeover. Suggested high; no established security or loss-of-work route. A queued receipt is not proof that the agent consumed the input, and disconnect may legitimately leave delivery unknown.\"; \"A surviving caller that reports a deleted tmux-client write as host input success without the replacement receipt path was not established.\"."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-106",
+          "key": "g168/c2",
+          "latest_line": 4,
+          "recommendation": "refuted",
+          "bucket": "high",
+          "underlying_key": "retired-tmux-input-client-silent-delivery-loss",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "Deleting the tmux input client does not replace active input with an unconfirmed pipe write. Host attachments keep input receipts and propagate Unknown/NotSent failures; prompt delivery waits for paste completion before submitting.",
+          "checks": [
+            "At 1ed482dde220452e424973faf38a5e1318986333, grid_stream.rs:1022-1036 creates the attachment's InputSequence; :1209-1238 publishes pump failure; :1244-1294 retains each receipt and rejects Unknown/NotSent as input failure.",
+            "core.rs:2192-2233,11913-12010 uses the current running host, lifecycle claim, restoration/paste-mode gates and a bounded delivery operation whose submit follows paste Written.",
+            "Read grid_stream/tests.rs:1014-1044,1113-1146: they assert received key/paste bytes, establish three held pieces filling the actual runtime input window, inject query/other input, and compare the whole resulting sequence.",
+            "The current queue's retired-runtime receipt item describes a separate late reserved-send race; it prevents a blanket claim that every receipt always resolves, but does not show deletion of InputClient caused silent keystroke acceptance. No runtime execution."
+          ],
+          "coverage_checked": {
+            "SPEC.md": "Terminal experience requires ordinary input delivery; no exact acceptance of silent successful loss found.",
+            "SPEC_impl.md": "Terminal host / Terminal switch points and Grid streams require receipt-based input failure and paste Written before submit; explicitly accepted uncertainty after disconnect is not a deleted-client regression.",
+            "TODO.md Planned": "Empty; no cover. Agent-prompt stale-approval entry concerns a different root.",
+            "plans/queue": "No unlanded plan matching this deleted-client regression; tmux removal is landed.",
+            "BUGS.md": "No matching item.",
+            "INDEX.md and matching queue files": "Read retired-runtime-retains-restart-seed-reply.md: late bounded-channel reservation can retain a request/receipt after runtime end. Different root and consequence, not exact coverage or an alias. paste-receipt-test-checks-before-ack-processing.md is indexed as an oracle issue, not proof of silent transport loss.",
+            "TRIAGE_OUTCOMES.md": "No exact decision.",
+            "FILTER.md": "No filter used."
+          },
+          "exact_cover_quotes": [],
+          "missing_premise": "A surviving caller that reports a deleted tmux-client write as host input success without the replacement receipt path was not established.",
+          "original_stronger_consequence": "Deleting the confirmed-input client might silently lose typed input during host connection failure or takeover. Suggested high; no established security or loss-of-work route. A queued receipt is not proof that the agent consumed the input, and disconnect may legitimately leave delivery unknown.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Source refutation of this deletion-induced transport regression, preserving known receipt-lifetime defects and the lack of exhaustive replacement test coverage."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "high",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "retired-tmux-input-client-silent-delivery-loss",
+        "destination": null
+      }
+    },
+    {
+      "key": "g168/c3",
+      "owner": "g168",
+      "id": "c3",
+      "domain": "retired-supervisor-tmux",
+      "purpose": "retired-supervisor-tmux: crates/farhelm-supervisor/src/tmux/input.rs, crates/farhelm-supervisor/src/tmux/presence.rs, crates/farhelm-supervisor/src/tmux/query_strip.rs; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 3,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c3",
+            "state": "open",
+            "summary": "Removing tmux query stripping does not expose queries to a second terminal parser",
+            "location": "crates/farhelm-supervisor/src/tmux/query_strip.rs:1",
+            "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. TLDR: considered whether deleting QueryStripper brings back duplicate cursor/color replies that appear as spurious shell input. Source refutation: the deleted transform applied to tmux raw control-mode output. At this revision service/terminals.rs:122-127,225-248 resolves only host terminals; hosts/terminal.rs:3447-3503,3529-3567 interprets raw output in the supervisor emulator with replay effects, and :3246-3285 queues its query answers through host Input. service/grid_stream.rs:423-461 reads the emulator screen/state and sends GridOutput messages rather than raw terminal-query bytes. There is no remaining production QueryStripper reference in the pinned supervisor source. Contract: SPEC_impl.md, The supervisor's terminal emulator, says this emulator is the one place host output is interpreted, and Terminal host, Grid streams, specifies screen/history messages. Suggested bucket: high if recurring injected query replies existed. Could-be-highest: no established security or user-owned-work loss route; considered consequence was spurious terminal input. Confidence: confirmed by source for removal's routing and one-parser distinction, not runtime observation. proposed_drop: source refutation above. possible_cover: none. Caveats: emulator query coverage and its accepted replay-delivery ambiguity are separate contracts; no claim is made that every possible terminal query is supported."
+          }
+        },
+        {
+          "line": 6,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c3",
+            "state": "open",
+            "summary": "Host query routing and surviving tests cover the replacement responsibility",
+            "location": "crates/farhelm-supervisor/src/tmux/query_strip.rs:1",
+            "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. Original consequence preserved: deleting QueryStripper brings back duplicate cursor/color replies that appear as spurious shell input. TLDR: host output is interpreted only in the supervisor and sent to viewers as screen grids; surviving tests inspect real reply bytes and split-feed behavior. Original source refutation retained: service/terminals.rs:122-127,225-248 resolves host terminals; hosts/terminal.rs:3246-3285,3447-3503,3529-3567 interprets host output and queues emulator replies; service/grid_stream.rs:423-461 sends screen/state grids, not raw query bytes. Added test-sensitivity checks: farhelm-terminal-emulator/tests/queries.rs:25-40 compares public-API reply strings with expected bytes, :53-100 includes cursor/status/device queries, and :112-128 includes foreground/background colors with both terminators and a clipboard-read refusal. tests/boundary.rs:137-175 accumulates replies through actual whole/bytewise/chunked/snapshot-split feeds, :320-337 compares their reply bytes; tests/common/output.rs:111-117 includes DA, CPR and color queries in its generated corpus. This is meaningful coverage of parsing/reply responsibilities that survive, rather than claiming correct production alone proves test sensitivity. The removed strip-table tests exercised a tmux-only transform no remaining host caller uses. Contract: SPEC_impl.md The supervisor's terminal emulator and Terminal host, Grid streams. Suggested bucket: high if recurring injected replies existed. Could-be-highest: no established security or user-owned-work loss route; original considered spurious-input consequence unchanged. Confidence: source-confirmed for routing and inspected test assertions; tests were not executed. proposed_drop: source refutation, still proposed and not accepted by this reviewer. possible_cover: none. Caveats: the property corpus is randomized, not proof that every old literal is tested at every split in each run; the public query table is tested separately. DECRQM synchronized-update state is intentionally normalized for split comparisons, and UTF-8 C1 journals are excluded. No blanket claim of complete host test coverage. Accepted replay-delivery ambiguity is separate, and is not the basis of this drop."
+          }
+        }
+      ],
+      "latest": {
+        "line": 6,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c3",
+          "state": "open",
+          "summary": "Host query routing and surviving tests cover the replacement responsibility",
+          "location": "crates/farhelm-supervisor/src/tmux/query_strip.rs:1",
+          "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. Original consequence preserved: deleting QueryStripper brings back duplicate cursor/color replies that appear as spurious shell input. TLDR: host output is interpreted only in the supervisor and sent to viewers as screen grids; surviving tests inspect real reply bytes and split-feed behavior. Original source refutation retained: service/terminals.rs:122-127,225-248 resolves host terminals; hosts/terminal.rs:3246-3285,3447-3503,3529-3567 interprets host output and queues emulator replies; service/grid_stream.rs:423-461 sends screen/state grids, not raw query bytes. Added test-sensitivity checks: farhelm-terminal-emulator/tests/queries.rs:25-40 compares public-API reply strings with expected bytes, :53-100 includes cursor/status/device queries, and :112-128 includes foreground/background colors with both terminators and a clipboard-read refusal. tests/boundary.rs:137-175 accumulates replies through actual whole/bytewise/chunked/snapshot-split feeds, :320-337 compares their reply bytes; tests/common/output.rs:111-117 includes DA, CPR and color queries in its generated corpus. This is meaningful coverage of parsing/reply responsibilities that survive, rather than claiming correct production alone proves test sensitivity. The removed strip-table tests exercised a tmux-only transform no remaining host caller uses. Contract: SPEC_impl.md The supervisor's terminal emulator and Terminal host, Grid streams. Suggested bucket: high if recurring injected replies existed. Could-be-highest: no established security or user-owned-work loss route; original considered spurious-input consequence unchanged. Confidence: source-confirmed for routing and inspected test assertions; tests were not executed. proposed_drop: source refutation, still proposed and not accepted by this reviewer. possible_cover: none. Caveats: the property corpus is randomized, not proof that every old literal is tested at every split in each run; the public query table is tested separately. DECRQM synchronized-update state is intentionally normalized for split comparisons, and UTF-8 C1 journals are excluded. No blanket claim of complete host test coverage. Accepted replay-delivery ambiguity is separate, and is not the basis of this drop."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g168/findings.jsonl",
+        "id": "c3",
+        "line": 6,
+        "disposition": "excluded",
+        "group": "retired-tmux-query-stripper-duplicate-replies",
+        "reason": "Parent explicitly accepted named refuted proposal from claims-106 after inspecting it. QueryStripper acted on the retired tmux raw-control stream. The active route interprets output in the supervisor emulator and sends viewers screen grids, so it has no second viewer query parser for the deleted stripper to protect. Source refutation limited to the retired transform's deletion, with no claim that all terminal queries or all feed splits are covered. Checked source/results: [\"Pinned git grep at 1ed482dde220452e424973faf38a5e1318986333 found no QueryStripper consumer. terminals.rs:225-248 returns host runtimes; hosts/terminal.rs:3246-3285 queues emulator query answers and :3447-3503 applies replay modes.\",\"Read grid_stream.rs:423-461: the attachment receives GridOutput::Hello/State and screen updates built from the emulator, not raw query bytes.\",\"Read farhelm-terminal-emulator/tests/queries.rs:25-40,53-100,112-128: public API replies are compared with literal device/status/cursor/color answers, with both color terminators and clipboard-read refusal. This is actual surviving responsibility coverage, not an inference from correct production.\",\"Source-only. Randomized split-feed coverage is not exhaustive; DECRQM normalization and excluded UTF-8 C1 journals remain the reported caveats. No test was run.\"] Current coverage/results: {\"SPEC.md\":\"No acceptance of repeated query replies as shell input.\",\"SPEC_impl.md\":\"The supervisor's terminal emulator and Grid streams define the one output interpreter and grid publication. Replay-delivery ambiguity is a separate accepted omission, not duplicate-answer acceptance.\",\"TODO.md Planned\":\"Empty; no cover.\",\"plans/queue\":\"No unlanded exact query-stripper replacement plan; tmux-removal plans are landed.\",\"BUGS.md\":\"No matching item.\",\"INDEX.md and matching queue files\":\"No exact duplicate-reply/deleted-stripper item. Replay/receipt-related entries concern other mechanisms.\",\"TRIAGE_OUTCOMES.md\":\"No exact decision.\",\"FILTER.md\":\"No filter used.\"} Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Deleting QueryStripper might bring back duplicate cursor/color replies as spurious shell input. Suggested high for recurring injected replies; no established security or user-owned-work loss route.\"; \"No active tmux raw-output transform consumer or second query interpreter was found.\"."
+      },
+      "accepted_parent_decision": {
+        "key": "g168/c3",
+        "line": 6,
+        "disposition": "excluded",
+        "group": "retired-tmux-query-stripper-duplicate-replies",
+        "bucket": "high",
+        "recording": "refuted",
+        "queue_target_candidate": null,
+        "needs_independent_drop_check": false,
+        "reason": "Parent explicitly accepted named refuted proposal from claims-106 after inspecting it. QueryStripper acted on the retired tmux raw-control stream. The active route interprets output in the supervisor emulator and sends viewers screen grids, so it has no second viewer query parser for the deleted stripper to protect. Source refutation limited to the retired transform's deletion, with no claim that all terminal queries or all feed splits are covered. Checked source/results: [\"Pinned git grep at 1ed482dde220452e424973faf38a5e1318986333 found no QueryStripper consumer. terminals.rs:225-248 returns host runtimes; hosts/terminal.rs:3246-3285 queues emulator query answers and :3447-3503 applies replay modes.\",\"Read grid_stream.rs:423-461: the attachment receives GridOutput::Hello/State and screen updates built from the emulator, not raw query bytes.\",\"Read farhelm-terminal-emulator/tests/queries.rs:25-40,53-100,112-128: public API replies are compared with literal device/status/cursor/color answers, with both color terminators and clipboard-read refusal. This is actual surviving responsibility coverage, not an inference from correct production.\",\"Source-only. Randomized split-feed coverage is not exhaustive; DECRQM normalization and excluded UTF-8 C1 journals remain the reported caveats. No test was run.\"] Current coverage/results: {\"SPEC.md\":\"No acceptance of repeated query replies as shell input.\",\"SPEC_impl.md\":\"The supervisor's terminal emulator and Grid streams define the one output interpreter and grid publication. Replay-delivery ambiguity is a separate accepted omission, not duplicate-answer acceptance.\",\"TODO.md Planned\":\"Empty; no cover.\",\"plans/queue\":\"No unlanded exact query-stripper replacement plan; tmux-removal plans are landed.\",\"BUGS.md\":\"No matching item.\",\"INDEX.md and matching queue files\":\"No exact duplicate-reply/deleted-stripper item. Replay/receipt-related entries concern other mechanisms.\",\"TRIAGE_OUTCOMES.md\":\"No exact decision.\",\"FILTER.md\":\"No filter used.\"} Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Deleting QueryStripper might bring back duplicate cursor/color replies as spurious shell input. Suggested high for recurring injected replies; no established security or user-owned-work loss route.\"; \"No active tmux raw-output transform consumer or second query interpreter was found.\"."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-106",
+          "key": "g168/c3",
+          "latest_line": 6,
+          "recommendation": "refuted",
+          "bucket": "high",
+          "underlying_key": "retired-tmux-query-stripper-duplicate-replies",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "QueryStripper acted on the retired tmux raw-control stream. The active route interprets output in the supervisor emulator and sends viewers screen grids, so it has no second viewer query parser for the deleted stripper to protect.",
+          "checks": [
+            "Pinned git grep at 1ed482dde220452e424973faf38a5e1318986333 found no QueryStripper consumer. terminals.rs:225-248 returns host runtimes; hosts/terminal.rs:3246-3285 queues emulator query answers and :3447-3503 applies replay modes.",
+            "Read grid_stream.rs:423-461: the attachment receives GridOutput::Hello/State and screen updates built from the emulator, not raw query bytes.",
+            "Read farhelm-terminal-emulator/tests/queries.rs:25-40,53-100,112-128: public API replies are compared with literal device/status/cursor/color answers, with both color terminators and clipboard-read refusal. This is actual surviving responsibility coverage, not an inference from correct production.",
+            "Source-only. Randomized split-feed coverage is not exhaustive; DECRQM normalization and excluded UTF-8 C1 journals remain the reported caveats. No test was run."
+          ],
+          "coverage_checked": {
+            "SPEC.md": "No acceptance of repeated query replies as shell input.",
+            "SPEC_impl.md": "The supervisor's terminal emulator and Grid streams define the one output interpreter and grid publication. Replay-delivery ambiguity is a separate accepted omission, not duplicate-answer acceptance.",
+            "TODO.md Planned": "Empty; no cover.",
+            "plans/queue": "No unlanded exact query-stripper replacement plan; tmux-removal plans are landed.",
+            "BUGS.md": "No matching item.",
+            "INDEX.md and matching queue files": "No exact duplicate-reply/deleted-stripper item. Replay/receipt-related entries concern other mechanisms.",
+            "TRIAGE_OUTCOMES.md": "No exact decision.",
+            "FILTER.md": "No filter used."
+          },
+          "exact_cover_quotes": [],
+          "missing_premise": "No active tmux raw-output transform consumer or second query interpreter was found.",
+          "original_stronger_consequence": "Deleting QueryStripper might bring back duplicate cursor/color replies as spurious shell input. Suggested high for recurring injected replies; no established security or user-owned-work loss route.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Source refutation limited to the retired transform's deletion, with no claim that all terminal queries or all feed splits are covered."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "high",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "retired-tmux-query-stripper-duplicate-replies",
+        "destination": null
+      }
+    },
+    {
+      "key": "g168/c4",
+      "owner": "g168",
+      "id": "c4",
+      "domain": "retired-supervisor-tmux",
+      "purpose": "retired-supervisor-tmux: crates/farhelm-supervisor/src/tmux/input.rs, crates/farhelm-supervisor/src/tmux/presence.rs, crates/farhelm-supervisor/src/tmux/query_strip.rs; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 9,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c4",
+            "state": "open",
+            "summary": "Retiring stdin-only tmux input does not move typed credentials into process arguments",
+            "location": "crates/farhelm-supervisor/src/tmux/input.rs:89",
+            "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. TLDR: checked the deleted input client's explicit privacy responsibility: typed input can contain credentials, so replacing it must not put those bytes on a spawned process command line. The replacement sends input as binary host-protocol payload, with no process invocation on this path. Details: the removed InputClient documentation at original input.rs:89 onward identifies argv exposure as the reason old send-keys invocations were avoided. At the reviewed revision hosts/terminal.rs:1527-1534,1552-1575,2300-2338 queues byte vectors in the host runtime and stamps the input epoch; hosts/client.rs:852-863 encodes ClientMessage::Input(data.to_vec()) into the established connection after bounded admission. This is not shell/tmux command interpolation. The grid-input encoder at grid_input.rs:177 converts text directly to UTF-8 bytes, and input_frames at :267-272 cuts those bytes at MAX_INPUT for the same protocol, rather than constructing process arguments. Governing contract: SPEC_impl.md, The grid client, states input is encoded by the supervisor from the terminal modes; Terminal host, A host terminal's runtime, sends input through the owned host connection. Suggested bucket: highest if typed credentials were exposed through process arguments. Could-be-highest: yes; original considered consequence here is disclosure of credential-bearing typed input to readers of process arguments. Confidence: confirmed source refutation of that removed-client replacement route; no execution or exposure observed. proposed_drop: source refutation above, pending independent check; no drop accepted. possible_cover: none. Caveats: this is limited to the input-delivery transport and does not claim arbitrary agent commands or the user's terminal program never expose secrets themselves. It is a considered non-finding discovered during the privacy/responsibility audit, not a new verified vulnerability. Original c2 silent-input-loss consequence and its source/test records remain separate and unchanged."
+          }
+        }
+      ],
+      "latest": {
+        "line": 9,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c4",
+          "state": "open",
+          "summary": "Retiring stdin-only tmux input does not move typed credentials into process arguments",
+          "location": "crates/farhelm-supervisor/src/tmux/input.rs:89",
+          "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. TLDR: checked the deleted input client's explicit privacy responsibility: typed input can contain credentials, so replacing it must not put those bytes on a spawned process command line. The replacement sends input as binary host-protocol payload, with no process invocation on this path. Details: the removed InputClient documentation at original input.rs:89 onward identifies argv exposure as the reason old send-keys invocations were avoided. At the reviewed revision hosts/terminal.rs:1527-1534,1552-1575,2300-2338 queues byte vectors in the host runtime and stamps the input epoch; hosts/client.rs:852-863 encodes ClientMessage::Input(data.to_vec()) into the established connection after bounded admission. This is not shell/tmux command interpolation. The grid-input encoder at grid_input.rs:177 converts text directly to UTF-8 bytes, and input_frames at :267-272 cuts those bytes at MAX_INPUT for the same protocol, rather than constructing process arguments. Governing contract: SPEC_impl.md, The grid client, states input is encoded by the supervisor from the terminal modes; Terminal host, A host terminal's runtime, sends input through the owned host connection. Suggested bucket: highest if typed credentials were exposed through process arguments. Could-be-highest: yes; original considered consequence here is disclosure of credential-bearing typed input to readers of process arguments. Confidence: confirmed source refutation of that removed-client replacement route; no execution or exposure observed. proposed_drop: source refutation above, pending independent check; no drop accepted. possible_cover: none. Caveats: this is limited to the input-delivery transport and does not claim arbitrary agent commands or the user's terminal program never expose secrets themselves. It is a considered non-finding discovered during the privacy/responsibility audit, not a new verified vulnerability. Original c2 silent-input-loss consequence and its source/test records remain separate and unchanged."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g168/findings.jsonl",
+        "id": "c4",
+        "line": 9,
+        "disposition": "under-investigation",
+        "group": "g168-c4",
+        "reason": "Record durably acknowledged; parent source/contract validation, cross-group synthesis, coverage/filter matching and any independent drop check remain pending. This preserves the claim and uncertainty without accepting, dropping or lowering it."
+      },
+      "accepted_parent_decision": null,
+      "returned_claim_checks": [
+        {
+          "batch": "claims-106",
+          "key": "g168/c4",
+          "latest_line": 9,
+          "recommendation": "refuted",
+          "bucket": "highest",
+          "underlying_key": "retired-tmux-input-replacement-credential-argv-exposure",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The replacement transports typed bytes through in-memory runtime queues and binary host-protocol Input messages. It does not spawn a process with those bytes in argv.",
+          "checks": [
+            "At 1ed482dde220452e424973faf38a5e1318986333, hosts/terminal.rs:1527-1575,2300-2338 keeps data as byte vectors, stamps an input epoch and queues InputRequest through the runtime.",
+            "Read hosts/client.rs:852-863: bounded admission queues ClientMessage::Input(data.to_vec()) on the existing connection.",
+            "Read grid_input.rs:177,267-272: text becomes UTF-8 bytes and frames are slices limited by MAX_INPUT. No shell interpolation or process construction occurs on this path.",
+            "No credential exposure observed or reproduced. This check covers input transport, not arbitrary commands the user or agent chooses to run."
+          ],
+          "coverage_checked": {
+            "SPEC.md": "No acceptance of credential-bearing input in process arguments.",
+            "SPEC_impl.md": "The grid client and Terminal host runtime contract specify supervisor encoding and input on the owned host connection; no accepted argv exposure.",
+            "TODO.md Planned": "Empty; no cover.",
+            "plans/queue": "No unlanded plan accepting or fixing this exact input-argv route.",
+            "BUGS.md": "No matching item.",
+            "INDEX.md and matching queue files": "No exact input-argv disclosure item found. Credential transport entries concern distinct settings/tunnel routes.",
+            "TRIAGE_OUTCOMES.md": "No exact decision.",
+            "FILTER.md": "No filter used; security consequences are outside applicable rare-glitch filters."
+          },
+          "exact_cover_quotes": [],
+          "missing_premise": "No process invocation carrying typed host input as argv exists on the inspected replacement delivery path.",
+          "original_stronger_consequence": "Replacing the privacy-conscious tmux input client could expose typed credentials to readers of process arguments. Potential highest credential disclosure remains preserved; this was a considered non-finding, not an observed vulnerability.",
+          "needs_independent_drop_check": true,
+          "proposed_basis": "Source refutation of the specific input-transport replacement route. Independent check required before dropping this potential security claim."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": true,
+        "provisional_bucket": "highest",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "retired-tmux-input-replacement-credential-argv-exposure",
+        "destination": null
+      }
+    }
+  ],
+  "replies": [
+    {
+      "turn": 1,
+      "reply": "Initial pass complete: all 1,205 assigned patch lines reviewed at the pinned commit.\n\nNo substantive findings or unresolved leads. Recorded three source-refuted candidates, c1–c3, in `findings.jsonl`; updated `progress.md` with coverage and evidence.\n\nNo tests or reproductions run. No assigned material remains unread."
+    },
+    {
+      "turn": 2,
+      "reply": "Revised c1–c3 with lifecycle, prompt-delivery, tab-identity, Delete-confirmation, and surviving test-sensitivity evidence. Original consequences remain preserved; all drops remain proposed.\n\nNo new findings. Unresolved lead IDs: none. Source-only synthesis complete; progress log updated."
+    },
+    {
+      "turn": 3,
+      "reply": "Discovery pass 1 found no new issue.\n\n- Qualified c1 after checking the Gone-host shortcut and whole-range history; the related issue remains with g166/c5.\n- Checked input privacy, framing, size limits, and surviving references. Logged source-refuted candidate c4.\n- New verified IDs: none.\n- New unverified-after-investigation IDs: none.\n- Open leads: none.\n\nProgress updated. No runtime execution."
+    }
+  ],
+  "progress": "Group: g168, retired-supervisor-tmux.\nTurn: initial review, count 1, complete. Discovery passes: 0. No synthesis or later discovery turn performed.\nReviewed revision: 1ed482dde220452e424973faf38a5e1318986333. Complete inventory commits field read; excluded coverage metadata not read.\nMandatory evidence delivered: 00953-000.patch lines 1-494 (1-180,181-360,361-494); 00954-000.patch lines 1-491 (1-180,181-360,361-491); 00955-000.patch lines 1-220 (1-160,161-220). All 1,205 assigned lines read, no omitted assigned material.\nGoverning contracts read at reviewed revision: SPEC.md Terminal experience, 2855-3187; SPEC_impl.md Terminal host, 1963-2700; The supervisor's terminal emulator, 2767-2826; Terminal substrate: private tmux server, 2880-2991; Answers bind to what was drawn and surrounding context, 1062-1106. Root AGENTS End sentinel present. Full review-feedback AGENTS and recording instructions read; the initial combined instruction output clipped, so both were redelivered in bounded chunks. Machine and scode-voice instructions read.\nContext source read at reviewed revision: service/terminals.rs 1-280; service/core.rs 6128-6190 and 6620-6810; service/grid_stream.rs 370-540 and 1018-1305; hosts/terminal.rs 3180-3285 and 3440-3575; lib.rs 1-180. Targeted searches checked remaining removed-type references, host input/query routes, and tmux file status. Commit metadata and relevant deletion stat read.\nInterface assumptions: no production tmux InputClient, ServerPresence or QueryStripper references remain. Interactive terminal resolution returns HostTerminal. Startup ends the old server before reload; old tmux rows resolve to no terminal. Unreadable host rows retain unattributed handles and record no durable outcome. Host viewer input uses InputSequence receipts; query replies originate in the supervisor emulator, while viewers receive screen/state grids rather than raw query bytes. These are source conclusions, not execution observations.\nDurable records: c1 (presence-removal concern refuted by replacement distinction), c2 (input-confirmation removal concern refuted by receipt/failure path), c3 (query-strip removal concern refuted by one-parser/grid route). No verified findings, no unverified findings, no open leads. c1 explicitly preserves the considered highest process-loss/duplication consequence for the caller's drop audit. Candidate events use state open, with their settled source basis in detail; they are not unfinished investigations.\nRecorder correction: the first c1 append was rejected because state closed is invalid; event changed to open and appended successfully before further source reads. Findings log now contains three records, never truncated.\nExecution: no tests, builds or reproductions; source-only charter requested none. Checkout unchanged.\nNext action: return initial-pass result to caller and await a separately requested synthesis/discovery turn. Unread scope: none within assignment; replacement implementations were consulted at their relevant interfaces, not reviewed repository-wide.\n\nTurn 2 started: later-turn synthesis. Existing candidate provenance retained; no proposed drop accepted. Rechecking full replacement lifecycle interfaces, prompt/excerpt/tab identity, and tests of surviving responsibilities. No open leads at entry. Discovery-pass count remains 0.\n\nTurn 2 complete: later-turn synthesis. Total turns: 2. Discovery-pass count: 0. New findings: none. New leads: none. Revised IDs: c1, c2, c3. Unresolved lead IDs: none. All drops remain proposed; no drop accepted and no security/process-loss consequence lowered. No candidate relies only on specification acceptance, so no spec-accepted highest candidate required conversion to finding. The known old-tmux retirement and failed-startup-termination duplication residual retain their prior-change provenance in c1; they were not counted as discovery.\n\nUseful checks and results at 1ed482dde220452e424973faf38a5e1318986333:\n- Input/prompt callers: core.rs 2155-2230 and 11865-12030. The lifecycle claim spans resolution, live probe, caught-up modes and confirmed paste/submit. Unknown/partial input errors are explicit; the removed tmux whole-call timeout tests do not define a new host-runtime timeout. capture.rs and grid_stream.rs diffs were read fully. connection.rs diff lines 1-230 confirms both channel and connection identity remain checked under attachments lock when backend dispatch becomes direct host input dispatch.\n- Replacement lifecycle: core.rs 13295-13405; session_hosts.rs 594-809; teardown.rs 479-590 and 609-664. Unreadable terminals refuse guarded Delete, uncertainty is checked again after tab count, and unconfirmed host endings propagate before artifact and row removal. No distinct later-unconfirmed-Delete route was established.\n- Tab identity: core/host_tabs.rs 883-1038 and 1403-1516. Adoption requires session and tab id in the tag. Close requires the same runtime in the cell, rejects the agent runtime, refuses unreadability and retains the record/tab after an unconfirmed end. No distinct wrong-target route was established.\n- Excerpts/restart: launch_artifacts.rs 38-130 and 801-845; core/host_restart.rs 200-257; core/tests/host_terminals.rs 168-247 and 3815-3863; hosts/terminal/tests.rs 1663-1736. Excerpts require processed final-state evidence. Restart uses a new generation's host; surviving seed test restores the seed and asserts a blank screen separately from retained history. The final-output test keeps Info's early child-exit report separate from journaled last output and exit. The excerpt test asserts the exact complaint, not just an error state. No new excerpt identity lead was established.\n- Surviving input tests: grid_stream/tests.rs 1009-1322. They assert exact received bytes, establish held-input/window premises, exercise connection loss and paste closure, explicitly cancel takeover pumps and assert they finish, and establish an emulator-lock hold before measuring input admission. c2 was revised with the prompt and meaningful test-sensitivity evidence; production correctness alone was not used to dismiss test-sensitivity concerns.\n- Surviving unavailable-host tests: core/tests/host_terminals.rs 236-368. These establish a live root, force unavailability, assert no observation transition or sentinel, refuse prompt/guarded Delete with no received input, and force a running-to-unavailable tab transition inside the guard before asserting refusal. These support the surviving guard responsibility, independently of the deleted presence model's tests.\n- Query tests: farhelm-terminal-emulator/tests/queries.rs 1-205; tests/boundary.rs 1-185,196-264,303-339; tests/common/output.rs 105-128. Expected cursor/status/color/clipboard reply bytes remain pinned through the public API. Split-feed tests collect and compare actual replies, with explicit DECRQM normalization and C1 exclusion caveats carried into c3. The generated corpus includes DA, CPR and color queries; it is not an exhaustive old-table split proof.\n\nContext searches identified relevant callers/test names and tmux file deletions; no queue or excluded coverage metadata was read. Two broad context diff requests clipped and were not treated as complete coverage: the relevant capture/grid-stream diff was reissued in full, connection diff was bounded to its routing/teardown section, and host-tab/excerpt replacement source was delivered in the bounded ranges above. The complete adjacent connection/host-tabs diffs were not an assigned mandatory read. Assigned mandatory material remains fully read from turn 1.\n\nValidation: source and contract analysis only. No runtime tests, builds, reproductions or repository changes. Private event revisions appended through evidence record. Next action: return only synthesis deltas and unresolved lead IDs; await caller instruction for a later discovery turn.\n\nTurn 3 started: cross-group reconciliation, then discovery pass 1. Parent input g166/c5:13 recorded immediately under c1 as a lead qualifying the former blanket end-confirmation rationale. Reading discovery-neighbours.json in bounded chunks before source checks. Original c1 consequence and proposed-drop provenance retained; no drop accepted.\nCross-group synthesis completed in turn 3 before discovery: all 831 neighbour JSON lines read in bounded chunks (initial 1-160 request clipped, then 1-80 and 81-160 reissued fully). c1 revised from temporary lead to candidate with explicit qualification; known g166/c5 shortcut source-confirmed conditionally and already present at the range base. No new finding or accepted drop. Separate discovery pass 1 now starts, restricted to remaining contracts of assigned input/presence/query-strip deletions.\n\nTurn 3 complete. Turn type: cross-group reconciliation followed by separate discovery pass 1. Total turns: 3. Discovery-pass count: 1. Discovery result: no new verified or unverified-after-investigation issue found in the assigned deletions. New verified IDs: none. New unverified-after-investigation IDs: none. New considered/source-refuted candidate: c4, input-transport privacy. Revised existing ID: c1. Open lead IDs: none. All proposed drops remain unaccepted.\n\nCross-group reconciliation evidence at 1ed482dde220452e424973faf38a5e1318986333: host_launch.rs 662-744; host_tabs.rs 1047-1085; session_hosts.rs 225-265,510-525,725-741,771-792; hosts/terminal.rs 754-794,2085-2100,2364-2389; core/tests/host_terminals.rs 3685-3783. The Gone runtime shortcut is real and does not verify its adopted process; the close path has the missing extra check. The retained close fixture manually removes a socket and disconnects a stand-in: it establishes the lifecycle distinction, not a normal real-host occurrence. c1 no longer claims all host-ending success establishes process termination. The related conditional orphan-host issue stays with known g166/c5; it is not dropped or counted as discovery here. Whole-range attribution checked, rather than only parent: the exclusive base already has the shortcut at host_launch.rs:684 and direct tab call at session_hosts.rs:751; git log -G for both exact branches over the complete base-to-tip range finds no change. This resolves c1's temporary source lead without claiming the deletion caused the known shortcut.\n\nSeparate discovery evidence: SPEC_impl.md The grid client 1896-1962 read fully; hosts/client.rs 829-893; hosts/terminal.rs 1518-1577 and 2300-2353; grid_input.rs 147-190 and 267-273; retained tmux.rs module/policy map 1-100. The deleted input client's credential privacy remains implemented by byte-vector host requests and ClientMessage::Input over the existing connection, with MAX_INPUT admission and no shell/process-argument construction on the delivery path. This source-refuted security candidate was appended immediately as c4, preserving its potential credential-disclosure consequence for independent checking. Frame cutting keeps small input whole and host request admission rejects invalid sizes; no new byte-delivery or size-bound regression established.\n\nPinned-reference searches: removed InputClient, ServerPresence, QueryStripper, open_input_client, delivered_any_bytes and MAX_HOLD_BACK names have no remaining code/spec/tool callers in crates, SPEC.md, SPEC_impl.md, docs, scripts and .github. The only match is docs/codex-input-investigation.md:68, explicitly labelled as the inspected historical commit and acknowledging that the driver was removed; it is not treated as a live unresolved caller. No prohibited coverage sources read. Neighbour context was read in full through line 831; known retirement, consent, guidance, excerpt and test-oracle issues were used for novelty and not re-reported as new findings.\n\nValidation: source/contract/history checks only. No runtime tests, builds, reproductions, live-install action or repository mutation. All 1,205 assigned mandatory patch lines remain read; no assigned scope unread. Findings history remains append-only. Next action: return discovery delta and explicit empty new-issue result to caller.\n"
+}

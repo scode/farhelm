@@ -1,0 +1,768 @@
+{
+  "group": {
+    "id": "g154",
+    "domain": "rust-terminal-host-regressions",
+    "purpose": "rust-terminal-host-regressions: crates/farhelm/tests/e2e/terminal_backpressure.rs, crates/farhelm/tests/e2e/host_processes.rs, crates/farhelm/tests/e2e/host_reclaim.rs; phases complete small per-commit changes",
+    "interfaces": [
+      "g001",
+      "g005",
+      "g006",
+      "g007",
+      "g008",
+      "g009",
+      "g144",
+      "g145",
+      "g146",
+      "g151",
+      "g153",
+      "g155",
+      "g157",
+      "g158",
+      "g159",
+      "g160",
+      "g161",
+      "g162",
+      "g163",
+      "g164",
+      "g165",
+      "g166",
+      "g167",
+      "g168",
+      "g169",
+      "g170",
+      "g171",
+      "g172",
+      "g173"
+    ],
+    "sources": [
+      {
+        "path": "[private-run]/prep/parts/00800-000.patch",
+        "ranges": [
+          [
+            1,
+            1296
+          ]
+        ],
+        "original_path": "crates/farhelm/tests/e2e/terminal_backpressure.rs",
+        "commit": "647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513",
+        "notes": "patch header; patch character offsets [0,58731)",
+        "lines": 1296,
+        "bytes": 58801,
+        "start": 0,
+        "end": 58731,
+        "original": "[private-run]/prep/originals/00800.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/00975-000.patch",
+        "ranges": [
+          [
+            1,
+            90
+          ]
+        ],
+        "original_path": "crates/farhelm/tests/e2e/host_processes.rs",
+        "commit": "1ed482dde220452e424973faf38a5e1318986333",
+        "notes": "patch header; patch character offsets [0,4419)",
+        "lines": 90,
+        "bytes": 4419,
+        "start": 0,
+        "end": 4419,
+        "original": "[private-run]/prep/originals/00975.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/01568-000.patch",
+        "ranges": [
+          [
+            1,
+            25
+          ]
+        ],
+        "original_path": "crates/farhelm/tests/e2e/host_reclaim.rs",
+        "commit": "08399d092d20815ced6619c26df2391944ae2b4a",
+        "notes": "patch header; patch character offsets [0,1570)",
+        "lines": 25,
+        "bytes": 1570,
+        "start": 0,
+        "end": 1570,
+        "original": "[private-run]/prep/originals/01568.patch"
+      }
+    ],
+    "lines": 1411,
+    "bytes": 64790
+  },
+  "records": [
+    {
+      "key": "g154/c1",
+      "owner": "g154",
+      "id": "c1",
+      "domain": "rust-terminal-host-regressions",
+      "purpose": "rust-terminal-host-regressions: crates/farhelm/tests/e2e/terminal_backpressure.rs, crates/farhelm/tests/e2e/host_processes.rs, crates/farhelm/tests/e2e/host_reclaim.rs; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 1,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c1",
+            "state": "open",
+            "summary": "Missing/empty database test comment preserves the reclaim safety contract",
+            "location": "crates/farhelm/tests/e2e/host_reclaim.rs:724",
+            "detail": "Reviewed commit: 08399d092d20815ced6619c26df2391944ae2b4a. TLDR: No defect established; the changed comment accurately explains why a missing or empty database must leave running terminals alone. Details: The assigned patch changes only lines 724–732 of the test documentation. Pinned source lines 738–763 establish an unrecorded live host, assert no database on the first start and an existing database with no known sessions on the second, then check survival after serving. SPEC_impl.md, Terminal host, startup reclaim, lines 2502–2527 explains that a lost/restored database must never cost a running terminal and states exactly: 'Nothing at all is reclaimed ... when it has no session and no reservation (at every start while that holds, as after a database went missing)'. Suggested bucket: other. Confidence: confirmed by source and contract analysis, no execution. proposed_drop: comment-only change consistent with the named authoritative contract and unchanged assertions. Could-be-highest: no; the change adds no executable route to ending user work. possible_cover: none; coverage sources were not consulted. Caveat: this is a judgment of the assigned documentation change, not an independent audit of the unchanged reclaim implementation."
+          }
+        },
+        {
+          "line": 4,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c1",
+            "state": "open",
+            "summary": "Missing/empty database test comment preserves the reclaim safety contract",
+            "location": "crates/farhelm/tests/e2e/host_reclaim.rs:724",
+            "detail": "Reviewed commit: 08399d092d20815ced6619c26df2391944ae2b4a. TLDR: No defect established; the changed comment accurately explains why a missing or empty database must leave running terminals alone. Details: The assigned patch changes only lines 724–732 of the test documentation. Pinned source lines 738–763 establish an unrecorded live host, assert no database on the first start and an existing database with no known sessions on the second, then check survival after serving. SPEC_impl.md, Terminal host, startup reclaim, lines 2522–2528 gives this exact text (line wraps normalized): 'Nothing at all is reclaimed when the socket directory is in a shape the supervisor refuses (a symlink, another owner, a looser mode: a host reached through it may be another installation's), when the store cannot be read, when it has no session and no reservation (at every start while that holds, as after a database went missing), or when the launch directory cannot be listed whole: a missing launch directory holds no records, but one that cannot be opened, or whose listing stops partway, leaves records unseen whose sessions and tabs would then look unknown.' Suggested bucket: other. Confidence: confirmed by source and contract analysis, no execution. proposed_drop: comment-only change consistent with the named authoritative contract and unchanged assertions. Could-be-highest: no; the change adds no executable route to ending user work. possible_cover: none; coverage sources were not consulted. Caveat: this judges the assigned documentation change, not an independent audit of the unchanged reclaim implementation. Revision only expands the contract quote to remove the previous ellipsis; consequence and judgment are unchanged."
+          }
+        },
+        {
+          "line": 5,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c1",
+            "state": "open",
+            "summary": "Missing/empty database test comment preserves the reclaim safety contract",
+            "location": "crates/farhelm/tests/e2e/host_reclaim.rs:724",
+            "detail": "Reviewed commit: 08399d092d20815ced6619c26df2391944ae2b4a. TLDR: No introduced defect established: the changed comment describes the implemented protection for terminals when a database disappears or has no sessions. Details: This patch changes only the test documentation at lines 724–732. The test at lines 738–765 establishes a live unrecorded host, checks the absent database before the first start, and calls known_session_ids().is_empty() before the second. Synthesis resolved the reservation premise: store.rs:4767–4786 uses exactly SELECT id FROM sessions UNION SELECT session_id FROM create_reservations, so the test proves no session row AND no reservation, not just no visible session. host_reclaim.rs:496–509 returns None for that empty union before listing launch records or producing destructive discovery work; :333–336 returns immediately on None. The helper hook_identity.rs:214–237 completes an actual protocol handshake before returning, rather than mere socket readiness, so the survival assertion is after startup reconciliation. stop at :243–255 awaits cancellation before the next supervisor. SPEC_impl.md, Terminal host, startup reclaim, lines 2522–2528 says exactly (line wraps normalized): 'Nothing at all is reclaimed when the socket directory is in a shape the supervisor refuses (a symlink, another owner, a looser mode: a host reached through it may be another installation's), when the store cannot be read, when it has no session and no reservation (at every start while that holds, as after a database went missing), or when the launch directory cannot be listed whole: a missing launch directory holds no records, but one that cannot be opened, or whose listing stops partway, leaves records unseen whose sessions and tabs would then look unknown.' Suggested bucket: other. Confidence: confirmed source/contract analysis, no execution. proposed_drop: assigned comment-only change agrees with both the named safety contract and the same-revision query/early-return implementation; this is a proposal for the parent, not an accepted drop. Could-be-highest: no established loss-of-work route introduced by the comment. possible_cover: none; coverage sources not read. Caveat preserved: this is not a full independent audit of the unchanged reclaim implementation or partial, nonempty restored databases."
+          }
+        }
+      ],
+      "latest": {
+        "line": 5,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c1",
+          "state": "open",
+          "summary": "Missing/empty database test comment preserves the reclaim safety contract",
+          "location": "crates/farhelm/tests/e2e/host_reclaim.rs:724",
+          "detail": "Reviewed commit: 08399d092d20815ced6619c26df2391944ae2b4a. TLDR: No introduced defect established: the changed comment describes the implemented protection for terminals when a database disappears or has no sessions. Details: This patch changes only the test documentation at lines 724–732. The test at lines 738–765 establishes a live unrecorded host, checks the absent database before the first start, and calls known_session_ids().is_empty() before the second. Synthesis resolved the reservation premise: store.rs:4767–4786 uses exactly SELECT id FROM sessions UNION SELECT session_id FROM create_reservations, so the test proves no session row AND no reservation, not just no visible session. host_reclaim.rs:496–509 returns None for that empty union before listing launch records or producing destructive discovery work; :333–336 returns immediately on None. The helper hook_identity.rs:214–237 completes an actual protocol handshake before returning, rather than mere socket readiness, so the survival assertion is after startup reconciliation. stop at :243–255 awaits cancellation before the next supervisor. SPEC_impl.md, Terminal host, startup reclaim, lines 2522–2528 says exactly (line wraps normalized): 'Nothing at all is reclaimed when the socket directory is in a shape the supervisor refuses (a symlink, another owner, a looser mode: a host reached through it may be another installation's), when the store cannot be read, when it has no session and no reservation (at every start while that holds, as after a database went missing), or when the launch directory cannot be listed whole: a missing launch directory holds no records, but one that cannot be opened, or whose listing stops partway, leaves records unseen whose sessions and tabs would then look unknown.' Suggested bucket: other. Confidence: confirmed source/contract analysis, no execution. proposed_drop: assigned comment-only change agrees with both the named safety contract and the same-revision query/early-return implementation; this is a proposal for the parent, not an accepted drop. Could-be-highest: no established loss-of-work route introduced by the comment. possible_cover: none; coverage sources not read. Caveat preserved: this is not a full independent audit of the unchanged reclaim implementation or partial, nonempty restored databases."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g154/findings.jsonl",
+        "id": "c1",
+        "line": 5,
+        "disposition": "under-investigation",
+        "group": "g154-c1",
+        "reason": "Record durably acknowledged; parent source/contract validation, cross-group synthesis, coverage/filter matching and any independent drop check remain pending. This preserves the claim and uncertainty without accepting, dropping or lowering it."
+      },
+      "accepted_parent_decision": null,
+      "returned_claim_checks": [
+        {
+          "batch": "claims-098",
+          "key": "g154/c1",
+          "latest_line": 5,
+          "recommendation": "refuted",
+          "bucket": "other",
+          "underlying_key": "startup-reclaim/empty-store-comment-candidate",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The changed test comment agrees with the missing/empty-store safety rule and unchanged executable assertions. This checks that bounded comment claim, not every partial restored-database case or the entire reclaim implementation.",
+          "checks": [
+            "08399d092d20815ced6619c26df2391944ae2b4a diff for crates/farhelm/tests/e2e/host_reclaim.rs changes only documentation:724-732. Test:738-765 creates a live unrecorded host, asserts absent database, then asserts an empty known-session set before the second serving start and host survival after each.",
+            "Same revision store.rs:4767-4786 queries SELECT id FROM sessions UNION SELECT session_id FROM create_reservations. service/core/host_reclaim.rs:496-509 returns None for an empty union before discovery. hook_identity.rs:214-237 completes the protocol handshake; :243-255 awaits serving-task cancellation. The survival assertion follows reconciliation, not mere socket existence. No runtime checks ran."
+          ],
+          "coverage_checked": [
+            "Both specifications searched for missing/empty database and reclaim. Current SPEC_impl.md:2502-2545 contains the same startup-reclaim safety rule. SPEC.md adds no contrary empty-store behavior.",
+            "TODO.md Planned empty; plans/queue searches for reclaim/missing/empty database found no exact work covering a comment defect. BUGS.md has no matching entry. Full INDEX.md and active TRIAGE_OUTCOMES.md have no exact claim; other reclaim test-premise items concern different fixtures. FILTER.md is not needed for this source refutation."
+          ],
+          "exact_cover_quotes": [
+            "SPEC_impl.md:2522-2528 at 08399d092d20815ced6619c26df2391944ae2b4a, exact excerpt: 'when it has no session and no reservation (at every start while that holds, as after a database went missing)'. This supports comment accuracy; it is not a generic acceptance of lost terminals."
+          ],
+          "missing_premise": "No contrary comment contract shown. Nonempty partial restores are explicitly outside this bounded check.",
+          "original_stronger_consequence": "A wrong reclaim explanation could misdescribe when running terminals are protected after database loss. The record never established an executable route ending work and repeatedly limited itself to the changed comment.",
+          "needs_independent_drop_check": true,
+          "proposed_basis": "Source-refute the assigned comment defect. Because the subject is destructive startup reclamation of running terminals, preserve the proposed dismissal for an independent drop check."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": true,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "startup-reclaim/empty-store-comment-candidate",
+        "destination": null
+      }
+    },
+    {
+      "key": "g154/c2",
+      "owner": "g154",
+      "id": "c2",
+      "domain": "rust-terminal-host-regressions",
+      "purpose": "rust-terminal-host-regressions: crates/farhelm/tests/e2e/terminal_backpressure.rs, crates/farhelm/tests/e2e/host_processes.rs, crates/farhelm/tests/e2e/host_reclaim.rs; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 2,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c2",
+            "state": "open",
+            "summary": "Recorder handoff follows the surviving child environment contract",
+            "location": "crates/farhelm/tests/e2e/host_processes.rs:110",
+            "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. TLDR: No introduced defect established in the test's move from the removed supervisor flag to its inherited installation environment. Details: HostStack::start at lines 105–118 puts FARHELM_TMUX only in the spawned supervisor, never changes the running test environment, and the changed assertion at lines 527–537 matches one complete NUL-separated environment entry. The recorder's own successful logging premise is established at lines 501–515 and the post-action assertion remains lines 588–596. SPEC_impl.md lines 2962–2965 says exactly: 'How the binary is chosen: `FARHELM_TMUX`, else the bare name `tmux` off `PATH` (`farhelm helm setup` also takes `--tmux <path>` above both). The supervisor runs no tmux, and `farhelm supervisor run` no longer takes a `--tmux` of its own; the floor stays the installation's requirement'. Suggested bucket: other. Confidence: confirmed source analysis, no execution. proposed_drop: the replacement matches the specified surviving handoff and verifies the fixture received it. Could-be-highest: no; this changes test setup and its premise check only. possible_cover: none. Caveats considered: /proc is Linux-specific, but the removed assertion already required /proc/<pid>/cmdline, so the changed environ read does not introduce that portability boundary. Like the former explicit-flag recorder, this sentinel does not prove an arbitrary future implementation could never bypass the configured executable; no such shipped bypass route is established by the assigned change."
+          }
+        },
+        {
+          "line": 6,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c2",
+            "state": "open",
+            "summary": "Recorder handoff follows the surviving child environment contract",
+            "location": "crates/farhelm/tests/e2e/host_processes.rs:110",
+            "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. TLDR: No introduced defect established in the recorder handoff or process identity check. Details: HostStack::start at lines 105–121 sets FARHELM_TMUX on only the spawned Command, stores its Child, and waits for supervisor readiness. The test at :522–537 obtains the PID from that still-owned Child and checks one complete NUL-delimited environment entry; no Child::wait/try_wait has run between spawn and this read, so an exited child remains unreaped and its PID cannot name an unrelated reused process. A premature child exit makes readiness/connection fail rather than silently validating the recorder against another PID. The recorder's append premise is checked at :501–515, its directory is held by the tools TestDir throughout the test, and the test calls stack.stop(SIGTERM) and awaits child.wait at :582 before checking recorder output at :588–596 and finishing the stack. The child is kill_on_drop at :116; the changed field does not alter that existing lifetime guard. This does not claim that asynchronous kill_on_drop is itself an awaited shutdown barrier. Same-revision prerequisite checked: main.rs:1263–1288 has no --tmux in SupervisorCmd::Run, and :1767–1771 dispatches only the surviving fields. Keeping the removed flag would reject the fixture before it starts; the environment replacement is necessary. SPEC_impl.md:2962–2965 says exactly: 'How the binary is chosen: `FARHELM_TMUX`, else the bare name `tmux` off `PATH` (`farhelm helm setup` also takes `--tmux <path>` above both). The supervisor runs no tmux, and `farhelm supervisor run` no longer takes a `--tmux` of its own; the floor stays the installation's requirement'. Suggested bucket: other. Confidence: confirmed source analysis, no execution. proposed_drop: child-only setup and the recorder assertion match the surviving installation handoff, with the PID and recorder directory owned through the check; proposal remains for the parent, not an accepted drop. Could-be-highest: no introduced security or user-work loss route in the assigned test-only change. possible_cover: none. Caveats preserved: /proc portability was already required by the replaced cmdline assertion; no claim that this sentinel would detect an arbitrary future executable-selection bypass, nor that this change independently proves all failure-path fixture cleanup."
+          }
+        }
+      ],
+      "latest": {
+        "line": 6,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c2",
+          "state": "open",
+          "summary": "Recorder handoff follows the surviving child environment contract",
+          "location": "crates/farhelm/tests/e2e/host_processes.rs:110",
+          "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. TLDR: No introduced defect established in the recorder handoff or process identity check. Details: HostStack::start at lines 105–121 sets FARHELM_TMUX on only the spawned Command, stores its Child, and waits for supervisor readiness. The test at :522–537 obtains the PID from that still-owned Child and checks one complete NUL-delimited environment entry; no Child::wait/try_wait has run between spawn and this read, so an exited child remains unreaped and its PID cannot name an unrelated reused process. A premature child exit makes readiness/connection fail rather than silently validating the recorder against another PID. The recorder's append premise is checked at :501–515, its directory is held by the tools TestDir throughout the test, and the test calls stack.stop(SIGTERM) and awaits child.wait at :582 before checking recorder output at :588–596 and finishing the stack. The child is kill_on_drop at :116; the changed field does not alter that existing lifetime guard. This does not claim that asynchronous kill_on_drop is itself an awaited shutdown barrier. Same-revision prerequisite checked: main.rs:1263–1288 has no --tmux in SupervisorCmd::Run, and :1767–1771 dispatches only the surviving fields. Keeping the removed flag would reject the fixture before it starts; the environment replacement is necessary. SPEC_impl.md:2962–2965 says exactly: 'How the binary is chosen: `FARHELM_TMUX`, else the bare name `tmux` off `PATH` (`farhelm helm setup` also takes `--tmux <path>` above both). The supervisor runs no tmux, and `farhelm supervisor run` no longer takes a `--tmux` of its own; the floor stays the installation's requirement'. Suggested bucket: other. Confidence: confirmed source analysis, no execution. proposed_drop: child-only setup and the recorder assertion match the surviving installation handoff, with the PID and recorder directory owned through the check; proposal remains for the parent, not an accepted drop. Could-be-highest: no introduced security or user-work loss route in the assigned test-only change. possible_cover: none. Caveats preserved: /proc portability was already required by the replaced cmdline assertion; no claim that this sentinel would detect an arbitrary future executable-selection bypass, nor that this change independently proves all failure-path fixture cleanup."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g154/findings.jsonl",
+        "id": "c2",
+        "line": 6,
+        "disposition": "excluded",
+        "group": "terminal-tests/recorder-child-environment-handoff",
+        "reason": "Parent explicitly accepted named refuted proposal from claims-098 after inspecting it. The test replaces a removed supervisor flag with its surviving installation environment handoff and verifies that the still-owned child received the exact entry. No introduced fixture-identity or recorder-handoff defect is established. Refute only the introduced handoff/identity candidate using the same-revision child ownership, exact environment assertion and recorder positive control. Checked source/results: [\"At 1ed482dde220452e424973faf38a5e1318986333, crates/farhelm/tests/e2e/host_processes.rs:105-121 sets FARHELM_TMUX on Command only, retains Child and waits for readiness. :501-515 proves recorder logging; :522-537 checks complete NUL-delimited environ entry for that Child's PID. No wait/try_wait between spawn and the read reaps it.\",\"Same test:582 waits for supervisor stop before :588-596 checks the recorder log and missing private socket. SPEC_impl.md:2962-2974 retains FARHELM_TMUX at this revision and says supervisor run no longer takes --tmux. Existing /proc cmdline usage already imposed Linux portability. kill_on_drop is not an awaited cleanup proof. No runtime checks ran.\"] Current coverage/results: [\"Both current specifications searched for FARHELM_TMUX/recorder/environment. Their later tmux retirement is not used as historical coverage; the reviewed revision's exact handoff contract supplies the factual check.\",\"TODO.md Planned empty. Matching tmux-removal plans are landed (plans/REPORTS.md:29-32), not unlanded fixes. BUGS.md, full INDEX.md and active TRIAGE_OUTCOMES.md contain no matching recorder-handoff defect. FILTER.md supplies no applicable filter.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Possible invalid recorder handoff or PID reuse could make the no-tmux regression vacuous. The record confines the conclusion to test setup/identity, without certifying every future bypass or all cleanup paths.\"; \"An arbitrary future executable-selection bypass or failure-path cleanup defect is not ruled out by this sentinel; no such concrete shipped route is supplied here.\"."
+      },
+      "accepted_parent_decision": {
+        "key": "g154/c2",
+        "line": 6,
+        "disposition": "excluded",
+        "group": "terminal-tests/recorder-child-environment-handoff",
+        "bucket": "other",
+        "recording": "refuted",
+        "queue_target_candidate": null,
+        "needs_independent_drop_check": false,
+        "reason": "Parent explicitly accepted named refuted proposal from claims-098 after inspecting it. The test replaces a removed supervisor flag with its surviving installation environment handoff and verifies that the still-owned child received the exact entry. No introduced fixture-identity or recorder-handoff defect is established. Refute only the introduced handoff/identity candidate using the same-revision child ownership, exact environment assertion and recorder positive control. Checked source/results: [\"At 1ed482dde220452e424973faf38a5e1318986333, crates/farhelm/tests/e2e/host_processes.rs:105-121 sets FARHELM_TMUX on Command only, retains Child and waits for readiness. :501-515 proves recorder logging; :522-537 checks complete NUL-delimited environ entry for that Child's PID. No wait/try_wait between spawn and the read reaps it.\",\"Same test:582 waits for supervisor stop before :588-596 checks the recorder log and missing private socket. SPEC_impl.md:2962-2974 retains FARHELM_TMUX at this revision and says supervisor run no longer takes --tmux. Existing /proc cmdline usage already imposed Linux portability. kill_on_drop is not an awaited cleanup proof. No runtime checks ran.\"] Current coverage/results: [\"Both current specifications searched for FARHELM_TMUX/recorder/environment. Their later tmux retirement is not used as historical coverage; the reviewed revision's exact handoff contract supplies the factual check.\",\"TODO.md Planned empty. Matching tmux-removal plans are landed (plans/REPORTS.md:29-32), not unlanded fixes. BUGS.md, full INDEX.md and active TRIAGE_OUTCOMES.md contain no matching recorder-handoff defect. FILTER.md supplies no applicable filter.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Possible invalid recorder handoff or PID reuse could make the no-tmux regression vacuous. The record confines the conclusion to test setup/identity, without certifying every future bypass or all cleanup paths.\"; \"An arbitrary future executable-selection bypass or failure-path cleanup defect is not ruled out by this sentinel; no such concrete shipped route is supplied here.\"."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-098",
+          "key": "g154/c2",
+          "latest_line": 6,
+          "recommendation": "refuted",
+          "bucket": "other",
+          "underlying_key": "terminal-tests/recorder-child-environment-handoff",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The test replaces a removed supervisor flag with its surviving installation environment handoff and verifies that the still-owned child received the exact entry. No introduced fixture-identity or recorder-handoff defect is established.",
+          "checks": [
+            "At 1ed482dde220452e424973faf38a5e1318986333, crates/farhelm/tests/e2e/host_processes.rs:105-121 sets FARHELM_TMUX on Command only, retains Child and waits for readiness. :501-515 proves recorder logging; :522-537 checks complete NUL-delimited environ entry for that Child's PID. No wait/try_wait between spawn and the read reaps it.",
+            "Same test:582 waits for supervisor stop before :588-596 checks the recorder log and missing private socket. SPEC_impl.md:2962-2974 retains FARHELM_TMUX at this revision and says supervisor run no longer takes --tmux. Existing /proc cmdline usage already imposed Linux portability. kill_on_drop is not an awaited cleanup proof. No runtime checks ran."
+          ],
+          "coverage_checked": [
+            "Both current specifications searched for FARHELM_TMUX/recorder/environment. Their later tmux retirement is not used as historical coverage; the reviewed revision's exact handoff contract supplies the factual check.",
+            "TODO.md Planned empty. Matching tmux-removal plans are landed (plans/REPORTS.md:29-32), not unlanded fixes. BUGS.md, full INDEX.md and active TRIAGE_OUTCOMES.md contain no matching recorder-handoff defect. FILTER.md supplies no applicable filter."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": "An arbitrary future executable-selection bypass or failure-path cleanup defect is not ruled out by this sentinel; no such concrete shipped route is supplied here.",
+          "original_stronger_consequence": "Possible invalid recorder handoff or PID reuse could make the no-tmux regression vacuous. The record confines the conclusion to test setup/identity, without certifying every future bypass or all cleanup paths.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Refute only the introduced handoff/identity candidate using the same-revision child ownership, exact environment assertion and recorder positive control."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "terminal-tests/recorder-child-environment-handoff",
+        "destination": null
+      }
+    },
+    {
+      "key": "g154/c3",
+      "owner": "g154",
+      "id": "c3",
+      "domain": "rust-terminal-host-regressions",
+      "purpose": "rust-terminal-host-regressions: crates/farhelm/tests/e2e/terminal_backpressure.rs, crates/farhelm/tests/e2e/host_processes.rs, crates/farhelm/tests/e2e/host_reclaim.rs; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 3,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c3",
+            "state": "open",
+            "summary": "Removed tmux pause tests do not establish a terminal-host regression",
+            "location": "crates/farhelm/tests/e2e/terminal_backpressure.rs:1",
+            "detail": "Reviewed commit: 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513. TLDR: No actionable defect established from the assigned deletion of tests that depended on creating tmux terminals. Details: Assigned evidence packet 00800-000.patch lines 1–1296 removes the tmux numbered-output helpers, forced catch-up scenarios, takeover/stall race attempt, tmux/supervisor RSS measurement, paused-delivery check and repeated-short-pause scenario. These tests explicitly require harness_tmux, pane ids, tmux control clients, or byte-stream catch-up; they cannot run unchanged against terminal-host grid output. The surviving source at this revision retains drain_for (terminal_backpressure.rs:20–43), its actual callers in session_lifecycle.rs, session_rename.rs, tab_lifecycle_edges.rs and terminal_tabs.rs, and the static history-bound assertion (lines 70–99); tmux.rs:61 still exports HISTORY_LIMIT=12000. Replacement contract checks inspected: service/grid_stream/tests.rs:485–547 checks withholding and every history line after pause/full queue, :560–584 checks eviction recovery, :778–796 checks stalled termination. Helm terminal.rs:2529–2641 uses a real WebSocket and scripted supervisor to check queue-driven pause, bounded in-flight data and ordered resume. Shared connection.rs:2079–2094 checks channel, connection and originating task before stale-stall removal; :2219–2255 retains an absolute pause anchor and clears it on resume, with virtual-time anchor test at :3502. SPEC.md:3051–3055 says: 'In a new terminal no viewer slows the agent at all: the terminal takes in everything the program writes whatever its viewers do, and a viewer that falls behind is sent the screen as it is when it can take more, skipping the screens in between, while every line that entered the scrollback meanwhile is still sent, appended.' SPEC_impl.md:2775–2778 says: 'While the writer queue is full or the viewer has paused it sends nothing, and the next cycle starts from the emulator as it is then, so skipped screen revisions cost nothing. History is not skipped'. Suggested bucket: other. Confidence: confirmed source/contract analysis; no execution. proposed_drop: removed tmux mechanism tests do not imply a violation of the different grid contract, for which concrete surviving tests and ownership guards were inspected. Could-be-highest: no established security or loss-of-work route from test deletion; any latent production defect would require its own source route. possible_cover: none. Caveats: surviving focused tests are not claimed to prove the entire real-stack race or terminal-host RSS plateau; the deleted RSS test measured the old tmux process, not a terminal host. Old tmux production code still exists at this intermediate revision, so this is not a claim that it was already fully retired. Scope ends at the assigned part boundary, mid-docstring before the next deleted test body; the rest of that file's patch is outside this group's assignment."
+          }
+        },
+        {
+          "line": 7,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c3",
+            "state": "open",
+            "summary": "Removed tmux pause tests do not establish a terminal-host regression",
+            "location": "crates/farhelm/tests/e2e/terminal_backpressure.rs:1",
+            "detail": "Reviewed commit: 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513. TLDR: No actionable defect established in the assigned removal of tmux-specific tests; the retained grid tests support only their particular pause/history claims, not every contract formerly exercised by a backlogged terminal. Details: The assigned patch range 1–1296 removes tmux helpers, forced catch-up, a takeover/stall race attempt, tmux/supervisor RSS sampling, paused-delivery and repeated-short-pause scenarios; all depend on tmux-created byte terminals. Retained drain_for at terminal_backpressure.rs:20–43 still serves its same-revision callers in session_lifecycle, session_rename, tab_lifecycle_edges and terminal_tabs, and the static assertion at :70–99 still has tmux.rs:61's HISTORY_LIMIT=12000. Same-revision retained tests inspected in the initial pass remain grid_stream/tests.rs:485–547 (withheld pause and full-queue history), :560–584 (eviction reset), :778–796 (stall verdict), and helm terminal.rs:2529–2641 (queue-driven pause, in-flight packing and ordered resume through a real WebSocket). Synthesis verified they are compiled through grid_stream.rs's cfg(test) mod tests. Their Viewer directly drives a watch pause channel and GridStream::run (tests.rs:120–151), so these are not end-to-end proofs of ControlMsg attachment lookup, stale teardown, RSS plateau, or shared-writer priority. Actual grid send waits call the shared pause/deadline functions at grid_stream.rs:801–830; GridSender::run at :941–968 runs the stream inline and reports its verdict in the same task, preserving the originating-task identity consumed by connection.rs:1886–1941 and its channel/connection/task guard at :2079–2094. The stored pause-anchor implementation and virtual-time test cited in the first record remain source evidence, not a substitute real-stack race attempt. SPEC.md:3051–3055 says exactly (line wraps normalized): 'In a new terminal no viewer slows the agent at all: the terminal takes in everything the program writes whatever its viewers do, and a viewer that falls behind is sent the screen as it is when it can take more, skipping the screens in between, while every line that entered the scrollback meanwhile is still sent, appended.' SPEC_impl.md:2775–2778 says: 'While the writer queue is full or the viewer has paused it sends nothing, and the next cycle starts from the emulator as it is then, so skipped screen revisions cost nothing. History is not skipped'. Suggested bucket: other. Confidence: confirmed source/contract analysis, no execution. proposed_drop: no violation established in this assigned tmux-specific deletion, with the precise surviving grid guarantees and their limits stated; proposal only, no parent drop accepted. Could-be-highest: no established security or loss-of-work route from this test deletion; a latent production defect needs an actual source route. possible_cover: none searched. Material caveats preserved: old tmux production code remains at this intermediate revision; no claim that it is already fully retired. The removed RSS test measures tmux, not a terminal host. This assigned part ends mid-docstring at line 1296, and the later deleted bodies are outside this assignment. Parent reports g139's separate loss of the real UploadAck priority backlog oracle; the retained grid pause/history cases do not settle or refute that finding. Parent reports g138/g140's directory ownership analysis; it does not change the narrower behavior/coverage conclusions here."
+          }
+        },
+        {
+          "line": 8,
+          "event": {
+            "version": 1,
+            "kind": "lead",
+            "id": "c3",
+            "state": "open",
+            "summary": "Check lost legacy catch-up and stale-stall test oracles at the intermediate revision",
+            "location": "crates/farhelm/tests/e2e/terminal_backpressure.rs:1",
+            "detail": "Reviewed commit: 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513. TLDR: Reopened the candidate as a test-oracle question: old terminals are still served here, so deleting their forced catch-up and stale-stall race checks may remove required regression protection even when current production code is correct. Original consequence and proposed-drop bases preserved: previous c3 found no established production failure, distinguished non-transferable tmux RSS sampling from terminal-host memory, and cited retained grid history/pause tests plus correct shared ownership/anchor guards. Those facts do not refute a distinct lost legacy integration oracle. Named interface input read fully from discovery-neighbours.json: g151/l1 and g153/c3 establish adjacent historical process/mixed-session gaps; g153/l1 identifies a later repaired stale-owner PauseOutput oracle, which differs from the assigned stalled-forwarder teardown race. g155/c5 concerns pending-cleanup lifecycle oracles. The parent separately reports g139's UploadAck priority gap; retained grid tests do not settle it. Missing premise to check now: which same-revision remaining tests actually force legacy %pause through the supervisor Forwarder and assert reset/history/modes/alternate-screen replay and survival of takeover against stale stalled teardown, rather than testing only the tmux stream mechanism or grid sender. Source searches and caller checks will settle that readily accessible premise, followed by the later retirement boundary. Suggested bucket: other for a test-only gap if confirmed. Confidence: lead under investigation, not a claim of missing coverage yet. Could-be-highest: no established product security or loss-of-work route; do not promote the test gap into such a claim. proposed_drop: prior production-correctness/grid-coverage argument is preserved for provenance but not accepted as a test-oracle refutation. possible_cover: only the named interface records supplied by parent; no forbidden coverage search. No runtime execution or reproduction."
+          }
+        },
+        {
+          "line": 9,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "c3",
+            "state": "open",
+            "summary": "Legacy forced-pause mode-restoration oracles disappear before legacy serving retires",
+            "location": "crates/farhelm/tests/e2e/terminal_backpressure.rs:1",
+            "detail": "Reviewed commit: 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513. TLDR: The intermediate change deletes regression checks that a paused old terminal restores its alternate screen and input modes through the actual viewer attachment, while this revision still supports those terminals. Confirmed impact is loss of specific test oracles, not an observed product failure. Details: assigned patch 00800-000.patch:675–800 deletes a_forced_tmux_pause_recovers_an_alternate_screen_pane and a_forced_tmux_pause_restores_modes_and_cursor_state. The former requires a post-reset alternate-buffer entry before ALT-SCREEN APP; the latter requires cursor placement after content and bracketed-paste restoration where tmux supports it. Source SPEC_impl.md:2294–2296 explicitly says the supervisor 'still adopts and serves one an earlier supervisor left'; :2954–2963 keeps the old-terminal runtime through the transition. Forwarder catch-up remains at service/connection.rs:1853–1871 and its TmuxReplay::render at :1441–1450 sends reset, pre-content modes, content and post-content modes. A concrete competing regression is omitting pre/post mode segments only for ReplayOccasion::Recovery: initial attach can remain correct and raw content recovery can pass while a recovering alternate-screen app is restored into the wrong buffer or loses bracketed paste. Actual retained legacy oracles were inspected, not just grid production correctness: tmux/stream.rs:2983–3061 forces pause and calls OutputStream::resume_paused_with_replay directly, then checks a PAUSETEST content marker and live resumption; it does not exercise Forwarder rendering or assert alternate/input mode bytes. connection.rs:2294–2482 retains a real Forwarder final-output recovery test with a simple normal-screen shell and checks reset/content once plus markerlessness, but no alternate-screen or nondefault input-mode restoration. Searches of pinned supervisor/e2e sources for the removed helper, forced pause, catch-up and resume callers found no same-revision replacement for the two deleted attachment-level mode oracles. Grid pause/history tests use a different screen representation and cannot refute this gap. Suggested bucket: other (maintainer regression-test protection). Confidence: confirmed source/contract and competing-oracle analysis, no execution. proposed_drop: false for the intermediate test gap. Original c3 consequence and earlier proposed-drop basis preserved: no current production failure was established, correct shared anchor/identity guards and retained grid history tests were cited, and tmux RSS does not transfer to host RSS. Those facts do not refute losing a still-required legacy mode oracle, so that earlier broad drop proposal is withdrawn for this specific gap. Could-be-highest: no established shipped security or user-work loss route; test coverage only. possible_cover: adjacent parent-supplied g151/l1 (process wiring), g153/c3 (mixed tabs), g153/l1 (stale-owner pause) and g155/c5 (pending cleanup) cover other exact oracles, not this mode-restoration check. g139's UploadAck priority remains separate. Caveats: no claim that all catch-up/reset coverage vanished, because the retained final-output test exercises recovery reset/content. Later runtime retirement must be attributed separately; its exact boundary and the deleted stale-stall-race oracle are still being checked in this pass. The assigned patch part ends at line 1296; no later deleted test body is claimed here."
+          }
+        },
+        {
+          "line": 10,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "c3",
+            "state": "open",
+            "summary": "Legacy forced-pause mode-restoration oracles disappear before legacy serving retires",
+            "location": "crates/farhelm/tests/e2e/terminal_backpressure.rs (parent):664",
+            "detail": "Reviewed commit: 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513. TLDR: This intermediate change removes regression checks that an old terminal recovers its alternate screen and input modes through the viewer attachment, while this revision still serves such terminals. The confirmed consequence is missing test protection, not a demonstrated product failure. Exact deletion: parent terminal_backpressure.rs:664 a_forced_tmux_pause_recovers_an_alternate_screen_pane and :729 a_forced_tmux_pause_restores_modes_and_cursor_state (assigned 00800-000.patch:675–800). The alternate-screen test requires post-reset alternate-buffer entry before ALT-SCREEN APP, and the mode test requires cursor placement after content plus bracketed-paste restoration where supported. SPEC_impl.md:2294–2296 says exactly: 'A supervisor creates every terminal in a terminal host; nothing selects tmux, and the supervisor never starts a tmux server (it still adopts and serves one an earlier supervisor left, Terminal substrate: private tmux server).' Its :2954–2963 retains old-terminal serving during the transition. The Forwarder recovery remains connection.rs:1853–1871; TmuxReplay::render :1441–1450 sends reset, pre-content modes, content, post-content modes. Concrete competing implementation: Recovery alone omits its mode segments while Attach remains correct. That can restore a full-screen app into the wrong buffer or lose bracketed paste while all raw content assertions pass. Same-revision surviving oracles inspected: tmux/stream.rs:2983–3061 forces a pause, directly calls OutputStream::resume_paused_with_replay, checks content and resumed live output, but discards returned modes and never renders them through Forwarder. tmux/test_support.rs:183–202 also resumes directly and discards replay. connection.rs:2294–2482 retains a real Forwarder normal-screen final-output test, asserting one reset, content once and no extra replay marker, but no nondefault alternate/input modes; there is no test of TmuxReplay/Recovery mode segments in that module. Pinned source searches across supervisor/e2e pause/recovery callers found no replacement attachment-level oracle for these two mode cases. Therefore not all catch-up coverage is lost, but the deleted mode sensitivity is. A repair at that historical revision would seed an earlier-release tmux session, adopt it, attach and force pause, preserving these mode/order assertions without restoring new tmux terminal creation.  Discovery also checked the other assigned shared-mechanism deletions rather than treating all tests as obsolete: parent :812's stalled-teardown/takeover test is a best-effort race sweep, and :1152 tests repeated short pauses. At 647f022 the retained host tests have ordinary takeover (host_terminals.rs:3564–3586) and one stalled viewer (:3598–3615), not the combined stale teardown or repeated-pause-cycle oracle. Later f560058da19e02716e6f943883a9508b447aff4e restores both as host-terminal tests: core/tests/host_terminals.rs:3734–3803 holds the attachments lock, queues takeover before stalled teardown, asserts winner attachment survival, requires only TakenOver for the loser and fresh winner output; :3822–3860 runs five short pauses with round-trip resumes and fresh output. Same tests survive at pinned tip :3729–3798/:3817–3855. Thus the missing ongoing shared-race/cumulative-pause claim is refuted by actual later tests, while their intermediate deletion remains historical. This differs from g153/l1's later repaired stale-owner PauseOutput authorization test. Grid pause/history tests alone do not establish any of these combined or legacy mode assertions, and they do not address g139's UploadAck priority oracle.  Retirement boundary resolved: dbfc69751215dbf15e1d31d5bed73c3754c4ebc4 core.rs:6426–6438 ends the old server and sets the driver absent, and :6965–6969 maps Tmux rows to None. Its SPEC.md:3003–3017 explicitly changes the product contract to ending old terminals at startup. The mode-recovery subject ceases there; 1ed482dde220452e424973faf38a5e1318986333 subsequently deletes the driver. This later retirement does not retroactively cover 647f022's tests and is not a request to restore obsolete tmux cases at tip.  Suggested bucket: other (regression-test protection in maintainer tooling). Confidence: confirmed source/contract and competing-oracle analysis; no execution or reproduction. proposed_drop: false for the historical test gap. Original c3 consequence/bases preserved: initial/synthesis records found no current production failure, cited correct shared anchor/identity guards and retained grid history tests, distinguished tmux RSS from terminal-host RSS, and proposed a broad drop on those grounds. That rationale cannot refute this test-oracle defect and is withdrawn for this specific gap. Propose excluding only an ongoing tip claim for the retired mode cases and the later repaired shared tests, on the exact retirement/test evidence above; no parent drop accepted. Could-be-highest: no established product security or loss-of-work defect; do not upgrade a missing test into a product failure. possible_cover: parent-supplied g151/l1 process-wiring, g153/c3 mixed-session and g155/c5 pending-cleanup historical test gaps are adjacent, not the same mode oracle; no prohibited coverage sources searched. Material caveats: the removed old race test did not prove it hit the race window; the later test is stronger. No host-memory coverage is inferred from the removed tmux RSS fixture. The assigned part ends at line 1296 and no later deleted body is included. Source-checkable premises for this ID are settled; no open lead remains."
+          }
+        },
+        {
+          "line": 11,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "c3",
+            "state": "open",
+            "summary": "Legacy forced-pause mode-restoration oracles disappear before legacy serving retires",
+            "location": "crates/farhelm/tests/e2e/terminal_backpressure.rs (parent):664",
+            "detail": "Reviewed commit: 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513. TLDR: This intermediate change removes regression checks that an old terminal recovers its alternate screen and input modes through the viewer attachment, while this revision still serves such terminals. The confirmed consequence is missing test protection, not a demonstrated product failure. Exact deletion: parent terminal_backpressure.rs:664 a_forced_tmux_pause_recovers_an_alternate_screen_pane and :729 a_forced_tmux_pause_restores_modes_and_cursor_state (assigned 00800-000.patch:675–800). The alternate-screen test requires post-reset alternate-buffer entry before ALT-SCREEN APP, and the mode test requires cursor placement after content plus bracketed-paste restoration where supported. SPEC_impl.md:2294–2296 says exactly: 'A supervisor creates every terminal in a terminal host; nothing selects tmux, and the supervisor never starts a tmux server (it still adopts and serves one an earlier supervisor left, \"Terminal substrate: private tmux server\").' Its :2954–2963 retains old-terminal serving during the transition. The Forwarder recovery remains connection.rs:1853–1871; TmuxReplay::render :1441–1450 sends reset, pre-content modes, content, post-content modes. Concrete competing implementation: Recovery alone omits its mode segments while Attach remains correct. That can restore a full-screen app into the wrong buffer or lose bracketed paste while all raw content assertions pass. Same-revision surviving oracles inspected: tmux/stream.rs:2983–3061 forces a pause, directly calls OutputStream::resume_paused_with_replay, checks content and resumed live output, but discards returned modes and never renders them through Forwarder. tmux/test_support.rs:183–202 also resumes directly and discards replay. connection.rs:2294–2482 retains a real Forwarder normal-screen final-output test, asserting one reset, content once and no extra replay marker, but no nondefault alternate/input modes; there is no test of TmuxReplay/Recovery mode segments in that module. Pinned source searches across supervisor/e2e pause/recovery callers found no replacement attachment-level oracle for these two mode cases. Therefore not all catch-up coverage is lost, but the deleted mode sensitivity is. A repair at that historical revision would seed an earlier-release tmux session, adopt it, attach and force pause, preserving these mode/order assertions without restoring new tmux terminal creation.  Discovery also checked the other assigned shared-mechanism deletions rather than treating all tests as obsolete: parent :812's stalled-teardown/takeover test is a best-effort race sweep, and :1152 tests repeated short pauses. At 647f022 the retained host tests have ordinary takeover (host_terminals.rs:3564–3586) and one stalled viewer (:3598–3615), not the combined stale teardown or repeated-pause-cycle oracle. Later f560058da19e02716e6f943883a9508b447aff4e restores both as host-terminal tests: core/tests/host_terminals.rs:3734–3803 holds the attachments lock, queues takeover before stalled teardown, asserts winner attachment survival, requires only TakenOver for the loser and fresh winner output; :3822–3860 runs five short pauses with round-trip resumes and fresh output. Same tests survive at pinned tip :3729–3798/:3817–3855. Thus the missing ongoing shared-race/cumulative-pause claim is refuted by actual later tests, while their intermediate deletion remains historical. This differs from g153/l1's later repaired stale-owner PauseOutput authorization test. Grid pause/history tests alone do not establish any of these combined or legacy mode assertions, and they do not address g139's UploadAck priority oracle.  Retirement boundary resolved: dbfc69751215dbf15e1d31d5bed73c3754c4ebc4 core.rs:6426–6438 ends the old server and sets the driver absent, and :6965–6969 maps Tmux rows to None. Its SPEC.md:3003–3017 explicitly changes the product contract to ending old terminals at startup. The mode-recovery subject ceases there; 1ed482dde220452e424973faf38a5e1318986333 subsequently deletes the driver. This later retirement does not retroactively cover 647f022's tests and is not a request to restore obsolete tmux cases at tip.  Suggested bucket: other (regression-test protection in maintainer tooling). Confidence: confirmed source/contract and competing-oracle analysis; no execution or reproduction. proposed_drop: false for the historical test gap. Original c3 consequence/bases preserved: initial/synthesis records found no current production failure, cited correct shared anchor/identity guards and retained grid history tests, distinguished tmux RSS from terminal-host RSS, and proposed a broad drop on those grounds. That rationale cannot refute this test-oracle defect and is withdrawn for this specific gap. Propose excluding only an ongoing tip claim for the retired mode cases and the later repaired shared tests, on the exact retirement/test evidence above; no parent drop accepted. Could-be-highest: no established product security or loss-of-work defect; do not upgrade a missing test into a product failure. possible_cover: parent-supplied g151/l1 process-wiring, g153/c3 mixed-session and g155/c5 pending-cleanup historical test gaps are adjacent, not the same mode oracle; no prohibited coverage sources searched. Material caveats: the removed old race test did not prove it hit the race window; the later test is stronger. No host-memory coverage is inferred from the removed tmux RSS fixture. The assigned part ends at line 1296 and no later deleted body is included. Source-checkable premises for this ID are settled; no open lead remains."
+          }
+        }
+      ],
+      "latest": {
+        "line": 11,
+        "event": {
+          "version": 1,
+          "kind": "finding",
+          "id": "c3",
+          "state": "open",
+          "summary": "Legacy forced-pause mode-restoration oracles disappear before legacy serving retires",
+          "location": "crates/farhelm/tests/e2e/terminal_backpressure.rs (parent):664",
+          "detail": "Reviewed commit: 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513. TLDR: This intermediate change removes regression checks that an old terminal recovers its alternate screen and input modes through the viewer attachment, while this revision still serves such terminals. The confirmed consequence is missing test protection, not a demonstrated product failure. Exact deletion: parent terminal_backpressure.rs:664 a_forced_tmux_pause_recovers_an_alternate_screen_pane and :729 a_forced_tmux_pause_restores_modes_and_cursor_state (assigned 00800-000.patch:675–800). The alternate-screen test requires post-reset alternate-buffer entry before ALT-SCREEN APP, and the mode test requires cursor placement after content plus bracketed-paste restoration where supported. SPEC_impl.md:2294–2296 says exactly: 'A supervisor creates every terminal in a terminal host; nothing selects tmux, and the supervisor never starts a tmux server (it still adopts and serves one an earlier supervisor left, \"Terminal substrate: private tmux server\").' Its :2954–2963 retains old-terminal serving during the transition. The Forwarder recovery remains connection.rs:1853–1871; TmuxReplay::render :1441–1450 sends reset, pre-content modes, content, post-content modes. Concrete competing implementation: Recovery alone omits its mode segments while Attach remains correct. That can restore a full-screen app into the wrong buffer or lose bracketed paste while all raw content assertions pass. Same-revision surviving oracles inspected: tmux/stream.rs:2983–3061 forces a pause, directly calls OutputStream::resume_paused_with_replay, checks content and resumed live output, but discards returned modes and never renders them through Forwarder. tmux/test_support.rs:183–202 also resumes directly and discards replay. connection.rs:2294–2482 retains a real Forwarder normal-screen final-output test, asserting one reset, content once and no extra replay marker, but no nondefault alternate/input modes; there is no test of TmuxReplay/Recovery mode segments in that module. Pinned source searches across supervisor/e2e pause/recovery callers found no replacement attachment-level oracle for these two mode cases. Therefore not all catch-up coverage is lost, but the deleted mode sensitivity is. A repair at that historical revision would seed an earlier-release tmux session, adopt it, attach and force pause, preserving these mode/order assertions without restoring new tmux terminal creation.  Discovery also checked the other assigned shared-mechanism deletions rather than treating all tests as obsolete: parent :812's stalled-teardown/takeover test is a best-effort race sweep, and :1152 tests repeated short pauses. At 647f022 the retained host tests have ordinary takeover (host_terminals.rs:3564–3586) and one stalled viewer (:3598–3615), not the combined stale teardown or repeated-pause-cycle oracle. Later f560058da19e02716e6f943883a9508b447aff4e restores both as host-terminal tests: core/tests/host_terminals.rs:3734–3803 holds the attachments lock, queues takeover before stalled teardown, asserts winner attachment survival, requires only TakenOver for the loser and fresh winner output; :3822–3860 runs five short pauses with round-trip resumes and fresh output. Same tests survive at pinned tip :3729–3798/:3817–3855. Thus the missing ongoing shared-race/cumulative-pause claim is refuted by actual later tests, while their intermediate deletion remains historical. This differs from g153/l1's later repaired stale-owner PauseOutput authorization test. Grid pause/history tests alone do not establish any of these combined or legacy mode assertions, and they do not address g139's UploadAck priority oracle.  Retirement boundary resolved: dbfc69751215dbf15e1d31d5bed73c3754c4ebc4 core.rs:6426–6438 ends the old server and sets the driver absent, and :6965–6969 maps Tmux rows to None. Its SPEC.md:3003–3017 explicitly changes the product contract to ending old terminals at startup. The mode-recovery subject ceases there; 1ed482dde220452e424973faf38a5e1318986333 subsequently deletes the driver. This later retirement does not retroactively cover 647f022's tests and is not a request to restore obsolete tmux cases at tip.  Suggested bucket: other (regression-test protection in maintainer tooling). Confidence: confirmed source/contract and competing-oracle analysis; no execution or reproduction. proposed_drop: false for the historical test gap. Original c3 consequence/bases preserved: initial/synthesis records found no current production failure, cited correct shared anchor/identity guards and retained grid history tests, distinguished tmux RSS from terminal-host RSS, and proposed a broad drop on those grounds. That rationale cannot refute this test-oracle defect and is withdrawn for this specific gap. Propose excluding only an ongoing tip claim for the retired mode cases and the later repaired shared tests, on the exact retirement/test evidence above; no parent drop accepted. Could-be-highest: no established product security or loss-of-work defect; do not upgrade a missing test into a product failure. possible_cover: parent-supplied g151/l1 process-wiring, g153/c3 mixed-session and g155/c5 pending-cleanup historical test gaps are adjacent, not the same mode oracle; no prohibited coverage sources searched. Material caveats: the removed old race test did not prove it hit the race window; the later test is stronger. No host-memory coverage is inferred from the removed tmux RSS fixture. The assigned part ends at line 1296 and no later deleted body is included. Source-checkable premises for this ID are settled; no open lead remains."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g154/findings.jsonl",
+        "id": "c3",
+        "line": 11,
+        "disposition": "rejected",
+        "group": "legacy-test-removal-before-retirement/recovery-mode-rendering",
+        "reason": "Parent read full098.647 removes explicit alternate-buffer entry and cursor/bracketed-paste recovery sequence while old tmux attachment service still exists. Surviving content/grid tests do not protect those exact mode segments; intermediate missing protection is real, not disproved by correct production. dbfc retires exact old service and1ed removes driver bytip, so no current obsolete fixture restoration queued. Preserve earlier no-product-bug dismissal withdrawal and later stronger host race/pause tests; no demonstrated unsafepaste/workloss or currentmode failure."
+      },
+      "accepted_parent_decision": {
+        "key": "g154/c3",
+        "line": 11,
+        "disposition": "rejected",
+        "group": "legacy-test-removal-before-retirement/recovery-mode-rendering",
+        "bucket": "other",
+        "recording": "retired-in-range",
+        "needs_independent_drop_check": false,
+        "reason": "Parent read full098.647 removes explicit alternate-buffer entry and cursor/bracketed-paste recovery sequence while old tmux attachment service still exists. Surviving content/grid tests do not protect those exact mode segments; intermediate missing protection is real, not disproved by correct production. dbfc retires exact old service and1ed removes driver bytip, so no current obsolete fixture restoration queued. Preserve earlier no-product-bug dismissal withdrawal and later stronger host race/pause tests; no demonstrated unsafepaste/workloss or currentmode failure."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-098",
+          "key": "g154/c3",
+          "latest_line": 11,
+          "recommendation": "retain-verified",
+          "bucket": "other",
+          "underlying_key": "legacy-test-removal-before-retirement/recovery-mode-rendering",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "Removing the alternate-screen and mode/cursor recovery assertions loses distinct legacy attachment-level test protection while old terminals remain served. Surviving content recovery and grid tests do not assert those mode segments. This is a historical test defect, not an established current mode-restoration failure.",
+          "checks": [
+            "647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513^:crates/farhelm/tests/e2e/terminal_backpressure.rs:664-715 requires alternate-buffer entry after reset and before ALT-SCREEN APP; :729-789 checks cursor placement after content and bracketed paste when tmux reports that mode. These tests are deleted at the reviewed revision.",
+            "At 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513, connection.rs:1441-1450 renders pre-content/content/post-content modes and :1853-1871 still performs tmux pause recovery. tmux/stream.rs:2983-3061 and :3385-3438 recover content but discard modes; connection.rs:2420-2482 asserts reset/content/count without nondefault modes. Targeted resume/Recovery/forced-pause searches found no replacement attachment mode oracle.",
+            "SPEC_impl.md:2294-2296,2954-2973 retains earlier-server adoption and serving. dbfc69751215dbf15e1d31d5bed73c3754c4ebc4:core.rs:6426-6438,6965-6969 subsequently retires that path. At tip 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db, core/tests/host_terminals.rs:3729-3798 and :3817-3855 contain the later repaired shared stalled-teardown and repeated-pause tests; do not claim those gaps remain ongoing. No runtime checks ran."
+          ],
+          "coverage_checked": [
+            "Both current specifications searched for old terminals, alternate screen, pause and modes. SPEC.md:2998-3010 and SPEC_impl.md Ending the old private tmux server now retire legacy serving; this does not accept the intermediate missing oracle.",
+            "TODO.md Planned empty; matching tmux-removal plans are landed per plans/REPORTS.md:29-32, with no unlanded exact repair. BUGS.md has no matching entry. Full INDEX.md and active TRIAGE_OUTCOMES.md searches found no exact recovery-mode test-gap item.",
+            "g153/c3 is mixed-session lifecycle and g154/l4 is resident-memory measurement: adjacent, distinct assertions. FILTER.md does not match deletion of regression coverage without an additional rare trigger. No general no-product-bug argument is used to dismiss a test defect."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": "None for loss of the two historical mode-sensitive oracles. An actual product corruption, unsafe paste, or lost-work route is not demonstrated. The old race sweep did not prove hitting its race; later host coverage is stronger.",
+          "original_stronger_consequence": "Initial records broadly proposed dropping the removed tmux pause/race/RSS suite because the host grid path differs, shared ownership/anchor guards are correct, and no product failure was established. Later records withdraw that argument for the legacy mode oracle, retain no-runtime/no-host-RSS caveats, and exclude only the retired ongoing legacy claim and later repaired shared tests. UploadAck priority is separately owned and not settled here.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Retain the specific intermediate mode-restoration test loss. Preserve the initial withdrawal history and the later retirement/repair boundaries without inventing a current product bug or requesting obsolete tmux tests at tip."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": true,
+        "clearly_refuted_candidate": false,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "legacy-test-removal-before-retirement/recovery-mode-rendering",
+        "destination": "trailing-legacy-forced-pause-mode-restoration-oracles-disappear-before-legacy-serving-retires.md"
+      }
+    },
+    {
+      "key": "g154/l4",
+      "owner": "g154",
+      "id": "l4",
+      "domain": "rust-terminal-host-regressions",
+      "purpose": "rust-terminal-host-regressions: crates/farhelm/tests/e2e/terminal_backpressure.rs, crates/farhelm/tests/e2e/host_processes.rs, crates/farhelm/tests/e2e/host_reclaim.rs; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 12,
+          "event": {
+            "version": 1,
+            "kind": "lead",
+            "id": "l4",
+            "state": "open",
+            "summary": "Check whether the removed RSS test leaves the still-served legacy path without its memory-growth oracle",
+            "location": "crates/farhelm/tests/e2e/terminal_backpressure.rs (parent):915",
+            "detail": "Reviewed commit: 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513. TLDR: Investigate a separate responsibility of the assigned deletion: measuring bounded resident memory while a viewer stalls. Original c3 correctly said a tmux measurement cannot certify terminal-host RSS, but the legacy tmux path still exists at this intermediate revision. Missing premise: whether another same-revision test measures legacy tmux and supervisor growth during sustained paused output, rather than checking consequences of queue bounds or normal host memory. Need compare actual retained memory/resource test assertions and the old fixture's stimulus before deciding whether this is a distinct historical test gap. Suggested bucket if confirmed: other, maintainer regression protection only. Could-be-highest: no established production resource exhaustion, security or user-work loss; do not infer such a bug from a missing oracle. Confidence: lead under source investigation. proposed_drop: none yet; retain the earlier non-transferability distinction from c3, which does not settle old-path coverage. possible_cover: no matching memory-growth concern in the fully read updated interface records. No runtime tests or reproductions."
+          }
+        },
+        {
+          "line": 13,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "l4",
+            "state": "open",
+            "summary": "Legacy stalled-viewer RSS regression check is removed before legacy serving retires",
+            "location": "crates/farhelm/tests/e2e/terminal_backpressure.rs (parent):918",
+            "detail": "Reviewed commit: 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513. TLDR: While this intermediate revision still serves old terminals, it removes the test that measures whether their private tmux server and supervisor keep bounded resident memory during sustained output to a paused viewer. This is lost regression-test protection, not a demonstrated memory leak in Farhelm. Details: the assigned deletion removes memory_stays_flat_while_a_viewer_is_stalled (parent lines 918–1074; assigned patch 00800-000.patch:938–1094). It warms retained history, pauses the real attachment, drains residual output, starts the out-of-band-progress flood, waits beyond tmux's five-second pause allowance, then reads seven resident-memory samples from process-identity-bound handles. It requires producer progress during the measurement (:1016–1025), less than 8 MiB peak growth separately for tmux (:1034–1039) and supervisor (:1043–1048), resumed delivery, and a test-controlled producer stop (:1050–1073). These distinguish sustained memory accumulation from correct lossless delivery after a stall; a growing buffer can preserve delivery/order and eventual detach while violating the removed memory bound. The same-revision SPEC_impl.md:2294–2296 explicitly retains adoption/serving of earlier supervisors' tmux servers, and :2954–2963 describes old-terminal support throughout this transition. Its backpressure explanation :1766–1768 states exactly: 'tmux reads ahead into history and pauses the client's stream. The agent free-runs into scrollback (tmux server RSS stays flat), the bytes queued for the stalled client age past `pause-after`, and tmux then cuts that client's stream'.  Actual retained checks inspected: tmux/stream.rs:2460–2471 still asserts that the generated attach command sets pause-after, so do not claim that merely dropping that flag would go wholly undetected. That syntactic oracle does not sample either process under sustained pressure. Searches of pinned crates/e2e/.config for the removed test, ProcessRss, RSS_SAMPLE, smaps_rollup and resident/RSS growth found no remaining terminal-backpressure memory test. The retained files.rs:1542–1608 RSS test measures streaming a 64 MiB file upload through StagedStream, with no terminal producer or viewer. e2e/grid-client/BENCHMARK.md:3–6 explicitly says its opt-in tool measures a mounted browser grid, has no performance thresholds, does not launch Farhelm and does not measure helm/SSH/emulator; benchmark.mts:403–417 returns browser content-process metrics. It cannot replace either removed server-side assertion. Retained grid pause/history/stall assertions establish behavior, not resident-memory plateau.  Suggested bucket: other (maintainer regression protection). Confidence: confirmed by source, scoped retained-oracle search and actual assertion comparison; no execution. proposed_drop: false for the intermediate historical test gap. Could-be-highest: no established production security, user-work-loss or catastrophic tooling route; do not infer an actual memory leak from absent measurement. possible_cover: no matching RSS-oracle finding in the fully read parent-supplied interface records; c3 owns different mode-restoration and shared lifecycle oracles. Material caveats: the old measurement belongs to tmux plus the in-process supervisor, not a terminal host, so its removal establishes no independent ongoing host-RSS defect. Correct fixed queues or static flags do not erase the lost metric, and no claim is made that every conceivable buffering regression passes every other test. Later source retirement is distinct: dbfc69751215dbf15e1d31d5bed73c3754c4ebc4 ends the old server at startup and resolves Tmux rows as absent; 1ed482dde220452e424973faf38a5e1318986333 removes its driver. Thus this specific old-path subject is retired at tip, not an instruction to restore a tmux memory fixture now. At the reviewed intermediate revision, keep a measurement against adopted earlier-release terminal state until that contract retires, rather than relying on the removed create-tmux switch. Prior lead's legitimate non-transferability distinction remains preserved; it did not refute historical old-path coverage. No runtime tests, reproductions or live-install actions."
+          }
+        },
+        {
+          "line": 15,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "l4",
+            "state": "open",
+            "summary": "Legacy stalled-viewer RSS regression check is removed before legacy serving retires",
+            "location": "crates/farhelm/tests/e2e/terminal_backpressure.rs (parent):918",
+            "detail": "Reviewed commit: 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513. TLDR: While this intermediate revision still serves old terminals, it removes the test that measures whether their private tmux server and supervisor keep bounded resident memory during sustained output to a paused viewer. This is lost regression-test protection, not a demonstrated memory leak in Farhelm. Details: the assigned deletion removes memory_stays_flat_while_a_viewer_is_stalled (parent lines 918–1074; assigned patch 00800-000.patch:930–1086). It warms retained history, pauses the real attachment, drains residual output, starts the out-of-band-progress flood, waits beyond tmux's five-second pause allowance, then reads seven resident-memory samples from process-identity-bound handles. It requires producer progress during the measurement (:1016–1025), less than 8 MiB peak growth separately for tmux (:1034–1039) and supervisor (:1043–1048), resumed delivery, and a test-controlled producer stop (:1050–1073). These distinguish sustained memory accumulation from correct lossless delivery after a stall; a growing buffer can preserve delivery/order and eventual detach while violating the removed memory bound. The same-revision SPEC_impl.md:2294–2296 explicitly retains adoption/serving of earlier supervisors' tmux servers, and :2954–2963 describes old-terminal support throughout this transition. Its backpressure explanation :1766–1768 states exactly: 'tmux reads ahead into history and pauses the client's stream. The agent free-runs into scrollback (tmux server RSS stays flat), the bytes queued for the stalled client age past `pause-after`, and tmux then cuts that client's stream'.  Actual retained checks inspected: tmux/stream.rs:2460–2471 still asserts that the generated attach command sets pause-after, so do not claim that merely dropping that flag would go wholly undetected. That syntactic oracle does not sample either process under sustained pressure. Searches of pinned crates/e2e/.config for the removed test, ProcessRss, RSS_SAMPLE, smaps_rollup and resident/RSS growth found no remaining terminal-backpressure memory test. The retained files.rs:1542–1608 RSS test measures streaming a 64 MiB file upload through StagedStream, with no terminal producer or viewer. e2e/grid-client/BENCHMARK.md:3–6 explicitly says its opt-in tool measures a mounted browser grid, has no performance thresholds, does not launch Farhelm and does not measure helm/SSH/emulator; benchmark.mts:403–417 returns browser content-process metrics. It cannot replace either removed server-side assertion. Retained grid pause/history/stall assertions establish behavior, not resident-memory plateau.  Suggested bucket: other (maintainer regression protection). Confidence: confirmed by source, scoped retained-oracle search and actual assertion comparison; no execution. proposed_drop: false for the intermediate historical test gap. Could-be-highest: no established production security, user-work-loss or catastrophic tooling route; do not infer an actual memory leak from absent measurement. possible_cover: no matching RSS-oracle finding in the fully read parent-supplied interface records; c3 owns different mode-restoration and shared lifecycle oracles. Material caveats: the old measurement belongs to tmux plus the in-process supervisor, not a terminal host, so its removal establishes no independent ongoing host-RSS defect. Correct fixed queues or static flags do not erase the lost metric, and no claim is made that every conceivable buffering regression passes every other test. Later source retirement is distinct: dbfc69751215dbf15e1d31d5bed73c3754c4ebc4 ends the old server at startup and resolves Tmux rows as absent; 1ed482dde220452e424973faf38a5e1318986333 removes its driver. Thus this specific old-path subject is retired at tip, not an instruction to restore a tmux memory fixture now. At the reviewed intermediate revision, keep a measurement against adopted earlier-release terminal state until that contract retires, rather than relying on the removed create-tmux switch. Prior lead's legitimate non-transferability distinction remains preserved; it did not refute historical old-path coverage. No runtime tests, reproductions or live-install actions."
+          }
+        }
+      ],
+      "latest": {
+        "line": 15,
+        "event": {
+          "version": 1,
+          "kind": "finding",
+          "id": "l4",
+          "state": "open",
+          "summary": "Legacy stalled-viewer RSS regression check is removed before legacy serving retires",
+          "location": "crates/farhelm/tests/e2e/terminal_backpressure.rs (parent):918",
+          "detail": "Reviewed commit: 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513. TLDR: While this intermediate revision still serves old terminals, it removes the test that measures whether their private tmux server and supervisor keep bounded resident memory during sustained output to a paused viewer. This is lost regression-test protection, not a demonstrated memory leak in Farhelm. Details: the assigned deletion removes memory_stays_flat_while_a_viewer_is_stalled (parent lines 918–1074; assigned patch 00800-000.patch:930–1086). It warms retained history, pauses the real attachment, drains residual output, starts the out-of-band-progress flood, waits beyond tmux's five-second pause allowance, then reads seven resident-memory samples from process-identity-bound handles. It requires producer progress during the measurement (:1016–1025), less than 8 MiB peak growth separately for tmux (:1034–1039) and supervisor (:1043–1048), resumed delivery, and a test-controlled producer stop (:1050–1073). These distinguish sustained memory accumulation from correct lossless delivery after a stall; a growing buffer can preserve delivery/order and eventual detach while violating the removed memory bound. The same-revision SPEC_impl.md:2294–2296 explicitly retains adoption/serving of earlier supervisors' tmux servers, and :2954–2963 describes old-terminal support throughout this transition. Its backpressure explanation :1766–1768 states exactly: 'tmux reads ahead into history and pauses the client's stream. The agent free-runs into scrollback (tmux server RSS stays flat), the bytes queued for the stalled client age past `pause-after`, and tmux then cuts that client's stream'.  Actual retained checks inspected: tmux/stream.rs:2460–2471 still asserts that the generated attach command sets pause-after, so do not claim that merely dropping that flag would go wholly undetected. That syntactic oracle does not sample either process under sustained pressure. Searches of pinned crates/e2e/.config for the removed test, ProcessRss, RSS_SAMPLE, smaps_rollup and resident/RSS growth found no remaining terminal-backpressure memory test. The retained files.rs:1542–1608 RSS test measures streaming a 64 MiB file upload through StagedStream, with no terminal producer or viewer. e2e/grid-client/BENCHMARK.md:3–6 explicitly says its opt-in tool measures a mounted browser grid, has no performance thresholds, does not launch Farhelm and does not measure helm/SSH/emulator; benchmark.mts:403–417 returns browser content-process metrics. It cannot replace either removed server-side assertion. Retained grid pause/history/stall assertions establish behavior, not resident-memory plateau.  Suggested bucket: other (maintainer regression protection). Confidence: confirmed by source, scoped retained-oracle search and actual assertion comparison; no execution. proposed_drop: false for the intermediate historical test gap. Could-be-highest: no established production security, user-work-loss or catastrophic tooling route; do not infer an actual memory leak from absent measurement. possible_cover: no matching RSS-oracle finding in the fully read parent-supplied interface records; c3 owns different mode-restoration and shared lifecycle oracles. Material caveats: the old measurement belongs to tmux plus the in-process supervisor, not a terminal host, so its removal establishes no independent ongoing host-RSS defect. Correct fixed queues or static flags do not erase the lost metric, and no claim is made that every conceivable buffering regression passes every other test. Later source retirement is distinct: dbfc69751215dbf15e1d31d5bed73c3754c4ebc4 ends the old server at startup and resolves Tmux rows as absent; 1ed482dde220452e424973faf38a5e1318986333 removes its driver. Thus this specific old-path subject is retired at tip, not an instruction to restore a tmux memory fixture now. At the reviewed intermediate revision, keep a measurement against adopted earlier-release terminal state until that contract retires, rather than relying on the removed create-tmux switch. Prior lead's legitimate non-transferability distinction remains preserved; it did not refute historical old-path coverage. No runtime tests, reproductions or live-install actions."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g154/findings.jsonl",
+        "id": "l4",
+        "line": 15,
+        "disposition": "rejected",
+        "group": "legacy-test-removal-before-retirement/stalled-server-rss",
+        "reason": "Full098: deleted647 sustained gated-flood paused-viewer test measures separate tmux/supervisor RSS growth over seven points after warming, with producer progress and controlledstop. Behavioralqueue/history checks, uploadmemory andbrowser-onlybenchmark do not replace this exact live legacy metric. Historical protection lost while supported; dbfc/1ed retire/removesubject bytip, no currenttmuxRSS fixture resurrection required. Preserve pause-after unitassertion and distinct hostRSSquestions; no actual leak/exhaustion/workloss established."
+      },
+      "accepted_parent_decision": {
+        "key": "g154/l4",
+        "line": 15,
+        "disposition": "rejected",
+        "group": "legacy-test-removal-before-retirement/stalled-server-rss",
+        "bucket": "other",
+        "recording": "retired-in-range",
+        "needs_independent_drop_check": false,
+        "reason": "Full098: deleted647 sustained gated-flood paused-viewer test measures separate tmux/supervisor RSS growth over seven points after warming, with producer progress and controlledstop. Behavioralqueue/history checks, uploadmemory andbrowser-onlybenchmark do not replace this exact live legacy metric. Historical protection lost while supported; dbfc/1ed retire/removesubject bytip, no currenttmuxRSS fixture resurrection required. Preserve pause-after unitassertion and distinct hostRSSquestions; no actual leak/exhaustion/workloss established."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-098",
+          "key": "g154/l4",
+          "latest_line": 15,
+          "recommendation": "retain-verified",
+          "bucket": "other",
+          "underlying_key": "legacy-test-removal-before-retirement/stalled-server-rss",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The removed test measured bounded tmux-server and supervisor resident growth under a live paused-viewer flood. No remaining same-revision test with that stimulus and those metrics was found. Behavioral queue/history assertions and browser-only benchmarks cannot replace those measurements. This proves lost historical protection, not a leak.",
+          "checks": [
+            "647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513^:crates/farhelm/tests/e2e/terminal_backpressure.rs:918-1074 binds process identities, warms history, pauses the attachment, gates sustained output, samples seven RSS points beyond the pause allowance, requires producer progress, enforces separate <8 MiB growth bounds, resumes delivery and verifies a controlled producer stop.",
+            "At 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513, ProcessRss/RSS_SAMPLE/smaps_rollup/removed-name search has no matches. Resident/RSS growth searches found files.rs:1542-1608 measuring a 64 MiB file upload, emulator-only memory tests and browser benchmarks, not the old terminal path. e2e/grid-client/BENCHMARK.md:3-6 explicitly excludes Farhelm/helm/SSH/emulator and has no thresholds. tmux/stream.rs:2460-2471 still checks pause-after command syntax; its absence would not go wholly undetected.",
+            "SPEC_impl.md:1766-1768 explicitly describes flat tmux RSS, and :2294-2296,2954-2973 retains legacy serving. dbfc69751215dbf15e1d31d5bed73c3754c4ebc4 subsequently retires it at core.rs:6426-6438,6965-6969. No runtime checks ran."
+          ],
+          "coverage_checked": [
+            "Both current specifications searched for resident/RSS, pause and old terminals: current retirement text does not supply historical RSS coverage. TODO.md Planned empty. Matching tmux-removal plans are already landed at plans/REPORTS.md:29-32; no unlanded exact measurement repair found.",
+            "BUGS.md has no matching entry. Full INDEX.md and active TRIAGE_OUTCOMES.md searches found memory/peak and browser cases but no same paused legacy-server measurement. g154/c3 and g153/c3 are separate oracles. FILTER.md has no applicable test-removal boundary."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": "None for removal of the historical metric. Any actual production memory exhaustion or loss of work needs separate evidence. No claim that every conceivable leak escapes every remaining test, or that tmux RSS certifies terminal-host RSS, is made.",
+          "original_stronger_consequence": "The lead asked whether the old path lost its memory-growth oracle despite the legitimate distinction between tmux and terminal-host RSS. The final finding preserves that distinction, the still-present pause-after assertion and the later retirement; it never establishes a product leak or catastrophic tooling harm.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Retain the historical stalled-viewer RSS test gap, other priority, separately from mode/lifecycle gaps. Do not request revival of an obsolete tmux fixture at current tip."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": true,
+        "clearly_refuted_candidate": false,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "legacy-test-removal-before-retirement/stalled-server-rss",
+        "destination": "trailing-legacy-stalled-viewer-rss-regression-check-is-removed-before-legacy-serving-retires.md"
+      }
+    },
+    {
+      "key": "g154/c5",
+      "owner": "g154",
+      "id": "c5",
+      "domain": "rust-terminal-host-regressions",
+      "purpose": "rust-terminal-host-regressions: crates/farhelm/tests/e2e/terminal_backpressure.rs, crates/farhelm/tests/e2e/host_processes.rs, crates/farhelm/tests/e2e/host_reclaim.rs; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 14,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c5",
+            "state": "open",
+            "summary": "Raw-byte draining does not establish an additional caller regression in the assigned change",
+            "location": "crates/farhelm/tests/e2e/terminal_backpressure.rs:20",
+            "detail": "Reviewed commit: 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513. TLDR: Considered whether keeping drain_for's raw Data-byte accumulation while harness attachments become grids invalidates its surviving tests. No additional failing or vacuous caller assertion was established. Details: the retained helper at terminal_backpressure.rs:20–43 appends Data bytes without harness append_transcript/grid_text; its assigned code change is documentation only. Exact same-revision caller checks: session_lifecycle.rs:693–701 and :833–841, session_rename.rs:592–598, and tab_lifecycle_edges.rs:281–300 assert no detach from the drain, then send a distinct fresh text marker and wait through the grid-aware helper. They do not infer successful output from raw transcript length or control-message bytes. terminal_tabs.rs:1385–1393 uses drained bytes only for absence of cross-stream marker text after already obtaining the positive markers from their intended streams. This review establishes no concrete missed assertion for those fixed-marker fixtures, and does not infer a generalized text-decoding contract from drain_for's name. Suggested bucket: other if a real test-oracle defect were established; confidence: confirmed caller-use analysis, no execution. proposed_drop: no concrete additional oracle failure found in the named callers; do not report the implementation-style mismatch alone. Could-be-highest: no established security or user-work-loss route; helper is test-only. possible_cover: none in supplied interface context. Caveats: this is not certification that raw binary is a suitable arbitrary styled-text transcript, and does not refute a future concrete fixture whose needle is split among styled runs. The distinction between raw bytes and decoded grid text remains real. No claim that production grid streams are wrong; no runtime tests or reproductions."
+          }
+        }
+      ],
+      "latest": {
+        "line": 14,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c5",
+          "state": "open",
+          "summary": "Raw-byte draining does not establish an additional caller regression in the assigned change",
+          "location": "crates/farhelm/tests/e2e/terminal_backpressure.rs:20",
+          "detail": "Reviewed commit: 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513. TLDR: Considered whether keeping drain_for's raw Data-byte accumulation while harness attachments become grids invalidates its surviving tests. No additional failing or vacuous caller assertion was established. Details: the retained helper at terminal_backpressure.rs:20–43 appends Data bytes without harness append_transcript/grid_text; its assigned code change is documentation only. Exact same-revision caller checks: session_lifecycle.rs:693–701 and :833–841, session_rename.rs:592–598, and tab_lifecycle_edges.rs:281–300 assert no detach from the drain, then send a distinct fresh text marker and wait through the grid-aware helper. They do not infer successful output from raw transcript length or control-message bytes. terminal_tabs.rs:1385–1393 uses drained bytes only for absence of cross-stream marker text after already obtaining the positive markers from their intended streams. This review establishes no concrete missed assertion for those fixed-marker fixtures, and does not infer a generalized text-decoding contract from drain_for's name. Suggested bucket: other if a real test-oracle defect were established; confidence: confirmed caller-use analysis, no execution. proposed_drop: no concrete additional oracle failure found in the named callers; do not report the implementation-style mismatch alone. Could-be-highest: no established security or user-work-loss route; helper is test-only. possible_cover: none in supplied interface context. Caveats: this is not certification that raw binary is a suitable arbitrary styled-text transcript, and does not refute a future concrete fixture whose needle is split among styled runs. The distinction between raw bytes and decoded grid text remains real. No claim that production grid streams are wrong; no runtime tests or reproductions."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g154/findings.jsonl",
+        "id": "c5",
+        "line": 14,
+        "disposition": "excluded",
+        "group": "raw-grid-drain-helper-current-caller-exposure",
+        "reason": "Parent read full098 proposal and its named source/caller results with092/093/actual145l1. Same raw-drain limitation, same four post-drain unique-marker callers and two fixed plain-marker absence checks; no additional concrete emitted shape invalidating these assertions or new in-range exposure. Reject proposed retain-unverified inference from lack of universal arbitrary-grid guarantee. Original hypothetical false positive/negative remains, production correctness is not the refutation; bounded present fixture/caller analysis is. No security/work-loss consequence."
+      },
+      "accepted_parent_decision": {
+        "key": "g154/c5",
+        "line": 14,
+        "disposition": "excluded",
+        "group": "raw-grid-drain-helper-current-caller-exposure",
+        "bucket": "other",
+        "recording": "parent-rejects-unestablished-uncertainty",
+        "needs_independent_drop_check": false,
+        "reason": "Parent read full098 proposal and its named source/caller results with092/093/actual145l1. Same raw-drain limitation, same four post-drain unique-marker callers and two fixed plain-marker absence checks; no additional concrete emitted shape invalidating these assertions or new in-range exposure. Reject proposed retain-unverified inference from lack of universal arbitrary-grid guarantee. Original hypothetical false positive/negative remains, production correctness is not the refutation; bounded present fixture/caller analysis is. No security/work-loss consequence."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-098",
+          "key": "g154/c5",
+          "latest_line": 14,
+          "recommendation": "retain-unverified",
+          "bucket": "other",
+          "underlying_key": "terminal-tests/raw-drain-grid-caller-sensitivity",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The raw-versus-decoded representation mismatch exists, but the supplied claim does not establish an additional vacuous or failing assertion in these callers. Source supports the latest narrow no-demonstrated-regression conclusion; it does not prove all negative-marker assertions sound over arbitrary grid shapes. Preserve that uncertainty if the parent records this candidate.",
+          "checks": [
+            "At 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513, terminal_backpressure.rs:20-43 appends Data bytes and observes detach/closure; its assigned change is documentation. session_lifecycle.rs:693-701,833-841, session_rename.rs:592-598 and tab_lifecycle_edges.rs:281-300 check detach absence and then request distinct fresh markers through grid-aware waits.",
+            "Same revision terminal_tabs.rs:1367-1393 first observes positive agent/tab markers, then uses drain_for before absence checks for cross-stream fixed text. This does not infer liveness from raw byte length. A concrete emitted/frame shape that hides a wrong-stream marker remains unestablished. No runtime checks ran."
+          ],
+          "coverage_checked": [
+            "Both specifications searched for grid text, raw drain and observer framing: current grid-client text explains styled rows, not arbitrary raw-byte transcript correctness. No explicit acceptance of a missed assertion found. TODO.md Planned empty; no matching unlanded plan or BUGS.md item.",
+            "Read full INDEX.md and matching grid-row-is-not-program-line.md and grid-text-omits-blank-columns.md. They concern synthetic row completion and omitted-column reconstruction in the grid-aware decoder, respectively, not raw drain accumulation; no exact alias or useful new consequence extension established. Active TRIAGE_OUTCOMES.md has no exact match. FILTER.md does not match an unproved test oracle by itself."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": "A concrete named fixture and supported grid/frame shape causing a false negative, false pass or false failure because this drain stores raw bytes, plus attribution within the reviewed range. The current source checks do not supply it.",
+          "original_stronger_consequence": "Keeping raw Data-byte draining after attachments become grids might invalidate surviving regression assertions. The reviewer proposed dropping because no concrete missed assertion was found, while explicitly refusing to certify arbitrary styled-text or split-run needles.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Retain as investigated uncertainty rather than treating absence of a demonstrated caller failure as complete source refutation. The parent may resolve the narrow candidate; no general decoder guarantee follows."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": false,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "raw-grid-drain-helper-current-caller-exposure",
+        "destination": null
+      }
+    },
+    {
+      "key": "g154/c6",
+      "owner": "g154",
+      "id": "c6",
+      "domain": "rust-terminal-host-regressions",
+      "purpose": "rust-terminal-host-regressions: crates/farhelm/tests/e2e/terminal_backpressure.rs, crates/farhelm/tests/e2e/host_processes.rs, crates/farhelm/tests/e2e/host_reclaim.rs; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 16,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c6",
+            "state": "open",
+            "summary": "Deleted private timing-helper tests have no surviving helper contract to exercise",
+            "location": "crates/farhelm/tests/e2e/terminal_backpressure.rs (parent):89",
+            "detail": "Reviewed commit: 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513. TLDR: Considered whether deletion of the deterministic quiet-deadline and numbered-progress tests creates an additional timing regression gap beyond the recorded terminal-path findings. No distinct surviving helper responsibility was established. Details: the assigned patch deletes QuietDeadline and FloodProgress, their helper-only unit tests, and their only local consumers (drain_until_quiet and wait_for_flood_marker_with_progress) together. Exact-name search at the pinned revision across crates/farhelm, crates/farhelm-supervisor and crates/farhelm-fixtures returned no remaining references to QuietDeadline, FloodProgress, either removed unit-test name, drain_until_quiet, wait_for_flood_marker_with_progress, assert_flood_outstanding, gated_flood_session, start_gated_flood_on_live_attachment or assert_records_consecutive (git grep exit 1, no matches). Their rearming rules belonged to the retired test-side observers, not a production clock or public utility still awaiting a test. The distinct lost production-path oracles remain recorded under c3/l4; removing private helper tests is not counted as another instance of those findings. Suggested bucket: other if a separate test-oracle defect existed. Confidence: confirmed source/reference analysis, no execution. proposed_drop: no surviving implementation or caller for these specific private helper contracts, rather than an assertion that correct production code makes regression tests unnecessary. Could-be-highest: no established security or user-work-loss route; these were test-only observers. possible_cover: none searched. Caveat: this candidate does not refute the historical recovery-mode and memory-measurement gaps or the separate later-repaired shared pause/race cases. No runtime tests, reproductions or live-install actions."
+          }
+        }
+      ],
+      "latest": {
+        "line": 16,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c6",
+          "state": "open",
+          "summary": "Deleted private timing-helper tests have no surviving helper contract to exercise",
+          "location": "crates/farhelm/tests/e2e/terminal_backpressure.rs (parent):89",
+          "detail": "Reviewed commit: 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513. TLDR: Considered whether deletion of the deterministic quiet-deadline and numbered-progress tests creates an additional timing regression gap beyond the recorded terminal-path findings. No distinct surviving helper responsibility was established. Details: the assigned patch deletes QuietDeadline and FloodProgress, their helper-only unit tests, and their only local consumers (drain_until_quiet and wait_for_flood_marker_with_progress) together. Exact-name search at the pinned revision across crates/farhelm, crates/farhelm-supervisor and crates/farhelm-fixtures returned no remaining references to QuietDeadline, FloodProgress, either removed unit-test name, drain_until_quiet, wait_for_flood_marker_with_progress, assert_flood_outstanding, gated_flood_session, start_gated_flood_on_live_attachment or assert_records_consecutive (git grep exit 1, no matches). Their rearming rules belonged to the retired test-side observers, not a production clock or public utility still awaiting a test. The distinct lost production-path oracles remain recorded under c3/l4; removing private helper tests is not counted as another instance of those findings. Suggested bucket: other if a separate test-oracle defect existed. Confidence: confirmed source/reference analysis, no execution. proposed_drop: no surviving implementation or caller for these specific private helper contracts, rather than an assertion that correct production code makes regression tests unnecessary. Could-be-highest: no established security or user-work-loss route; these were test-only observers. possible_cover: none searched. Caveat: this candidate does not refute the historical recovery-mode and memory-measurement gaps or the separate later-repaired shared pause/race cases. No runtime tests, reproductions or live-install actions."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g154/findings.jsonl",
+        "id": "c6",
+        "line": 16,
+        "disposition": "excluded",
+        "group": "terminal-tests/deleted-private-observer-unit-contracts",
+        "reason": "Parent explicitly accepted named refuted proposal from claims-098 after inspecting it. The helper-only unit tests disappear together with the private observer implementations and every consumer. No distinct surviving helper contract is left untested by their deletion. This does not refute the separate loss of product-path mode or RSS assertions. Refute the additional helper-contract candidate narrowly. Do not count deleted private helper tests as an extra instance of the distinct historical path-oracle findings. Checked source/results: [\"647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513^:terminal_backpressure.rs:89-153 implements QuietDeadline and FloodProgress solely for the deleted local drain/progress observers. At the reviewed revision, exact-name searches across crates/farhelm, crates/farhelm-supervisor and crates/farhelm-fixtures for both types and drain_until_quiet, wait_for_flood_marker_with_progress, assert_flood_outstanding, gated_flood_session, start_gated_flood_on_live_attachment and assert_records_consecutive return no matches (exit 1). No runtime checks ran.\"] Current coverage/results: [\"Both specifications searched for these helpers/timing observer contracts: no surviving public or production helper contract. TODO.md Planned empty; plans/queue, BUGS.md, full INDEX.md and active TRIAGE_OUTCOMES.md searches found no exact helper-only gap. FILTER.md not used; the basis is removal of both subject and consumers, not rarity or correct production behavior.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Deleting deterministic quiet-deadline and numbered-progress tests might create an additional timing-regression gap. The latest record separates that candidate from the retained production-path test losses and later repaired shared race/pause cases.\"; \"A surviving implementation or caller of these exact private observers would be needed for an independent continuing unit-test gap; none found.\"."
+      },
+      "accepted_parent_decision": {
+        "key": "g154/c6",
+        "line": 16,
+        "disposition": "excluded",
+        "group": "terminal-tests/deleted-private-observer-unit-contracts",
+        "bucket": "other",
+        "recording": "refuted",
+        "queue_target_candidate": null,
+        "needs_independent_drop_check": false,
+        "reason": "Parent explicitly accepted named refuted proposal from claims-098 after inspecting it. The helper-only unit tests disappear together with the private observer implementations and every consumer. No distinct surviving helper contract is left untested by their deletion. This does not refute the separate loss of product-path mode or RSS assertions. Refute the additional helper-contract candidate narrowly. Do not count deleted private helper tests as an extra instance of the distinct historical path-oracle findings. Checked source/results: [\"647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513^:terminal_backpressure.rs:89-153 implements QuietDeadline and FloodProgress solely for the deleted local drain/progress observers. At the reviewed revision, exact-name searches across crates/farhelm, crates/farhelm-supervisor and crates/farhelm-fixtures for both types and drain_until_quiet, wait_for_flood_marker_with_progress, assert_flood_outstanding, gated_flood_session, start_gated_flood_on_live_attachment and assert_records_consecutive return no matches (exit 1). No runtime checks ran.\"] Current coverage/results: [\"Both specifications searched for these helpers/timing observer contracts: no surviving public or production helper contract. TODO.md Planned empty; plans/queue, BUGS.md, full INDEX.md and active TRIAGE_OUTCOMES.md searches found no exact helper-only gap. FILTER.md not used; the basis is removal of both subject and consumers, not rarity or correct production behavior.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Deleting deterministic quiet-deadline and numbered-progress tests might create an additional timing-regression gap. The latest record separates that candidate from the retained production-path test losses and later repaired shared race/pause cases.\"; \"A surviving implementation or caller of these exact private observers would be needed for an independent continuing unit-test gap; none found.\"."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-098",
+          "key": "g154/c6",
+          "latest_line": 16,
+          "recommendation": "refuted",
+          "bucket": "other",
+          "underlying_key": "terminal-tests/deleted-private-observer-unit-contracts",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The helper-only unit tests disappear together with the private observer implementations and every consumer. No distinct surviving helper contract is left untested by their deletion. This does not refute the separate loss of product-path mode or RSS assertions.",
+          "checks": [
+            "647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513^:terminal_backpressure.rs:89-153 implements QuietDeadline and FloodProgress solely for the deleted local drain/progress observers. At the reviewed revision, exact-name searches across crates/farhelm, crates/farhelm-supervisor and crates/farhelm-fixtures for both types and drain_until_quiet, wait_for_flood_marker_with_progress, assert_flood_outstanding, gated_flood_session, start_gated_flood_on_live_attachment and assert_records_consecutive return no matches (exit 1). No runtime checks ran."
+          ],
+          "coverage_checked": [
+            "Both specifications searched for these helpers/timing observer contracts: no surviving public or production helper contract. TODO.md Planned empty; plans/queue, BUGS.md, full INDEX.md and active TRIAGE_OUTCOMES.md searches found no exact helper-only gap. FILTER.md not used; the basis is removal of both subject and consumers, not rarity or correct production behavior."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": "A surviving implementation or caller of these exact private observers would be needed for an independent continuing unit-test gap; none found.",
+          "original_stronger_consequence": "Deleting deterministic quiet-deadline and numbered-progress tests might create an additional timing-regression gap. The latest record separates that candidate from the retained production-path test losses and later repaired shared race/pause cases.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Refute the additional helper-contract candidate narrowly. Do not count deleted private helper tests as an extra instance of the distinct historical path-oracle findings."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "terminal-tests/deleted-private-observer-unit-contracts",
+        "destination": null
+      }
+    }
+  ],
+  "replies": [
+    {
+      "turn": 1,
+      "reply": "Initial review complete. All assigned ranges and the complete commits list were read.\n\nNo actionable findings or unresolved leads. Candidates `c1`–`c3` record the considered issues and source-based reasons for not reporting them. Findings log and progress are updated.\n\nSource-only review; no tests or reproductions run."
+    },
+    {
+      "turn": 2,
+      "reply": "Revised `c1`–`c3` with same-revision checks for database reservations, startup ordering, child lifetime/environment, and retained grid coverage limits. Grid tests do not refute g139’s UploadAck finding.\n\nNo new findings. Unresolved lead IDs: none."
+    },
+    {
+      "turn": 3,
+      "reply": "New finding confirmed under `c3`: legacy alternate-screen and input-mode recovery tests disappear while legacy serving remains supported.\n\nChecked retained stream/Forwarder assertions, retirement timing, and later replacements. The shared stall-race and repeated-pause tests are restored later.\n\nNewly verified: `c3`. New unverified IDs: none. Open leads: none. Source-only; nothing executed."
+    },
+    {
+      "turn": 4,
+      "reply": "New finding: `l4` confirms a historical loss of the legacy stalled-viewer RSS test before legacy serving retires.\n\nChecked remaining memory tests, benchmark scope, drain-helper callers, and both other assigned patches. Recorded non-reporting candidate `c5`.\n\nNew verified IDs: `l4`. New unverified IDs: none. Open leads: none. Source-only; no execution."
+    },
+    {
+      "turn": 5,
+      "reply": "Nothing new found to report.\n\nChecked deleted timing-helper references, the surviving module and scrollback asset, recorder-field uses, reclaim-test wording, and full-range path history. Recorded non-reporting candidate `c6`.\n\nNew verified IDs: none. New unverified IDs: none. Open leads: none. Discovery count: 3. Source-only; no execution."
+    }
+  ],
+  "progress": "g154: separate discovery pass 3 complete, awaiting caller.\nTurn type/count: discovery / 5 total turns (initial 1, synthesis 1, discovery 3). Discovery-pass count: 3.\nResult: nothing new found to report. New verified finding IDs: none. New unverified-after-investigation IDs: none. Open lead IDs: none. Added considered candidate c6 only; all prior findings/consequences/proposed-drop bases remain unchanged and no parent drops/lowerings accepted.\nPre-search context: read refreshed discovery-neighbours.json lines 1–606 completely in bounded chunks. No named pending questions. Adjacent excerpt, guard-lifetime, lifecycle and stale-comment records were novelty context only; none was counted as a new local issue or used to broaden scope.\nUseful new checks/results: searched same-revision farhelm/supervisor/fixtures sources for every deleted private deadline/progress type, observer and gate helper and the deterministic timing test names. No surviving references. The removed timing tests therefore have no remaining private helper contract to exercise, distinct from any lost production-path oracle (recorded immediately as c6). Read the complete surviving backpressure module and its actual terminal.js scrollback literal at the pinned revision: asset, 12000 literal, retained static floor assertion and drain_for remain coherent for the intermediate legacy client. Rechecked all recorder-field uses, child-only environment handoff and proc entry assertion at 1ed482d, and the complete assigned reclaim-comment/test boundary at 08399d09. No additional changed caller/contract premise appeared. Read full-range path history for all three assigned files to avoid treating an immediate-parent difference as whole-range provenance.\nScope/coverage: mandatory evidence delivery remains complete and previously audited; no unread assigned ranges. First terminal_backpressure part ends at 1296, and no later deleted body is claimed. Did not reopen known issues merely to produce a discovery.\nExecution: source-only; no runtime tests, builds, reproductions, live-install actions, checkout writes or prohibited coverage-source searches. Findings log append-only; only private artifacts changed.\nNext: return empty discovery result and requested counters; await caller. No separate report file.\n"
+}

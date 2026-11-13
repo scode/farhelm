@@ -1,0 +1,180 @@
+[
+  {
+    "key": "g186/c1",
+    "latest_line": 9,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "paste-sanitizer-move-bracket-frame-escape",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The helper move preserves the sanitizer and its callers. No removal-induced paste-frame escape is established. This is source refutation of that move, not certification of every terminal program's paste behavior.",
+    "checks": [
+      "f560058da19e02716e6f943883a9508b447aff4e diff: deleted assets/term-bytes.js:55-57 and added assets/paste-sanitizer.js:26-28 have the identical ESC/end-marker replacement.",
+      "At f560058d, crates/farhelm-ui/src/lib.rs:1445,1914 registers and mounts the asset; assets/terminal.js:3204 waits for its global, :1910 sanitizes intercepted text, :4354 supplies the component sanitizer and :4369 routes attachment text through created.paste. assets/grid-terminal.js:1549-1559 sanitizes ordinary text paste before paste().",
+      "At f560058d, assets/grid-input.js:447-477 splits text at characters and keeps CRLF together. crates/farhelm-supervisor/src/grid_input.rs:223-249 actually runs PasteText before framing. :617-646 removes ESC and whole closing markers, carries partial markers across parts and reprocesses mismatches. These are source checks, not executed reproductions."
+    ],
+    "coverage_checked": [
+      "Current SPEC.md Terminal experience and SPEC_impl.md The grid client/Terminal widget require structured paste handling; neither accepts an escape regression.",
+      "TODO.md Planned is empty. Searches of plans/queue found no plan fixing this trigger; tmux-end-old-terminals acceptance criteria 3-5 remove legacy helpers but do not authorize weakened paste filtering.",
+      "BUGS.md has only the unrelated SSH-helper provisioning hang. INDEX.md read in full; no exact sanitizer-move item. Paste receipt/backpressure entries have different triggers and consequences. Active TRIAGE_OUTCOMES.md searches found no matching decision; archive not read.",
+      "FILTER.md read in full. No filter is the proposed basis; a paste escape capable of executing commands lies outside the rare-diagnostic filter."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": "No source route from this move to escaping the paste frame was found. Native browser behavior and arbitrary terminal programs were not executed or independently audited.",
+    "original_stronger_consequence": "Highest if deleting term-bytes.js allowed pasted text to close bracketed paste and run remaining text as typed shell commands. Both historical events propose source refutation of this regression; neither is an accepted parent drop.",
+    "needs_independent_drop_check": true,
+    "proposed_basis": "Drop only the removal/move regression after the required independent check. The other bucket denotes no established surviving harm and must not erase the original highest consequence from the drop register."
+  },
+  {
+    "key": "g186/c2",
+    "latest_line": 10,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "osc52-classifier-removal-clipboard-read-disclosure",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The remaining callback receives completed clipboard writes. Removing a classifier for the deleted raw terminal path does not create a viewer-clipboard read route. The primary-selection guidance defect in earlier c2 events remains separate under g186/f1.",
+    "checks": [
+      "f560058da19e02716e6f943883a9508b447aff4e:crates/farhelm-terminal-emulator/src/effects.rs:173-190 produces effects for ClipboardStore and returns without an effect for ClipboardLoad; :207-208 forwards live clipboard effects as notices.",
+      "At f560058d, assets/grid-model.js:1043-1064 validates/assembles clipboard parts and only publishes a write on last. assets/grid-terminal.js:1983 calls onClipboard for model.takeClipboard(); assets/terminal.js:4326-4330 increments the counter and invokes only the clipboard write sink.",
+      "Read all c2 history: lines 5-7 found a distinct missing primary-write notification; line 10 restores confidentiality as c2's identity and explicitly preserves that guidance issue under f1. No runtime reproduction was performed."
+    ],
+    "coverage_checked": [
+      "Current SPEC.md:3053-3073 explicitly forbids answering OSC 52 reads; SPEC_impl.md:1728-1753 describes write-only delivery and both-target guidance counting. These do not accept disclosure. SPEC_impl.md:2067-2069 separately says primary notices are not sent, relevant to f1 only.",
+      "TODO.md Planned is empty. plans/queue searches found clipboard-cap alignment and removal of legacy plumbing, not permission for reads or an exact read-disclosure fix.",
+      "BUGS.md, full INDEX.md and active TRIAGE_OUTCOMES.md have no exact read-disclosure item/decision. The clipboard-drain work-bound item concerns scheduling, not clipboard confidentiality. No archive was read.",
+      "No FILTER.md boundary accepts clipboard disclosure. Refutation, not coverage/filtering, is proposed."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": "A read request reaching a viewer-clipboard read sink is absent on the checked event/callback path. This does not constitute a new audit of all escape parsing.",
+    "original_stronger_consequence": "Highest/security: a terminal program might obtain clipboard secrets after isOsc52Write removal. Initial c2 also considered false guidance suppression. Later primary-write findings under c2 were split into f1, not withdrawn as incorrect. The confidentiality refutation remains subject to independent checking.",
+    "needs_independent_drop_check": true,
+    "proposed_basis": "Drop only the classifier-removal confidentiality candidate after independent agreement. Preserve c2 lines 5-7 as provenance of g186/f1; do not use this refutation to dismiss primary guidance. The other bucket records that no surviving confidentiality route is established, not authorization to lower or drop it."
+  },
+  {
+    "key": "g186/c3",
+    "latest_line": 14,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "legacy-input-helper-removal-structured-key-split",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The deleted browser merge and binary conversion serve the removed raw path. The surviving structured path encodes the exact ordinary Shift+Enter as one ESC CR input and constructs mouse bytes on the server. This does not establish physical pty-write atomicity or refute the separately supplied documentation defect.",
+    "checks": [
+      "At f560058da19e02716e6f943883a9508b447aff4e, assets/grid-terminal.js:1515-1521 sends one keyMessage after keydownAction. assets/terminal.js:4501-4505 sends its encoded message once. crates/farhelm-supervisor/src/grid_input.rs:299-312 prepends ESC for Enter with exactly SHIFT; :269-270 only chunks above MAX_INPUT.",
+      "At f560058d, service/grid_stream.rs:1077-1089 queues one QueuedInput::OneOff and :1247-1257 sends its input_frames pieces. terminal-host/src/host.rs:800-802 keeps each Input as its own segment; :581-600 initially offers its full remaining bytes to libc::write. grid_input.rs:747-763 constructs default mouse report bytes directly in Vec<u8>, including high bytes.",
+      "At f560058d, terminal-host/src/host.rs:573-580 and terminal-host/SPEC.md:399-403 explicitly allow short kernel writes and later suffix writes. The datagram test at host.rs:4536-4572 checks the initial whole offer, not native read boundaries. SPEC_impl.md:1722-1727 and the new grid-input-tables.js:182-184 comment state a stronger single-write promise; production encoding does not refute that known documentation concern.",
+      "assets/grid-input.js:289-293 limits third-level-shift filtering by platform and key code; :326 ignores composition/229. This is not a universal AltGraph exclusion. No execution was performed."
+    ],
+    "coverage_checked": [
+      "Current SPEC.md:2869-2877 promises exact-chord single-write delivery. SPEC_impl.md:1721-1726 repeats it; The grid client at :1859-1865 describes structured input and fixed tables. These are contracts, not accepted exceptions.",
+      "TODO.md Planned is empty. plans/queue/tmux-end-old-terminals.md acceptance criterion 4 removes the legacy merge; tmux-drop-from-docs.md preserves behavior and only rewrites rationale. Neither settles the stronger single-write documentation conflict.",
+      "Read queue/grid-shift-enter-loses-independent-altgraph.md: it covers the distinct pre-existing AltGraph modifier-loss route, not this helper-deletion regression. Read input-test-comments-overstate-termination-coverage.md: its atomic-co-arrival statements concern different WebSocket test helpers, not the pty guarantee. INDEX.md and active TRIAGE_OUTCOMES.md searches yielded no exact helper-removal or pty-documentation disposition. BUGS.md is unrelated; no archive read.",
+      "No FILTER.md rule is proposed. A proven destructive unintended submission would lie outside rare self-correcting diagnostics."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": "No removal-induced split or high-byte corruption was found. A kernel short write and harmful destructive-submit execution are not established here. The separate documentation contradiction is not resolved by these checks.",
+    "original_stronger_consequence": "High for newline becoming submit; potentially highest if an established destructive shell command were submitted. Historical c3 explicitly retains kernel partial-write and bounded AltGraph caveats. Latest c3 links g010/f1 as a separate documentation finding and proposes no drop of it.",
+    "needs_independent_drop_check": true,
+    "proposed_basis": "Refute only the deleted-helper dependency. Keep the possible highest route in the independent register and retain the separate single-write documentation evidence for its owner. Do not interpret the other bookkeeping bucket as an approved consequence lowering."
+  },
+  {
+    "key": "g186/c4",
+    "latest_line": 4,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "composition-exclusion-selector-removal",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The narrowed selector still identifies the surviving terminal input. Removing the deleted xterm input selector does not cause this composition guard to normalize grid-terminal events.",
+    "checks": [
+      "f560058da19e02716e6f943883a9508b447aff4e:assets/composition-guard.js:56-63 excludes .grid-terminal-input from compositionend tracking and event normalization. assets/grid-terminal.js:368 assigns that class; :1536-1549 retains its own composition lifecycle.",
+      "At f560058d, js-tests/composition-guard.test.js:97-139 injects an isolated window, checks the exact selector and asserts that the terminal event remains unmodified. It does not mutate process environment. Read the test; did not run it. The patch removes only .xterm-helper-textarea from the selector."
+    ],
+    "coverage_checked": [
+      "Current SPEC_impl.md:1487-1503 explicitly leaves grid-terminal input-method handling with the terminal and limits synthetic-test/native timing claims. SPEC.md Terminal experience requires normal terminal input fidelity; no accepted selector regression found.",
+      "TODO.md Planned is empty. The Maybe later input-method composition-preview item at :547-552 is about displaying composition/candidate placement, not this selector. plans/queue/tmux-drop-from-docs.md:84 leaves that item alone; tmux-end-old-terminals criterion 4 removes dual selectors, without authorizing interception of surviving input.",
+      "BUGS.md, full INDEX.md, plans/queue and active TRIAGE_OUTCOMES.md searches show no exact selector-regression coverage. No archive read. No FILTER.md rule is used."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": "No mismatch between the surviving input class and exclusion exists. Native Mac IME behavior was not executed.",
+    "original_stronger_consequence": "High if this narrowing caused widespread terminal IME breakage. The sole historical record source-refutes that regression and states no established security or work-loss consequence.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Source-refute the selector-removal regression within the stated scope; do not generalize to native IME correctness."
+  },
+  {
+    "key": "g186/f1",
+    "latest_line": 12,
+    "recommendation": "out-of-range",
+    "bucket": "other",
+    "underlying_key": "primary-write-notice-filter-drag-guidance",
+    "aliases": ["g186/c2 primary-guidance events at lines 5-7"],
+    "target_queue_file": null,
+    "why": "The misleading guidance mechanism is real by source, but both the omission and its contradictory promise already exist at the exclusive base. This is a proposed range exclusion, not a claim that the behavior meets its contract.",
+    "checks": [
+      "At f560058da19e02716e6f943883a9508b447aff4e, effects.rs:180-181 preserves selection writes. hosts/terminal.rs:3310-3321 broadcasts only ClipboardTarget::Clipboard; service/handlers.rs:1907-1915 passes that subscription to the grid; service/grid_stream.rs:844-849 independently filters to clipboard and :786-788 emits only that target. assets/terminal.js:4326-4330 counts delivered callbacks; :4426-4431 can therefore show guidance after a primary-only write.",
+      "Direct exclusive-base check at 6e423e30068b62c6cfa276c6d720ee35bb70387a: hosts/terminal.rs:3210-3221 already has the clipboard-only broadcast; service/grid_stream.rs:845-850 has the same stash filter; terminal.js:6012-6016 and :6113-6124 have the same delivered-write count and grace decision.",
+      "At the exclusive base, SPEC.md:3055-3057 already promises primary-write suppression and SPEC_impl.md:1833-1835 already claims either-target callback counting. Thus this is not a newly added documentation promise or filter within the review range. No runtime reproduction or frequency measurement occurred."
+    ],
+    "coverage_checked": [
+      "Current SPEC.md:3067-3068 and SPEC_impl.md:1747-1753 require counting primary writes. SPEC_impl.md:2067-2069 also explicitly says primary notices are not sent. This is a contract conflict worth preserving if the parent records this pre-existing issue separately; it is not unambiguous spec acceptance of misleading guidance.",
+      "TODO.md Planned is empty. plans/queue searches found clipboard-cap alignment and removal of old plumbing, not an exact primary-notice/count repair.",
+      "BUGS.md and active TRIAGE_OUTCOMES.md have no matching guidance disposition. Full INDEX.md has different guidance placement/detachment items and a clipboard-drain bound item, not this primary target omission. No archive read.",
+      "No FILTER.md omission is proposed. The supplied history names g188/c3 as the same issue, but that record was not assigned or independently read; parent should reconcile it using this underlying key."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": "No missing premise for base provenance or the conditional source mechanism. Actual occurrence/frequency was not measured. Whether to record a pre-existing issue beyond this trailing-review range is the parent's scope decision.",
+    "original_stronger_consequence": "The distinct f1 consequence remains other: false program-handles-selection guidance after a completed primary write. Earlier c2 histories found this while investigating a highest clipboard-confidentiality candidate, but the latter remains separately preserved under c2 and must not disappear through this split or scope exclusion.",
+    "needs_independent_drop_check": true,
+    "proposed_basis": "Exclude this exact pre-existing grid-path mismatch from findings introduced in the pinned range, preserving its contract conflict and c2 history. Conservative independent-check flag retains the earlier security-related identity split; no independent drop approval is supplied here."
+  },
+  {
+    "key": "g186/c5",
+    "latest_line": 13,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "input-table-shift-enter-nonkeydown-caller",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The omitted event-type guard has no non-keydown caller in the table renderer. The caller constructor establishes that premise; production correctness is not the refutation of this test-oracle candidate.",
+    "checks": [
+      "At f560058da19e02716e6f943883a9508b447aff4e, js-tests/grid-input-tables.js:160-172 constructs type=keydown. :186-190 retains exact key/modifier/composition/AltGraph checks; :200-205 calls it only from sentBytes; :226-232 feeds sentBytes those constructed events. :442-451 exports neither helper.",
+      "The f560058d diff replaces shiftEnterKeyAction/mergeArmedPrefix only in the table renderer; a direct diff of grid-keys.jsonl, keydown-actions.jsonl and move-to-cell.txt is empty. js-tests/grid-input-tables.test.js:23-46 compares generated output to existing fixture strings rather than rewriting expectations. No tests were executed.",
+      "assets/grid-terminal.js:1515 is specifically a keydown listener, but the table caller and export surface, not that production fact, settle the named oracle concern."
+    ],
+    "coverage_checked": [
+      "Current SPEC_impl.md:1859-1865 declares fixed tables as the input contract. SPEC.md:2869-2877 defines the exact Shift+Enter chord; neither accepts weakening the oracle.",
+      "TODO.md Planned is empty. plans/queue, BUGS.md, full INDEX.md and active TRIAGE_OUTCOMES.md searches found no exact omitted-event-guard/table-caller item. The existing AltGraph encoding issue concerns production modifier loss, not non-keydown input to this private table helper. No archive read.",
+      "FILTER.md is not the basis; this is source refutation."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": "No shipped table-renderer route supplies keyup or keypress to the helper. The claim is limited to actual callers and exports at the reviewed revision.",
+    "original_stronger_consequence": "Other: the key oracle might accept non-keydown events after losing the old guard. The only event source is keydown by construction; no security or user-work-loss route was claimed.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Source-refute the named non-keydown oracle route. Keep the separately supplied single-write comment concern outside this refutation."
+  },
+  {
+    "key": "g187/c1",
+    "latest_line": 3,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "generated-key-table-header-fixture-drift",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The header edits update generator strings and both fixed fixtures together. The Rust table consumer ignores comment headers, so the changed wording cannot alter its comparison rows.",
+    "checks": [
+      "61e632323dbc6b4a35ed27bf5b9833102ffd5a4e diff: grid-input-tables.js:219 and farhelm-supervisor/tests/fixtures/grid-keys.jsonl:1 both change 'a new terminal' to 'a terminal'. Generator :335 and js-tests/fixtures/input/keydown-actions.jsonl:1 change the corresponding page header together; no generator logic or data row changes are present in that patch.",
+      "At 61e63232, js-tests/grid-input-tables.test.js:23-36 compares whole strings; :39-45 checks key and keydown tables. crates/farhelm-supervisor/src/grid_input/tests.rs:104 includes the same key fixture and :113 filters lines beginning '#', leaving Rust comparison rows unchanged. Tests were read, not run."
+    ],
+    "coverage_checked": [
+      "Current SPEC_impl.md:1859-1865 names checked-in input tables as the shared key contract; SPEC.md Terminal experience defines the input behavior without mandating these header words.",
+      "TODO.md Planned is empty. plans/queue/tmux-drop-from-docs.md acceptance criterion 3 rewrites old comparisons while preserving behavior; it does not cover a hypothetical generator/fixture mismatch. No exact header-drift item exists in full INDEX.md, active TRIAGE_OUTCOMES.md, BUGS.md or the searched plans/queue. Archive not read.",
+      "FILTER.md is not the basis; direct generator/fixture synchronization and the Rust comment filter refute the considered failure."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": "No stale header was found. This verifies the assigned wording edits and immediate consumers, not unrelated encoder behavior or runtime tests.",
+    "original_stronger_consequence": "Other: stale generated headers might fail maintainer validation. All three historical events preserve that consequence and add source checks; none claims security or user-work loss.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Source-refute the named header synchronization failure only."
+  }
+]

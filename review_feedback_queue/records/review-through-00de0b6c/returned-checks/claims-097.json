@@ -1,0 +1,309 @@
+[
+  {
+    "key": "g151/l1",
+    "latest_line": 8,
+    "recommendation": "needs-parent",
+    "bucket": "other",
+    "underlying_key": "647f022-old-terminal-process-compatibility-oracle-deletion",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The intermediate process-level coverage loss is established. Its subject was retired before the review tip, so there is no demonstrated current repair to make. Preserve the historical finding and ask the parent to decide whether that history warrants a queue item; do not restore obsolete compatibility tests.",
+    "checks": [
+      "647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513 deletes the named host_processes tests. Parent source :608-710 checks persisted old-session adoption, byte-stream attachment and notification resolution; :900-952 checks last-server exit; :970-1028 checks unusable-tmux listing and Delete refusal.",
+      "The unusable-tmux test's Restart refusal is explicitly an earlier no-conversation gate (:1011-1015), not a witness of the unusable-server Restart gate. Preserve this limit when describing the lost oracle.",
+      "At 647f022, tmux.rs:9448-9494 and :9509-9540 check driver refusal/adoption/server exit, and service/ticker.rs:7332-7399 checks notifications on an installed entry. These do not replace shipped-process wiring.",
+      "At 647f022, SPEC.md:3013-3038 and SPEC_impl.md:2294-2307 still retain compatibility. At 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db, core.rs:6141-6149 ends old terminals before reload, :6674-6678 never resolves a Tmux row, and :6807-6821 converts live old rows to TerminalEnded. No runtime test or reproduction was run."
+    ],
+    "coverage_checked": [
+      "Current SPEC.md:2998-3010 and SPEC_impl.md:2780-2823 explicitly retire old-terminal serving; this resolves forward applicability, not the earlier test deletion.",
+      "TODO.md Planned bucket is empty. BUGS.md concerns stalled SSH provisioning, not these tests. Searches of active TRIAGE_OUTCOMES.md and queue INDEX/matching terms found no exact coverage.",
+      "plans/queue tmux removal plans describe retirement, but plans/REPORTS.md:29-32 records all four landed. They are not unlanded-plan coverage. FILTER.md has no complete boundary matching an ordinary test-oracle deletion."
+    ],
+    "exact_cover_quotes": [
+      "Current SPEC.md:3000-3002: A supervisor that finds that tmux server when it starts ends it, and with it everything that still ran in an old terminal, without needing a tmux program."
+    ],
+    "missing_premise": "None for the historical test-only consequence. Whether to record a fully retired intermediate gap is a parent recording decision.",
+    "original_stronger_consequence": "Lost combined real-process checks for adoption/serving, warning resolution, last-private-server shutdown, and protection against deleting or duplicating an unreachable old agent. No runtime breakage was established. The earlier lower-layer-coverage drop was withdrawn and remains withdrawn; lower-layer correctness is not equivalent process coverage.",
+    "needs_independent_drop_check": true,
+    "proposed_basis": "Historical claim verified; current applicability retired by an explicit later contract and source change. This consultation does not authorize dropping the history. Related g152/l1 adds actual migration/history-transition oracles and can be consolidated as an extension, but is not an exact alias."
+  },
+  {
+    "key": "g151/c2",
+    "latest_line": 3,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "70bc66a-resize-oracle-observes-applied-host-size",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The size observation is processed emulator state, rather than the requested size. The test establishes non-default initial geometry before exercising distinct resizes.",
+    "checks": [
+      "70bc66a9f285cc2a9984924f389834d118b7cfdc terminal_tabs.rs:2100-2154 attaches both terminals at 81x25, waits for those premises, resizes tab to 111x33 and agent to 90x30, and samples the sibling after each wait.",
+      "Same revision hosts/terminal.rs:2240-2253 reads emulator size; :3240-3244 dispatches HostEvent::Resized; :3754-3766 applies that record. Thus a desired-but-unprocessed size cannot satisfy host_size.",
+      "The sibling assertions remain snapshots, not proof against an arbitrary later resize. No execution or actual false-pass schedule was claimed."
+    ],
+    "coverage_checked": [
+      "SPEC.md terminal-dimension ownership and SPEC_impl.md Recovery and checkpoints support the processed-size model. Neither accepts a defective test oracle.",
+      "Searched current specifications, TODO Planned, plans/queue, BUGS.md, queue INDEX/matching queue terms and active TRIAGE_OUTCOMES.md for resize/status/oracle claims; no exact item or decision found. Planned is empty; no filter is needed."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": null,
+    "original_stronger_consequence": "A resize regression could pass merely by seeing requested geometry rather than a host-applied resize. Source refutes that premise. No production security or work-loss claim existed.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Source refutation of the named oracle concern, with the snapshot limitation preserved. This does not refute g151/f5's separate inaccurate comment."
+  },
+  {
+    "key": "g151/c3",
+    "latest_line": 10,
+    "recommendation": "retain-verified",
+    "bucket": "other",
+    "underlying_key": "647f022-pre-reap-tab-live-only-attach-oracle-not-ported",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The deletion removes a concrete pre-reap refusal/close oracle. Eventual destruction and dead-tab listing tests do not protect the interactive-versus-close boundary, which remains in host terminals. This is test coverage, not evidence of incorrect current attachment behavior.",
+    "checks": [
+      "647f022 parent tab_lifecycle_edges.rs:173-250 establishes shell exit, hidden listing, exact NotFound attachment refusal, and continued physical pane existence before manual close. The deleted fixture is tmux-backed.",
+      "At 647f022, host_tabs.rs:475-519 checks failed-open cleanup; :531-566 waits for listing absence AND host/socket/record destruction. core/host_tabs.rs:1783-1833 checks listing and reap selection without calling the live-only resolver. Neither distinguishes pre-reap refusal.",
+      "At 647f022, terminals.rs:906-912 and :983-993 implement separate host and tmux live-only gates. The deleted test directly exercised the tmux gate, not the host branch: the supported current claim is an unported behavioral oracle, not that the old test would detect a host-branch mutation.",
+      "At tip 00de0b6, terminals.rs:105-149,223-248 still separates LiveOnly from DeadIncluded; handlers.rs:1674-1679 uses the former for Attach; core.rs:14003-14011 uses the latter for Close/reap. Targeted tip searches for dead/exited/unreaped attach assertions and resolve_terminal callers found no equivalent tab test. Search absence is bounded evidence, not a proof against every indirectly equivalent test."
+    ],
+    "coverage_checked": [
+      "Current SPEC_impl.md Tabs in hosts (:2234-2269) says exited tabs are hidden at once and separately describes close/reap. This preserves the behavioral distinction; it does not accept missing regression protection. SPEC.md terminal-tab rules were searched alongside it.",
+      "TODO Planned is empty. Searches of plans/queue, BUGS.md, active ledger and queue INDEX/matching queue terms found no exact pre-reap Attach/Close-oracle coverage. Zombie-agent and tab-reap-deadline items have different triggers and assertions.",
+      "The landed tmux-end-old-terminals plan criterion 5 requires tests whose subject survives to run on terminal hosts; it is not an unlanded fix. FILTER.md does not cover ordinary missing test sensitivity."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": "No missing premise for the narrow missing-oracle finding. Attribution must remain a lost tmux test whose backend-independent contract was not ported, rather than a formerly protected host-code branch.",
+    "original_stronger_consequence": "The first candidate combined failed-open process cleanup and dead-tab handling. Failed-open cleanup remains directly tested, and BeforeMarking belongs to removed tmux-window creation. The initial broad drop was withdrawn for pre-reap refusal; preserve that withdrawal and the narrower surviving oracle gap. No actual leftover-process or privacy defect was established.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Retain the surviving pre-reap behavioral-oracle gap as other priority. Keep the obsolete BeforeMarking portion separate and do not restore it."
+  },
+  {
+    "key": "g151/c4",
+    "latest_line": 5,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "1ed482-suite-timeout-replacement-preserves-host-budgets",
+    "aliases": ["g153/c1"],
+    "target_queue_file": null,
+    "why": "The removed helper only raised timeout fields removed with the tmux implementation. Replacing it with defaults does not reduce a surviving host deadline.",
+    "checks": [
+      "1ed482dde220452e424973faf38a5e1318986333 parent harness.rs:2482-2503 starts from defaults and changes only tmux_exchange, tmux_pane_list and sink_ready.",
+      "1ed482 core.rs diff removes those fields and their defaults; retained host fields are not changed by that removal. This directly refutes a shortened host-lifecycle budget caused by replacing suite_timeouts.",
+      "No runtime run, timing observation or latent-flake claim was made."
+    ],
+    "coverage_checked": [
+      "Searched both current specifications, TODO Planned, plans/queue, BUGS.md, active ledger and queue INDEX for suite_timeouts/host timeout replacement and related claims. No exact coverage found; Planned is empty. Relevant tmux-removal plans are recorded landed in REPORTS.md:29-32.",
+      "FILTER.md need not be applied: the suspected change in effective timeout is source-refuted."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": null,
+    "original_stronger_consequence": "Replacing suite_timeouts could shorten host regression budgets and cause unrelated load-sensitive failures. No actual failure or product harm was alleged.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Source-refuted candidate; g153/c1 is the exact same timeout-helper premise in another set of call sites."
+  },
+  {
+    "key": "g151/f5",
+    "latest_line": 12,
+    "recommendation": "retain-verified",
+    "bucket": "other",
+    "underlying_key": "70bc66a-host-size-wait-comment-denies-public-status-size",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The helper's new rationale says size is not a status field, but the same revision exposes precisely that size in its public status and notifies subscribers after processed resizes. The comment remains at the review tip.",
+    "checks": [
+      "70bc66a9f285cc2a9984924f389834d118b7cfdc terminal_tabs.rs:2164-2170 adds the false rationale; git diff confirms this helper is new and no hosts/terminal.rs change in that commit explains it as later API drift.",
+      "Same revision hosts/terminal.rs:688-691 defines public HostStatus.size as the emulator's size, :2116-2118 exposes its watch subscription, and :2240-2253 defines HostTerminal::size as applied emulator state.",
+      "Same revision :3754-3766 on_resized calls after_record; :3875-3886 publishes; :3890-3906 writes status.size with send_modify. Resizes therefore notify the subscription already used by the helper.",
+      "Tip 00de0b6 terminal_tabs.rs:1300-1306 retains the rationale. No wrong runtime result, unsafe polling, test failure or need to change executable behavior was established."
+    ],
+    "coverage_checked": [
+      "At the reviewed revision SPEC_impl.md:2204-2205 says status carries terminal size as of each change; current Recovery and checkpoints (:2074-2075) preserves this. This contradicts the comment rather than accepting it. SPEC.md dimension ownership supplies no exception.",
+      "Searched TODO Planned, plans/queue, BUGS.md, queue INDEX/matching terms and active TRIAGE_OUTCOMES.md for helper/status-size/resize-rationale claims. No exact coverage found; Planned is empty. The broad comment sweep in tmux-drop-from-docs is recorded landed, and its subject is tmux-specific rationale, not this status claim.",
+      "No FILTER.md boundary matches: the inaccurate rationale is present in normal source reading, without a rare trigger, and is not a product diagnostic."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": null,
+    "original_stronger_consequence": "Future maintainers receive the wrong synchronization model. The lead's public-status/history premise is resolved; no stronger runtime or user-work consequence was claimed.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Record a narrow test-documentation defect, other priority. Correct behavior of the size wait does not refute the comment defect."
+  },
+  {
+    "key": "g151/c6",
+    "latest_line": 13,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "647f022-unlaunched-old-create-row-fixture-validity",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The synthetic row is changed before any host starts, and replacement ownership is explicitly witnessed. The suspected invalid fixture premises are refuted.",
+    "checks": [
+      "647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513 host_creates.rs:1682-1694 injects AfterRecord; :1717-1730 establishes one Launching row with an empty address before relabeling it Tmux.",
+      "Same revision core.rs:11348-11355 places the crash before allocation and launch side effects; store.rs:5067-5102 updates only terminal_kind/address on exactly one existing row.",
+      "create_idempotency.rs:207-238 drops the client and supervisor, waits for the directory claim, constructs the replacement and asserts owns_state_dir. The test additionally checks the old kind after reload. This validates the interrupted-no-launch shape, not every possible old-supervisor state. No execution performed."
+    ],
+    "coverage_checked": [
+      "Reviewed SPEC_impl.md:2312-2319 expressly requires the interrupted old create to retain kind and refuse takeover before anything starts. Current old-terminal retirement does not invalidate what this fixture tested at that revision.",
+      "Searched current specs, TODO Planned, plans/queue, BUGS.md, queue INDEX/matching terms and active ledger for synthetic old-create fixture/ownership claims. No exact coverage found. Planned is empty; no filter is used."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": null,
+    "original_stronger_consequence": "The fixture might relabel a live host or let a non-owner replacement appear to reconcile correctly. Both premises are refuted. No production corruption, security or work-loss route was claimed.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Source refutation of fixture validity concern, separate from the lost old-session migration oracles."
+  },
+  {
+    "key": "g152/l1",
+    "latest_line": 6,
+    "recommendation": "needs-parent",
+    "bucket": "other",
+    "underlying_key": "647f022-old-to-host-migration-integration-oracle-deletion",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The migration suite was deleted while the intermediate revision still promised and implemented migration. That historical test gap is established, but the migration itself was retired within the review range. A current queue repair restoring it would be obsolete.",
+    "checks": [
+      "647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513 deletes all 1545 lines of host_migrations.rs. Its parent :1345-1454 tests a migrated agent surviving loss of the last old tab, later adoption and lifecycle controls; :1474-1545 tests ordinary creates beside an old source.",
+      "At 647f022, SPEC_impl.md:2488-2558 still promises history capture/refusal, interruption recovery and migrated-host lifecycle; core.rs:13058-13063 still dispatches old terminals to tmux_restart_seed.",
+      "Targeted search of remaining core/tests, host_relaunches and host_processes found no transition replacement; core/tests/host_terminals.rs:40-68 explicitly has no old tmux session and checks discovery completeness, not migration. This is scoped source evidence, not a runtime regression.",
+      "At tip 00de0b6, SPEC.md:2998-3010 and SPEC_impl.md:2780-2823 replace migration with startup termination and empty-terminal Restart. core.rs:6141-6149 performs termination before reload; tip source search finds no tmux_restart_seed. No runtime test or reproduction run."
+    ],
+    "coverage_checked": [
+      "Both current specifications expressly remove the old behavior. That resolves ongoing applicability without denying the intermediate deletion.",
+      "TODO Planned is empty. BUGS.md is unrelated SSH provisioning. Searches of active TRIAGE_OUTCOMES.md, INDEX and matching queue terms found no exact migration-suite deletion item.",
+      "Relevant tmux-removal plans are still readable under queue, but REPORTS.md:29-32 records them landed. They are not unlanded-plan coverage. FILTER.md does not cover this test gap."
+    ],
+    "exact_cover_quotes": [
+      "Current SPEC.md:3010: Restart, Clone and Replace start such a session in a new, empty terminal.",
+      "Current SPEC_impl.md:2799-2801: The reload then takes every old-kind row as having no terminal, in any state, without looking its recorded pane id up."
+    ],
+    "missing_premise": "None for historical missing regression protection. The parent must choose the disposition of a fully retired intermediate gap.",
+    "original_stronger_consequence": "Lost migration, history-preservation, interrupted-move and mixed-tab regression coverage while migration still shipped. No actual history loss, stopped agent or security defect was established. Later retirement is not equivalent test coverage and does not retroactively refute the deletion.",
+    "needs_independent_drop_check": true,
+    "proposed_basis": "Preserve the historical finding; do not infer a current migration fix. g151/l1 is a related extension about distinct real-process compatibility wiring, not an exact alias. g152/c2's old-source portion belongs here; its ordinary-create concern is independently refuted."
+  },
+  {
+    "key": "g152/c1",
+    "latest_line": 5,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "f560058-grid-only-attach-removes-stream-discriminator",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "Removing the stream-selection argument follows a universal API/protocol change. The relaunch test still decodes grid data and checks replacement behavior.",
+    "checks": [
+      "f560058da19e02716e6f943883a9508b447aff4e client.rs:3967-3976 forwards terminal/lease/policy unchanged; :4007-4074 constructs the sole grid TermStream and starts grid flow after Attached.",
+      "Same revision host_relaunches.rs:1498-1532 decodes GridOutput and waits for catch-up. :1546-1599 checks the old viewer's session-restarted detach, changed host socket, resumed screen and retained history without the old frame.",
+      "This refutes silent fallback to a byte stream. It does not certify every restart assertion against unrelated timing defects. No execution performed."
+    ],
+    "coverage_checked": [
+      "Reviewed SPEC_impl.md:2272-2347 includes the detached-old-viewer/new-grid contract; :3015-3017 declares grid-only attachments. Current Grid streams repeats it. SPEC.md Restart behavior was searched and remains history above a blank screen.",
+      "Searched TODO Planned, plans/queue, BUGS.md, active ledger and INDEX/matching terms for removed stream-selector/relaunch coverage. No exact queue or decision coverage found; Planned is empty. The tmux plans have landed. No filter needed."
+    ],
+    "exact_cover_quotes": [
+      "f560058 SPEC_impl.md:3015-3017: every attachment's data channel carries a grid stream, so Attach, Attached and the browser's socket say nothing about it"
+    ],
+    "missing_premise": null,
+    "original_stronger_consequence": "Removing ViewerStreams::BytesOrGrid might weaken relaunch coverage or silently choose bytes. The retained decoder/assertions and sole representation refute that concern.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Source-refuted API-migration concern. g153/c2 shares the API transition but concerns a different helper/assertion; do not count it as separate evidence of a defect."
+  },
+  {
+    "key": "g152/c2",
+    "latest_line": 7,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "647f022-ordinary-host-create-oracle-survives-old-source-test-removal",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "No additional loss of the ordinary host-create oracle is established. The deleted test's distinct old-source/mixed-runtime assertions remain part of g152/l1's historical suite deletion.",
+    "checks": [
+      "647f022 parent host_migrations.rs:1474-1545 uses ordinary create_session_with_extras twice with the source launch/cwd, then explicitly deletes the source; it invokes no dedicated Clone/Replace endpoint.",
+      "At 647f022, host_creates.rs:241-288 still checks created Host kind and Running outcome, socket/runtime identity, readiness, no tmux session, live listing and Stop preserving the host's final screen.",
+      "This is a source check of executable regression assertions, not a claimed test execution. It establishes ordinary-create protection only, not full combined Clone/Replace or GUI coverage."
+    ],
+    "coverage_checked": [
+      "Both specifications' lifecycle sections were searched: Clone/Replace use independent creation, and current old-terminal rules retire the old source. Nothing accepts losing a still-required generic create assertion.",
+      "Searched TODO Planned, plans/queue, BUGS.md, queue INDEX/matching terms and active ledger for this exact deleted-oracle concern; no exact coverage. Planned is empty. Landed tmux plans are not unlanded coverage; FILTER.md is unnecessary."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": null,
+    "original_stronger_consequence": "Deleting clone_and_replace_of_an_old_session_create_host_sessions might also delete the sole surviving generic host-create oracle. That extra premise is refuted; the old-source deletion/liveness assertions are not refuted and remain under g152/l1.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Refute only the additional generic-create finding, preserving all old-source/mixed-runtime coverage loss in g152/l1."
+  },
+  {
+    "key": "g153/l1",
+    "latest_line": 14,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "647f022-stale-connection-pause-oracle-restored-f560058",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "An equivalent test added before the review tip restores the equal-channel/different-connection stale-pause oracle. This refutes ongoing missing coverage, while preserving the intermediate deletion and earlier narrower stall-isolation disposition.",
+    "checks": [
+      "git log -S for the exact test name identifies deletion in 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513 and restoration in f560058da19e02716e6f943883a9508b447aff4e.",
+      "At tip 00de0b6, core/tests/host_terminals.rs:3248-3273 creates separate duplex connections through actual handle_connection. :3662-3702 attaches loser/winner on channel 1, verifies TakenOver, catches winner up, sends the stale pause and barriers on the losing connection before producing new text. It requires that fresh text and no detach.",
+      "The barrier is valid by source: :3372-3378 sends ListSessions and awaits its reply; connection.rs:347-359,582-583,709-718 reads successive frames and awaits handle_control; handlers.rs:3016-3018 awaits pause inline. A later spawned listing reply cannot precede handling the preceding pause.",
+      "connection.rs:1552-1557 selects channel AND same_channel(tx). Removing connection identity would pause the winner under this fixture and prevent its new text; current correctness alone was not used as a substitute for test sensitivity.",
+      "At 647f022, tab_lifecycle_edges.rs:535-660 retains sibling stall-detach isolation and terminal_tabs.rs:1397-1472 retains paused-tab/agent output isolation. The latter's eight-second observation is not proof of a sixty-second stall interval; that separate limitation is already recorded in host-flood-stall-window-claim. No runtime run or production pause bug established."
+    ],
+    "coverage_checked": [
+      "Current SPEC.md:3011-3022 and SPEC_impl.md Grid streams retain single-client ownership and no slowing unattached work. They do not accept stale-owner pauses.",
+      "Searched TODO Planned, plans/queue, BUGS.md, INDEX/matching queue terms and active ledger for the stale-owner pause/channel-collision oracle. No exact item found; Planned is empty. The existing flood-window item covers another assertion, not stale-owner routing.",
+      "No FILTER.md rule is used. Basis is a later equivalent source test, not rarity or general subsystem coverage."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": null,
+    "original_stronger_consequence": "Initially both displaced-viewer pause ownership and cross-attachment stall isolation appeared untested. The latter was narrowed after retained sibling tests were read. The stale-owner oracle really disappeared at 647f022, but was restored at f560058; neither narrowing establishes or refutes a production authorization defect.",
+    "needs_independent_drop_check": true,
+    "proposed_basis": "Drop only ongoing stale-owner missing-coverage applicability at the tip, subject to the parent's independent check because the oracle concerns ownership enforcement. Preserve the historical gap, all prior caveats and the narrower stall-isolation conclusion."
+  },
+  {
+    "key": "g153/c1",
+    "latest_line": 2,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "1ed482-suite-timeout-replacement-preserves-host-budgets",
+    "aliases": ["g151/c4"],
+    "target_queue_file": null,
+    "why": "This is the same source-refuted timeout-helper premise as g151/c4. Only removed tmux-facing fields differed from production defaults.",
+    "checks": [
+      "At 1ed482dde220452e424973faf38a5e1318986333 parent harness.rs:2482-2503, suite_timeouts starts from default and floors only tmux_exchange, tmux_pane_list and sink_ready.",
+      "The 1ed482 core.rs diff removes those fields/defaults. Replacements at host_creates call sites therefore cannot lower any surviving host budget through this helper change. No execution or actual flake evidence."
+    ],
+    "coverage_checked": [
+      "Searched both current specs, TODO Planned, plans/queue, BUGS.md, active ledger, INDEX and matching terms for the exact helper/budget claim. No exact external coverage. Planned is empty; relevant tmux plans are landed per REPORTS.md:29-32.",
+      "FILTER.md is not needed; source refutes the changed-budget premise."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": null,
+    "original_stronger_consequence": "Default timeout replacement might make host lifecycle tests fail under shared-machine load. No host deadline change or observed failure was established.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Source refutation; exact same-root alias g151/c4."
+  },
+  {
+    "key": "g153/c2",
+    "latest_line": 10,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "f560058-grid-only-attach-removes-stream-discriminator",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "A removed stream-kind assertion no longer names a protocol choice. Grid decoding and text/catch-up assertions remain in the helper's consumers.",
+    "checks": [
+      "f560058da19e02716e6f943883a9508b447aff4e client.rs:3967-3976,4007-4074 has one attach representation, no stream discriminator, GRID_EVENT_QUEUE and grid flow.",
+      "Same revision host_tabs.rs:147-151 obtains that stream; :154-183 decodes Data as GridOutput, requires expected text and catch-up, and fails on malformed output or detachment. No alternative supported byte-stream route is selected by removing the assertion.",
+      "No test execution or product stream mismatch was observed."
+    ],
+    "coverage_checked": [
+      "Reviewed SPEC_impl.md:3015-3017 explicitly states Protocol 77 removed byte streams and terminal kinds; current Grid streams preserves that contract. SPEC.md's current terminal rules name only terminal hosts.",
+      "Searched TODO Planned, plans/queue, BUGS.md, active ledger, INDEX and matching terms for removed stream-kind assertion/attach-grid coverage. No exact queue or decision item found; Planned is empty and tmux-removal plans are landed. No FILTER.md rule is used."
+    ],
+    "exact_cover_quotes": [
+      "f560058 SPEC_impl.md:3015-3017: every attachment's data channel carries a grid stream, so Attach, Attached and the browser's socket say nothing about it"
+    ],
+    "missing_premise": null,
+    "original_stronger_consequence": "attach_grid could silently accept the wrong representation after stream_kind disappeared. The sole representation and retained decoder refute that premise.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Source-refuted assertion-removal concern. Same API transition as g152/c1, with a distinct helper observation rather than an additional defect."
+  }
+]
