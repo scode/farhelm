@@ -545,8 +545,9 @@ too-narrow window** — **keep**
 **L1. Page zoom (Cmd/Ctrl with +, −, 0; pinch)** — **drop** (decided 2026-11-13)
 
 - At 24bc0580, SPEC's "Terminal experience" said "Cmd/Ctrl with = or − and no Shift stay the browser's own page zoom";
-  the current text reads "Cmd/Ctrl with = or − and no Shift do nothing app-wide: there is no interface zoom". Code:
-  `ui/assets/terminal.js:2643-2645`; `website/src/content/docs/docs/using/keyboard-shortcuts.mdx:84`.
+  the current text reads "Cmd/Ctrl with = or − and no Shift are not app shortcuts and reach a focused terminal like any
+  other key: there is no interface zoom". Code: `ui/assets/terminal.js:2643-2645`;
+  `website/src/content/docs/docs/using/keyboard-shortcuts.mdx:84`.
 - Unverified: whether page zoom works in the Mac app today. Its menu has no View menu (`ui/src/desktop/menu.rs:42-73`),
   and WKWebView by default does not zoom on Cmd+= or pinch (not tested here).
 - Decided: no whole-interface zoom. Terminal text size (Cmd/Ctrl+Shift with + or −) is separate, SPEC-named and kept;

@@ -340,9 +340,14 @@ Enforced by a test of a completion queued across a reset (it must not reach the 
 Owner: the UI channel.
 
 The helm accepts one UI channel. A new one displaces the old; the displaced window shows "another window took over" and
-does not reconnect on its own. Only the live channel's "displaced" message counts as a takeover. Losing the seat makes
-the displaced window wholly inert: it tears down its terminal attachments and their automatic reconnect workers, and
-none of them restarts until the user explicitly takes the seat back.
+does not reconnect on its own. Only the live channel's "displaced" message counts as a takeover. The displaced window is
+the reset's inert state, with that message in place of "Reconnecting to the helm…" and no automatic reconnect, plus a
+"Take back" control, which runs the ordinary connect: there is no separate machinery. Like a reset, it tears down its
+terminal attachments and their automatic reconnect workers, and none of them restarts until the user takes the seat
+back.
+
+Enforcing the seat is a small check when a channel is accepted. If it ever needs more than that, enforcement is deferred
+(the maintainer accepted that) while the code keeps assuming a single UI and adds nothing to cope with several.
 
 Whether a window is open, for agent approvals, is the live seat, released on disconnect and on takeover. It is not a
 count of feed subscribers: the helm's own internal subscriptions to the feed never count as windows.
@@ -542,9 +547,9 @@ Enforced by denying clippy's `unwrap_used` and `expect_used` crate-wide in the G
 
 ### Dependencies and licenses
 
-GPUI is pinned to gpui-pre 0.3.12 and GPUI Kit to 0.9.1 exactly, with the lockfile committed. Upgrades happen only at
-milestones, as a dedicated change. Patched GPUI crates are vendored under `vendor/` with their patch files, per
-`vendor/README.md`.
+GPUI is pinned to gpui-pre 0.3.12 and GPUI Kit to 0.9.1 exactly, with the lockfile committed, unless the early macOS
+checks force a change. Upgrades happen only at milestones, as a dedicated change. Patched GPUI crates are vendored under
+`vendor/` with their patch files, per `vendor/README.md`.
 
 No GPL-family code (GPL, AGPL, LGPL) enters the tree, as a dependency or as copied or closely paraphrased source.
 MPL-2.0 is allowed only as an unmodified dependency. Agents read GPL or other copyleft source only in an isolated
@@ -633,9 +638,12 @@ Traps that an earlier rule already prevents get one line pointing at it.
   tests, and executor timers only. Animations use the wall clock, so tests use reduced motion.
 - **A hanging test may be GPUI's.** zed#66801 is an open scheduler deadlock; rule it out before blaming the app.
 - **The glyph atlas never evicts.** Every rasterized size stays in memory, so zooming the terminal grows memory without
-  bound (one report, infiniterm#758, saw 286 MB after 18 hours). Rule: snap terminal zoom to a few sizes; call
-  `drop_image` for every released image.
+  bound (one report, infiniterm#758, saw 286 MB after 18 hours). Rule: keep terminal text size to the existing steps
+  (every whole point size from 9 to 28), which bounds what zooming adds to the atlas; call `drop_image` for every
+  released image.
 - **Paths are a trust boundary;** see "Paths are a trust boundary".
+- **The helm refuses any request that carries an `Origin` header** (SPEC.md, "Security"). The GUI's channel, terminal
+  and HTTP clients never send one; a client library that adds it by default must be configured not to.
 - **GPUI Kit is a black box to Farhelm's lints** (about 83 focus call sites in 0.9.1, its own overlay layers); see "The
   component layer and theme".
 - **Parents see presses on child Kit buttons.** A parent's `on_mouse_down` sees presses on child Kit buttons, because
