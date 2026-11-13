@@ -73,6 +73,14 @@ review also had known coverage gaps. An entry records an open finding, not a cle
   silently overwrite an agent settings save made after its final digest check and before replacement. The new comparison
   protects earlier edits but leaves this narrower window.
 
+- [`moved-on-launch-return.md`](moved-on-launch-return.md) — A failed launch or follow-up question can reopen the
+  launcher and take the keyboard after the user has switched sessions or started typing elsewhere. It should wait behind
+  a notice the user opens.
+
+- [`late-suspend-question-interrupts-work.md`](late-suspend-question-interrupts-work.md) — After choosing Suspend in
+  Hosts, the user can resume typing while Farhelm checks activity. A late reply can then open a modal question over that
+  work and take keyboard focus instead of waiting to be reached.
+
 ## Other: correctness, diagnostics, cleanup, or convenience
 
 - [`removed-host-strands-tunnel-listeners.md`](removed-host-strands-tunnel-listeners.md) — Removing a host leaves its
@@ -613,9 +621,9 @@ review also had known coverage gaps. An entry records an open finding, not a cle
 - [`narrow-sidebar-tests-measure-outer-container.md`](narrow-sidebar-tests-measure-outer-container.md) — Two narrow row
   tests retain containment bounds from the wider outer sidebar after shrinking only its content area.
 
-- [`remove-retirement-may-release-later-dialog.md`](remove-retirement-may-release-later-dialog.md) — Old desktop Remove
-  cleanup may release a replacement dialog's isolation; native ordering remains unverified, with no harmful action
-  established.
+- [`remove-retirement-may-release-later-dialog.md`](remove-retirement-may-release-later-dialog.md) — A late desktop
+  Remove retirement or Suspend dismissal may release a later opening's modal protection; the required native ordering
+  remains unverified.
 
 - [`native-confirmation-reopen-paint-order-source-gap.md`](native-confirmation-reopen-paint-order-source-gap.md) — A
   pre-existing retained Delete flyout is focusable while unmeasured; an ordinary native sequence accepting an unseen
@@ -1517,15 +1525,16 @@ review also had known coverage gaps. An entry records an open finding, not a cle
   session.
 
 - [`resume-test-retires-create-stub-before-client-settles.md`](resume-test-retires-create-stub-before-client-settles.md)
-  — Failure cleanup may remove the create stub before a pending launcher settles, allowing a real test session to start
-  afterward. The complete browser ordering remains unverified after investigation.
+  — Failure cleanup can retire a create trap before the pending launcher settles, including the newer existing-host
+  Resume test; actual extra allocation remains unmeasured.
 
 - [`lifecycle-fixture-cleanup-stops-after-release-failure.md`](lifecycle-fixture-cleanup-stops-after-release-failure.md)
   — One fixture-release failure can skip the remaining browser-test cleanup and leave shared settings or resources
   behind.
 
 - [`route-retirement-failure-skips-owned-session-cleanup.md`](route-retirement-failure-skips-owned-session-cleanup.md) —
-  A route-retirement exception can prevent cleanup of sessions the test already owns.
+  Fallible browser-handle cleanup, route retirement or optional session discovery can skip independent cleanup of
+  already-owned test resources and preferences.
 
 - [`snapshot-cleanup-spec-omits-unrecorded-builder-exception.md`](snapshot-cleanup-spec-omits-unrecorded-builder-exception.md)
   — The product says reusing any Farhelm-built snapshot is refused, but an unrecorded build snapshot can be accepted as
@@ -2166,3 +2175,95 @@ review also had known coverage gaps. An entry records an open finding, not a cle
 - [`attention-retry-omits-failed-save-identity.md`](attention-retry-omits-failed-save-identity.md) — An old Try again
   activation could restore automatic updates after a newer opt-out, but no ordinary shipped ordering outside accepted
   input races was established. This remains unverified after investigation.
+
+- [`retained-restart-hides-reboot-card.md`](retained-restart-hides-reboot-card.md) — A reboot before any post-Restart
+  listing sees the session running or stale can leave its recovery card hidden. Header recovery remains available; a
+  landed-plan acceptance conflicts with the product specification.
+
+- [`moved-on-body-focus.md`](moved-on-body-focus.md) — A delayed Replace YOLO question can focus and scroll Cancel after
+  the user has clicked elsewhere, if that click left focus on empty page space. Farhelm already knows the user pressed
+  something and still moves focus.
+
+- [`bulk-completion-focuses-sort.md`](bulk-completion-focuses-sort.md) — When a completed bulk action removes the
+  focused toolbar, keyboard focus can move to the list's sorting heading instead of the selected session's terminal,
+  even when the user waited without pressing anything.
+
+- [`quick-launch-billing-focus.md`](quick-launch-billing-focus.md) — An automatically arriving sandbox quick-launch
+  question focuses Create and launch rather than Cancel. A fresh Enter therefore chooses the billed action instead of
+  the harmless default required for a question arriving later.
+
+- [`switcher-late-activity-baseline.md`](switcher-late-activity-baseline.md) — A quick launch picked from the switcher
+  captures its input baseline after closing the switcher. On native desktop this might absorb later typing and permit
+  unwanted selection or naming, but the required native event ordering remains unverified after investigation. The
+  ordinary browser investigation did not establish that harmful input window.
+
+- [`replace-selection-focus-contract.md`](replace-selection-focus-contract.md) — The specifications give conflicting
+  answers about opening a replacement after the user types while its source remains selected. Current code follows the
+  explicit Replace selection rule. Whether that violates the new focus policy remains unverified after investigation and
+  needs a product-contract clarification.
+
+- [`failed-launch-pins-template-host.md`](failed-launch-pins-template-host.md) — After an ordinary launch fails, Save as
+  template prechecks its inherited host even when the user never picked that host. Saving without clearing the visible
+  check can make a template installation-specific unexpectedly.
+
+- [`heading-tests-dismiss-menus.md`](heading-tests-dismiss-menus.md) — Two sidebar tests require an open session menu to
+  disappear when only the heading grows. The final focus rules require that menu to stay with its session, so the tests
+  would reject the intended behavior.
+
+- [`irreversible-confirmation-focus-contract.md`](irreversible-confirmation-focus-contract.md) — The new focus rules say
+  permanent trash deletion starts on its confirming answer, then give risky irreversible actions a Cancel-first
+  exception without defining which rule wins. This is a specification ambiguity, not a demonstrated change to current
+  deletion behavior.
+
+- [`native-header-dispatch-readiness.md`](native-header-dispatch-readiness.md) — A very early native desktop header
+  action might silently do nothing if a manually opened session becomes interactive before its action dispatcher is
+  installed. That physical input/render ordering remains unverified after investigation; ordinary automatic startup
+  selection and the browser path were refuted for this hypothesis.
+
+- [`cache-lock-repair-child-lifetime.md`](cache-lock-repair-child-lifetime.md) — Repository-cache repair assumes Git
+  cannot outlive its outer-lock owner; a real collision or damage remains unverified after investigation.
+
+- [`subline-progress-preview-hides-diagnosis.md`](subline-progress-preview-hides-diagnosis.md) — A positive sub-line
+  host-diagnostic budget can round its preview to zero; reachable production geometry remains unverified after
+  investigation.
+
+- [`pending-stop-header-width.md`](pending-stop-header-width.md) — Pending Stopping feedback may exceed the compact
+  header's 650px budget with a tunnel pill; actual geometry remains unverified after investigation.
+
+- [`replace-cleanup-snapshots-owned-ids-before-drain.md`](replace-cleanup-snapshots-owned-ids-before-drain.md) —
+  Replace-test cleanup constructs owned-session deletion steps before draining a callback that can add the replacement
+  ID.
+
+- [`resume-test-selection-settlement-witness.md`](resume-test-selection-settlement-witness.md) — The Resume
+  no-navigation test changes selection itself before witnessing that the operation reply settled.
+
+- [`nonblocking-reply-tests-lack-settlement-witness.md`](nonblocking-reply-tests-lack-settlement-witness.md) —
+  Delayed-launch regressions can dismiss newer dialogs before proving reply processing or blocked naming admission,
+  leaving the intended overlap untested.
+
+- [`replace-question-test-starts-with-restart-unavailable.md`](replace-question-test-starts-with-restart-unavailable.md)
+  — The Replace-question exclusion test asserts Restart disabled on a source that was already not resumable.
+
+- [`stop-progress-omits-row-movement.md`](stop-progress-omits-row-movement.md) — Stop progress can wrap an earlier
+  noncompact row without updating a later row's open menu or notification position; exact native geometry is unmeasured.
+
+- [`started-report-test-exceeds-expiry.md`](started-report-test-exceeds-expiry.md) — A browser test reasserts the brief
+  Started report after an unrelated API read that can outlast its correct four-second expiry.
+
+- [`replace-question-omits-prefix-movement.md`](replace-question-omits-prefix-movement.md) — A background Replace
+  question can move session rows without updating another row's open menu position; runtime geometry was not measured.
+
+- [`native-launcher-restore-races-resubmit.md`](native-launcher-restore-races-resubmit.md) — A native restoration frame
+  may race a later resubmit and reclaim hidden-launcher isolation; the necessary native ordering remains unverified
+  after investigation.
+
+- [`deleted-source-retains-replace-question.md`](deleted-source-retains-replace-question.md) — A deleted session's
+  retained Replace permission question survives authoritative absence, contrary to the final subject-gone rule; an empty
+  fleet can hide it until another session appears.
+
+- [`older-pin-success-clears-newer-stop-error.md`](older-pin-success-clears-newer-stop-error.md) — A delayed bulk Pin
+  success can clear a newer Stop failure or partial-cleanup notice from both the session row and open view.
+
+- [`cleanup-status-masks-body-assertion.md`](cleanup-status-masks-body-assertion.md) — Own-finally cleanup reads
+  Playwright status before a hard assertion is recorded, so cleanup failure can replace the primary assertion error;
+  step/trace evidence retains it.

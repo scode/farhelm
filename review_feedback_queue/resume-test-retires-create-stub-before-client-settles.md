@@ -48,3 +48,44 @@ intact.
 
 Review provenance: trailing review run `dc410e54-098d-481c-be02-f2f9b4826f83`, canonical `g036/l6`. The retained private
 log preserves earlier wording and its corrections. This record does not claim runtime reproduction.
+
+## Additional ordinary-launch test retires the trap too early
+
+Additional reviewed commit: `6e423e30068b62c6cfa276c6d720ee35bb70387a`, introducing change
+`112fd9d812e95df7f69f66c85820d76faaf89582`.
+
+The same client-settlement lifetime gap affects the new existing-host launch test in
+`e2e/tests/tensorlake-sandbox-sessions.spec.ts:201-262`. It submits the ordinary command `true` at `232-234` and tracks
+only its two setup sessions (`211-214`). If an assertion fails while Resume is held, finally releases that gate, then
+disposes the fixture routes before deleting those two IDs (`255-259`). It neither retires the submitted launcher nor
+waits for its independent continuation before removing the create refusal (`221-225`).
+
+`api.rs:5666-5676` performs a fresh host GET after successful Resume. `create_form.rs:6658-6682` accepts that connected
+real SSH host, then awaits key minting (`6704`) and ultimately sends the ordinary create (`7004-7016`) after its
+retained-draft checks. Draining the Resume callback cannot join those later browser phases. A delayed host GET/key mint
+can therefore outlive the trap and continue while teardown deletes the setup sessions; any extra created ID is outside
+the test's owned list. Same-commit lifecycle tests explicitly retire the owner before removing downstream traps
+(`tensorlake-lifecycle.spec.ts:483-485,695-697`), providing a local pattern for the missing boundary.
+
+Keep the create trap until the accepted launcher has settled, or retire the document while that trap remains installed,
+then drain routes and clean captured ownership. Success already observes the controlled create refusal and is outside
+the failure path. The earlier vendor/cloud escape allegation was refuted: a real SSH Resume falling through before a
+controlled success is refused. It is not revived by this ordinary-create route.
+
+Suggested bucket remains **other**. Confidence for the added scope is **verified missing lifetime fence and
+source-compatible continuation**, with actual extra allocation and frequency unmeasured. The existing item's older
+uncertainty remains as recorded; this extension does not authenticate a historical browser outcome. No exact accepted
+limitation, Planned item, pending repair, known bug, ledger or filter cover was established beyond this same queue item.
+No runtime or network experiment ran.
+
+Provenance: trailing-review run `3033ee5b-b95a-4e16-8ecc-c4a9e727335a`, `g026/l1`, exclusive base
+`0bc984b71384e7b754b55d007b53ebbeb9a076ca`. The log retains the original refuted claim and the later distinct cleanup
+finding.
+
+Current-main check (2026-11-12, `6652f84fe3ecd9427b2631fb4bca4e06fa7fc741`): tensorlake-sandbox-sessions.spec.ts:223-280
+retains the ordinary command at :250, held Resume route at :233-238 and create refusal at :239-243. Finally at :274-279
+still releases Resume and disposes fixture routes before deleting only the two known setup IDs. api.rs:5730 onward still
+reads host state around Resume, and create_form.rs:6817,6863 continues through Resume and key mint before creation.
+Later host-wake hardening does not retire this mounted launcher before interception disappears. The existing
+resume-test-retires-create-stub-before-client-settles.md remains the same root with additional affected scope. The
+missing fence is source-confirmed; actual allocation after trap removal remains unmeasured.
