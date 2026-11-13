@@ -5,6 +5,7 @@ members = [
   "crates/farhelm-desktop",
   "crates/farhelm-fixtures",
   "crates/farhelm-helm",
+  "crates/farhelm-helm-client",
   "crates/farhelm-proto",
   "crates/farhelm-supervisor",
   "crates/farhelm-terminal-emulator",
@@ -48,6 +49,7 @@ exclude = [
 default-members = [
   "crates/farhelm",
   "crates/farhelm-helm",
+  "crates/farhelm-helm-client",
   "crates/farhelm-proto",
   "crates/farhelm-supervisor",
   "crates/farhelm-terminal-emulator",
@@ -206,6 +208,9 @@ tokio = { version = "1", features = [
   "fs",
   "signal",
 ] }
+# The GUI's helm client opens the UI channel and terminal sockets with it. 0.29 is the version axum's WebSocket
+# support already pulls in, so the client adds no second copy.
+tokio-tungstenite = "0.29"
 # Not linked by any runtime code — the supervisor renders its one TOML
 # value by hand (`agent_kind::toml_basic_string`) rather than depending on
 # a TOML writer for a single quoted string. This entry exists purely as a
@@ -224,6 +229,7 @@ uuid = { version = "1", features = ["v4"] }
 
 farhelm-grid-model = { path = "crates/gui/farhelm-grid-model" }
 farhelm-helm = { path = "crates/farhelm-helm" }
+farhelm-helm-client = { path = "crates/farhelm-helm-client" }
 farhelm-proto = { path = "crates/farhelm-proto" }
 farhelm-supervisor = { path = "crates/farhelm-supervisor" }
 farhelm-terminal-emulator = { path = "crates/farhelm-terminal-emulator" }
