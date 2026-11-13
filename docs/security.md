@@ -104,10 +104,10 @@ authenticate new requests from any client until rotation or eviction from the 64
 for as long as their script runs in the user's tab. For the desktop window the window is different, and rotation is no
 remedy: its webview secret is in page memory and exempt from rotation and the cap, so a stolen one stays valid until the
 desktop app quits, which is what revokes it. That follows from the decision that the desktop app never has a credential
-to renew (SPEC.md "Signing in again"); it is narrower than the stored desktop secrets it replaced, which survived
-restarts until a rotation. That is the residual, and it is why every path from untrusted text into the DOM (session
-titles, cwds, host and provisioning output, anything a terminal can turn into a link) has to be treated as a security
-boundary rather than a rendering concern.
+to renew (SPEC.md "Security", "Client to helm"); it is narrower than the stored desktop secrets it replaced, which
+survived restarts until a rotation. That is the residual, and it is why every path from untrusted text into the DOM
+(session titles, cwds, host and provisioning output, anything a terminal can turn into a link) has to be treated as a
+security boundary rather than a rendering concern.
 
 Other properties of the current design, stated without judgment: device secrets have no time-based expiry; rotation
 revokes all browser ones at once (the desktop app's in-memory pair is exempt and ends with its process), and retaining

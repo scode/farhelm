@@ -32,13 +32,13 @@ absolutely catastrophically major mistake with huge user impact."
   the local Mac because the app starts its supervisor detached, so quitting the app leaves the supervisor running (the
   helm lives in the app and stops with it). Nothing restarts that local Mac supervisor if it crashes while the app is
   closed, and nothing starts it at login; opening the app does.
-- **Helm**: the single control-plane process. The user runs exactly one helm, on whichever machine is convenient — the
-  Mac or a Linux host. It holds the host registry, connects directly to each registered supervisor, aggregates their
-  sessions, and serves the UI. The helm holds no authoritative session state — supervisors are the authority — but its
-  registry and its last-known view of each host's sessions persist across helm restarts, so a helm bounce neither
-  affects sessions nor empties the list.
-- **Client**: a UI surface attached to the helm — the native Mac app's window or a browser tab on the helm's web UI.
-  Killing a client, or the helm itself, never affects a session.
+- **Helm**: the single control-plane process. The user runs exactly one helm, normally the one the desktop app embeds,
+  on the Mac or a Linux desktop; a standalone helm (see Topology) serves no UI. It holds the host registry, connects
+  directly to each registered supervisor, aggregates their sessions, and serves the UI through its API. The helm holds
+  no authoritative session state — supervisors are the authority — but its registry and its last-known view of each
+  host's sessions persist across helm restarts, so a helm bounce neither affects sessions nor empties the list.
+- **Client**: a UI surface attached to the helm — the desktop app's window. A helm accepts one UI at a time (see
+  [One GUI at a time](#one-gui-at-a-time)). Killing a client, or the helm itself, never affects a session.
 - **Session**: the unit of supervision. A session has a working directory, a launch, a title, and a live terminal. A
   session is agent-centric: it has one main agent terminal, plus optional additional terminal tabs (plain shells) that
   open in the same working directory. Session metadata — title, parent reference, stop annotations, captured
@@ -72,19 +72,26 @@ absolutely catastrophically major mistake with huge user impact."
 
 ## Topology
 
-One control plane, two ways to face it:
+One control plane, one face: the **desktop app**, `farhelm-desktop`, a native app for macOS and Linux (Wayland). It
+opens the UI in its own window and runs the helm. On the Mac it also starts a local supervisor beside it, so the Mac
+itself is a host; the NOTE below covers Linux. The helm is embedded in the app and serves only that app's window, on a
+loopback port chosen for that launch. The window still talks to the helm only through the helm's API (its UI channel,
+terminal streams, and plain HTTP for file transfers), never through the helm's internals, even though both run in one
+process. Keeping that split is what leaves a remote helm possible later.
 
-1. **Native Mac app**: `farhelm-desktop`, a bare binary that opens the UI in a native window and starts the helm and a
-   local supervisor beside it, so the Mac itself is a host. This is the setup when the Mac is your main machine.
-2. **Web interface**: a standalone helm — wherever it runs — serves a browser UI with the same capabilities, so a helm
-   running on a Linux host is fully usable with nothing installed on the client machine. The native app's embedded helm
-   is an internal part of the app: it serves only its own window, on a loopback port chosen for that launch, and serves
-   no browser UI.
+There is no web interface: Farhelm serves no browser UI. A remote helm, meaning a desktop app attached to a helm on
+another machine, is not offered now. Decided by the maintainer on 2026-11-12, when the GUI moved to a native app on
+macOS and Linux: "a large part of the point is to drop the entire browser mess", while "we DO still want to keep the
+'helm' concept ... we may still support running a remote helm". A helm started without the desktop app, by
+`farhelm helm run` or through the systemd units `farhelm helm setup` writes on a Linux machine, still manages its hosts
+and serves agents and the command line, but no UI attaches to it. Whether that standalone helm stays is an open
+question.
 
-The two client forms have the same capabilities: terminal, attachments, lifecycle operations, host registration, and
-launch-template management in the helm-owned catalog. They differ only in packaging. These are the only two faces the
-product has — a standalone helm's web UI, or the local app's internal window. There is no remote native-app-to-helm
-mode: a helm running on a Linux host is reached through its web UI, period.
+NOTE: The Linux desktop app is new. How it runs and keeps its local supervisor is not specified yet; the Mac desktop
+app's rules below apply to the Mac.
+
+The desktop app has the same capabilities on both platforms: terminal, attachments, lifecycle operations, host
+registration, and launch-template management in the helm-owned catalog.
 
 The Mac is not architecturally special: it runs a normal supervisor that any helm — the app's embedded one, or one on a
 Linux host — can register and drive, and the helm that registers it then owns it (see the ownership rule below). The
@@ -95,7 +102,7 @@ integration is layered on top of that, not baked in. On Linux, v1 ships that lay
 its local supervisor and leaves it running when it quits; nothing starts that local supervisor at login or restarts it
 after a crash before the app is opened again. A remote Apple-silicon Mac set up over SSH instead gets a per-user launchd
 job, which runs the supervisor right away and restarts it after a crash. After a reboot, reconnecting over SSH does not
-load the job; choosing Update in the host menu starts it. Automatic loading at screen login is unverified. The native
+load the job; choosing Update in the host menu starts it. Automatic loading at screen login is unverified. The desktop
 app has no helmless mode in v1: launching it alongside a standalone helm would start a second helm — the unsupported
 state.
 
@@ -113,51 +120,51 @@ is the prerequisite on the HOST side, plus, on the helm's own machine, access to
 (get.farhelm.io by default) or a staged payload directory (a developer-facing, best-effort option; see
 [Supported host setup](#supported-host-setup)). With that in place, provisioning and everyday operation just work out of
 the box — reaching supervisors needs no port forwards, no opened firewall ports, and no address configuration beyond the
-SSH destination. (The web UI's own loopback-plus-forward story is separate; see Security.) Downloads go directly to that
-configured release-asset source — get.farhelm.io by default, whose archive links redirect to the project's GitHub
-releases; neither it, GitHub, nor a configured mirror is a relay or rendezvous service for Farhelm sessions or
-connections, and the no-relay guarantee below still holds. Nothing the supervisor does requires root: install, updates,
-and operation all happen as the SSH user (user-level systemd on Linux or launchd on a remote Mac, files in user-owned
-directories). If some optional step cannot be done without privileges on a given host, provisioning says so and
-continues without it rather than escalating. Before touching the host for initial setup, the helm states exactly what it
-is about to do in concrete terms — the files it will place and where, the background service it will create, and its
-persistence behavior — and proceeds only on confirmation. Remote updates use the same one-use plan mechanism behind the
-same authority, but the user's Update click or explicit automatic-update opt-in is the authorization: no plan is shown
-for confirmation. Update never downgrades a host: it installs the helm's own build, so a host whose supervisor reports a
-newer build is refused with both versions named, and the user updates the helm instead. It also refuses a host whose
-supervisor reports a database schema newer than the helm's build can open, which happens after a development build ran
-there; that host needs a build at least that new. A supervisor below this release's upgrade floor is also refused, with
-a manual recovery remedy: stop its Farhelm supervisor service, then remove its dedicated Farhelm installation directory.
-The remedy names the executable the host reported; its parent may be a shared or custom binary directory, in which case
-only Farhelm-owned files are removed and the shared directory stays. Then remove the host from Farhelm and set it up
-again. Its data directory can stay, without a promise that the new release can use every feature's old data, or the user
-can delete it too if they accept losing it. While an update is running, its host row stays folded and shows `Updating…`
-until a progress snapshot is available, then shows the current step, completed-step count, and client-measured elapsed
-time inline in the status spot. Hovering that status opens the same card as a working host in the attention list: the
-host's mark and name, operation and completed-step count with elapsed time, every step with its status and explanation,
-the current step highlighted, and any degraded or failed step's reason. Connection detail follows the steps while the
-host is not connected, including the attempt and last connection error, and the run's own message follows when present.
-In a short window the step list shrinks, keeping the current step in view as it changes. If connection detail or a run
-message cannot fit beside a readable current step, only the oversized text becomes a preview of whole lines from its end
-and the card says `Full details in Hosts`. Messages that fit stay whole. The card remains non-interactive; opening Hosts
-through the host identity gives access to the whole diagnosis. This is the narrow exception to full detail on hover. The
-card uses the shared hover delay and beside-the-sidebar placement, is absent on touch, and adds no keyboard stop to the
-status label. The sidebar is too narrow to show a long step name, let alone the rest of the run. Reduced-motion settings
-replace the animated indicator with a static one. Remote binary upload appears as a separate step before installation,
-so the user can tell when network transfer is still underway. The row and its hover use the helm's readable names for
-the same steps in the plan, with completed work checked green, the running step pulsing amber (static under reduced
-motion), pending work grey, unchanged work grey, degraded work as an amber warning, and failure red with the helm's
-reason. Success returns the status spot to its normal label and leaves the row folded unless global details are on.
-Failure or an uncertain outcome still expands the row so its step list and diagnostic remain visible in Hosts. When
-setup or Update fails or has an uncertain outcome while Hosts is closed, the host's rail avatar shows a warning mark
-until Hosts is opened or a later run of that same action succeeds. Starting a retry does not acknowledge the warning,
-and an unrelated successful action does not clear it. Setup recovery by discovery can resolve the same failed setup run.
-Hosts never opens by itself. The Hosts header's `Update all` action makes the same authorized Update request for each
-remote host whose individual Update action is available at the click. A host already busy with setup or another run is
-skipped rather than queued for a later update; the local host is excluded. Each remote host keeps its own validation,
-progress, and result, so one failure does not hide or delay the others. Having an available Update action does not
-itself mean the host needs an update: the rail's update badge and the attention list's Update rows require a compatible
-older build or a lower protocol, as well as an available remote Update action.
+SSH destination. Downloads go directly to that configured release-asset source — get.farhelm.io by default, whose
+archive links redirect to the project's GitHub releases; neither it, GitHub, nor a configured mirror is a relay or
+rendezvous service for Farhelm sessions or connections, and the no-relay guarantee below still holds. Nothing the
+supervisor does requires root: install, updates, and operation all happen as the SSH user (user-level systemd on Linux
+or launchd on a remote Mac, files in user-owned directories). If some optional step cannot be done without privileges on
+a given host, provisioning says so and continues without it rather than escalating. Before touching the host for initial
+setup, the helm states exactly what it is about to do in concrete terms — the files it will place and where, the
+background service it will create, and its persistence behavior — and proceeds only on confirmation. Remote updates use
+the same one-use plan mechanism behind the same authority, but the user's Update click or explicit automatic-update
+opt-in is the authorization: no plan is shown for confirmation. Update never downgrades a host: it installs the helm's
+own build, so a host whose supervisor reports a newer build is refused with both versions named, and the user updates
+the helm instead. It also refuses a host whose supervisor reports a database schema newer than the helm's build can
+open, which happens after a development build ran there; that host needs a build at least that new. A supervisor below
+this release's upgrade floor is also refused, with a manual recovery remedy: stop its Farhelm supervisor service, then
+remove its dedicated Farhelm installation directory. The remedy names the executable the host reported; its parent may
+be a shared or custom binary directory, in which case only Farhelm-owned files are removed and the shared directory
+stays. Then remove the host from Farhelm and set it up again. Its data directory can stay, without a promise that the
+new release can use every feature's old data, or the user can delete it too if they accept losing it. While an update is
+running, its host row stays folded and shows `Updating…` until a progress snapshot is available, then shows the current
+step, completed-step count, and client-measured elapsed time inline in the status spot. Hovering that status opens the
+same card as a working host in the attention list: the host's mark and name, operation and completed-step count with
+elapsed time, every step with its status and explanation, the current step highlighted, and any degraded or failed
+step's reason. Connection detail follows the steps while the host is not connected, including the attempt and last
+connection error, and the run's own message follows when present. In a short window the step list shrinks, keeping the
+current step in view as it changes. If connection detail or a run message cannot fit beside a readable current step,
+only the oversized text becomes a preview of whole lines from its end and the card says `Full details in Hosts`.
+Messages that fit stay whole. The card remains non-interactive; opening Hosts through the host identity gives access to
+the whole diagnosis. This is the narrow exception to full detail on hover. The card uses the shared hover delay and
+beside-the-sidebar placement, is absent on touch, and adds no keyboard stop to the status label. The sidebar is too
+narrow to show a long step name, let alone the rest of the run. Reduced-motion settings replace the animated indicator
+with a static one. Remote binary upload appears as a separate step before installation, so the user can tell when
+network transfer is still underway. The row and its hover use the helm's readable names for the same steps in the plan,
+with completed work checked green, the running step pulsing amber (static under reduced motion), pending work grey,
+unchanged work grey, degraded work as an amber warning, and failure red with the helm's reason. Success returns the
+status spot to its normal label and leaves the row folded unless global details are on. Failure or an uncertain outcome
+still expands the row so its step list and diagnostic remain visible in Hosts. When setup or Update fails or has an
+uncertain outcome while Hosts is closed, the host's rail avatar shows a warning mark until Hosts is opened or a later
+run of that same action succeeds. Starting a retry does not acknowledge the warning, and an unrelated successful action
+does not clear it. Setup recovery by discovery can resolve the same failed setup run. Hosts never opens by itself. The
+Hosts header's `Update all` action makes the same authorized Update request for each remote host whose individual Update
+action is available at the click. A host already busy with setup or another run is skipped rather than queued for a
+later update; the local host is excluded. Each remote host keeps its own validation, progress, and result, so one
+failure does not hide or delay the others. Having an available Update action does not itself mean the host needs an
+update: the rail's update badge and the attention list's Update rows require a compatible older build or a lower
+protocol, as well as an available remote Update action.
 
 **Update remote hosts automatically** in Settings is off by default for new and existing installations. While on, the
 helm starts that same authorized Update for each host with an update by the badge's test, including required protocol
@@ -257,9 +264,7 @@ connection or transitive aggregation. A container host's supervisor does not rel
 sees exactly the hosts in its registry, including the session-owned hosts described under
 [Sandbox sessions](#sandbox-sessions) and [Container sessions](#container-sessions). Those entries participate in
 ordinary host management and session aggregation, with their permanent rail icons hidden. The machine running the helm
-must therefore be able to reach every registered supervisor over the user's network fabric (Tailscale, SSH tunnel); a
-browser only needs to reach the helm — which in v1 means loopback on the helm's machine, tunneled when the browser is
-elsewhere (see Security).
+must therefore be able to reach every registered supervisor over the user's network fabric (Tailscale, SSH tunnel).
 
 The host registry belongs to the helm. An ordinary remote entry carries its SSH destination, and an environment entry
 carries its provider binding and place. A host can carry an optional alias, shown in place of its destination everywhere
@@ -356,8 +361,8 @@ resources use the normal subdued details styling in Hosts.
 
 The session launcher shows its own **Resuming** preparation through both the Tensorlake call and reconnection, including
 quick launch. Both existing-directory and fresh-checkout launches say the session starts when the host is ready. A
-failed preparation says the session was not launched, without the uncertain-outcome promise reserved for a create that
-may have been sent. A host another surface is suspending or resuming remains unavailable to this launcher.
+failed preparation says the session was not launched. A host another surface is suspending or resuming remains
+unavailable to this launcher.
 
 Environment supervisor connections use a two-minute input-silence limit. The helm sends a lightweight heartbeat every 30
 seconds independently of session refreshes or storage work. If the helm vanishes while the gateway keeps its connection
@@ -433,8 +438,8 @@ is unchanged: a second client attaching a session visibly detaches the first, wh
 between helms.
 
 The helm is a plain command-line process too, with the same layering as supervisors: on Linux, v1 ships user-level
-systemd units for it, so a reboot of the helm's machine brings the web UI back; on the Mac, the helm lives and dies with
-the app.
+systemd units for it, so a reboot of the helm's machine brings the helm back; in the desktop app, the helm lives and
+dies with the app.
 
 Launch templates belong to the helm: one catalog applies to every host the helm manages, while a command a template
 carries still has to exist on the host that runs it. Farhelm ships no built-in templates; the agent types themselves are
@@ -656,16 +661,14 @@ workspace edits approved automatically and other actions asking), and `approve` 
 running/idle status, a settled scope decision rather than a detection gap. Provider capabilities may clamp or reject a
 requested effort.
 
-Standard operation must never require falling back to SSH or a separate command line, with four v1 carve-outs:
-transport, web-token bootstrap, bringing up the helm's own machine, and recovery from a release below the upgrade floor.
-Reaching a remote helm's web UI takes a user-managed SSH port forward, and obtaining or rotating that UI's token happens
-on the helm's machine (see Security) — accepted v1 friction, deliberately outside "standard operation". Bringing up a
-Linux helm machine is `farhelm helm setup`, run once there: that machine's systemd units are written by one owner rather
-than by whichever surface got there first, which is why the hosts panel refers to it instead of installing a supervisor
-locally (see Topology). On provisionable hosts, install and updates are the helm's job (over the user's SSH access);
-what may legitimately require manual host-side work is that same transport and token pair, on hosts provisioning does
-not cover. Everything else — session operations, template management, directory browsing — must work from the client.
-SSH otherwise remains an escape hatch, never a requirement.
+Standard operation must never require falling back to SSH or a separate command line, with three v1 carve-outs:
+transport, bringing up the helm's own machine, and recovery from a release below the upgrade floor. Bringing up a
+standalone Linux helm machine is `farhelm helm setup`, run once there: that machine's systemd units are written by one
+owner rather than by whichever surface got there first, so the helm never installs a supervisor on its own machine (see
+Topology). On provisionable hosts, install and updates are the helm's job (over the user's SSH access); what may
+legitimately require manual host-side work is that same transport, on hosts provisioning does not cover. Everything else
+— session operations, template management, directory browsing — must work from the client. SSH otherwise remains an
+escape hatch, never a requirement.
 
 ## Install and uninstall
 
@@ -768,8 +771,8 @@ Clicking it opens a small menu with **Restart to update**, which quits Farhelm a
 (sessions keep running, as they do across any quit), and **What's new**, which opens the release notes on the docs
 website (`https://farhelm.io/docs/release-notes/`) in the system browser. Without an update waiting, selecting the
 version checks for updates. A dim refresh glyph after it hints at that action; hover and keyboard focus brighten both
-and turn the glyph a quarter. The reinstall warning keeps its mark and the same check action. Where no updater runs (the
-web UI or a build from main), the readout stays plain text without the refresh glyph.
+and turn the glyph a quarter. The reinstall warning keeps its mark and the same check action. Where no updater runs (a
+build from main, say), the readout stays plain text without the refresh glyph.
 
 The update can be checked for on demand by selecting the version, by choosing the local machine's host row's Update (see
 [Session list](#session-list)), or by choosing **Check for updates** in the `?` menu (see [Feedback](#feedback)). Each
@@ -1018,8 +1021,8 @@ agent choice is independent of that destination:
   flags. Cursor's omission stays under its own setting; Pi, OpenCode and Goose omissions remain YOLO. Model and effort
   omissions still leave their flags out. Model selection is optional for every harness; OpenCode, Cursor, and Grok offer
   no effort choice, and Grok accepts no model choice. The helm owns the released model catalog and validates every
-  agent-launch choice, so the browser never turns a model identifier into an argv fragment. Typing a model never changes
-  a selected harness: the typed id is read as that harness spells it (for OpenCode, a bare Zen name means
+  agent-launch choice, so the GUI never turns a model identifier into an argv fragment. Typing a model never changes a
+  selected harness: the typed id is read as that harness spells it (for OpenCode, a bare Zen name means
   `opencode/<model>`), a model only other harnesses offer is refused with a message naming them, and choosing another
   harness's model from the full model list switches the harness on purpose. With no harness selected yet, a typed known
   model fills in its owning harness (a bare `gpt-6-luna` picks Codex); a custom model needs an explicit harness, and an
@@ -1089,7 +1092,8 @@ agent choice is independent of that destination:
   switching tabs; unsupported selections omit it from the request. A Clone or Replace-with prefill clears it. Template
   messages with invisible formatting are shown escaped and read-only until explicitly cleared; ordinary newlines and
   tabs remain editable. The message travels with the create request, including managed checkouts and named conversations
-  where supported, and its exact value is part of retry identity.
+  where supported, and for a create the command line or an agent sends with an idempotency key, its exact value is part
+  of that key's retry identity.
 - Command launch: a command launch takes a command line run through `bash -c`, non-login and non-interactive. The text
   reaches Bash unchanged except for Farhelm's placeholders, so `~`, variables, globs, newlines, comments, compound
   commands, pipes and redirection have Bash meaning. Each placeholder must stand as its own unquoted word; a quoted
@@ -1192,96 +1196,94 @@ agent choice is independent of that destination:
   changed in between. Closing the dialog ends its undo notice.
 - Quick launch: at most one saved template is marked with ⚡ in Templates. Its list button shows a muted outline bolt
   when unmarked and a filled amber bolt when marked, at the same size. Cmd+P on macOS or Ctrl+Shift+P elsewhere starts
-  it directly in the browser and desktop app when no dialog is open, without showing the launcher on success. While the
-  session launcher is the only visible dialog, the same chord applies its template to that draft and leaves Launch to
-  the user. Consecutive presses apply in order; a refusal changes nothing from that press and does not discard a later
-  press. A missing mark or failed read shows its refusal where `tl:` does, without opening Templates. During a launch or
-  while saving a template, the chord is consumed without changing the draft. Applying by shortcut leaves focus and
-  search text alone, unless its edits remove the focused control, when focus returns to the launcher's search. Other
-  visible dialogs keep the keyboard. A hidden quick-launch launcher still consumes the chord without applying it.
-  Applying it on the page uses exactly New's defaults and ordinary launch path: the open session's host, else this
-  machine, and New's default folder for that host (Working directory above), with the template overriding only its own
-  fields. Success selects the created session only if the user has pressed no key or pointer button since dispatch or
-  their last answer to the launcher, under the launch-completion rules below. When New was never shown and success
-  selects its session, the rename dialog opens over it while its agent is already starting, unless Settings'
-  on-by-default **Name sessions on quick launch** choice is off. This applies to the bolt shortcut, number shortcuts,
-  composed sequences, the quick-switcher row and the Cmd+J template list, even when a template supplied the name. The
-  actual created name is focused and fully selected. Enter with the name unchanged or Escape keeps it without sending a
-  rename; a changed name uses ordinary rename. Closing returns to the new terminal, which takes no input while the
-  dialog is open. A launch that revealed New gets no naming dialog, even if a later submission succeeds. A quick launch
-  the user moved on from keeps its generated name without opening the naming dialog; it can be renamed from its row. A
-  held chord starts only once; the chord never reaches the terminal and visible modals other than the launcher keep the
-  keyboard. With no usable mark on the page it opens Templates with an explanation. An edited marked template that no
-  longer supplies what its active launch kind needs opens New with it applied and a prominent banner saying it needs
-  more choices before it can launch. The same banner accompanies an incomplete Cmd+J or quick-switcher pick, without
-  recommending the sequence prefix. A launch refusal or YOLO question reveals New with the same draft, error or
-  confirmation, or offers it in a notice once the user has moved on (see [Keyboard focus](#keyboard-focus)); nothing
-  bypasses host admission, and the shortcut never retries itself. The mark is a nullable template name on the helm's
-  shared preferences, independent of the template fields. Clicking another bolt moves it; clicking the lit bolt clears
-  it. An agent-launch template needs an agent to be marked; a command-launch template needs a nonblank command. With no
-  launch kind, it is judged as an agent launch. The same rule decides whether a template or combined sequence can launch
-  directly. A marked template that no longer qualifies can still be unmarked. Renaming repoints the mark before deleting
-  the old name; deleting that name clears its mark through the shared delete path, and Undo never restores the mark. The
-  editor says whether its saved template is marked. The shortcut reads the mark and templates fresh on each use, so
-  another window's change takes effect without reloading. Templates' hover and a separate quick-switcher row advertise
-  the chord and marked name. A browser that reserves the chord keeps its behavior; the quick-switcher row remains
-  available. An agent may set or clear the mark through `farhelm agent template create` or `edit`, behind a template
-  approval card. The helm applies the same eligibility rule to an agent's write as the Templates editor does.
-- Template number shortcuts: a template may hold one of ten shared keys, 1–9 then 0, independently of ⚡. Cmd+digit in
-  the Mac desktop app, or Ctrl+Shift+digit everywhere else (including a Mac browser), starts its template through the
-  same direct launch path as quick launch on the page, and applies it to an open session launcher draft under the same
-  focus, ordering and refusal rules as the ⚡ chord. It reads bindings and templates fresh each time. Unbound keys open
-  Templates with a binding hint; an incomplete template, refusal or YOLO question uses quick launch's ordinary New
-  fallback. Other visible modals retain the keyboard, held keys act once, and the chord never reaches the terminal.
-  Matching uses the physical digit key, independent of the printed character; the numeric keypad is excluded. Each row's
-  key button opens a menu with No shortcut, then 1–9 and 0; every option has a description, occupied keys name their
-  template there, and choosing one moves it. Accessible command names remain No shortcut or the key chord; ownership and
-  binding help are separate accessible descriptions. A template has at most one key and each key has at most one
-  template. Any template can hold a number key, including one that cannot launch alone; only the combined setup must be
-  launchable. Pressing such a key alone opens New with the template applied and a prominent alert banner at the top
-  explaining that it cannot launch on its own and how to combine it with the sequence prefix. The banner expires about
-  six seconds after application finishes, or when the user starts editing. Both key and bolt hover explain launching,
-  their uniqueness and the current choice; partial-template key hover explains composition. The bolt retains its
-  existing eligibility rule. Bindings are a whole-map shared preference, replaced on write; concurrent windows may lose
-  one map edit, and a GUI save, which re-reads the bindings first, can undo an agent's or the command line's binding
-  change that lands between that read and its write (One GUI at a time). Names must be syntactically valid but need not
-  exist at write time. Rename keeps a key, delete frees it through both delete paths, and Undo never restores it. A
-  browser that reserves a chord keeps its behavior. An agent may assign or clear a number key through the same template
-  verbs and approval card. Assigning an occupied key moves it from its previous template, as the Templates editor does;
-  a key can still belong to a partial template.
-- Quick-launch sequences compose templates without changing the single-chord shortcuts. Cmd+X in the Mac desktop app, or
-  Ctrl+Shift+X everywhere else, starts a sequence, except in a text field outside the launcher where it retains its
-  normal meaning. In the launcher's own text fields it starts a sequence only when no text is selected; with a selection
-  it keeps Cut or the browser's normal action. The terminal's input textarea counts as the terminal. Bare physical
-  number keys or their usual template chord queue templates in order; the ordinary ⚡ chord queues the marked template.
-  Printable characters, including Shift for capitals, build a word. Space (with or without Shift) queues that word; an
-  empty Space does nothing. A bare digit extends a word already in progress, but with no word queues its number key, so
-  a name beginning with a digit is reachable only by its number key or the launcher. A number or ⚡ chord first queues
-  any unfinished word, then its bound template. Backspace removes the last character of the unfinished word, never a
-  queued entry. Tab queues the full name when the word uniquely identifies a template; an exact match wins over longer
-  prefixes. It does nothing while the advisory catalog is loading or unavailable, or when the word is empty, unknown or
-  ambiguous. Tab can queue an existing name containing spaces as one entry. With both `my project` and `myproject`
-  stored, `my project` is reachable only by its number key or the launcher; no quoting or candidate cycling is offered.
-  Enter first queues any unfinished word. Typed words resolve against current templates: a case-sensitive exact name,
-  then a unique case-insensitive exact name, then a unique case-insensitive prefix, using Rust's Unicode lowercase.
-  Unknown or ambiguous words refuse the whole sequence, naming the word and, for ambiguity, the competing candidates; a
-  word's refusal wins over an unbound number key in the same sequence. On the page it opens New with that error; in the
-  launcher it appears beneath search without changing the draft. While armed, typed characters never reach the
-  terminal's program. Enter applies the templates in that order, later edits winning, and directly launches through the
-  same defaults, validation and admission as quick launch on the page. In the session launcher, Enter instead applies
-  the queued templates to the current draft without launching; each completed sequence is one refusal unit, and the pill
-  says "apply" instead of "launch". An unbound key opens Templates at Enter with the binding hint on the page; inside
-  the launcher it shows a refusal beneath the search box without changing the draft. A refusal names its template and
-  reveals New with the draft on the page; an incomplete result opens New with a prominent banner saying "This sequence
-  doesn't make a complete setup; complete it below", whether one or several templates were queued. A YOLO question uses
-  the same fallback. The banner follows the number-key banner's expiry and dismissal rules. Bindings refresh when the
-  prefix starts; Enter captures the bound names currently shown in the pill. Enter with nothing queued cancels without
-  opening anything. A non-modal amber status pill is centered over the terminal area, or the main area with no session
-  open, showing queued entries as chips and the word in progress. Its hint names typing, Tab, Enter and Escape. While a
-  word is in progress, a list below the pill shows at most five matching template names, exact matches before prefixes
-  and catalog order within each tier; non-matches are absent. Candidates and Tab use an independent catalog read when
-  the prefix starts, which never gates Enter or decides what Enter launches. Neither the pill nor the list takes focus
-  or pointer input. While the launcher is open, the pill stays at the bottom of the main area so it does not cover the
+  it directly in the desktop app when no dialog is open, without showing the launcher on success. While the session
+  launcher is the only visible dialog, the same chord applies its template to that draft and leaves Launch to the user.
+  Consecutive presses apply in order; a refusal changes nothing from that press and does not discard a later press. A
+  missing mark or failed read shows its refusal where `tl:` does, without opening Templates. During a launch or while
+  saving a template, the chord is consumed without changing the draft. Applying by shortcut leaves focus and search text
+  alone, unless its edits remove the focused control, when focus returns to the launcher's search. Other visible dialogs
+  keep the keyboard. A hidden quick-launch launcher still consumes the chord without applying it. Applying it directly
+  uses exactly New's defaults and ordinary launch path: the open session's host, else this machine, and New's default
+  folder for that host (Working directory above), with the template overriding only its own fields. Success selects the
+  created session only if the user has pressed no key or pointer button since dispatch or their last answer to the
+  launcher, under the launch-completion rules below. When New was never shown and success selects its session, the
+  rename dialog opens over it while its agent is already starting, unless Settings' on-by-default **Name sessions on
+  quick launch** choice is off. This applies to the bolt shortcut, number shortcuts, composed sequences, the
+  quick-switcher row and the Cmd+J template list, even when a template supplied the name. The actual created name is
+  focused and fully selected. Enter with the name unchanged or Escape keeps it without sending a rename; a changed name
+  uses ordinary rename. Closing returns to the new terminal, which takes no input while the dialog is open. A launch
+  that revealed New gets no naming dialog, even if a later submission succeeds. A quick launch the user moved on from
+  keeps its generated name without opening the naming dialog; it can be renamed from its row. A held chord starts only
+  once; the chord never reaches the terminal and visible modals other than the launcher keep the keyboard. With no
+  usable mark it opens Templates with an explanation. An edited marked template that no longer supplies what its active
+  launch kind needs opens New with it applied and a prominent banner saying it needs more choices before it can launch.
+  The same banner accompanies an incomplete Cmd+J or quick-switcher pick, without recommending the sequence prefix. A
+  launch refusal or YOLO question reveals New with the same draft, error or confirmation, or offers it in a notice once
+  the user has moved on (see [Keyboard focus](#keyboard-focus)); nothing bypasses host admission, and the shortcut never
+  retries itself. The mark is a nullable template name on the helm's shared preferences, independent of the template
+  fields. Clicking another bolt moves it; clicking the lit bolt clears it. An agent-launch template needs an agent to be
+  marked; a command-launch template needs a nonblank command. With no launch kind, it is judged as an agent launch. The
+  same rule decides whether a template or combined sequence can launch directly. A marked template that no longer
+  qualifies can still be unmarked. Renaming repoints the mark before deleting the old name; deleting that name clears
+  its mark through the shared delete path, and Undo never restores the mark. The editor says whether its saved template
+  is marked. The shortcut reads the mark and templates fresh on each use, so an agent's or the command line's change
+  takes effect at once. Templates' hover and a separate quick-switcher row advertise the chord and marked name. An agent
+  may set or clear the mark through `farhelm agent template create` or `edit`, behind a template approval card. The helm
+  applies the same eligibility rule to an agent's write as the Templates editor does.
+- Template number shortcuts: a template may hold one of ten shared keys, 1–9 then 0, independently of ⚡. Cmd+digit on
+  macOS, or Ctrl+Shift+digit on Linux, starts its template through the same direct launch path as quick launch, and
+  applies it to an open session launcher draft under the same focus, ordering and refusal rules as the ⚡ chord. It
+  reads bindings and templates fresh each time. Unbound keys open Templates with a binding hint; an incomplete template,
+  refusal or YOLO question uses quick launch's ordinary New fallback. Other visible modals retain the keyboard, held
+  keys act once, and the chord never reaches the terminal. Matching uses the physical digit key, independent of the
+  printed character; the numeric keypad is excluded. Each row's key button opens a menu with No shortcut, then 1–9 and
+  0; every option has a description, occupied keys name their template there, and choosing one moves it. Accessible
+  command names remain No shortcut or the key chord; ownership and binding help are separate accessible descriptions. A
+  template has at most one key and each key has at most one template. Any template can hold a number key, including one
+  that cannot launch alone; only the combined setup must be launchable. Pressing such a key alone opens New with the
+  template applied and a prominent alert banner at the top explaining that it cannot launch on its own and how to
+  combine it with the sequence prefix. The banner expires about six seconds after application finishes, or when the user
+  starts editing. Both key and bolt hover explain launching, their uniqueness and the current choice; partial-template
+  key hover explains composition. The bolt retains its existing eligibility rule. Bindings are a whole-map shared
+  preference, replaced on write; concurrent windows may lose one map edit, and a GUI save, which re-reads the bindings
+  first, can undo an agent's or the command line's binding change that lands between that read and its write (One GUI at
+  a time). Names must be syntactically valid but need not exist at write time. Rename keeps a key, delete frees it
+  through both delete paths, and Undo never restores it. An agent may assign or clear a number key through the same
+  template verbs and approval card. Assigning an occupied key moves it from its previous template, as the Templates
+  editor does; a key can still belong to a partial template.
+- Quick-launch sequences compose templates without changing the single-chord shortcuts. Cmd+X on macOS, or Ctrl+Shift+X
+  on Linux, starts a sequence, except in a text field outside the launcher where it retains its normal meaning. In the
+  launcher's own text fields it starts a sequence only when no text is selected; with a selection it keeps Cut. A
+  focused terminal counts as the terminal, not as a text field. Bare physical number keys or their usual template chord
+  queue templates in order; the ordinary ⚡ chord queues the marked template. Printable characters, including Shift for
+  capitals, build a word. Space (with or without Shift) queues that word; an empty Space does nothing. A bare digit
+  extends a word already in progress, but with no word queues its number key, so a name beginning with a digit is
+  reachable only by its number key or the launcher. A number or ⚡ chord first queues any unfinished word, then its
+  bound template. Backspace removes the last character of the unfinished word, never a queued entry. Tab queues the full
+  name when the word uniquely identifies a template; an exact match wins over longer prefixes. It does nothing while the
+  advisory catalog is loading or unavailable, or when the word is empty, unknown or ambiguous. Tab can queue an existing
+  name containing spaces as one entry. With both `my project` and `myproject` stored, `my project` is reachable only by
+  its number key or the launcher; no quoting or candidate cycling is offered. Enter first queues any unfinished word.
+  Typed words resolve against current templates: a case-sensitive exact name, then a unique case-insensitive exact name,
+  then a unique case-insensitive prefix, using Rust's Unicode lowercase. Unknown or ambiguous words refuse the whole
+  sequence, naming the word and, for ambiguity, the competing candidates; a word's refusal wins over an unbound number
+  key in the same sequence. Outside the launcher it opens New with that error; in the launcher it appears beneath search
+  without changing the draft. While armed, typed characters never reach the terminal's program. Enter applies the
+  templates in that order, later edits winning, and directly launches through the same defaults, validation and
+  admission as quick launch. In the session launcher, Enter instead applies the queued templates to the current draft
+  without launching; each completed sequence is one refusal unit, and the pill says "apply" instead of "launch". An
+  unbound key opens Templates at Enter with the binding hint outside the launcher; inside the launcher it shows a
+  refusal beneath the search box without changing the draft. A refusal names its template and reveals New with the draft
+  outside the launcher; an incomplete result opens New with a prominent banner saying "This sequence doesn't make a
+  complete setup; complete it below", whether one or several templates were queued. A YOLO question uses the same
+  fallback. The banner follows the number-key banner's expiry and dismissal rules. Bindings refresh when the prefix
+  starts; Enter captures the bound names currently shown in the pill. Enter with nothing queued cancels without opening
+  anything. A non-modal amber status pill is centered over the terminal area, or the main area with no session open,
+  showing queued entries as chips and the word in progress. Its hint names typing, Tab, Enter and Escape. While a word
+  is in progress, a list below the pill shows at most five matching template names, exact matches before prefixes and
+  catalog order within each tier; non-matches are absent. Candidates and Tab use an independent catalog read when the
+  prefix starts, which never gates Enter or decides what Enter launches. Neither the pill nor the list takes focus or
+  pointer input. While the launcher is open, the pill stays at the bottom of the main area so it does not cover the
   launcher. It is larger, with a soft amber halo and a short fade/scale entrance that is disabled for reduced motion; it
   never loops or takes pointer input. There is no timeout. Escape cancels and is consumed; a click, switching windows or
   opening a dialog cancels. Non-sequence keys, including arrows, other chords and Shift+Enter, cancel and reach their
@@ -1339,20 +1341,20 @@ After submitting a launch, including Restart with or Replace with, the launcher 
 user can switch sessions, type in their terminals and act on other sessions. The same launcher remains busy and cannot
 accept a second launch or be replaced with another draft. Launches and changes to the host registry still exclude each
 other. Suspend and Resume are not changes to the host registry: from Hosts or from a sandbox session's row, top bar or
-Stop question (Stop and suspend), they are refused only while this page's own launch targets or is waking that same
+Stop question (Stop and suspend), they are refused only while this window's own launch targets or is waking that same
 host, and their buttons are disabled for exactly that. Launches on other hosts and host changes elsewhere proceed while
 one is pending, and a launch on that host is left to the launcher's availability rule below and to the host's own
-lifecycle lock. Preparation and required confirmations remain modal until the launch is submitted. A failure, unknown
-outcome or follow-up question restores the same launcher with its draft and ordinary retry rules if the user has not
-moved on since submitting it. Otherwise a notice offers it, and the launcher returns when the user opens that notice
-(see [Keyboard focus](#keyboard-focus)). Whether such a notice keeps New and other launches refused until it is opened
-is not settled yet. Switching to a session on another host does not change the submitted launch's destination or retry
-identity. The acted-on session's progress, actions, terminal attachment and row outcome settle as soon as the reply
-arrives; only the launcher's return depends on the user. Successfully waking a suspended sandbox continues to create
-without revealing the launcher, restoring its page isolation or waiting for another dialog. A fresh GitHub checkout then
-waits for this window to see the woken host connect, for at most 60 seconds. When that runs out, nothing is created: the
-launcher returns with its draft and says the window did not see the host connect, and a connection that shows up later
-creates nothing. The wait for the checkout's preview that follows is not part of that limit.
+lifecycle lock. Preparation and required confirmations remain modal until the launch is submitted. A failure or
+follow-up question restores the same launcher with its draft if the user has not moved on since submitting it. Otherwise
+a notice offers it, and the launcher returns when the user opens that notice (see [Keyboard focus](#keyboard-focus)).
+Whether such a notice keeps New and other launches refused until it is opened is not settled yet. Switching to a session
+on another host does not change the submitted launch's destination. The acted-on session's progress, actions, terminal
+attachment and row outcome settle as soon as the reply arrives; only the launcher's return depends on the user.
+Successfully waking a suspended sandbox continues to create without revealing the launcher, restoring its page isolation
+or waiting for another dialog. A fresh GitHub checkout then waits for this window to see the woken host connect, for at
+most 60 seconds. When that runs out, nothing is created: the launcher returns with its draft and says the window did not
+see the host connect, and a connection that shows up later creates nothing. The wait for the checkout's preview that
+follows is not part of that limit.
 
 Once the request has waited about two seconds, a small pill at the bottom of the window shows a spinner and a status:
 Launching, Restarting or Replacing, the captured host's name and elapsed seconds, updated about once a second, including
@@ -1373,22 +1375,19 @@ Hosts hides the new row. This brief report does not keep the launcher or its dra
 fresh launch immediately. Replace and Replace with open their replacement only while their source remains selected;
 Restart with never navigates.
 
-Creation guards against accidental double submission (a double-click, a retry after a timeout): one intended create
-yields one session or a clear error, never two silently. Deliberately creating several sessions with identical
-parameters — same directory, same launch — is a sanctioned workflow, not a duplicate to be suppressed.
+Creation guards against accidental double submission (a double-click): one intended create yields one session or a clear
+error, never two silently. Around a lost connection to the helm a duplicate is accepted instead (see
+[Losing the connection to the helm](#losing-the-connection-to-the-helm)). Deliberately creating several sessions with
+identical parameters — same directory, same launch — is a sanctioned workflow, not a duplicate to be suppressed.
 
-A create's retry key lasts as long as the session it created, including a retained error session; a refusal without a
-surviving session is replayed for 24 hours. Delete removes the session's retry record along with the session, including
-an unfinished create's record. After Delete or refusal expiry, the same key is a fresh request that re-validates and,
-for an agent request, needs the approval any new request needs.
+The idempotency keys the command line and agents send with a create (Agent-spawned sessions) are the create's retry
+keys; the GUI sends none. A create's retry key lasts as long as the session it created, including a retained error
+session; a refusal without a surviving session is replayed for 24 hours. Delete removes the session's retry record along
+with the session, including an unfinished create's record. After Delete or refusal expiry, the same key is a fresh
+request that re-validates and, for an agent request, needs the approval any new request needs.
 
 Controls that perform exactly the same operation on the same target behave identically and share that operation's state,
-including an unresolved retry identity or a pending confirmation, differing only where the GUI strictly requires it.
-Plain Replace shares one unresolved identity across the sidebar, session header and interrupted-session card, including
-navigation away and back. In New, Clone, Replace, Replace with and quick launch, an unchanged create's retry identity
-ends only on success or the helm's definite proof that nothing was created; partial success, unclear outcomes,
-authentication refusals and reapplying an unchanged template retain it. Cancelling Replace, choosing Replace with, or
-starting Replace on another source ends the plain Replace identity.
+including a pending confirmation, differing only where the GUI strictly requires it.
 
 A YOLO launch on a host that asks before YOLO launches (see the host settings under Topology) needs an explicit
 confirmation. An agent launch counts as YOLO when its stored permission is custom or YOLO, including omitted permissions
@@ -1407,20 +1406,17 @@ confirmation it offers to stop asking for that host: that answer first sets the 
 asking, exactly as its settings would, and then retries with the override; if changing that setting fails, nothing is
 started and the confirmation stays up with the reason. In the session launcher, an explicit YOLO choice on an agent that
 offers guarded mode also offers starting the same launch guarded instead, without YOLO confirmation; Restart with offers
-it only when the resulting draft still differs from the stored launch. The session launcher does not offer it when the
-refused request retries an earlier attempt whose outcome is unknown (a lost reply, say): that attempt may already have
-started the session, which a guarded launch, being a new request, would duplicate, so the confirmation says the launch
-may already have started instead. The `farhelm` command line has no override: a request from inside a session is an
-agent's, and agents follow their own rule under Agent-spawned sessions, whatever the request claims. A plain restart
-relaunches the session's own stored launch and needs no YOLO confirmation again. The question stays inline and has no
-header Close: its answers read Cancel, the guarded option when offered, the outlined permanent YOLO answer, then the
-filled one-time YOLO answer. Tab follows that same order; Cancel keeps initial focus, except that a plain Replace's
-question, which arrives after its reply, takes focus only if the user has not moved on since answering Replace (see
-[Keyboard focus](#keyboard-focus)). Plain Replace, agent clone and inherited spawn also copy the stored command;
-pre-upgrade no-flag sessions therefore remain own-setting, with plain Replace asking on hosts that ask before YOLO
-launches and agent copies refused there. Clone, Replace with and Restart with compile new choices and get the guarded
-flags. Remote hosts must be updated after this protocol change before launches resume; older releases cannot read
-launches stored as guarded.
+it only when the resulting draft still differs from the stored launch. The `farhelm` command line has no override: a
+request from inside a session is an agent's, and agents follow their own rule under Agent-spawned sessions, whatever the
+request claims. A plain restart relaunches the session's own stored launch and needs no YOLO confirmation again. The
+question stays inline and has no header Close: its answers read Cancel, the guarded option when offered, the outlined
+permanent YOLO answer, then the filled one-time YOLO answer. Tab follows that same order; Cancel keeps initial focus,
+except that a plain Replace's question, which arrives after its reply, takes focus only if the user has not moved on
+since answering Replace (see [Keyboard focus](#keyboard-focus)). Plain Replace, agent clone and inherited spawn also
+copy the stored command; pre-upgrade no-flag sessions therefore remain own-setting, with plain Replace asking on hosts
+that ask before YOLO launches and agent copies refused there. Clone, Replace with and Restart with compile new choices
+and get the guarded flags. Remote hosts must be updated after this protocol change before launches resume; older
+releases cannot read launches stored as guarded.
 
 Failures split cleanly in two: precondition failures (nonexistent directory, unknown template, unreachable host) fail
 the create with a visible error and no session; launch failures of a session that was successfully created surface on
@@ -1435,13 +1431,8 @@ as "Save as template" refusing a wrapper, keep the plain line. When the refusal 
 directory or is not usable, the folder field is also marked and says so under it, naming the host, for as long as the
 form still names that host, its connection and that folder.
 
-The GUI's sixty-second request deadline is not a refusal: the helm may still finish the launch. On that deadline the
-launcher stays open and its alert instead starts "Still waiting on <host>." It says the session may still start and will
-appear in the sidebar if it does, and that launching again with the same settings will not start a second copy. Restart
-with has no such retry guarantee: its alert says the restart may still finish and to check the session before restarting
-again. A real refusal, including an unresolved refusal, and failures other than the request deadline keep their existing
-wording and retry behavior. A fresh managed checkout uses this same deadline explanation rather than adding a second
-explanation of its retained request.
+The GUI has no per-request deadline. A command the helm leaves unanswered too long counts as a lost connection (see
+[Losing the connection to the helm](#losing-the-connection-to-the-helm)).
 
 ### Sandbox sessions
 
@@ -1525,8 +1516,8 @@ helm destroys the sandbox through the ordinary Tensorlake deletion path. A seale
 whenever it lists its sessions, and the helm finishes destroying any sealed sandbox it sees, whether or not it sent the
 Delete: after a lost reply, a failed destruction or its own restart. While that runs, and if it fails, Hosts and the
 sidebar attention area show the sandbox as being deleted, with the reason and **Retry**, and its sessions show as being
-deleted with their actions unavailable. Two windows deleting a sandbox's last two sessions at once can briefly show "the
-sandbox stays" in one window just before the other window's Delete seals it; the list then shows the truth.
+deleted with their actions unavailable. Deleting a sandbox's last two sessions at once (from the window and an agent,
+say) can briefly show "the sandbox stays" for one Delete just before the other seals it; the list then shows the truth.
 
 When the helm cannot ask the sandbox's Farhelm (the sandbox is suspended or unreachable, or its Farhelm is a version
 this helm cannot talk to until it is updated), or the request gets no answer, nothing is decided. Delete does not guess
@@ -1600,12 +1591,12 @@ or with the command line. Each host's settings also offers its own checkout fold
 command-line only. The default is resolved at launch, never copied when a host is added. Settings saves each field
 explicitly, shows a refused value's reason, and clears it when an all-whitespace field is saved. The command field
 preserves all other spacing and newlines. An explicitly disabled command displays as an empty field, but opening
-Settings never rewrites any stored value. Browser-readable configuration replies may contain the default folder, a
-host's own folder and the all-hosts command, never per-host command overrides. A missing root and its parents are
-created on the target host at the first checkout, using the ordinary umask; configuration, discovery and preview create
-nothing. Existing symlink ancestors resolve to their canonical directory, while unresolved `..` in a missing suffix and
-dangling symlinks are refused. A root whose resolution changed since preview is still refused. `~` expands there, using
-the supervisor's captured home. Clearing an override restores inheritance; an empty hook override disables the inherited
+Settings never rewrites any stored value. Configuration replies the GUI reads may contain the default folder, a host's
+own folder and the all-hosts command, never per-host command overrides. A missing root and its parents are created on
+the target host at the first checkout, using the ordinary umask; configuration, discovery and preview create nothing.
+Existing symlink ancestors resolve to their canonical directory, while unresolved `..` in a missing suffix and dangling
+symlinks are refused. A root whose resolution changed since preview is still refused. `~` expands there, using the
+supervisor's captured home. Clearing an override restores inheritance; an empty hook override disables the inherited
 hook. Configuration changes affect new attempts, not an already accepted attempt or its retries.
 
 Settings offers an off-by-default, all-hosts choice under **Agent trust** to answer Claude's "trust this folder?" for
@@ -1629,10 +1620,10 @@ has not been dismissed, an informational band appears above the terminal, below 
 than covering the question, is announced without taking focus, and explains that answering automatically would require
 editing Claude's own settings with caveats. Settings and caveats opens **Agent trust** in Settings at Claude's switch;
 Don't show again stores a shared dismissal, reversible beside the switch. × hides only the current occurrence, until the
-question leaves the screen. The normal invalidation feed updates the hint band in other clients; Settings reads the
-current shared values when opened. A failed Don't show again save restores the band with an adjacent error while that
-session is still shown; leaving the session drops the error. If the corrective settings read also fails, only the save
-error appears until trust is known to be off again, without the normal explanation or its actions.
+question leaves the screen. A change made elsewhere updates the hint band as it happens; Settings reads the current
+shared values when opened. A failed Don't show again save restores the band with an adjacent error while that session is
+still shown; leaving the session drops the error. If the corrective settings read also fails, only the save error
+appears until trust is known to be off again, without the normal explanation or its actions.
 
 The **Agent trust** section also offers separate off-by-default, all-hosts trust switches for Codex, Muse and Pi. Each
 applies only when Farhelm composes an agent launch into a managed checkout, including a checkout an agent requests and
@@ -1761,16 +1752,14 @@ environments).
 Once allocation has occurred, failures retain the session and its checkout association for inspection and Delete. A
 completed preparation permits ordinary restart without repeating clone or hook. Interrupted, missing, corrupt or
 ambiguous preparation refuses automatic repetition. Retrying an accepted create with its original key reconciles the
-original allocation and configuration, including after a helm restart or configuration edit. A transport-ambiguous reply
-keeps that original request and key. Authenticated reconciliation can return the accepted result or a refusal that
-prevents this key from allocating for 24 hours, after which the key re-validates as a new request. That refusal resolves
-even an earlier lost reply: the composer refreshes the preview and requires another explicit submission. An ordinary
-conflict without that proof retains the original request and key.
+original allocation and configuration, including after a helm restart or configuration edit. Authenticated
+reconciliation can return the accepted result or a refusal that prevents this key from allocating for 24 hours, after
+which the key re-validates as a new request.
 
 In managed-checkout mode, the composer's folder field shows the current preview's effective path read-only, or a pending
-or error state while no path is available. An ambiguous retry keeps displaying the original request's path. The folder
-segment deliberately leaves checkout mode and restores the prior editable path, Browse and recent folders. Typing into
-the checkout path cannot turn a managed checkout into an existing-folder launch.
+or error state while no path is available. The folder segment deliberately leaves checkout mode and restores the prior
+editable path, Browse and recent folders. Typing into the checkout path cannot turn a managed checkout into an
+existing-folder launch.
 
 An interruption after mkdir but before durable identity capture leaves ownership unestablished. Recovery retains a
 visible error session and refuses to adopt or prepare the unknown directory. Explicit Delete may retire that unresolved
@@ -1821,18 +1810,19 @@ inside their host sections. Initial focus stays on footer Close; sequential Tab 
 footer actions. Confirming a bulk delete closes the dialog immediately and sends one request per host with its frozen
 IDs; the hosts progress independently. An entry's own Delete keeps the dialog open. On a host that reports accepted
 cleanup, the row stays marked as removing until a later listing confirms it is gone; older hosts keep their existing
-row-disappearance behavior. Close, header close and Escape remain available during that request. Trash requests keep
-their fifteen-minute deadline for older hosts that still remove files before answering. They do not block other page
-actions, while the trash control prevents overlapping requests of its own. The listing is rechecked after the requests
-settle. Refusals and uncertain replies remain visible on the next dialog opening; an uncertain reply warns that some
-folders may already be deleted. The trash button's tooltip tells the user to open the trash to see why. Deleting
-unrelated checkouts does not clear an uncertain outcome. Notices for a host disappear when a successful host registry
-refresh confirms that the host has been removed; disconnection or a failed refresh does not acknowledge them.
+row-disappearance behavior. Close, header close and Escape remain available during that request. A trash delete is long
+work the helm accepts at once: it reports the deletion's progress and each entry's result as ordinary state, so nothing
+in the window waits on the request. Trash deletes do not block other actions, while the trash control prevents
+overlapping deletes of its own. The listing is rechecked after the deletes settle. Refusals the helm reports remain
+visible on the next dialog opening, and the trash button's tooltip tells the user to open the trash to see why. Notices
+for a host disappear when a successful host registry refresh confirms that the host has been removed; disconnection or a
+failed refresh does not acknowledge them.
 
-While this page has a delete request in flight or a host reports that it is freeing space, only the trash button's can
-turns upside down and bobs (static but still upside down under Reduce Motion). Its tooltip names the hosts freeing
-space. The page rechecks only hosts that last reported active removal, every few seconds until they report completion;
-no poll runs for idle hosts. A failed read retains the last removal report rather than implying that removal finished.
+While a trash delete the helm accepted is still running or a host reports that it is freeing space, only the trash
+button's can turns upside down and bobs (static but still upside down under Reduce Motion). Its tooltip names the hosts
+freeing space. The window rechecks only hosts that last reported active removal, every few seconds until they report
+completion; no poll runs for idle hosts. A failed read retains the last removal report rather than implying that removal
+finished.
 
 Only the client that issued a session Delete plays an archive cue, and only when the host confirms that a checkout
 moved: the row's dashed outline flies into the trash, which then wiggles briefly. Reduced motion skips both parts.
@@ -1882,8 +1872,7 @@ labels and colons inside model IDs retain ordinary meaning. When no ordinary res
 an unknown label) offers a visible name action instead; it never silently becomes a name on submit. Accepting a name or
 host action clears search without launching. Invalid `gh:` input cannot launch a hidden existing directory. Host,
 installation, destination, title, agent choice and observed configuration changes invalidate an undispatched preview.
-Late responses cannot restore its authority or steal focus. An already ambiguous submission remains bound to its
-original request.
+Late responses cannot restore its authority or steal focus.
 
 ### Lifecycle operations
 
@@ -1898,10 +1887,10 @@ open lifecycle confirmation or a pending request refuses another lifecycle actio
 session. Opening the session remains possible, including while its Delete is pending. A Stop shows a spinner and
 **Stopping…** on its row and at the top of the open session until it finishes.
 
-Actions and their results survive switching sessions. A failure, unknown outcome or partial result appears on the source
-session's row and at the top when it is opened again. A view opened during Stop or Restart observes that operation's
-completion, including the terminal refresh or reattachment it needs. A completed Replace opens its replacement only if
-the source is still selected; otherwise it appears in the list and the user stays where they are.
+Actions and their results survive switching sessions. A failure or partial result appears on the source session's row
+and at the top when it is opened again. A view opened during Stop or Restart observes that operation's completion,
+including the terminal refresh or reattachment it needs. A completed Replace opens its replacement only if the source is
+still selected; otherwise it appears in the list and the user stays where they are.
 
 A list rename opens in a modal editor owned by the list rather than by the row-actions popup. Listing updates may
 reorder, filter, or temporarily fail without moving its textarea, so its draft, selection, composition, and source
@@ -1957,9 +1946,7 @@ submission and focus-return behavior.
   directory remain fixed. If a harness rejects a changed model or other setting while resuming, that is an ordinary
   launch failure; restart again with settings the harness accepts. After a Restart request has waited about two seconds,
   an adjacent status shows a spinner, the host and elapsed seconds, updated about once a second until the reply arrives.
-  If the GUI's 60-second request deadline expires, it says the restart's outcome is unknown and may still finish, and
-  tells the user to check the session before restarting again. Restart has no retry identity and makes no promise that a
-  second press is harmless.
+  Restart makes no promise that a second press is harmless.
 - **Restart with** opens the session launcher in restart mode before resuming the session's own or a user-named
   conversation. It edits model, effort, permissions, wrapper prefix and conversation for an agent launch, or command,
   resume command and YOLO assertion for a command launch. Launch kind, agent type, host, folder or destination, session
@@ -2005,10 +1992,7 @@ submission and focus-return behavior.
   the source is still there depends on how the removal failed, and the user checks or removes it by hand. Replace is
   offered wherever clone is offered. After about two seconds waiting for the reply, the sidebar, session header and
   interrupted-session card share a spinner, the host and elapsed seconds, updated about once a second. The status
-  disappears on the reply. If the GUI's 60-second request deadline expires, it says the replacement may still finish and
-  to check the sidebar; retrying the same plain Replace without cancelling it or starting Replace on another source
-  reuses its retained identity rather than creating a second replacement. A definite refusal keeps its ordinary
-  explanation, including partial failure of the source's removal.
+  disappears on the reply. A refusal keeps its ordinary explanation, including partial failure of the source's removal.
 - **Replace with** opens the same editable create form clone opens, pre-filled with the source's host, existing
   directory, title, and launch even when the source belongs to a GitHub checkout, so every field can be edited before
   launching — the key use is starting an equivalent session on a different harness or effort. Launching creates the new
@@ -2195,9 +2179,9 @@ that session and clears all marks. Shift marking does not extend the page's text
 selects text. Row controls keep their own actions. The open row keeps its blue fill; a distinct side marker and tint
 identify marked rows.
 
-Marks belong to the current client page and are not saved. Counts, offered actions and targets include only marked rows
-displayed now. Filtering or opening Hosts retains hidden marks but never counts or acts on them; failed listings expose
-no targets. A complete authoritative listing prunes vanished session keys, while a partial, filtered, failed or
+Marks belong to the window and are not saved. Counts, offered actions and targets include only marked rows displayed
+now. Filtering or opening Hosts retains hidden marks but never counts or acts on them; failed listings expose no
+targets. A complete authoritative listing prunes vanished session keys, while a partial, filtered, failed or
 non-authoritative reply does not establish disappearance.
 
 With any effective marks, **N marked**, **Stop**, **Delete**, a metadata menu and Clear replace the ordinary title,
@@ -2272,7 +2256,7 @@ foot included, to 220px beside the session list. Expanded host rows show the dis
 underneath when different; long names truncate and remain available in full in the tooltip. Captions disappear, All
 hosts, Add host and the foot controls show labels, and each whole row highlights and selects as one click target.
 Picking a host keeps the rail expanded. Badges, menus and actions retain their behavior. Each device remembers expansion
-in local storage, independently of the helm; a fresh device starts collapsed. Touch screens follow the same rules.
+locally, independently of the helm; a fresh device starts collapsed. Touch screens follow the same rules.
 
 Choosing a host sends a server-side query immediately and is not persisted, while All widens it again. Status, sort and
 the selected session remain unchanged. Unavailable hosts retain their last-known sessions; a removed selected host
@@ -2289,8 +2273,8 @@ most recent activity is what a client shows until someone picks otherwise. The s
 terminal web-link click ownership, the quick-launch template name and number-key bindings, the session-confirmation
 opt-out, the quick-launch naming choice, terminal-frame coloring, the desktop download-opening types, automatic
 remote-host updates, and whether host setup or host removal confirmation should be skipped after an explicit permanent
-answer; a client that has already loaded its preferences keeps its previous behavior until it reloads, except that
-automatic session selection rereads the shared visits immediately before choosing, template shortcuts read their
+answer. A change to these preferences, by an agent or the command line included, reaches the open window as it happens;
+automatic session selection also rereads the shared visits immediately before choosing, template shortcuts read their
 bindings on each invocation and the desktop helm reads the current file-opening list for each hover and open request.
 The gear at the foot of the host rail opens a settings dialog. Its left sidebar lists **Sessions**, **Appearance**,
 **Hosts**, **Recipes**, **Tensorlake**, **Containers**, **Credentials**, **Terminal**, **Checkouts**, **Agent trust**
@@ -2329,33 +2313,32 @@ saved-key metadata immediately; each keeps its own unsaved replacement draft. Cr
 the stored Tensorlake key.
 
 **Appearance** chooses **System**, **Dark** or **Light** for this device, with System as the default. System follows the
-device's current appearance, including changes while Farhelm stays open; an explicit choice overrides it. The browser or
-desktop webview remembers the choice locally, independently of the helm. The resolved palette applies before application
-content appears, and changes immediately without reloading. The terminal keeps its dark colors in both palettes.
-Sessions has an off-by-default **Skip session confirmations** switch. Its help names Stop, Delete, Replace, Restart and
-tab Close and excludes YOLO, host and trash questions (see Lifecycle operations). Beside it, **Name sessions on quick
-launch** is on by default, including when the helm has never stored a choice. Turning it off disables the naming prompt
-for quick launches. Beside it, **Color terminal frames by host** starts off and colors every session's thin terminal
-frame to match its host icon when turned on. The **Hosts** section has the switches `Set up new hosts without asking`
-and `Remove hosts without asking`, on when the respective confirmation is skipped. Turning one off restores that
-confirmation; turning one on makes the same choice as the host dialog's permanent answer. Changes take effect
-immediately in the current client. Each switch explains the current behavior, and each host dialog's permanent answer
-points to the gear as the place to undo it. Hosts also has **Update remote hosts automatically**, off unless explicitly
-enabled, with help explaining that the helm updates remote hosts as soon as updates are available, with no window open,
-and never updates its own machine this way. This shared choice survives helm restarts; other clients read it on reload,
-while the helm acts on a committed change immediately. A failed save restores the last known value and shows an adjacent
-error, then reconciles only this field with the helm if the request's outcome is uncertain. The **Tensorlake** section
-holds the helm's Tensorlake account, for hosts and sessions that are Tensorlake sandboxes. It opens, above the API key,
-with a large red warning that begins "EXPERIMENTAL:", says Tensorlake support is early and experimental and will change
-between releases, and makes the user responsible for sandboxes not running and billing when they do not want them to; it
-shows whether or not the section's settings load. Its API key is explicitly saved helm configuration, shared by every
-client and kept outside the preference row like the ntfy token: the helm stores it unencrypted in its state directory,
-and the section says so plainly. The key is never returned; the form shows only whether one is saved. Pasting a key and
-pressing **Save** stores or replaces it (surrounding whitespace is dropped), a blank field keeps the saved key, and
-**Clear** removes it. **Test** lists the account's sandboxes with the saved key and reports how many it can see, or why
-Tensorlake refused, inline. Test uses the saved key, never unsaved text in the field. Until Farhelm's own Tensorlake SSH
-key (see [Security](#security)) exists, the section offers **Create SSH key**; opening Settings never creates it. Once
-it exists, the section shows the one-time command that registers it with the user's Tensorlake account,
+device's current appearance, including changes while Farhelm stays open; an explicit choice overrides it. The desktop
+app remembers the choice locally, independently of the helm. The resolved palette applies before application content
+appears, and changes live. The terminal keeps its dark colors in both palettes. Sessions has an off-by-default **Skip
+session confirmations** switch. Its help names Stop, Delete, Replace, Restart and tab Close and excludes YOLO, host and
+trash questions (see Lifecycle operations). Beside it, **Name sessions on quick launch** is on by default, including
+when the helm has never stored a choice. Turning it off disables the naming prompt for quick launches. Beside it,
+**Color terminal frames by host** starts off and colors every session's thin terminal frame to match its host icon when
+turned on. The **Hosts** section has the switches `Set up new hosts without asking` and `Remove hosts without asking`,
+on when the respective confirmation is skipped. Turning one off restores that confirmation; turning one on makes the
+same choice as the host dialog's permanent answer. Changes take effect immediately in the current client. Each switch
+explains the current behavior, and each host dialog's permanent answer points to the gear as the place to undo it. Hosts
+also has **Update remote hosts automatically**, off unless explicitly enabled, with help explaining that the helm
+updates remote hosts as soon as updates are available, with no window open, and never updates its own machine this way.
+This shared choice survives helm restarts, and the helm acts on a committed change immediately. A failed save restores
+the last known value and shows an adjacent error. The **Tensorlake** section holds the helm's Tensorlake account, for
+hosts and sessions that are Tensorlake sandboxes. It opens, above the API key, with a large red warning that begins
+"EXPERIMENTAL:", says Tensorlake support is early and experimental and will change between releases, and makes the user
+responsible for sandboxes not running and billing when they do not want them to; it shows whether or not the section's
+settings load. Its API key is explicitly saved helm configuration, shared by every client and kept outside the
+preference row like the ntfy token: the helm stores it unencrypted in its state directory, and the section says so
+plainly. The key is never returned; the form shows only whether one is saved. Pasting a key and pressing **Save** stores
+or replaces it (surrounding whitespace is dropped), a blank field keeps the saved key, and **Clear** removes it.
+**Test** lists the account's sandboxes with the saved key and reports how many it can see, or why Tensorlake refused,
+inline. Test uses the saved key, never unsaved text in the field. Until Farhelm's own Tensorlake SSH key (see
+[Security](#security)) exists, the section offers **Create SSH key**; opening Settings never creates it. Once it exists,
+the section shows the one-time command that registers it with the user's Tensorlake account,
 `tl sbx ssh keys add --name farhelm-<tag> '<public key>'`, with a **Copy** button. The command carries the public key's
 text, so it works on any machine where Tensorlake's `tl` CLI is signed in. The section says that Farhelm cannot check
 the registration, because an API key cannot list SSH keys. `<tag>` is the helm tag: four lowercase letters or digits
@@ -2369,12 +2352,11 @@ sandboxes are always created with a fixed 30-minute idle timeout. The creation s
 sessions and explains that timeout. The **Terminal** section chooses whether web links open in Farhelm without passing
 the click on (the default), open in Farhelm and also pass the click on, or only pass the click on. The latter two
 choices explain the risk of a second browser tab and that a program without mouse reporting cannot act on a click. This
-choice covers every client of the helm and takes effect in every mounted terminal of the current client immediately;
-other open clients pick it up when they reload, like the host choices. In the desktop app, the **Terminal** section also
-has tunnel consent and a free-form, comma-separated **File types to open with Cmd-click** field (Ctrl-click outside
-macOS). It defaults to `md, txt, json, png, jpg, jpeg, gif, webp, bmp, avif`; saving an empty list disables opening
-while downloads still save. This field requires an explicit, acknowledged save, but its value lives in the shared
-preference row. The dialog shows one prominent warning beside the field for each listed type outside `md`, `txt`,
+choice is the helm's and takes effect in every mounted terminal immediately. In the desktop app, the **Terminal**
+section also has tunnel consent and a free-form, comma-separated **File types to open with Cmd-click** field (Ctrl-click
+outside macOS). It defaults to `md, txt, json, png, jpg, jpeg, gif, webp, bmp, avif`; saving an empty list disables
+opening while downloads still save. This field requires an explicit, acknowledged save, but its value lives in the
+shared preference row. The dialog shows one prominent warning beside the field for each listed type outside `md`, `txt`,
 `json`, `log` and the image types in that default; HTML-like types have a browser-specific warning, and all other
 unrecognized types have a generic warning. The warnings follow the draft as typed, including when another entry is
 malformed. A refused save leaves the draft and current helm policy unchanged and shows the reason inline. Under
@@ -2394,17 +2376,17 @@ The command's help explains that it runs in each new checkout on its host, after
 that changes affect future checkouts only, and that command-line host overrides keep their command. The installed
 desktop app's dialog also has an **App** section with a switch for installing updates automatically (see
 [Installation and updates](#installation-and-updates)); unlike the host choices it is a setting of that app
-installation, kept with the app rather than by the helm, and a browser never shows it. The two host confirmation choices
-apply to every host and client of this helm; existing controls with a natural place in the main UI stay there. No client
-keeps its own copy: every client reads the helm's preference once after authenticating and writes it on change, so a
-browser tab and the desktop app open in the same order and on the same session. Per-client persistence — browser
-storage, a desktop state file, anything that lets two clients remember different answers — is not wanted for these
-shared preferences, including welcome-card and announcement dismissal (appearance, sidebar width, host rail expansion,
-terminal text size and sound switches, by contrast, are deliberately per device; see Session list, Terminal experience
-and Status). A client that asks the helm for no particular order gets creation time. No mandatory hierarchy. Sessions
-may carry an optional parent reference usable by the API, but parentage does not nest the list and implies nothing about
-VCS state. Parent tracking is not comprehensive: `farhelm spawn --parent` can record it, while `farhelm agent create`
-and `clone` need not record the asking session.
+installation, kept with the app rather than by the helm. The two host confirmation choices apply to every host and
+client of this helm; existing controls with a natural place in the main UI stay there. No client keeps its own copy:
+every client reads the helm's preference once after connecting and writes it on change, so a window opens in the same
+order and on the same session after a reconnect as before it. Per-client persistence — a desktop state file, anything
+that lets two clients remember different answers — is not wanted for these shared preferences, including welcome-card
+and announcement dismissal (appearance, sidebar width, host rail expansion, terminal text size and sound switches, by
+contrast, are deliberately per device; see Session list, Terminal experience and Status). A client that asks the helm
+for no particular order gets creation time. No mandatory hierarchy. Sessions may carry an optional parent reference
+usable by the API, but parentage does not nest the list and implies nothing about VCS state. Parent tracking is not
+comprehensive: `farhelm spawn --parent` can record it, while `farhelm agent create` and `clone` need not record the
+asking session.
 
 The sidebar can be resized by dragging its right edge, between 296px and 656px, with 396px as the default. Its 56px host
 rail leaves the session column between 240px and 600px, with 340px as the default. Double-click the edge to reset it, or
@@ -2631,9 +2613,9 @@ not.
 
 A close control dismisses only the optional Update rows; required updates, problems and working hosts cannot be
 dismissed. The dismissal leaves the rail badges and hides those reminders until a host outside the dismissed update set
-gains an update or the helm build changes. It lives only in interface memory, so reloading shows optional reminders
-again. If no undismissed host needs attention, the list disappears. This list replaces the required-update banner and
-optional-update card.
+gains an update or the helm build changes. It lives only in interface memory, so a restart or a reset after a lost
+connection shows optional reminders again. If no undismissed host needs attention, the list disappears. This list
+replaces the required-update banner and optional-update card.
 
 Lifecycle operations against an unreachable host are refused with a clear error; nothing queues for later delivery in
 v1. Environment Suspend/Resume and Delete use their provider paths under Sandbox sessions and Container sessions. A
@@ -2642,11 +2624,11 @@ diagnostics beneath it. Its metadata — title, directory, last-known status —
 and age in exactly one band. A terminal already open keeps its last screen and tab strip dimmed and inert beneath the
 card, clearly no longer live. A session opened while unreachable has no terminal or tab strip. When the host returns,
 retained terminals retry promptly and automatically without displacing another client. A rebooted session still shows
-its interrupted card. Browser transport loss uses the same card with `Session unavailable — reconnecting` and a neutral
-`Reconnect now` button; recoverable drops show no red detach banner. Final takeover and stall decisions retain their
-explicit banners. Changes made from any client — creates, renames, stops, deletes, status transitions — appear in all
-other connected clients automatically; the agent-spawn behavior below is one instance of this general rule, not a
-special case.
+its interrupted card. A dropped terminal stream between the window and the helm uses the same card with
+`Session unavailable — reconnecting` and a neutral `Reconnect now` button; recoverable drops show no red detach banner.
+Final takeover and stall decisions retain their explicit banners. Changes made from any client — creates, renames,
+stops, deletes, status transitions — appear in all other connected clients automatically; the agent-spawn behavior below
+is one instance of this general rule, not a special case.
 
 ### Status
 
@@ -2654,12 +2636,11 @@ Each client can play distinct sounds when a session starts waiting, when a new a
 an agent goes from running to idle. Claude and Codex report Waiting; Muse reports it for workspace trust only, with
 in-conversation questions and approvals still unverified. Such sessions can show Idle while Muse waits for an answer.
 Settings has sounds controls under **Notifications**, with one switch per event, remembered per device: waiting and
-approval default on, turn finished off. The open session stays quiet while its window is active; initial page-load or
-sign-in state makes no sound. Status sounds follow the sidebar's current host selector and filters; changing that view
-silently records its existing statuses. New approval requests sound regardless of those filters, because their cards are
-always shown. Each observation plays only its most urgent enabled, non-quiet event: approval, waiting, then turn
-finished. Browser playback needs a prior user gesture; blocked playback is discarded, never queued. Every open client
-makes its own sounds.
+approval default on, turn finished off. The open session stays quiet while its window is active; the state loaded when
+the window starts or resets makes no sound. Status sounds follow the sidebar's current host selector and filters;
+changing that view silently records its existing statuses. New approval requests sound regardless of those filters,
+because their cards are always shown. Each observation plays only its most urgent enabled, non-quiet event: approval,
+waiting, then turn finished. Every open client makes its own sounds.
 
 Each session shows one of: **Running** (agent actively working), **Waiting** (a detected pending question or approval
 directed at the user), **Idle** (agent alive and at rest, no pending ask), **Exited** (process ended), **Interrupted**
@@ -2709,14 +2690,13 @@ editing, retargeting or adopting that entry, but removing it and adding the host
 upgrading to this storage, state the helm cannot attribute to one host starts fresh too.
 
 The stamp is set automatically in two moments — opening a session records its current activity as seen, and that
-session's activity advancing while it stays open re-records the new value — with which client did the opening, and
-whether its window has focus or its tab is visible, both ignored: a session sitting in a background tab is still
-recorded as seen the same way a foregrounded one is. It can also be set or cleared by hand: a "Mark unread"/"Mark read"
-toggle, reachable from the session's row, sets or clears the stamp directly. A manual mark unread on the session
-currently open STICKS — the automatic rule does not immediately re-record it as seen — until the user leaves and returns
-to it, or new output arrives. A failed automatic mark is logged but silent, the same best-effort exception the
-list-order/last-selection preference gets (see Errors and diagnostics); a failed manual toggle surfaces to the row like
-any other operation.
+session's activity advancing while it stays open re-records the new value — with whether the window has focus ignored: a
+session open in a window behind other apps is still recorded as seen the same way one in a focused window is. It can
+also be set or cleared by hand: a "Mark unread"/"Mark read" toggle, reachable from the session's row, sets or clears the
+stamp directly. A manual mark unread on the session currently open STICKS — the automatic rule does not immediately
+re-record it as seen — until the user leaves and returns to it, or new output arrives. A failed automatic mark is logged
+but silent, the same best-effort exception the list-order/last-selection preference gets (see Errors and diagnostics); a
+failed manual toggle surfaces to the row like any other operation.
 
 Beside the status, a session shows how long ago it was last active as a short relative age (`2m`, `3h`), with the full
 timestamp available on the row. Last active means the last time the agent was seen working, or the moment it started
@@ -2824,9 +2804,9 @@ anywhere it likes in front of the user. Resolved entries remain visible, greyed 
 even if the user has never opened them; they never make the bell loud or appear as new. Closing the list, by clicking
 away, pressing Escape, or clicking the bell again, marks everything it showed as read; there is no mark unread. A clear
 button removes them all, and the bell disappears until a new one arrives. Notifications persist across supervisor and
-helm restarts and reloads; each session keeps its 10 most recent, with no time-based expiry, and deleting a session
-deletes them. Read and cleared state is kept by the helm and shared by every client, the same way seen state is. Other
-than ntfy waiting alerts, desktop or operating-system notifications are not part of v1.
+helm restarts and window resets; each session keeps its 10 most recent, with no time-based expiry, and deleting a
+session deletes them. Read and cleared state is kept by the helm and shared by every client, the same way seen state is.
+Other than ntfy waiting alerts, desktop or operating-system notifications are not part of v1.
 
 Notifications about a host or the whole app have a separate bell at the top of the navigation rail's footer, above
 Hosts. It uses the same 16px size and quiet colors as its neighboring controls. Unread items make it filled red with an
@@ -2834,7 +2814,7 @@ unread count; its accessible name reports that count too. Clicking opens newest-
 clicking outside, clicking the bell again or leaving the panel with keyboard focus closes it and marks only the items it
 showed as read. The bell then goes quiet; a failed best-effort mark may leave it loud until another close. Resolved
 items are quiet even if never opened, stay greyed in the panel, and can be removed with **Clear resolved**. Read and
-cleared state is shared by the helm across clients and reloads. Removing a host removes its notices; an unreachable host
+cleared state is kept by the helm across resets and restarts. Removing a host removes its notices; an unreachable host
 keeps its last known notices.
 
 The initial kind reports trashed checkouts whose background cleanup failed. It names the host and checkout, shows how
@@ -2862,8 +2842,8 @@ whatever the agent renders is what you see. There is no composer, no message abs
 - Settings can color the thin frame around every session's terminal with that session's host identity color. This is off
   by default and shared by every device. When on, a host with the default color uses the ordinary foreground color;
   every other host uses its chosen icon color at full strength. A host color change updates open session frames through
-  the existing hosts feed, and a switch change applies immediately in the current client. Other open clients pick up the
-  switch change when they reload. The terminal background, text palette and size do not change.
+  the existing hosts feed, and a switch change applies immediately, from whichever surface made it. The terminal
+  background, text palette and size do not change.
 - The quick-switcher's Cmd+K and template list's Cmd+J on macOS, or Ctrl+Shift+K and Ctrl+Shift+J elsewhere, never reach
   the terminal's program when Farhelm accepts them; plain Ctrl+K off macOS keeps the terminal program's own behavior.
 - Shift+Enter (the exact chord — no other modifier held, not mid-IME-composition) is sent as ESC CR in a SINGLE write,
@@ -2878,13 +2858,13 @@ whatever the agent renders is what you see. There is no composer, no message abs
   at the start of the action group on the right of the session's top row, step every open terminal's text size together,
   hidden tabs included, within a fixed range, and each terminal is resized so the program inside sees its new rows and
   columns. The buttons share one border with a fixed-width, display-only readout of the current size in points between
-  them. The readout follows button and shortcut changes, reloads and rebuilt session controls without adding a tab stop.
-  While a terminal is open the shortcut works wherever focus is and never reaches the terminal's program or the browser;
-  Cmd/Ctrl with = or − and no Shift stay the browser's own page zoom. On Linux this takes over Ctrl+Shift+− (Ctrl+_,
-  undo in readline and emacs) inside the terminal, accepted 2026-10-02. The keys are the ones at the US-layout positions
-  of = and −. The size is remembered per device, deliberately unlike the session list's preference: it is about the
-  screen in front of the user, not a choice every client should share. Only the terminal text changes; the rest of the
-  UI keeps its size.
+  them. The readout follows button and shortcut changes, resets and rebuilt session controls without adding a tab stop.
+  While a terminal is open the shortcut works wherever focus is and never reaches the terminal's program. Cmd/Ctrl
+  with = or − and no Shift are not app shortcuts and reach a focused terminal like any other key: there is no interface
+  zoom (decided 2026-11-13). On Linux this takes over Ctrl+Shift+− (Ctrl+_, undo in readline and emacs) inside the
+  terminal, accepted 2026-10-02. The keys are the ones at the US-layout positions of = and −. The size is remembered per
+  device, deliberately unlike the session list's preference: it is about the screen in front of the user, not a choice
+  every client should share. Only the terminal text changes; the rest of the UI keeps its size.
 - Scrollback is whatever the host-side terminal naturally retains, and it survives client disconnects: detach, reconnect
   a day later, and the buffer is still there. Farhelm avoids storing terminal output except where it directly helps the
   user, such as error reporting. When an agent never starts, its durable error may include the failed launch's last five
@@ -2945,22 +2925,21 @@ whatever the agent renders is what you see. There is no composer, no message abs
   visit history, excluding the session just removed, else the newest-created listed session. While history is empty, the
   retained last selection counts as one visit under those same rules. A filter or the listing's cap narrows candidates;
   exited sessions and sessions on disconnected hosts still count. The helm keeps the 32 most recent distinct visits
-  across clients, reloads and restarts. Row clicks, quick switching, creation, replacement and automatic selection
-  record visits. Immediately before an automatic pick the client rereads shared preferences, falling back to its current
-  in-memory copy on failure, and remembers the result. Removing an unselected session leaves the pane alone; removing
-  the last session leaves it empty. Existing removal detection still needs a complete, unfiltered fleet reply to infer
-  an external deletion or host removal; filtering or a capped reply does not unselect an already-open session. Replace
-  selects its replacement if its source is still selected when it finishes, and closing a terminal tab is not a session
-  removal. Launching the app is itself the deliberate act the attach semantics below key off. Opening a second client
-  therefore takes over its chosen session exactly as clicking that session there would. The attached client owns input
-  and terminal dimensions: the PTY resizes to that client, and the last size sticks when nothing is attached.
-  Reconnecting replays the terminal so the session looks as it would have had the client stayed attached, modulo redraws
-  caused by dimension changes. The floor: the host-side terminal retains, and replay covers, at least the current screen
-  plus 10,000 lines of scrollback. The sidebar visibly marks the selected session's row whenever that session is listed,
-  so which session the main pane is interacting with is readable at a glance rather than only from the bottom bar's
-  session name. A filter that excludes the selected session leaves no row to mark — the bottom bar's session name
-  remains the identifier in that state, and the main pane deliberately stays put (filtering the list is not
-  deselecting).
+  across resets and restarts. Row clicks, quick switching, creation, replacement and automatic selection record visits.
+  Immediately before an automatic pick the client rereads shared preferences, falling back to its current in-memory copy
+  on failure, and remembers the result. Removing an unselected session leaves the pane alone; removing the last session
+  leaves it empty. Existing removal detection still needs a complete, unfiltered fleet reply to infer an external
+  deletion or host removal; filtering or a capped reply does not unselect an already-open session. Replace selects its
+  replacement if its source is still selected when it finishes, and closing a terminal tab is not a session removal.
+  Launching the app is itself the deliberate act the attach semantics below key off. Opening a second client therefore
+  takes over its chosen session exactly as clicking that session there would. The attached client owns input and
+  terminal dimensions: the PTY resizes to that client, and the last size sticks when nothing is attached. Reconnecting
+  replays the terminal so the session looks as it would have had the client stayed attached, modulo redraws caused by
+  dimension changes. The floor: the host-side terminal retains, and replay covers, at least the current screen plus
+  10,000 lines of scrollback. The sidebar visibly marks the selected session's row whenever that session is listed, so
+  which session the main pane is interacting with is readable at a glance rather than only from the bottom bar's session
+  name. A filter that excludes the selected session leaves no row to mark — the bottom bar's session name remains the
+  identifier in that state, and the main pane deliberately stays put (filtering the list is not deselecting).
 - The typical session view has one top row, with terminal tabs and the desktop tunnel pill on the left and text size
   (zoom out, size in points, zoom in), Stop, Restart ▾, Replace ▾, Clone and Delete on the right, followed by the
   terminal and a slim details bar below it. Restart and Replace are split buttons: the main part performs the ordinary
@@ -2984,17 +2963,17 @@ whatever the agent renders is what you see. There is no composer, no message abs
   the agent instructions state the same timing, without the invitation. Directory and command line are muted
   click-to-copy buttons that take the width their values need and ellipsize before the session name or host when the bar
   runs out of room; a click confirms locally for about 1.5 seconds. A hidden-characters copy warning opens upward from
-  the bar and stays within the window. Clipboard writes use the native bridge first and `navigator.clipboard` second,
-  with JSON serialization and silent failures. Replace has its own anchored danger confirmation and neutral
-  cancellation. Delete is styled as the danger action and asks first in the same anchored way, even for a session that
-  has ended, with the same consequence text the row's delete prompt shows. Restart's confirmation is likewise anchored
-  under its top-row button; Escape cancels these questions and returns focus to the terminal. The session-confirmation
-  setting skips the top row's Stop, Delete, Replace and Restart questions, the interrupted-card Replace question, and
-  tab Close, using the screen's consent and existing guards. Split menus follow the app's shared keyboard rules: mouse
-  or pen movement focuses the hovered choice without scrolling, arrows and Home/End move between choices, and only the
-  focused enabled choice has the highlight fill. Leaving the menu keeps that focus; Escape or Tab closes the menu and
-  returns focus to its caret. Cancelling Restart with returns to that persistent caret. An unavailable plain Restart
-  does not hide an independently available Restart with; the menu remains available to inspect reasons.
+  the bar and stays within the window. Clipboard writes use the system clipboard and fail silently. Replace has its own
+  anchored danger confirmation and neutral cancellation. Delete is styled as the danger action and asks first in the
+  same anchored way, even for a session that has ended, with the same consequence text the row's delete prompt shows.
+  Restart's confirmation is likewise anchored under its top-row button; Escape cancels these questions and returns focus
+  to the terminal. The session-confirmation setting skips the top row's Stop, Delete, Replace and Restart questions, the
+  interrupted-card Replace question, and tab Close, using the screen's consent and existing guards. Split menus follow
+  the app's shared keyboard rules: mouse or pen movement focuses the hovered choice without scrolling, arrows and
+  Home/End move between choices, and only the focused enabled choice has the highlight fill. Leaving the menu keeps that
+  focus; Escape or Tab closes the menu and returns focus to its caret. Cancelling Restart with returns to that
+  persistent caret. An unavailable plain Restart does not hide an independently available Restart with; the menu remains
+  available to inspect reasons.
 - Old terminals: releases from before terminal hosts ran each terminal (the agent's and each tab's) in the host's
   private tmux server instead, and later ones kept those old terminals running beside terminal hosts, with a loud band
   on such a session and the old-terminal warning (see Status) asking the user to move them. A supervisor that finds that
@@ -3020,7 +2999,7 @@ whatever the agent renders is what you see. There is no composer, no message abs
   viewer must take in a full scrollback at about 50 KB/s locally, or about 110 KB/s over ssh (the figure moves with how
   much the link holds), and live output that falls behind slowly at about 10 KB/s (SPEC_impl.md, "Helm ↔ supervisor
   transport: system ssh + stdio protocol", has the arithmetic).
-- A viewer that stops consuming output entirely (a wedged tab, a machine asleep past its connection's lifetime) is
+- A viewer that stops consuming output entirely (a hung window, a machine asleep past its connection's lifetime) is
   detached with a visible stall reason rather than honored forever, as the floors above describe — the same surface as a
   takeover detach, with reattach behaving exactly as any reconnect does. Flow control never drops terminal output:
   whatever bound it degrades to is the same replay floor above, never a silent gap. Skipped screens are no exception,
@@ -3066,11 +3045,11 @@ whatever the agent renders is what you see. There is no composer, no message abs
   program; the rest of the notice is pointer-transparent. For a Codex session's agent terminal the notice names Codex's
   own copy key instead. It is guidance about the program, not a report of a clipboard failure. Any completed program
   clipboard write, including a primary-selection write, suppresses it during the grace window. Clipboard operations are
-  explicitly best-effort and silent on failure — permission policy, secure-context requirements, and an engine's own
-  clipboard behavior are outside this system's control — a deliberate, named exception to the Errors and diagnostics
-  section's surface-every-error rule below, not a lapse in it. Farhelm assumes the host's system clipboard works. A
-  broken, hung or slow clipboard is not something Farhelm adds complexity to support well: copies may be dropped while
-  it is in that state, but nothing else in Farhelm may stall because of it.
+  explicitly best-effort and silent on failure — the operating system's clipboard behavior is outside this system's
+  control — a deliberate, named exception to the Errors and diagnostics section's surface-every-error rule below, not a
+  lapse in it. Farhelm assumes the host's system clipboard works. A broken, hung or slow clipboard is not something
+  Farhelm adds complexity to support well: copies may be dropped while it is in that state, but nothing else in Farhelm
+  may stall because of it.
 - Dragging across a terminal link never opens its target, downloads a file or opens a saved file, including while a
   program has mouse reporting on. Small pointer jitter still counts as a click.
 - Links in terminal output open their http(s) target on click, with no confirmation or prompt of any kind, unless the
@@ -3110,22 +3089,21 @@ whatever the agent renders is what you see. There is no composer, no message abs
   uses. The opened URL uses that IPv4 literal and the actual local port, preserving the rest of the URL. Bytes travel
   over Farhelm's existing helm-to-supervisor connection to the supervisor's loopback; this is raw TCP, including
   WebSockets, with no HTTP rewriting. Named localhost and wildcard addresses try IPv4 then IPv6 loopback; an explicit
-  loopback IP is used as given. Browser clients and sessions on the local host have no offer, and a standalone helm
-  refuses tunnel requests. Before the first tunnel opens, the user must accept the security warning in Security below.
-  This choice is a shared helm preference, off until accepted; Settings shows it and can turn it off, closing existing
-  tunnels. A later tunnel request then needs the warning again. Each tunnel is kept only in helm memory until the
-  session is deleted, Farhelm quits, or the user closes it. Restarting or stopping the agent does not close it.
-  Reopening a link for the same session and loopback target reuses its tunnel. A host disconnect fails new connections
-  until the host returns; an existing TCP stream is never replayed. A distinctively colored pill beside the terminal
-  tabs shows the local-port → host-port mapping for one listener, or a count for several. Both ports remain visible; a
-  long host name ellipsizes, with the full mapping in its tooltip and accessible name. Opening the pill shows a list of
-  mappings with a close button for each listener and Close all. Close all attempts the listeners shown at activation in
-  order, continuing after failures and retaining failed listeners with their reasons. The list and close actions stay
-  available while the host is disconnected. No pill appears when no listeners remain. Read and close failures appear in
-  a dismissible notice below the top row without adding a permanent row, including when no pill is present; refreshing
-  the list does not dismiss a close failure. Escape closes the list and returns focus to the pill; Tab follows its
-  ordinary controls and leaving the list closes it without reclaiming focus. This feature does not forward login
-  callbacks.
+  loopback IP is used as given. Sessions on the local host have no offer, and a standalone helm refuses tunnel requests.
+  Before the first tunnel opens, the user must accept the security warning in Security below. This choice is a shared
+  helm preference, off until accepted; Settings shows it and can turn it off, closing existing tunnels. A later tunnel
+  request then needs the warning again. Each tunnel is kept only in helm memory until the session is deleted, Farhelm
+  quits, or the user closes it. Restarting or stopping the agent does not close it. Reopening a link for the same
+  session and loopback target reuses its tunnel. A host disconnect fails new connections until the host returns; an
+  existing TCP stream is never replayed. A distinctively colored pill beside the terminal tabs shows the local-port →
+  host-port mapping for one listener, or a count for several. Both ports remain visible; a long host name ellipsizes,
+  with the full mapping in its tooltip and accessible name. Opening the pill shows a list of mappings with a close
+  button for each listener and Close all. Close all attempts the listeners shown at activation in order, continuing
+  after failures and retaining failed listeners with their reasons. The list and close actions stay available while the
+  host is disconnected. No pill appears when no listeners remain. Read and close failures appear in a dismissible notice
+  below the top row without adding a permanent row, including when no pill is present; refreshing the list does not
+  dismiss a close failure. Escape closes the list and returns focus to the pill; Tab follows its ordinary controls and
+  leaving the list closes it without reclaiming focus. This feature does not forward login callbacks.
 
 - File paths in terminal output can be downloaded from the session's host, including the local host. Absolute and `~/`
   paths, relative paths containing a slash or a file extension, and `file://` hyperlinks emitted by a program count;
@@ -3152,21 +3130,20 @@ whatever the agent renders is what you see. There is no composer, no message abs
   differing only by leading or trailing spaces, other Unicode spaces, or lookalike letters render differently (confirmed
   2026-10-17): a trailing space only makes a file less openable, and in the usual case the program that could plant such
   a name can already write the file it imitates. Files must be readable regular files no larger than 100 MB, including
-  while transferring; directories are refused. A browser saves a complete file by basename. The desktop app saves into
-  Downloads under a unique name and shows where it went, with no partial file after failure or interruption. Status
-  appears at the top of that terminal: success fades after a few seconds, while a failure stays until the next click or
-  download there. Plain click only downloads. In the desktop app, Cmd-click on macOS (Ctrl-click elsewhere) also opens
-  the completed save with the default app when the saved file's final extension is in the helm's shared list,
-  case-insensitively. The list defaults to .md, .txt, .json and the common image types .png, .jpg, .jpeg, .gif, .webp,
-  .bmp and .avif, and the saved file must still have the same final extension as the path disclosed at hover. Other
-  types are saved without opening; an opening failure leaves the save successful and says why it was not opened. A
-  browser modifier-click only downloads. The hover uses a file icon and bright name, the host and full directory on a
-  second line, and decimal size with the action hints on a third. A left stripe and size color show under 1 MB green,
-  1–10 MB blue stripe with neutral size, and 10–100 MB amber; refusals are red and checking has a neutral stripe. Only
-  an eligible desktop file has the opening hint. Any file the session's account can read is in reach, within the
-  existing shell authority; hover discloses the agent-provided target before an explicit click. Only the helm can ask
-  the supervisor for file reads. OSC hyperlink schemes are explicitly limited to http, https and file; every other
-  scheme is ignored.
+  while transferring; directories are refused. The desktop app saves into Downloads under a unique name and shows where
+  it went, with no partial file after failure or interruption. Status appears at the top of that terminal: success fades
+  after a few seconds, while a failure stays until the next click or download there. Plain click only downloads. In the
+  desktop app, Cmd-click on macOS (Ctrl-click elsewhere) also opens the completed save with the default app when the
+  saved file's final extension is in the helm's shared list, case-insensitively. The list defaults to .md, .txt, .json
+  and the common image types .png, .jpg, .jpeg, .gif, .webp, .bmp and .avif, and the saved file must still have the same
+  final extension as the path disclosed at hover. Other types are saved without opening; an opening failure leaves the
+  save successful and says why it was not opened. The hover uses a file icon and bright name, the host and full
+  directory on a second line, and decimal size with the action hints on a third. A left stripe and size color show under
+  1 MB green, 1–10 MB blue stripe with neutral size, and 10–100 MB amber; refusals are red and checking has a neutral
+  stripe. Only an eligible desktop file has the opening hint. Any file the session's account can read is in reach,
+  within the existing shell authority; hover discloses the agent-provided target before an explicit click. Only the helm
+  can ask the supervisor for file reads. OSC hyperlink schemes are explicitly limited to http, https and file; every
+  other scheme is ignored.
 
 ## Attachments
 
@@ -3196,7 +3173,7 @@ must never become published attachments. A failure response must distinguish a d
 whose publication outcome is unknown.
 
 Attachment bytes ride the existing edges — client to helm, helm to supervisor. There is no direct client-to-supervisor
-path; a browser never needs to reach any machine but the helm's.
+path; the window never needs to reach any machine but the helm's.
 
 Transfer must not block the terminal: you can keep typing while it runs, and the path is inserted at whatever cursor
 position is current when the transfer completes. For a typical screenshot this is imperceptible.
@@ -3349,44 +3326,42 @@ frame); a single click without movement never zooms. Empty background is everyth
 (buttons, tabs, the version readout, the sidebar's resize edge) and its text; the wordmark counts as background, like a
 title, and so do the gaps between and around controls and the band's top and bottom edges. With no session open, the
 main pane's half of the band is empty background too. Every such press drags, whatever input device made it. Controls,
-text in the band, and the terminal retain their own interactions. Browser and Linux window layouts retain their existing
-appearance and gain no drag or zoom behavior. In narrow macOS windows, the app-level row stays fixed above both
+text in the band, and the terminal retain their own interactions. The Linux window layout retains its existing
+appearance and gains no drag or zoom behavior. In narrow macOS windows, the app-level row stays fixed above both
 scrolling panes so horizontal scrolling cannot move application controls underneath native window buttons. Startup,
 authentication errors, and build-mismatch notices also keep their content clear of native controls.
 
 Cmd+N in the Mac desktop app opens New with the same prefill, even from a focused terminal, unless a modal is open or
-New is disabled. New's hover text names the shortcut in the Mac desktop app only; the web UI has no such shortcut
-because browsers keep Cmd/Ctrl+N for a new window.
+New is disabled. New's hover text names the shortcut in the Mac desktop app only; the Linux app has no such shortcut.
 
-Cmd+W in the Mac desktop app, or Ctrl+Shift+Backspace in browsers (including on Mac), invokes the open session's header
-Delete action with its ordinary confirmation and busy rules. With no session open it does nothing. The Mac app's Window
-menu has no Close Window item, leaving Cmd+W to session deletion; the window close button and Cmd+Q still close the app.
-The browser chord leaves text editors other than the terminal alone. A visible modal keeps keyboard ownership.
+Cmd+W in the Mac desktop app, or Ctrl+Shift+Backspace on Linux, invokes the open session's header Delete action with its
+ordinary confirmation and busy rules. With no session open it does nothing. The Mac app's Window menu has no Close
+Window item, leaving Cmd+W to session deletion; the window close button and Cmd+Q still close the app. The Linux chord
+leaves text editors other than the terminal alone. A visible modal keeps keyboard ownership.
 
-Cmd+L in the Mac desktop app, or Ctrl+Shift+L in browsers, opens Rename for the open session, including when its row is
+Cmd+L in the Mac desktop app, or Ctrl+Shift+L on Linux, opens Rename for the open session, including when its row is
 filtered out of the sidebar. Closing that shortcut-opened dialog returns focus to the terminal. Both session shortcuts
 work from terminal focus without sending their chord to the program, ignore repeat and composition, and appear in the
 relevant tooltips: Delete on the header button, Rename only on the open session's row-menu item.
 
-Cmd+0–9 in the Mac desktop app, or Ctrl+Shift+0–9 in every other client, directly launches templates with number keys
-(see Creation). Browsers on a Mac use Ctrl+Shift as well, leaving their Cmd+digits free for tabs and zoom.
+Cmd+0–9 in the Mac desktop app, or Ctrl+Shift+0–9 on Linux, directly launches templates with number keys (see Creation).
 
-Cmd+X in the Mac desktop app, or Ctrl+Shift+X everywhere else, begins a quick-launch template sequence (see Creation).
-Text fields outside the session launcher keep their normal Cut or text-direction key; the terminal accepts the sequence
+Cmd+X in the Mac desktop app, or Ctrl+Shift+X on Linux, begins a quick-launch template sequence (see Creation). Text
+fields outside the session launcher keep their normal Cut or text-direction key; the terminal accepts the sequence
 prefix. In the launcher's own fields, selected text keeps that normal action and an unselected field accepts the prefix.
 
-Cmd+K on macOS, Ctrl+Shift+K elsewhere, opens a quick switcher in the web UI and desktop app, including from a focused
-terminal. It works during a pending launch, whose hidden launcher is no longer modal. It does nothing while another
-modal is open or before sign-in and preferences loading finish. Type a case-insensitive subsequence to find sessions
-across all hosts, independent of the sidebar's host selector: title matches come before matches only in host name or
-directory, with most recent activity first within each group. With nothing typed, sessions appear in most recent
-activity order. Every match is reachable by scrolling; if the helm's listing cap cut the snapshot, the switcher says
-only the most recently active sessions were searched. Rows show status, agent, host (with its chosen mark) and
-directory, with matching characters marked. Arrow keys choose and Enter opens the selected session, including while a
-session action is pending; the first match is initially selected. Opening a session hidden by the host choice or status
-filter resets both to All after the open is accepted; a refused pick keeps both choices. A pick already visible through
-both leaves them in place. Escape or a click outside closes and restores the previous focus. A loading list says
-loading, rather than no matches, and Enter picks nothing until a reply arrives; a failed read says so.
+Cmd+K on macOS, Ctrl+Shift+K on Linux, opens a quick switcher, including from a focused terminal. It works during a
+pending launch, whose hidden launcher is no longer modal. It does nothing while another modal is open or before
+preferences finish loading. Type a case-insensitive subsequence to find sessions across all hosts, independent of the
+sidebar's host selector: title matches come before matches only in host name or directory, with most recent activity
+first within each group. With nothing typed, sessions appear in most recent activity order. Every match is reachable by
+scrolling; if the helm's listing cap cut the snapshot, the switcher says only the most recently active sessions were
+searched. Rows show status, agent, host (with its chosen mark) and directory, with matching characters marked. Arrow
+keys choose and Enter opens the selected session, including while a session action is pending; the first match is
+initially selected. Opening a session hidden by the host choice or status filter resets both to All after the open is
+accepted; a refused pick keeps both choices. A pick already visible through both leaves them in place. Escape or a click
+outside closes and restores the previous focus. A loading list says loading, rather than no matches, and Enter picks
+nothing until a reply arrives; a failed read says so.
 
 While text is typed, a pinned row below the scrolling session matches offers "New session named X". It follows the
 sessions in arrow-key order and is selected when no session matches, except while the session list is still loading,
@@ -3400,38 +3375,34 @@ query, a separate final "Quick launch: <template>" row uses the direct quick-lau
 one; the first recent session stays initially selected. After a failed session read, New and template search remain
 usable.
 
-Cmd+J on macOS, Ctrl+Shift+J elsewhere, opens a template-only list in the web UI and desktop app when no dialog is open.
-It follows the quick switcher's focus, Escape, loading and modal rules. Typing filters template names as `tl:` does,
-without a prefix. Rows show the template name, summary and its ⚡ or number shortcut when assigned. Enter starts the
-highlighted template through the fresh quick-launch path; clicking a row does the same. A name exactly equal to the
-trimmed query (case-sensitively) is highlighted over an earlier substring match, and Enter starts it; arrowing to
-another row changes that choice. With no match, Enter does nothing. A partial template opens New with its choices
-applied. A pick uses the template currently holding that name, including a template edited or recreated since the list
-opened; a name missing from the current catalog shows a preparation error in New. The chord never reaches the terminal's
-program and does nothing while any modal is open, including New, Clone, Replace with and hidden quick-launch
-preparation, or before sign-in and preference loading finish. Chrome, Edge and Firefox document Ctrl+Shift+J as a
-browser console shortcut on Windows and Linux; Firefox documents Cmd+J as Downloads on macOS. Those browsers may keep
-their own action. Browser shortcut lists do not establish whether the page receives the key; the desktop app is the
-guaranteed target.
+Cmd+J on macOS, Ctrl+Shift+J on Linux, opens a template-only list when no dialog is open. It follows the quick
+switcher's focus, Escape, loading and modal rules. Typing filters template names as `tl:` does, without a prefix. Rows
+show the template name, summary and its ⚡ or number shortcut when assigned. Enter starts the highlighted template
+through the fresh quick-launch path; clicking a row does the same. A name exactly equal to the trimmed query
+(case-sensitively) is highlighted over an earlier substring match, and Enter starts it; arrowing to another row changes
+that choice. With no match, Enter does nothing. A partial template opens New with its choices applied. A pick uses the
+template currently holding that name, including a template edited or recreated since the list opened; a name missing
+from the current catalog shows a preparation error in New. The chord never reaches the terminal's program and does
+nothing while any modal is open, including New, Clone, Replace with and hidden quick-launch preparation, or before
+preferences finish loading.
 
-Cmd+/ on macOS, Ctrl+Shift+/ elsewhere, opens **Keyboard shortcuts** in the web UI and desktop app, including from a
-focused terminal. Matching uses the physical Slash key, with no extra modifiers; repeat and composition do not open it.
-The chord never reaches the terminal's program, and does nothing while another modal is open or before sign-in and
-preferences loading finish. The same dialog is available from the **?** menu when a browser keeps the chord for itself.
-Its Sessions, Launching and Terminal groups show every app-wide shortcut and the keys inside a quick-launch sequence,
-with action names beside key chips. New appears only in the Mac desktop app. Each shortcut shows only the form this
-client handles: quick switcher, template list, ⚡, terminal text size and this dialog follow the operating system, while
-New, Delete, Rename, number keys and the sequence prefix use Command only in the Mac desktop app. The dialog names the
-current ⚡ template, or says none is marked, and lists assigned number keys with their template names. It refreshes
-those shared bindings once each time it opens; a failed read keeps cached names. Keys used only inside other dialogs are
-omitted. Escape, Close or a click outside closes the ordinary modal and restores the opener's focus, including the
-terminal or the **?** button. The documentation's Keyboard shortcuts page lists both platform forms.
+Cmd+/ on macOS, Ctrl+Shift+/ on Linux, opens **Keyboard shortcuts**, including from a focused terminal. Matching uses
+the physical Slash key, with no extra modifiers; repeat and composition do not open it. The chord never reaches the
+terminal's program, and does nothing while another modal is open or before preferences finish loading. The same dialog
+is also available from the **?** menu. Its Sessions, Launching and Terminal groups show every app-wide shortcut and the
+keys inside a quick-launch sequence, with action names beside key chips. New appears only in the Mac desktop app. Each
+shortcut shows only the form this client handles: quick switcher, template list, ⚡, terminal text size and this dialog
+follow the operating system, while New, Delete, Rename, number keys and the sequence prefix use Command only in the Mac
+desktop app. The dialog names the current ⚡ template, or says none is marked, and lists assigned number keys with their
+template names. It refreshes those shared bindings once each time it opens; a failed read keeps cached names. Keys used
+only inside other dialogs are omitted. Escape, Close or a click outside closes the ordinary modal and restores the
+opener's focus, including the terminal or the **?** button. The documentation's Keyboard shortcuts page lists both
+platform forms.
 
 The native desktop remembers its last ordinary window rectangle and whether it was maximized when it closed. On the next
 launch it restores that rectangle only when it fits on a currently connected display; otherwise it opens at a safe size
 centered on a current display. On Wayland, which does not expose reliable global window positions, Farhelm keeps a
-usable saved size and the maximized state while leaving placement to the compositor. Native fullscreen and webview zoom
-are not persisted.
+usable saved size and the maximized state while leaving placement to the compositor. Native fullscreen is not persisted.
 
 ## Durability and resume
 
@@ -3820,12 +3791,12 @@ host ID, and its JSON envelope is schema version 7 with a full `caller.session_i
 the entry and session together; the own-host marker compares the entry. Acting host selectors still use display names as
 described below.
 
-Every session route requires the full ID, including terminal attachment, files, tunnels and viewer metadata. A bare ID
-from a stale browser tab is refused with a reload remedy. Agents must also use full targets, except that exact equality
-with their authenticated own bare `$FARHELM_SESSION_ID` is accepted on their requesting entry. That equality wins even
-when the bare string resembles a full ID. Every other bare target is refused with a pointer to `farhelm agent sessions`.
-Full self-Delete and self-Prompt are refused by comparing both entry and session, just like their bare self spellings.
-The credential and helm-to-supervisor protocol stay bare; older supervisors keep working without an update for this.
+Every session route requires the full ID, including terminal attachment, files, tunnels and viewer metadata. A bare ID,
+such as one from an out-of-date client, is refused. Agents must also use full targets, except that exact equality with
+their authenticated own bare `$FARHELM_SESSION_ID` is accepted on their requesting entry. That equality wins even when
+the bare string resembles a full ID. Every other bare target is refused with a pointer to `farhelm agent sessions`. Full
+self-Delete and self-Prompt are refused by comparing both entry and session, just like their bare self spellings. The
+credential and helm-to-supervisor protocol stay bare; older supervisors keep working without an update for this.
 
 The helm accepts bare session IDs up to 40 UTF-8 bytes, allowing the supervisor's 36-byte UUID and a small margin; a
 full ID is at most 77 bytes. Empty, control-containing and dot-segment bare IDs are refused. This also applies to parent
@@ -3949,9 +3920,9 @@ and change their own stored values, even when fleet-wide authority makes the nar
 
 `farhelm agent open-url -- <url>` asks to open an absolute HTTP or HTTPS URL with a host, at most 4096 bytes long. Raw
 whitespace and control characters are refused before parsing, matching terminal links; the full original URL is shown as
-labelled data on the approval card. The command waits and exits zero after a web Open/Allow click or after the desktop's
-native browser opener accepts the request, not after the destination loads. Denial, dismissal, refusal, timeout and a
-native opener failure exit nonzero with a short message.
+labelled data on the approval card. The command waits and exits zero after the desktop's native browser opener accepts
+the request, not after the destination loads. Denial, dismissal, refusal, timeout and a native opener failure exit
+nonzero with a short message.
 
 On remote hosts only, Farhelm supplies `BROWSER=<absolute-session-farhelm> agent open-url -- %s` to agents at their next
 launch and to new terminal tabs immediately. Existing agents and tabs keep their environments. This is a conditional
@@ -3978,12 +3949,10 @@ always asks unless its own permission is on, regardless of the public permission
 Always allow on a link card grants only its category, and only while the host still has the installation identity that
 asked.
 
-Without the matching permission, Allow and Always allow open the link after the card's ordinary pause. A web client
-rechecks the URL and opens synchronously in the click, before sending the approval; an expired or rejected answer can
-therefore arrive after the link has opened. The desktop page opens nothing itself: its embedded helm opens through the
-desktop's native callback after approval. With the matching permission on, the desktop opens immediately without a card,
-while a web client still shows the full URL with Open and Dismiss. Dismiss refuses the request. A standalone helm never
-opens a browser on the server. A web client whose pop-up is blocked cannot reliably detect that failure.
+Without the matching permission, Allow and Always allow open the link after the card's ordinary pause. The window opens
+nothing itself: its embedded helm opens the link through the desktop's native opener after approval. With the matching
+permission on, the desktop opens immediately without a card. Dismiss refuses the request. A standalone helm never opens
+a browser on the server.
 
 For a loopback URL from a remote session in the Mac app, the card offers **Tunnel and open** first, alongside the
 ordinary raw-link answer. It names the remote host and port, and explains that opening directly reaches the Mac instead.
@@ -4045,22 +4014,22 @@ Failure to store the grant leaves the request answerable; already-waiting cards 
 UI ignores the new eligibility field and keeps its existing buttons. The new answer is a distinct variant so an older
 helm rejects it rather than interpreting it as a fleet-wide grant.
 
-If no Farhelm window is open to show the card (no GUI is connected to the helm), a request that needs approval is
-refused at once, with a message saying there is no Farhelm window to ask in and to open Farhelm and retry. Otherwise it
-waits for the user's answer for at most nine minutes, then is refused as not answered and its card disappears; nine
-rather than ten so that an agent whose shell commands are cut off at ten minutes, as Claude Code's are, still sees the
-answer. Declined, not answered, and no GUI are distinct messages on stderr with a nonzero exit, and nothing is carried
-out after any of them. While it waits, the CLI itself says once on stderr, after a couple of seconds without an answer,
-that it is waiting for the user to approve the request in Farhelm. Deleting a session first denies the requests it has
-waiting. An approval holds only for the host connection the request arrived on: a request whose host was replaced or
-re-identified while it waited is refused rather than carried out. An approval that arrives after the asking CLI was
-killed still carries out exactly what the card showed. While its session still exists, an approved managed-checkout
-create's keyed retry returns or finishes that attempt's session without another card; a request never approved still
-asks as usual. Other retries are new requests and are asked about like one; when one carries the first request's
-idempotency key and that session still exists, approving it returns the session the first approval created rather than
-creating another. After Delete, every keyed retry is a fresh request with the ordinary approval rules. A host's sessions
-can keep only a few cards waiting at a time; a misbehaving host that keeps asking is answered by denying its cards or
-removing the host, and that nuisance is accepted.
+If no Farhelm window is open to show the card (no UI holds the helm's seat; see
+[One GUI at a time](#one-gui-at-a-time)), a request that needs approval is refused at once, with a message saying there
+is no Farhelm window to ask in and to open Farhelm and retry. Otherwise it waits for the user's answer for at most nine
+minutes, then is refused as not answered and its card disappears; nine rather than ten so that an agent whose shell
+commands are cut off at ten minutes, as Claude Code's are, still sees the answer. Declined, not answered, and no GUI are
+distinct messages on stderr with a nonzero exit, and nothing is carried out after any of them. While it waits, the CLI
+itself says once on stderr, after a couple of seconds without an answer, that it is waiting for the user to approve the
+request in Farhelm. Deleting a session first denies the requests it has waiting. An approval holds only for the host
+connection the request arrived on: a request whose host was replaced or re-identified while it waited is refused rather
+than carried out. An approval that arrives after the asking CLI was killed still carries out exactly what the card
+showed. While its session still exists, an approved managed-checkout create's keyed retry returns or finishes that
+attempt's session without another card; a request never approved still asks as usual. Other retries are new requests and
+are asked about like one; when one carries the first request's idempotency key and that session still exists, approving
+it returns the session the first approval created rather than creating another. After Delete, every keyed retry is a
+fresh request with the ordinary approval rules. A host's sessions can keep only a few cards waiting at a time; a
+misbehaving host that keeps asking is answered by denying its cards or removing the host, and that nuisance is accepted.
 
 A waiting card's session targets and GUI Delete and Replace confirmations keep the full reference they showed. Removing
 and re-adding a host creates a new entry UUID, so an old confirmation cannot reach it even if it reports the same bare
@@ -4317,21 +4286,22 @@ inside the environment the first attempt created, where a retry could not find i
   lost automatic mark costs nothing worse than a dot that is one open-and-close cycle behind, corrected by the next
   successful write; and marking a session's notifications read when their list closes (see Status), for the same reason:
   a lost mark costs a bell that stays loud until the list is next closed; marking the welcome card seen, because a
-  failed save only lets it appear on a later load; the automatic announcement check and recording a dismissed batch,
-  because a failed read or save only postpones those announcements to a later load; and a trust hint's Don't show again
-  save after its session has left the screen, because that session's adjacent error no longer has a place to appear. The
-  manual "Mark unread"/"Mark read" toggle and the notification list's clear button are not covered — a failed toggle or
-  clear surfaces like any other operation. Turning the session-confirmation opt-out off restores confirmations
-  immediately in the current client; if that save fails while Settings is still open, Settings shows an adjacent error
-  saying confirmations may still be off for this helm and to try again. Closing Settings before the save settles drops
-  that error, so the failure is then only logged. A newer switch choice clears the error and supersedes older save
-  results. Quick-launch naming, terminal-frame colors, terminal link-click behavior and trust-hint visibility instead
-  put back the saved choice and show an adjacent error when their newest save fails. For naming, frame colors and link
-  clicks, closing Settings drops only the alert: the shared choice still reverts, so mounted terminals and later actions
-  cannot keep using a failed save. Superseded results neither report nor revert a newer choice. A trust-hint choice
-  copied by a reopened Settings dialog or another mounted hint also stops being current when its save fails; reopening
-  while that save is pending does not keep the failed choice alive or inherit the closed dialog's alert. A failed
-  corrective read leaves trust settings unavailable rather than treating unknown trust as off.
+  failed save only lets it appear at a later window start or reset; the automatic announcement check and recording a
+  dismissed batch, because a failed read or save only postpones those announcements to a later window start or reset;
+  and a trust hint's Don't show again save after its session has left the screen, because that session's adjacent error
+  no longer has a place to appear. The manual "Mark unread"/"Mark read" toggle and the notification list's clear button
+  are not covered — a failed toggle or clear surfaces like any other operation. Turning the session-confirmation opt-out
+  off restores confirmations immediately in the current client; if that save fails while Settings is still open,
+  Settings shows an adjacent error saying confirmations may still be off for this helm and to try again. Closing
+  Settings before the save settles drops that error, so the failure is then only logged. A newer switch choice clears
+  the error and supersedes older save results. Quick-launch naming, terminal-frame colors, terminal link-click behavior
+  and trust-hint visibility instead put back the saved choice and show an adjacent error when their newest save fails.
+  For naming, frame colors and link clicks, closing Settings drops only the alert: the shared choice still reverts, so
+  mounted terminals and later actions cannot keep using a failed save. Superseded results neither report nor revert a
+  newer choice. A trust-hint choice copied by a reopened Settings dialog or another mounted hint also stops being
+  current when its save fails; reopening while that save is pending does not keep the failed choice alive or inherit the
+  closed dialog's alert. A failed corrective read leaves trust settings unavailable rather than treating unknown trust
+  as off.
 - Connection state per host is always visible on its rail avatar, with name and phase on hover and to screen readers;
   reconnection uses bounded retries followed by periodic low-frequency re-probing, so a host that comes back overnight
   resurfaces by itself. Hosts swaps session content for the complete management surface. Each row and its rail avatar
@@ -4355,17 +4325,16 @@ inside the environment the first attempt created, where a retry could not find i
 
 ## Feedback
 
-The host rail's foot has a **?** button below the settings gear, in the desktop app and the web UI alike. It opens a
-small menu with these items, in order: **Send feedback**, **Chat on Discord**, **Documentation**, **Keyboard
-shortcuts**, **Release notes**, **SSH needs 2FA?** and **Welcome**. Chat on Discord opens the project's Discord invite
-(`https://discord.gg/G3bukxTjXR`) the same way as Documentation. Documentation opens the docs site
-(`https://farhelm.io/docs/`) in the user's browser: a new tab from the web UI, the system browser from the desktop app.
-Keyboard shortcuts opens the dialog described in [Desktop window chrome](#desktop-window-chrome). Release notes opens
-the general release notes page (`https://farhelm.io/docs/release-notes/`) the same way, whether or not an update is
-waiting. After this helm has shown an announcement, **Announcements** appears directly after **Release notes**, with the
-description **Shows previously shown announcements again**; it reopens the shown history described below. The installed
-desktop app's menu adds **Check for updates** last (see [Installation and updates](#installation-and-updates)). Welcome
-shows the welcome card again.
+The host rail's foot has a **?** button below the settings gear. It opens a small menu with these items, in order:
+**Send feedback**, **Chat on Discord**, **Documentation**, **Keyboard shortcuts**, **Release notes**, **SSH needs 2FA?**
+and **Welcome**. Chat on Discord opens the project's Discord invite (`https://discord.gg/G3bukxTjXR`) the same way as
+Documentation. Documentation opens the docs site (`https://farhelm.io/docs/`) in the system browser. Keyboard shortcuts
+opens the dialog described in [Desktop window chrome](#desktop-window-chrome). Release notes opens the general release
+notes page (`https://farhelm.io/docs/release-notes/`) the same way, whether or not an update is waiting. After this helm
+has shown an announcement, **Announcements** appears directly after **Release notes**, with the description **Shows
+previously shown announcements again**; it reopens the shown history described below. The installed desktop app's menu
+adds **Check for updates** last (see [Installation and updates](#installation-and-updates)). Welcome shows the welcome
+card again.
 
 **SSH needs 2FA?** shows the two shell commands for each registered SSH host: **Sessions connection** and **Setup and
 updates connection**, each with a copy button. Run them on the helm's machine, as its user (on this Mac in the Mac app);
@@ -4381,18 +4350,17 @@ for that connection. It never starts SSH or registers a host.
 ### Welcome card
 
 Once per helm, a welcome card introduces Farhelm and points at the Get started guide's first-session page and private
-feedback. Every helm starts unseen, including existing helms after updating. Each page load decides once, after sign-in
-and a successful shared-preferences read; a failed or timed-out read does not open the card. It is a modal in the app's
-dialog style, titled **Welcome to Farhelm**, with focus inside and other global chords inactive. Escape, the ×, **Got
-it**, and **Send feedback now** close it and mark it seen in the helm's shared preferences. A failed write still closes
-it and may let it appear on a later load. Other clients pick up dismissal on their next load; a card already open
-elsewhere stays open.
+feedback. Every helm starts unseen, including existing helms after updating. Each window start or reset decides once,
+after a successful shared-preferences read; a failed or timed-out read does not open the card. It is a modal in the
+app's dialog style, titled **Welcome to Farhelm**, with focus inside and other global chords inactive. Escape, the ×,
+**Got it**, and **Send feedback now** close it and mark it seen in the helm's shared preferences. A failed write still
+closes it and may let it appear again at a later window start or reset.
 
 **Read Get started** opens `https://farhelm.io/docs/get-started/first-session/` in the user's browser through the same
 opener as Documentation and leaves the card open. **Send feedback now** closes it and opens the feedback dialog, without
 sending anything. The footer says it is available again as **Welcome** in the **?** menu. Reopening does not reset or
 rewrite seen. Closing a reopened card returns focus to the help toggle; the first-open card has no originating control
-and restores ordinary initial page focus.
+and restores ordinary initial focus.
 
 ### Announcements
 
@@ -4401,22 +4369,22 @@ never-reused id, title, plain-text body and optional display details or a labell
 does nothing, even after dismissal, and never replaces the text this helm first received. The queue, dialog and history
 do not depend on where an announcement came from.
 
-Once per page load after sign-in and the initial preference decision, the client reads pending announcements and shown
+Once per window start or reset, after the initial preference decision, the client reads pending announcements and shown
 history. Initial Welcome, including its Send feedback now handoff, closes first. A failed preference read does not
 prevent this separate check. An empty queue opens nothing; a failed announcement read is logged silently and retried
-only on a later load. A batch ready behind another modal waits for it to close. The read-and-show operation can also be
-called by a later trigger; there is no live announcement event reader today.
+only at a later window start or reset. A batch ready behind another modal waits for it to close. The read-and-show
+operation can also be called by a later trigger; there is no live announcement event reader today.
 
 The dialog is titled **Announcements**, with **Updates and information from Farhelm.** underneath. Pending entries
 appear newest first, each with its title, body and supplied extras. Blank lines separate plain-text paragraphs; text is
 never interpreted as markup. Focus moves inside, global chords are inactive, and **Got it**, the × and Escape all close
 it. Dismissal records only the entries that dialog showed, moving them into the helm's shared history with a shown time.
-A failed write still closes the dialog and leaves them queued for a later load. Every browser and desktop client shares
-this state; another window's already open dialog may stay open.
+A failed write still closes the dialog and leaves them queued for a later window start or reset. The helm keeps this
+state.
 
 After at least one successful showing, **Announcements** stays in the **?** menu directly after **Release notes**. It
 opens the same dialog with all shown announcements, newest shown first, and reopening writes nothing. Closing this
-history view returns focus to Help; closing an automatic batch restores ordinary initial page focus.
+history view returns focus to Help; closing an automatic batch restores ordinary initial focus.
 
 The first and only producer is a compiled-in release table, initially empty. It contains only announcements explicitly
 chosen by the maintainer during the release procedure, never everything under Breaking in the changelog. Before the helm
@@ -4432,12 +4400,12 @@ builds release-notes links.
 
 Send feedback is a lightweight, private way to tell the maintainer something. It opens a dialog with a required message,
 an optional field for how to reach the user, and a plain display of everything else that will be sent: the Farhelm
-version, whether this is the desktop app or the web UI, and the operating system the user is on. That display is the
-whole submission; nothing else is attached (no logs, session content, host names, or paths). Nothing leaves the machine
-until the user presses Send. Feedback goes only to the project's maintainer, not to a public issue tracker, and needs no
-account; opening a public issue stays possible for anyone who prefers that. On success the dialog thanks the user and
-closes. On any failure (offline, the feedback service unreachable or refusing) it says sending failed, in plain words,
-and keeps the typed text so the user can retry or copy it. Nothing is queued or retried later.
+version, that this is the desktop app, and the operating system the user is on. That display is the whole submission;
+nothing else is attached (no logs, session content, host names, or paths). Nothing leaves the machine until the user
+presses Send. Feedback goes only to the project's maintainer, not to a public issue tracker, and needs no account;
+opening a public issue stays possible for anyone who prefers that. On success the dialog thanks the user and closes. On
+any failure (offline, the feedback service unreachable or refusing) it says sending failed, in plain words, and keeps
+the typed text so the user can retry or copy it. Nothing is queued or retried later.
 
 Under the header summary, the dialog offers "Rather talk in the open? Chat on Discord". Its **Chat on Discord** link
 opens the same invite through the same browser opener as the menu item, leaving the dialog and its draft open.
@@ -4445,16 +4413,14 @@ opens the same invite through the same browser opener as the menu item, leaving 
 While the contact field is not blank, the dialog shows **Re-use for future feedback**, checked by default, with hover
 text. A successful send remembers exactly the contact sent when checked; when unchecked, or when the user emptied a
 prefilled field, it clears the remembered contact. A failed send changes nothing. The helm stores the contact in its
-shared preferences, so desktop and web clients share it. Each client reads those preferences once after authentication,
-and each dialog starts with that client's copy and reuse checked. Another client's later change appears after a reload.
-Every successful send writes the preference, even when it looks unchanged locally, since another client may have changed
-it meanwhile. The feedback submission itself is unchanged; remembering or clearing happens in a separate best-effort
-preference write after success.
+shared preferences, so every client shares it. Each dialog starts with the current remembered contact and reuse checked.
+Every successful send writes the preference, even when it looks unchanged locally. The feedback submission itself is
+unchanged; remembering or clearing happens in a separate best-effort preference write after success.
 
-The helm sends the submission on the UI's behalf; the browser and the desktop webview never send it themselves. Sending
-feedback is a UI action only. Farhelm offers agents no way to send feedback, and no agent request or `farhelm` CLI
-command may be added that does: feedback sent that way would leave the user's machine without the user pressing Send.
-This is about what Farhelm offers, not containment; anything that runs commands as the user can reach a public URL.
+The helm sends the submission on the UI's behalf; the window never sends it itself. Sending feedback is a UI action
+only. Farhelm offers agents no way to send feedback, and no agent request or `farhelm` CLI command may be added that
+does: feedback sent that way would leave the user's machine without the user pressing Send. This is about what Farhelm
+offers, not containment; anything that runs commands as the user can reach a public URL.
 
 The submission travels over HTTPS to a service the project runs on Vercel, which sees the helm machine's IP address
 (used only to rate-limit sends, never put into the feedback), and is stored as an issue in a private GitHub repository
@@ -4467,13 +4433,13 @@ The [maintainer-confirmed decisions](#maintainer-confirmed-decisions) below defi
 trust between hosts, and the user's approval that agent-requested actions across hosts need. Apply those boundaries when
 interpreting the transport and credential rules here.
 
-Steady-state operation between Farhelm's own components uses the browser to a standalone helm (token-authenticated) and
-the helm to each supervisor (local IPC, SSH or Podman exec), plus the desktop app's deliberately local loopback edge.
-User-opened localhost tunnels add a loopback listener on the Mac and a supervisor connection to a loopback service on
-the session host; the bytes between machines still ride the existing helm-to-supervisor connection. Besides
-provisioning's release downloads (see [Topology](#topology)), three more kinds of outbound connection exist. When the
-user sends feedback, the helm posts that submission, and nothing else, to the project's feedback endpoint (see
-[Feedback](#feedback)); that happens only on explicit user action. And the installed desktop app's updater (see
+Steady-state operation between Farhelm's own components uses the desktop app's deliberately local loopback edge between
+its window and its embedded helm, and the helm to each supervisor (local IPC, SSH or Podman exec). User-opened localhost
+tunnels add a loopback listener on the Mac and a supervisor connection to a loopback service on the session host; the
+bytes between machines still ride the existing helm-to-supervisor connection. Besides provisioning's release downloads
+(see [Topology](#topology)), three more kinds of outbound connection exist. When the user sends feedback, the helm posts
+that submission, and nothing else, to the project's feedback endpoint (see [Feedback](#feedback)); that happens only on
+explicit user action. And the installed desktop app's updater (see
 [Installation and updates](#installation-and-updates)) asks get.farhelm.io which stable release is the latest, reads
 `/advisories` and its signature for release withdrawals, and, when it is newer, verifies that release's signed checksums
 and its installer against the keys compiled into the app before running the installer, which downloads the release's
@@ -4495,51 +4461,20 @@ first, excluding configured certificates and hardware-token keys that could take
 may follow it. The user's proxy and jump configuration still applies. The gateway's host key is recorded on first use in
 a known_hosts file in the helm's state directory, never in the user's own.
 
-- **Client to helm**: a standalone helm serves its web UI over plain HTTP bound to loopback only, with a required token.
-  The helm refuses to bind non-loopback addresses in v1; TLS serving is post-v1. Reaching the UI from another machine
-  means an SSH port forward the user sets up themselves — there is no built-in tunneling or Tailscale integration in v1.
-  The browser therefore always talks to the loopback literal `http://127.0.0.1:<port>`, which is conveniently a secure
-  context — the precondition the browser clipboard APIs require to be reachable at all. Eligibility is not the same as
-  success: engine policy and per-request permission still apply on top of it, and a clipboard operation that the engine
-  refuses fails silently by the Terminal experience section's own clipboard contract above, not with an error. The token
-  still matters on loopback: it keeps other local processes and users out. The helm generates it on first run; the user
-  views or rotates it on the helm's machine (`farhelm helm token show|rotate`), and the browser asks for it once per
-  device and keeps a session thereafter. Rotating the token invalidates every browser device credential for new
-  requests; already-admitted requests may finish. The native app's own credentials, which its embedded helm issues to it
-  directly rather than through the token, are exempt from rotation, and its open connections stay up through one.
-  Existing terminal and event-feed connections may remain usable or close on rotation, whichever keeps the
-  implementation simpler; reconnecting requires a current credential. Rotation does not stop running agent sessions. The
-  desktop app uses a different client boundary: its embedded helm serves no browser UI and exposes no token exchange. It
-  chooses a fresh loopback port at each launch and accepts only the two credentials minted in memory for that launch;
-  stored browser credentials in the shared state directory do not authenticate there. The token-control commands still
-  operate on the shared durable token for a standalone helm started later. Dioxus itself also keeps a loopback WebSocket
-  for its UI updates, protected by a random per-launch key. That framework listener is accepted; removing it would
-  require maintaining a Dioxus fork. The desktop app embeds its helm; that edge is local. The token keeps other users
-  OUT of a standalone helm; it does not let the browser tell the helm apart from another local user's process that binds
-  the same port while the helm is down. That gap is accepted in v1: the browser UI is recommended only on a machine with
-  no other, untrusted local users, and the native app is the preferred client wherever it is available.
-  `docs/security.md` records the reasoning. The UI is served only under the IPv4 literal, never under the names
-  `localhost` or `[::1]`: the helm binds only `127.0.0.1`, so another local account can bind `[::1]` on the same port at
-  any time, even while the helm runs, and a browser that resolves `localhost` to `::1` would load that account's page
-  under the origin holding the device secret. Refusing the names keeps any device secret from being stored under an
-  origin another account can serve; a plain page load that names them and still reaches the helm is redirected to
-  `127.0.0.1`. A device secret a browser stored under `localhost` before this rule remains exposed to such a squatter
-  until the token is rotated, and a squatter on `localhost` can still show a lookalike token prompt, which falls under
-  the gap accepted above. Whether the web token is stored in the user's password manager is the user's choice: the
-  browser prompt is an ordinary password field, and Farhelm does not try to stop a browser from offering to save it or
-  keep a synced store from holding it. A saved token being autofilled into a lookalike prompt is the same port-squatter
-  gap. The helm's Origin check is a browser-side defense: it keeps pages in the user's browser, whose `Origin` the
-  browser sets truthfully, away from the helm. The desktop app's embedded helm admits its webview's custom URL schemes
-  (`dioxus://`, and `wry://` for the webview library underneath), which every desktop app built on that framework or
-  library can present. A standalone helm does not admit those schemes: it has no custom-scheme page that needs a
-  cross-origin API. Content displayed by another such application can still pass the embedded helm's Origin check. That
-  is accepted for this browser-facing check only, because such content still has no credential; the embedded helm needs
-  the exemption because the window's page is `dioxus://index.html`, cross-origin to the helm. That check is not the
-  desktop app's identity. Nothing that establishes the native app as a client may rely on `Origin`; that rests on the
-  credential the native process obtains itself, and hardening that keeps other software from passing for the native app
-  goes through that credential. In both modes, a request without an Origin is refused when `Sec-Fetch-Site` says
-  `cross-site` or `same-site`: a page on another loopback port has no authority over this helm. This also prevents an
-  ordinary link from such a page from opening the standalone helm; address-bar launches and bookmarks still work.
+- **Client to helm**: the desktop app's window reaches its embedded helm over loopback only. The helm chooses a fresh
+  loopback port at each launch, binds only the IPv4 literal `127.0.0.1`, and accepts only the credentials minted in
+  memory for that launch and handed to the window directly. They never reach the database, and no request can obtain
+  one, so the window never has a credential to lose or renew. TLS serving and binding non-loopback addresses are
+  post-v1, together with any remote helm. The helm serves no browser UI and no token exchange. Every helm, embedded or
+  standalone, refuses a request a browser page sends: one that carries an `Origin`, or a `Sec-Fetch-Site` of
+  `cross-site` or `same-site`, has no authority over the helm, so a page in the user's browser on the same machine
+  cannot reach it. The credential keeps other local processes and users out; it does not let the window tell the helm
+  apart from another local user's process that binds the same port while the helm is down. That gap is accepted because
+  it barely exists for the desktop app: its embedded helm holds the port for the app's whole life, and the app exits
+  when its helm ends, so no window is left talking to a port the helm gave up. `docs/security.md` records the reasoning.
+  Nothing that establishes the desktop app as a client may rely on anything but the credential the app's own process
+  holds; hardening that keeps other software from passing for the app goes through that credential. A standalone helm
+  (see Topology) accepts no UI connection.
 - **Helm to supervisor**: ordinary remote supervisors use the user's SSH access. Containers use a Podman exec pipe, with
   SSH to the container host when remote. The helm's own machine's supervisor uses local IPC. These all carry the same
   supervisor protocol. Passwordless SSH authenticates with the user's keys, with the Tensorlake exception below.
@@ -4601,9 +4536,8 @@ Further requirements:
   add-on; v1 leans on agent conversation resume instead.
 - A prompt composer or message-level abstraction over the terminal.
 - Multi-writer session sharing, or multiple concurrent helms.
-- TLS on the web edge — the helm binds loopback only, and tunnels provide transport security.
-- Tailscale integration, and built-in tunneling for the web edge — that stays a local port plus user-managed SSH
-  forwarding. (Automatic SSH transport for the helm-to-supervisor edge is in scope; see Topology.)
+- A remote helm: the desktop app attaches only to the helm it embeds, so the window-to-helm edge needs no TLS, Tailscale
+  integration or tunneling. (Automatic SSH transport for the helm-to-supervisor edge is in scope; see Topology.)
 - IDE functionality, diff viewers, code review UI.
 - Built-in Git branch management, stacked-PR tooling, or a `jj` graph editor.
 - Multi-user collaboration and cloud-hosted execution beyond Tensorlake sandboxes used as hosts or individual sessions.
@@ -4615,11 +4549,10 @@ Further requirements:
 
 The first usable version is complete when all of the following pass:
 
-1. From the helm on the Mac (native app) — with helm-side access to the configured release source (get.farhelm.io by
+1. From the helm on the Mac (desktop app) — with helm-side access to the configured release source (get.farhelm.io by
    default) or a staged payload directory — given nothing but passwordless SSH to a fresh Ubuntu host, provision it in
    one action: supervisor installed and started without root, host registered, sessions operable with no further network
-   setup. Also quit the app, start a standalone `farhelm helm run` on the same state directory, and open that helm's web
-   UI from a browser (token-authenticated). Stop the standalone helm and relaunch the app before continuing.
+   setup.
 2. Create and launch an official Claude Code session in one action, in an existing `jj` workspace where Git reports
    detached HEAD.
 3. Create a local (Mac) session the same way; both appear in one list.
@@ -4627,8 +4560,9 @@ The first usable version is complete when all of the following pass:
 5. Quit and relaunch the app: both sessions are still running, terminal state intact, exactly as left. Then reboot the
    Mac: the remote session is untouched; the local session shows interrupted, and opening it offers resume that restores
    the conversation.
-6. Quit the app and start a standalone `farhelm helm run` on the same state directory. Attach to the remote session from
-   one authenticated browser tab, then another; the first tab visibly detaches.
+6. With the remote session open, break or stall the window's connection to its helm (the test harness can): the window
+   goes inert behind "Reconnecting to the helm…", rebuilds, shows the generic connection-lost notice, and the remote
+   session and its terminal come back as left.
 7. Ask Claude to create a new `jj workspace` and spawn a child session via the provided CLI, and approve its card; the
    child appears in the client without refresh.
 8. Restart the Linux supervisor while its session runs: the terminal is uninterrupted and no state is lost.
@@ -4954,31 +4888,30 @@ builds) also opens the completed local save with the default app. The helm check
 ignoring ASCII case, against a shared user-chosen list that defaults to .md, .txt and .json (amended 2026-11-12 at the
 maintainer's request: the default also lists .png, .jpg, .jpeg, .gif, .webp, .bmp and .avif). It also requires the saved
 file to retain the final extension disclosed at hover. An empty list opens nothing; any listed type can open, including
-HTML if the user adds it. A plain click or any browser click only downloads. The desktop app deliberately does not set
-the macOS quarantine flag on downloaded files, so these saves do not carry the "downloaded from the internet" prompt a
-browser save would carry. The click authorizes this transfer across the host boundary, including for agent-controlled
-files. In the desktop settings dialog, listed types outside `md`, `txt`, `json`, `log` and (since that amendment) the
-default's image types get a prominent warning beside the field. For HTML-like types, it explains that an agent-written
-page can run scripts in the browser, open web addresses outside Farhelm's link permissions, and send cross-site requests
-to services on the user's machine, including localhost on other ports. Those requests may carry the service's cookies
-even though the page cannot read them directly. For other unrecognized types, it explains that Farhelm does not restrict
-the default app's handling of the file and that opening an agent-written file may run code.
+HTML if the user adds it. A plain click only downloads. The desktop app deliberately does not set the macOS quarantine
+flag on downloaded files, so these saves do not carry the "downloaded from the internet" prompt a browser save would
+carry. The click authorizes this transfer across the host boundary, including for agent-controlled files. In the desktop
+settings dialog, listed types outside `md`, `txt`, `json`, `log` and (since that amendment) the default's image types
+get a prominent warning beside the field. For HTML-like types, it explains that an agent-written page can run scripts in
+the browser, open web addresses outside Farhelm's link permissions, and send cross-site requests to services on the
+user's machine, including localhost on other ports. Those requests may carry the service's cookies even though the page
+cannot read them directly. For other unrecognized types, it explains that Farhelm does not restrict the default app's
+handling of the file and that opening an agent-written file may run code.
 
 Opening a link is another bounded effect across the host boundary. Only an admitted HTTP(S) URL may reach the user's
 browser, after an Allow/Open click or under the requesting host's matching link permission. With **Open local-network
 links without asking** on, a remote host can make the desktop user's browser load addresses on the user's own machine or
-network without a click. In a web client the permission still leaves an Open click. Neither permission authorizes other
-commands, file access or clipboard reads. Login redirects to `localhost` on the remote host are not forwarded
-automatically; forwarding those callbacks is outside the localhost-tunnel feature.
+network without a click. Neither permission authorizes other commands, file access or clipboard reads. Login redirects
+to `localhost` on the remote host are not forwarded automatically; forwarding those callbacks is outside the
+localhost-tunnel feature.
 
 Localhost tunnels deliberately extend that browser boundary. Before enabling them, a prominent warning must explain that
 a tunneled page is served from `127.0.0.1` on the Mac: cookies are not isolated by port, so it can read cookies from
 other services on that address; the browser treats it as a local page and skips private-network checks. The tunnel's
 loopback listener has no authentication and accepts connections from any program on the Mac, like SSH port forwarding.
-The helm's same-site navigation hardening also means an ordinary link from another `127.0.0.1` page cannot open a
-standalone helm on that Mac. The user accepted these consequences for this feature; consent is off until they accept the
-warning, and Settings can revoke it and close the tunnels. A tunnel does not give a supervisor an arbitrary network
-dialer: only the helm may open a relay, and the supervisor independently confines its destination to loopback.
+The user accepted these consequences for this feature; consent is off until they accept the warning, and Settings can
+revoke it and close the tunnels. A tunnel does not give a supervisor an arbitrary network dialer: only the helm may open
+a relay, and the supervisor independently confines its destination to loopback.
 
 A program in an attached remote terminal may write the viewer machine's system clipboard through OSC 52, without a
 separate local selection or copy gesture. This is an explicitly allowed, bounded effect across the remote-host boundary,
@@ -5031,59 +4964,70 @@ templates are a possible design, not a security property established for the cur
 
 ### Client hardening
 
-Confirmed 2026-09-28: for the browser UI, security work addresses concrete, practical attacks. Defense in depth against
-a hypothetical flaw, such as a script-injection bug nobody has found, is not required there, and neither is protection
-against actors this threat model already excludes: same-account processes, and other local accounts on a machine where
-the browser UI is not recommended. The native app is the preferred client and is held to a higher bar: hardening that
-narrows what a hypothetical flaw in it could reach, or that keeps other software from passing for it, is wanted, as long
-as it stays proportionate.
+Confirmed 2026-09-28: the desktop app is held to a high bar. Hardening that narrows what a hypothetical flaw in it could
+reach, or that keeps other software from passing for it, is wanted, as long as it stays proportionate.
 
-### Signing in again
+### Losing the connection to the helm
 
-Confirmed 2026-10-01: the desktop app is the primary supported surface. Decided 2026-10-02: the desktop app never
-involves a user-visible credential, and the split between its embedded helm and its window is an implementation detail.
-Its own credentials are not revoked by browser sign-in token rotation or evicted by the cap on remembered client
-credentials, so in ordinary operation it never signs in again.
+Decided by the maintainer on 2026-11-12: the window and its helm behave as if joined by an infallible, ordered stream.
+While the connection holds, the helm receives the window's commands in the order the user gave them, answers each one
+promptly (a host that does not answer in time is an ordinary answer, such as that the host timed out), and every change
+a command causes is already on screen when its answer arrives. In the maintainer's words: "We need an abstraction that
+works as if there's an infallible, ordered stream between the UI and the Helm. If that is actually failing, that needs
+some kind of UI reset ... so that we don't spread complexity all over the place."
 
-Decided 2026-10-22: when a browser GUI's sign-in expires (the browser sign-in token was rotated, its device credential
-was evicted, or the helm otherwise stops accepting it), the browser is treated as if the interface were reloaded from
-scratch. Everything the page held that the helm had not accepted is lost: open forms, dialogs and drafts, unsaved edits,
-a save or click that failed or was cut off because the sign-in had expired (including one that happened just as it
-expired), pending retries and queued reconciliation. After signing in, the page starts over from what the helm reports;
-nothing is replayed, restored or merged back, and the user redoes what was lost. Recovery is a literal page reload, or
-as close to one as the browser allows. The browser keeps its credential in local storage, so a reload does not by itself
-require signing in again; where that does not hold, the token prompt simply reappears, and no mechanism is added to
-avoid it. Spend no complexity making browser sign-in expiry fine-grained or preserving any browser state across it,
-however narrow the case. Work the helm already accepted is unaffected, since it is the helm's. Friction in the browser's
-token prompt is acceptable too.
+When the connection does break, for whatever reason (the connection dropped, the machine slept, the helm stopped
+answering), nothing tries to recover individual actions. The whole window resets instead, the same way however it broke:
 
-Three things still hold. In the desktop app, an action the user started is never lost silently: it either completes and
-reports its outcome, or reports that its outcome is unknown. The browser is excepted: an action still pending when its
-token prompt opens may lose its report. The helm still carries the action out, since accepted actions are the helm's,
-and the session list shows the result after sign-in. Decided 2026-10-02: the browser is best effort for rare problems
-that lose a report but not work. Sign-in recovery never crashes the window or leaves it dead. If the desktop app's own
-authentication fails anyway, which takes something genuinely broken rather than a rotation or a busy browser, the window
-says so and offers a retry, without restarting the app. This principle may be revisited later.
+- The window goes inert behind "Reconnecting to the helm…" and reconnects to the same helm, making at most one attempt
+  at a time.
+- Once reconnected, everything the window held from the helm is thrown away and rebuilt from what the helm reports now.
+  Terminals re-attach and replay from their supervisors as on any reconnect.
+- One generic notice covers the gap: "The connection to the helm was lost; something you did just before may or may not
+  have happened." No action tracks its own fate across a reset, and there is no per-action report that an outcome is
+  unknown. Work the helm already accepted carries on, since it is the helm's, and the session list shows its result.
+- What survives a reset: this device's local preferences (sidebar width, theme, window size and the like) and the
+  selected session, by id, if it still exists. Everything else starts over: open dialogs and menus, unsaved edits and
+  half-typed launcher drafts included. Nothing is replayed, restored or merged back, and the user redoes what was lost.
+- Duplicates around a reset are accepted. A launch sent just before the drop may or may not have happened; after the
+  reset the user sees the real list, and launching again without looking can start a second session. The GUI keeps no
+  launch request keys or retry rules to prevent that. Idempotency keys the command line and agents use are unaffected
+  (Agent-spawned sessions).
+- If the helm refuses the app's own credential, which takes something genuinely broken, the window says it cannot
+  connect and offers Retry rather than reconnecting in a loop, without restarting the app.
+- A reset never crashes the window or leaves it dead: it ends rebuilt, or on the cannot-connect state with Retry. The
+  one exception is a helm that has ended inside the app: the app says its helm stopped and exits, since nothing restarts
+  the helm inside a running app.
+
+An action the user started is still never lost silently: while the connection holds it completes and reports its
+outcome, and when the connection breaks first, the generic notice is its report. Terminal streams and file transfers
+travel on their own connections. A dropped terminal stream or a failed transfer alone does not reset the window: the
+stream reconnects on its own (Terminal experience), and a failed upload or download is that transfer's own visible
+outcome. A transfer still in flight when the window resets is covered by the generic notice.
+
+Decided 2026-10-02 and still in force: the desktop app never involves a user-visible credential. Its own credentials are
+minted for each launch (see Security), so it never signs in.
 
 ### One GUI at a time
 
-Confirmed 2026-10-01: a single GUI attached to the helm, one browser tab or the desktop app's window, is the supported
-user surface. Several GUIs open on the same helm at once work on a best-effort basis: an action taken in one can race a
-change made in another, and the outcome may reflect what that GUI last showed rather than the newest state. Fix such a
-race when the fix is easy and adds little complexity; do not add significant machinery to keep concurrent GUIs
-consistent. This does not withdraw the session view's multi-client rules (one attached client per session, takeover,
-displaced clients), which still hold whenever more than one client opens a session, and the desktop app remains the
-primary GUI (see Signing in again).
+Decided by the maintainer on 2026-11-12, replacing the best-effort support for several GUIs at once confirmed
+2026-10-01: a helm accepts one UI at a time, and enforces it. The UI's connection to the helm is its seat. A UI that
+connects takes the seat, and the one holding it is displaced: the displaced window says that another window took over
+and goes wholly inert, its terminals included. It does not reconnect on its own and none of its terminals re-attaches
+until the user explicitly takes the seat back from that window, which displaces the other one in turn. Only the helm's
+own word that another UI took the seat counts as a takeover; a connection that merely drops is a reset (Losing the
+connection to the helm). Agent approvals follow the seat: a window holding it is an open Farhelm window for approval
+requests, and a displaced or disconnected one is not (Agent-spawned sessions). Farhelm adds nothing to cope with several
+UIs at once. If enforcing the seat ever turns complicated, the maintainer accepted deferring the enforcement, but not
+the assumption of a single UI.
 
-With several GUIs open, a view already open in one GUI need not reflect a change saved from another until the view is
-reopened or the page reloads, unless this spec explicitly requires that view to update live. A finding solely about an
-already-open view showing older state after another GUI saves a change is covered by this rule, not a defect. Explicit
-live-update requirements, the session view's multi-client rules, and destructive prompts' preconditions still hold.
+With the helm embedded in the app and its credential handed only to that app's window (see Security), a second UI cannot
+arise today. The seat is enforced for a future remote helm, and the test harness exercises it.
 
 The `farhelm` command line, and the agent skill through which agents act on the fleet, are a fully supported primary
 surface alongside the GUI, including while a GUI is open (acting from inside a session needs a window open to approve
 it, unless the host's setting says not to ask; see Agent-spawned sessions): operations they perform concurrently with a
-GUI must behave correctly, and the best-effort qualifier above applies only to several GUIs at once.
+GUI must behave correctly.
 
 A GUI write must not undo a change an agent or the command line made while that view was open; the view's display may
 lag until the next interaction.
@@ -5096,10 +5040,10 @@ than the one deleted. A number-key change re-reads the bindings before it saves 
 agent's or the command line's binding change that lands between that read and the write can be undone (Creation). That
 overwriting is accepted.
 
-Decided 2026-10-22: a GUI save that fails, for any reason and in the browser or the desktop app, is reported to the user
-and then discarded. The GUI does not keep the change it tried to save, does not treat it as the current state, and does
-not retry or replay it later; the next view or save starts from what the helm reports, and the user redoes the change if
-they still want it. Reporting the failure keeps the rule that an action is never lost silently (see Signing in again).
+Decided 2026-10-22: a GUI save that fails, for any reason, is reported to the user and then discarded. The GUI does not
+keep the change it tried to save, does not treat it as the current state, and does not retry or replay it later; the
+next view or save starts from what the helm reports, and the user redoes the change if they still want it. Reporting the
+failure keeps the rule that an action is never lost silently (see Losing the connection to the helm).
 
 Confirmed 2026-10-10: an action a user takes inside a sub-second window before the screen updates, or in a dialog hidden
 behind another, may be carried out as delivered. A Cancel and a submit of the same dialog that arrive together before a
@@ -5359,17 +5303,6 @@ a Mac the installer supplies the desktop app, which manages its own helm and loc
 
 ### Upgrade compatibility and client scale
 
-Viewing and rotating the browser sign-in token through `farhelm helm token show|rotate` on the helm's machine is
-sufficient for the current product. An app-UI token-management surface is not a current requirement.
-
-Browser sign-in token rotation prevents old browser credentials from admitting new requests to a standalone helm. The
-desktop helm accepts only its own launch's credentials, which are exempt; see "Client to helm". It does not require
-cancelling requests already admitted, including attachment uploads, or rolling back work already performed. Already-open
-terminal and event-feed connections may continue to work, including terminal input, or may close as a consequence of
-rotation. Both outcomes are explicitly acceptable; prefer the simpler implementation. Neither outcome alone is a defect
-or a reason to add cancellation or continuity machinery. Any new request or connection, including a reconnect, must
-authenticate with a current credential. Rotation does not stop the agent processes running in Farhelm sessions.
-
 Supporting a range of historical data schemas and hardening every upgrade/downgrade path are not current design goals.
 During feature design, agents must alert the maintainer to potential loss of data or state before proceeding. The mere
 fact that a schema version was bumped, so that older releases refuse the newer data, is not worth raising (the
@@ -5434,9 +5367,3 @@ releases use ordinary SemVer precedence, so a floor release's own prereleases ar
 The floor constrains update mechanics, not stored-data formats. Uninstall keeps local data, and the remote remedy lets
 the user keep the host's data directory too; a reinstall does not promise that every feature can read that older data.
 Whether a feature's own data survives remains decided per feature, as above.
-
-The helm is optimized for a handful of browser/desktop clients, not a large device fleet. Retaining the 64 newest
-browser credentials is acceptable even when an older credential is actively used. The desktop app's own credentials are
-not counted among them and are never evicted. Beyond a few tens of enrollments, reauthentication friction is acceptable;
-activity-based eviction is not required. Enrollments are credentials, not physical devices, and eviction does not delete
-Farhelm sessions or terminate their agent processes.

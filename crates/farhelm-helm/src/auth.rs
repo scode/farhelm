@@ -12,7 +12,7 @@
 //! They never reach the database, so token rotation and the cap on
 //! remembered browser credentials cannot revoke them, and no HTTP request can
 //! obtain one: the desktop window never has a credential to lose or renew
-//! (SPEC.md "Signing in again").
+//! (SPEC.md "Security", "Client to helm").
 //!
 //! The middleware in this module covers every protected API method, including
 //! both WebSocket handshakes. The static bundle, bootstrap exchange, and the
@@ -983,7 +983,7 @@ mod tests {
     /// authenticates while a browser credential minted beside it does not,
     /// and the embedded one was never a database row for rotation's delete
     /// to reach. This is what keeps the desktop window from ever having to
-    /// sign in again (SPEC.md "Signing in again").
+    /// sign in again (SPEC.md "Security", "Client to helm").
     #[farhelm_testtrace::test]
     async fn rotation_revokes_browser_credentials_but_not_embedded_ones() {
         let dir = tempfile::tempdir().unwrap();
