@@ -1,18 +1,13 @@
-//! Golden JSON for the helm's HTTP views that the browser mirrors by hand.
-//!
-//! `farhelm-ui` keeps its own decoders for [`SessionListBody`] and
-//! [`HostView`] rather than sharing these types, because the helm shapes them
-//! for HTTP and the UI deliberately tolerates words a newer helm may add (a
-//! browser tab loaded before a helm upgrade keeps running old code). Nothing
-//! compiled ties the two sides together, so drift used to surface only in the
-//! browser suite, which CI does not run.
+//! Golden JSON for the helm's HTTP views of sessions and hosts.
 //!
 //! The files under `crates/farhelm-helm/http-contract/` are the contract. The
 //! tests here prove that the helm serializes exactly those bytes' JSON value,
-//! and `farhelm-ui`'s tests decode the same files with the UI's types. A field
-//! added or renamed on the helm side therefore fails here first; updating the
-//! fixture then runs it through the UI decoder, which is where a UI that
-//! cannot read the new shape fails.
+//! so a field added or renamed on the helm side fails here first. The old
+//! Dioxus UI kept its own decoders for [`SessionListBody`] and [`HostView`]
+//! and decoded the same files with them; that half went with that UI (GPUI
+//! migration, F1). The desktop app's startup check still decodes
+//! `host-list.json` (`crates/farhelm-desktop/src/local_host.rs`), so a helm
+//! change that breaks its read of the local row fails there too.
 //!
 //! The values are fully populated on purpose: an `Option` left at `None` or a
 //! defaulted field would let a rename of that field slip through both sides.
@@ -26,10 +21,10 @@ use farhelm_proto::{
     SessionInfo, SessionStatus, TabInfo, WorkingCopyInfo,
 };
 
-/// The one session-list fixture shared with `farhelm-ui`'s decoder tests.
+/// The one session-list fixture.
 const SESSION_LIST_JSON: &str = include_str!("../http-contract/session-list.json");
 
-/// The one host-list fixture shared with `farhelm-ui`'s decoder tests.
+/// The one host-list fixture.
 const HOST_LIST_JSON: &str = include_str!("../http-contract/host-list.json");
 
 /// A `GET /api/sessions` body whose single row sets every field the wire

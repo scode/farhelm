@@ -2,26 +2,28 @@
 
 The session list identifies each agent harness with a small mark beside the permission mark. This document records where
 every mark comes from, what the brand owner's terms allow, and the one sizing rule they all obey, so that the next
-person to touch `crates/farhelm-ui/src/icons.rs` does not have to redo the research or guess why a given harness does
-not carry its official logo. Geometry research date: 2026-09-22; the color re-check is recorded below. Brand terms
-change; re-check the cited pages before relying on a statement here for a new use.
+person to touch `crates/gui/farhelm-gui/src/marks.rs` does not have to redo the research or guess why a given harness
+does not carry its official logo. That module holds the geometry as plain data (paths, bounding boxes, transforms) for
+the GPUI app to draw; the old Dioxus UI drew the same data as inline SVG. Geometry research date: 2026-09-22; the color
+re-check is recorded below. Brand terms change; re-check the cited pages before relying on a statement here for a new
+use.
 
 ## The sizing rule
 
-Every mark is a path inside the shared `viewBox="0 0 12 12"`, wrapped in a `<g transform>` that applies one rule to the
-mark's native coordinates: scale so the longer side of its bounding box spans 10 units, then centre it in the box. With
-`w`, `h`, `x`, `y` the native bounding box and `s = 10 / max(w, h)`, the transform is
-`translate((12 - w*s)/2 - x*s, (12 - h*s)/2 - y*s) scale(s)`. The bounding box is recorded in a comment beside each
-transform so the arithmetic can be checked. The mark is then rendered in a 10×12 CSS pixel slot by `.sidebar-glyph`.
+Every mark is drawn in a shared 12-unit box, through a transform that applies one rule to the mark's native coordinates:
+scale so the longer side of its bounding box spans 10 units, then centre it in the box. With `w`, `h`, `x`, `y` the
+native bounding box and `s = 10 / max(w, h)`, the transform is
+`translate((12 - w*s)/2 - x*s, (12 - h*s)/2 - y*s) scale(s)`. The bounding box is recorded beside each transform, and a
+test checks every transform against the rule. The old UI rendered the box in a 10×12 CSS pixel slot.
 
 The rule exists because the marks are only ever seen next to each other. Before it, three marks were SVG `text` elements
 at font-size 9 and drew at roughly three quarters the height of the path marks beside them. Do not render a mark as
 text, and do not hand-tune a transform to make a mark "look right": change the bounding box, recompute, and keep the
 rule.
 
-Official geometry is scaled by the rule and nothing else; CSS supplies the color treatment recorded below. Several of
-the terms below forbid modification, and an unaltered path is also what lets `THIRD_PARTY_NOTICES.md` cite an upstream
-file at a commit rather than describe a derivative work.
+Official geometry is scaled by the rule and nothing else; the color treatment recorded below is applied by the view that
+draws the mark. Several of the terms below forbid modification, and an unaltered path is also what lets
+`THIRD_PARTY_NOTICES.md` cite an upstream file at a commit rather than describe a derivative work.
 
 ## Per-harness provenance
 
@@ -62,7 +64,7 @@ Farhelm identifies Codex with the OpenAI blossom. OpenAI's brand page (`https://
 self-serve licence for third parties: use the logo "only when it directly relates to OpenAI services", "exactly as
 provided", not "more prominently than your own", and do not "modify it in any way". Official black and white
 "monoblossom" SVGs are in `https://cdn.openai.com/brand/OpenAI-Logos-2025.zip`. The mark is the `d` attribute of
-`OpenAI-black-monoblossom.svg` byte for byte, kept in `icons/openai-blossom.svgpath` because a 2.5 KB path does not
+`OpenAI-black-monoblossom.svg` byte for byte, kept in `marks/openai-blossom.svgpath` because a 2.5 KB path does not
 belong on one source line and must not be simplified. The permission is revocable; if OpenAI's terms change, the mark
 comes out.
 

@@ -1,7 +1,8 @@
 # The bytes a terminal's program reads for each keydown: Farhelm's key contract, which the supervisor's
-# encoder (grid_input.rs) and the page's keyboard rules (grid-input.js) are both held to. Change it only on
-# purpose: regenerate with `node crates/farhelm-ui/js-tests/grid-input-tables.js --write` and review the diff.
-# Which keydowns are sent at all is the page's (js-tests/fixtures/input/keydown-actions.jsonl).
+# encoder (grid_input.rs) and the GUI's keyboard rules (crates/gui/farhelm-input-mapping) are both held to. Change
+# it only on purpose: edit it by hand and review the diff (its generator,
+# the old web GUI's `grid-input-tables.js`, went with that GUI; read it at commit 24bc0580).
+# Which keydowns are sent at all is the GUI's (crates/gui/farhelm-input-mapping/fixtures/keydown-actions.jsonl).
 # [keyCode, key, code, sent]: sent[mods] (1 Shift, 2 Alt, 4 Ctrl, 8 Meta) is the hex bytes,
 # or [non-Mac, non-Mac with application cursor keys, Mac, Mac with application cursor keys].
 [0,"UIKeyInputUpArrow","",[["1b5b41","1b4f41","1b5b41","1b4f41"],["1b5b41","1b4f41","1b5b41","1b4f41"],["1b5b41","1b4f41","1b5b41","1b4f41"],["1b5b41","1b4f41","1b5b41","1b4f41"],["1b5b41","1b4f41","1b5b41","1b4f41"],["1b5b41","1b4f41","1b5b41","1b4f41"],["1b5b41","1b4f41","1b5b41","1b4f41"],["1b5b41","1b4f41","1b5b41","1b4f41"],["1b5b41","1b4f41","1b5b41","1b4f41"],["1b5b41","1b4f41","1b5b41","1b4f41"],["1b5b41","1b4f41","1b5b41","1b4f41"],["1b5b41","1b4f41","1b5b41","1b4f41"],["1b5b41","1b4f41","1b5b41","1b4f41"],["1b5b41","1b4f41","1b5b41","1b4f41"],["1b5b41","1b4f41","1b5b41","1b4f41"],["1b5b41","1b4f41","1b5b41","1b4f41"]]]

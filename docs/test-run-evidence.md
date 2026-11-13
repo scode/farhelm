@@ -75,10 +75,10 @@ The recorder requires a run kind, selection label, concurrency label, and an exp
 ```console
 python3 scripts/record-test-run.py \
   --kind development \
-  --selection 'asset JavaScript unit harness' \
+  --selection 'OMP reporter asset scenarios' \
   --concurrency 'node default discovery' \
   --timeout 60 \
-  -- bash -c 'cd crates/farhelm-ui/js-tests && node --test'
+  -- bash -c 'cd crates/farhelm-supervisor/asset-js-tests && node --test'
 ```
 
 The labels are recorded verbatim; coverage is never inferred from them. Generic mode invokes the argv directly with the

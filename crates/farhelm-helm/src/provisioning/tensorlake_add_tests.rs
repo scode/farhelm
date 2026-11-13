@@ -120,7 +120,6 @@ impl Fixture {
             Arc::clone(&self.harness.manager),
             self.harness.store.clone(),
             Arc::clone(&self.service),
-            self.harness.state.mode,
         );
         state.tensorlake = self.tensorlake.clone();
         state

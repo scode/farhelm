@@ -2,11 +2,13 @@
 
 NOTE: This records the native API limits that shape Farhelm's release persistence behavior.
 
-Farhelm creates its desktop window through `desktop_window()` in
-[`crates/farhelm-ui/src/desktop.rs`](../crates/farhelm-ui/src/desktop.rs). The builder configures native chrome, while
-the release app stores a versioned geometry snapshot under its desktop state directory. It restores a validated normal
-rectangle and maximized flag before the webview is created, and flushes the final snapshot on close. The window-root
-actions already call Tao's maximize API; persistence observes that state without changing the interaction.
+Farhelm created its desktop window through `desktop_window()` in `crates/farhelm-ui/src/desktop.rs` (deleted with the
+Dioxus app; read it at the GPUI port's reference commit `24bc0580`). The geometry record and its restore rules now live
+in [`crates/farhelm-desktop/src/window_state.rs`](../crates/farhelm-desktop/src/window_state.rs). The builder configures
+native chrome, while the release app stores a versioned geometry snapshot under its desktop state directory. It restores
+a validated normal rectangle and maximized flag before the webview is created, and flushes the final snapshot on close.
+The window-root actions already call Tao's maximize API; persistence observes that state without changing the
+interaction.
 
 The pinned Dioxus Desktop 0.7.10 does contain a window-state save and restore path in its
 [`app.rs`](https://docs.rs/dioxus-desktop/0.7.10/src/dioxus_desktop/app.rs.html). It is behind `debug_assertions`, so

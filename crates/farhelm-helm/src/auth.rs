@@ -3,7 +3,7 @@
 //! Every protected API method, both WebSocket handshakes included, needs a
 //! device credential. The helm mints those credentials in memory for one
 //! process lifetime and hands them only to callers inside that process: the
-//! desktop app that embeds the helm (two per launch, see
+//! desktop app that embeds the helm (one per launch, see
 //! [`crate::EmbeddedReady`]) and, for tests, a standalone helm started with
 //! the hidden `--test-credential-file` flag. Only each secret's SHA-256 digest
 //! is kept, and nothing is written to `helm.db`, so a credential dies with the
@@ -94,16 +94,6 @@ impl AuthState {
             });
         bool::from(found)
     }
-}
-
-/// `GET /api/auth/device`: let the desktop webview prove the helm accepts the
-/// credential it was handed before its window opens.
-///
-/// Authentication middleware runs before this handler. Reaching it is the
-/// entire success condition; the empty response carries no credential or
-/// account data across the webview's custom origin.
-pub(crate) async fn validate_device() -> StatusCode {
-    StatusCode::NO_CONTENT
 }
 
 /// Require an explicit device secret before any protected REST handler or
@@ -336,43 +326,6 @@ mod tests {
             StatusCode::OK,
             "control: the same request with a credential this helm minted must authenticate"
         );
-    }
-
-    /// The desktop webview's credential-validation route keeps readable
-    /// success and failure answers on the embedded helm. This pins both
-    /// outcomes because the UI must distinguish an expired credential from a
-    /// valid one.
-    #[farhelm_testtrace::test]
-    async fn embedded_device_validation_cors_is_readable_for_success_and_failure() {
-        let harness = rest_harness::idle_helm().await.embedded();
-        let secret = harness.state.auth.mint_device().unwrap();
-        for (label, credential, status) in [
-            ("valid embedded credential", secret, StatusCode::NO_CONTENT),
-            (
-                "rejected embedded credential",
-                "rejected".into(),
-                StatusCode::UNAUTHORIZED,
-            ),
-        ] {
-            let request = Request::builder()
-                .uri("/api/auth/device")
-                .header(header::HOST, "127.0.0.1:7433")
-                .header(header::ORIGIN, "dioxus://index.html")
-                .header(header::AUTHORIZATION, format!("Bearer {credential}"))
-                .body(Body::empty())
-                .unwrap();
-            let response = harness
-                .unauthenticated_router()
-                .oneshot(request)
-                .await
-                .unwrap();
-            assert_eq!(response.status(), status, "unexpected status for {label}");
-            assert_eq!(
-                response.headers()[header::ACCESS_CONTROL_ALLOW_ORIGIN],
-                "dioxus://index.html",
-                "credential case {label} must have readable CORS headers"
-            );
-        }
     }
 
     /// Device credentials carry the promised 128 bits, rather than merely

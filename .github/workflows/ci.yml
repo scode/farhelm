@@ -272,23 +272,17 @@ jobs:
       # binary builds without it, so lint that configuration separately:
       # `-p farhelm --bins` builds no dev-dependency.
       - run: cargo clippy -p farhelm --bins -- -D warnings
-      # The JS unit harness (PLAN_M6_5.md item 1) is milliseconds of work, so
-      # it shares the existing lint runner rather than paying for a separate
-      # job. Node is already present on this runner image. Running from
-      # inside js-tests/ uses node's long-supported default test discovery
-      # instead of relying on glob CLI syntax from an unpinned node release.
-      - run: cd crates/farhelm-ui/js-tests && node --test
       # The OMP conversation-reporter asset's scenarios are the only
-      # automated execution of an injected asset, so they ride the same lint
-      # runner on the same terms: node is already here, and running from
-      # inside the suite directory keeps node's default test discovery.
+      # automated execution of an injected asset. They are milliseconds of
+      # work, so they ride the lint runner rather than paying for a separate
+      # job: node is already present on this runner image, and running from
+      # inside the suite directory uses node's long-supported default test
+      # discovery instead of glob CLI syntax from an unpinned node release.
       - run: cd crates/farhelm-supervisor/asset-js-tests && node --test
 
-  # The desktop renderer is compiled by no other ordinary-CI job: clippy
-  # builds without the renderer feature. Keep this fast
-  # compile gate on PRs and main; the desktop unit and runtime gates run in
-  # the x86_64 Linux release artifact job, where their native build can share
-  # the Dioxus setup release already needs.
+  # The desktop app (`farhelm-desktop`) is outside the workspace's default
+  # members, so the clippy job never builds it and this job is the only
+  # ordinary-CI lint of it, its tests included.
   desktop:
     needs: changes
     if: needs.changes.outputs.code == 'true'
@@ -301,30 +295,24 @@ jobs:
             ~/.cargo/registry
             ~/.cargo/git
             target
-          # The `compile-only-v2` namespace refuses the old desktop cache,
-          # which can contain Dioxus and test outputs the job no longer uses.
-          # No restore-keys: a stale WebKit generation restored on a lockfile
+          # The `lint-v3` namespace retires the old Dioxus/WebKit compile
+          # cache. No restore-keys: a stale generation restored on a lockfile
           # change and saved beside the new one previously filled the runner's
           # disk in the cache post-step (main, 2026-08-24).
-          key: ${{ runner.os }}-cargo-${{ github.job }}-compile-only-v2-${{ hashFiles('**/Cargo.lock') }}
+          key: ${{ runner.os }}-cargo-${{ github.job }}-lint-v3-${{ hashFiles('**/Cargo.lock') }}
       - uses: actions-rust-lang/setup-rust-toolchain@ecabd13d1c56bd1345c230e542e9144811ad706f # v2.0.0
         with:
+          components: clippy
           cache: false
           rustflags: ""
           build-warnings: ""
-      # The -sys crates in the desktop dependency tree (gtk-sys,
-      # webkit2gtk-sys and friends) resolve their C libraries through
-      # pkg-config at build-script time; these packages are the minimal
-      # additions the CI image needs for the check to pass.
+      # On Linux the app opens saved downloads through GIO, whose -sys
+      # crates resolve GLib through pkg-config at build-script time.
       - name: Install desktop system deps
         run: |
           sudo apt-get update
-          sudo apt-get install -y libwebkit2gtk-4.1-dev libgtk-3-dev libxdo-dev
-      - run: cargo check -p farhelm-ui --features desktop
-      # `farhelm-desktop` is outside the workspace's default members, so no
-      # ordinary workspace command compiles it and only this job checks it on
-      # PRs and main. The release artifact build covers the slower dx path.
-      - run: cargo check -p farhelm-desktop
+          sudo apt-get install -y libglib2.0-dev
+      - run: cargo clippy -p farhelm-desktop --all-targets -- -D warnings
 
   # scripts/install.sh is the one file a fresh machine runs unread and
   # unreviewed (`curl | sh`), so a syntax slip or a shellcheck-catchable

@@ -5,30 +5,70 @@ edition.workspace = true
 homepage.workspace = true
 license.workspace = true
 repository.workspace = true
-description = "Farhelm desktop window (webview shell around the helm)"
+description = "The Farhelm desktop app: the embedded helm, the local supervisor and the app's updater"
 
-# The whole reason this crate exists is to be a BINARY with no library half
-# (D6). Naming the bin explicitly pins the installed file name — `install.sh`
-# puts `farhelm` and `farhelm-desktop` side by side, and the shell finds its
-# CLI sibling by that exact name.
+# The library half is what the GPUI app links: the bootstrap, the updater and the app's state files. It is the only
+# crate that depends on both the helm and the GUI (SPEC_impl.md, "GUI architecture").
+[lib]
+path = "src/lib.rs"
+
+# Naming the bin explicitly pins the installed file name: `install.sh` puts `farhelm` and `farhelm-desktop` side by
+# side, and the app finds its CLI sibling by that exact name.
 [[bin]]
 name = "farhelm-desktop"
 path = "src/main.rs"
 
 [dependencies]
 anyhow.workspace = true
-# The `desktop` feature is not optional here: it is what this crate is. It
-# pulls in dioxus-desktop, wry, and WebKit, which is why the workspace's
-# `default-members` excludes this package.
-farhelm-ui = { workspace = true, features = ["desktop"] }
+# Native file downloads use the platform's account-specific Downloads folder; the helm receives the capability.
+dirs = "6"
+farhelm-helm.workspace = true
+# The shared presentation-unsafe character table, for host text in a startup refusal, and the development-build rule
+# the update readout uses.
+farhelm-proto.workspace = true
+farhelm-supervisor.workspace = true
+# The app starts its supervisor in a session of its own (`setsid`), so the supervisor outlives the app and no signal
+# aimed at the app's terminal reaches it.
+libc.workspace = true
+# Startup reads the embedded helm's host listing over loopback; the updater asks get.farhelm.io for the latest release.
+reqwest.workspace = true
+# The updater refuses a latest-release answer or a compiled version that does not parse as a release. Version ORDER is
+# not computed here: it comes from `farhelm_helm::build_is_newer`, so there is one rule for which build is newer.
+semver.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+# The updater checks a downloaded `install.sh` against its entry in the release's signed `SHA256SUMS` before running it.
+sha2.workspace = true
+tokio.workspace = true
+# This binary embeds a helm in its own process rather than running `farhelm helm run`, so it installs its own
+# subscriber (`init_tracing` in src/lib.rs).
+tracing.workspace = true
+tracing-subscriber.workspace = true
+# Names the updater's private download directory.
+uuid.workspace = true
+# A helm-admitted link opens natively. `hardened` refuses anything but http(s) URLs, so a future caller that skips the
+# helm's validation still cannot open a local file or another scheme.
+webbrowser = { version = "1.1.0", features = ["hardened"] }
 
-# The shipped `farhelm-desktop` binary IS built from this crate, but not by
-# cargo-dist's cargo build — dx has to rewrite the `asset!()` paths into it
-# after the link, or the window renders nothing (see this crate's README).
-# dist reaches it through a generic package instead
-# (`packaging/farhelm-desktop/dist.toml`), whose build command runs dx over
-# this crate. `dist = false` here is what keeps the two descriptions from
-# both producing an asset: cargo-dist would otherwise see a binary target and
-# publish a placeholder-ridden archive under the same name.
+[target.'cfg(target_os = "linux")'.dependencies]
+# Opens a saved download through the desktop's dispatch API rather than waiting for xdg-open, whose generic fallback can
+# wait for the opened app to exit (`open_saved_file` in src/lib.rs).
+gio = "0.18"
+
+[target.'cfg(target_os = "windows")'.dependencies]
+# Windows' std::fs::rename refuses an existing destination; MoveFileExW keeps the state files' replacement atomic
+# without deleting the prior record.
+windows-sys = { version = "0.61.2", features = ["Win32_Storage_FileSystem"] }
+
+[dev-dependencies]
+farhelm-teststate.workspace = true
+# Per-test tracing capture. The attribute owns an isolated dispatcher and, for async tests, a Tokio runtime.
+farhelm-testtrace.workspace = true
+tempfile.workspace = true
+
+# Not built by cargo-dist's cargo build. The release still describes the shipped `farhelm-desktop` as a generic package
+# (`packaging/farhelm-desktop/dist.toml`) whose build command ran dx over the old Dioxus app; that build is broken until
+# the GPUI cutover replaces it. `dist = false` keeps cargo-dist from also publishing an archive for this binary target
+# under the same name.
 [package.metadata.dist]
 dist = false

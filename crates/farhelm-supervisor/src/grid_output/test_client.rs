@@ -1,5 +1,5 @@
-//! A grid client for tests: applies a supervisor's grid stream the way the
-//! browser's grid client does (`crates/farhelm-ui/assets/grid-model.js`),
+//! A grid client for tests: applies a supervisor's grid stream the way a
+//! viewer's grid model does (the GPUI app's is `crates/gui/farhelm-grid-model`),
 //! so that a test can compare what a viewer ends up showing with what the
 //! emulator holds.
 //!

@@ -18,12 +18,10 @@ a harness; when a harness genuinely needs a stable name, derive it from the run'
 
 What is NOT isolated, and what follows from it:
 
-- One agent per checkout or workspace. `.ci-nextest/` and the dx output under `target/` are per checkout. Two agents in
-  one tree race on all of them. Sibling checkouts and `jj workspace` directories are the supported shape; a shared
-  `CARGO_TARGET_DIR` across workspaces is fine for cargo (it locks) but not for the dx build: the desktop smoke
-  serializes its own cargo and dx builds behind `/tmp/fh-build.lock`, and nothing serializes other dx builds. (Fixed
-  lock files like that one, and the CentOS script's lock next to the ssh config, are the exception the fixed-path rule
-  allows: a lock exists to be shared, and it names no state.)
+- One agent per checkout or workspace. `.ci-nextest/` is per checkout. Two agents in one tree race on it. Sibling
+  checkouts and `jj workspace` directories are the supported shape; a shared `CARGO_TARGET_DIR` across workspaces is
+  fine for cargo (it locks). (A fixed lock file, like the CentOS script's lock next to the ssh config, is the exception
+  the fixed-path rule allows: a lock exists to be shared, and it names no state.)
 - Processes you did not start are someone else's. A helm or supervisor answering on a port you did not choose, a
   `farhelm-<uuid>-*.scope` unit whose UUID no run of yours minted, an `fh-it.*`, `fh-e2e.*` or `fh-smoke.*` directory
   holding a live flock, or a docker container from the CentOS script: leave them alone. The teststate sweep already

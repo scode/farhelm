@@ -1,33 +1,13 @@
-//! The `farhelm-desktop` binary: a native window onto a helm that runs
-//! inside it.
+//! The `farhelm-desktop` binary: the desktop app's process, which owns an embedded helm and the local supervisor.
 //!
-//! ## Why this crate is a shell and nothing else
+//! D6 ships the Mac app as two bare binaries, `farhelm` (CLI, helm, supervisor) and `farhelm-desktop` (this one),
+//! installed side by side in `~/.local/bin`. `install.sh` also wraps copies of the pair in an assembled
+//! `~/Applications/Farhelm.app` for launcher identity (SPEC_impl.md, "Native app packaging"); the sibling contract is
+//! the same in both places.
 //!
-//! D6 ships the Mac GUI as two bare binaries — `farhelm` (CLI, helm,
-//! supervisor) and `farhelm-desktop` (this one) — installed side by side in
-//! `~/.local/bin`. `install.sh` additionally wraps COPIES of the pair in an
-//! assembled `~/Applications/Farhelm.app` for launcher identity
-//! (SPEC_impl.md, "Native app packaging"), but that bundle is packaging the
-//! installer does, not anything this binary knows about: the sibling
-//! contract is the same in both places, and no code here reads a bundle.
-//! There is no code here at all, in fact, because there is nothing this
-//! binary does that the `farhelm-ui` bin does not also have to do: both call
-//! [`farhelm_ui::desktop::run`].
-//!
-//! That shared body is what makes the Xvfb smoke worth running. It exercises
-//! the same desktop implementation, but not the same artifact: the smoke
-//! builds `farhelm-ui` for Linux, while the release builds THIS package for
-//! macOS. What each side still owes its own validation is the thin part —
-//! this wrapper, the packaging, and the platform — and only a run on macOS
-//! can cover it.
-//!
-//! It is a SEPARATE crate rather than a second `[[bin]]` in `farhelm-ui`
-//! because a package can turn on a dependency's feature and a bin target
-//! cannot: `farhelm-ui`'s desktop renderer is a feature, and only a package
-//! depending on `farhelm-ui` with `features = ["desktop"]` gets it
-//! unconditionally. Keeping that package out of the workspace's
-//! `default-members` is then what keeps WebKit out of every ordinary build.
+//! Everything this binary does lives in the library half ([`farhelm_desktop::run`]) so the GPUI app can be wired in
+//! there. Until it is, the binary runs without a window.
 
 fn main() -> anyhow::Result<()> {
-    farhelm_ui::desktop::run()
+    farhelm_desktop::run()
 }

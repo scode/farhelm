@@ -49,11 +49,11 @@
 /// library has no category tables, and escaping everything non-ASCII would
 /// mangle every legitimately non-English title. A future format character
 /// outside the list renders as itself, which is why surfaces with a second,
-/// category-free defense (the browser's direction-isolated elements) keep it.
-/// The browser's terminal disclosure helper `visibleFormatCharacters` in
-/// `farhelm-ui/assets/terminal-links.js` mirrors this list and also escapes
-/// Unicode's entire format category. Keep its policy and regression table
-/// aligned when changing these families.
+/// category-free defense (direction-isolated elements) keep it. The old
+/// browser GUI's terminal disclosure helper (`visibleFormatCharacters`, read
+/// it at the GPUI port's reference commit `24bc0580`) mirrored this list and
+/// also escaped Unicode's entire format category; the GPUI app's host-text
+/// element uses this table itself (SPEC_impl.md, "Host-supplied text").
 pub fn is_presentation_unsafe(ch: char) -> bool {
     ch.is_control()
         || matches!(

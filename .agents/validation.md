@@ -544,26 +544,26 @@ systemd or SSH substrate ran.
   agent-shaped reads, a property test that whole, byte-at-a-time, chunked and candidate-split feeding end in the same
   state once any open update is flushed, the handler's forwarding as a property test against a bare
   `alacritty_terminal`, Farhelm's screen-text format and titles (tabs, modes 47 and 1047), the mode accessors (resetting
-  any mouse tracking mode ends reporting), the browser theme's colors, one-column terminals with wide characters and
-  resizes (each bounded to 10 seconds, so that a regression of the vendored reflow fix fails after about 1 GB of
-  allocation instead of running until memory runs out), a screen full of tabs captured in linear time, and hostile
-  output through the vendored caps (combining floods, 8 MB OSC 52 and titles, long hyperlinks, floods of hyperlinks and
-  combining marks against the per-terminal extra storage, a synchronized update past vte's 2 MiB buffer). The terminal
-  snapshot format: the round trip (a recording fed in reads, snapshots where the emulator is clean after a read's split
-  candidate or end, restore, then compare field by field with the uninterrupted emulator after the rest of the output in
-  the same reads, after probes, and after the rest in other reads and a final flush) as a property test over generated
-  output, over a one-column terminal and over two short synthetic recordings, and over 20,000 short scripts of awkward
-  output and resizes (from 8x4 and two columns, each continued after the restore); the review reproducers (a one-column
-  encoder panic, four round-trip losses); the version 1 golden fixtures (`tests/fixtures/snapshots/v1/`: each blob
-  restores to its recorded state, each script still encodes to its blob and reaches its feature); hand-built version 1
-  blobs and refusals of malformed, truncated, oversized (before allocating) and unknown-version blobs, of streams
-  holding sequences version 1 never writes or taking too much work to replay (before feeding), and of fixups no live
-  output makes; history past the restore's cell bound dropped and marked trimmed; mutated and crafted blobs never
-  panicking; extras shared by content through a restore, within the extra storage limit; the size ladder (titles before
-  history); the trimmed mark across restores; an encode's cancel (nothing once it fires, the same bytes until then); the
-  character width table's fingerprint; the Restart seeds, and a seed's encode stopping at whichever look its cancel
-  fires on. About a minute. Part of the workspace nextest run. Run it when the crate or anything under `vendor/`
-  changes. Ignored tests, run by hand in release: the snapshot spike's full round-trip configuration
+  any mouse tracking mode ends reporting), one-column terminals with wide characters and resizes (each bounded to 10
+  seconds, so that a regression of the vendored reflow fix fails after about 1 GB of allocation instead of running until
+  memory runs out), a screen full of tabs captured in linear time, and hostile output through the vendored caps
+  (combining floods, 8 MB OSC 52 and titles, long hyperlinks, floods of hyperlinks and combining marks against the
+  per-terminal extra storage, a synchronized update past vte's 2 MiB buffer). The terminal snapshot format: the round
+  trip (a recording fed in reads, snapshots where the emulator is clean after a read's split candidate or end, restore,
+  then compare field by field with the uninterrupted emulator after the rest of the output in the same reads, after
+  probes, and after the rest in other reads and a final flush) as a property test over generated output, over a
+  one-column terminal and over two short synthetic recordings, and over 20,000 short scripts of awkward output and
+  resizes (from 8x4 and two columns, each continued after the restore); the review reproducers (a one-column encoder
+  panic, four round-trip losses); the version 1 golden fixtures (`tests/fixtures/snapshots/v1/`: each blob restores to
+  its recorded state, each script still encodes to its blob and reaches its feature); hand-built version 1 blobs and
+  refusals of malformed, truncated, oversized (before allocating) and unknown-version blobs, of streams holding
+  sequences version 1 never writes or taking too much work to replay (before feeding), and of fixups no live output
+  makes; history past the restore's cell bound dropped and marked trimmed; mutated and crafted blobs never panicking;
+  extras shared by content through a restore, within the extra storage limit; the size ladder (titles before history);
+  the trimmed mark across restores; an encode's cancel (nothing once it fires, the same bytes until then); the character
+  width table's fingerprint; the Restart seeds, and a seed's encode stopping at whichever look its cancel fires on.
+  About a minute. Part of the workspace nextest run. Run it when the crate or anything under `vendor/` changes. Ignored
+  tests, run by hand in release: the snapshot spike's full round-trip configuration
   (`cargo nextest run -p farhelm-terminal-emulator --release --run-ignored only -E 'test(/^full_size_round_trip_seed_/)'`,
   a few minutes), the review's 300,000 short scripts (`-E 'test(short_scripts_round_trip_at_review_size)'`) and 230,000
   hostile blobs (`-E 'test(hostile_blobs_never_panic_at_review_size)'`), the full round trip over private recordings of
@@ -594,14 +594,10 @@ systemd or SSH substrate ran.
   of several parts, line endings and sanitizing carried across parts, the closing marker of an interrupted paste), UTF-8
   mouse coordinates, focus reports, the wheel on the alternate screen, and `Input` framing. Seconds, in-process. Part of
   the workspace nextest run. Which keydowns become key messages at all (third-level shift, lone capitals, the key after
-  a dead key) and mouse motion de-duplication are the grid client's, pinned by its own tests, not this selection. Both
-  tables are checked-in contract data, first computed from the xterm.js code Farhelm's terminals used before the grid.
-  The key table is rendered from the grid client's keyboard rules: after a deliberate change to them (`grid-input.js`),
-  run `node crates/farhelm-ui/js-tests/grid-input-tables.js --write` from the repository root, review the diff (a
-  changed row is a key a program will read differently), and run this selection; the JS harness's
-  `grid-input-tables.test.js` fails while a checked-in table differs from what the client computes, and it also holds
-  the client's keydown and Alt-click tables (`crates/farhelm-ui/js-tests/fixtures/input/`). The mouse table is edited by
-  hand, together with the encoder.
+  a dead key) and mouse motion de-duplication are the GUI's, not this selection's. Both tables are checked-in contract
+  data, first computed from the xterm.js code Farhelm's terminals used before the grid. The key table was rendered from
+  the old Dioxus UI's grid client, whose generator went with that UI; both tables are now edited by hand, together with
+  the encoder, and a changed row is a key a program will read differently.
 - `python3 scripts/record-test-run.py --kind development --selection 'vendored vte' --concurrency 'libtest default threads' -- cargo test --manifest-path vendor/vte/Cargo.toml --features ansi`,
   `python3 scripts/record-test-run.py --kind development --selection 'vendored alacritty_terminal' --concurrency 'libtest default threads' -- cargo test --locked --lib --manifest-path vendor/alacritty_terminal/Cargo.toml`
   and
@@ -620,46 +616,43 @@ systemd or SSH substrate ran.
   synthetic keys or replayed prefixes. Like the terminal crates, the GPUI trees are excluded from the workspace, so
   nothing else runs it. Run it when anything under `vendor/gpui-pre*` or `vendor/patches/gpui/` changes; minutes, since
   it builds GPUI on its own.
-- `cd crates/farhelm-ui/js-tests && node --test` — the JS unit harness for the asset-JS layer's pure functions
-  (PLAN_M6_5.md item 1). Run from inside the directory rather than as a glob from the repo root: node's no-argument
-  default discovery (every `*.test.js` in cwd) is the oldest, most version-portable form the test runner has, whereas
-  quoted-glob CLI arguments are newer and CI pins no node version. Run it also when
-  `crates/farhelm-proto/grid-fixtures/` changes: `grid-proto-fixtures.test.js` holds the grid client to those files and
-  fails on a fixture it has no entry for, which `farhelm-proto`'s own tests cannot show.
 - `python3 scripts/record-test-run.py --runner nextest --kind development --selection 'helm terminal relay' --concurrency '4 nextest slots; retries 0' -- cargo nextest run -p farhelm-helm --lib -E 'test(/^terminal::tests::/) | test(/^client::tests::/)'`
   — the helm's terminal WebSocket (`crates/farhelm-helm/src/terminal.rs`) and its supervisor client
   (`crates/farhelm-helm/src/client.rs`), in-process against stand-in supervisors: attach, takeover, refusals, data that
   beat the attach reply reaching the browser first, replay-complete ordering, heartbeat, frame and queue bounds, the
   stall detach, teardown, and the client's requests, uploads and relays, and the attachment trace (the
-  `farhelm_helm::terminal_attachments` debug events the desktop smoke reads) reporting each attachment's start and end
-  once. The grid stream: relayed unread both ways (a 200 KiB frame sent before the reply, a browser message of exactly
-  the 64 KiB input bound arriving as one frame, resize, and a browser's pause and resume dropped after it), a message
-  over that bound ending the attachment with nothing forwarded after it (on the socket, and in the client whoever sends
-  next), a slow browser paused by the helm and resumed once it catches up with no frame lost, at 32 KiB messages with a
-  writer queue's worth arriving after the pause and at 1 MiB rows with 8 arriving after it, a browser's own pause and
-  resume never touching that flow, the queue's pause and resume marks, event and byte bounds and frame bounds, an ended
-  attachment never paused again, and a wedged browser's handler ended by the stall detach (premise: parked mid-send with
-  the attachment live; oracle: the handler's own teardown `Detach` and the socket's close). Under a minute. Part of the
-  workspace nextest run. Run it when the helm's terminal relay, its client's terminal queue or the protocol's attach
-  messages change.
+  `farhelm_helm::terminal_attachments` debug events) reporting each attachment's start and end once. The grid stream:
+  relayed unread both ways (a 200 KiB frame sent before the reply, a browser message of exactly the 64 KiB input bound
+  arriving as one frame, resize, and a browser's pause and resume dropped after it), a message over that bound ending
+  the attachment with nothing forwarded after it (on the socket, and in the client whoever sends next), a slow browser
+  paused by the helm and resumed once it catches up with no frame lost, at 32 KiB messages with a writer queue's worth
+  arriving after the pause and at 1 MiB rows with 8 arriving after it, a browser's own pause and resume never touching
+  that flow, the queue's pause and resume marks, event and byte bounds and frame bounds, an ended attachment never
+  paused again, and a wedged browser's handler ended by the stall detach (premise: parked mid-send with the attachment
+  live; oracle: the handler's own teardown `Detach` and the socket's close). Under a minute. Part of the workspace
+  nextest run. Run it when the helm's terminal relay, its client's terminal queue or the protocol's attach messages
+  change.
 - `cd crates/farhelm-supervisor/asset-js-tests && node --test` — the OMP conversation-reporter asset's own execution
   proof: dispatch ordering against a controlled subprocess mock (including a deliberately nonserialized variant the
   proof must reject), stale-id cancellation, execution-time file recheck, the subscribed transition events, and the
-  silent-failure boundary, run against the real shipped asset. Same node terms as the UI harness above; the release gate
-  runs it through the recorder with the `OMP reporter asset scenarios` selection.
+  silent-failure boundary, run against the real shipped asset. Run it from inside the directory rather than as a glob
+  from the repo root: node's no-argument default discovery (every `*.test.js` in cwd) is the oldest, most
+  version-portable form the test runner has, and CI pins no node version. The release gate runs it through the recorder
+  with the `OMP reporter asset scenarios` selection.
 - `cd website/feedback-tests && node --test` — the feedback endpoint's handler (`website/feedback/handler.js`, deployed
   as `website/api/feedback.js`): method, configuration and size refusals, field caps counted in code points, fences that
   user text cannot close, and that no response or log line carries the token, the inbox's name, the message or the
   contact. Configuration and the GitHub client are injected; nothing touches the network or `process.env`. Run it when
   the handler or its tests change; CI's website job runs it beside the website build.
-- `cargo check -p farhelm-ui --features desktop` — the desktop renderer compiles nowhere else; needs the webkit2gtk/gtk
-  dev packages (see the CI job for the apt list).
-- `python3 scripts/record-test-run.py --runner nextest --kind development --selection 'desktop Rust targets' --concurrency '4 nextest slots; retries 0' -- cargo nextest run -p farhelm-ui --features desktop`
-  — exercises desktop-only persistence and IPC seams with the same system dependencies as the compile check.
-- `python3 scripts/record-test-run.py --kind development --selection 'desktop doctests' --concurrency '4 doctest threads' -- cargo test --locked --doc -p farhelm-ui --features desktop -- --show-output --test-threads=4`
-  — preserves the desktop feature's separate doctest coverage. Desktop execution remains release-only in hosted CI.
-- `cargo check -p farhelm-desktop` — the shipped desktop binary sits outside `default-members` (so ordinary builds never
-  compile WebKit), which means `-p` is the only thing that ever compiles it.
+- `cargo clippy -p farhelm-desktop --all-targets -- -D warnings` — the desktop app sits outside `default-members`
+  (unlike the GPUI GUI crates, which are default members), so the default-member clippy run never lints it. On Linux it
+  needs the GLib development package (`libglib2.0-dev`) for GIO. CI's `desktop` job runs exactly this.
+- `python3 scripts/record-test-run.py --runner nextest --kind development --selection 'desktop app' --concurrency '4 nextest slots; retries 0' -- cargo nextest run -p farhelm-desktop`
+  — the desktop app's process (`crates/farhelm-desktop/`): the bootstrap's supervisor discovery, record and replacement
+  decisions, the pre-window refusal surface and its native helper commands, the host listing it reads at startup, the
+  app's state files, the window frame's format and restore arithmetic, bundle resolution, the updater against injected
+  dependencies (no network or real bundle), and the update readout's wording. Excluded from the workspace nextest run
+  above, so this is the only run of these tests.
 - `python3 -B scripts/check-gui-lints.py` and `python3 -B scripts/test-check-gui-lints.py` — proves every ban in
   `crates/gui/clippy.toml` still fires: it lints `crates/gui/lint-demo` (a non-default member that violates each ban on
   purpose behind its `violations` feature) and fails when a demo's expected diagnostic is missing or a ban has no demo.
@@ -671,47 +664,6 @@ systemd or SSH substrate ran.
   through normal or build dependencies, when one other than the GPUI app crates the script names reaches GPUI or GPUI
   Kit, or when a GUI crate's manifest does not deny clippy's `unwrap_used` and `expect_used`. Seconds, nothing compiled.
   Run it when a manifest under `crates/gui/` or `Cargo.lock` changes. CI's `deny` job runs both.
-- `scripts/check-desktop-assets.sh` — holds the desktop build's `asset!()` set and the web bundle's files to the same
-  set, in both directions. The shipped desktop-artifact builder calls `--compare` on its actual embedded bundle, so
-  release validation preserves parity without a duplicate CI rebuild. `--self-test` also proves head CSS/classic JS
-  remain product assets while only the body renderer module and WASM are excluded.
-- `scripts/desktop-smoke.sh` — the x86_64 Linux release gate runs this in the job's shared target tree with
-  `DESKTOP_SMOKE_WEB_DIST` naming the release's own web bundle, so it embeds the bundle that ships instead of building
-  one; before any of it needs Xvfb, one pre-display process leg drives `farhelm-desktop`'s own entry point directly: a
-  bootstrap failure (an unusable state directory) exits 1 with one plain `farhelm-desktop: ...` line and no panic. The
-  non-pixel Xvfb integration gate that follows covers the embedded helm, managed supervisor, desktop authentication, the
-  supervisor outliving a hard exit and an ordinary quit (reused, then replaced by a launch whose program file changed,
-  with a session surviving the replacement), a second launch with another program refusing beside the open app without
-  stopping its supervisor, a replacement that would fail its prerequisites (a program reached through a directory whose
-  name holds `:`) stopping nothing, a frozen (SIGSTOP) supervisor being replaced with a kill after the grace, a
-  supervisor the app did not start reused rather than replaced, restart persistence, that every asset the window
-  requested went through the desktop asset handler, and that the teardown's terminal-host stop ends a real host planted
-  in the answering-supervisor leg's state directory. The app's supervisor creates its sessions in terminal hosts, as
-  every shipped one does, and the smoke requires every session it creates to be a host row; a session's terminal counts
-  as alive while a process listens on the host socket its database row names (`terminal_address`), read from the
-  kernel's socket table. Which session the relaunched window holds open is read from the embedded helm's attachment
-  trace (the `farhelm_helm::terminal_attachments` debug events, turned on through the launches' `RUST_LOG`), and after
-  the supervisor replacement the kept session is attached as a grid viewer through the replacement and a typed command
-  must write its file. API checks retain host-qualified session references; row and scope checks use their local session
-  IDs. The optional coordinate-driven leg is not part of CI; it checks typed input through a file the typed command
-  writes.
-- `DESKTOP_SMOKE_APPEARANCE=1 scripts/desktop-smoke.sh` — optional Linux native appearance integration using the
-  ordinary owned Xvfb/openbox setup. Four fresh/stored dark/light cases check native media-query premises, palette
-  before renderer content, real Settings choices, private WebKit profile persistence, Inter, embedded assets and the
-  same live terminal attachment's input and ordered output. The session's terminal is a grid terminal (every session the
-  app creates runs in a terminal host), and the in-page probe reads it the way the removed browser suite's terminal
-  helpers did: the grid's painted background, its input field for focus, its own paste and grid text messages for
-  typing, and its model for the 512-line burst; a terminal that is not a grid fails it. Retains bounded JSON and one
-  final client screenshot per case. DOM assertions do not prove transient paint correctness; normal appshots provide
-  visual review. No live native system-appearance event, physical keyboard dispatch, throughput or macOS claim. Run
-  through the recorder; the script supplies its own private profile and closed scenario inputs.
-- `DESKTOP_SMOKE_APPEARANCE=no-initialize scripts/desktop-smoke.sh` — one optional Linux missing-initialize leg using
-  the same builds and owned display. A fixed valid rootless index exercises the creation-time startup deadline before
-  App renders. It requires actual hidden native creation, natural refusal with exit 1, the owned supervisor's birth, its
-  detached setup (own session, `/dev/null` stdin, its log file as stderr) and the app's record of it, and that it keeps
-  running after the refusal; teardown stops it by that record. Private profiles and bounded process/window observations
-  are retained. X11 polling supplies sampled no-observed-map evidence; an absent hidden XID is recorded as unknown
-  realization, never manufactured by showing the window. Requires Linux pidfd support in the existing Python runner.
 - `sh -n scripts/install.sh && shellcheck scripts/install.sh scripts/test-install-sh.sh` — the curl-installer is POSIX
   `sh` run unread on a fresh machine (`curl | sh`), so a syntax slip or a shellcheck-catchable bug in it gets caught
   before the slower Rust-side asset-table parity test in `assets.rs` would notice. `test-install-sh.sh` is bash, not
@@ -787,13 +739,12 @@ systemd or SSH substrate ran.
   the directory on PATH. Seconds plus `cargo metadata`'s first download of the crates, nothing compiled. Run it when a
   manifest, `Cargo.lock` or `deny.toml` changes. The advisories and bans checks are deliberately not part of it
   (`deny.toml`'s header says why), so do not run a bare `cargo deny check` as this gate.
-- `python3 -B scripts/test-install-pinned-nextest.py`, `python3 -B scripts/test-install-pinned-dx.py` and
-  `python3 -B scripts/test-install-pinned-cargo-deny.py` — the installers that put the pinned nextest, dx and cargo-deny
-  binaries in place for the release build jobs, CI's `deny` job and local runs, and the checksum verification and atomic
-  publication they share (`scripts/pinned_tool.py`): archive and executable digests, archive shape (a sole executable,
-  or for cargo-deny an executable at a named path among plain files), cache reuse, curl's size limit, each tool's
-  platform mapping, and dx's refusal of a pin that is not the workspace's `dioxus` version. Run them when an installer,
-  the shared module or a pins file changes; seconds, no network.
+- `python3 -B scripts/test-install-pinned-nextest.py` and `python3 -B scripts/test-install-pinned-cargo-deny.py` — the
+  installers that put the pinned nextest and cargo-deny binaries in place for the release build jobs, CI's `deny` job
+  and local runs, and the checksum verification and atomic publication they share (`scripts/pinned_tool.py`): archive
+  and executable digests, archive shape (a sole executable, or for cargo-deny an executable at a named path among plain
+  files), cache reuse, curl's size limit, each tool's platform mapping. Run them when an installer, the shared module or
+  a pins file changes; seconds, no network.
 - `scripts/publish-docs-shots.sh --self-test` — the docs screenshot publisher's whole validation: against a bare
   repository standing in for GitHub, it checks that refused publishes push nothing, that only `refs/docs-assets/keep` is
   ever created (never a branch), that a snapshot holds exactly the shots the docs pages reference, that partial,
@@ -864,11 +815,11 @@ systemd or SSH substrate ran.
   previous revision. Without node it says `SKIPPED` for the page script part. Run it when that script changes; seconds,
   no network.
 
-This inventory names the relevant local checks. The CI workflow (`ci.yml`) covers formatter, Clippy, desktop
-compilation, the JS harness, the website build and its feedback endpoint tests, installer validation, the dependency
-license and source policy, generated-workflow validation, and the agent-instructions check; costly Rust, desktop
-runtime, and CentOS gates run in the x86_64 Linux release artifact job. If either workflow changes, update this list in
-the same change.
+This inventory names the relevant local checks. The CI workflow (`ci.yml`) covers formatter, Clippy, the desktop app's
+lints, the OMP reporter asset scenarios, the website build and its feedback endpoint tests, installer validation, the
+dependency license and source policy, generated-workflow validation, and the agent-instructions check; costly Rust and
+CentOS gates run in the x86_64 Linux release artifact job. If either workflow changes, update this list in the same
+change.
 
 The CI workflow runs ONLY on demand: it has no push or pull-request trigger (removed 2026-09-12), so neither a PR, a
 `gh pr ready`, nor a merge to main starts a run. The release build gate is the validation that decides whether a build

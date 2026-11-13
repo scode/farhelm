@@ -9,53 +9,31 @@ The literal variation-base exceptions, formatting ranges and Hangul attachment p
 [Unicode License V3](https://www.unicode.org/license.txt) copyright and permission notice is reproduced in
 [`vendor/UNICODE-LICENSE.txt`](vendor/UNICODE-LICENSE.txt). No Ghostty implementation is copied.
 
-## Inter interface font
-
-The Inter regular, semibold and bold WOFF2 files in `crates/farhelm-ui/assets/fonts/` are unchanged copies of the
-website's vendored Inter fonts. Copyright 2016 The Inter Project Authors
-([`rsms/inter`](https://github.com/rsms/inter)). They are licensed under the SIL Open Font License, Version 1.1; the
-complete notice is in `crates/farhelm-ui/assets/fonts/OFL-Inter.txt` and ships in the app as `/assets/OFL-Inter.txt`.
-
 ## Code ported from xterm.js
 
-Parts of the terminal's input, selection, sizing and link handling are Farhelm ports of code from `@xterm/xterm` 6.0.0,
-its `@xterm/addon-fit` 0.11.0 and `@xterm/addon-web-links` 0.12.0 add-ons, and the part of Visual Studio Code's
-`vs/base` that xterm.js compiles in. The ports keep behavior that programs and users already rely on, such as the bytes
-each key sends and the cell a click lands on, so they were carried over rather than rewritten. They live in:
+The supervisor's grid input encoder is a Farhelm port of code from `@xterm/xterm` 6.0.0. The port keeps behavior that
+programs already rely on, such as the bytes each key sends, so it was carried over rather than rewritten. It lives in
+`crates/farhelm-supervisor/src/grid_input.rs`: key encoding (`evaluateKeyboardEvent`), mouse report encoding
+(`CoreMouseService`, and the wheel on the alternate screen), and paste line endings (`prepareTextForTerminal`). The old
+Dioxus UI's JavaScript grid client carried further ports from xterm.js, its `@xterm/addon-fit` 0.11.0 and
+`@xterm/addon-web-links` 0.12.0 add-ons and Visual Studio Code's `vs/base`; those were deleted with that UI.
 
-- `crates/farhelm-ui/assets/grid-input.js`: the keydown decision (`evaluateKeyboardEvent`, and the filters of
-  `CoreBrowserTerminal._keyDown` and `_isThirdLevelShift`), the platform list (`isMac`, `isWindows`), mouse cell
-  rounding (`getCoords`), mouse move de-duplication and wheel step accumulation (`CoreMouseService`), and the Alt-click
-  cursor move (`moveToCellSequence`).
-- `crates/farhelm-ui/assets/grid-terminal.js`: character measurement (`CharSizeService`), the cell size
-  (`DomRenderer._updateDimensions`), the fit (the fit add-on's `proposeDimensions`), selection coordinates, drag
-  scrolling and column selection (`SelectionService`), placing the input field under the pointer
-  (`moveTextAreaUnderMouseCursor`), and the wheel's scroll distance (Visual Studio Code's `StandardWheelEvent` and
-  scrollable element).
-- `crates/farhelm-ui/assets/grid-buffer.js`: selection text and word selection (`SelectionService`), the default word
-  separators, and the web-links add-on's URL pattern, line window and URL check.
-- `crates/farhelm-supervisor/src/grid_input.rs`: key encoding (`evaluateKeyboardEvent`), mouse report encoding
-  (`CoreMouseService`, and the wheel on the alternate screen), and paste line endings (`prepareTextForTerminal`).
-- `crates/gui/farhelm-grid-model/src/selection.rs` and `src/links.rs`: the GPUI app's Rust ports of the `grid-buffer.js`
-  rules above (selection text, word selection, the URL pattern and line window). Their complete notices are in that
-  crate's `LICENSE-PORTED`.
-- `crates/gui/farhelm-input-mapping/src/keys.rs`, `src/pointer.rs` and `src/cursor.rs`: the GPUI app's Rust ports of the
-  `grid-input.js` rules above (the keydown decision, mouse cell rounding, move de-duplication, wheel accumulation and
-  the Alt-click cursor move). Their complete notices are in that crate's `LICENSE-PORTED`.
+The GPUI app's own Rust ports of those JavaScript rules live in `crates/gui/farhelm-grid-model` (`src/selection.rs` and
+`src/links.rs`: selection text, word selection, the URL pattern and line window) and `crates/gui/farhelm-input-mapping`
+(`src/keys.rs`, `src/pointer.rs` and `src/cursor.rs`: the keydown decision, mouse cell rounding, move de-duplication,
+wheel accumulation and the Alt-click cursor move). Their complete notices are in each crate's `LICENSE-PORTED`.
 
 Each ported function names its origin in a source comment. The code is MIT-licensed: copyright the xterm.js authors,
-SourceLair Private Company and Christopher Jeffrey for xterm.js, the xterm.js authors for the add-ons, and Microsoft
-Corporation for Visual Studio Code. The complete notices are in
-`crates/farhelm-ui/assets/grid-ported-code-LICENSES.txt`, which ships in the app as
-`/assets/grid-ported-code-LICENSES.txt`; xterm.js itself no longer ships. Release builds of `farhelm`, which run the
-supervisor, embed the same web bundle and so carry the notice beside the ported Rust code.
+SourceLair Private Company and Christopher Jeffrey. The complete notices are in
+`crates/farhelm-supervisor/grid-ported-code-LICENSES.txt`. They used to ship inside the web bundle that release builds
+of `farhelm` embedded; that bundle is gone, so no binary carries them at the moment.
 
 ## Harness marks
 
-The session sidebar's harness marks in `crates/farhelm-ui/src/icons.rs` vendor geometry from the sources below. Each is
-used with unaltered geometry apart from a uniform scale into the shared 12-unit box; `docs/harness-marks.md` records why
-each mark was chosen, its color treatment and what the owner's terms allow. Marks not listed here (Claude, Grok,
-Terminal) are Farhelm's own drawings.
+The session sidebar's harness marks in `crates/gui/farhelm-gui/src/marks.rs` vendor geometry from the sources below.
+Each is used with unaltered geometry apart from a uniform scale into the shared 12-unit box; `docs/harness-marks.md`
+records why each mark was chosen, its color treatment and what the owner's terms allow. Marks not listed here (Claude,
+Grok, Terminal) are Farhelm's own drawings.
 
 ## OpenCode sidebar mark
 

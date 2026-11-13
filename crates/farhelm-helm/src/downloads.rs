@@ -37,8 +37,12 @@ impl NativeStaging {
     }
 }
 
-/// Call from the desktop's LoopDestroyed event, before the event loop exits.
+/// Call from the desktop app's quit path, before its event loop exits.
 /// Crashes and force-quits cannot run this process-local cleanup.
+///
+/// NOTE: Nothing calls it at the moment. The old Dioxus app called it from its
+/// event loop's teardown; the GPUI app's quit path must call it once that app
+/// is wired in, or download staging is left behind until the next launch.
 pub fn cleanup_native_downloads() {
     NATIVE_STAGING.cleanup();
 }
@@ -1192,41 +1196,5 @@ mod tests {
         })
         .await
         .expect("cancelled download staging did not disappear");
-    }
-
-    /// Saving is not a webview Blob operation. Embedded preflights are public,
-    /// but actual native saves still require a credential, with readable CORS.
-    #[farhelm_testtrace::test]
-    async fn desktop_file_cors_wraps_auth_and_preflight() {
-        let h = crate::rest_harness::idle_helm().await.embedded();
-        for operation in ["stat", "download"] {
-            let mut req = request(operation, false);
-            req.headers_mut()
-                .insert("origin", "dioxus://index.html".parse().unwrap());
-            let response = h.unauthenticated_router().oneshot(req).await.unwrap();
-            assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
-            assert_eq!(
-                response.headers()["access-control-allow-origin"],
-                "dioxus://index.html"
-            );
-            let req = Request::builder()
-                .method("OPTIONS")
-                .uri(format!("/api/sessions/sess-1/files/{operation}"))
-                .header("host", "127.0.0.1:7433")
-                .header("origin", "dioxus://index.html")
-                .header("access-control-request-method", "POST")
-                .header(
-                    "access-control-request-headers",
-                    "authorization,content-type",
-                )
-                .body(Body::empty())
-                .unwrap();
-            let response = h.unauthenticated_router().oneshot(req).await.unwrap();
-            assert_eq!(response.status(), StatusCode::NO_CONTENT);
-            assert_eq!(
-                response.headers()["access-control-allow-origin"],
-                "dioxus://index.html"
-            );
-        }
     }
 }

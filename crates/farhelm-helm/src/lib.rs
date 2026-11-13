@@ -114,25 +114,9 @@ mod agent_launch;
 /// Device-secret enforcement for the in-process credentials the helm mints.
 mod auth;
 
-/// `POST /api/client-log` — the desktop webview console shim's receiving
-/// end: authenticated, capped, and forwarded into native `tracing` under
-/// the `webview_console` target (PLAN_desktop_web_bug_triage.md).
-mod client_log;
-
 mod browser;
-/// `POST /api/clipboard` — the desktop webview's route to a REAL system
-/// clipboard write, because WKWebView gives the `dioxus://` page no
-/// `navigator.clipboard` at all (not a secure context). Enabled only when
-/// an embedding shell registered a [`ClipboardSink`].
-mod clipboard;
 pub use browser::LinkOpener;
 pub use downloads::{FileOpener, NativeDownloads, cleanup_native_downloads};
-
-/// The web UI tree a release build compiles into this binary (D12/D13) —
-/// `build.rs`'s counterpart. Public because the desktop app's asset handler
-/// serves its window from this tree; the helm itself serves it to nobody.
-mod embedded_ui;
-pub use embedded_ui::embedded_ui;
 
 /// `--ensure-hosts`: the JSON5 floor under the registry, applied once
 /// before serving starts.
@@ -175,7 +159,7 @@ mod ssh_help;
 /// The one SemVer release order Farhelm uses to call a build newer, and the
 /// test for a development build that has no place in it.
 ///
-/// Public for the desktop app's updater (`farhelm-ui`'s `desktop/updater.rs`),
+/// Public for the desktop app's updater (`farhelm-desktop`'s `updater.rs`),
 /// which decides whether an installed or released version is newer than the
 /// running one by the same rule the host list uses for a host's build, rather
 /// than keeping a second comparison that could drift from this one.
@@ -202,8 +186,7 @@ pub fn compile_agent_launch(
 pub mod manager;
 
 /// The layers wrapped around the routes: the loopback-origin guard and the
-/// build stamp, which every response passes through, plus the CORS headers
-/// scoped to the desktop webview's four cross-origin API routes.
+/// build stamp, which every response passes through.
 mod middleware;
 
 /// Discovery-first supervisor setup, explicit update, and host-scoped run
@@ -290,7 +273,7 @@ mod rest_harness;
 #[cfg(test)]
 mod test_capture;
 
-/// Golden JSON shared with `farhelm-ui` for the HTTP views it mirrors.
+/// Golden JSON for the helm's session and host HTTP views.
 #[cfg(test)]
 mod http_contract_tests;
 
@@ -515,9 +498,6 @@ impl HelmArgs {
 /// crate's docs for why the single-client `AppState` this replaced could
 /// not survive multi-host.
 struct AppState {
-    /// Whether the desktop custom-Origin exemption is active, and how the
-    /// process is asked to stop.
-    mode: ServingMode,
     manager: Arc<manager::ConnectionManager>,
     store: store::HelmStore,
     /// The client security boundary: the credentials this process minted.
@@ -538,23 +518,6 @@ struct AppState {
     /// Own the event-driven updater independently of any connected interface.
     /// Dropping application state requests cancellation of its listener.
     _automatic_updates: provisioning::AutomaticUpdates,
-    /// The shared fixed-window accept budget behind `POST /api/client-log`
-    /// (see [`client_log::RateWindow`]).
-    ///
-    /// Per-helm rather than a process-wide static, for the same reason
-    /// [`Self::counts`] is: an embedded second helm serving its own webview
-    /// must not have its budget shared with — or starved by — another
-    /// helm's.
-    client_log_rate: std::sync::Mutex<client_log::RateWindow>,
-    /// Where `POST /api/clipboard` lands text, when this helm has anywhere
-    /// to land it. The desktop shell registers a native pasteboard writer
-    /// here when it embeds a helm ([`run_embedded`]'s `clipboard_sink`);
-    /// every other construction leaves `None`, which makes the endpoint
-    /// answer 404 on server helms — a helm without a desktop window around
-    /// it has no clipboard that is the requester's to write. See
-    /// `clipboard.rs` for why this channel exists at all (the webview's own
-    /// clipboard API does not).
-    clipboard_sink: Option<ClipboardSink>,
     /// A desktop-only capability; standalone helms never open links on their server machine.
     link_opener: Option<LinkOpener>,
     /// Session-owned native TCP listeners; shutdown closes accepted relays too.
@@ -566,11 +529,6 @@ struct AppState {
     /// Receives only a newly published, allowlisted save. Separate from the
     /// hardened HTTP(S) opener so local files never widen that URL boundary.
     file_opener: Option<FileOpener>,
-    /// The cap on native clipboard writes in flight at once, so a hung OS
-    /// clipboard cannot pile blocking threads up behind it (see
-    /// `clipboard::ClipboardAdmission`). Per helm rather than process-wide,
-    /// so tests running many helms in one process cannot starve each other.
-    clipboard_admission: clipboard::ClipboardAdmission,
     /// Where `POST /api/feedback` sends the user's feedback, and with which
     /// client. Always the production endpoint outside tests; a field rather
     /// than a constant so a test helm can point it at a stand-in server it
@@ -595,24 +553,13 @@ struct AppState {
 }
 
 /// The two serving surfaces share their handlers and authentication. The mode
-/// controls whether the loopback guard admits the custom webview Origin that
-/// only the embedded window needs, and whether the helm owns its process's
-/// signals.
+/// decides whether the helm owns its process's signals and whether it mints
+/// the embedding app's credential.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum ServingMode {
     Standalone,
     Embedded,
 }
-
-/// A native system-clipboard writer the embedding desktop shell provides.
-///
-/// Takes the full text to place on the system clipboard; an `Err` carries a
-/// human-readable reason that is LOGGED, never surfaced to the requester —
-/// SPEC.md's terminal-experience section makes clipboard operations
-/// best-effort and silent on failure by contract. Called on tokio's blocking
-/// pool, so it may block; implementations own whatever platform threading
-/// their pasteboard requires.
-pub type ClipboardSink = Arc<dyn Fn(&str) -> Result<(), String> + Send + Sync>;
 
 impl AppState {
     /// Both providers' artifact tasks and Settings projections use this one
@@ -638,7 +585,6 @@ impl AppState {
         podman: Option<Arc<environment::podman::Podman>>,
         state_dir: PathBuf,
         sources: provisioning::ProductionProvisioning,
-        mode: ServingMode,
     ) -> anyhow::Result<AppState> {
         let provisioning = provisioning::ProvisioningService::production(
             store.clone(),
@@ -649,7 +595,7 @@ impl AppState {
         Ok(AppState {
             podman,
             tensorlake,
-            ..Self::with_provisioning(manager, store, provisioning, mode)
+            ..Self::with_provisioning(manager, store, provisioning)
         })
     }
 
@@ -660,7 +606,6 @@ impl AppState {
         manager: Arc<manager::ConnectionManager>,
         store: store::HelmStore,
         provisioning: Arc<provisioning::ProvisioningService>,
-        mode: ServingMode,
     ) -> AppState {
         let tensorlake = tensorlake::Tensorlake::detached_with_delivery(
             store.clone(),
@@ -669,7 +614,6 @@ impl AppState {
         AppState {
             podman_places: provisioning.credential_delivery().places(),
             _automatic_updates: provisioning::AutomaticUpdates::start(&provisioning),
-            mode,
             ntfy: manager.ntfy.clone(),
             // No state directory reaches this seam, so no ssh key and no
             // API; `new` replaces it with the production service.
@@ -681,15 +625,10 @@ impl AppState {
             event_subscriber_cap: events::MAX_SUBSCRIBERS,
             trash_requests: Arc::default(),
             provisioning,
-            client_log_rate: std::sync::Mutex::new(client_log::RateWindow::new(
-                std::time::Instant::now(),
-            )),
-            clipboard_sink: None,
             link_opener: None,
             tunnels: tunnels::TunnelManager::default(),
             downloads_dir: None,
             file_opener: None,
-            clipboard_admission: clipboard::ClipboardAdmission::new(),
             // Test-built helms never reach the production endpoint; a
             // feedback test injects its own stand-in instead.
             #[cfg(not(test))]
@@ -888,9 +827,7 @@ fn api_router(state: Arc<AppState>) -> Router {
             "/api/hosts/{id}/adopt",
             axum::routing::post(hosts::adopt_host),
         )
-        // The shared client preference (SPEC.md, Session list). An ordinary
-        // protected route with no CORS wrapper — see `preferences.rs` for
-        // why the desktop webview never fetches it from JavaScript.
+        // The shared client preference (SPEC.md, Session list).
         .route(
             "/api/preferences",
             get(preferences::get_preferences).put(preferences::put_preferences),
@@ -1102,26 +1039,11 @@ fn api_router(state: Arc<AppState>) -> Router {
             Arc::clone(&state),
             auth::require_device_session,
         ));
-    // Validation is protected like every other read, but its webview caller
-    // (on a custom-scheme origin) must be able to read the status at all,
-    // including the auth middleware's 401, to report it rather than a bare
-    // transport failure. Keeping CORS outside this small router makes that
-    // refusal readable without widening any ordinary REST route.
-    let desktop_device = Router::new()
-        .route("/api/auth/device", get(auth::validate_device))
-        .route_layer(axum::middleware::from_fn_with_state(
-            Arc::clone(&state),
-            auth::require_device_session,
-        ))
-        .route(
-            "/api/auth/device",
-            axum::routing::options(middleware::desktop_webview_preflight),
-        )
-        .layer(axum::middleware::from_fn(middleware::desktop_webview_cors));
-    // Uploads are cancellable exceptions: dropping their handler aborts the
-    // upstream transfer, including admission. CORS must still wrap mandatory
-    // authentication so a custom-scheme webview can read its structured 401.
-    let desktop_attachment = Router::new()
+    // Uploads and file operations are cancellable exceptions with their own
+    // body limits, so they sit outside the ordinary group: dropping an upload's
+    // handler aborts the upstream transfer, stat is read-only, and dropping a
+    // download must abort upstream and remove unfinished native staging.
+    let transfers = Router::new()
         .route(
             "/api/sessions/{id}/attachments",
             // SPEC.md's "no size cap in v1" is a promise about memory, not
@@ -1129,75 +1051,6 @@ fn api_router(state: Arc<AppState>) -> Router {
             axum::routing::post(uploads::upload_attachment)
                 .layer(axum::extract::DefaultBodyLimit::disable()),
         )
-        .route_layer(axum::middleware::from_fn_with_state(
-            Arc::clone(&state),
-            auth::require_device_session,
-        ))
-        // Preflight cannot carry the Authorization header it requests.
-        .route(
-            "/api/sessions/{id}/attachments",
-            axum::routing::options(middleware::desktop_webview_preflight),
-        )
-        .layer(axum::middleware::from_fn(middleware::desktop_webview_cors));
-    // Client-log authentication is layered identically to the attachment
-    // upload above: mandatory device-session auth, wrapped in CORS so the
-    // desktop webview can read the structured 401 rather than a generic
-    // fetch failure — the one thing this route must never do is fail
-    // silently for the caller reporting silent failures.
-    let desktop_client_log = Router::new()
-        .route(
-            "/api/client-log",
-            axum::routing::post(client_log::post_client_log),
-        )
-        .route_layer(axum::middleware::from_fn(middleware::own_state_change))
-        .route_layer(axum::middleware::from_fn_with_state(
-            Arc::clone(&state),
-            auth::require_device_session,
-        ))
-        .route(
-            "/api/client-log",
-            axum::routing::options(middleware::desktop_webview_preflight),
-        )
-        .layer(axum::middleware::from_fn(middleware::desktop_webview_cors))
-        // Tighter than axum's 2 MiB default, sized from the endpoint's own
-        // caps: the JSON is fully allocated before the handler's entry cap
-        // can drop anything, so without this a spent budget still buys a
-        // 2 MiB parse per request. The upload route makes the OPPOSITE
-        // choice (no limit at all) for SPEC.md's no-size-cap promise, which
-        // is why these two webview routes cannot share a router group.
-        .layer(axum::extract::DefaultBodyLimit::max(
-            client_log::MAX_BODY_BYTES,
-        ));
-
-    // Auth and CORS layered identically to client-log above, and for the
-    // same reason: the desktop webview must be able to READ a structured
-    // 401 from its own fetch. The body limit is this route's own — sized
-    // for one clipboard payload, not a log batch (see clipboard.rs).
-    // This is a cancellation exception: the blocking native write already owns
-    // its permit, while the outer failure log retains the waiter's lifetime.
-    let desktop_clipboard = Router::new()
-        .route(
-            "/api/clipboard",
-            axum::routing::post(clipboard::post_clipboard),
-        )
-        .route_layer(axum::middleware::from_fn_with_state(
-            Arc::clone(&state),
-            auth::require_device_session,
-        ))
-        .route(
-            "/api/clipboard",
-            axum::routing::options(middleware::desktop_webview_preflight),
-        )
-        .layer(axum::middleware::from_fn(middleware::desktop_webview_cors))
-        .layer(axum::extract::DefaultBodyLimit::max(
-            clipboard::MAX_BODY_BYTES,
-        ));
-
-    // File operations use the same auth-inside-CORS boundary as attachments.
-    // Only preflight is public; a webview must read actual auth refusals too.
-    // Both are explicit cancellation exceptions: stat is read-only, and dropping
-    // a download must abort upstream and remove unfinished native staging.
-    let desktop_files = Router::new()
         .route(
             "/api/sessions/{id}/files/stat",
             axum::routing::post(downloads::stat_file),
@@ -1209,24 +1062,9 @@ fn api_router(state: Arc<AppState>) -> Router {
         .route_layer(axum::middleware::from_fn_with_state(
             Arc::clone(&state),
             auth::require_device_session,
-        ))
-        .route(
-            "/api/sessions/{id}/files/stat",
-            axum::routing::options(middleware::desktop_webview_preflight),
-        )
-        .route(
-            "/api/sessions/{id}/files/download",
-            axum::routing::options(middleware::desktop_webview_preflight),
-        )
-        .layer(axum::middleware::from_fn(middleware::desktop_webview_cors));
+        ));
 
-    protected
-        .merge(desktop_device)
-        .merge(desktop_attachment)
-        .merge(desktop_client_log)
-        .merge(desktop_clipboard)
-        .merge(desktop_files)
-        .with_state(state)
+    protected.merge(transfers).with_state(state)
 }
 
 /// Return the ordinary status for an authenticated but unknown API path.
@@ -1383,11 +1221,10 @@ mod request_ownership_tests {
 /// including the origin guard and headers, rather than exercising handlers
 /// in isolation and silently skipping the security boundary.
 fn build_router(state: Arc<AppState>, port: u16) -> Router {
-    let mode = state.mode;
     api_router(state)
         .layer(axum::middleware::from_fn(
             move |req: axum::extract::Request, next: axum::middleware::Next| {
-                middleware::require_loopback_origin(port, mode, req, next)
+                middleware::require_loopback_origin(port, req, next)
             },
         ))
         // OUTSIDE the origin guard, and that placement is the whole point:
@@ -1498,12 +1335,12 @@ mod router_boundary_tests {
         let response = build_router(Arc::clone(&harness.state), 7433)
             .oneshot(authenticated_api_request(
                 Method::GET,
-                "/api/auth/device",
+                "/api/hosts",
                 &secret,
             ))
             .await
             .unwrap();
-        assert_eq!(response.status(), StatusCode::NO_CONTENT);
+        assert_eq!(response.status(), StatusCode::OK);
         // Spelled out rather than taken from the constant: this pins the
         // header's wire name, so an edit to the shared constant fails here
         // instead of silently renaming what clients look for.
@@ -1568,25 +1405,22 @@ mod router_boundary_tests {
 /// Owns and drains its runtime before releasing the state-directory claim,
 /// including during panic unwind. Call from outside a tokio runtime.
 pub fn run(args: HelmArgs) -> anyhow::Result<()> {
-    run_with_ready(args, None, None, None, None, None, ServingMode::Standalone)
+    run_with_ready(args, None, None, None, None, ServingMode::Standalone)
 }
 
 /// What an embedded helm hands the desktop process that owns it once every
 /// serving dependency is ready.
 ///
-/// The two device secrets are the desktop app's own credentials, one for its
-/// native REST client and one for its webview. They are minted in memory for
-/// this helm process alone (see `auth::AuthState::mint_device`): no HTTP
-/// request can obtain one, and they are worthless once the process exits.
-/// The owner must not persist them; a fresh pair comes with every launch.
+/// The device secret is the desktop app's own credential, the one its GUI
+/// presents on every request and socket. It is minted in memory for this helm
+/// process alone (see `auth::AuthState::mint_device`): no HTTP request can
+/// obtain one, and it is worthless once the process exits. The owner must not
+/// persist it; a fresh one comes with every launch.
 pub struct EmbeddedReady {
     /// The address the helm actually bound, which a port-0 caller needs.
     pub addr: SocketAddr,
-    /// The credential for the desktop's native REST client.
+    /// The credential for the desktop app's GUI.
     pub native_device_secret: String,
-    /// The credential for the desktop's webview (its page-memory global and
-    /// WebSocket subprotocols).
-    pub webview_device_secret: String,
 }
 
 /// Run an embedded helm and report its bound address and the desktop's own
@@ -1594,21 +1428,20 @@ pub struct EmbeddedReady {
 ///
 /// The desktop shell lets the kernel choose a fresh loopback port, but it must
 /// not launch the window until the HTTP listener and the local-host actor
-/// exist. A synchronous channel keeps that startup boundary out of the Dioxus
+/// exist. A synchronous channel keeps that startup boundary out of any UI
 /// runtime and, unlike parsing stdout, cannot confuse another log line for
 /// readiness. The explicit shutdown receiver gives `DesktopBootstrap`
 /// a teardown path it can join; dropping its sender carries the same owner-
 /// disappeared meaning as sending the signal.
 ///
-/// The native shell supplies clipboard and Downloads capabilities for this
-/// window's account, including dispatch of an allowlisted completed save to its
-/// default app. An absent Downloads capability leaves saves and opening refused;
-/// it never asks the webview to save in its place.
+/// The native shell supplies the link opener and Downloads capabilities for
+/// this window's account, including dispatch of an allowlisted completed save to
+/// its default app. An absent Downloads capability leaves saves and opening
+/// refused.
 /// This synchronous entry point owns its runtime; the desktop thread returns
 /// only after runtime teardown, with state ownership retained throughout it.
 pub fn run_embedded(
     args: HelmArgs,
-    clipboard_sink: Option<ClipboardSink>,
     link_opener: Option<LinkOpener>,
     downloads: Option<NativeDownloads>,
     ready: std::sync::mpsc::Sender<EmbeddedReady>,
@@ -1616,7 +1449,6 @@ pub fn run_embedded(
 ) -> anyhow::Result<()> {
     run_with_ready(
         args,
-        clipboard_sink,
         link_opener,
         downloads,
         Some(ready),
@@ -1629,12 +1461,11 @@ pub fn run_embedded(
 /// startup sequence so the desktop cannot acquire a weaker auth or transport
 /// boundary than `farhelm helm run`.
 ///
-/// Native clipboard and Downloads saves belong to the embedded window's user.
+/// Opening links and Downloads saves belong to the embedded window's user.
 /// A standalone helm has no window, so its startup always supplies `None` for
 /// both capabilities; no CLI flag enables either one.
 fn run_with_ready(
     args: HelmArgs,
-    clipboard_sink: Option<ClipboardSink>,
     link_opener: Option<LinkOpener>,
     downloads: Option<NativeDownloads>,
     ready: Option<std::sync::mpsc::Sender<EmbeddedReady>>,
@@ -1648,7 +1479,6 @@ fn run_with_ready(
     let runtime = tokio::runtime::Runtime::new().context("starting helm runtime")?;
     runtime.block_on(serve_with_ready(
         args,
-        clipboard_sink,
         link_opener,
         downloads,
         ready,
@@ -1667,13 +1497,8 @@ thread_local! {
 
 /// Serve inside the owning runtime, publishing the claim to its outer scope.
 /// Ownership outlives serving and also covers runtime drain.
-#[expect(
-    clippy::too_many_arguments,
-    reason = "the claim slot belongs outside this async serving lifetime"
-)]
 async fn serve_with_ready(
     args: HelmArgs,
-    clipboard_sink: Option<ClipboardSink>,
     link_opener: Option<LinkOpener>,
     downloads: Option<NativeDownloads>,
     ready: Option<std::sync::mpsc::Sender<EmbeddedReady>>,
@@ -1777,9 +1602,7 @@ async fn serve_with_ready(
         Some(podman),
         state_dir.clone(),
         sources,
-        mode,
     )?;
-    app.clipboard_sink = clipboard_sink;
     app.link_opener = link_opener;
     if let Some(downloads) = downloads {
         app.downloads_dir = Some(downloads.directory);
@@ -1807,11 +1630,10 @@ async fn serve_with_ready(
 
     if let Some(ready) = ready {
         // Minted only on the embedded path: a `farhelm helm run` has no
-        // in-process owner to hand them to, so it holds none.
+        // in-process owner to hand one to, so it holds none.
         let _ = ready.send(EmbeddedReady {
             addr,
             native_device_secret: state.auth.mint_device()?,
-            webview_device_secret: state.auth.mint_device()?,
         });
     }
     if let Some(path) = args.test_credential_file.as_deref() {
@@ -2363,7 +2185,6 @@ mod tests {
                 None,
                 None,
                 None,
-                None,
                 crate::ServingMode::Standalone,
                 &mut None,
             ),
@@ -2429,7 +2250,6 @@ mod tests {
                     state_dir: Some(state_dir),
                     ..base_args()
                 },
-                None,
                 None,
                 None,
                 ready_tx,

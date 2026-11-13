@@ -1431,7 +1431,6 @@ async fn actor_fixture(hold_hook: bool, hold_backend: bool) -> (Harness, Fixture
         harness.manager.clone(),
         harness.store.clone(),
         service,
-        crate::ServingMode::Standalone,
     ));
     *gate.service.lock().unwrap() = Some(harness.state.tensorlake.clone());
     f.admit().await;

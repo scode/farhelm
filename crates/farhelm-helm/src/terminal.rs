@@ -83,12 +83,11 @@ use tracing::{error, info};
 ///
 /// A dedicated target so that a log can turn exactly these on
 /// (`RUST_LOG=…,farhelm_helm::terminal_attachments=debug`) without the rest
-/// of this module's debug output. The desktop app's smoke test
-/// (`scripts/desktop-smoke.sh`) does, to tell which session the window
-/// attached and whether that attachment stayed open across a token
-/// rotation: nothing outside the process shows that, since a terminal host
-/// serves only its supervisor. The events' message and fields are a
-/// contract with that script; change both together.
+/// of this module's debug output. It shows which session a window attached
+/// and whether that attachment stayed open, which nothing outside the
+/// process shows, since a terminal host serves only its supervisor. The old
+/// desktop smoke test read these events; it went with the Dioxus app (GPUI
+/// migration, F1), so nothing parses them today.
 const ATTACHMENT_TRACE: &str = "farhelm_helm::terminal_attachments";
 
 /// One admitted attachment's trace: `terminal attached` when made, and

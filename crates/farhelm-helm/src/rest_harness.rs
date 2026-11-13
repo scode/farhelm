@@ -832,7 +832,7 @@ impl Harness {
     ///
     /// Minted rather than stored because credentials live only in the
     /// `AuthState` that minted them, and tests replace `state` (a restart,
-    /// [`Self::embedded`], an injected provisioning service): a stored secret
+    /// an injected provisioning service): a stored secret
     /// from the old state would be refused with 401 by the new one.
     fn device_secret(&self) -> String {
         self.state
@@ -844,40 +844,6 @@ impl Harness {
     /// The real router without the harness's synthetic device secret.
     pub(crate) fn unauthenticated_router(&self) -> axum::Router {
         crate::build_router(Arc::clone(&self.state), self.port)
-    }
-
-    /// Reuse this fixture's fleet and store with the embedded helm boundary.
-    ///
-    /// CORS tests need the same router shape the desktop window uses: custom
-    /// webview origins are admitted only in embedded mode, while the fixture
-    /// still supplies the real manager, provisioning service, and clipboard
-    /// sink it had before the mode switch. The new state mints its own
-    /// credential, so the standalone fixture's one stops working.
-    /// This is a terminal mode switch for the fixture: [`Self::restart_with`]
-    /// intentionally rebuilds standalone state and therefore must not follow
-    /// this call.
-    pub(crate) fn embedded(mut self) -> Harness {
-        assert!(
-            self.served.is_empty(),
-            "switch the fixture to embedded mode before starting a server"
-        );
-        let old_state = Arc::clone(&self.state);
-        let mut state = AppState::with_provisioning(
-            Arc::clone(&self.manager),
-            self.store.clone(),
-            Arc::clone(&old_state.provisioning),
-            crate::ServingMode::Embedded,
-        );
-        state.event_subscriber_cap = old_state.event_subscriber_cap;
-        state.clipboard_sink = old_state.clipboard_sink.clone();
-        state.link_opener = old_state.link_opener.clone();
-        state.downloads_dir = old_state.downloads_dir.clone();
-        state.file_opener = old_state.file_opener.clone();
-        state.feedback = old_state.feedback.clone();
-        state.tensorlake = old_state.tensorlake.clone();
-        state.podman = old_state.podman.clone();
-        self.state = Arc::new(state);
-        self
     }
 
     /// Serve the real router on a loopback port, for the tests that need a
@@ -993,11 +959,6 @@ impl Harness {
     /// The restarted helm's state mints its own device credentials, as a
     /// real restart would (see [`Self::device_secret`]).
     pub(crate) async fn restart_with(self, rescript: impl FnOnce(&ScriptedFleet)) -> Harness {
-        assert_eq!(
-            self.state.mode,
-            crate::ServingMode::Standalone,
-            "restart_with only supports standalone fixtures"
-        );
         rescript(&self.fleet);
         let Harness {
             served,
@@ -1057,7 +1018,6 @@ impl Harness {
                 None,
                 _dir.path().to_path_buf(),
                 sources,
-                crate::ServingMode::Standalone,
             )
             .expect("build restarted app state")
         });
@@ -1167,12 +1127,6 @@ pub(crate) struct FleetBuilder {
     /// Overrides `/api/events`'s subscriber bound, so a test can exhaust it
     /// with a handful of real sockets instead of sixty-four.
     event_subscriber_cap: Option<usize>,
-    /// A native clipboard writer for `POST /api/clipboard` to land on, as
-    /// [`crate::run_embedded`] would register one. `None` — the default, and
-    /// every production server helm's state — leaves the endpoint answering
-    /// 404; clipboard.rs's tests inject one to observe what the handler
-    /// forwards.
-    clipboard_sink: Option<crate::ClipboardSink>,
     /// A stand-in for the desktop-only admitted link opener; tests never open a real browser.
     link_opener: Option<crate::LinkOpener>,
     /// Where `POST /api/feedback` sends, when a test points it at a
@@ -1276,7 +1230,6 @@ impl FleetBuilder {
             port: 7433,
             refresh: None,
             event_subscriber_cap: None,
-            clipboard_sink: None,
             link_opener: None,
             feedback: None,
             approval_wait: None,
@@ -1295,13 +1248,6 @@ impl FleetBuilder {
         forwarder: crate::feedback::FeedbackForwarder,
     ) -> FleetBuilder {
         self.feedback = Some(forwarder);
-        self
-    }
-
-    /// Register a clipboard sink the way the desktop's embedded helm does,
-    /// so `POST /api/clipboard` has something observable to land on.
-    pub(crate) fn clipboard_sink(mut self, sink: crate::ClipboardSink) -> FleetBuilder {
-        self.clipboard_sink = Some(sink);
         self
     }
 
@@ -1463,7 +1409,6 @@ impl FleetBuilder {
             event_subscriber_cap: self
                 .event_subscriber_cap
                 .unwrap_or(crate::events::MAX_SUBSCRIBERS),
-            clipboard_sink: self.clipboard_sink,
             link_opener: self.link_opener,
             // Offline unless a test injected a stand-in, like every
             // test-built helm (`AppState::with_provisioning`).
@@ -1481,7 +1426,6 @@ impl FleetBuilder {
                 None,
                 state_dir,
                 sources,
-                crate::ServingMode::Standalone,
             )
             .expect("build harness app state")
         };
@@ -1549,23 +1493,6 @@ pub(crate) async fn idle_helm_with_link_opener(opener: crate::LinkOpener) -> Har
     let local = local_id(&harness.store).await;
     harness.await_refreshed(local).await;
     harness
-}
-
-/// [`idle_helm`] on a helm that carries a clipboard sink, as the desktop's
-/// embedded one does — for clipboard.rs's tests, which need to observe what
-/// the endpoint actually forwards.
-pub(crate) async fn idle_helm_with_clipboard_sink(sink: crate::ClipboardSink) -> Harness {
-    FleetBuilder::new()
-        .await
-        .clipboard_sink(sink)
-        .local(HostScript {
-            identity: Some("local-identity".to_string()),
-            sessions: vec![session("sess-1", 1_700_000_000)],
-            ..HostScript::default()
-        })
-        .await
-        .start()
-        .await
 }
 
 /// [`idle_helm`] with an explicit session list — for the tests where the

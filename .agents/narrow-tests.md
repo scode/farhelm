@@ -26,7 +26,7 @@ of one test cost far less than one run of everything.
 ## Rust: recorded nextest selections
 
 The workspace holds roughly 2,100 Rust tests. Most are per-crate unit tests (`farhelm-helm` ~610, `farhelm-supervisor`
-~590, `farhelm-ui` ~300, `farhelm-proto` ~100, `farhelm` ~100). The expensive battery is the one integration binary
+~590, `farhelm-proto` ~100, `farhelm` ~100). The expensive battery is the one integration binary
 `crates/farhelm/tests/e2e` (several hundred tests driving real supervisors and terminal hosts); `crates/farhelm/tests/`
 also has five smaller process-level binaries (`agent_cli`, `spawn_cli`, and friends). Everything is selectable with
 cargo's ordinary target flags and nextest filter expressions. Nextest starts one process per test; doctests remain a
@@ -70,8 +70,8 @@ The shapes, narrowest first:
 - Repetition for a flake: loop the complete recorder invocation, stopping at the first failure and preserving its run
   directory. Choose the count explicitly; twenty attempts are a focused option, not a default gate. Each invocation is a
   fresh runner invocation, and nextest gives every selected test its own process.
-- Desktop-feature seams: `cargo nextest run -p farhelm-ui --features desktop -E 'test(substring)'` — needs the
-  webkit2gtk/gtk dev packages.
+- The desktop app's tests: `cargo nextest run -p farhelm-desktop -E 'test(substring)'` — on Linux needs the GLib
+  development package.
 
 `test(=name)` needs the full path including the `tests` module for unit tests (e.g. `store::tests::the_name`). When in
 doubt, use `cargo nextest list` with the same package/target/filter options first; listing may compile missing test
@@ -106,19 +106,15 @@ single supervisor unit test cost ~30s wall (compile of the just-built crate's te
 
 ## JS unit tests
 
-`crates/farhelm-ui/js-tests` runs in milliseconds, so narrowing is rarely about cost — but selection works: from inside
-the directory, `node --test client-log-shim.test.js` runs one file, and `node --test --test-name-pattern 'clipboard'`
-selects by test name across files.
+`crates/farhelm-supervisor/asset-js-tests` runs in milliseconds, so narrowing is rarely about cost — but selection
+works: from inside the directory, `node --test omp-conversation.test.mjs` runs one file, and
+`node --test --test-name-pattern 'pattern'` selects by test name across files.
 
 ## The batteries without a narrow mode
 
 - `scripts/test-install-sh.sh --farhelm target/debug/farhelm` — one monolithic pass over every install.sh scenario, no
   per-scenario selection, after `cargo build -p farhelm`. The locked install work it reaches has narrow Rust module
   tests (`cargo nextest run -p farhelm-supervisor -E 'test(/installation::/)'`); start there for a failure inside it.
-- `scripts/desktop-smoke.sh` — ordinary transport legs share one built app and one Xvfb. Optional
-  `DESKTOP_SMOKE_APPEARANCE=1` runs four fresh/stored dark/light appearance cases; `no-initialize` runs its fixed
-  startup deadline fault. Both prepare the native app and owned display. Retain failures and choose another run only for
-  a concrete remaining question. These integration assertions complement ordinary appshot visual review.
 - `scripts/test-provision-centos.sh` — already narrow where it counts: the cargo part is a single named test
   (`provisioning_and_update_over_ssh_preserve_an_operable_session`); the cost is the docker container and the one-time
   musl payload build, which caches across runs.

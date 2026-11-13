@@ -15,9 +15,10 @@ Some entries carry both a keep line and a drop line: the browser widget goes, bu
 
 Conventions. Code and test line numbers are at 24bc0580. `ui/` means `crates/farhelm-ui/`; `e2e/` specs are under
 `e2e/tests/`. "SPEC" is `SPEC.md` and "SPEC_impl" is `SPEC_impl.md`, cited by section heading and a short quote from the
-current text rather than by line, since SPEC was rewritten for the desktop-only GUI after 24bc0580. Where a quote exists
-only in the 24bc0580 text, the entry says so. "dioxus-desktop" means the crates.io source of dioxus-desktop 0.7.10
-(Apache/MIT), read to confirm what the Mac app's webview shell does.
+current text rather than by line, since SPEC was rewritten for the desktop-only GUI after 24bc0580. The SPEC_impl
+sections on the old GUI ("GUI: Dioxus" and its siblings) were deleted with that GUI, so read quotes from them at
+24bc0580. Where a quote exists only in the 24bc0580 text, the entry says so. "dioxus-desktop" means the crates.io source
+of dioxus-desktop 0.7.10 (Apache/MIT), read to confirm what the Mac app's webview shell does.
 
 Scope: the GPUI app replaces the desktop app, and the browser UI is dropped (SPEC.md, Topology). Behaviors that existed
 only for browser clients (touch, phone widths, browser tabs) are marked against the desktop app. The entries first

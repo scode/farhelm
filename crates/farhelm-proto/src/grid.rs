@@ -377,23 +377,16 @@
 //! the rules spanning messages have no fixtures; the tests construct those.
 //! Every other bound in the table above has an `invalid/` fixture past it.
 //!
-//! This module's tests validate every fixture. The browser grid client's
-//! JS unit tests (`crates/farhelm-ui/js-tests/grid-proto-fixtures.test.js`)
-//! read the same directories, and each of their tables must name exactly
-//! the files in its directory, so a new fixture fails there until the
-//! client's side of it is decided. They apply every output fixture to the
-//! client's decoder: valid and tolerated ones must be accepted and keep
-//! their content, invalid ones refused. They compare the client's input
-//! builders with each valid input fixture. Valid input fixtures are in the
-//! client's encoding (no `mac` from a viewer that is not a Mac, for
-//! example), but some are wire forms the client never sends as written: an
-//! empty last paste part, a short paste part that is not the last, a wheel
-//! step with Shift held, a key code an input method owns. For tolerated and
-//! invalid input fixtures, the JS tests check that the client sends the
-//! canonical form instead and stays within the bounds the invalid ones
-//! break. The input size fixtures are one byte past the limit: this
-//! module's tests pin the limit in their refusal text and the JS tests pin
-//! it to the client's own copy, so a limit changed on one side fails.
+//! This module's tests validate every fixture. The GPUI app's grid model
+//! (`crates/gui/farhelm-grid-model`, its `tests/fixtures.rs`) reads the same
+//! directories from the viewer's side, as the old browser grid client's JS
+//! tests did until that client went with the Dioxus GUI. Valid input
+//! fixtures are in a viewer's encoding (no `mac` from a viewer that is not a
+//! Mac, for example), but some are wire forms a viewer never sends as
+//! written: an empty last paste part, a short paste part that is not the
+//! last, a wheel step with Shift held, a key code an input method owns. The
+//! input size fixtures are one byte past the limit, and this module's tests
+//! pin the limit in their refusal text.
 
 use serde::de::{self, IgnoredAny, MapAccess, SeqAccess, Visitor};
 use serde::ser::SerializeSeq;

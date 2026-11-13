@@ -11,9 +11,8 @@ of it in the same change.
 
 ## Language and runtime
 
-Rust throughout, async on tokio, one cargo workspace. The only sanctioned non-Rust runtime code is the terminal island,
-the grid client that draws every terminal, and the thin JS interop around it (see GUI; "Terminal widget: the grid
-island", "The grid client").
+Rust throughout, async on tokio, one cargo workspace. The old Dioxus UI's terminal island and its JavaScript left with
+that UI; the GPUI app has no non-Rust runtime code.
 
 Motivation: single language across supervisor, helm, CLI, and UI maximizes shared types and lets one test suite exercise
 real components. tokio because the chosen web stack (axum, tungstenite) lives there; no exotic async needs exist that
@@ -161,14 +160,17 @@ framework for every externally supplied value.
 - `crates/farhelm-terminal-emulator` — the supervisor's terminal emulator for terminals in terminal hosts, and their
   snapshot format, over the patched crates in `vendor/` (see "Terminal host", "The supervisor's terminal emulator").
 - `crates/farhelm-helm` — the host registry (SPEC.md's term: the helm's record of registered hosts and their SSH
-  destinations), SSH transport, aggregation, axum API, static UI serving.
+  destinations), SSH transport, aggregation, axum API.
 - `crates/farhelm-proto` — wire types and protocol version, shared by both ends and by tests; also the few HTTP tokens
   the UI branches on in the helm's replies.
-- `crates/farhelm-ui` — the Dioxus application, built for web (wasm32) and desktop from the same crate.
-- `crates/farhelm-desktop` — the macOS webview shell (D6): a `main` that calls farhelm-ui's desktop entry point and
-  nothing else. It exists as its own package because only a package can enable farhelm-ui's `desktop` feature
-  unconditionally, and it is excluded from the workspace's `default-members` so that no ordinary
-  `cargo build`/`test`/`clippy` compiles WebKit. `-p farhelm-desktop` is consequently the only thing that compiles it.
+- `crates/farhelm-desktop` — the desktop app's process (D6): the bootstrap that embeds the helm and starts or finds the
+  local supervisor, the pre-window refusal surface, the updater and the app's state files, as a library the GUI is wired
+  into, and the `farhelm-desktop` binary. It is the only crate that depends on both the helm and the GUI ("Where the GUI
+  meets the helm"). Until the GPUI app is wired in, the binary runs the bootstrap without a window. It is excluded from
+  the workspace's `default-members`, like the GUI crates, so `-p farhelm-desktop` or a `--workspace` run is what
+  compiles it.
+- `crates/gui/` — the GPUI GUI crates (see "GUI architecture"). `farhelm-gui` also holds the harness marks' geometry as
+  plain data (`docs/harness-marks.md`).
 
 Motivation: the proto crate is the seam that keeps helm and supervisor honestly decoupled (they meet only over the wire,
 even in-process). `farhelm` remains the single multi-call artifact provisioning ever has to move — farhelm-desktop is a
@@ -176,10 +178,8 @@ second release binary for the Mac desktop alone, never provisioned to a host.
 
 ## GUI architecture
 
-NOTE: This section governs the GPUI desktop app (macOS and Linux) that replaces the Dioxus GUI. The older GUI sections
-below ("GUI: Dioxus", "GUI: sidebar, sounds, text size, quick switcher and shortcuts", "Terminal widget: the grid
-island") describe the app being replaced and leave with its code. New GUI code follows this section, not them. Where a
-rule names an owner that is not built yet, its path is recorded in the foundation ownership table when it is built.
+This section governs the GPUI desktop app (macOS and Linux) that replaces the Dioxus GUI. Where a rule names an owner
+that is not built yet, its path is recorded in the foundation ownership table when it is built.
 
 This is a rulebook in the style of SPEC.md's "Keyboard focus": each app-wide concern has one owner, a rule, and the
 mechanism that enforces it. The old GUI decided these concerns one feature at a time (focus, popover placement, late
@@ -668,1710 +668,14 @@ Traps that an earlier rule already prevents get one line pointing at it.
 
 ## GUI: Dioxus
 
-Dioxus, version pinned at the workspace level, rendering the same component tree in two targets: web (wasm32, real DOM,
-served by the helm) and desktop (wry webview wrapping the identical DOM). No dioxus-fullstack / server functions — the
-UI is a pure client of the helm's HTTP/WS API.
-
-The launcher's managed type also has an unselected repository draft, which cannot carry preview authority or fall back
-to the ordinary folder seed. Its field reuses the existing installation-bound repository discovery worker; explicit
-`gh:` search owns that worker's query while scoped search is active, otherwise the repository field owns it. Selecting a
-repository invalidates the preview generation even on same-repository reselection. The launcher and template editor
-share one destination type control; template JSON retains its existing folder/github variants.
-
-The composer keeps destination choice separate from agent mode. `github_checkout` owns the preview authority and
-retained-attempt state; `launch_composer` owns pure scope parsing and history grouping. An async preview is usable only
-for the same destination generation, host/incarnation/install claim, repository, title, agent choice and observed
-configuration epoch. Key minting snapshots and rechecks that authority. A transport-ambiguous attempt retains its entire
-body and key across configuration changes and ordinary conflicts. Authenticated reconciliation on the original
-installation either returns the recorded result or commits a refusal of that same key before any allocation. The refusal
-survives process crashes; like ordinary WAL/NORMAL state, it can be lost on an OS crash or power loss. Only that refusal
-permits retiring a dispatched binding, including after a lost reply; the composer then refreshes its preview and waits
-for another explicit submission. It never automatically substitutes a new key.
-
-Pending-launch status is local GUI state over the actual mutation request's lifetime, independent of preparation and the
-page-wide operation guard. One component renders its captured host/name and elapsed time after two seconds. Typed
-transport errors retain reqwest's timeout evidence separately from retry outcomes: an unresolved server refusal is not a
-client deadline, and expiry while waiting for earlier configuration saves has not dispatched the launch. Success-body
-reads retain the same request-owned deadline marker. Browser engines can replace even reqwest's dedicated abort reason
-with generic exceptions, so launches arm a signal-only callback with the same remaining millisecond budget before
-reqwest installs its abort timer. The caller owns that callback through body decoding; it records expiry without
-aborting, retrying or settling work. Native requests use reqwest's typed timeout. Neither error prose nor elapsed-time
-inference supplies deadline evidence; request deadlines and the helm's work stay unchanged.
-
-The submitted launcher stays mounted so its request, draft and retry identity outlive session navigation. Pending
-mutation and submitted host-resume state hide its presentation independently of quick-launch provenance. A woken fresh
-checkout's wait to see its host connect ends at most 60 seconds after the wake (see "Tensorlake hosts"). The limit is
-checked when its 60 seconds run out: a press still waiting for a connection then is discarded, even one that saw the
-host connect and lost it again before that point, while a host that shows a connection pending again only after that
-point is not bounded by it. The hidden pending root releases its existing dialog isolation, drops `aria-modal` and
-leaves no backdrop hit area; the progress pill takes no input. Preparation and unanswered confirmations keep their
-isolation. Revealing an outcome or question restores isolation and focus through the same dialog handle and opening
-generation. A return that needs a modal waits inside the same request task until other modal roots and admitted host
-results leave. It retains its pending state and operation guard through that handoff, then reserves the captured root
-before revealing it. Opening Rename or the switcher during this wait preserves the composer's opening identity. A
-retired opening still settles the request's pending state and shared Restart or Replace outcome without revealing its
-old draft. The mounted form's opening id is separate from that revocation counter: denied admission removes only the
-matching form owner, without cancelling a newer draft or restoring focus. This is a presentation transition, not a
-second owner or another launch queue; the existing operation token continues to exclude competing composer openings and
-host mutations. An admitted launch pins its resolved host into the existing host choice before releasing the page. This
-keeps navigation from changing an implicit target or retiring its retry binding, including after a returned refusal. It
-is owner bookkeeping rather than a placement edit; genuine registry changes still reconcile that host's installation.
-
-Motivation: the project's standing constraints — recorded here, because SPEC.md deliberately stays
-implementation-neutral and does not contain them: as much Rust as possible, one implementation for web and native, and a
-GUI that agents can test visually without a human in the loop. Those force a DOM-based Rust framework. Canvas-rendering
-toolkits (egui, Iced, Slint) fail the testing constraint: Playwright against a canvas is blind screenshot-diffing with
-no semantic selectors. Among DOM-based Rust options, Dioxus is the most active and has a first-party desktop story;
-Tauri+Leptos would mean gluing two frameworks for no clear gain. Skipping dioxus-fullstack keeps the API a first-class
-tested surface (the spawn CLI and test fixtures need it anyway) and avoids the framework's most churn-prone part.
-
-Helm schema 50 stores `template_shortcuts` as a JSON map from one ASCII digit to one valid template name, initially
-empty. A preferences write replaces the whole map; concurrent windows can lose an edit to that same map, which is
-accepted. Each template may hold at most one key. Names need not exist at write time, just as the quick-launch mark may
-be stale. Both template-deletion paths clear matching bindings and the quick-launch mark inside the deletion
-transaction; restoring the template does not restore either shortcut. Older helms refuse this schema.
-
-Helm schema 51 adds `welcome_seen` to the shared preference row. Unset and false mean unseen; both fresh and upgraded
-helms start unseen. The dismissal belongs to the helm so closing the welcome card on one client hides it on every
-client's next load. This migration prevents older helms from opening the database.
-
-The preferences gate exposes its successful-read, unseen decision before mounting the authenticated UI. AppBar seeds the
-welcome's open state once from it, separately from later preference changes; defaults after a failed or timed-out read
-never count as unseen evidence. First-open dismissal explicitly restores the selected, revealed terminal's focus,
-because its reveal behind a modal deliberately withholds that handoff. The card uses the existing framed modal and
-isolation helper, with every close path available regardless of persistence. First-open dismissal writes through the
-normal per-field preference queue; help-menu reopening writes nothing. AppBar owns both welcome and feedback so their
-handoff releases isolation and replaces one modal with the other without a competing focus-return task.
-
-Helm schema 56 adds nullable `preferences.name_session_on_quick_launch`. Unset and true enable quick-launch naming; only
-false disables it, so upgraded helms have the same default as fresh ones. The Settings switch under sessions, beside
-session confirmations, writes an explicit boolean through the ordinary sparse preference queue. Null restores the
-enabled default and omission preserves the stored choice. Older helms refuse this schema.
-
-Helm schema 59 adds nullable `preferences.color_terminal_frames`. Unset and false leave terminal frames uncolored on
-fresh and upgraded helms. The Settings switch under Sessions writes through the same sparse preference queue: a null
-restores the off default, and an omitted key preserves another client's choice. Older helms refuse this schema.
-
-Helm schema 60 adds `preferences.remembered_wrapper_prefixes` as an empty JSON map on upgrade. Each accepted user agent
-launch replaces or clears its own agent type's entry in the same transaction that records the launch; agent requests do
-not change it. An older helm refuses this schema.
-
-The session list's chosen ORDER, last-selected session, compact-row choice, and the launch composer's remembered
-permissions, host confirmation choices, and remembered feedback contact are one preference the HELM keeps, in a
-singleton row of `helm.db` (`preferences`: `list_sort`, `last_selected`, `visit_history`, `compact`,
-`remembered_permissions`, `remembered_workspace_trust`, `skip_host_remove_confirmation`, `skip_host_setup_confirmation`,
-`feedback_contact`, `remembered_wrapper_prefixes`, `terminal_link_click`, `skip_session_confirmations`,
-`name_session_on_quick_launch`, `color_terminal_frames`, `quick_launch_template`, `template_shortcuts`, `welcome_seen`,
-`auto_update_remote_hosts`) behind `GET`/`PUT /api/preferences`, device-authenticated like every other route. The
-remembered permission field and per-agent wrapper-prefix map are written by the helm after a successful user agent
-launch; no client PUTs them. A launch without a prefix removes that agent type's entry. Agent-origin launches and
-command launches leave the map alone. The `remembered_workspace_trust` column remains for upgrade compatibility but is
-neither read nor written. Remembered permissions describe accepted launches rather than one client's claim. Both clients
-read the row once after authentication — `PreferencesGate` holds the authenticated tree, rendering nothing, until the
-read lands, so the sort control and the auto-select effect see the remembered values on their first run and no frame
-shows a default that is then corrected. On desktop the IPC authentication gate already holds the tree and the read is
-one loopback hop, so nothing is visible; in the browser the first paint deliberately waits on that one round trip to the
-helm — a page with a valid credential used to paint its sidebar synchronously from localStorage — so the list never
-appears in an order that then changes. A write is a sparse patch naming only the field the user changed, merged
-per-field by the helm (an absent field is untouched, an explicit `null` clears one), so two clients changing different
-fields at nearly the same time cannot clobber each other; immediate controls update the signal in the page before the
-request leaves. Same-field writes are serialized latest-wins in the client, so a burst of changes cannot land on the
-helm in reverse order. A write that fails, or whose writer is lost, is forgotten: the choice stays in effect only until
-the next read from the helm for the explicitly silent preferences, and is never resent. A failed write is logged;
-callers that must report it discard their optimistic choice and report locally (SPEC.md, "Errors and diagnostics"). The
-seed read runs under a seconds-scale deadline of its own and expiry reads as "nothing remembered", so a stalled
-preference endpoint cannot blank the page for the funnel's full sixty seconds. Before each automatic session choice the
-list makes one more GET under that same short deadline. Only selection/history inputs refresh; unrelated settings retain
-their reload contract. A failed GET uses the current optimistic preference mirror. Selection writes update both values
-in that mirror before queueing their existing single-field PUT.
-
-Helm schema 68 adds nullable `preferences.auto_update_remote_hosts`, constrained to booleans. Unset, null and false
-authorize nothing; only true enables automatic remote-host updates. Migration leaves it unset and preserves other
-preferences. The normal newer-schema guard refuses older helms, and the value survives reopening the store.
-
-Helm schema 69 adds a durable announcement queue and the database's creation build. Fresh creation records the build
-inside the schema transaction; migration leaves that row absent, so an older database does not acquire a false
-fresh-install baseline. Older helms refuse the new schema. Each announcement stores its stable unique id, title,
-plain-text body, optional display-ready detail and labelled link, insertion sequence, and nullable shown timestamp.
-Enqueue is atomic and idempotent by id, including after dismissal: original content is never replaced. Pending rows sort
-by insertion sequence; shown history sorts by shown time descending, then sequence descending for a batch.
-
-Device-authenticated `GET /api/announcements` reads pending and history from one database snapshot.
-`POST /api/announcements/shown` takes an explicit `ids` list and atomically timestamps only those pending rows; unknown
-or already shown ids do nothing. The client can therefore dismiss an older window without draining newer unseen content,
-and a failed write leaves the whole batch pending.
-
-The compiled `release_announcements.json` table is the queue's first producer and ships empty. Before serving clients,
-the helm enqueues entries newer than its creation build and no newer than its running build, using full semver
-precedence, including prereleases and ignoring build metadata. An absent or `0.0.0-unreleased` creation build is older
-than every entry; a running `0.0.0-unreleased` build enqueues none. Only the producer interprets versions or supplies
-release-notes destinations: stable entries link to their version's notes, and prereleases omit the link because curated
-notes need not exist. Queue storage, routes and consumers carry display-ready content and know nothing about releases.
-
-AppBar owns the announcement dialog and a once-per-load flag beneath the authentication and preference gates. It waits
-for the initial Welcome and its feedback handoff, then calls the separate `announcements::read_and_show` operation. That
-operation reads display-ready pending/history content without load state or version interpretation. The existing
-`HostModal` admission wrapper holds a late queue result until another modal leaves, without introducing an announcement
-event subscriber. Closing releases isolation before clearing the batch or writing its ids. A successful write prepends
-that showing to the client's known history; a failed write only logs. Help reopens known history without recording it
-again, and a reload refreshes both lists from the helm.
-
-The GUI's HTTP funnel orders reads and actions after this client's earlier configuration saves: quick-launch and
-number-key bindings, template save/delete, checkout folder, post-clone command, and ntfy settings. A save registers
-synchronously before its task is polled. Template name-validation reads capture their place before registering the save
-they validate, so validation cannot wait on itself. Saves to different settings remain parallel; same-field preference
-writes retain their serialized latest-wins queue. A dependent request snapshots the preceding tickets, including queued
-preference choices, and waits only for those batches, so newer edits cannot starve it. Its existing deadline includes
-that wait; only the remaining budget reaches HTTP. Completion, refusal, timeout and cancellation release tickets, and
-failure or writer loss releases readers. A lost reply still has an unknown remote outcome: later requests can proceed
-while the helm may still apply that save, with no new retry or remote-order guarantee.
-
-Read/unread and notification marks, every preference field other than the template bindings, and host settings other
-than checkout-folder saves register no tickets; host mutations can wait on remote operations and must not hold every
-read behind them. These requests still wait for preceding tracked configuration saves. Reads and actions remain
-concurrent with each other. Terminals, the event feed and the page JavaScript's own HTTP calls (attachments, file
-stat/download, client log and clipboard) bypass this Rust funnel and are unaffected. No helm or protocol change is
-involved, and separate clients remain last-writer-wins.
-
-The sort travels as the bare word `?sort=` takes and is validated against that vocabulary at the write; the selection is
-the full entry-bound session reference. Its entry UUID prevents a remembered selection from following a removed host's
-bare session ID to another entry. Helm schema 66 adds `preferences.visit_history`, a JSON list of at most 32 full
-references, newest first without duplicates. Each non-null `last_selected` write prepends its reference, removes its
-previous occurrence and caps the list in the same database transaction as the sparse preference write. Null clears both
-selection and visits; omission changes neither. Clients cannot PUT the history. Deleted references remain until later
-visits age them out. Migration adds an empty list without inventing visits from a retained legacy selection; the next
-selection write establishes the history-head/last-selection invariant. Older helms refuse the newer schema. An absent or
-unrecognized sort word still reads as the UI default (`activity`) on the client, because the row outlives the build that
-validated it. Nothing is kept per client: no localStorage key, no field in `desktop-client.json` (which holds no
-credentials either, only the webview readiness counter the desktop smoke reads and the desktop app's automatic-updates
-setting, which is a setting of that app installation rather than one of these shared preferences), no eval round trip.
-The visible consequences are the ones SPEC.md names — one answer shared by every client, and a second client attaching
-to its first listed surviving visit.
-
-Keeping the order out of `SessionFilter` mirrors the helm's own split, and on this side the argument is about
-reconciliation rather than about caches: what a reply COVERS is keyed to the filter — whether the banner may say the
-list is filtered, whether a session's absence means it left the fleet, whether an optimistic rename may be retired — and
-not one of those answers can change because the same rows arrived in a different sequence. Reply ADMISSION is the one
-question that does depend on both: a listing answered under the previous order is a correct list of the wrong sequence
-arriving under a control that names another one, so it is refused exactly as a listing answering a stale filter is. The
-UI names the order on every read instead of leaning on the helm's `created` default, which is what keeps the control on
-screen and the rows beneath it from disagreeing. Changing it is one more read, since every read is one request for the
-whole list.
-
-The listing is ONE request and one reply (SPEC.md's Session list section): `GET /api/sessions` answers with the entire
-view — merged, filtered, sorted — up to the helm's cap, plus both counts and a `truncated` flag that is set exactly when
-the cap cut it. The UI follows no cursor, keeps no ceilings of its own, and never asks a second time to reconcile what
-it got. Because the rows and both counts come from one snapshot on the helm's side — with a cached row nothing can
-render dropped from all three at the source — there is nothing for the list to change under and no count contradiction
-to detect: the flag is the whole of what the UI reads off a reply about completeness, and the rows are never compared
-against the counts (that comparison was the paged design's "underfilled listing" detector, and it went with the pages).
-"Short" is one predicate with two readers rather than a rule each place restates: it is exactly the condition the count
-banner prints "Showing N of M" for, the same answer decides whether an absence may be read as a departure (otherwise the
-missing row's optimistic rename is retired, its editor is left usable, and — if it is the selected one — its pane is
-left alone). Automatic selection uses only listed candidates even on a short reply; it never resolves missing visits
-directly. A complete authoritative absence changes a ListView-owned rename editor to an unavailable-target state instead
-of closing it, preserving its draft for copying or cancellation; seeing the exact source again clears only that state. A
-UI that tells the user its list is incomplete and then reasons as though it were complete would be disagreeing with the
-one line whose job is to be believed.
-
-One consequence is worth recording because nothing on screen shows it: the auto-select fallback (SPEC.md's
-"newest-created session", when no eligible listed visit remains) cannot be assumed to be the first row of the listing,
-because the first row is whatever the chosen order put there. It picks by the session's `created_at` instead, which is
-why that field is decoded by the UI at all, and treats a missing stamp (an older helm) as unknown rather than as 1970 —
-a fleet with no stamps degrades to the listing's own first row. It picks from the rows in hand even when the cap cut the
-listing, where under a non-creation order the newest session may sit past the cut: a cut listing is a fleet of hundreds,
-the fallback exists to keep the pane from sitting empty rather than to be exact, and the alternative was a second
-request shape for that corner.
-
-One pure chooser serves startup and removal: first listed history entry, else that newest-created fallback. When stored
-history is empty, the retained last selection is one effective visit under the same eligibility and exclusion rules; it
-is never appended behind nonempty history. This preserves the known choice after the empty-history migration, and the
-ordinary automatic save establishes stored history. The list's `SelectionIntent` distinguishes an unspent startup
-choice, an actually opened reference whose removal needs a successor, and an intentionally retained empty pane. Every
-actual open records its reference synchronously. That reference remains excluded when the pane clears, because a
-successful local Delete can precede the listing refresh; the exclusion applies to both history and fallback. Immediately
-before a New, Clone or quick launch sends its first create, it takes over only an empty startup opportunity. A feed may
-publish its row before its HTTP reply, so a completion-time handoff would let automatic selection bypass the launch's
-input check. Refusal and unknown outcomes do not rearm obsolete startup intent; a later row created by another client
-does not revive it, while manual opening remains available. Actual selected-session removal keeps its normal successor
-choice, including while another launch is pending, after the admitted Delete set drains. No additional session-exclusion
-set or page-wide busy gate is involved. One in-flight guard holds the pre-pick preference read; completion checks the
-same selector reason, current selection, operation gates and latest admitted rows, so a manual selection or retired
-startup intent during the read wins. No eligible rows means no read and no pick. Automatic selections use the same
-selection writer as manual ones, so reload remembers the resulting visit. This listed-only rule replaces the old direct
-restoration of a remembered session beyond a truncated listing; absence still cannot retire an already-open session
-without the separate complete/unfiltered disappearance gate.
-
-The sidebar uses an identity line and, outside compact mode, a host/directory line plus a detail line when there is
-ended status or a stale qualifier to explain. Its identity line is status, locality, title, a one- or two-glyph agent
-badge, and a right-aligned activity-time column before the narrow menu gutter. The host line is the host name and
-directory, joined by `:` when a name is available. `ListView` projects `Host::short_name()` from its existing hosts read
-into the compared `RowState`, so alias or destination changes redraw the memoized row. A missing registry match keeps
-the session's full helm-supplied name. This restores host visibility for confirmed local sessions too: a host name is an
-identity fact, while the locality icon answers a separate question. The status and locality tracks keep fixed icon-sized
-widths: live status uses the first slot's dot, compact ended status replaces that dot with a distinct stopped, exit,
-interrupted, or error glyph, and an absent status or unknown locality leaves its slot blank. A session with
-notifications adds a bell between the agent glyph (and its permission mark) and the activity-time column, in both
-densities; it is absent, taking no width, when the list is empty, and its hover help and accessible name carry the
-unread count. Compact rows therefore remain one visual line; host unavailability survives there as a neutral glyph with
-the same cause phrase the regular row and session card show, in its accessible text and tooltip. The full status,
-annotation, exit code, and qualifier meaning remain in accessible text and tooltips, and ended glyphs never acquire the
-live dot's mark-read action. Noncompact ended details and qualifier words occupy their own full-width line under the
-title through activity and above host/directory. Detail wraps unbroken peer text at any boundary without ellipsis,
-clamping, or widening the menu gutter. The activity track has a four-character minimum and grows for unbounded ages such
-as `1000d`. Agent glyphs are max-content rather than a text-badge allowance: an agent launch's agent type and a command
-launch's declared agent type are authoritative, a legacy row gets its stored agent kind's glyph and the unclassified
-permission mark, and a command with no declared agent type gets the terminal glyph; nothing is read off a command line.
-C/M/L/G/P are Farhelm letter paths for Codex, Muse, Claude, Goose, and Pi; OpenCode uses its attributed inline mark, and
-an unknown command uses the neutral terminal glyph. A legacy row with no name leaves that fact absent.
-`list::shared::session_locality` decides among three answers rather than two — `Local` when the session's host id
-matches the registry's `HostKind::Local` row (never by name; see that function's own doc for why), `Remote` when both
-ids are known and differ, and `Unknown` when either is missing (an old helm sending no host id, or a hosts read that has
-not landed). A confirmed local glyph uses the semantic red caution color on unselected rows, including stale and compact
-rows. On a selected row it uses the same inverse selection color as remote host marks; selection treats every host
-alike. The row draws the LOCAL glyph only for a confirmed `Local` verdict — an `Unknown` row draws no glyph at all,
-never the local one, because a glyph is a positive claim `session_locality` has no evidence to back. The 2026-08-23
-rule's weaker promise survives underneath: unknown locality still never SUPPRESSES an available host label, it only ever
-leaves the row free to show one it already has, and the glyph rule adds a second promise on top rather than replacing
-the first. Legacy rows with neither a registry match nor a supplied host name show none — locality does not invent one.
-Only sidebar rows opt into `SessionHostName`'s short-form rendering, which escapes the intended raw short name without
-reinterpreting a literal alias as the local sentinel. Other callers keep full-name presentation. The agent track is
-rendered as glyphs: structured launch metadata decides the harness: an agent launch's agent type, a command launch's
-declared one, or a legacy session's stored kind, and the terminal glyph otherwise. The sidebar's YOLO mark and the
-helm's YOLO confirmation must agree on every launch by reading the same verdict, `SessionLaunch::yolo`:
-`farhelm_proto::yolo::selection_is_yolo` for an agent launch and the user's (or agent's) assertion for a command launch.
-Nothing reads a command line for it. A legacy session has no verdict and carries the unclassified mark; nothing that can
-create a launch holds one, so the guard never asks about it. An omitted Pi, OpenCode, OMP or Goose permission is
-rendered as YOLO for compatibility with older snapshots. The full invocation remains in its accessible text and tooltip.
-The working directory is tilde-folded against the `/home/<user>` and `/Users/<user>` shapes, since no home directory is
-on the wire to fold against properly. The full invocation stays on the agent mark; the untouched directory and other row
-facts ride in a hidden summary card source beside the row. The open button names that source with `data-tooltip-card`;
-the shared tooltip clones its DOM children on hover or keyboard focus. All row hover targets explicitly opt into
-`data-tooltip-anchor="session-row"`, including the open button, nearer marks and the sibling notification bell. The pure
-`placeSessionCard` puts their help six pixels past `.app-sidebar`, centred vertically on the target and clamped to the
-window, with a notch centre clamped inside the box's straight edge. It falls back to `placeTooltip` when there is no
-room to the right. The source is a sibling, not a row descendant, so row-scoped controls and locators cannot match a
-second, hidden copy. Rust renders the host's own mark, status classes and isolated peer text. The card gives the full
-title, host, managed checkout, directory and timestamps without changing the open button's accessible name; marks keep
-their nearer hover targets and the complete ended-status detail stays on the row. The source and cloned tooltip remain
-outside the accessibility tree.
-
-Agent identity colors are independent of the permission mark: `app.css` binds `.harness-glyph[data-glyph]` to per-theme
-`--harness-*` tokens for Claude, Muse, Cursor, Pi, OMP, Grok and OpenCode. Codex, Goose and Terminal inherit the agent
-track's `--fg-1`. Each colored mark clears 3:1 against the sidebar and row hover surfaces; the more-specific
-selected-row glyph rule uses `--on-fill` for every mark. `docs/harness-marks.md` records color sources and terms,
-separately from geometry.
-
-Each live dot carries its status word on the dot itself, with the optional mark read / mark unread action following it.
-Permission marks use hand-drawn stroke silhouettes in the 12-unit viewBox: a slashed shield (`data-glyph="yolo"`) and a
-question mark (`unknown`) use `--warn`; a plain shield (`shielded`) uses `--ok`. The badge's permission is non-optional.
-Agent-launch non-YOLO modes share the plain shield but retain their own mode-specific descriptions; a command launch
-gets the plain shield only from its own not-YOLO assertion, and a legacy command gets the question mark. An own-setting
-launch gets a dashed shield (`own-setting`) in `--fg-1`, while still counting as YOLO for the host guard. Both slots
-remain fixed-width.
-
-The agent and permission SVGs sit in separate tooltip targets, so hovering the permission mark explains its mode instead
-of returning only the combined agent summary. The combined summary remains on the agent track for provenance and the
-full invocation.
-
-`status::status_badge` supplies the status wording; the row chooses its presentation according to compact mode. Live
-states keep their text for screen readers alongside the colored dot. Ended states use a distinct icon in compact mode,
-with the complete wording in accessible text and a tooltip. Outside compact mode the wording gets a full-width wrapping
-line. Keeping that detail beside the title used to truncate it despite unused space elsewhere in the row, and keeping it
-visible in compact mode made stopped rows taller than live ones. The two presentations preserve the same facts while
-honoring the user's density choice.
-
-The relative age beside it needs a `now`, and there is no honest one on the wire. `last_activity_at` is written by the
-session's HOST and compared against the VIEWER's wall clock, which on a remote helm is a different machine and in a
-multi-host fleet is several of them at once. The UI corrects for none of that. The one reference a client could obtain —
-the helm's own clock, off an HTTP `Date` header — would fix at most one of the N edges involved and would lend the rest
-a precision they do not have, so the code instead refuses to print nonsense (a stamp in the future reads `now` rather
-than a negative age) and keeps the raw stamp one hover away. The `Session` mirror decodes `last_activity_at` for this
-and applies the proto's own fallback rule, `last_activity_at` when positive and `created_at` otherwise, by calling
-`farhelm_proto::effective_activity` rather than keeping a copy. The UI depends on farhelm-proto with its tokio-based
-frame I/O feature turned off, so it builds for wasm, and shares the leaf wire types the helm forwards verbatim (session
-status, restart offer, tab, launch selection). It keeps its own decoders for what the helm shapes for HTTP (session
-rows, hosts and the reply envelopes), because those tolerate words a newer helm may send to a browser tab still running
-older code; shared golden files under `crates/farhelm-helm/http-contract/`, serialized by the helm's tests and decoded
-by the UI's, keep the two sides from drifting. That rule governs the displayed age and the seen/unseen comparison only —
-the helm orders an activity-sorted list by reported status first and the work-start key inside each group, so the age
-column is deliberately not a rank column: a row above another can show an older age, and that is the contract rather
-than a contradiction. A zero means "this helm predates the field" and renders no age at all rather than an age counted
-from 1970. The viewer's end of the subtraction can go missing too — a platform clock that will not answer, or one
-sitting at or before the epoch — and that is carried as an absent value rather than as a zero, because subtracting a
-good host stamp from a zero "now" would clamp every session in the fleet to `now` and paint a dormant fleet as a busy
-one.
-
-Ages advance on a dedicated 30-second tick — one page-wide signal, written by a component mounted beside the
-invalidation feed and read by the list and the open session's header. The listing's fallback poll was the obvious thing
-to reuse and is the wrong one: it runs only while the feed is DOWN, so on a healthy page it never fires at all. The list
-formats each row's age itself and hands the row a finished string, which is what keeps the tick from re-rendering rows
-whose displayed age has not moved — an `8h` row survives sixty ticks comparing equal.
-
-Styling is the single hand-written application stylesheet, `crates/farhelm-ui/assets/app.css`: plain CSS, with no
-preprocessing and no framework transformation, though Dioxus still registers it as a packaged asset and decides its
-served path the same way it does every other asset. Its colors, font stacks, and non-zero corner radii are declared once
-as CSS custom properties in a `:root` block at the top of the file and referenced as `var(--token)` everywhere else; the
-rule is that no use site holds a literal, with one carve-out — a structural `0`, where a corner has to stay square
-because it joins a neighboring control, names no design value and stays a literal. The tokens are named for the role a
-value plays — surface levels (`--bg-*`), foreground levels (`--fg-*`), one accent family, `--ok`/`--warn`/`--danger`
-with their fill and border variants, `--radius-*`, `--font-ui`/`--font-mono` — rather than for the color it happens to
-be, so a restyle is an edit to one block instead of to every rule that mentioned the same hex. The dark palette is
-Steel: blue-gray surfaces and a periwinkle accent. Steel Light is a second `:root[data-appearance="light"]` block
-defining every color, elevation and opacity role independently. Geometry and font roles remain shared. The token and
-contrast checks read both owners separately, so a missing light role cannot silently inherit its dark value.
-
-One classic head script owns the device appearance choice, stored as `system`, `dark` or `light` under
-`farhelm.appearance` in localStorage. Missing, invalid or refused storage starts with System; an unavailable system
-query resolves to Dark. The owner resolves System through `prefers-color-scheme`, sets the root's `data-appearance`
-before renderer content, and follows live system and same-origin storage changes. A refused write still keeps this
-page's selected choice. Settings supplies native radios whose checked properties the same owner synchronizes on mount;
-Rust holds no second choice signal and the helm stores no copy. The web build packages the classic script and stylesheet
-as static head assets. The desktop custom head inlines those exact sources, script first, without waiting for its
-embedded asset handler. Native backing before a document exists is a separate surface; DOM order alone is not paint
-evidence.
-
-On Linux, the native window starts hidden while the root acknowledges applied ordinary content and returns the page
-owner's computed opaque ground. The native WebKit backing receives that color before the single startup reveal; this
-transient RGB value is neither another preference nor a native theme choice. Readiness includes Starting and Retry
-pages, without waiting for authentication, fonts or a terminal. A deadline measured from window creation bounds missing
-initialization and unanswered eval; failure refuses startup rather than leaving an invisible process or revealing an
-unprepared backing. Closing cancels the pending reveal. Dioxus derives its direct-edit interpreter mode from initial
-hidden visibility and retains that scheduling after reveal. macOS keeps the framework's existing reveal and foreground
-path. Native recordings are still required to assess presentation; DOM acknowledgement and backing readback are not
-compositor acknowledgements.
-
-The Linux window ground also receives that startup RGB, because the native surface can appear before WebKit's backing.
-Its existing native menu uses GTK's standard background role so its ground and labels retain the OS theme together,
-including when the page has an inverse device override. No native palette or theme subscription is added.
-
-Two of those roles are design constraints and not merely names. The first is the surface ladder: exactly three levels
-are in use — the ground (the page), the chrome one step above it (sidebar, main header, tab strip), and the floating
-level one step above that (menus, dialogs, forms, bands that interrupt a pane). All three lean cool by the same small
-amount. In Steel, the ground is a near-black and not `#000`, because pure black would be the one untinted surface in a
-set meant to read as one material at three depths. The terminal's own `--terminal-bg` surface, Ghostty's default
-background for an out-of-the-box readable terminal, is not a rung on that ladder: it is the terminal theme's background
-(`assets/terminal-theme.js`), which the grid paints, mirrored so the pane's gutter and viewport agree. Which level an
-element sits on is recorded in the `:root` comments; a `--control-hover-bg` and a `--chip-bg` token fill a bordered
-control's hover state and a small chip respectively, named for that specific role rather than folded into the `--bg-*`
-surface family, so neither one reads as a fourth and fifth level to lay something out on. `--well` is a third fill of
-that kind: the inside of an input, select, or code box, darker than its raised panel so that a field reads as cut into
-it. In Steel it stays lighter than the ground so a field on a dialog does not read as a hole through to the page; Steel
-Light uses a pale recessed fill. The second is that there is ONE accent, and what it may be spent on is a closed list
-rather than a palette to decorate with: selection, `:focus-visible`, normal primary actions, any PRESSED disclosure
-control, and the wait after a confirmed delete (the spinner and words on the session's row and over its terminal, and
-the dot and words in its header). That last entry is the maintainer's choice (2026-09-30): the wait is the outcome the
-user just confirmed, so the danger red it used to be read as a failure; grey is what an earlier indicator used, and it
-went unnoticed; and `--info`, the blue for status, already means idle with unseen output. It is the one entry that does
-not mean "this is where you are" (see below), so it is kept narrow enough not to compete with selection: it colors only
-the spinner or dot, the words, and the terminal overlay card's edge, and the deleting row takes no tint or edge of its
-own, which would look exactly like the selection it usually already is. Action buttons use three deliberate tiers on the
-shared ghost `.btn` base: `.btn-primary` is the normal periwinkle affirmative, `.btn-neutral` is the quiet secondary
-treatment, and `.btn-danger` is reserved for destructive confirmations. A permanent answer uses the outlined form of its
-one-off tier: the YOLO confirmation's "Start, and don't ask again on this host" and host removal's "Remove, don't ask
-again" keep the danger color, while host setup's "Set up, don't ask again" keeps the primary color. Each leaves its
-one-off action as the filled choice. The maintainer chose (2026-09-30) not to make a permanent answer the filled one
-that draws the reflex click. The host row's inline update action is another deliberate outlined treatment: amber
-(`--warn`) for an optional update and red (`--danger-strong`) for a required one. Its outline signals urgency without
-presenting an update as a destructive confirmation. Being outlined, it preserves the sidebar's one-filled-control rule.
-Pressed disclosures use `--accent-fill-hover` so an open trigger is distinct from a resting primary. The normal-primary
-entry is scoped per SURFACE, not per screen: the sidebar's resting chrome carries exactly one filled control
-(`New session`), and each dialog or popup that floats over it may supply its own affirmative primary. The sidebar's
-secondary actions use the neutral tier; menu items, tabs, composer selections, relays, and other explicit exemptions
-retain their ghost or purpose-built styling. Destructive menu items remain red text, while their confirmation buttons
-use the danger tier. SPEC.md requires the sidebar to mark the selected session's row readably at a glance, so anything
-else joining that list has to be a place where the accent means "this is where you are" — the same thing every entry but
-the delete wait says — because an accent spread across ordinary decoration would leave nothing to make the selection
-readable. Both constraints have a contrast floor under them: the quiet foreground tokens are set so that metadata stays
-at WCAG AA against the brightest ordinary surface it lands on. Solid selected surfaces have separate inverse text roles,
-so their legibility does not depend on muted prose colors also surviving the selection fill.
-
-Links use their own `--link` role (`#9cb7ff` in Steel), separate from the accent and from status colors. Every anchor
-and button styled as an inline link uses that color and stays underlined at rest, with no different visited or hover
-treatment. The underline matters because the link blue alone does not stand apart from the surrounding grey prose at the
-3:1 contrast needed to identify a link by color alone. Keyboard focus keeps the shared accent ring. A link that opens a
-page outside the app ends in `↗`; an inline action inside the app does not.
-
-Selection is one construct wherever it appears — the sidebar's selected row, the selected tab, highlighted menu items,
-the open settings section and the launch composer's chosen harness, segment, folder and list option: a solid
-`--accent-fill` with inverse `--on-fill` text. The normal primary action uses that same fill. Selection needs no
-additional accent bar. Secondary selected metadata uses `--on-accent-dim`, an inverse role that still clears AA on the
-solid fill; `--fg-bright` remains ordinary emphatic text rather than carrying two incompatible foreground roles.
-
-Status shapes carry their meaning on a selected row: filled circle running, triangle waiting, diamond idle with unseen
-output, hollow ring idle. Their inverse foreground remains visible against the selection, and the running pulse keeps a
-higher minimum opacity there so its dim phase does not disappear into the fill. Unselected rows keep the status colors.
-Accessible labels, stale-state meaning and reduced-motion/inactive-window behavior are unchanged. Selected technical
-values, identity marks and delete-progress wording also use inverse foregrounds; keeping their ordinary colors would
-lose contrast on a solid selection. Focus on a selected control needs its own visible inverse indicator. Menus and
-dialogs use the shared surface and selection roles; a dialog adds only what being modal needs (a veil, a panel edge one
-step brighter than a control outline, a shadow), on the same one corner scale as everything else.
-
-On/off settings share a switch presentation over native checkboxes. Two to five exclusive choices share segmented
-controls; longer effort lists use a native select, including any inherited value the current catalog no longer offers.
-The launcher's YOLO radios and Resume checkbox keep their native Enter behavior. Presentation does not own their values
-or requests. Menu headers, icon/label/description rows and separators likewise leave native item buttons and their
-navigation in each caller. Dialog header, body and footer presentation preserves each existing scroll region and modal
-owner. The shared action row keeps Cancel, any outlined permanent answer and the ordinary main action in that order,
-including when a narrow window stacks them. Disabled filled actions return to a quiet raised surface with readable text
-rather than fading the affirmative fill.
-
-The session launcher uses that frame around its existing form root and draft. Its labeled destination and launch-choice
-rows share one scrolling body; the inline save-template editor stays there. A pinned footer separates the complete
-target and agent-choice summaries from the compact main-action label, whose accessible name still includes its target.
-Refusals, destructive warnings and the current inline YOLO question occupy an adjacent, bounded `ScrollRegion` only
-while they exist. Its native controls supply keyboard entry, or the shared region supplies one when it has no usable
-control. The action row never scrolls with the fields or yields its height to a long notice. Phone widths stack field
-labels and use the shared action order; short windows compact and wrap the launcher actions to keep fields and notices
-reachable. Frame wrappers do not change Enter handling, captured consent, asynchronous operation guards or modal focus
-ownership. Initial focus stays on search for ordinary creates and Cancel for Restart; sequential Tab follows the new
-header, body and footer reading order.
-
-Rename and tunnel consent use that shared header, bounded scroll body and pinned answer footer. Their header Close uses
-the same live cancellation guard as Cancel; tunnel consent also retains the rendered warning's opening token and refuses
-dismissal during its acknowledged consent write. Native Tab follows header Close, body fields or keyboard scroll entry,
-then Cancel and the main answer; their existing initial focus remains unchanged. Rename retains one native form around
-its body and footer, so moving Save does not create another submission path. Inline YOLO shares only the action row:
-Cancel, optional guarded start, outlined permanent YOLO and the filled one-time answer. It gains no modal frame or
-header Close.
-
-Templates keeps its existing root scroll owner and selected editor's local footer, using the same shared heading and
-action presentation. The leave question reads Keep editing, Discard, Save but still focuses Save when it opens. Its
-single header Close continues through the draft-departure guard. Trash uses the shared header without an icon tile: the
-title retains its static can, the total is its summary, and header close shares footer Close's confirmation-aware
-dismissal. Both remain available during cleanup requests. Its archive ScrollRegion sits above a pinned footer containing
-Close, then Delete all. Global confirmation uses a conditional, bounded ScrollRegion immediately above that footer;
-per-host bands remain in the archive body. Both regions retain native keyboard entry and recover toward footer controls.
-Initial focus stays on footer Close; sequential Tab follows header close, body, confirmation when present, then footer
-actions. Phone widths use the shared full-width action stack. At ordinary heights the global question keeps its bounded
-natural height before the archive list gets the remaining space. Short windows compact only Trash's header vertical
-spacing; the archive body and global confirmation retain enough height for keyboard entry and the answers.
-
-Nothing on screen may redraw on its own more than 10 times per second. "On its own" means an indicator or decoration
-that moves, fades, spins, or blinks while nothing about the state it shows has changed; drawing new content because new
-data arrived (terminal output, a list update) is not animation, and this rule does not cover it. In this codebase that
-means a CSS animation that repeats indefinitely (`infinite`, or any iteration count that keeps it running with no end in
-sight) uses a stepped timing function, `steps(n)`, `step-start`, or `step-end`, at no more than 10 steps per second
-counted across the whole cycle (the timing function applies to each interval between keyframes, so `steps(4)` over a
-three-keyframe pulse is eight changes per cycle). Interpolating timing functions on such an animation (`linear`, `ease`,
-`ease-in`, `ease-out`, `ease-in-out`, `cubic-bezier(...)`) are forbidden, and so are `requestAnimationFrame` loops and
-JS timers that change what is drawn more often than 10 times per second. That list explains the rule; it is not a
-whitelist, and a technique it does not name that redraws every frame is just as forbidden. One-shot transitions and
-animations started by a user action or a state change, and done drawing within about a second, are allowed (a delay
-before one starts draws nothing and does not count): the 100 ms hover tints, or the grid's 800 ms scrollbar fade. Every
-looping animation also stands still while the window is inactive, meaning the window or tab lacks keyboard focus or is
-hidden or minimized, which includes a Farhelm window visible beside another app that has focus; one universal
-`animation-play-state` rule in app.css, keyed on an attribute the UI root keeps in step with focus and visibility,
-covers present and future animations alike. That rule freezes one-shot CSS animations as well, so one that may start
-while the window is inactive has to read correctly at its first keyframe, or be written as a CSS transition, which the
-pause does not touch. Under Reduce Motion (`prefers-reduced-motion: reduce`) every looping indicator is static.
-`js-tests/app-css-animations.test.js` enforces the stepped-timing half against app.css.
-
-The reason is CPU and battery, not taste. An interpolated animation produces a new frame on every display refresh for as
-long as it runs, so on macOS the compositor (WindowServer) redraws the window at the display's full rate, up to 120 Hz,
-and the display cannot drop to its low-power idle refresh. A single running-status pulse, `2s ease-in-out infinite` on
-opacity, was observed holding WindowServer at roughly 40-50% CPU on a 120 Hz MacBook, even with the window hidden; that
-is one observation on one machine (2026-10-02), not a constant, but turning Reduce Motion on made the load go away and
-turning it off brought it back. Animating only opacity or transform does not get around this: it keeps the page's own
-layout and paint idle, but the compositor still redraws every frame the value changes, so "compositor-only" does not
-make a looping animation cheap.
-
-`--font-ui` names the vendored Inter face for interface text, including labels, buttons, titles, menus, session names
-and host names. `--font-mono` names JetBrains Mono Nerd Font for the terminal, paths, versions, commands, ages and small
-Nerd Font glyphs. Technical values opt into that role explicitly; a peer-authored value is not necessarily technical
-text, so the shared trust and bidi classes do not select a font. Age overlays and their hidden measurement copies use
-the same mono metrics. Both families ship as WOFF2 with their licenses; Inter's regular, semibold and bold weights are
-the same files the docs website vendors. Form controls inherit their surrounding face rather than opting in: user-agent
-stylesheets give `button`, `input`, `select`, and `textarea` a platform face instead of letting them inherit, so one
-zero-specificity rule in app.css makes them inherit `font-family`, and a control added later cannot fall back to the
-platform sans-serif the way most of the launch composer's buttons once did. The rule leaves font size alone; the grid
-terminal's hidden input field matches it harmlessly, since it is never visible and sets its own font inline.
-
-The open session's chrome has one top row with terminal tabs on the left and fixed text-size controls, Stop, split
-Restart and Replace buttons, Clone and Delete on the right, and a slim details bar below the terminal. The bottom bar is
-ordered status, title, host, age, managed-checkout branch mark when present, copyable `{cwd}`, and copyable invocation.
-The host uses the same label component as the session list in its full-name mode, reading the shared `Signal<HostsRead>`
-context rather than starting another host request; its name remains visible when locality is unknown, and only a missing
-name omits it. Identity moved below the terminal to make the active session and host easier to see while keeping the
-bottom bar small and leaving room for the tabs and actions together at the top. The terminal keeps at least its previous
-steady-state height. Earlier, four stacked bands cost roughly 170px before the terminal started, on a surface whose
-entire point is the terminal; they were consolidated into one roughly 40px header above the tabs before this split. Two
-of those bands had to go somewhere rather than merely shrink. The restart offer's explanation became the restart
-button's tooltip and its `aria-describedby` target: SPEC.md's rule that Restart always resumes and, when it cannot, is
-greyed out with the specific reason is carried by the button's accessible name (`aria-label` and, alongside the further
-elaboration, its tooltip) — naming the offer (`Resume conversation` or `Restart unavailable`) rather than the action. An
-unavailable Restart, like an unavailable Restart with, is `aria-disabled` rather than natively disabled, so its tooltip
-stays hoverable in webviews and its click handler is what refuses. The directory and invocation buttons carry their full
-values in their tooltips, shrink before the session title and host, and reveal a clipboard affordance on hover or
-keyboard focus. Their hidden-characters copy warning opens upward from the bottom bar so the window edge cannot clip it.
-
-Copy feedback snapshots that warning from the copied value alongside its click id. A metadata refresh leaves the warning
-and its existing expiry unchanged; an older click's timer cannot clear newer feedback.
-
-The action group remains fully visible and in DOM order from a 650px main pane: zoom out, the display-only point size,
-zoom in, Stop, Restart and its caret, Replace and its caret, Clone, Delete. Text size does not scroll with tabs; it
-retains the tab surface's stale/inert condition. The two split menus use the shared menu anatomy, focus queue, keyboard
-handling and outside-pointer relay, with one open family per session view. Their absolute below-caret placement follows
-toolbar layout without a separate async measurement lifecycle. Main halves and repeated plain menu choices call the same
-lifecycle-admission callbacks; opening a menu takes no claim. Restart with keeps its independent availability and
-accessible explanation. The launcher returns to the persistent caret rather than its unmounted menu entry. The native
-tunnel pill has a bounded width beside the tabs, outside their terminal-presence condition and stale/inert subtree;
-together with the action group it stays visible at 650px. The tab strip shrinks into the remaining width and scrolls
-horizontally. The app's 320px main-pane floor is unchanged; between those widths the row may clip its trailing actions
-rather than wrapping or hiding them. The restart confirmation became a popover anchored under the button that opened it,
-still confirm-in-place with focus on the enabled confirming answer (Cancel while disabled); the consequence sentence
-they lead with is the one line standing between a click and a killed process tree, and a header that kept it in flow
-would have to either wrap or truncate it. Header Replace has a separate anchored confirmation state so it cannot
-accidentally open the interrupted card's confirmation. The top row owns their Escape handler alongside the action
-buttons; keyboard order is top row, terminal, then bottom bar. Everything conditional — a refused restart's prose, the
-last-known-status band and the "helm stopped listing this session" line — is still a full-width band, because a band
-that only appears when it has something to say costs the steady state nothing. These notices, the interrupted card,
-trust hint and tab errors remain between the top row and terminal. A classified status renders in at most one place: the
-bottom bar normally, the stale notice's own metadata band for a stale session (where SPEC.md's
-title/directory/last-known-status triple is assembled), and nowhere at all for a session nothing has classified yet.
-
-The desktop tunnel owner stays mounted even with no listeners, preserving its controller generation, feed/backstop
-reader and raw terminal-hover metadata bridge. Only its pill disappears at zero listeners. A dedicated teal role in each
-palette distinguishes local listeners from host status; the open disclosure uses the shared accent. Content-sized tabs
-keep the pill beside the last tab at wide widths. Header measurement enables tighter horizontal action spacing only when
-this pill, the tab floor and normal-size actions do not fit. It measures normal widths before each decision so
-compaction cannot oscillate, and observes pane and content changes without introducing a containment boundary around the
-anchored confirmations. This preserves a useful tab scrollport at the 650px floor; only the escaped host field yields
-within the bounded mapping. Both ports stay fixed, and multiple listeners show a count. Its popup uses the shared menu
-header and separator around an ordinary list with native close buttons, not a dynamic command-menu navigation framework.
-Escape returns focus to the pill; Tab leaving and outside-pointer dismissal preserve newer focus. Removing a focused
-last listener returns to an enabled, non-inert Restart caret or bottom-bar copy control.
-
-One synchronous close claim excludes overlapping individual and batch closes. Close all snapshots listener IDs, calls
-the existing close endpoint serially, removes acknowledged successes and attempts the remainder after a refusal, then
-requests an authoritative refresh. Action failures retain the attempted mappings until Dismiss or a later successful
-action; successful reads clear only read failures. Both error channels share one conditional notice inside the open
-list, or anchored below the top row when the list is closed or absent. It survives a vanished pill without taking
-terminal height in the steady state. The popup and notice declare terminal-link coverage; the global tunnel error notice
-and consent controller are unchanged.
-
-An unavailable session uses one accent card over the terminal scrim, sharing Delete's card geometry and spinner.
-`hosts::session_unavailable_cause` maps the existing host read to a stable phrase for both row densities and the card;
-retry counts and escaped peer diagnostics stay in smaller print. The remedy is preserved verbatim. A pending registry
-read says checking, a failed read names that failure, and a connected host under a stale session says refreshing. The
-browser's reconnect card uses the same CSS with its own counter and neutral retry button. Recoverable detach notices
-never paint the red banner; takeover, stall and terminal refusals still do. A session-owned resize observer gives the
-card the window's full height beside the sidebar when less than 80px of terminal height remains, so conditional chrome
-cannot hide its explanation and the sidebar stays usable (a window too narrow for the sidebar and the main pane's 320px
-lets the card take those 320px over the sidebar's edge).
-
-The session view remembers whether it has offered terminals. Staleness retains those islands and makes their panes and
-tab strip inert; a freshly opened stale view offers no terminals. The existing recovery snapshot's element (the grid's)
-moves beside the replacement mount so hidden replay does not hide the old screen. It is disposed only at successful
-replay reveal, or restored into its mount for a final refusal. Pane visibility still hides background tabs. Availability
-in the synced terminal specs nudges waiting recovery controllers once when the host returns, through the existing
-automatic `if_unowned` path, without changing the retry ladder or disturbing attempts already in flight. Takeover
-tombstones and the build-mismatch capability veto remain authoritative. Interruption after a reboot still empties the
-desired set. Replay callbacks from a socket that died meanwhile cannot retire its new recovery. If replay reveals while
-the pane is still inert, the availability edge completes the focus handoff through the same guard used by reveal,
-preserving deliberate focus in fields, dialogs and other keyboard owners. Inline session questions share a
-keyboard-owner marker: header Restart, Replace and Delete, sidebar Delete and Replace, interrupted-card Replace and tab
-Close keep focus on their answers across replay reveal, availability recovery and automatic selected-tab fallback. The
-guard follows focus inside the question, so explicitly selecting a terminal still allows typing there. Header Escape
-cancellation keeps its existing post-unmount return to the selected terminal.
-
-Restart with is a mode of the shared session launcher. Its source seeds the same draft that New, Clone and Replace with
-use; the mode controls held-field applicability and submit routing. Templates, search and shortcut batches obey the same
-applicability checks before any edit lands. The stored launch supplies the comparison baseline, preserving old
-permission omissions and ignoring historical workspace trust. Agent changed markers use `LaunchControls`; an old model
-in a marker remains escaped and direction-isolated. Command fields retain the launcher's peer-text ownership: they show
-stored commands escaped and submit their original bytes until edited, with `CommandLaunch::validate` before dispatch.
-Agent edits travel under `with`, command edits under `with_command`, and a named conversation remains a one-time sibling
-field. Restart sends no create retry key and does not consume or update the host's folder default.
-
-The launcher owns Restart with's draft, validation, YOLO question and guarded answer. The originating session view
-retains restart admission and terminal lifecycle through local before-send and every-reply hooks carried by the existing
-header-prefill channel. The action carries the stop-first consent its render showed; a newer status cannot widen it.
-Before dispatch the view invalidates old detail reads. Every actual reply, success or refusal, remounts the terminal,
-invalidates reads begun during the restart and refreshes authoritative detail. A refused restart therefore reattaches
-beneath the still-open launcher, whose modal isolation keeps keystrokes from reaching the agent. A failed YOLO
-host-setting save sends no restart and needs no terminal remount. Cancel returns focus to the header action; success
-closes without returning it, so terminal reveal can receive focus. Restart mode starts on Cancel, while other launcher
-modes keep their ordinary initial focus.
-
-Every modal renders through the shared `ModalDialog` boundary, which isolates the page and traps sequential Tab. Its
-targets are connected, visible native Tab stops, excluding disabled controls (including fieldset descendants), hidden or
-inert descendants and explicit `tabindex=-1` options. `aria-disabled` actions remain focusable. Native interior Tab and
-radio-group navigation stay native; the boundary wraps at either end, enters the first or last target from the
-container, and keeps focus on the container when no target is available. Initial-focus order and gap-click retention
-remain explicit policies, separate from trapping and isolation. Hidden preparation isolates without focusing fields.
-
-Modal scroll bodies use the shared `ScrollRegion` div, which adds a named sequential stop only while no usable native
-Tab target exists inside. Templates applies that rule to its existing dialog root, retaining its dialog role and name.
-The rule shares the trap's native eligibility check, including disabled fieldsets, hidden/inert ancestors and negative
-tabindex exclusion; it does not depend on measured overflow or per-dialog busy flags. Local observers reconcile the
-captured node after content, visibility or size changes and dispose independently when that node leaves the document.
-Lost-focus recovery preserves any usable current owner, including programmatic negative-tabindex children and exempt
-approval answers. A withdrawn managed stop and the dialog root parked by isolation are recovery surfaces, not chosen
-owners. Existing consumer target priorities and one- or two-frame write/navigation ordering remain explicit.
-
-The dialog owns keyboard focus structurally. While it is mounted, every sibling of every element on its path up to
-`body` is `inert`, including siblings rendered after it opened, except the agent approval cards (`data-modal-exempt`),
-which stay live so that an agent waiting on a card does not also wait on the dialog, so no other code can focus anything
-behind it and Tab from `body` can only reach the dialog. Only elements that were not already inert are marked, and
-exactly those are restored when it closes, before focus returns to the header action. A capture-phase keydown handler
-covers focus that still ends up outside the dialog (a click on the scrim leaves it on `body`): it swallows that key and
-puts focus back on the dialog, and Escape still cancels unless a request is in flight. The earlier per-mechanism guards
-stay as a second layer for engines without `inert`: a terminal whose output becomes visible, or that becomes the
-selected terminal (as when the selected tab exits and the view falls back to the agent), does not take focus while the
-dialog is mounted, and during a request the primary action stays focusable (unavailable through `aria-disabled`) while
-the other controls are disabled, because a focused control that is natively disabled or unmounted drops focus to `body`.
-
-Hosts use one permanently mounted management owner, with its ordinary content swapped for session content by a
-page-local presentation signal. The compact attention list remains above sessions while management is concealed and
-hosts need attention. The rail's Hosts toggle belongs to ListView and renders in AppBar's existing footer above Settings
-and Help; it keeps focus and names the management region. Neither list owner nor any keyed HostRow or ProvisioningPanel
-unmounts during a swap. Only ordinary headers, rows, notices and inline provisioning fragments are hidden. Add, agent
-Add, Settings, Remove, refusals and setup/uninstall confirmations remain outside those concealed fragments. Listing
-reads, sounds, operation identities and the page lock keep their existing lifetime. Height-driven movement reports are
-gated while management is concealed; membership/order and the actual rail's scroll still invalidate its existing
-anchors. Dialog focus uses the remembered menu origin and the currently visible presentation: rail avatars while
-present, visible panel rows for panel openings, the visible Add control for Add, and the persistent Hosts toggle after
-removal. Asynchronous retirement uses the existing document-focus guard so a newer approval or control retains focus.
-Its header gives the known host count, an unpersisted global details switch, Update all and the secondary add control.
-Every row always shows its name and a muted actions toggle that appears on hover, keyboard focus, or a coarse pointer,
-in the same narrow trailing gutter as the session-row actions toggle, and shows its phase dot except while a setup,
-update or uninstall runs, when the progress line below the name takes its place; connected reads `Connected` unless the
-helm marks a compatible older build, in which case the amber `Old version` advisory is shown, or a newer one
-(`newer_version`), in which case the amber `Too new` advisory is shown. A skew whose peer protocol is the higher one
-also reads `Too new`, but keeps the red styling of every skew, since that host cannot be used until one side is updated.
-Either way the `Too new` label's hover names both versions, and Update (and a rerun of a failed Update) is not offered.
-Other phases use humanized prose and retain the stable wire token in their data attribute. A protocol-incompatible
-supervisor remains the red `Needs update` case; an unparseable build leaves a connected host's age unknown and keeps the
-ordinary connected label. When an older SSH host has Update available, a compact outlined `↑ Update` button appears
-alongside `Old version` or `Needs update`, amber for the former and red for a lower-protocol peer. It shares the fleet
-update eligibility predicate (remote kind, not newer, menu offer present, no live provisioning work) and sends the same
-bound Update request as the menu. The button sits outside the status region; that region retains its phase words through
-an accessible label. Its hover uses escaped peer builds and explains urgency and installing the helm's version. Current,
-newer, local, busy, and not-yet-loaded rows keep their existing presentation. Each row's effective disclosure is the
-global switch OR that row's automatic provisioning disclosure: the switch is the user's preference and no run writes it.
-Update stays folded during planning and execution, shows a pending status until a snapshot is available, and then
-publishes compact step/count/elapsed progress beside the row status. Setup and uninstall show their own pending verbs;
-their first running snapshot opens the row once, with a fold choice kept for that run id. Failure opens the row for its
-diagnostic, and completion clears the one-off expansion. A failed Update or unresolved diagnostic also opens its row;
-authoritative Update success clears the automatic half for the tracked run. Provisioning commands live in the row menu,
-with the older-host update shortcut also inline, but active or retained progress stays under the row because that
-lifecycle owns more context than a floating menu can safely hold. Setup and uninstall confirmation dialogs render
-independently of row details, while a failed retained run leaves one short trace when details are closed. A run whose
-status is showing inline leaves that trace out because it would only repeat the progress.
-
-Automatic remote-host updates have one AppState-owned, abort-on-drop listener. It subscribes to fleet revisions before
-its initial scan; connection transitions, provisioning completion and a committed preference write wake it through that
-same channel. Its idle provisioning reference is weak. Shutdown requests listener cancellation before shutting down the
-manager; pending admission waits belong to that cancellable listener, while accepted runs retain normal provisioning
-ownership. Cancellation is cooperative, rather than a synchronous stop-return barrier. There is no timer or interface
-owner. Each scan checks the stored authorization, remote panel-update capability, busy state, and the host response's
-existing build-order helpers: a compatible older build or a lower protocol without a newer build. Development and
-unparseable builds retain unknown age. It reserves the host incarnation before awaiting the existing Update planner,
-then rechecks authorization and the host binding before consuming or starting that one-use plan. Committed policy writes
-and the final automatic authorization check plus busy/progress claim share a short admission lock, including a patch
-that also changes tunnel consent. It is released before waiting for the host lock or doing remote work; manual Update
-does not take it. An opt-out that commits before admission therefore prevents that start. The start uses the ordinary
-owned Update path and its revalidation; it adds no confirmation or alternate executor.
-
-The listener remembers attempted host incarnations for this helm lifetime, including logged planning refusals. Busy
-hosts are skipped before reservation. Automatic run ownership is bound to its run ID under the same lock that publishes
-busy and progress, before execution can finish. Failure records the then-current incarnation before releasing busy and
-bumping the fleet revision: Update can itself reconnect while learning installation paths, and that earlier reconnect
-must not turn its later failure into another automatic attempt. Manual runs cannot acquire this ownership. Removal
-forgets the host's memory; a later connection incarnation or a helm restart permits a new automatic attempt. Toggling
-the preference does not clear remembered failures. An accepted run retains its normal progress and lifetime after
-opt-out.
-
-The rail footer's gear opens a modal `settings` dialog owned by AppBar outside its top band; that band's context cannot
-cap the backdrop below main-pane surfaces. Its sessions section holds session confirmations, quick-launch naming and
-terminal-frame coloring; hosts holds the two app-wide host-confirmation choices and the default-off automatic
-remote-host update choice, with state-specific help and an explanation that other open clients see changes on reload,
-and, only in a desktop app whose updater is active, the app section holds the automatic-updates switch, which reads and
-writes the desktop state file instead (see The desktop app's updater). The desktop file-opening field lives in the
-shared preference row but bypasses the best-effort preference queue: it sends one acknowledged sparse
-`PUT /api/preferences`, keeps a refused draft editable, and updates the shared client mirror only after success. Its
-warnings use the same parser and type classifier as the helm's stat and open checks. The switches retain native checkbox
-inputs for label activation and Space handling. Each host-confirmation switch reads `Some(true)` as without asking,
-updates `SharedPreferences` immediately and sends an explicit boolean through the existing sparse preference queue.
-Host-confirmation preference failures retain that queue's silent behavior. The session confirmation switch also updates
-locally immediately, but restoring confirmations observes the queue's completion: a failed save shows an adjacent
-Settings error because a reload could restore the stored opt-out. Each click advances a component-local generation and
-clears the error; only the newest restoring click can show a failure. The enqueue happens before spawning its waiter so
-a later silent opt-out cannot overtake it. Closing Settings cancels the waiter, never the process-owned preference
-writer. Quick-launch naming, frame colors and link-click choices observe the same queue with a retained per-field
-identity, as does automatic remote-host updating, so even an already delivered result loses authority after another
-click. On failure they immediately restore only their field from its last observed or acknowledged value, then refine it
-with one fresh read while that identity is still current. Every successful sent PUT advances this fallback, including a
-PUT whose observer was superseded; capturing the previous click could preserve another unsaved choice. These four
-bounded fallbacks are never pending overlays or replayed writes. The existing authenticated seed refreshes idle
-fallbacks, leaves pending ones intact, and initializes only missing defaults after a failed read. A failed corrective
-read retains the fallback and save error without claiming that the helm's current value is known. Rollback outlives
-Settings; its alert uses the mounted check of the surface that started the save (the dialog, or the session list for the
-host prompt's Always update), and a destroyed authenticated tree's signal is left alone. Trust reads capture the
-dismissal field's identity and pending bit before awaiting the GET. At completion a current pending dismissal wins and
-carries its identity; otherwise a read that began pending or crossed a new identity carries its start marker for
-immediate invalidation. Only an unchanged idle read is unmarked, so an old raw response cannot escape reconciliation
-just because its crossing save already settled. Every mounted Settings or band resource independently owns a cancellable
-one-shot invalidation waiter for that stamp, separate from the click's completion and any deletion barrier. New records,
-final settlement and writer loss release these waiters; late enrollment checks pending state and identity atomically. An
-invalidated resource clears and rereads only if it still carries that stamp, including after supersession. Local
-optimistic mutations stamp their new record before yielding, so an old invalidation cannot clear a newer choice. This
-uses one replaceable companion resource, not a trust cache, polling loop, mounted-resource registry or global HTTP
-ordering ticket. A copied overlay therefore cannot survive its failed save in a reopened dialog or another band. The
-click waiter owns only its local alert, which disappears on close; a corrective read failure leaves the resource unknown
-rather than treating trust as off. Restart alone would retain the previous successful provisional value while that GET
-is pending, so the matching value is cleared first. Controlled native checks also synchronize their property from the
-currently rendered choice: a refusal that beats the optimistic render can otherwise leave the browser's changed property
-behind an unchanged virtual-DOM value. A band's Don't show again waiter belongs to its mounted session and reports only
-the current dismissal's failure; navigation drops that alert without canceling the write. Normal hint copy and actions
-still require an explicitly disabled trust setting. An unreadable corrective GET can show the local save error alone,
-under the existing question, managed-checkout, agent-pane and occurrence-dismissal gates, without claiming trust is off.
-The dialog uses the host dialogs' framed header and footer, with a gear tile and a separately named × close control.
-Settings alone has a 780px height capped by the shared viewport margin. Its body grows to fill spare height and is the
-only scroller, containing a section-button sidebar and the selected panel. The order is Sessions, Appearance, Hosts,
-Recipes, Tensorlake, Containers, Credentials, Terminal, Checkouts, Agent trust, Notifications and, when the updater is
-active, App. Each section button pairs an existing decorative icon with its full sentence-case label; icons inherit the
-selected button's inverse color. The solid selection fill marks the open section. Terminal holds web-link choices and
-desktop tunnel consent and file types; checkouts holds the explicit-save folder and command; agent trust holds all four
-agents' blocks; notifications groups device sounds and helm-wide ntfy alerts. Inactive panels stay mounted with hidden,
-preserving field drafts, outcomes and pending saves. The sound asset's document-wide input query initializes even hidden
-inputs. No section choice is persisted. At 620px and below, a presentation-only signal reveals either the selected panel
-or the section list; the back button reads '‹ Settings'. Section selection focuses its heading, while back focuses the
-selected section button after the rendering frame. Neither adds a normal Tab stop or overrides platform button
-navigation. Both close controls stay visible. It uses the shared focus/isolation helper with its own selector; gear
-opening selects sessions and focuses its first switch. Existing trust props instead select agent trust before mount,
-focus the agent's switch and scroll its block into view. Escape or either close control releases isolation and returns
-focus to the gear. The host setup and removal permanent answers each name that gear as the way to turn confirmation back
-on.
-
-The default and per-host checkout folders use a shared scoped explicit-save field rather than the preference queue:
-invalid path text must have a visible refusal, and a draft is not configuration. `GET`/`PUT /api/checkout-root` is an
-ordinary protected route with a required nullable `root` and no host or command fields. It calls the existing global
-setter/clearer; the revision watcher is the sole invalidation publisher for HTTP and CLI writes. The saving field
-refetches on success and invokes its caller's callback so dependent reads need not wait for the watcher. A submitted
-save is app-owned and survives dismissal; its outcome and callback touch component-owned state only while the field
-remains mounted. The browser reads only the global folder through that route. `GET`/`PUT /api/hosts/{id}/checkout-root`
-checks host existence (404 if absent) and reads only its stored `root` and the global `default`, or sets/clears that
-host's root with the existing helpers. Neither route contacts a host; path validation is shape-only. The host field
-stays empty while inheriting, with the default as its placeholder and a Use default button while an override is saved.
-The field keeps its refused draft and reports success.
-
-The all-hosts post-clone command uses its own protected `GET`/`PUT /api/checkout-post-clone` route with a required
-nullable `command` and no other fields. Null is unset, an empty string is explicitly disabled, and nonempty text is
-stored verbatim; no browser configuration route exposes a host's command override. The handler checks the shared 16 KiB
-cap before calling the existing global setter/clearer, returning a visible 400 refusal without quoting the command or
-changing the revision. Its Settings-only multi-line field follows the folder field's draft, refusal, app-owned save and
-refetch contract; Enter inserts a newline. Only an explicit save maps an all-whitespace draft to null. Opening the
-dialog displays an explicit disable as an empty draft without writing it. Existing revision checks and frozen supervisor
-launch specs keep an accepted preparation and its retries on the command accepted with it.
-
-The repository-discovery REST reply carries `needs_checkout_root`, derived from the selected host's effective
-configuration, without changing the supervisor protocol. The launcher retains an accepted setup observation, including
-either answer, for that host connection and installation so selecting a repository cannot hide inline setup or prevent
-its first check. It continues discovery while choosing, awaiting that first answer, or needing setup; a successful save
-restarts discovery and advances preview authority explicitly. Once a reply confirms a folder is in effect, selected
-repositories return to preview-only behavior. Global-root reads and message text never decide host setup eligibility, so
-host overrides remain authoritative.
-
-The host actions menu follows the session menu's anchor, pointer, raised surface, header, grouped inset commands, line
-icons, muted descriptions, roving keyboard focus, and one-menu-at-a-time dismissal rules. The add-host fields, probe
-outcomes, and setup confirmation live in a modal dialog; a permanent setup answer is shared through the helm preference
-and lets later setup-needed adds submit after probing. The dialog never holds the user behind a pending request: its
-cancel and Escape stay live while discovery or another operation's request is out, and confirming setup closes it at
-once. The submission then continues from the hosts panel, which keeps the page token until the helm answers; the new row
-tracks an accepted run. A definite refusal reopens the add dialog with its destination and reason but without the
-consumed plan; a lost reply stays on the panel because the run may have started. Remote setup rerun, update and
-uninstall planning failures, and definite confirmed setup rerun or uninstall refusals, use one host-keyed refusal
-dialog. Retry and adopt refusals use that dialog too. Remove opens the modal `HostRemoveDialog`; the modal is isolated
-from the page, starts focus on Remove when enabled (Cancel otherwise), and returns focus to the row toggle when
-cancelled. It stays open through its request and shows a refusal there; when the remembered preference skips
-confirmation, a refused Remove opens the short refusal dialog instead. The dialog's permanent answer writes the shared
-helm preference best-effort before removing the registry row.
-
-Host Settings waits while any host prepares or holds an ADD/Uninstall confirmation, so independent modal isolation
-cannot lock both dialogs. Another host's one-click Update or accepted run does not block it; the host's own planning or
-busy state and the page operation lock still do.
-
-Host results wait for whatever modal is open. A setup or uninstall confirmation and a host-action refusal render only
-once no modal dialog (`role="dialog"` with `aria-modal="true"`) and no other admitted host result is in the page.
-`HostModal` claims its slot in the page before it renders, so two waiting results cannot both open, and they appear one
-at a time. The wait is on the dialog being in the document, not on it being visible: a modal that stays mounted while
-hidden would hold every host result back indefinitely, so a modal that hides must leave the document or drop
-`aria-modal`. A result whose wrapper unmounts while it waits never opens.
-
-Every per-session action lives in one floating actions menu behind the row's `⋯`, and four decisions about it are
-contract rather than styling. **Anchor:** the panel opens just beyond the sidebar's right edge, with its top aligned to
-the row and a small pointer toward it. It stays beside the session list instead of covering neighbouring rows and their
-action toggles. One side placement is clamped to the viewport, including when there is too little room to keep the
-sidebar fully uncovered or to keep the panel top aligned with a row near the bottom. The toggle holds a pressed accent
-state, its row holds a tint, and the panel is a raised surface with a shadow. The action list starts with the session
-title and a muted summary of its stored launch selection, followed by the concise state. The summary uses the same
-launch-choice wording as the session launcher; a legacy session uses its command's program name, and an unclassified
-session omits the state word. The pointer is hidden when horizontal clamping makes the panel overlap the sidebar, where
-it could no longer indicate the opening row. Commands have small decorative line icons and form groups separated by
-non-focusable rules: rename, mark read/unread and pin/unpin; clone and replace with; replace; stop; delete. Only groups
-with available commands contribute rules. Replace, stop and delete are red; replace with stays neutral because it opens
-the editable session launcher. Every command has a visible muted description exposed as an accessible description, so
-the accessible command name remains the action word. Mouse or pen movement onto a command moves focus there without
-scrolling. Focus alone fills the command with rounded inset corners: arrow navigation moves that fill even while the
-pointer remains over a different command, and leaving the menu keeps the last focused item. Disabled commands remain
-focusable without a fill. **One at a time:** at most one row's menu is open, and it closes on any layout change that
-could have moved the row it was measured against (a sidebar scroll or resize, the host list's shape changing, the create
-form opening, the row reordering under a refresh), because the panel's coordinates are a one-time snapshot.
-**Keyboard:** it is a real `role="menu"` and behaves like one — opening it (pointer, Enter, Space, ArrowDown) lands
-focus on the first command and ArrowUp opens onto the last; arrows step and wrap, Home/End jump; the whole menu is a
-single tab stop via roving `tabindex`, so Tab leaves rather than walking the commands; Escape closes; and every close
-that took the menu away from a focused item hands focus back to the toggle rather than dropping it on the document body
-— except the two transfers, Rename and a clone/replace-with acceptance, whose newly mounted dialogs own focus instead,
-so the teardown retires its return rather than racing their mount handoff. An item made inert by an in-flight operation
-stays focusable and refuses on activation (`aria-disabled`) rather than going natively `disabled`, because a browser
-cannot focus a disabled control and a menu that went busy under the user would otherwise swallow every navigation key.
-Arrows step from whichever item actually has focus, including one the user hovered or focused by screen reader in the
-middle of an arrow burst. A page-side check rejects navigation focus moves after independent focus, including requests
-already sent across the desktop webview. Each request retains the page's independent-focus epoch from its key press; a
-synchronous input relay updates Rust with the current focus event's source before the original event, so a user landing
-at the in-flight target also retires older requested destinations. Initial menu focus uses the same function without
-that check and does not invalidate navigation; a hover that precedes that opening request can therefore be overtaken by
-it. Pointer-made focus keeps hover help's rest delay and hides the help on pointer leave, even when the engine marks
-that scripted focus as focus-visible after keyboard use. Nothing activates without Enter or Space on the visibly focused
-item. The row tint is owned by the menu's open state, not by `:focus-within`: a dismissal may return focus to the toggle
-while the pointer is elsewhere, and that focused toggle must not make the row look as though its menu is still open. The
-focused toggle or menu item retains the normal `:focus-visible` indicator, so pointer-return focus and keyboard focus
-remain visually distinct without changing the dismissal or focus-return contract. **Confirm in place:** a destructive
-item swaps the panel's own contents for the consequence line and a confirm/cancel pair with focus on the enabled
-confirming answer, or Cancel while busy, rather than opening a second surface; that sub-state is a `role="dialog"`
-inside the same positioned box, and it survives the panel closing, which is why it deliberately does not answer Escape.
-The one exception is a pointer going down outside the open menu: that closes the menu and answers a showing confirmation
-with cancel, since a click elsewhere is the user leaving the question, and a prompt kept for the next open would greet
-them with a question they already walked away from. Every other dismissal still preserves it. Outside dismissal also
-never takes focus back from the control the pointer went to: the toggle handback only reclaims focus that is on nothing,
-on the document body, or still inside a row menu.
-
-Each session confirmation mount schedules focus on its enabled confirming answer, falling back to Cancel if disabled.
-The script supplements native autofocus because browsers can ignore it after a document's first prompt, including when
-an existing question remounts. Confirm buttons consume repeated or composing Enter before native click synthesis: a held
-opening key cannot also answer the question. A shared header key handler cancels any still-open Restart, Replace or
-Delete question on Escape, releases its lifecycle claim and returns focus to the selected terminal after unmount. Host
-dialogs retain quiet scripted focus and independent Escape selectors; trash focuses and scrolls its confirming answer
-into view within the archive body for a host question or the separate confirmation region for Delete all. Cancelling a
-global question returns to footer Delete all, falling back to footer Close if a re-list disabled the trigger. YOLO and
-Restart with keep their Cancel default.
-
-**Answers bind to what was drawn.** A handler for something the user answered or confirmed acts on what the render that
-drew the control showed, never on state it reads when it runs. A click or key can be handled after later renders, a
-desktop round trip or a listing refresh, so state read at that point may describe a prompt, a target or a precondition
-the user never saw. Review kept finding handlers that read it anyway, while the surfaces that did bind correctly each
-had their own check, so binding now goes through one mechanism instead of being left to each handler. Every question,
-confirmation and destructive prompt goes through `ConfirmSlot` in `crates/farhelm-ui/src/ops.rs` (or `ConfirmSlots`, its
-per-row form for the sidebar rows, whose questions coexist and outlive the row components): opening a prompt mints an
-opening number from one process-wide counter, the render that draws the prompt reads that token with what the prompt
-shows, every button carries the token, and an answer whose token is not the open one does nothing and leaves the current
-prompt up, with no notice. The slot's answer methods (`take`, `cancel_for`, `is_current`) all require a token, and no
-token can be made outside `ops.rs`; what keeps a handler from fetching the live token at click time and answering with
-it is convention, stated in `ConfirmSlot`'s docs and checked by review (`review_feedback_queue/.agents/recording.md`).
-Three prompts stay up through the request their answer starts (host Remove, the desktop tunnel warning, and the
-templates editor's "Save these changes before leaving?" prompt); they accept an answer while its token is still the open
-one and let the request's outcome retire the prompt, and `ConfirmSlot`'s docs name them as the only exception. All three
-refuse a second answer while their request runs. Plain Replace's list-owned YOLO questions use one `ConfirmSlots` lane
-per source and consume either answer before dispatch; a failed host-setting save reopens its source's lane with the
-reason only while no newer question occupies that lane. Another source's question remains independent. Destructive
-preconditions travel the same way: the launcher's Guarded answer submits the Replace with precondition and the launcher
-opening of the render the user answered, and its YOLO answers refuse once the launcher has moved to another opening and
-otherwise submit the precondition their render showed, so nothing is recomputed at send time. Two counters stay outside
-the mechanism on purpose, because neither binds an answer to a prompt: the launcher's opening generation identifies one
-opening of the launcher (answers and deferred work check that their opening is still the current one), and the approval
-cards' arm generation times the 700 ms pause SPEC.md names, while the answers themselves are bound by the helm's request
-id. Input the page holds across time is retired when its owner stops observing: a held terminal link press is dropped
-whenever the terminal removes its pointer listeners (as it does when it reconnects), and each snapshot of a quick-launch
-key press is used or dropped by exactly the launch it was taken for, with any still waiting dropped when the sidebar
-list goes away. The link covers under "Session-host file reads" apply the same rule to the destination preview: a
-surface that can hide it marks itself in its own markup, so counting a new cover no longer depends on updating a central
-list.
-
-The dialog installers share a pointer rule: primary mouse-down on unused space cancels the browser's focus change, but
-controls and text keep their native behavior. An Enter listener runs only when the dialog container itself has focus; it
-submits the launcher form or clicks the dialog's named main button. The selector is resolved at keypress time so a
-button mounted by a later confirmation or disabled during a request keeps its own rule. Inline session confirmations use
-only the gap rule. Modal dialog containers have no focus ring; controls and the nonmodal notification panel retain their
-keyboard rings.
-
-Mark read/unread and an admitted Stop close the menu as soon as the handler accepts the choice. A Stop that needs a
-terminal-tab confirmation retains the panel until the answer. Their asynchronous failures still appear in the row's
-error line; completion does not close a subsequently opened menu or reclaim focus. In-place confirmations retain their
-panel so the user can finish the interaction. Rename does not: opening it closes the menu and mounts the list-owned
-dialog SPEC.md specifies, whose lifetime belongs to the list rather than to the popup — the edit survives the panel, the
-row, and listing failures.
-
-`ListView` owns page-local marked session keys beside its row-question slots. The displayed held-order projection
-defines counts and drawn targets; only the same authoritative absence boundary that prunes questions prunes marks.
-Neither filters nor the toolbar own a second copy. The marked toolbar can unmount during an accepted operation, so the
-batch futures and combined confirmation belong to the persistent list owner. Ordinary header owners also stay mounted:
-only their triggers are hidden, preserving Trash's active dialog, requests and removal polling.
-
-Single and bulk Stop/Delete share synchronous admission and an owned, initially unpolled completion future. Admission
-does not spawn its request. A batch admits every eligible row before driving any host queue, then awaits one future at a
-time per routing host while different hosts run concurrently. Rows without a known host share a conservative sequential
-lane. A per-session claim excludes an open header or row question from competing actions on its session. Taking the
-rendered confirmation token hands its captured consent to the persistent list owner. That synchronous handler releases
-the question's claim and admits the request before yielding, awaiting, or invoking another callback; no input handler
-can enter between those steps. The existing row admission and completion paths hold queued and sending work until it
-settles. Navigation never consults these claims. Automatic selection waits on the shared set of admitted Deletes and
-rechecks it after its preference read; pending Stop work does not delay it. No second batch lock or automatic-selection
-exclusion set is needed. Stop releases its session claim when the reply settles, before its gated status refetch and
-recovery demand; the host queue still awaits that read before starting its next admitted request. Delete's completion
-includes the ordinary cues, notices, removal, read fence, row error and removal callback before another request
-proceeds.
-
-The persistent list owns header Stop, Restart and Replace requests as well as row actions. Their pending state and
-source-session errors are shared with the keyed session view, so switching views cannot cancel a request or lose its
-outcome. Stop and Restart publish their start and completion boundaries to any mounted view: detail reads spanning
-either boundary are fenced, and Restart's completion reattaches the agent terminal even after a refusal or lost reply. A
-view mounted during the request observes its completion, and one opened before the listing catches up can use the
-retained successful reply. Replace uses the existing shared retry identity and selects its replacement only while its
-source remains selected. Its inline YOLO questions coexist per source in the same persistent owner. Their existing
-exclusion signal participates in the common session admission and header gates, while pending-request presentation stays
-separate so the question's own answers remain enabled. An answer consumes its rendered source/token and admits the
-request synchronously; a refused admission restores only that source's question and error under a fresh opening. The
-page operation token remains the launch-versus-host-mutation exclusion, independent of session claims. Suspend and
-Resume, from Hosts or a sandbox session (Stop and suspend included), are not registry mutations and never claim it. The
-token instead records the existing host a launch resolved (`OpGuard::target`, set synchronously once the submit has
-resolved and checked that host, cleared when the launch's guard drops), and those controls are refused while it names
-their host, at the click and again at the answer. A launch that creates its own environment records no target: its host
-does not exist until the create, and that session's controls appear only after it. Hosts' per-host busy checks still
-serialize this page's requests on one host. Header composer openings check both exclusions before publishing their
-prefill, and the list rechecks before consuming it. Releasing a claim between the click and that effect cannot revive a
-refused opening. Only the admitted list opening retires an earlier Replace retry identity.
-
-Session-action and launch completions have three responsibilities: settle, return and leave alone. These rules cover
-New, Clone, quick launch, Restart with, Replace with, and Stop, Restart, Replace and Delete from rows, headers,
-interrupted cards and the bulk bar, including reactive effects their settlement triggers. A pending action no longer
-owns the page, so its reply cannot assume the user is still where it started. Settlement clears progress and the session
-claim, records failures, unknown outcomes or partial results, reattaches the terminal when required and requests the
-listing refresh before waiting for any returning dialog. A dialog still owed to the user returns through its ordinary
-modal admission and opening focus. Everything else stays as the user left it: focus, panels, menus, dialogs and selected
-session, apart from the launch navigation rules, Replace's source-selected rule and automatic selection after Delete.
-While a dialog is owed back, its local pill, draft and composer operation guard remain until admission. A successful
-wake continues hidden through preview, key preparation and create; it is not a Return. Shared Restart/Replace source
-state and claims settle before that wait, independently of the local composer guard. Retirement clears seeds only for
-the submitted mounted opening, so a newer draft retains its choices.
-
-Asynchronous focus in those paths uses `FocusTarget::async_script`: one evaluated script admits only focus on the
-document body or document element, or inside the surface being left, and then performs the target's ordinary focus
-action, preserving quiet tooltip behavior. It does not infer navigation intent from document focus. One exception: a
-plain Replace's inline YOLO question focuses Cancel outright while the page's press count still equals the count read
-when the user's Replace answer started the request, because WebKit leaves focus in the session's terminal after a header
-button click, where the guard alone would deny the safe answer its focus. Any later press, or an unknown count, keeps
-the guard. Explicit user-handler handoffs, including their deferred frames, and a returning modal's own opening focus
-keep their existing policies. Effects that close, open, focus, scroll or select something when settlement changes state
-must observe an actual visible layout or ownership change, rather than treating completion itself as permission. Other
-asynchronous GUI paths predate these rules; the TODO entry “Stop asynchronous completions from moving focus or closing
-things the user has moved on from, across the whole UI” covers them.
-
-SPEC.md, "Keyboard focus" (confirmed 2026-11-10), now states the product rules in toolkit-neutral terms, and this code
-does not yet follow all of them. In particular, a launcher owed back after the user moved on should wait behind a notice
-instead of returning by itself; focus left on the document body on the main screen should go to the selected session's
-terminal; an explicit click on an agent host-add card still opens its dialog after an existing dialog, manual add draft
-or pending add submission clears, even if the user has moved on meanwhile, and without a fresh arm pause; and the guard
-above admits focus on the document body where the spec now leaves a moved-on result quiet. Treat the spec as the target
-when changing any of these paths.
-
-`launch_activity::LaunchActivity` observes one window-owned key/pointer press count installed before page shortcuts. Its
-capture listener publishes a scalar through an ordered hidden-input relay before the original event reaches Rust;
-user-answer handlers synchronously peek that signal. A quick dispatch captures its baseline before fresh reads or host
-wake, and internal preview/resume submission carries it unchanged alongside its existing consent stamp. Completions read
-the window counter again, including after waiting for naming admission. `launch_is_current` requires the same mounted
-opening and known equal counts; a missing bridge result cannot establish that the user stayed. Replace keeps its
-source-selected decision and Restart with never navigates; a plain Replace uses the count only for its YOLO question's
-focus, as above. A submitted launcher that hides blurs its focused control once that control stops rendering, because
-WebKit can otherwise keep focus on the hidden Launch button. An allowed launch uses ordinary selection and terminal
-reveal without focusing New. Otherwise the list owns the brief Started report outside the form, with expiry tied to that
-report's identity; it holds no operation guard or draft seeds. Hidden launcher retirement does not move menu anchors and
-is not a menu-closing effect dependency.
-
-The combined `ConfirmSlot` freezes original identities and consequence-bearing displayed facts, including the status
-annotation and displayed rename overlay. Reconciliation does not reset consent for unrelated activity or notification
-changes. Changed drawn facts mint a replacement opening; authoritative absence permanently drops a target from that
-question. Every handler carries its rendered token, and every `DeleteGuard` and Stop no-tabs guard comes from its
-answered snapshot. Live admission can shrink visibility or mark membership but never retarget a question or strengthen
-its guard from a newer read. The modal uses the existing dialog frame, focus and scrolling facilities. Confirming-close
-focus targets the nonsequential marked count, which remains programmatically focusable; cancellation uses the enabled
-toolbar menu button. A page-local marking-interaction revision distinguishes a batch's accepted marking from later
-gestures, including a same-session unmark and re-mark, or a fresh marked-actions menu or bulk question opened over
-unchanged marks. Those explicit opening handlers advance the same revision before publishing their surface; measurement,
-remount and question reconciliation do not. If that revision changed, the old batch leaves every current mark alone,
-even after the newer surface was cancelled. Otherwise it removes only its captured targets after all work settles.
-Automatic pruning and other batch cleanup do not count as user edits. Conditional asynchronous header handback is
-requested before that removal only when it actually removes the currently effective toolbar; hidden marks do not keep
-that toolbar mounted.
-
-Session-heading size changes use the shared ResizeObserver-backed Dioxus event, rather than count-sentence equality. A
-harmless count increment must not dismiss an unchanged row menu. A visible size transition asks captured weak session
-openings to verify their anchors; each row menu or notification list compares its toggle's current rectangle with its
-own measured placement. Only an actual difference closes that exact still-current opening. This also protects a fresh
-opening measured after the layout changed but before an older observer notification arrived. The existing row-local
-lease owns at most one measurement query and one dirty bit, shared by initial placement and later probes; a pending
-placement rechecks before publication when dirtied. Fallback placement remains pinned, and a failed verification does
-not invent movement. The registry keeps only optional probe callbacks and weak opening identities, never DOM handles or
-geometry. Other scroll, row-content, order, removal and recovery invalidation remains unchanged.
-
-Clone reuses the create form rather than a second submit path: the click builds a `CreatePrefill` snapshot of the row's
-`Session` and hands it to the SAME `CreateSessionForm`, tagged with a monotonic generation the list view mints per
-click. A `use_effect` inside the form compares that generation against the last one it applied and reseeds the form
-whenever the two disagree; comparing generations rather than mere presence is what makes cloning the SAME row twice in a
-row reseed a second time, since an unrelated rerender of that effect (a host reconnect, a catalog refresh) must not
-overwrite an edit in progress. An agent-launch source seeds the agent tab from its stored declarative selection,
-resolving new-request permissions through `LaunchHarness::request_permission` rather than parsing the composed command,
-and also fills the command tab's command with the composed start command, YOLO unanswered, as a starting point for
-turning the setup into a command launch; the launch still comes from whichever tab is selected at submit. A
-command-launch source opens the command tab with its command, YOLO answer, declared agent type and resume command, and a
-legacy source opens the command tab with only its stored command. One `LaunchTab` value selects between two retained
-field groups in `LaunchDraft`, so switching shows and submits the other kind without copying anything between them.
-Destination, folder browser, optional name, search, and submission remain shared; only the tab's own controls differ.
-
-The agent group's ContainerDraft keeps its switch and raw path/port inputs in that same owner. Stateless controls emit
-individual field edits against the live draft so two browser events before a render cannot overwrite each other. Enabled
-invalid input is a refusal, never an absent container selection. Copied paths retain their bytes with escaped, read-only
-presentation where needed. The template editor retains an invalid raw draft until corrected or removed; its wire field
-keeps absent/set/null semantics. Restart holds container settings fixed. Replace with's copied managed directory remains
-eligible on the same confirmed host installation without turning it into a new checkout request; the supervisor remains
-the actual membership authority.
-
-The prefill keeps the source's raw directory and title while separately carrying its repository, preferring checkout
-membership over launch provenance. Clone seeds that repository as a fresh destination; Replace with keeps the folder.
-The untouched Clone name is computed at every launch-related read, so display, preview, retry binding and submission
-agree without destroying the copied title needed when returning to a folder. One naming source is active at a time: the
-untouched Clone default or a template's base/fixed name. Applying a name template replaces the Clone series, and typing
-clears the template source. Occupied-name previews advance a Clone default through `-clone`, then `-clone-2` through
-`-clone-50`, or a template base through its raw base, then `-2` through `-50`; fixed names never advance. The pure
-`CheckoutNameSequence` in `farhelm-proto::github_checkout` owns that shared series and cap; GUI source/target state
-stays in the form. Snapshots retain the template's unnumbered base and kind while display, preview and submission use
-its resolved name. Folder destinations use the base unchanged. At the cap the conflict stays visible. Changing host
-installation or repository resets the search. The preview API classifies an unmarked 409 as occupied, separately from
-the helm's stale-precondition 409, transport errors and other refusals; new conflict responses must revisit that
-classification. The existing preview-authority generation checks reject late results before they can advance a name. A
-retained attempt matching the current intent and installation freezes its name for reconciliation; the occupied
-directory may be its own accepted allocation. Editing the launch while an ambiguous attempt is retained can advance the
-default away from that attempt, even if the edit is later undone; reselecting the repository restarts the search and
-restores the opportunity to reconcile its name. Re-preview never submits a launch by itself.
-
-Search is the composer's one initial and post-selection focus target on both tabs. Its command-tab result set is built
-without the retained structured harness or model, so it can expose globally owned models but cannot offer an effort that
-would edit only a hidden draft. A harness, known model, or recent setup switches to the agent tab; a folder, host, or
-name changes the shared field and leaves the active tab alone. There is no search result for the command tab itself:
-SPEC.md's list of what search matches has no launch kind, and the tab strip is that choice. The focus handoff runs only
-at dialog mount, the tab buttons, and accepted search results. Catalog, history, and operation rerenders cannot take
-focus back from another field. A clone or replace-with acceptance transfers that initial handoff from the originating
-row menu: removing the activated item can leave the row's inside-focus bookkeeping populated — the teardown reclaims the
-item's element identity in the same pass, so its `onfocusout` never runs to clear it — and the dismissal must retire its
-toggle return for the transfer instead of issuing it after the composer's own search focus and stealing it back.
-
-The protocol crate's `host_name::host_short_name` is the single short-display-name rule, over raw local-kind,
-destination and alias values. The UI's `Host::short_name()` delegates to it, falling back to the full registry name when
-the derived form is empty, and returns raw `PeerText`, so consumers choose ordinary escaping and direction isolation at
-presentation. Every surface needing a short form asks the host; it never re-parses the destination itself. The result
-depends on that host alone, may equal another host's short name, and never identifies or resolves one. All inputs
-already arrive in `GET /api/hosts`; there is no new wire field, helm name, stored alias or registry mutation.
-
-The leading `name:` label offers one action carrying its whole value, including later colons. `host:` filters the same
-registry rows as the GUI selector; `host:local` uses the row's local kind rather than its mutable display name.
-Accepting either action does not launch and keeps search as the focus target. A host action also takes over a clone's
-inferred host and retires the old history destination and idempotency key, just as changing the host selector does. The
-GUI labels an unaliased local host `Local (this machine)` in the selector, Hosts page, full-name details and rail's
-expanded label, while preserving aliases and the registry's own `this machine` name. Its rail caption and known-host
-session row use `Local` through the short-name rule. A session row without a registry match retains the name supplied by
-the helm; the GUI does not infer locality from its text.
-
-The rail uses 40px inner icon boxes for corner badges, progress rings and menu measurements; expanding a row never moves
-these anchors horizontally. Captions are clipped below collapsed avatars and leave layout while expanded, when the whole
-row becomes one labeled click target. The page script's `host-rail-open` root class redefines `--host-rail-width` from
-56px to 220px, so the navigation, four-control foot and session-content margin move together without overlaying the
-list. Neither hover nor focus changes rail width. The content child stays inside the scroller so padding and gap
-wheel/touch gestures retain native scrolling; the nav still owns scroll-driven menu-anchor updates. Caption and expanded
-text copies are aria-hidden; the button's display name, distinct remote destination and state remain its one accessible
-name and tooltip. Raw peer values use ordinary escaping and direction isolation.
-
-The `perms:` scope offers guarded and YOLO before a harness on the Agent tab, matching its permission buttons; custom,
-own-setting and approval-mode choices require an active harness that supports them. Bare `yolo` and `guarded` join the
-ordinary combined search and get exact-word preselection; own setting, custom and the approval modes require `perms:`.
-Bare `own` and `custom` would match too many unrelated queries. Applying a permission row updates the same
-explicit-choice bookkeeping as the segmented control and leaves the other draft fields intact. Command mode has no
-active structured harness, so it offers no permission actions.
-
-The `effort:` scope offers `default` whenever the chosen harness offers effort, even while the model catalog is empty.
-Bare `default` does not offer an effort action. Accepting it clears the explicit effort, as the default button does.
-
-The clone's host is put through the SAME install-identity comparison SPEC.md's ordinary creation default uses (a
-`HostId` is a registry row that outlives a retarget or an adopt) before the selector trusts it. A row whose install this
-client cannot currently confirm is left at the ordinary host default with a note explaining why, rather than risking a
-stale command landing on a successor install. That identity check is not a one-shot gate: `CloneHostState`
-(`list::create_form`) tracks it across renders so a clone opened before the FIRST hosts read lands keeps retrying once
-the registry answers, instead of giving up permanently because the form's separate text-field reseed only ever runs once
-per clone generation. A clone whose host DID pass the check is re-checked on every later pass, withdrawing only the host
-selection back to the ordinary default the instant a retarget or adopt changes the installation behind it while the form
-stays open. A row that names no host at all (a session from a helm too old to report one) is permanently unconfirmable
-rather than retried. An explicit host interaction takes the host decision away from automatic reconciliation for the
-rest of that clone generation.
-
-Launch seeding is separate from host selection. An agent-launch source seeds its stored selection, a command-launch
-source its command fields, and a legacy source its stored command line, each once per clone generation. A delayed or
-unconfirmable host does not suppress that seed, and later host binding or withdrawal does not change it, so a late host
-read cannot overwrite an edit.
-
-A clone's working directory, invocation and title are peer-relayed text (SPEC.md's clone rule copies them off another
-session, and a remote supervisor under `--ssh` is the one this client does not control) going into editable controls, so
-they get an escaped-display / raw-seed / edited-flag treatment (`create_form::submitted_field`) rather than being
-written in raw: shown escaped while untouched, so a directional override or an invisible character cannot make the field
-say something different from the bytes a submit would send, and an untouched submit still sends those ORIGINAL bytes
-rather than the escaped spelling on screen.
-
-The title is the exception once a managed checkout is the destination: an untouched copied title is submitted empty and
-not displayed (SPEC.md, Managed checkouts). The composer applies that rule wherever it reads the title for a launch
-(`create_form::submitted_title`) instead of clearing the field when a repository is picked, because the checkout
-preview's title must equal the create's, and choosing an existing folder again must bring the copied title back.
-
-The session list and open-session details bar mark current `working_copy` membership with the shared inline branch SVG,
-including sessions sharing another session's checkout whose launch has no repository provenance. Full rows display
-`working_copy.repo` after a spaced dot separating it from the host; compact rows retain only the mark beside the title.
-The escaped tooltip exposes the recorded canonical path, the session directory when its spelling differs from the root,
-and checkout lifetime. A visually hidden word pairs with the decorative SVG without repeating a visible repository.
-Ordinary directories keep their existing clipping and display.
-
-The macOS desktop WindowBuilder retains native decorations while making the titlebar transparent, hiding its visible
-title text, and extending the webview into the full content area. Tao positions the native traffic lights in logical
-coordinates, and the root-mounted Wry webview retains the same inset because its content view replaces Tao's. The
-desktop macOS shell class reserves matching space in the sticky sidebar app bar and aligns the session top row's height
-with it at 48px. In narrow windows, a fixed app row sits above both scrolling panes; the current sidebar width,
-main-pane floor, and horizontal scrolling remain intact without moving controls under the native buttons. The native
-window still has a title for system menus. The title band's drag surfaces are the sidebar's app bar, the session top
-row, and, with no session open, an empty strip laid over the top of the main pane; each is a Dioxus element carrying the
-`window-drag-surface` class and one shared press handler, and surfaces never nest, so each press reaches exactly one
-handler. Because a surface also contains controls and text, and its handler receives their presses by bubbling, the
-handler never decides from the event alone: a page script (`assets/click-detail.js`) classifies every press inside a
-surface as empty background or not (controls, anything focusable or with a role, and text keep their own interactions;
-the wordmark counts as background) and reports that verdict with the press, and only background presses drag or zoom.
-Three cases need the press's position, not just its target. A press outside the surface's own box is never background,
-because a surface can lay descendants out beyond it, as a session's confirmation panels hang below the top row. A press
-on anything absolutely or fixed positioned between the target and the surface is not background either, because such a
-popover can overlap the band: those panels' top edges do. And a press over an `inert` descendant (a stale session's tab
-strip) is not background, because hit testing skips inert elements and would otherwise hand the press to the row behind
-a visible tab. The classifier is one exported function. Double-click zoom/restore is decided on the press's own
-mousedown, before any dragging for that press begins: the script reads the mousedown's DOM `detail` — which WebKit sets
-from the incoming native click count (`NSEvent.clickCount`, copied statelessly through
-`WebEventFactory::createWebMouseEvent`, `WebEventConversion`, and `EventHandler::handleMousePressEvent`'s per-press
-assignment) — and synchronously POSTs it, with an eligibility bit saying whether the preceding primary press landed on
-the same connected surface's background and the background verdict, to a Rust asset-handler route ahead of the
-interpreter's own event send for the same press. That chain proves propagation of an incoming native count, not AppKit's
-classification itself: that the press after a drag-consumed release carries count 2 is an assumption, unobserved here,
-and native zoom/restore awaits the manual Mac checklist. A document-level capture listener runs strictly before the
-interpreter's delegated bubble listener, and both sends are synchronous XHRs on the page's one JS thread, so each POST
-is answered before its press's event send starts and the Rust side pairs the two by order. Every press inside a surface
-POSTs, background or not, so the handler always consumes the report for its own press. The handler then zooms exactly
-once for an eligible repeat press and never drags it, drags an ordinary background press, and does nothing at all for a
-cross-target repeat (no zoom AND no drag), a press that is not on background, or a press whose report is missing:
-without a verdict a press cannot be told apart from a button press. There is no `dblclick` handler. The first press's
-mouse-up may never reach the view once native dragging starts, and that is harmless here: the count is assigned fresh
-from each press's own platform event rather than accumulated across the release, and the release-dependent
-click/dblclick synthesis is on a path this design never uses. Fullscreen suppresses both actions explicitly
-(`toggle_maximized` has no fullscreen check of its own, and Tao defers a fullscreen maximize change until exit). The
-route is registered from the window root, which never unmounts, and the page listener survives component remounts.
-Complementary loss in both directions at once — report A arrives, event A never consumes it, report B fails to replace
-it, event B consumes A — borrows the wrong press's report and stays a documented residual.
-
-The drag itself is started with `performWindowDragWithEvent:` on the window's own NSWindow, not through Tao's
-`drag_window`. Tao hands AppKit `NSApp.currentEvent`, assuming the press is still current when the Dioxus handler runs.
-It often is not: on a Force Touch trackpad AppKit delivers pressure events while the button is down, and by the time a
-press has crossed the webview and the bridge, a pressure or mouse-dragged event is frequently current. AppKit silently
-ignores a drag started from anything but a mouse-down, so before this, many presses on the band did nothing (observed
-2026-10: in one logged session three of eight presses found such an event current). When the current event is not a left
-mouse-down, the handler builds one at the pointer's present location in the window, as Tao itself does for one other
-event type, and drags from that. Only the event's type is read from an arbitrary current event; AppKit throws when a
-pressure event is asked for a click count. Other builds keep the surfaces' handlers inert and receive no macOS shell
-class, and the script never POSTs outside that class. Browser tests can apply the class to production markup to verify
-geometry and the press classification, without enabling native actions. Fullscreen, resizing, and button behavior remain
-AppKit-owned; actual native appearance and interactions require the manual Mac checklist. The window root installs
-native layout before authentication completes. Bootstrap and error pages reserve a top band without requiring the
-sidebar to mount. A build-mismatch notice stays below that band and above the scrolling shell, with the app bar pinned
-above it so the warning remains readable.
-
-Hover help is Farhelm's own tooltip, `assets/tooltip.js`, not the browser's `title` tooltip. The native tooltip's delay
-belongs to the engine and cannot be shortened by any attribute, style or script, and WebKit, which the macOS desktop app
-embeds, also ignores the macOS tooltip-delay default; at a second or more, nobody discovered the hover texts that
-existed. So no element keeps a `title` as hover help, because one would bring the slow native box back on top. Elements
-opt in with a `data-tooltip` attribute for text, or `data-tooltip-card` naming a hidden DOM source for a styled card,
-set like any other attribute by components; scripts can also add targets (terminal.js does for its reconnect and
-take-control buttons). A card clones the source's child nodes into the tooltip, rather than parsing markup from a
-string, so peer text remains DOM text rendered by Rust. One delegated listener set on `document` and one body-level
-`role="tooltip"` element serve the whole page, keeping the mechanism out of every component's props. The tooltip appears
-300 ms after the pointer comes to rest on a target (each movement inside it restarts the wait) or keyboard focus
-(`:focus-visible`) reaches one. Host confirmations suppress hover help during their automatic initial focus on their
-enabled confirming answer (Cancel while disabled), preserving its visible focus ring; later pointer entry or moving
-focus away restores ordinary help. Other programmatic focus keeps its existing behavior. The tooltip appears at once
-when another target is entered while one is showing or within 300 ms of the pointer or focus leaving one (a press,
-Escape, a scroll or window blur does not open that window, so the next tooltip after a dismissal waits the full delay).
-It hides on leaving, any press (which keeps that element's tooltip down until the pointer leaves it or it loses focus),
-Escape, losing focus, window blur, the target leaving the document (checked on a short timer rather than with a DOM
-observer, which would run on every live status update), and a scroll of the document or of a container holding the
-target, but not a scroll elsewhere such as the terminal under live output. Touch never shows it. It is placed above the
-target with a 6 px gap and, only without room there, below with a 28 px gap: a page cannot know the cursor's size, and
-standard cursors extend downward from their hot spot, so space above a control is never under the cursor while a box
-just below a small icon would be. It is `position: fixed` from the target's measured rectangle so no scroll container
-clips it, wears the row menu panels' background, border and shadow, wraps at about 280 px and clamps to eight lines.
-Explicit session-row targets instead use the beside-the-sidebar placement above. One reusable sibling notch stays
-outside the text box's clipping, matching the actions flyout's notch and theme. The showing target carries
-`tooltip-target-ring`; hiding, changing target or falling back removes that class and hides the notch. The watch tick
-also follows window and sidebar-size changes for text targets, so a resting hover switches placement and cues together.
-Split-action menu items and session Rename opt into their enclosing panel as the placement rectangle, so their full
-reasons and shortcut help do not cover neighboring choices at normal window heights. Other described row-menu commands
-and template-number options need no duplicate tooltip. The item retains tooltip ownership and dismissal; the existing
-watch tick also follows panel-size changes. Missing panels fall back to the item, and the ordinary short-window clamp
-remains. Peer text still goes through `display_peer` before it becomes tooltip text, which the script sets with
-`textContent`; the card copies nodes already rendered by Rust and never parses its serialized change signature as
-markup. The tooltip element is a visual aid kept out of the accessibility tree (`aria-hidden`); icon-only controls and
-status marks keep accessible text of their own (an `aria-label` or a `.visually-hidden` copy), and the hover texts that
-carry information a screen-reader user needs (the header copy buttons' full values, a host's update urgency, a too-new
-host's remedy) are also exposed as accessible descriptions. Plain timestamps and the client build string are hover-only.
-Host progress uses a shared Rust-rendered card source beside each host or attention row, with surface-qualified IDs
-because Hosts stays mounted when closed. The summary carries run diagnostics; connection detail comes from the current
-host. The shared tooltip clones the source on changes, including its run-keyed elapsed clock, and centers each
-`[data-tooltip-follow]` list on its `[data-current]` item after layout. Session cards have no follow marker. Only the
-steps shrink in short windows until the current step needs their remaining height. Before placement, the tooltip
-measures that step and each diagnostic at the card's wrapped width. Only diagnostics too tall for the remaining space
-are clipped to whole final lines using their definite line height and bottom scroll position, with a visible
-`Full details in Hosts` notice. Smaller messages stay whole. Each fresh clone repeats this sizing, so a larger window or
-shorter diagnosis restores the whole text. The card remains pointer-inert, and the expanded Hosts row retains the full
-diagnosis. The terminal's link-target display keeps its own shape and carries no `data-tooltip`, so two popups never
-stack. The local and remote host marks carry their hover text inside the icon component itself, so the session rows and
-the host rows both get it without either row's layout changing.
-
-Known risks, accepted deliberately:
-
-- API churn between Dioxus 0.x releases. Mitigation: pin, avoid internals, budget for migrations.
-- Desktop is WKWebView on macOS while tests drive Chromium (no usable WebDriver exists for WKWebView on macOS).
-  Mitigation: the tested surface is the web build; desktop-only glue is kept as small as possible and is the one
-  manually-verified path.
-- Clipboard and drag-drop are where WKWebView diverges from Chromium, and paste interception is a headline feature. The
-  default is the same DOM paste/drop event path on both targets — WebKit does deliver file/image data on those events,
-  but with documented engine-specific restrictions (pasted-HTML sanitization, gesture gating on the async clipboard
-  API), so the honest framing is "same event model, engine differences expected", not "same as Chromium". The predicted
-  real deficiency arrived (2026-09, dogfooding): clipboard WRITES never worked in the desktop app at all, because
-  WKWebView does not treat the `dioxus://` page as a secure context and `navigator.clipboard` is simply absent there
-  (wry registers custom schemes as secure on webkit2gtk, and has no way to on WKWebView — which is why Linux never
-  showed it). The built solution is the native-side fallback this entry reserved: the webview POSTs copy text to the
-  embedded helm's `POST /api/clipboard` (device-session authenticated, enabled only when the desktop registered a
-  `ClipboardSink` — farhelm-helm's clipboard.rs) and the shell writes the real pasteboard via arboard. At most four such
-  writes run at once; a write arriving while all four are still waiting on the native clipboard is dropped with the same
-  success reply, so a hung OS clipboard cannot pile up threads in the helm's blocking pool. One correction to the
-  parenthetical this entry used to carry: loopback HTTP is a secure context in Chromium but NOT in WebKit — Safari
-  against `http://127.0.0.1` has no `navigator.clipboard` either, so browser-tab copies work in Chromium-family browsers
-  and stay silently refused in Safari, within SPEC.md's best-effort clipboard contract. One concrete thing to check
-  early rather than debug late: wry's own file-drop handling swallows DOM drop events unless configured not to. Also
-  established the hard way during M2 dogfooding: wry implements NO native JS dialogs on macOS — `window.confirm()`
-  silently does nothing — so any confirmation or prompt the UI needs must be in-page DOM, never a browser dialog.
-  SPEC.md's confirmation language is deliberately mechanism-agnostic; this is the constraint that picks the mechanism.
-- Blitz (Dioxus's native renderer) is not production-ready. The plan assumes webview desktop indefinitely; nothing may
-  depend on Blitz landing.
-
-**Input-method keys.** `composition-guard.js` installs before AppBody's other window capture listeners. It marks an
-otherwise noncomposing keydown as composing when the same input just ended a composition, so existing Rust guards,
-desktop event serialization and JS shortcuts see the same value. This works around
-[WebKit's end-before-keydown order](https://bugs.webkit.org/show_bug.cgi?id=165004); Dioxus's desktop keyboard API does
-not expose the legacy key code, and 229 alone would also suppress ordinary Pinyin Enter. The compatibility hint expires
-after 16ms and is consumed by the next keydown or keyup; 229 does not extend it because it can also label an ordinary
-Enter. An unreleased native composing key on the target makes the end ambiguous: it could be Chromium's ending key, or
-earlier WebKit typing or a modifier still held. The listener declines a hint in both cases, deliberately leaving WebKit
-rollover unprotected so Chromium's separate next key works even before the ending key is released. Only a keyup of the
-same physical key (`event.code`) releases the recorded composing key; any keyup retires a pending end conservatively.
-Browser replay of the outlined 229-or-window rule exposes the conflict at equal elapsed time; a threshold cannot select
-the two different desired outcomes. This is the agreed spare-real-key fallback, not an inference that a held key caused
-the end. The 16ms bound covers the immediate replay sequence with a scheduling margin, not measured native Mac timing;
-delayed ending keys remain unprotected. Installation is idempotent across authenticated-tree remounts, and the grid
-terminal's input field retains its own input-method handling. Browser tests replay both orders and pin the overlap
-omission; they do not establish real Mac IME or desktop-shell behavior.
-
-## GUI: sidebar, sounds, text size, quick switcher and shortcuts
-
-Sidebar width lives in `sidebar-width.js`, shared by web and desktop. It reads localStorage once at script load
-(`farhelm.sidebar-width`): plain content-width digits only, clamped to 240–600px, with 340px for absent, malformed or
-unreadable storage. Adding the 56px rail gives a 296–656px total width and 396px default without migrating the existing
-key. The same script reads `farhelm.host-rail-open` as a per-device boolean, defaulting to collapsed, and binds the
-footer's expansion toggle separately from the separator. Its root class and shown `--sidebar-width` survive
-authenticated-tree remounts. Expanded shown width adds 164px to the stored total, capped at window width minus 322px but
-never below that total. Expansion alone cannot cross the existing narrow-window class thresholds. The extra width and
-the stylesheet's 220px rail are kept in sync explicitly; there is no width animation or extra terminal debounce. A
-shell-level separator owns pointer capture, double-click reset and 10px arrow steps; completed gestures store total
-minus the rail. Width-derived root classes replace the fixed narrow-window and row-menu-pointer media cutoffs. The
-existing terminal ResizeObserver sends each resulting grid change without debounce. A focused separator prevents
-terminal reveal from taking keyboard focus. Desktop persistence has the same webview-localStorage assumptions as
-terminal text size below.
-
-Terminal reveal also yields keyboard focus to an open menu, including its expanded toggle while the menu is mounting.
-Those controls remain the destination for menu keys even if the selected terminal finishes its initial replay at the
-same time; tab-strip buttons still allow reveal to move focus into the terminal after selection. Reveal takes focus only
-from where the selection that asked for the terminal left it, or from a sidebar row or tab clicked since, so a plain
-button the user moved to during the catch-up keeps focus.
-
-Device sounds live in `sounds.js`, which generates the three approved note sequences with Web Audio at master gain 0.3.
-Its `farhelm.sound.waiting`, `farhelm.sound.approval` and `farhelm.sound.finished` localStorage keys accept only `true`
-or `false`; missing, malformed or inaccessible values use their event defaults. One context serves the page, resumed on
-trusted pointer-release, click or key gestures, with no replay queue. Touch release is required for mobile browser
-activation. Desktop persistence has the same webview-storage assumption as terminal text size below.
-
-The authenticated `SessionSounds` component lives under the persistent sidebar and observes its accepted listing and
-view scope signals, without another session-list request. The scope advances when an accepted reply changes the filter,
-including a return to a previously shown filter while an approval read is pending. That first reply records the view's
-silent status baseline, so a later status change is still detected when approval replies lag. Approval history starts
-with its own first successful reply. It keeps prior statuses for that view and all seen approval ids. Its
-serialized/retrying surface reader reads approval data on feed notices, accepted listing changes and the
-disconnected-feed fallback. A different accepted filter silently reseeds status history; sort and selection changes and
-reconnects preserve it. A new authenticated mount starts silently. Status coverage has the sidebar's listing cap.
-Successful approval reads pair with current sidebar evidence for pure JS transition and priority rules; device switches
-and `data-window-active` quiet the open session before priority is chosen. Priority is per observed snapshot, not a time
-window across independent replies. Failed reads leave history intact; a silent audio refusal still consumes the event.
-Approval-card markup is not an input to detection, and approval requests remain audible when their requesting session is
-outside the sidebar's view.
-
-Terminal text size lives entirely in `terminal.js`. It reads the remembered size once, at script load, from the page's
-localStorage (`farhelm.terminal-font-size`; 9 to 28 in steps of 1, default 14; a missing or unreadable value, or
-anything but plain digits, means the default, and an out-of-range number is clamped) and constructs every terminal at
-it. `farhelmTerm.stepFontSize` clamps, stores, then hands the size to every mounted terminal: a grid's `setFontSize`
-re-measures, redraws and refits it, and the refit reports the new rows and columns, which terminal.js sends as a resize.
-Hidden tabs are mounted and sized like visible ones, so they take the change at once. A screen held aside during a
-reconnect or kept after a takeover keeps its old size: it is frozen, with no program to tell. The shortcut is one
-capture-phase `keydown` listener on `window`, matched on `event.code` (`Equal`, `Minus`, so the US-layout key positions)
-with Shift and Meta on macOS or Ctrl elsewhere, by a platform-string test that agrees with the grid's own Mac check;
-capture on `window` runs before the grid's own key handling, which is left untouched, and preventDefault keeps the
-browser out. With no terminal mounted the listener lets the keys through. The top row's zoom buttons are stateless Rust
-buttons that call the same function, which hands focus back to the terminal the view last focused when the click left it
-on a button; nothing about the size flows back to Rust, so they have no disabled state at the ends of the range. The two
-magnifier buttons and a fixed-width, non-focusable point-size span share one border. `farhelmTerm.paintFontSize` paints
-every readout at script load and after each step. The Rust span has no text children, so Dioxus leaves its text to JS,
-and its mount asks for another paint: whichever side arrives second supplies the size, including after a session switch
-or a terminal surface returning. In the desktop app the size persists as far as the webview keeps its local storage
-across restarts; that was verified on Linux, not on macOS, where a webview that does not keep it would fall back to the
-default rather than earn a native state file.
-
-The quick switcher installs an idempotent capture-phase window keydown listener through inline `document::eval` in both
-renderers. It matches `KeyK` with Meta alone on macOS or Ctrl+Shift elsewhere, using terminal.js's platform test;
-composition and repeat do not open it. Cmd+J is matched by the shared template-shortcut listener from the Rust
-definition, and uses the same focus-capturing opener with a templates-only relay. An existing modal or an absent
-list-owned trigger yields the chord without preventing its default. Otherwise it prevents default and propagation before
-the terminal handles input, records the active element and clicks the appropriate hidden trigger. In sessions mode, each
-mounted dialog fetches one unfiltered activity-ordered session snapshot and partitions it into title and metadata-only
-subsequence matches, retaining helm order inside each tier. It never adds a result cap or subscribes to listing updates.
-Peer text is escaped and isolated before highlighting. Closing releases modal isolation and waits for actual DOM removal
-before letting ListView's ordinary navigation callback open a session. Cancellation, a refused pick and picking the
-current session restore previous focus; an accepted different session leaves focus free for its terminal. The trigger
-stays mounted but disabled through that handoff, swallowing repeat chords without replacing the saved opener;
-terminal.js's modal focus veto must no longer see the switcher when the new selection arrives.
-
-The switcher also reads one template snapshot per open and delegates `tl:` parsing and matching to the launcher's own
-search helpers. It reuses the Templates panel's summary formatter. New/name and template choices close through the same
-DOM-removal handoff, then use the ordinary New-open callback with an optional `ComposerSearchResult`, not a clone
-prefill. The launcher keeps its normal remembered permissions and destination seeds. A one-shot pending action uses
-names after mount seeding; templates also wait for the templates and model-catalog resources to settle and the hosts
-read to succeed. While waiting, the launcher shows a cancellable loading state so late acceptance cannot overwrite user
-edits. Clone/Replace revokes any pending choice, and closing clears the parent opening intent. Both kinds use the same
-search-accept callback as Enter and a clicked search result. Completed read failures follow that callback's ordinary
-refusal behavior; resource refreshes do not reapply the initial choice. Name and template picks do not submit the form.
-The templates-only mode passes its plain query through that same template matcher and refreshes shortcut labels when
-opened. Its separate preference read overlays local bindings whose save is still pending and updates only the binding
-fields; a failed read leaves cached labels intact and does not hide templates. Later binding moves need not refresh an
-already-open list. An exact case-sensitive name is selected over other substring matches unless the user arrows away;
-the same rule applies if the template snapshot arrives after typing. A row pick carries only its name across the modal
-removal handoff. The shared shortcut worker reads preferences and templates afresh and resolves that name before using
-the existing quick-launch admission, fallback and naming behavior. A name missing from the fresh catalog opens New with
-a preparation error rather than launching a stale captured definition.
-
-The keyboard-shortcuts overview installs its own idempotent capture-phase window listener in `AppBody`, immediately
-after the quick switcher's listener and before the session-action listener. The composition guard and shared template
-listener still run first, and all these command listeners precede the terminal. Physical `Slash` uses Meta alone on
-macOS or Ctrl+Shift elsewhere, with the same `/Mac/` platform test as the quick switcher. A modal or an absent
-authenticated, preferences-ready trigger yields the chord; otherwise the listener consumes it before the terminal,
-ignores repeat and composition, and opens the AppBar-owned dialog through a hidden trigger. The help menu opens that
-same ordinary `ModalDialog`, with focus restored to the help toggle rather than to a removed menu item.
-
-The overview's Rust row definitions reuse `SESSION_DELETE_SHORTCUT`, `SESSION_RENAME_SHORTCUT` and `TEMPLATE_SHORTCUTS`,
-plus shared quick-switcher and text-size label definitions. One platform evaluation per opening feeds one-form labels
-for OS-following chords; build-following chords retain their Mac-desktop predicate, including in a Mac browser. The
-dialog refreshes only the shared template-binding fields once per open with `fetch_preferences`,
-`template_bindings_after_read` and `apply_template_bindings`, overlaying pending local saves as the templates-only
-switcher does. Failed reads leave cached bindings intact. No listener is rebound or derived from this display table;
-browser tests keep the separately written JS matchers and Rust labels in agreement.
-
-Session-action shortcuts use an idempotent capture listener and a pure key matcher from `session-action-shortcuts.js`.
-The build's Mac-desktop condition selects Cmd+W for Delete; browsers use Ctrl+Shift+Backspace. A visible modal yields,
-and browser Delete leaves ordinary editors alone while consuming the terminal's input proxy. Matching keys stop before
-the terminal; repeat and disabled controls never click. Delete clicks the current header button, sharing admission,
-confirmation and the skip preference. Cmd+W is consumed even without a header. The Mac desktop installs an explicit
-native menu without muda's predefined Close Window, whose fixed Cmd+W accelerator would win before the page. Its
-renderer-free description is tested on Linux; native construction is type-checked by Linux desktop builds, while only
-macOS installs it.
-
-The same matcher maps Cmd+L on Mac desktop or Ctrl+Shift+L in browsers to a list-owned hidden Rename trigger. The open
-view publishes its accepted raw title through a separate signal, keyed by the selected session ID and independent of
-sidebar filtering. Navigation and successful local renames seed it synchronously; detail refreshes update it without
-writing the selection, whose observer would fence and refetch those same reads. The trigger uses the ordinary rename
-opener and guards. An editor retains whether it came from that shortcut: row edits return to their menu, keyboard edits
-to the selected terminal, through the same post-unmount generation and focus-ownership checks. The listener records the
-exact active element before its hidden click so repeated dialog mounts can take focus from that opener; a delayed mount
-still yields to an unrelated control chosen meanwhile.
-
-Template shortcuts use one capture listener with a pure classifier fed by a Rust definition of physical keys and
-modifier masks. Rust also derives the visible chords from those masks. The build's Mac-desktop condition selects Meta
-alone for number keys and the sequence prefix; every other build selects Ctrl+Shift alone for those, regardless of
-`navigator.platform`. The bolt's chord follows the operating system instead. The listener's one context rule
-distinguishes the page, a hidden launcher preparing quick launch, the visible launcher and unrelated visible modals; the
-launcher alone accepts template actions while unrelated visible modals yield. Ten hidden `.template-number-trigger`
-buttons hand the digit to the same list callback that handles quick launch; the existing `.quick-launch-trigger` remains
-unique. Cmd+J uses the definition's platform chord in this listener and admits only the page context; a hidden
-template-switcher relay shares Cmd-K's opener and close handoff. Both direct-launch relays read fresh shortcut
-preferences and template definitions, resolve a name and use the same New-open, template application and submission
-path. The row's key popup uses `menu_panel` keyboard/focus/placement helpers inside modal isolation; Escape closes it
-without closing Templates. The open toggle owns pointerdown until click. Dialog scroll/resize, backdrop resize and the
-app's layout epoch dismiss the popup when its fixed coordinates become stale; the popup's own scrolling does not dismiss
-it. Focus returns only while still owned by a closing menu, with `preventScroll`, so a delayed dismissal cannot steal
-another popup's focus or undo the dialog's scroll. Re-delivery to an already closed popup does nothing. The two shortcut
-preference fields share acknowledgment and fresh-read overlay helpers. A rename repoints both before deleting the old
-name, and removes a stale new-name key when retaining the old name's key would otherwise violate one-key-per-template.
-Failed repoints keep both names. A failed number-key save from a key edit, or a failed repoint of either shortcut, is
-reported and its local pending value discarded, without retrying it. A key edit reports uncertainty and re-reads the
-helm's bindings, since a lost reply may follow a committed save. If that read fails too, it shows the previous read and
-says the current keys could not be read. A failed quick-launch mark toggle in the Templates dialog follows the same
-rollback and re-read; it reports uncertainty, and says when the current mark could not be read.
-
-Quick launch uses that shared capture listener and the same list-owned New-open callback, followed by the ordinary
-template search action and form requestSubmit. The mark is one nullable shared preference rather than template data, so
-a stale editor save cannot move it. Both template delete paths clear only a matching mark in their existing immediate
-transaction; recreating a template does not restore the mark. The editor repoints between save-new-name and
-delete-old-name through the existing preference writer, awaiting its own acknowledgment. Rename reads the mark fresh,
-respecting a local choice whose write is still pending; its separate writes retain ordinary cross-client
-last-writer-wins semantics. An unconfirmed repoint keeps both template names and shows the helm's mark again. Delete
-waits for any owned mark request, so the helm sees that write before the delete clears it. This sends no unconditional
-clear that could erase another client's different mark. Each shortcut fetches the saved mark and templates rather than
-trusting its startup preference snapshot, overlaying only an explicit local mark still awaiting persistence: a pending
-mark write cannot silently launch the previous mark, while a failed one is discarded and the helm's mark launches.
-
-The form's quick-launch flag changes visibility and schedules one ordinary submission after mount seeding,
-template/catalog reads, host binding and the current managed-checkout preview settle. Its transparent modal backdrop and
-existing modal isolation prevent page clicks or keyboard input from replacing the pending intent, while hidden fields
-take no focus. Parent opening generations revoke late reads and scheduled submissions when another opening takes over;
-the modal install epoch also notices an intervening modal that already closed. Session Rename uses the shared modal
-boundary and explicitly revokes a held quick read when opened. Clone/Replace reveals a superseding draft and spends the
-automatic intent. Incomplete or offline prerequisites, request errors and YOLO refusal reveal that same form. The
-auto-submit intent is consumed before requestSubmit and stays consumed through retry reconciliation or a new path
-preview. There is no headless composition, second create path or timer-based readiness. The YOLO question mounts only
-after reveal so its usual Cancel focus still applies. A completed initial host-read failure reveals the cancellable
-draft, focuses its loading Cancel button, and cannot launch later merely because the host read recovers. Preparation
-errors survive first binding; every unsuccessful create reveals the form even when its old-target refusal is fenced out
-after a target change. The quick-switcher row closes its modal through the existing DOM-removal handoff before using
-this shortcut path.
-
-Successful creation carries one local fact to the list: whether this quick-launch opening never revealed New, read from
-its original quick-launch flag and current hidden state at success. The list selects the accepted session and opens its
-existing rename editor in naming mode in that same completion event, omitting New-button focus. The create operation is
-already released; no rename or user answer gates agent startup. An unset naming preference enables it. The editor keeps
-one naming flag alongside its existing shortcut origin. Naming's generation-checked mount explicitly focuses and selects
-the field once, including later openings in the same document. An unchanged raw title closes without calling rename;
-edited titles keep ordinary validation and refusal behavior. Naming and shortcut editors use the existing
-generation-fenced, post-unmount terminal focus return. The terminal's existing modal guard withholds focus while naming
-is mounted; an unrevealed terminal retains its ordinary reveal-time handoff after early dismissal.
-
-## Terminal widget: the grid island
-
-Every terminal runs in a terminal host ("Terminal host") and is interpreted by the supervisor's emulator, so the browser
-draws a grid stream with its own grid client ("The grid client", at the end of this section), mounted as a JS island
-inside the Dioxus tree. Grid messages flow WebSocket → the grid component directly, bypassing Dioxus state entirely.
-Dioxus owns everything around the terminal (tabs, status, dialogs), not the terminal's content path. Everything is a
-static asset (no CDN — the UI must be fully self-contained, consistent with SPEC.md's no-public-relay,
-no-third-party-services posture and the loopback deployment). Some of the grid client's code is ported from xterm.js and
-VS Code, with its attribution kept beside it and listed in `THIRD_PARTY_NOTICES.md`.
-
-JetBrains Mono Nerd Font is vendored for the same self-contained reason, and terminal.js gives it to the grid as its
-`fontFamily`. The terminal and the interface's technical values share the same two cached `.woff2` files; ordinary
-interface text uses Inter. A terminal mounts only once both bundled mono weights have loaded, the same as its bundled
-scripts, with no fallback font. Inter is not a terminal-mount prerequisite.
-
-Motivation: full escape-sequence fidelity is a SPEC.md requirement, and the supervisor's emulator (`alacritty_terminal`,
-"The supervisor's terminal emulator") already interprets every byte, keeps the scrollback across supervisor restarts and
-answers the program's queries; the browser only has to draw a grid of styled text as ordinary DOM, which keeps the most
-important widget testable in an ordinary browser. Routing high-frequency output through a reactive framework would be a
-performance disaster, so the bypass is load-bearing, not an optimization. An emulator in the page, a pure-Rust wasm one
-say, was rejected: it is a project in itself, and it would draw to a canvas, which ordinary browser tests cannot
-inspect.
-
-No code Farhelm owns may ever drop a terminal's output silently: every Farhelm-side bound on the way to a viewer is
-backpressure, a skipped intermediate screen with the current one sent (never a lost scrollback line), or a visible
-detach. How a grid stream meets that is in "Grid streams" (flow control and the helm's pause and resume); the page
-applies every message as it arrives and sends no flow control of its own. The scrollback a viewer keeps is the history
-cap the stream's `hello` announces (the supervisor's 12,000 lines), so a viewer holds what the terminal retains.
-
-Shift+Enter (SPEC.md, "Terminal experience") leaves the page as an ordinary `key` message; the supervisor's encoder
-(`crates/farhelm-supervisor/src/grid_input.rs`) turns the exact chord into ESC CR and sends it as one input, which the
-terminal host writes to the pty in one write. The single write is the promise: split across two writes, the pair reads
-as Escape-then-Enter to line editors that disambiguate a lone ESC by read boundary (Codex; zsh with a small KEYTIMEOUT),
-which is how the chord once shipped broken. The page's key table (`grid-keys.jsonl`) records the chord's ESC CR like
-every other key.
-
-Clipboard writes — SPEC.md's terminal contract is that select-to-copy and a program's OSC 52 WRITE land on the system
-clipboard while an OSC 52 READ is never answered (the supervisor's emulator answers no clipboard read) — are implemented
-per surface, because the web platform only delivers that contract on some engines. Both of the page's write paths (the
-grid's completed-selection `onCopy` and its program-clipboard `onClipboard`) go through one page-wide queue
-(`clipboard-writer.js`) that prefers `window.__farhelmNativeClipboardWrite` whenever it exists and fall back to
-`navigator.clipboard.writeText` otherwise, with every failure swallowed per the contract's best-effort clause. The
-global exists ONLY in the desktop app, installed by desktop authentication's success path (auth.rs's
-`arm_native_clipboard`, re-armed whenever that authentication runs again from the failure page's Retry): it POSTs the
-text to the embedded helm's `POST /api/clipboard`, and the desktop shell — the only construction able to register a
-`ClipboardSink` (`run_embedded`'s parameter; `farhelm helm run` hardcodes none, deliberately without a flag) — writes
-the real pasteboard via arboard. The reason the desktop cannot use the web API at all: WKWebView does not treat the
-`dioxus://` page as a secure context, so `navigator.clipboard` is absent there — not denied, absent — which shipped as
-copy-never-works until 2026-09 (the Dioxus-risks bullet above records the diagnosis; farhelm-helm's clipboard.rs owns
-the endpoint's contract: device-session auth with the desktop-webview CORS layering, one bounded text field, 404 on any
-helm without a sink so a remote browser can never write a server machine's clipboard, and a silent 204 whether the
-native write succeeded or not). A browser tab keeps the web API path and inherits its engine's policy: Chromium-family
-engines treat loopback HTTP as a secure context and work; Safari does not, and stays silently refused. OSC 52 reads are
-never answered on any surface — the native route is write-only by construction, not by policy that could drift.
-
-The "this drag did not copy" notice is decided in `assets/copy-on-select.js` (`dragMayHaveCopiedNothing`,
-`dragCopyNoticeText`) and driven by terminal.js around the grid. The press records the pointer position, whether the
-pane's program had mouse tracking on (`grid.model.state.mouse`), and the pane's program-copy count: the completed
-`onClipboard` callbacks for either target, including primary writes that the page does not copy to the system clipboard.
-Local grid selection copying is a separate callback and does not increment that count. The release checks for a plain
-drag under press-time mouse tracking without the forcing modifier, and 1.5 seconds later whether any OSC 52 arrived
-since the press. A retained local selection does not suppress this notice: that program-owned gesture does not copy it.
-The forcing modifier it names follows the exact Mac platform list the grid uses (`copy-on-select.js`'s `MAC_PLATFORMS`,
-the same as grid-input.js's `platformOf`). Agent-specific wording comes from the session's agent kind
-(`SessionAgentKind::drag_copy_hint` in the UI crate, an exhaustive per-kind function per the harness map), passed on the
-agent terminal's spec only; tabs always get the generic text. The persistent Rust-rendered live region holds an
-initially empty text span and a dismiss button. `createDragCopyNotice` owns its placement and thirty-second timer per
-mount; every qualifying drag replaces its position and deadline. Horizontal placement reuses `placeTooltip`. The bottom
-edge sits three terminal rows above the release pointer when the whole box fits inside the pane and viewport, otherwise
-the top edge sits three rows below. When neither fits, vertical placement falls back to six pixels above, clamped to the
-viewport. Row height comes from the rendered grid row (screen height divided by model rows before any row is painted).
-CSS caps the box to the viewport and hides its entire subtree when dismissed. Only × takes pointer events; its mousedown
-prevents the native focus change, and its click hides locally outside the terminal element. A terminal press cancels
-both the visible notice and any pending OSC 52 grace check. The grid observes presses in capture phase, including its
-scrollbar, and marks a withheld link press as ineligible. Resize repositions the notice; surface teardown removes
-listeners, cancels timers and invalidates deferred work. The notice driver's teardown runs before the grid becomes a
-frozen takeover snapshot, so that snapshot remains selectable without raising guidance.
-
-### Links in terminals
-
-Terminal web-link click ownership is the nullable `terminal_link_click` shared preference added by helm schema 46:
-`intercept` is the default, `both` preserves Farhelm activation plus program mouse reporting, and `program` disables
-Farhelm's web activation. The settings radio buttons use the ordinary sparse preference queue. `PreferencesGate`
-publishes the current choice into the page-wide terminal asset state; every terminal reads it at press/activation time,
-without a remount. Other clients seed again on reload, matching host confirmation choices. File downloads and agent URL
-forwarding do not consult this choice.
-
-OSC 8 and plain-web links identify only targets their existing activation checks would open (each link's `web` flag).
-Under mouse reporting the grid asks terminal.js's `linkPress` about a primary press on a link, without the forcing
-modifier held, before reporting it; in interception mode a web link's press is withheld (`interceptLinkPress`), and the
-grid then reports neither the press nor its drag nor its release to the program, while the release still activates the
-link through its ordinary click admission. The withheld press runs the drag-notice dismissal bookkeeping and marks its
-gesture as withheld, so it never raises the guidance. Forced-selection presses keep their local selection; file links,
-other buttons, wheel and moves keep their existing behavior.
-
-An OSC 8 link's hover compares the link's underlined text with its target (`linkTextMismatch` in
-`assets/terminal-links.js`) to decide whether the display is the quiet one or the loud mismatch warning. The link code
-in `terminal-links.js` and `terminal-files.js` reads a terminal through one small interface, "link lines" (each line's
-length, whether it soft-wraps from the previous one, its cells' characters, widths and hyperlink tags, and its text),
-which the grid offers directly (`grid-buffer.js`'s `linkLines`). The text is joined by `linkHoverText` from the cells'
-hyperlink tags. Only consecutive rows carrying the same tag join, with exactly one contiguous tagged run per row, at
-most 128 rows and 8192 characters. Each run is read without trimming; only the ends of the joined string are trimmed.
-One synthetic empty padding cell before a terminal-wrapped wide character is omitted; an actual printed space is
-preserved. Agent cursor moves do not set a soft wrap, so that flag is not a join condition. Within a complete bounded,
-unambiguous extent, rows whose addresses each independently match the target compare as separate occurrences. Otherwise
-the whole text is compared normally. An adjacent continuation that exceeds a bound or has ambiguous runs yields
-Fragment: its hovered piece warns whenever it looks like an address, even if that piece happens to equal the target. A
-single row with repeated same-tag links keeps its existing comparison. The grid gives every cell an integer tag (0 for
-no link), so the join always has its tags; a missing hover range or row yields Unknown, which keeps the row-only
-comparison, and the link-lines interface keeps that fallback for a cell whose tag is undefined. That row-only rule is
-incomplete and is never the answer while tags are readable: `https://git` followed by `hub.com/login` targeting
-`https://hub.com/login` is quiet on the second row, which alone equals the target.
-
-The tagged cells, read row by row, must spell the target for a quiet URL-like comparison; this does not certify all text
-the reader sees. Untagged decoy text is outside the comparison. Nor is the join complete against a hostile program, and
-the reason must not be overstated: pieces that are not joined are still judged one by one, so `https:/` and
-`/github.com/login` emitted as two hyperlinks with different tags (or on non-adjacent rows, or as a join refused for an
-ambiguous run) are each not URL-like and both stay quiet. `https://good.example` followed by `.evil.test/` targeting
-`https://good.example.evil.test/` is quiet, just as the same tagged text on one row is. Position proves nothing because
-agents can break before the edge. The quiet display still names the real host, which is the safeguard the warning adds
-to. The URL-like gate is deliberately generous, and strict parsing then decides: it accepts any scheme spelling, looks
-past leading non-ASCII characters that are not letters or digits and past the Hangul fillers (letters that draw as
-blanks), and reads lookalike colons, slashes and dots as their ASCII originals. So a lookalike scheme (`httрs` with a
-Cyrillic letter), invisible leading characters, or a `ː` posing as `:` warn rather than pass. Only the start of the text
-is examined: link text that is prose containing an address is not judged. A dotted host counts only when its last label
-is two or more letters, which keeps version and directory text such as `v1.2/` or `changelog.d/` quiet, at the cost of
-not judging scheme-less IP text. The warning shows the link's text with Unicode format characters (bidi controls,
-zero-width characters) as visible escapes, because the terminal stores them unapplied and HTML would apply them.
-
-`grid-buffer.js` resolves directly continuing pieces with generated ids matching `^\d+_alacritty$` and equal targets to
-the first piece's id and target. Pieces continue when adjacent on a row, or from a soft-wrapped row's last cell into
-column zero of the next (including the synthetic padding before a wrapped wide character). Explicit program ids stay
-separate from generated ids. Per-question row caching keeps resolution linear in the runs examined, with at most 128
-rows of backward discovery. The underline and the link lines' tags use the same identity, as do the rows captured as
-hover and late-answer evidence.
-
-Only the spelling distinguishes generated ids: a program can send `id=7_alacritty` itself. This is acceptable because
-joining requires equal targets, and such a contiguous chain is a subset of what a shared explicit id already joins. The
-compared text is the underlined chain's text; it stays quiet only when it reads the real target under the existing
-comparison rules. Misclassifying a program's id can extend an underline across touching same-target links, or cause a
-false alarm, but gives no quieter display for text naming a different place than the explicit-id rule already allows.
-The repeated-complete-address rule above still applies. Once a piece inherits the chain's first id, cursor movement onto
-an unwrapped row carrying that piece's original generated id no longer joins that other row.
+NOTE: The Dioxus GUI's sections were deleted with that app (GPUI migration, F1): this one, "GUI: sidebar, sounds, text
+size, quick switcher and shortcuts", and "Terminal widget: the grid island" with its "Links in terminals" and "The grid
+client". These two stub headings remain only because open review-queue items cite them. Read the old text at commit
+`6ef88c9a`, or at the GPUI port's reference commit `24bc0580`.
 
 ### The grid client
 
-A terminal is interpreted by the supervisor's emulator ("The supervisor's terminal emulator"), so the browser gets the
-screen and scrollback as rows of styled runs (the grid stream, "Helm ↔ supervisor transport: system ssh + stdio
-protocol", "Grid streams") and draws them; it is not a terminal emulator. It lives in
-`crates/farhelm-ui/assets/grid-*.js`: `grid-terminal.js` is the DOM half (rendering, the virtualized scrollback,
-selection, the pointer and keyboard), and `grid-model.js`, `grid-buffer.js`, `grid-style.js` and `grid-input.js` hold
-the decisions it acts on as pure functions, which `node --test` covers. `terminal.js` owns the connection and mounts the
-grid component for every terminal before the socket exists, because the socket URL carries its fitted size. The catch-up
-and its reveal, the heartbeat, detaches, banners, reconnect, resize, paste interception, the clipboard queue, links with
-their hover checks, file downloads and tunnels are terminal.js's around it.
-
-The grid's deterministic fit is Farhelm's documented formula (`grid-terminal.js`, "Size"): the character measured by an
-offscreen canvas, the proposal cell rounded through device pixels at a fixed 80-column, 24-row reference, and the room
-less the element's padding and a 14-pixel scrollbar. The fixed reference preserves direct mounts' initial fits while
-making later answers independent of resize history. Drawing still rounds cells at the supervisor-committed size, never
-at the proposal reference. An observation whose pane, character metrics and pixel ratio are all unchanged proposes
-nothing, and no per-terminal sizing state is retained across visits. The measurement, the 14-pixel scrollbar reserve and
-the padding are Farhelm's fit contract: changing any of them changes the rows and columns of every pane at the same
-size, which programs see as a resize. Browser checks hold the fit to its independently computed formula across text
-sizes and pixel ratios. Rendering is one element per visible row with its runs as spans reused in place, painted at most
-once per animation frame however many messages arrive; the choice between boxing every non-ASCII cell and letting
-characters the font draws at the cell width flow inline came from a renderer benchmark, recorded in the file's header.
-Input goes up as small JSON messages (keys, text, pastes, mouse and focus events), never as encoded bytes: the
-supervisor encodes them from the terminal's modes (`crates/farhelm-supervisor/src/grid_input.rs`). Which keydowns reach
-the program, and the bytes each key and click becomes, are Farhelm's own contract, written down as checked-in tables
-(`grid-keys.jsonl` and `grid-mouse.jsonl` under `crates/farhelm-supervisor/tests/fixtures/`, and the page's keydown and
-Alt-click tables under `crates/farhelm-ui/js-tests/fixtures/input/`) that the page's code and the supervisor's encoder
-are held to, the key table by both. They are the xterm family's encodings, which shells and agents expect; a changed row
-is a key or click a program reads differently. The client sends no flow-control pause or resume: it applies every
-message as it arrives, applying a large history in slices between frames so that the screen stays usable, and the helm
-pauses a grid stream on its own queue instead.
-
-History stays in binary form until a reader asks for a row. Arrival owns an exact copy of the message's row region and a
-typed offset index, validates its declared links once, and checks every row envelope. The existing sliced drain then
-validates each retained row in full before storing it; malformed content fails there even if nobody scrolls to it. Each
-applied line owns its exact body bytes, original width and only the immutable links it references, indexed by their
-original wire numbers. `GridModel.historyLine` constructs a fresh row and styles for that call; selection, copy, word
-and link readers keep their existing interface. Historical styles never enter the screen's style interner, and there is
-no decoded-history cache.
-
-Hover and asynchronous link answers use a separate stable token for each applied history line. That token points at
-neither the body nor its links, so a pending answer cannot retain evicted output. A reset gives replacement lines new
-tokens even if their numbers and text repeat. Eviction clears each dropped record immediately. Queued partial drains and
-trims advance offsets rather than copy the remaining suffix on every append: at most one partly consumed message keeps
-its bounded row region (under 1 MiB), typed index (under 0.6 MiB) and declared links until its final queued row goes.
-Fully discarded entries release those allocations. Empty appends settle numbering on arrival without entering the queue,
-so only real rows absorb trims. A real reset drops the old queue on arrival and clears the applied history at its
-existing drain boundary.
-
-Not built, a near-term entry in `TODO.md`: showing an input method's composition at the cursor (committed text is sent).
+Deleted; see "GUI: Dioxus" above.
 
 ## Terminal host
 
@@ -3178,16 +1482,16 @@ palette, as the browser's) or the colors the program set. Known limitations, acc
 parse go unanswered, and a query inside an open synchronized update is answered when the update ends rather than at
 once. Keyboard input keeps today's legacy xterm encoding: the kitty keyboard protocol stays off (turning it on would
 change the Shift+Enter and Escape handling SPEC.md promises) and its query unanswered, and OSC 52 writes are honored
-while reads are never answered. The encoding itself is the supervisor's (`grid_input.rs`, "The grid client"). `vte`
-holds a synchronized update's bytes until the update ends, and its 150 ms safety deadline is not self-driving: the
-runtime wakes at the deadline on its own clock and draws the update, and also draws one left open when the child exits,
-when a replay ends and before a resize; `vte` itself ends one whose bytes reach its 2 MiB buffer. Each of those can draw
-a frame the program had not finished. The safety deadline, the buffer limit, a resize, the child's exit and the end of a
-replay are examples of the deliberate exceptions to frames never being drawn half done; a recovering replay also draws
-an open update where it crosses from output an earlier supervisor was sent to output none was, and where it crosses a
-gap, though it carries on to the same final state. The crate's own tests pin the answer table, the screen-text format
-and the modes as Farhelm's, and the supervisor's screen fixture tests paint every captured agent screen into the
-emulator and run its status reader on the emulator's text.
+while reads are never answered. The encoding itself is the supervisor's (`grid_input.rs`). `vte` holds a synchronized
+update's bytes until the update ends, and its 150 ms safety deadline is not self-driving: the runtime wakes at the
+deadline on its own clock and draws the update, and also draws one left open when the child exits, when a replay ends
+and before a resize; `vte` itself ends one whose bytes reach its 2 MiB buffer. Each of those can draw a frame the
+program had not finished. The safety deadline, the buffer limit, a resize, the child's exit and the end of a replay are
+examples of the deliberate exceptions to frames never being drawn half done; a recovering replay also draws an open
+update where it crosses from output an earlier supervisor was sent to output none was, and where it crosses a gap,
+though it carries on to the same final state. The crate's own tests pin the answer table, the screen-text format and the
+modes as Farhelm's, and the supervisor's screen fixture tests paint every captured agent screen into the emulator and
+run its status reader on the emulator's text.
 
 Emoji and text variation selectors follow Ghostty's default Unicode width rules: only eligible bases change width,
 selectors after a combining mark are ignored, and text presentation can narrow a wide character. Two exceptions keep the
@@ -5521,6 +3825,95 @@ clone. Only validated GitHub HTTPS/scp/SSH origins become canonical pairs; raw o
 Recent-first deduplication, sorted discovered entries and explicit incomplete status keep a failed scan from disabling
 manual repository selection. Browser requests debounce for 150 ms and discard stale host/query generations.
 
+`GET`/`PUT /api/checkout-root` is an ordinary protected route with a required nullable `root` and no host or command
+fields. It calls the existing global setter/clearer; the revision watcher is the sole invalidation publisher for HTTP
+and CLI writes. `GET`/`PUT /api/hosts/{id}/checkout-root` checks host existence (404 if absent) and reads only its
+stored `root` and the global `default`, or sets/clears that host's root with the existing helpers. Neither route
+contacts a host; path validation is shape-only.
+
+The all-hosts post-clone command uses its own protected `GET`/`PUT /api/checkout-post-clone` route with a required
+nullable `command` and no other fields. Null is unset, an empty string is explicitly disabled, and nonempty text is
+stored verbatim; no GUI configuration route exposes a host's command override. The handler checks the shared 16 KiB cap
+before calling the existing global setter/clearer, returning a visible 400 refusal without quoting the command or
+changing the revision. Existing revision checks and frozen supervisor launch specs keep an accepted preparation and its
+retries on the command accepted with it.
+
+### Shared preferences and announcements
+
+NOTE: These rules lived in the Dioxus GUI's section until that app was deleted (GPUI migration, F1). They describe the
+helm, which still enforces them; the old client-side mechanics that surrounded them went with that app.
+
+The helm keeps the GUI's shared preferences in a singleton row of `helm.db` (`preferences`; the `Preferences` type in
+`farhelm_proto::ui_channel` lists its fields) behind `GET`/`PUT /api/preferences`, device-authenticated like every other
+route. One answer is shared by every client: nothing is kept per client. A write is a sparse patch naming only the
+fields it changes, merged per field by the helm: an absent field is untouched and an explicit `null` clears one, so two
+writers changing different fields at nearly the same time cannot clobber each other. The remembered permission field and
+the per-agent wrapper-prefix map are written by the helm after a successful user agent launch; no client PUTs them.
+Remembered permissions describe accepted launches rather than one client's claim. The `remembered_workspace_trust`
+column remains for upgrade compatibility but is neither read nor written. The session list's sort travels as the bare
+word `?sort=` takes and is validated against that vocabulary at the write; the selection is the full entry-bound session
+reference, whose entry UUID keeps a remembered selection from following a removed host's bare session ID to another
+entry. A client reads an absent or unrecognized sort word as the default (`activity`), because the row outlives the
+build that validated it.
+
+Helm schema 46 adds the nullable `terminal_link_click` preference, the ownership of a click on a terminal web link:
+`intercept` is the default, `both` keeps Farhelm's activation plus the program's mouse reporting, and `program` turns
+Farhelm's web activation off. File downloads and agent URL forwarding do not consult it.
+
+Helm schema 50 stores `template_shortcuts` as a JSON map from one ASCII digit to one valid template name, initially
+empty. A preferences write replaces the whole map; concurrent writers can lose an edit to that same map, which is
+accepted. Each template may hold at most one key. Names need not exist at write time, just as the quick-launch mark may
+be stale. Both template-deletion paths clear matching bindings and the quick-launch mark inside the deletion
+transaction; restoring the template does not restore either shortcut. Older helms refuse this schema.
+
+Helm schema 51 adds `welcome_seen` to the shared preference row. Unset and false mean unseen; both fresh and upgraded
+helms start unseen. The dismissal belongs to the helm so closing the welcome card on one client hides it on every
+client's next load. A failed or timed-out read is never evidence of unseen. This migration prevents older helms from
+opening the database.
+
+Helm schema 56 adds nullable `preferences.name_session_on_quick_launch`. Unset and true enable quick-launch naming; only
+false disables it, so upgraded helms have the same default as fresh ones. Null restores the enabled default and omission
+preserves the stored choice. Older helms refuse this schema.
+
+Helm schema 59 adds nullable `preferences.color_terminal_frames`. Unset and false leave terminal frames uncolored on
+fresh and upgraded helms. A null restores the off default, and an omitted key preserves another client's choice. Older
+helms refuse this schema.
+
+Helm schema 60 adds `preferences.remembered_wrapper_prefixes` as an empty JSON map on upgrade. Each accepted user agent
+launch replaces or clears its own agent type's entry in the same transaction that records the launch; a launch without a
+prefix removes that entry. Agent-origin launches and command launches leave the map alone. An older helm refuses this
+schema.
+
+Helm schema 66 adds `preferences.visit_history`, a JSON list of at most 32 full session references, newest first without
+duplicates. Each non-null `last_selected` write prepends its reference, removes its previous occurrence and caps the
+list in the same database transaction as the sparse preference write. Null clears both selection and visits; omission
+changes neither. Clients cannot PUT the history. Deleted references remain until later visits age them out. Migration
+adds an empty list without inventing visits from a retained legacy selection; the next selection write establishes the
+history-head/last-selection invariant. Older helms refuse the newer schema.
+
+Helm schema 68 adds nullable `preferences.auto_update_remote_hosts`, constrained to booleans. Unset, null and false
+authorize nothing; only true enables automatic remote-host updates. Migration leaves it unset and preserves other
+preferences. The normal newer-schema guard refuses older helms, and the value survives reopening the store.
+
+Helm schema 69 adds a durable announcement queue and the database's creation build. Fresh creation records the build
+inside the schema transaction; migration leaves that row absent, so an older database does not acquire a false
+fresh-install baseline. Older helms refuse the new schema. Each announcement stores its stable unique id, title,
+plain-text body, optional display-ready detail and labelled link, insertion sequence, and nullable shown timestamp.
+Enqueue is atomic and idempotent by id, including after dismissal: original content is never replaced. Pending rows sort
+by insertion sequence; shown history sorts by shown time descending, then sequence descending for a batch.
+
+Device-authenticated `GET /api/announcements` reads pending and history from one database snapshot.
+`POST /api/announcements/shown` takes an explicit `ids` list and atomically timestamps only those pending rows; unknown
+or already shown ids do nothing. A client can therefore dismiss an older window without draining newer unseen content,
+and a failed write leaves the whole batch pending.
+
+The compiled `release_announcements.json` table is the queue's first producer and ships empty. Before serving clients,
+the helm enqueues entries newer than its creation build and no newer than its running build, using full semver
+precedence, including prereleases and ignoring build metadata. An absent or `0.0.0-unreleased` creation build is older
+than every entry; a running `0.0.0-unreleased` build enqueues none. Only the producer interprets versions or supplies
+release-notes destinations: stable entries link to their version's notes, and prereleases omit the link because curated
+notes need not exist. Queue storage, routes and consumers carry display-ready content and know nothing about releases.
+
 ### Composer history
 
 `POST /api/browse-directory` accepts a default-false `membership_only` flag. When set, the helm uses the existing
@@ -6057,34 +4450,23 @@ beside its installation snapshot from AppBody, independently of the filtered sid
 - axum serving: REST for CRUD (sessions, hosts), a WebSocket event stream for live session-list updates, and a WebSocket
   per attached terminal. The helm serves no page; the desktop's embedded helm uses a fresh kernel-selected loopback
   port. Loopback bind enforced — refuses non-loopback per SPEC.md.
-- The desktop app's two credentials (one for native REST, one for the webview's page memory and WebSocket subprotocols)
-  are the only credentials the helm accepts in production; there is no browser sign-in. The one other credential is the
-  test hook `farhelm helm run --test-credential-file PATH` (hidden): a standalone helm mints one in memory the same way
-  and writes it to a new 0600 file, so end-to-end tests can reach the real binary's API. The embedded helm mints them in
-  memory at startup and hands them to the desktop process through `run_embedded`'s readiness channel; it keeps only
-  their SHA-256 digests, in memory, so only the current launch can authenticate. No HTTP route mints one, and the
-  embedded helm serves no browser UI. They die with the process, so nothing persists or accumulates across launches, and
-  the app keeps none on disk. With nothing to revoke, the desktop has no re-authentication path: a native 401 is
-  reported as an error, and the window's failure page with its Retry button is left for genuinely broken states, such as
-  a webview credential that fails validation or the event-socket probe. The page keeps its secret in memory for the life
-  of the window, and removes any legacy `farhelm.device-secret` key on each credentialed authentication attempt as best
-  effort. A debug page reload discards that page copy; nothing hands the page its credential again, so its terminals,
-  attachment uploads and event feed cannot authenticate until the app is relaunched. The shipped release desktop
-  configuration does not expose the debug context-menu reload control, so that debug-only behavior is outside the
-  supported product lifetime. The webview's secret is readable by script in the window, and a stolen one ends only when
-  the app quits.
-- The loopback guard accepts `Host` and `Origin` only as the IPv4 literal `127.0.0.1:<port>` (bare `127.0.0.1` on port
-  80, where browsers omit the default port), or (in embedded mode only) the native webview's custom schemes as Origin.
-  That exemption is a scheme prefix and cannot be narrower in a useful way: dioxus-desktop hardcodes the page URL
-  `dioxus://index.html/` on Linux and macOS, so every Dioxus desktop app sends the same Origin, and `wry://` is open to
-  any app built on wry directly. A standalone helm has no custom-scheme page to authorize and refuses those origins.
-  Another such app's content passing the embedded guard is the residual SPEC.md "Client to helm" accepts for this
-  browser-facing check. `localhost` and `[::1]` are refused because the helm binds only IPv4 loopback, leaving
-  `[::1]:<port>` free for another local account to bind; a `localhost` origin could then be served by that account and
-  read whatever the UI stored there. Binding `[::1]` as well was rejected: IPv6 loopback can be enabled after the helm
-  starts, so the helm cannot hold that address reliably. A `GET` or `HEAD` without an `Upgrade` header whose Host is
-  exactly one of the refused names gets a `307` to the fixed `http://127.0.0.1:<port>/`, built from the literal rather
-  than from the request; API calls and WebSocket upgrades under those names get the ordinary 403.
+- The desktop app's credential is the only credential the helm accepts in production; there is no browser sign-in. The
+  one other credential is the test hook `farhelm helm run --test-credential-file PATH` (hidden): a standalone helm mints
+  one in memory the same way and writes it to a new 0600 file, so end-to-end tests can reach the real binary's API. The
+  embedded helm mints the desktop's in memory at startup and hands it to the desktop process through `run_embedded`'s
+  readiness channel; it keeps only its SHA-256 digest, in memory, so only the current launch can authenticate. No HTTP
+  route mints one. It dies with the process, so nothing persists or accumulates across launches, and the app keeps none
+  on disk. With nothing to revoke, the desktop has no re-authentication path: a 401 is reported as an error.
+- The loopback guard accepts a request only when its `Host` is the IPv4 literal `127.0.0.1:<port>` (bare `127.0.0.1` on
+  port 80, where clients omit the default port), it carries no `Origin` header, and its `Sec-Fetch-Site`, if any, is
+  neither `cross-site` nor `same-site`. Farhelm's own clients never send `Origin`, so any request that carries one came
+  from a web page and is refused whatever its value; the custom-scheme origins the Dioxus webview needed left with it.
+  `Sec-Fetch-Site` catches browser requests without an `Origin`, such as a top-level navigation from a hostile page or
+  from a page on another loopback port. `localhost` and `[::1]` are refused because the helm binds only IPv4 loopback,
+  leaving `[::1]:<port>` free for another local account to bind, and a client resolving `localhost` to `::1` would talk
+  to that account's server. Binding `[::1]` as well was rejected: IPv6 loopback can be enabled after the helm starts, so
+  the helm cannot hold that address reliably. Every refusal is a plain 403; the helm serves no page, so there is nothing
+  to redirect to.
 - The native app embeds farhelm-helm in-process; the Linux helm is the same code behind `farhelm helm run`. The local
   supervisor is a separate process either way — the app discovers one that already answers and leaves it alone (unless
   it is the app's own outdated or wedged one), or starts `farhelm supervisor run` detached, and it keeps running after
@@ -7468,21 +5850,6 @@ channel, so a stray line there corrupts frames. File logging under `~/.local/sta
 (tracing-appender) and a `--log-level` flag are the intended shape but are not built yet — today verbosity is
 `RUST_LOG`-style env only.
 
-One log source is not native code: `POST /api/client-log` (PLAN_desktop_web_bug_triage.md) lets the desktop webview's
-console shim forward its errors and warnings into native tracing under the `webview_console` target, because the webview
-is the one layer with neither tracing nor devtools and a dead eval bridge (MT-5) otherwise erases its own evidence. The
-route is device-session-authenticated with the desktop-webview CORS layering, and treats the page as a peer, not a
-friend: an envelope-shaped body with unknown fields refused, a route body limit, per-field byte caps with the same
-bound-and-escape treatment as every other peer string, a shared fixed-window accept budget, and at most one
-dropped-count warn per window so the endpoint's own reporting cannot amplify the failure loop it exists to observe. Only
-the desktop build ships a sender; browsers have devtools and forward nothing. The desktop app also runs a native
-eval-bridge watchdog (`webview_watchdog` target): a 15-second one-shot-eval heartbeat that logs exactly one error line
-per continuous outage when the bridge stops answering (the MT-5 class — the shim cannot report a failure of the very
-bridge that armed it) and one recovery line if it resumes; log-only by explicit decision, never a reload or an exit.
-Both target names are grep contracts: `docs/desktop-web-triage.md` is the triage recipe built on them, and
-`scripts/desktop-smoke.sh` asserts the whole pipeline (a marker through the real capture path, for the first launch and
-the restarted process alike) plus watchdog silence on every non-skipped run.
-
 Motivation: tracing is the ecosystem standard, and span context is the cheap way to make "logs are available for X" a
 property of the architecture instead of a discipline.
 
@@ -7647,6 +6014,10 @@ running version; see "Side-by-side versions inside Farhelm.app"). clap-derive be
 grammar declared next to the types.
 
 ## Native app packaging
+
+During the GPUI migration this section describes release machinery that no longer builds: the browser UI and the dx
+build it relies on are gone from main, and the release files are deliberately left as they were until the GPUI app
+replaces them at cutover. Main ships no releases in the meantime.
 
 Dioxus desktop (wry) wrapping farhelm-ui, released as a BARE BINARY rather than a `.app` bundle: `farhelm-desktop`, a
 thin crate (`crates/farhelm-desktop`) whose `main` is one call into farhelm-ui's desktop module, built by cargo-dist
@@ -7931,7 +6302,7 @@ executable (on Linux also the running image's device and inode; macOS exposes on
 not start is never stopped by it.
 
 At startup the app decides from the record and from discovery (`plan_local_supervisor` in
-`crates/farhelm-ui/src/desktop.rs`). Without a matching record, an answering supervisor is reused as it is and only
+`crates/farhelm-desktop/src/lib.rs`). Without a matching record, an answering supervisor is reused as it is and only
 absence starts one, as before. With one, the app's own supervisor is replaced when it was started from another program
 file than the one this launch would start (by resolved path, device and inode, not version: every untagged build reports
 the same version), and when it does not answer at all (holding the state directory without serving); otherwise it is
@@ -7991,11 +6362,10 @@ helper replaces itself with the tab's shell, which needs no version afterwards.
 
 ### The desktop app's updater
 
-The updater is native code in the desktop build of `farhelm-ui` (`desktop/updater.rs`), in the same process as the
-component tree, which reaches it through the Dioxus context the way it reaches `WebviewBootstrap`. It has no helm part:
-no endpoint, no helm state, nothing a standalone helm or a browser could see. Its network requests are native reqwest
-calls, so the webview still never talks to the internet; feedback goes through the helm because it starts in page
-JavaScript, which nothing here does.
+The updater is native code in the desktop app (`crates/farhelm-desktop/src/updater.rs`), in the same process as the
+window, which reaches it through its `UpdaterHandle`. It has no helm part: no endpoint, no helm state, nothing a
+standalone helm could see. Its network requests are the app's own reqwest calls. `update_readout.rs` beside it turns its
+state into the words the window shows.
 
 It is active only when the running program is the main program of `$HOME/Applications/Farhelm.app` (both sides
 canonicalized; `app_bundle::bundle_contents_of_main_program` recognizes the layout), that bundle has
@@ -8643,11 +7013,6 @@ constraint (see the GUI section's motivation), not an afterthought:
   the emulator is held to Farhelm's answer table, screen-text format and modes by its own tests (the recorded agents'
   startup probes among them), the status readers by the captured agent screens painted into it, and its snapshot round
   trip by property tests. `.agents/validation.md` names the selections.
-- **`node --test` unit-tests the asset-JS layer's pure functions**, under `crates/farhelm-ui/js-tests/` (outside
-  `assets/` for source/test separation — bundling itself is by explicit `asset!` registration, so placement alone
-  neither includes nor excludes a file). It covers the pure parts of the page's scripts, the grid client's decoder,
-  input rules and link recognition among them. Node's built-in runner over vitest/jest: the asset-JS layer has no
-  bundler for a module-tooling-heavy runner to pay for (PLAN_M6_5.md item 1).
 - **A CentOS Stream 9 container stands in for a host that is not the CI runner.** Provisioning accepts any Linux host
   with a usable systemd user manager, but every provisioning integration test dials `localhost`, and both CI and the
   release gate run on Ubuntu — so the case the retired `ID=ubuntu` gate existed to forbid, a helm installing onto a

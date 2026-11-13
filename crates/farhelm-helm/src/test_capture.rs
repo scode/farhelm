@@ -38,12 +38,6 @@ impl CapturedEvent {
             .or_else(|| self.span_fields.get(name))
             .map(String::as_str)
     }
-
-    /// Whether the event's message contains `needle`.
-    pub(crate) fn message_contains(&self, needle: &str) -> bool {
-        self.field("message")
-            .is_some_and(|message| message.contains(needle))
-    }
 }
 
 /// Returns the capture belonging to the active wrapped test.

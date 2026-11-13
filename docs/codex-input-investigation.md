@@ -70,7 +70,8 @@ defects.
 The ordinary open-socket path preserves accepted input ordering: `terminal.js` encodes xterm's `onData` text, the helm's
 terminal reader awaits each send, the supervisor accepts frames under the current attachment's ownership, and the tmux
 input client sends hexadecimal bytes and waits for tmux's acknowledgement. The relevant code is
-[`terminal.js`](../crates/farhelm-ui/assets/terminal.js), [`terminal.rs`](../crates/farhelm-helm/src/terminal.rs),
+`crates/farhelm-ui/assets/terminal.js` (deleted with the Dioxus app),
+[`terminal.rs`](../crates/farhelm-helm/src/terminal.rs),
 [`connection.rs`](../crates/farhelm-supervisor/src/service/connection.rs), and
 `crates/farhelm-supervisor/src/tmux/input.rs` (at the inspected commit; the supervisor's tmux driver has since been
 removed). This trace does not prove which bytes reached Codex during the reported incident.
@@ -92,9 +93,9 @@ issue to painting; incorrect input bytes would instead direct investigation towa
 at xterm input, WebSocket send, helm receive, and the owned PTY can distinguish those paths without reading an unrelated
 conversation.
 
-Follow the [desktop/web triage guide](desktop-web-triage.md) to compare the desktop app, Safari, and Chromium against
-the same helm. The exact running versions and launch configuration are needed to connect that result to a vendor or
-Farhelm change. Until then, the TODO stays open.
+Follow the desktop/web triage guide (since deleted with the Dioxus UI) to compare the desktop app, Safari, and Chromium
+against the same helm. The exact running versions and launch configuration are needed to connect that result to a vendor
+or Farhelm change. Until then, the TODO stays open.
 
 ## Follow-up on 2026-09-23
 

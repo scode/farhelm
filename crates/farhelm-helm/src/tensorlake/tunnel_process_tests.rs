@@ -334,7 +334,6 @@ fn serve_standalone_child(dir: &Path) {
         },
         None,
         None,
-        None,
         Some(ready_tx),
         None,
         crate::ServingMode::Standalone,

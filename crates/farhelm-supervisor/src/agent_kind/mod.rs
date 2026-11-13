@@ -71,20 +71,19 @@
 //!   OMP's approval mode, the workspace-trust flags) that were deliberately
 //!   left as they are. A new harness gets compile errors for the former and
 //!   has to be checked against the latter by hand.
-//! - **How the browser shows it.** `farhelm-ui/src/launch_composer.rs` holds
-//!   the per-harness vocabulary (labels, display orders checked against
-//!   `LaunchHarness::ALL` at compile time, help text); `list/row.rs` maps
-//!   harnesses to their marks in `icons.rs`; `app.css` assigns those marks'
-//!   identity colors by `data-glyph`, with provenance in
-//!   `docs/harness-marks.md`. One exception keeps a direct
-//!   comparison: the new-session form's Cursor support notice
-//!   (`list/create_form.rs`). The browser's per-agent facts are keyed on the
-//!   agent KIND rather than the harness, so they also cover command and
-//!   legacy launches:
-//!   they live in the exhaustive functions of `SessionAgentKind` in
-//!   `farhelm-ui/src/lib.rs`, the browser's tolerant mirror of
-//!   [`farhelm_proto::AgentKind`] (today the copy instruction the terminal's
-//!   "this drag did not copy" notice offers).
+//! - **How the GUI shows it.** The GPUI app's harness marks are plain
+//!   geometry in `crates/gui/farhelm-gui/src/marks.rs`, with provenance in
+//!   `docs/harness-marks.md`. The rest of the GUI's per-harness vocabulary is
+//!   not ported yet: labels, display orders checked against
+//!   `LaunchHarness::ALL`, help text, the harness-to-mark mapping and the
+//!   marks' identity colors, the new-session form's Cursor support notice, and
+//!   the per-agent-KIND facts that also cover command and legacy launches
+//!   (today the copy instruction the terminal's "this drag did not copy"
+//!   notice offers). Each comes back as an exhaustive per-harness or per-kind
+//!   function in the GUI crates. The Dioxus versions are readable at the GPUI
+//!   port's reference commit `24bc0580` (`crates/farhelm-ui/src/launch_composer.rs`,
+//!   `list/row.rs`, `icons.rs`, `list/create_form.rs`, `assets/app.css`, and
+//!   `SessionAgentKind` in `lib.rs`).
 //! - **What an agent launch runs and resumes with.** The helm's compiler
 //!   (`farhelm-helm/src/launches.rs`): the start command from the choices,
 //!   and `resume_arguments`, the per-harness resume selector the resume
