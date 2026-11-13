@@ -786,12 +786,21 @@ systemd or SSH substrate ran.
 - `dist generate --check` — `release.yml` is generated from `dist-workspace.toml` plus `.github/dist-build-setup.yml`,
   and the release `plan` job refuses a stale one; this asks the same question before a tag has to. Needs the pinned
   cargo-dist (`cargo install --locked cargo-dist --version 0.32.0`, the version `dist-workspace.toml` names).
-- `python3 -B scripts/test-install-pinned-nextest.py` and `python3 -B scripts/test-install-pinned-dx.py` — the
-  installers that put the pinned nextest and dx binaries on PATH in the release build jobs (and nextest locally), and
-  the checksum verification and atomic publication they share (`scripts/pinned_tool.py`): archive and executable
-  digests, archive shape, cache reuse, curl's size limit, each tool's platform mapping, and dx's refusal of a pin that
-  is not the workspace's `dioxus` version. Run them when an installer, the shared module or a pins file changes;
-  seconds, no network.
+- `python3 scripts/install-pinned-cargo-deny.py`, then `<printed directory>/cargo-deny --locked check licenses sources`
+  from the checkout root — the dependency policy in `deny.toml`: every crate in the graph (every workspace feature and
+  dev-dependencies included) has a license expression its allowlist satisfies, so no GPL, AGPL or LGPL-only crate gets
+  in, and every crate comes from crates.io, never a git repository or another registry. It reads crates' declared
+  licenses only; files a crate bundles under other terms need their own look. CI's `deny` job runs the same command with
+  the directory on PATH. Seconds plus `cargo metadata`'s first download of the crates, nothing compiled. Run it when a
+  manifest, `Cargo.lock` or `deny.toml` changes. The advisories and bans checks are deliberately not part of it
+  (`deny.toml`'s header says why), so do not run a bare `cargo deny check` as this gate.
+- `python3 -B scripts/test-install-pinned-nextest.py`, `python3 -B scripts/test-install-pinned-dx.py` and
+  `python3 -B scripts/test-install-pinned-cargo-deny.py` — the installers that put the pinned nextest, dx and cargo-deny
+  binaries in place for the release build jobs, CI's `deny` job and local runs, and the checksum verification and atomic
+  publication they share (`scripts/pinned_tool.py`): archive and executable digests, archive shape (a sole executable,
+  or for cargo-deny an executable at a named path among plain files), cache reuse, curl's size limit, each tool's
+  platform mapping, and dx's refusal of a pin that is not the workspace's `dioxus` version. Run them when an installer,
+  the shared module or a pins file changes; seconds, no network.
 - `scripts/publish-docs-shots.sh --self-test` — the docs screenshot publisher's whole validation: against a bare
   repository standing in for GitHub, it checks that refused publishes push nothing, that only `refs/docs-assets/keep` is
   ever created (never a branch), that a snapshot holds exactly the shots the docs pages reference, that partial,
@@ -864,9 +873,10 @@ systemd or SSH substrate ran.
   no network.
 
 This inventory names the relevant local checks. The CI workflow (`ci.yml`) covers formatter, Clippy, desktop
-compilation, the JS harness, the website build and its feedback endpoint tests, installer validation, generated-workflow
-validation, and the agent-instructions check; costly Rust, desktop runtime, and CentOS gates run in the x86_64 Linux
-release artifact job. If either workflow changes, update this list in the same change.
+compilation, the JS harness, the website build and its feedback endpoint tests, installer validation, the dependency
+license and source policy, generated-workflow validation, and the agent-instructions check; costly Rust, desktop
+runtime, and CentOS gates run in the x86_64 Linux release artifact job. If either workflow changes, update this list in
+the same change.
 
 The CI workflow runs ONLY on demand: it has no push or pull-request trigger (removed 2026-09-12), so neither a PR, a
 `gh pr ready`, nor a merge to main starts a run. The release build gate is the validation that decides whether a build

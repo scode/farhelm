@@ -32,9 +32,10 @@ e2e/.stacks/
 # own, never sweeps one into a commit.
 .ci-tmux/
 
-# Verified local runner binaries; release jobs install into their temporary directory.
+# Verified local tool binaries; release and CI jobs install into their temporary directory.
 .ci-nextest/
 .ci-dx/
+.ci-cargo-deny/
 
 # Personal use-it-for-real dev-loop script; carries user-specific hostnames
 # and stays out of the repo on purpose.

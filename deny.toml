@@ -1,0 +1,83 @@
+# cargo-deny policy: which licenses and which package sources Farhelm's dependency graph may contain.
+#
+# NOTE: Only the `licenses` and `sources` checks are enforced, with `cargo-deny --locked check licenses sources` from
+# the checkout root (CI's `deny` job; `.agents/validation.md` has the local steps). A bare `cargo deny check` also runs
+# the advisories and bans checks with cargo-deny's defaults, and the advisories check fails on any new RustSec entry
+# against any crate in the tree, which is a separate decision from this policy.
+#
+# The point is to keep copyleft code (GPL, AGPL, LGPL of any version), and code whose license cannot be checked, out of
+# the tree by accident, for example as a transitive dependency of a new UI framework. The license allowlist below is
+# exhaustive: a crate passes only if its license expression can be satisfied by licenses on it, so `MIT OR Apache-2.0`
+# passes and `GPL-3.0-only` fails. An `OR` with one allowed alternative is enough (r-efi's
+# `MIT OR Apache-2.0 OR LGPL-2.1-or-later` passes through MIT and Apache-2.0), while every term of an `AND` must be
+# allowed.
+#
+# NOTE: The check reads each crate's declared license. It does not see files a crate bundles under other terms (icon
+# sets, fonts, data), which need their own look and, where they ship, an entry in `THIRD_PARTY_NOTICES.md`.
+#
+# The cargo-deny version is pinned in `.github/cargo-deny-pins.json`, and `scripts/install-pinned-cargo-deny.py`
+# installs it.
+
+[graph]
+# Every feature of every workspace member, so a crate that only an optional feature pulls in is checked too, although
+# no default build compiles it. cargo-deny resolves features the way a build does, so lockfile entries that no feature
+# combination of the workspace ever compiles (dioxus-fullstack and its dependencies, for example, which `cargo tree`
+# never shows) are still left out.
+all-features = true
+
+[licenses]
+# Only these licenses are accepted. Each entry that is not one of the common permissive licenses (Apache-2.0, MIT, the
+# BSD licenses, ISC, Zlib) names the crates that need it. "Only through OR" means no crate needs the entry today,
+# because every expression naming it also offers an allowed alternative. "For GPUI" means the GPUI or GPUI Kit crates
+# need it: on 2026-11-13, resolving gpui-pre 0.3.12 and gpui-component 0.9.1 with default features in a scratch crate
+# needed nothing outside this list, and needed 0BSD on its own.
+allow = [
+  # BSD-style, without even the notice requirement. Today only through OR (adler2). For GPUI: GPUI Kit's
+  # enum-iterator and enum-iterator-derive are 0BSD alone.
+  "0BSD",
+  "Apache-2.0",
+  # The exception only relaxes Apache-2.0's terms for compiled object code. target-lexicon (through cfg-expr and
+  # system-deps, a build dependency of the GTK -sys crates) is under it alone.
+  "Apache-2.0 WITH LLVM-exception",
+  "BSD-2-Clause",
+  "BSD-3-Clause",
+  # Boost Software License, permissive. clipboard-win and error-code (arboard, on Windows).
+  "BSL-1.0",
+  # Public-domain dedication with a permissive fallback. notify (the supervisor's file watching).
+  "CC0-1.0",
+  # Community Data License Agreement, Permissive, a license for data rather than code. webpki-root-certs (through
+  # rustls-platform-verifier and reqwest), which is Mozilla's CA certificate list.
+  "CDLA-Permissive-2.0",
+  "ISC",
+  "MIT",
+  # Weak copyleft at file level: whoever distributes a binary must make the source of the MPL-covered files available,
+  # including any changes to them. SPEC_impl.md allows MPL-2.0 only as an unmodified dependency, so do not vendor or
+  # patch these crates; this check cannot see a patch. cssparser, cssparser-macros, dtoa-short and selectors (wry, the
+  # desktop app's webview) and option-ext (dirs).
+  "MPL-2.0",
+  # University of Illinois/NCSA license, BSD-style. libfuzzer-sys (rav1e, through image and dioxus-desktop).
+  "NCSA",
+  # Unicode's data license. The icu_* crates (url's IDNA handling), unicode-ident and the zerovec family.
+  "Unicode-3.0",
+  "Zlib",
+]
+# cargo-deny's default. A crate that only ships a license file (no SPDX `license` field) is identified by comparing
+# that file with the canonical license texts; below this score the file counts as unlicensed and the crate fails.
+confidence-threshold = 0.8
+# cargo-deny skips dev-dependencies by default, since they do not reach shipped binaries. They are checked here anyway:
+# the point is to keep copyleft code out of the repository's builds, and test builds are builds.
+include-dev = true
+# A crate with no `license` field, or only a `license-file`, gets a `[[licenses.clarify]]` entry here, with a comment
+# saying where its license was checked by hand. There are none: on 2026-11-13 every crate in the graph, dev and
+# all-features crates included, had an SPDX `license` field.
+
+[sources]
+# Only crates.io. cargo-deny cannot vouch for a git repository's license: all it reads is whatever the checked-out
+# manifest claims at that revision, with no published crates.io release behind it. So git dependencies are banned
+# outright rather than allowlisted one by one.
+# Crates under `vendor/` reach the build through `[patch.crates-io]` as path dependencies, which this check does not
+# cover; `vendor/README.md` has their rules, and their licenses are still checked above.
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]
+allow-git = []
