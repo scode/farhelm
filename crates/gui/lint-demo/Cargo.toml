@@ -1,0 +1,29 @@
+[package]
+name = "farhelm-gui-lint-demo"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+repository.workspace = true
+description = "One deliberate violation of each GUI lint ban, so scripts/check-gui-lints.py can prove the bans fire"
+
+# Never shipped.
+[package.metadata.dist]
+dist = false
+
+# A workspace member (so it shares Cargo.lock and the vendored GPUI patches) but not a default member, and its
+# violations compile only with the `violations` feature: an ordinary `cargo clippy --workspace` sees an empty crate.
+# scripts/check-gui-lints.py turns the feature on and expects every ban in crates/gui/clippy.toml to fire.
+[features]
+violations = []
+
+[dependencies]
+gpui.workspace = true
+gpui-base.workspace = true
+gpui-component.workspace = true
+# Only so the tokio bans have something to fire on; the GUI crates themselves never depend on tokio.
+tokio.workspace = true
+
+[lints.clippy]
+unwrap_used = "deny"
+expect_used = "deny"

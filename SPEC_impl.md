@@ -216,8 +216,8 @@ the async runtime and its threads, and it hands results to the GUI through GPUI'
 one exemption from the ban on threads and other runtimes, and it counts as a lint exception like any `#[allow]`; no
 other crate the GUI depends on gets one.
 
-Enforced by a `cargo metadata` test that fails when a GUI crate depends, directly or transitively, on the helm crate, or
-when a framework-free crate depends on `gpui`.
+Enforced by `scripts/check-crate-layering.py`, which reads `cargo metadata` and fails when a GUI crate depends, directly
+or transitively, on the helm crate, or when a framework-free crate depends on `gpui`.
 
 ### The UI channel
 
@@ -492,9 +492,11 @@ sheets, popovers, menus, notifications, tooltips) are not used, not even inside 
 internally and has its own modal, notification and popover layers, which Farhelm's lints cannot see into, so the layer
 manager draws every overlay instead. Kit is not forked to satisfy a lint.
 
-Enforced by `disallowed-types` and `disallowed-methods` entries that ban raw color construction and direct Kit use
-outside the component layer (the overlay bans are listed under the layer manager), and by one golden screenshot per
-component and per dialog frame.
+Enforced by `disallowed-types` and `disallowed-methods` entries that ban raw color construction and Kit's overlays (the
+overlay bans are listed under the layer manager), by `scripts/check-crate-layering.py`, which lets only the GPUI app
+crate depend on GPUI Kit, and by one golden screenshot per component and per dialog frame. Known gap: inside the app
+crate, clippy paths cannot confine the rest of Kit to the component layer's module, so that confinement is checked by
+review.
 
 ### Actions and keymap
 
@@ -566,7 +568,8 @@ The GUI bans are clippy `disallowed-methods` and `disallowed-types`, each entry 
 `crates/gui/clippy.toml` (clippy uses the nearest `clippy.toml`). That scopes them to the GUI crates: the helm, the
 supervisor, the command line, the desktop binary and the helm client legitimately spawn, sleep and read clocks and are
 unaffected. Each owner holds one `#[allow]` for the call it owns. `cargo clippy --all-targets -- -D warnings` stays
-green, and every lint has a demonstration that it fails on a violation.
+green, and every lint has a demonstration that it fails on a violation: `scripts/check-gui-lints.py` lints
+`crates/gui/lint-demo`, which commits one violation per ban, and fails when any ban stays silent.
 
 The test automation bridge is a cargo feature that shipped builds and devbuilds never enable: its socket is
 unauthenticated, and local agent sessions run as the same user, so with the bridge in a build any agent could click
