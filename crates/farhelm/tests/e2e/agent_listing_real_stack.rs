@@ -59,17 +59,22 @@ pub(crate) fn bare_session_id(reference: &str) -> String {
         .to_string()
 }
 
-/// Hold one authenticated GUI channel without consuming its frames.
+/// Hold one authenticated GUI channel for as long as the guard lives.
 ///
 /// Hand-rolled down to the upgrade request because no WebSocket client is a
-/// dependency of this workspace and these tests need exactly one thing from
-/// one: that the upgrade SUCCEEDS. The events channel is what establishes
-/// the approval-window premise (a card needs a connected GUI); routing does
-/// not depend on any GUI channel. The credential rides
-/// `Sec-WebSocket-Protocol` rather than a header because browsers cannot
-/// set headers on a WebSocket handshake, so this is the only way the helm's
-/// own client authenticates one (`farhelm-helm`'s `auth`).
-async fn hold_gui_socket(helm: &HelmProcess, secret: &str, path: &str) -> tokio::net::TcpStream {
+/// dependency of this workspace and these tests need little from one: that
+/// the upgrade SUCCEEDS, and that the channel stays up. The UI channel holds
+/// the helm's seat, which is what establishes the approval-window premise (a
+/// card needs a connected GUI); routing does not depend on any GUI channel.
+/// The credential rides `Sec-WebSocket-Protocol` rather than a header
+/// because a WebSocket handshake from a browser could not set headers, and
+/// the helm authenticates every UI socket that way (`farhelm-helm`'s `auth`).
+///
+/// The helm drops a channel that answers none of its keepalive Pings within
+/// about a minute, which would give the seat up mid-test, so the guard's task
+/// reads the channel and answers every Ping with a Pong. Everything else the
+/// helm sends (snapshots, changes) is read and ignored.
+async fn hold_gui_socket(helm: &HelmProcess, secret: &str, path: &str) -> GuiSocket {
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
     let addr = helm.addr();
@@ -105,7 +110,68 @@ async fn hold_gui_socket(helm: &HelmProcess, secret: &str, path: &str) -> tokio:
         response.starts_with("HTTP/1.1 101"),
         "the GUI upgrade for {path} was refused: {response}"
     );
-    stream
+    GuiSocket(tokio::spawn(answer_pings(stream)))
+}
+
+/// A held GUI channel; dropping it closes the channel and gives the seat up.
+struct GuiSocket(tokio::task::JoinHandle<()>);
+
+impl Drop for GuiSocket {
+    fn drop(&mut self) {
+        self.0.abort();
+    }
+}
+
+/// Read server frames until the helm closes the channel, answering each Ping
+/// with a Pong that carries the same payload.
+///
+/// Server frames are never masked; client frames must be, and an all-zero
+/// mask is a valid one that leaves the payload as it is. A Ping's payload is
+/// at most 125 bytes by the protocol, so a Pong always fits the short form.
+async fn answer_pings(mut stream: tokio::net::TcpStream) {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+    loop {
+        let mut header = [0u8; 2];
+        if stream.read_exact(&mut header).await.is_err() {
+            return;
+        }
+        let opcode = header[0] & 0x0f;
+        let len = match header[1] & 0x7f {
+            126 => {
+                let mut extended = [0u8; 2];
+                if stream.read_exact(&mut extended).await.is_err() {
+                    return;
+                }
+                u64::from(u16::from_be_bytes(extended))
+            }
+            127 => {
+                let mut extended = [0u8; 8];
+                if stream.read_exact(&mut extended).await.is_err() {
+                    return;
+                }
+                u64::from_be_bytes(extended)
+            }
+            short => u64::from(short),
+        };
+        let mut payload = vec![0u8; usize::try_from(len).expect("a frame fits in memory")];
+        if stream.read_exact(&mut payload).await.is_err() {
+            return;
+        }
+        match opcode {
+            // Ping: answer at once.
+            0x9 => {
+                let mut pong = vec![0x8a, 0x80 | payload.len() as u8, 0, 0, 0, 0];
+                pong.extend_from_slice(&payload);
+                if stream.write_all(&pong).await.is_err() {
+                    return;
+                }
+            }
+            // Close: the channel is over.
+            0x8 => return,
+            _ => {}
+        }
+    }
 }
 
 /// Read one session's credential out of the supervisor's own store.
@@ -247,7 +313,7 @@ async fn host_add_cli_reports_accepted_edited_destination_and_declined() {
         serde_json::json!({"cwd":work.path(), "command":{"command":fixture_cmd("fake-agent --script basic"), "yolo":false}, "title":"host add requester"})).await;
     assert!(status.is_success(), "create requester: {body}");
     let session: SessionInfo = serde_json::from_str(&body).unwrap();
-    let _events = hold_gui_socket(&helm, &secret, "/api/events").await;
+    let _gui = hold_gui_socket(&helm, &secret, "/api/ui").await;
     let token = session_token(supervisor.state.path(), &session.id).await;
     let socket = supervisor.state.path().join("supervisor.sock");
     allow_agents_without_asking(&client, &helm.base).await;
@@ -375,9 +441,9 @@ async fn browser_link_cli_waits_without_fencing_and_reports_each_answer() {
         serde_json::json!([])
     );
 
-    // The event route admits its GUI seat before returning 101, so the
+    // The UI channel takes the helm's seat before it answers 101, so the
     // upgrade completing is enough for the approval premise.
-    let _gui = hold_gui_socket(&helm, &secret, "/api/events").await;
+    let _gui = hold_gui_socket(&helm, &secret, "/api/ui").await;
     let hosts = get_json(&client, &format!("{}/api/hosts", helm.base)).await;
     let host = hosts["hosts"]
         .as_array()
@@ -1403,7 +1469,7 @@ async fn keyed_agent_create_and_clone_need_fresh_approval_after_delete() {
     wait_for_agent_ready_at(supervisor.state.path(), &bare_session_id(&asker.id)).await;
     let token = session_token(supervisor.state.path(), &asker.id).await;
     let socket = supervisor.state.path().join("supervisor.sock");
-    let _gui = hold_gui_socket(&helm, &secret, "/api/events").await;
+    let _gui = hold_gui_socket(&helm, &secret, "/api/ui").await;
     let store = SessionStore::open(&supervisor.state.path().join("supervisor.db"), false)
         .await
         .expect("inspect the supervisor's durable state");

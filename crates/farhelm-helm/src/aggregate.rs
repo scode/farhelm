@@ -100,7 +100,6 @@
 use crate::manager::{ConnectionManager, HostSnapshot};
 use crate::store::{self, HelmStore, HostId, HostKind};
 use farhelm_proto::{LIST_SESSIONS_CAP, SessionInfo, SessionStatus};
-use serde::Serialize;
 
 /// How a host is NAMED on a session row.
 ///
@@ -151,109 +150,7 @@ pub(crate) fn host_display_name(
     }
 }
 
-/// One internal merged row, retaining the supervisor's bare references and
-/// the host-entry provenance required to qualify them at a client boundary.
-///
-/// `SessionInfo` is FLATTENED rather than nested, which is the whole
-/// compatibility story for the UI that predates this PR: every field it
-/// already reads (`id`, `title`, `status`, `tabs`, …) stays at the top
-/// level of each row, and the host fields are additive siblings. A nested
-/// `{"session": {...}, "host": ...}` would have been tidier and would have
-/// broken every existing reader.
-///
-/// The flattening is also why new `SessionInfo` timestamps need nothing here
-/// to reach a client: activity age and stable work ordering arrive as raw
-/// sibling fields without a second request or a row shape of their own.
-///
-/// Session references stay bare while filtering and sorting; REST and agent
-/// projections add this row's captured entry prefix only when building output.
-/// Other fields retain what the supervisor reported, zeroes included.
-/// `?sort=activity` groups by connected Running/Waiting first and then
-/// applies `effective_work_started_at`, whose zero fallback is creation in
-/// milliseconds; row age applies `effective_activity`, whose zero fallback
-/// is creation in seconds. Neither derived value is written back, because a
-/// synthesized timestamp would be indistinguishable from an authoritative
-/// observation at the next monotonic cache merge. The displayed age and the
-/// seen/unseen comparison play no part in the grouping or the work-start
-/// order — they describe output recency, a separate fact.
-#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
-pub(crate) struct SessionRow {
-    #[serde(flatten)]
-    pub(crate) info: SessionInfo,
-    /// The registry id of the host this session lives on — the value a
-    /// client hands back to `POST /api/sessions` to create alongside it,
-    /// and the join key into `GET /api/hosts`.
-    pub(crate) host: HostId,
-    /// Boundary projections use the entry from this same snapshot. Keeping it
-    /// private to serialization avoids a second lookup after removal or retarget.
-    #[serde(skip)]
-    pub(crate) entry_uuid: String,
-    /// The install identity the REGISTRY held for that host when the reply
-    /// was being built (`HostView::identity`'s value), denormalized onto
-    /// the row so a client can bind "the session the user is looking at"
-    /// to the INSTALL behind it rather than to the row id alone. "Was
-    /// being built" is deliberate: the identity is sampled beside the
-    /// session content, not atomically with it, and can be one write stale
-    /// by the time the reply lands — the assembly orders its reads so that
-    /// such skew mismatches (and the client falls back safely) rather than
-    /// falsely matching; see the identity join in `session_list_staged`. A
-    /// `HostId` outlives retargets and adoptions while the machine behind
-    /// it changes; this field is what lets the create dialog's host default
-    /// notice that the install it was derived from is no longer the one
-    /// the row id now names (the #156-review residual).
-    ///
-    /// `None` means the registry records no identity for the host (never
-    /// reached, or it reports none) — and the key is ALWAYS serialized, so
-    /// a client can tell "this helm says no identity" (`null`) from "this
-    /// helm predates the field" (key absent) and degrade to the old
-    /// row-id-only behavior only in the latter case.
-    pub(crate) host_identity: Option<String>,
-    /// [`host_display_name`]'s rendering of that host, denormalized onto
-    /// the row so a list can be drawn without a second request.
-    pub(crate) host_name: String,
-    /// Whether this row is last-known knowledge rather than a live report:
-    /// true for every row of a host that is not currently connected, in
-    /// ANY of the non-connected states. SPEC.md requires such rows to stay
-    /// listed and be clearly marked, and requires operations against them
-    /// to be refused — this flag is the first half, and
-    /// `crate::route_session` is the second.
-    pub(crate) stale: bool,
-    /// The activity stamp that was current the last time some client had
-    /// this session open (`store::HelmStore::seen_activity`'s per-session
-    /// answer), or `None` when nothing is currently recorded — either
-    /// because no client has ever opened the session, or because a client
-    /// manually marked it unread (`store::HelmStore::clear_seen` DELETES
-    /// the row rather than writing a sentinel, so the two cases are
-    /// indistinguishable here on purpose: SPEC.md, Status defines "unseen"
-    /// from the absence of a stamp either way). Compared against
-    /// `SessionInfo::effective_activity` on the CLIENT to decide whether
-    /// the idle dot draws grey (seen) or blue (unseen output).
-    ///
-    /// ALWAYS serialized, `host_identity`'s shape and reason exactly: a
-    /// client must be able to tell "this helm says never seen" (`null`) from
-    /// "this helm predates the field" (key absent), because only the former
-    /// may draw the unseen-blue dot and offer the read/unread toggle — an
-    /// old helm's idle rows draw the SAME grey every other idle row does;
-    /// what they lose is only the toggle and the possibility of the blue
-    /// variant, never a distinct legacy colour.
-    pub(crate) seen_activity_at: Option<i64>,
-    /// Shared helm pin membership. The sidebar partitions on this flag;
-    /// the served sort stays intact for clients such as the quick switcher.
-    pub(crate) pinned: bool,
-    /// Shared manual position, absent for an unpinned row. Positions can tie
-    /// while Replace keeps both source and replacement; clients break ties
-    /// by host number, then bare session ID. The served sort ignores it.
-    pub(crate) pin_position: Option<i64>,
-    /// How far through this session's notifications every client of this
-    /// helm has read (`store::HelmStore::notification_marks`): a
-    /// notification whose sequence number is above it is unread, which
-    /// decides whether the row's bell shouts and which entries its list sets
-    /// apart (SPEC.md, Status). Cleared notifications never reach the row at
-    /// all: [`row_of`] drops them from `info.notifications`, so a row with
-    /// none left shows no bell.
-    #[serde(default)]
-    pub(crate) notifications_read_through: u64,
-}
+pub(crate) use farhelm_proto::ui_channel::SessionRow;
 
 /// A session's notification marks as the row builder needs them: read
 /// through, cleared through. `(0, 0)` for a session nobody has read or
@@ -286,42 +183,7 @@ pub(crate) fn apply_notification_marks(info: &mut SessionInfo, marks: Notificati
     read_through
 }
 
-/// The whole merged list, in the JSON shape `GET /api/sessions` answers
-/// with: one array, its two counts, and whether a cap cut it.
-///
-/// `sessions`/`total`/`truncated` are the keys the UI has read since the
-/// list first existed; `matching` arrived with filtering. There is no
-/// cursor and no page size, by contract (SPEC.md's Session list section).
-#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
-pub(crate) struct SessionListBody {
-    /// Every row of the view that satisfies the filter, in the requested
-    /// order — cut at [`LIST_SESSIONS_CAP`] only when `truncated` says so.
-    pub(crate) sessions: Vec<SessionRow>,
-    /// How many sessions the VIEW holds, filter or no filter — the
-    /// denominator the UI's "N matching of M sessions" prints.
-    ///
-    /// Deliberately does not move when the user types: a denominator that
-    /// tracked the filter would compare a number against itself. A cached row whose
-    /// payload no longer decodes is in neither the rows nor this count: it
-    /// is dropped at the read with a warning (`store::CachedRow`), so the
-    /// counts always describe rows a client can see.
-    pub(crate) total: u64,
-    /// How many rows of the view satisfy the caller's filter, present
-    /// exactly when a predicate is active (`!filter.is_empty()`).
-    ///
-    /// Equal to `sessions.len()` unless the cap cut the reply — the count
-    /// is over the whole view, the array is what fits — so a client that
-    /// prints "showing N of M matching" has both numbers.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub(crate) matching: Option<u64>,
-    /// Whether the client is NOT looking at the whole view: some host's
-    /// list was cut at the wire's cap (a fact kept with that host's cache,
-    /// so it holds for a host that has since gone down and across a helm
-    /// restart), or the merged, filtered, sorted array hit the cap. This is
-    /// the one signal behind SPEC.md's "could not read to the end" notice;
-    /// nothing else produces it.
-    pub(crate) truncated: bool,
-}
+pub(crate) use farhelm_proto::ui_channel::SessionList as SessionListBody;
 
 /// Tag one host's session with that host, for the merged list.
 ///

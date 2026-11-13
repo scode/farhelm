@@ -215,7 +215,14 @@ pub(crate) async fn shown(
     axum::Json(body): axum::Json<ShownAnnouncements>,
 ) -> impl IntoResponse {
     match state.store.mark_announcements_shown(body.ids).await {
-        Ok(()) => axum::http::StatusCode::NO_CONTENT.into_response(),
+        Ok(()) => {
+            // Moves entries from pending to history, which a connected GUI
+            // learns only through the feed. Unconditional for the same reason
+            // as the ordinary preference write: the store cannot tell a no-op,
+            // and a dismissal is a rare user action, never periodic.
+            state.manager.events().bump();
+            axum::http::StatusCode::NO_CONTENT.into_response()
+        }
         Err(error) => http_error(error),
     }
 }

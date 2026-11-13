@@ -227,6 +227,13 @@ Owner: the UI channel, one WebSocket per UI. It carries everything except bulk d
 - the helm's reply to each command, with its status and body: done, refused, or accepted (for long work);
 - state the helm pushes: a full snapshot of the pushed collections when the channel opens, then changes per collection.
 
+The channel is the WebSocket `GET /api/ui` (`farhelm_proto::ui_channel::UI_CHANNEL_PATH`), and its wire types live in
+`farhelm_proto::ui_channel`. The session-list query is the channel-local command `PUT /ui/session-query`, which the
+channel handles itself and never routes. Rename and the ordinary session delete bound their host wait at 20 seconds
+(`HOST_REPLY_BOUND` in the helm's sessions module) and then reply that the host timed out while the work continues; the
+GUI's watchdog therefore waits longer than that. Environment and sandbox deletes are not bounded yet and take the
+accepted form when the work that ports them needs it.
+
 The helm runs each command through its existing HTTP router in process, so a command gets the same handlers, validation
 and authentication middleware as an HTTP request. There is no second, typed command API. A route that genuinely cannot
 work this way is recorded as a decision with the reason. The router's existing contracts hold: the cancellable group in

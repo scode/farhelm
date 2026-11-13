@@ -33,7 +33,11 @@ use tokio::sync::watch;
 ///   The frequent publishers meet it by comparing, not by assuming a
 ///   mutation changed something: the cache writes compare stored rows
 ///   inside their own transaction, and the actor's publication compares the
-///   value it is about to publish. A caller that cannot tell must not bump.
+///   value it is about to publish. A periodic caller that cannot tell must
+///   not bump. A user's own write that the store cannot diff (a preference
+///   save, an announcement dismissal) bumps anyway: it happens once per
+///   click, never on a timer, and a connected GUI learns of the change only
+///   through the feed.
 ///
 /// Owned by the [`crate::manager::ConnectionManager`] because that is where
 /// the chokepoints are — actor state transitions, cache writes, registry
@@ -185,16 +189,6 @@ impl FleetEvents {
     /// tests read it to observe that a bump happened.
     pub fn revision(&self) -> u64 {
         *self.revision.borrow()
-    }
-
-    /// How many subscriptions are open right now.
-    ///
-    /// What the agent approval prompts read as "a GUI is connected"
-    /// (`approvals::gui_connected`): every GUI holds one subscription open for
-    /// its whole life, and nothing else subscribes. A snapshot, stale the
-    /// moment it is read; the caller only decides whether to ask at all.
-    pub fn subscriber_count(&self) -> usize {
-        self.subscribers.load(std::sync::atomic::Ordering::Relaxed)
     }
 
     /// A receiver that yields every later revision, coalesced.

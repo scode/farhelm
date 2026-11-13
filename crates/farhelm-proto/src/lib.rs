@@ -129,6 +129,9 @@ pub mod io;
 pub mod launch;
 /// Final-extension policy shared by desktop settings and the helm's opener.
 pub mod open_extensions;
+// The GUI's one ordered channel to the helm. Its docs are its own, for the
+// same rustdoc-link reason as `grid`.
+pub mod ui_channel;
 
 /// What counts as a YOLO launch (see the module's own docs).
 pub mod yolo;

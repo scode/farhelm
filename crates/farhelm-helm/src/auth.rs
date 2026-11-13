@@ -144,7 +144,7 @@ fn authorization_device_secret(headers: &axum::http::HeaderMap) -> Option<&str> 
 
 /// Decode the credential-bearing protocol only when the stable application
 /// protocol is offered beside exactly one non-empty secret.
-fn websocket_device_secret(headers: &axum::http::HeaderMap) -> Option<String> {
+pub(crate) fn websocket_device_secret(headers: &axum::http::HeaderMap) -> Option<String> {
     let mut application = false;
     let mut secret = None;
     for protocol in headers
