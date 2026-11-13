@@ -1,4 +1,4 @@
-# Route retirement failure skips owned session cleanup
+# Fallible teardown can skip independent owned cleanup
 
 Reviewed commit: 3650a8e1d0afc94a1438c1db09ecc08c1d5edf96
 
@@ -39,3 +39,61 @@ may reclaim leaked fixture work; this does not guarantee per-test cleanup or pre
 Review provenance: trailing review run `dc410e54-098d-481c-be02-f2f9b4826f83`, canonical `g038/c5`; supporting records
 `g035/d5`. The retained private log preserves earlier wording and its corrections. This record does not claim runtime
 reproduction.
+
+## Additional fallible teardown prerequisites
+
+Additional reviewed commit: `6e423e30068b62c6cfa276c6d720ee35bb70387a`, introducing change
+`112fd9d812e95df7f69f66c85820d76faaf89582`.
+
+`e2e/tests/nonblocking-launch.spec.ts` has further cleanup gates outside its best-effort owned-resource boundary. These
+are separate failure operations from the original `page.unroute` route, with the same consequence: later independent
+cleanup steps are never attempted.
+
+In the asynchronous-host-result test (`779-800`), the finally block releases its held replies, then evaluates and
+disposes an `admissionTrace` handle (`783-784`), disposes routes and scans the session list before reaching
+`cleanupOwnedSteps`. A lost page execution context after handle acquisition makes the evaluation reject. That skips
+cleanup of already-owned fake sessions, templates and quick-launch preferences, although their request context is
+independent of the failed page. Other blocks await unprotected route disposers before their API cleanup; those are
+additional sites of the original route-retirement failure mechanism, not proof that every unroute rejects on closure.
+
+Further route-disposal sites are `e2e/tests/launch-progress.spec.ts:212-215,328-330` and
+`e2e/tests/yolo-guard.spec.ts:301-309`. They await `stop()` or `unrouteAll` before independent session, template,
+preference or host-policy cleanup. The matching cached Playwright-core 1.64.0 tarball has lock-matching integrity;
+`package/lib/coreBundle.js:63274-63300` forwards unroute/unrouteAll through interception-pattern updates without
+suppressing closed-target failure. An absent target yields TargetClosedError (`20140-20142`), which rejects the client
+command (`65439-65448`). Page loss can therefore reject disposal while its separate API request context remains usable.
+These sites add to the existing route-disposal proof; they do not turn the handle-evaluation or discovery-scan
+prerequisites into unroute duplicates.
+
+The optional session-discovery scan is another prerequisite. The empty-fleet finally releases/drains at `1323-1324`,
+then awaits `listSessions` at `1325`, before cleanup at `1328`. Its known session IDs were captured at `1240-1242`, and
+preferences/template restoration exists only inside the later cleanup. The same order appears at `1421-1426`,
+`1534-1540`, `1766-1771` and `1870-1876`. `helpers/fleet.ts:389-398` throws on request failure, non-OK response or bad
+JSON. A failed discovery therefore skips cleanup that could use the IDs already known. Proper gate release before drain
+remains correct; this finding narrows the earlier broader conclusion that independent cleanup would be reached.
+
+`helpers/cleanup.ts:6-19` attempts supplied steps independently, but cannot protect work done before it is called. Make
+page-handle cleanup, each route disposal and optional discovery independent fallible steps; later known-ID and
+preferences/template cleanup must still run when one fails. Preserve the original test failure and use any IDs a
+successful scan adds. This does not promise to recover cleanup after every network outage or a closed request context.
+
+Suggested bucket remains **other**. Confidence for these added branches is **verified conditional source control flow**,
+not observed leakage. Actual leftovers require the failed prerequisite while subsequent independent cleanup could still
+work. The private stack eventually has wider reclamation, but that does not prevent intervening contamination. No
+user-work loss, vendor exposure or catastrophic tooling consequence is claimed. No exact accepted limitation, Planned
+item, pending repair, known bug, ledger or filter cover was established for these added branches. The existing
+recipe-navigation item remains a related, separately named failure boundary.
+
+Provenance: trailing-review run `3033ee5b-b95a-4e16-8ecc-c4a9e727335a`, `g024/l6`, `g025/c4` and `g023/g023-l6`,
+exclusive base `0bc984b71384e7b754b55d007b53ebbeb9a076ca`. Original candidate reversals, the valid gate-order refutation
+and the retained cleanup finding remain in the private history. The g023 normal release/drain/HTTP-publication
+refutations remain valid; this failure boundary does not revive its refuted normal-path late-create or
+premature-owned-ID snapshot claims. No runtime failure injection ran.
+
+Current-main check (2026-11-12, `6652f84fe3ecd9427b2631fb4bca4e06fa7fc741`): nonblocking-launch.spec.ts:783-790 is
+unchanged: browser-handle evaluation and disposal, route retirement and optional API discovery still precede independent
+known-ID, preference and template cleanup. launch-progress.spec.ts:212-215,328-330 and yolo-guard.spec.ts:301-309 retain
+their route-retirement prerequisites. The existing route-retirement queue root remains listed at INDEX.md:1527-1528.
+Browser-handle evaluation and optional discovery add separate fallible prerequisites under that broadened root,
+preserving the original proof and all three aliases. This remains a source-confirmed conditional cleanup boundary,
+without an observed browser-crash leak.
