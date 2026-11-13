@@ -137,10 +137,10 @@ AGENTS.md forbids agents from running them — or from restarting the helm's uni
 - Run `farhelm helm setup`. It writes the helm and supervisor systemd user units, enables and starts both, and prints
   the two hints below. `--dry-run` prints the units it would write and the commands it would run, and changes nothing;
   `--uninstall` removes the units it wrote. It owns only the files it wrote — a unit you wrote yourself makes it refuse
-  rather than replace it — and it neither needs nor installs tmux. The helm unit it writes serves the web UI out of the
-  binary, so it expects a release build with the UI embedded. Beside the units it keeps two dot-files systemd ignores: a
-  lock, so two setups cannot run at once, and a short-lived `.<unit>.restart-pending` marker that makes a rerun finish a
-  restart an interrupted run still owed.
+  rather than replace it. The helm unit it writes serves the web UI out of the binary, so it expects a release build
+  with the UI embedded. Beside the units it keeps two dot-files systemd ignores: a lock, so two setups cannot run at
+  once, and a short-lived `.<unit>.restart-pending` marker that makes a rerun finish a restart an interrupted run still
+  owed.
 - Run `loginctl enable-linger "$USER"` so the helm can start at boot and survive logout, where the machine allows it.
 - Open `http://127.0.0.1:7433/` and paste the token printed by `farhelm helm token show`.
 - In the hosts panel, remote hosts are added exactly as in the quickstart above. The panel never installs a supervisor
@@ -252,8 +252,7 @@ given. Build the web UI with `(cd crates/farhelm-ui && dx build --package farhel
 supplies those development paths while testing the app-owned bootstrap.
 
 `AGENTS.md` has the conventions and the finish-work checks. Rust tests use pinned nextest through the
-[run recorder](test-run-evidence.md), including real-tmux integration; doctests run separately with cargo. Read retained
-output for runtime skip reasons from tests that need a systemd user manager. Browser tests use
-`cd e2e && npx playwright test` (against a real stack, Chromium and WebKit both — needs `npm install` and
-`npx playwright install chromium webkit` once). `lore/` holds historical decision records; read `lore/AGENTS.md` before
-touching it.
+[run recorder](test-run-evidence.md); doctests run separately with cargo. Read retained output for runtime skip reasons
+from tests that need a systemd user manager. Browser tests use `cd e2e && npx playwright test` (against a real stack,
+Chromium and WebKit both — needs `npm install` and `npx playwright install chromium webkit` once). `lore/` holds
+historical decision records; read `lore/AGENTS.md` before touching it.

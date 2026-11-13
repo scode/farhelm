@@ -34,11 +34,11 @@ session they belong to. Any it cannot tell are stopped when you delete their ses
 The old notification asking you to restart such a session is now greyed and marked **Resolved**
 ([Read the session list](/docs/using/session-list/#when-a-row-shows-a-bell) says how notifications work).
 
-## Why terminals are leaving tmux
+## Why terminals left tmux
 
-tmux was intended to be as much of an implementation detail as possible, but it leaks through:
+tmux was intended to be as much of an implementation detail as possible, but it leaked through:
 
-- Farhelm exercises tmux in ways normal users don't. We already triggered tmux crash bugs in early development which
+- Farhelm exercised tmux in ways normal users don't. We already triggered tmux crash bugs in early development which
   lead to setting a minimum tmux version of farhelm, and supporting an embedded musl build of tmux. This meant
   supporting both the embedded musl build and the native build. We already had one case of a newer tmux breaking
   behavior in certain environments.
@@ -52,20 +52,20 @@ tmux was intended to be as much of an implementation detail as possible, but it 
 A new terminal stands on its own: a problem with one does not take the others down, and it no longer depends on which
 tmux version a host has.
 
-## What is different in a new terminal
+## What is different from old terminals
 
-Typing with an input method, as for Chinese, Japanese or Korean, does not work fully in a new terminal yet. What you
-commit reaches the agent, but the text you are composing, and the input method's list of candidates, do not appear at
-the terminal's cursor while you type.
+Typing with an input method, as for Chinese, Japanese or Korean, does not work fully in Farhelm's terminals yet. What
+you commit reaches the agent, but the text you are composing, and the input method's list of candidates, do not appear
+at the terminal's cursor while you type.
 
-Emoji presentation selectors, as in ❤️, give eligible characters two columns in a new terminal, and text presentation
-selectors can make a wide character narrow. This follows Ghostty's defaults; tmux also widened characters that are not
-eligible and did not narrow them.
+Emoji presentation selectors, as in ❤️, give eligible characters two columns, and text presentation selectors can make a
+wide character narrow. This follows Ghostty's defaults; tmux also widened characters that are not eligible and did not
+narrow them.
 
-New terminals drop some invisible formatting characters from program output, including zero-width spaces, text-direction
-marks, line and paragraph separators, word joiners, byte order marks and Hangul fillers. Those characters are also
-absent from scrollback, saved terminal contents and text you copy. What you type, your programs and their files are
-unchanged.
+Farhelm's terminals drop some invisible formatting characters from program output, including zero-width spaces,
+text-direction marks, line and paragraph separators, word joiners, byte order marks and Hangul fillers. Those characters
+are also absent from scrollback, saved terminal contents and text you copy. What you type, your programs and their files
+are unchanged.
 
 Two edge cases still differ from Ghostty: with wrapping disabled, a printed space in the final column is treated as
 empty when choosing which character a selector affects; and a terminal only one column wide drops a wide character
@@ -75,10 +75,10 @@ and
 [the second case](https://github.com/ghostty-org/ghostty/blob/c7f68a7f48c6a5b357689eb8c2328bc2dab5d8ed/src/terminal/Terminal.zig#L2189-L2262)
 show the behavior Farhelm will revisit.
 
-Programs in a new terminal see `TERM_PROGRAM=farhelm`, with Farhelm's version in `TERM_PROGRAM_VERSION`. `TMUX` is
-unset. If a startup file of your login shell starts tmux whenever it is not already inside tmux, it does so in a new
-terminal too, including while the agent starts. One that replaces the shell with tmux (`exec tmux`) keeps the agent from
-starting at all, and the session's terminal shows your tmux instead. To leave Farhelm's terminals alone, have the
+Programs in Farhelm's terminals see `TERM_PROGRAM=farhelm`, with Farhelm's version in `TERM_PROGRAM_VERSION`. `TMUX` is
+unset. If a startup file of your login shell starts tmux whenever it is not already inside tmux, it does so in Farhelm's
+terminals too, including while the agent starts. One that replaces the shell with tmux (`exec tmux`) keeps the agent
+from starting at all, and the session's terminal shows your tmux instead. To leave Farhelm's terminals alone, have the
 startup file skip tmux when `TERM_PROGRAM` is `farhelm`.
 
 ## Farhelm no longer needs tmux

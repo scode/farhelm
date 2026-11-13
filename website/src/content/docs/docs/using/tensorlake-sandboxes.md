@@ -258,8 +258,8 @@ and restarted agents receive it as `GH_TOKEN`, including the Git clone that prep
 
 Farhelm-built snapshots include GitHub's `gh` command and Farhelm sets up its Git helper on the host. Hosts created from
 old reused images, or older snapshots without `gh`, need it installed for private GitHub checkouts over HTTPS. If it is
-missing, the host stays usable and its details say private clones need gh. Older hosts also need **Update** so their
-Farhelm can deliver the token to new terminals; [old terminals](/docs/using/new-terminals/) do not receive it.
+missing, the host stays usable and its details say private clones need gh. Older hosts also need **Update** before their
+Farhelm can deliver the token.
 
 Replacing the token in Credentials sends it to connected hosts; other hosts receive it when they next connect. Recipe
 selection changes wait for the next connection or setup. Existing programs keep their environment. Selecting **None**

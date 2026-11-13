@@ -1,5 +1,10 @@
 # Codex conversation continuity after Replace
 
+NOTE: This is a historical investigation record, kept as written in September 2026 and not maintained. The TODO entry it
+mentions was removed on 2026-09-23 as most likely resolved by later session-tracking work. Its runs used the system as
+it was then, including a pinned tmux that terminals ran in; Farhelm no longer runs terminals in tmux, and the code it
+cites may have moved.
+
 The report remains unresolved. Source inspection has not established a Farhelm defect, and a different Farhelm row ID
 alone would not prove that Codex started a fresh conversation. This investigation tracks launch arguments and captured
 vendor identities separately.

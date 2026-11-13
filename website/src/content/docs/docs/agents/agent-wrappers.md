@@ -151,14 +151,13 @@ session.
 ## What happens on stop
 
 There are fewer processes involved than the launch chain suggests. Farhelm starts a login shell in the session's
-terminal (tmux starts it instead for a session from before [new terminals](/docs/using/new-terminals/)), the shell
-`exec`s Farhelm's launch shim, and the shim `exec`s your command. For a custom command or wrapper prefix, Bash
-interprets the text and can replace itself with a simple command; compound commands can keep Bash running above the
-wrapper and agent. A wrapper that `exec`s the agent replaces itself in that chain. Where farhelm's own probe finds a
-WORKING systemd user manager — it creates a throwaway scope, looks it up, kills it, and confirms it went away, rather
-than trusting a `systemd-run` on `PATH` — the launch also runs inside a per-launch cgroup scope, which is containment
-rather than a level of the tree (`systemd-run --scope` execs in place too). Each launch records what it selected, so a
-session can outlive the manager that scoped it.
+terminal, the shell `exec`s Farhelm's launch shim, and the shim `exec`s your command. For a custom command or wrapper
+prefix, Bash interprets the text and can replace itself with a simple command; compound commands can keep Bash running
+above the wrapper and agent. A wrapper that `exec`s the agent replaces itself in that chain. Where farhelm's own probe
+finds a WORKING systemd user manager — it creates a throwaway scope, looks it up, kills it, and confirms it went away,
+rather than trusting a `systemd-run` on `PATH` — the launch also runs inside a per-launch cgroup scope, which is
+containment rather than a level of the tree (`systemd-run --scope` execs in place too). Each launch records what it
+selected, so a session can outlive the manager that scoped it.
 
 Stopping or restarting a session reaps the agent's tree. Stop also closes its terminal tabs; Restart leaves them
 running. What the agent reap claims is the descendants of that login shell plus every process carrying the session's
