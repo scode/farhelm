@@ -54,7 +54,7 @@ runs. A removed container host or deleted recipe makes it unavailable. For these
 environment's home and a managed checkout is cloned inside. Deleting its session removes the checkout permanently,
 without trash, unless another session still uses it; deleting the environment removes every checkout in it the same
 way. See [Container sessions](/docs/agents/containerized-sessions/) and
-[session-owned sandboxes](/docs/using/tensorlake-sandboxes/#give-each-session-its-own-sandbox).
+[sandbox sessions](/docs/using/tensorlake-sandboxes/#give-each-session-its-own-sandbox).
 
 A **Session name** can be a **Base name** or a **Fixed name**. When you apply a base name in the session launcher or a
 quick launch, or an agent starts a session from the template, a managed checkout uses it as-is when free, then adds `-2`, `-3`, and so on up to `-50` when taken. The
@@ -80,8 +80,8 @@ while the others are outlines: selecting another template's bolt moves the mark,
 switch**, it is judged as an agent launch.
 
 Choices the template leaves out use the defaults of **+** (New session), including the open session's destination and
-the [directory it starts in](/docs/using/start-a-session/#choose-where-it-runs). For a session-owned environment, that means
-its recipe and where it runs for a fresh environment, starting in its home. A template can
+the [directory it starts in](/docs/using/start-a-session/#choose-where-it-runs). For a container or sandbox session,
+that means its recipe and where it runs for a fresh environment, starting in its home. A template can
 start a fresh [managed checkout](/docs/using/start-a-session/#start-from-a-managed-checkout) this way too: marking it
 means you choose to create its new directory without first seeing the path. If Farhelm asks about YOLO or the launch
 fails, the session launcher opens with that setup and the question or error. With no marked template, the shortcut opens

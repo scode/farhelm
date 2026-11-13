@@ -164,8 +164,8 @@ carries traffic in the other direction.
 
 In **Settings → Recipes**, each recipe's row shows its Tensorlake snapshot, with **Build snapshot** while it has none
 and **Rebuild snapshot** once it has one, and a status line with **Rebuild** for each container host. Build the first
-snapshot there, or let adding the first ordinary sandbox host build it. A session-owned sandbox needs that snapshot
-before launch. Status shows build progress, age and failure reasons; a failed build offers **Retry**.
+snapshot there, or let adding the first ordinary sandbox host build it. A sandbox session needs that snapshot before
+launch. Status shows build progress, age and failure reasons; a failed build offers **Retry**.
 
 New hosts and sandbox sessions start from a second, prepared snapshot with Farhelm already installed. The first one to
 need it prepares it, which takes about a minute; the recipe's row says whether it is ready.
